@@ -69,7 +69,7 @@ async function fetchOddsForSport(sportKey:string, leagueName:string): Promise<Od
     });
     games.forEach(g=>{
       if (!oddsHistory[g.id]) oddsHistory[g.id]=[];
-      const last = oddsHistory[g.id].at(-1);
+      const arr=oddsHistory[g.id];const last=arr[arr.length-1];
       if (!last||last.home!==g.bestHome||last.away!==g.bestAway) {
         oddsHistory[g.id].push({ts:now,home:g.bestHome,away:g.bestAway,draw:g.bestDraw});
         if (oddsHistory[g.id].length>20) oddsHistory[g.id].shift();
@@ -79,7 +79,6 @@ async function fetchOddsForSport(sportKey:string, leagueName:string): Promise<Od
     return games;
   } catch(e) { return cached?.data??[]; }
 }
-type OddsAlert="급락"|"연속하락"|"하락"|null;
 function classifyAlert(hist:OddsSnapshot[],side:"home"|"away"):OddsAlert {
   if (hist.length<2) return null;
   const vals = hist.map(h=>h[side]);
