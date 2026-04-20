@@ -3,25 +3,25 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, LineCh
 import * as db from "./lib/db";
 import type { Bet, Deposit, Withdrawal, SiteState, Log, EsportsRecord, ProfitExtra, OddsGame, OddsSnapshot, OddsAlert } from "./types";
 
-// ── 테마 컬러 (연한 오렌지 + 녹색) ─────────────────────────────
+// ── 테마 컬러 ─────────────────────────────────────────────────
 const C = {
-  bg:      "#111614",   // 메인 배경 (짙은 그린-다크)
-  bg2:     "#182018",   // 패널 배경
-  bg3:     "#1e261e",   // 카드 배경
-  border:  "#2a3a2a",   // 기본 보더
-  border2: "#344534",   // 강조 보더
-  text:    "#dde8dd",   // 기본 텍스트
-  muted:   "#7a9a7a",   // 뮤트 텍스트
-  dim:     "#3a5a3a",   // 어두운 텍스트
-  green:   "#5ddb8a",   // 메인 그린
-  orange:  "#f0944a",   // 메인 오렌지
-  amber:   "#f5c842",   // 앰버 (강조)
-  red:     "#e05a5a",   // 레드 (경고)
-  purple:  "#b07af5",   // 퍼플 (보조)
-  teal:    "#4ad4c8",   // 틸 (포인트)
+  bg:      "#111614",
+  bg2:     "#182018",
+  bg3:     "#1e261e",
+  border:  "#2a3a2a",
+  border2: "#344534",
+  text:    "#dde8dd",
+  muted:   "#7a9a7a",
+  dim:     "#3a5a3a",
+  green:   "#5ddb8a",
+  orange:  "#f0944a",
+  amber:   "#f5c842",
+  red:     "#e05a5a",
+  purple:  "#b07af5",
+  teal:    "#4ad4c8",
 };
 
-// ── The Odds API ─────────────────────────────────────────────
+// ── The Odds API ──────────────────────────────────────────────
 const ODDS_API_KEY = (import.meta.env.VITE_ODDS_API_KEY as string) ?? "";
 const ODDS_BASE    = "https://api.the-odds-api.com/v4";
 const SPORT_KEY_MAP: Record<string, string> = {
@@ -39,7 +39,7 @@ const SPORT_KEY_MAP: Record<string, string> = {
   "NPB":          "baseball_npb",
 };
 
-
+const SCHEDULE_CACHE_TTL = 90 * 60 * 1000; // 90분
 const oddsCache: Record<string,{data:OddsGame[];fetchedAt:number}> = {};
 const oddsHistory: Record<string,OddsSnapshot[]> = {};
 const CACHE_TTL = 10*60*1000;
@@ -79,6 +79,7 @@ async function fetchOddsForSport(sportKey:string, leagueName:string): Promise<Od
     return games;
   } catch(e) { return cached?.data??[]; }
 }
+
 function classifyAlert(hist:OddsSnapshot[],side:"home"|"away"):OddsAlert {
   if (hist.length<2) return null;
   const vals = hist.map(h=>h[side]);
@@ -97,11 +98,24 @@ const useTodayStr = () => {
 };
 const weekMonday = () => { const d=new Date(),day=d.getDay(),diff=day===0?-6:1-day; d.setDate(d.getDate()+diff); return d.toISOString().slice(0,10); };
 
-// ── 사이트 상수 ────────────────────────────────────────────────
-const KRW_SITES = ["이지벳","조인벳","벨라벳"];
-const USD_SITES = ["벳38","케이탑","벳16","고트벳","벳위즈"];
-const ALL_SITES = [...KRW_SITES,...USD_SITES];
-const isUSD = (s:string) => USD_SITES.includes(s);
+// ── 기본 사이트 상수 ───────────────────────────────────────────
+const DEFAULT_KRW_SITES = ["이지벳","조인벳","벨라벳"];
+const DEFAULT_USD_SITES = ["벳38","케이탑","벳16","고트벳","벳위즈"];
+
+// ── 포인트 사이트 타입 ────────────────────────────────────────
+interface PointSite {
+  id: string;
+  name: string;
+  exchangeName: string;
+  exchangeDate: string;      // "YYYY-MM-DD"
+  targetAmount: number;      // 목표 금액 (원화)
+  sessions: PointSession[];
+}
+interface PointSession {
+  id: string;
+  completedAt: string;       // ISO string
+  nextTargetDate: string;    // "YYYY-MM-DD"
+}
 
 const fmtDisp = (n:number,dollar:boolean) => dollar?`$${n%1===0?n:n.toFixed(2)}`:n.toLocaleString();
 const fmtProfit = (n:number,dollar:boolean) => { const abs=Math.abs(n); const str=dollar?`$${abs%1===0?abs:abs.toFixed(2)}`:abs.toLocaleString(); return n>=0?`+${str}`:`-${str}`; };
@@ -136,11 +150,47 @@ const getDefaultOpt = (cat:string,g:string,league="") => {
 const TEAM_DB = ["뉴욕 양키스","LA 다저스","보스턴 레드삭스","시카고 컵스","샌프란시스코 자이언츠","휴스턴 애스트로스","애틀란타 브레이브스","뉴욕 메츠","필라델피아 필리스","샌디에이고 파드리스","시애틀 매리너스","토론토 블루제이스","미네소타 트윈스","클리블랜드 가디언스","텍사스 레인저스","탬파베이 레이스","볼티모어 오리올스","밀워키 브루어스","애리조나 다이아몬드백스","LA 에인절스","오클랜드 애슬레틱스","콜로라도 로키스","캔자스시티 로열스","피츠버그 파이리츠","신시내티 레즈","마이애미 말린스","워싱턴 내셔널스","디트로이트 타이거스","시카고 화이트삭스","세인트루이스 카디널스","LA 레이커스","골든스테이트 워리어스","보스턴 셀틱스","마이애미 히트","시카고 불스","브루클린 네츠","밀워키 벅스","피닉스 선즈","댈러스 매버릭스","덴버 너기츠","멤피스 그리즐리스","필라델피아 세븐티식서스","애틀란타 호크스","클리블랜드 캐벌리어스","뉴욕 닉스","토론토 랩터스","새크라멘토 킹스","뉴올리언스 펠리컨스","인디애나 페이서스","미네소타 팀버울브스","오클라호마시티 선더","포틀랜드 트레일블레이저스","유타 재즈","샌안토니오 스퍼스","샬럿 호네츠","워싱턴 위저즈","올랜도 매직","디트로이트 피스톤스","휴스턴 로케츠","LA 클리퍼스","맨체스터 시티","아스날","리버풀","첼시","맨체스터 유나이티드","토트넘","레알 마드리드","바르셀로나","아틀레티코 마드리드","바이에른 뮌헨","도르트문트","인테르 밀란","AC 밀란","유벤투스","파리 생제르맹","T1","Gen.G","DK","KT","BRO","NS","DRX","HLE","FNC","G2","C9","TL","NRG","100T","EG","FLY","BLG","JDG","EDG","WBG"];
 
 const CATS = ["축구","농구","야구","배구","E스포츠"];
-const USD_TO_KRW = 1380; // fallback
+const USD_TO_KRW = 1380;
 
 const noSpin:React.CSSProperties = {MozAppearance:"textfield"} as any;
 const S:React.CSSProperties = {width:"100%",background:C.bg2,border:`1px solid ${C.border}`,color:C.text,padding:"7px 9px",borderRadius:7,fontSize:13,...noSpin};
 const L:React.CSSProperties = {fontSize:11,color:C.muted,marginBottom:3};
+
+// ── 비밀번호 화면 ─────────────────────────────────────────────
+function PasswordScreen({onAuth}:{onAuth:()=>void}) {
+  const [pw,setPw]=useState("");
+  const [err,setErr]=useState(false);
+  const [shake,setShake]=useState(false);
+  const handleSubmit=()=>{
+    if(pw==="03144"){onAuth();}
+    else{setErr(true);setShake(true);setPw("");setTimeout(()=>setShake(false),500);}
+  };
+  return(
+    <div style={{minHeight:"100vh",background:C.bg,display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:20}}>
+      <div style={{fontSize:36,marginBottom:4}}>⚡</div>
+      <div style={{fontSize:22,fontWeight:900,letterSpacing:3,color:C.orange}}>BET TRACKER</div>
+      <div style={{fontSize:12,color:C.muted,marginBottom:8}}>관리자 인증이 필요합니다</div>
+      <div style={{
+        background:C.bg3,border:`1px solid ${err?C.red:C.border2}`,borderRadius:14,padding:"28px 32px",width:300,
+        animation:shake?"shake 0.4s ease":"none",
+      }}>
+        <div style={{fontSize:12,color:C.muted,marginBottom:10,textAlign:"center"}}>🔒 비밀번호 입력</div>
+        <input
+          autoFocus type="password" value={pw}
+          onChange={e=>{setPw(e.target.value);setErr(false);}}
+          onKeyDown={e=>e.key==="Enter"&&handleSubmit()}
+          placeholder="비밀번호"
+          style={{...S,boxSizing:"border-box",textAlign:"center",fontSize:18,letterSpacing:6,marginBottom:12}}
+        />
+        {err&&<div style={{fontSize:11,color:C.red,textAlign:"center",marginBottom:8}}>비밀번호가 틀렸습니다</div>}
+        <button onClick={handleSubmit} style={{width:"100%",background:`${C.orange}22`,border:`1px solid ${C.orange}`,color:C.orange,padding:"10px",borderRadius:8,cursor:"pointer",fontWeight:800,fontSize:14}}>
+          입장
+        </button>
+      </div>
+      <style>{`@keyframes shake{0%,100%{transform:translateX(0)}20%{transform:translateX(-8px)}40%{transform:translateX(8px)}60%{transform:translateX(-6px)}80%{transform:translateX(6px)}}`}</style>
+    </div>
+  );
+}
 
 // ── 공통 컴포넌트 ──────────────────────────────────────────────
 function EditableCell({value,dollar,onSave,color}:{value:number,dollar:boolean,onSave:(v:number)=>void,color?:string}) {
@@ -164,17 +214,6 @@ function TeamInput({value,onChange,placeholder}:{value:string,onChange:(v:string
   );
 }
 
-// ── 인터페이스 ──────────────────────────────────────────────────
-
-
-
-
-
-
-
-
-
-
 // ── 실시간 환율 fetch ──────────────────────────────────────────
 async function fetchUsdKrw():Promise<number> {
   try {
@@ -184,11 +223,30 @@ async function fetchUsdKrw():Promise<number> {
   } catch { return 1380; }
 }
 
+// ─────────────────────────────────────────────────────────────
 export default function App() {
+  // ── 비밀번호 / 세션 ───────────────────────────────────────
+  const [authed,setAuthed]=useState(()=>{
+    try{const v=sessionStorage.getItem("bt_auth");const t=sessionStorage.getItem("bt_auth_ts");
+    if(v==="1"&&t&&Date.now()-parseInt(t)<2*60*60*1000)return true;}catch{}return false;
+  });
+  const lastActivity=useRef(Date.now());
+  const handleAuth=()=>{setAuthed(true);try{sessionStorage.setItem("bt_auth","1");sessionStorage.setItem("bt_auth_ts",String(Date.now()));}catch{}};
+  const logout=useCallback(()=>{setAuthed(false);try{sessionStorage.removeItem("bt_auth");sessionStorage.removeItem("bt_auth_ts");}catch{};},[]);
+
+  // 활동 감지 + 2시간 자동 로그아웃
+  useEffect(()=>{
+    if(!authed)return;
+    const reset=()=>{lastActivity.current=Date.now();try{sessionStorage.setItem("bt_auth_ts",String(Date.now()));}catch{}};
+    window.addEventListener("mousemove",reset);window.addEventListener("keydown",reset);window.addEventListener("click",reset);window.addEventListener("touchstart",reset);
+    const id=setInterval(()=>{if(Date.now()-lastActivity.current>2*60*60*1000)logout();},60000);
+    return()=>{window.removeEventListener("mousemove",reset);window.removeEventListener("keydown",reset);window.removeEventListener("click",reset);window.removeEventListener("touchstart",reset);clearInterval(id);};
+  },[authed,logout]);
+
   const today = useTodayStr();
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const [tab,setTab]=useState<"betting"|"stats"|"roi"|"odds"|"strategy"|"log">("betting");
+  const [tab,setTab]=useState<"betting"|"stats"|"roi"|"odds"|"strategy"|"log"|"schedule"|"points">("betting");
   const [statTab,setStatTab]=useState<"overview"|"daily"|"baseball"|"adv">("overview");
   const [bbSub,setBbSub]=useState<"league"|"option">("league");
   const [advCat,setAdvCat]=useState("축구");
@@ -196,6 +254,33 @@ export default function App() {
   const [showOldDone,setShowOldDone]=useState(false);
   const [stratCat,setStratCat]=useState("축구");
   const [esportsStratLeague,setEsportsStratLeague]=useState("LCK");
+
+  // ── 사이트 목록 (동적) ────────────────────────────────────
+  const [krwSites,setKrwSites]=useState<string[]>(()=>{try{const v=localStorage.getItem("bt_krw_sites");return v?JSON.parse(v):DEFAULT_KRW_SITES;}catch{return DEFAULT_KRW_SITES;}});
+  const [usdSites,setUsdSites]=useState<string[]>(()=>{try{const v=localStorage.getItem("bt_usd_sites");return v?JSON.parse(v):DEFAULT_USD_SITES;}catch{return DEFAULT_USD_SITES;}});
+  const ALL_SITES = useMemo(()=>[...krwSites,...usdSites],[krwSites,usdSites]);
+  const isUSD = useCallback((s:string)=>usdSites.includes(s),[usdSites]);
+
+  const saveKrwSites=(sites:string[])=>{setKrwSites(sites);try{localStorage.setItem("bt_krw_sites",JSON.stringify(sites));}catch{}};
+  const saveUsdSites=(sites:string[])=>{setUsdSites(sites);try{localStorage.setItem("bt_usd_sites",JSON.stringify(sites));}catch{}};
+
+  // 사이트 추가/삭제 모달
+  const [siteManageModal,setSiteManageModal]=useState(false);
+  const [newSiteName,setNewSiteName]=useState("");
+  const [newSiteType,setNewSiteType]=useState<"krw"|"usd">("krw");
+
+  const handleAddSite=()=>{
+    const name=newSiteName.trim();if(!name)return;
+    if(ALL_SITES.includes(name))return alert("이미 존재하는 사이트입니다.");
+    if(newSiteType==="krw")saveKrwSites([...krwSites,name]);
+    else saveUsdSites([...usdSites,name]);
+    setNewSiteName("");
+  };
+  const handleDeleteSite=(site:string)=>{
+    if(!window.confirm(`"${site}" 사이트를 삭제하시겠습니까?`))return;
+    if(krwSites.includes(site))saveKrwSites(krwSites.filter(s=>s!==site));
+    else saveUsdSites(usdSites.filter(s=>s!==site));
+  };
 
   // 배당 탭
   const [oddsGames,setOddsGames]=useState<OddsGame[]>([]);
@@ -208,54 +293,165 @@ export default function App() {
   const [activeOddsLeagues,setActiveOddsLeagues]=useState<string[]>(()=>{try{const v=localStorage.getItem("btv12_oddsLeagues");return v?JSON.parse(v):Object.keys(SPORT_KEY_MAP).slice(0,5);}catch{return Object.keys(SPORT_KEY_MAP).slice(0,5);}});
   const [,setOddsTick]=useState(0);
 
+  // ── 경기 일정 탭 ──────────────────────────────────────────
+  const [scheduleGames,setScheduleGames]=useState<OddsGame[]>([]);
+  const [scheduleLoading,setScheduleLoading]=useState(false);
+  const [scheduleLastFetch,setScheduleLastFetch]=useState(0);
+  const [scheduleLeagues,setScheduleLeagues]=useState<string[]>(()=>{try{const v=localStorage.getItem("bt_sched_leagues");return v?JSON.parse(v):Object.keys(SPORT_KEY_MAP).slice(0,6);}catch{return Object.keys(SPORT_KEY_MAP).slice(0,6);}});
+  const [scheduleCatFilter,setScheduleCatFilter]=useState("전체");
+
+  // 모의 베팅 모달
+  const [mockBetGame,setMockBetGame]=useState<OddsGame|null>(null);
+  const [mockBets,setMockBets]=useState<Bet[]>([]);
+  const [mockForm,setMockForm]=useState({site:"",betSide:"home" as "home"|"away"|"draw",amount:10000,oddsRaw:""});
+  const [lastClickTime,setLastClickTime]=useState<Record<string,number>>({});
+
+  const handleGameDoubleClick=(game:OddsGame)=>{
+    setMockBetGame(game);
+    setMockForm({site:"",betSide:"home",amount:10000,oddsRaw:String(Math.round(game.bestHome*100))});
+  };
+  const handleGameClick=(game:OddsGame)=>{
+    const now=Date.now();
+    const last=lastClickTime[game.id]||0;
+    if(now-last<400){handleGameDoubleClick(game);}
+    setLastClickTime(p=>({...p,[game.id]:now}));
+  };
+
+  const handleAddMockBet=()=>{
+    if(!mockBetGame||!mockForm.site)return alert("사이트를 선택해주세요.");
+    const odds=parseFloat((parseInt(mockForm.oddsRaw)/100).toFixed(2));
+    if(isNaN(odds)||odds<=0)return alert("배당률을 확인해주세요.");
+    const dollar=isUSD(mockForm.site);
+    const teamName=mockForm.betSide==="home"?mockBetGame.home:mockForm.betSide==="away"?mockBetGame.away:"무";
+    const bet:Bet={
+      id:"mock_"+String(Date.now()),
+      date:today,
+      category:"모의",
+      league:mockBetGame.leagueName,
+      site:mockForm.site,
+      betOption:mockForm.betSide==="home"?"홈승":mockForm.betSide==="away"?"원정승":"무승부",
+      homeTeam:mockBetGame.home,awayTeam:mockBetGame.away,teamName,
+      amount:mockForm.amount,odds,profit:null,result:"진행중",
+      includeStats:false,isDollar:dollar
+    };
+    setMockBets(p=>[...p,bet]);
+    setMockBetGame(null);
+  };
+  const removeMockBet=(id:string)=>setMockBets(p=>p.filter(b=>b.id!==id));
+
+  // 경기 일정 fetch (90분마다)
+  const fetchSchedule=useCallback(async()=>{
+    if(!scheduleLeagues.length)return;
+    setScheduleLoading(true);
+    try{
+      const results:OddsGame[]=[];
+      for(const league of scheduleLeagues){
+        const key=SPORT_KEY_MAP[league];if(!key)continue;
+        results.push(...await fetchOddsForSport(key,league));
+      }
+      const now=new Date();
+      const in24h=new Date(now.getTime()+24*60*60*1000);
+      const filtered=results.filter(g=>{
+        const t=new Date(g.commence);
+        return t>now&&t<=in24h;
+      });
+      filtered.sort((a,b)=>new Date(a.commence).getTime()-new Date(b.commence).getTime());
+      setScheduleGames(filtered);
+      setScheduleLastFetch(Date.now());
+    }finally{setScheduleLoading(false);}
+  },[scheduleLeagues]);
+
+  useEffect(()=>{
+    if(tab!=="schedule")return;
+    if(Date.now()-scheduleLastFetch>SCHEDULE_CACHE_TTL)fetchSchedule();
+    const id=setInterval(()=>fetchSchedule(),SCHEDULE_CACHE_TTL);
+    return()=>clearInterval(id);
+  },[tab,fetchSchedule,scheduleLastFetch]);
+
+  // ── 포인트 탭 ─────────────────────────────────────────────
+  const [pointSites,setPointSites]=useState<PointSite[]>(()=>{
+    try{const v=localStorage.getItem("bt_point_sites");return v?JSON.parse(v):[];}catch{return [];}
+  });
+  const savePointSites=(sites:PointSite[])=>{setPointSites(sites);try{localStorage.setItem("bt_point_sites",JSON.stringify(sites));}catch{}};
+
+  const [addPointSiteModal,setAddPointSiteModal]=useState(false);
+  const [newPointSite,setNewPointSite]=useState({name:"올인구조대",exchangeName:"포인트교환",exchangeDate:"2025-05-04",targetAmount:2000000});
+
+  const handleAddPointSite=()=>{
+    const site:PointSite={id:String(Date.now()),name:newPointSite.name,exchangeName:newPointSite.exchangeName,exchangeDate:newPointSite.exchangeDate,targetAmount:newPointSite.targetAmount,sessions:[]};
+    const updated=[...pointSites,site];
+    savePointSites(updated);
+    setAddPointSiteModal(false);
+    setNewPointSite({name:"올인구조대",exchangeName:"포인트교환",exchangeDate:"2025-05-04",targetAmount:2000000});
+  };
+
+  // 현금교환 완료 → 2주 뒤 같은 요일
+  const getNextTargetDate=(fromDate:string)=>{
+    const d=new Date(fromDate);
+    d.setDate(d.getDate()+14);
+    return d.toISOString().slice(0,10);
+  };
+
+  const handlePointExchangeComplete=(siteId:string)=>{
+    const now=new Date().toISOString().slice(0,10);
+    const nextTarget=getNextTargetDate(now);
+    const session:PointSession={id:String(Date.now()),completedAt:now,nextTargetDate:nextTarget};
+    const updated=pointSites.map(s=>{
+      if(s.id!==siteId)return s;
+      return{...s,sessions:[...s.sessions,session]};
+    });
+    savePointSites(updated);
+  };
+
   // 실시간 환율
   const [usdKrw,setUsdKrw]=useState(USD_TO_KRW);
   useEffect(()=>{fetchUsdKrw().then(setUsdKrw);},[]);
 
-  // ── Supabase 데이터 상태 ─────────────────────────────────────
+  // ── Supabase 데이터 ────────────────────────────────────────
   const [dbReady, setDbReady] = useState(false);
   const [bets,setBetsRaw]=useState<Bet[]>([]);
   const [deposits,setDepositsRaw]=useState<Deposit[]>([]);
   const [withdrawals,setWithdrawalsRaw]=useState<Withdrawal[]>([]);
   const [siteStates,setSiteStatesRaw]=useState<Record<string,SiteState>>(
-    Object.fromEntries(ALL_SITES.map(s=>[s,{deposited:0,betTotal:0,active:false,isDollar:isUSD(s)}]))
+    ()=>Object.fromEntries(ALL_SITES.map(s=>[s,{deposited:0,betTotal:0,active:false,isDollar:isUSD(s),pointTotal:0}]))
   );
   const [customLeagues,setCustomLeaguesRaw]=useState<Record<string,string[]>>({});
   const [esportsRecords,setEsportsRecordsRaw]=useState<EsportsRecord[]>([]);
   const [profitExtras,setProfitExtrasRaw]=useState<ProfitExtra[]>([]);
   const [logs,setLogs]=useState<Log[]>([]);
 
-  // ── 앱 시작 시 Supabase에서 전체 데이터 로드 ─────────────────
+  // ── 수익률 카테고리 목록 (저장) ──────────────────────────
+  const [pextSiteList,setPextSiteList]=useState<string[]>(()=>{try{const v=localStorage.getItem("bt_pext_sites");return v?JSON.parse(v):[];}catch{return [];}});
+  const [pextCatList,setPextCatList]=useState<string[]>(()=>{try{const v=localStorage.getItem("bt_pext_cats");return v?JSON.parse(v):[];}catch{return [];}});
+
+  const savePextSiteList=(list:string[])=>{setPextSiteList(list);try{localStorage.setItem("bt_pext_sites",JSON.stringify(list));}catch{}};
+  const savePextCatList=(list:string[])=>{setPextCatList(list);try{localStorage.setItem("bt_pext_cats",JSON.stringify(list));}catch{}};
+
   useEffect(()=>{
     (async()=>{
       const [b,dep,wth,ss,cl,er,pe] = await Promise.all([
-        db.loadBets(),
-        db.loadDeposits(),
-        db.loadWithdrawals(),
+        db.loadBets(),db.loadDeposits(),db.loadWithdrawals(),
         db.loadSiteStates(ALL_SITES, isUSD),
-        db.loadCustomLeagues(),
-        db.loadEsportsRecords(),
-        db.loadProfitExtras(),
+        db.loadCustomLeagues(),db.loadEsportsRecords(),db.loadProfitExtras(),
       ]);
-      setBetsRaw(b);
-      setDepositsRaw(dep);
-      setWithdrawalsRaw(wth);
-      setSiteStatesRaw(ss);
-      setCustomLeaguesRaw(cl);
-      setEsportsRecordsRaw(er);
-      setProfitExtrasRaw(pe);
+      setBetsRaw(b);setDepositsRaw(dep);setWithdrawalsRaw(wth);
+      setSiteStatesRaw(ss);setCustomLeaguesRaw(cl);setEsportsRecordsRaw(er);setProfitExtrasRaw(pe);
+      // 기존 수익률 카테고리 목록 자동 수집
+      const sites=new Set(pe.map((x:ProfitExtra)=>x.category));
+      const cats=new Set(pe.map((x:ProfitExtra)=>x.subCategory).filter(Boolean));
+      if(sites.size>0)savePextSiteList([...new Set([...pextSiteList,...Array.from(sites)])]);
+      if(cats.size>0)savePextCatList([...new Set([...pextCatList,...Array.from(cats)])]);
       setDbReady(true);
     })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   },[]);
 
   const addLog=(type:string,desc:string)=>setLogs(p=>[{id:String(Date.now()),ts:new Date().toLocaleString("ko-KR"),type,desc},...p].slice(0,200));
 
-  // ── JSON 백업 / 복구 (Supabase가 있어도 비상용으로 유지) ──────
   const exportData = () => {
     const data={exportedAt:new Date().toISOString(),bets,deposits,withdrawals,siteStates,customLeagues,esportsRecords,profitExtras};
     const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
-    const url=URL.createObjectURL(blob);
-    const a=document.createElement("a");a.href=url;a.download=`bettracker_${today}.json`;a.click();URL.revokeObjectURL(url);
+    const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=`bettracker_${today}.json`;a.click();URL.revokeObjectURL(url);
     addLog("📤 백업",today);
   };
   const importData=(e:React.ChangeEvent<HTMLInputElement>)=>{
@@ -264,42 +460,22 @@ export default function App() {
     reader.onload=async ev=>{
       try{
         const data=JSON.parse(ev.target?.result as string);
-        if(data.bets){
-          for(const b of data.bets) await db.upsertBet(b);
-          setBetsRaw(data.bets);
-        }
-        if(data.deposits){
-          for(const d of data.deposits) await db.insertDeposit(d).catch(()=>{});
-          setDepositsRaw(data.deposits);
-        }
-        if(data.withdrawals){
-          for(const w of data.withdrawals) await db.insertWithdrawal(w).catch(()=>{});
-          setWithdrawalsRaw(data.withdrawals);
-        }
-        if(data.siteStates){
-          for(const [site,st] of Object.entries(data.siteStates as Record<string,SiteState>))
-            await db.upsertSiteState(site,st);
-          setSiteStatesRaw(data.siteStates);
-        }
-        if(data.customLeagues) setCustomLeaguesRaw(data.customLeagues);
-        if(data.esportsRecords){
-          for(const r of data.esportsRecords) await db.insertEsportsRecord(r).catch(()=>{});
-          setEsportsRecordsRaw(data.esportsRecords);
-        }
-        if(data.profitExtras){
-          for(const p of data.profitExtras) await db.insertProfitExtra(p).catch(()=>{});
-          setProfitExtrasRaw(data.profitExtras);
-        }
-        alert("불러오기 완료 (Supabase에 저장됨)!");addLog("📥 복구","완료");
+        if(data.bets){for(const b of data.bets)await db.upsertBet(b);setBetsRaw(data.bets);}
+        if(data.deposits){for(const d of data.deposits)await db.insertDeposit(d).catch(()=>{});setDepositsRaw(data.deposits);}
+        if(data.withdrawals){for(const w of data.withdrawals)await db.insertWithdrawal(w).catch(()=>{});setWithdrawalsRaw(data.withdrawals);}
+        if(data.siteStates){for(const [site,st] of Object.entries(data.siteStates as Record<string,SiteState>))await db.upsertSiteState(site,st);setSiteStatesRaw(data.siteStates);}
+        if(data.customLeagues)setCustomLeaguesRaw(data.customLeagues);
+        if(data.esportsRecords){for(const r of data.esportsRecords)await db.insertEsportsRecord(r).catch(()=>{});setEsportsRecordsRaw(data.esportsRecords);}
+        if(data.profitExtras){for(const p of data.profitExtras)await db.insertProfitExtra(p).catch(()=>{});setProfitExtrasRaw(data.profitExtras);}
+        alert("불러오기 완료!");addLog("📥 복구","완료");
       }catch{alert("파일 오류");}
     };
     reader.readAsText(file);e.target.value="";
   };
 
-  // ── 배당 fetch ────────────────────────────────────────────────
+  // ── 배당 fetch ────────────────────────────────────────────
   const fetchAllOdds=useCallback(async(leagues?:string[])=>{
-    const targets=leagues??activeOddsLeagues;
-    if(!targets.length)return;
+    const targets=leagues??activeOddsLeagues;if(!targets.length)return;
     setOddsLoading(true);setOddsError("");
     try{
       const results:OddsGame[]=[];
@@ -317,7 +493,7 @@ export default function App() {
     return()=>clearInterval(id);
   },[tab,fetchAllOdds]);
 
-  // ── 리그 ──────────────────────────────────────────────────────
+  // ── 리그 ─────────────────────────────────────────────────
   const getLeagues=(cat:string)=>{
     const major=MAJOR[cat]||[],extra=EXTRA[cat]||[];
     const custom=(customLeagues[cat]||[]).filter(l=>![...major,...extra].includes(l)).sort((a,b)=>a.localeCompare(b,"ko"));
@@ -325,7 +501,7 @@ export default function App() {
   };
   const allLeagues=(cat:string)=>{const{major,others}=getLeagues(cat);return[...major,...others];};
 
-  // ── 모달 상태 ─────────────────────────────────────────────────
+  // ── 모달 상태 ─────────────────────────────────────────────
   const [addLeagueModal,setAddLeagueModal]=useState<{cat:string}|null>(null);
   const [editLeagueModal,setEditLeagueModal]=useState<{cat:string;old:string;idx:number}|null>(null);
   const [newLeagueName,setNewLeagueName]=useState("");
@@ -336,28 +512,34 @@ export default function App() {
   const leagueInputRef=useRef<HTMLInputElement>(null);
   useEffect(()=>{if(addLeagueModal&&leagueInputRef.current)setTimeout(()=>leagueInputRef.current?.focus(),50);},[addLeagueModal]);
 
-  // ── 입금 폼 ──────────────────────────────────────────────────
+  // ── 입금 폼 ──────────────────────────────────────────────
   const [depSite,setDepSite]=useState("");
   const depIsDollar=depSite?isUSD(depSite):false;
   const [depAmt,setDepAmt]=useState(0);
+  const [depPoint,setDepPoint]=useState(0);
 
-  // ── 베팅 폼 ──────────────────────────────────────────────────
+  // ── 베팅 폼 ──────────────────────────────────────────────
   const [esportsCustomOpt,setEsportsCustomOpt]=useState("");
-  const [esportsCustomLeagueInForm,setEsportsCustomLeagueInForm]=useState("");
   const activeSiteNames=ALL_SITES.filter(s=>siteStates[s]?.active);
   const makeForm=()=>({date:today,category:"야구",league:"MLB",site:"",homeTeam:"",awayTeam:"",teamName:"",amount:10000,oddsRaw:"",optGroup:"승패",betOption:"역배",includeStats:true});
   const [form,setForm]=useState(makeForm);
+
+  // 날짜 실시간 동기화 (베팅 폼)
+  useEffect(()=>{setForm(f=>({...f,date:today}));},[today]);
+
   const formIsDollar=isUSD(form.site);
   const isOverUnder=(opt:string)=>opt.includes("오버")||opt.includes("언더");
   const {major:fMajor,others:fOthers}=getLeagues(form.category);
 
-  // ── E스포츠 기록 ──────────────────────────────────────────────
+  // ── E스포츠 기록 ─────────────────────────────────────────
   const [esRec,setEsRec]=useState({league:"LCK",date:today,teamA:"",teamB:"",scoreA:0,scoreB:0});
 
-  // ── 수익률 기타 ───────────────────────────────────────────────
+  // ── 수익률 기타 ──────────────────────────────────────────
   const [pextForm,setPextForm]=useState({category:"",subCategory:"",amount:0,note:"",isIncome:true});
+  const [newPextSite,setNewPextSite]=useState("");
+  const [newPextCat,setNewPextCat]=useState("");
 
-  // ── 리그 핸들러 ───────────────────────────────────────────────
+  // ── 리그 핸들러 ──────────────────────────────────────────
   const handleAddLeague=()=>{
     const name=newLeagueName.trim();if(!name||!addLeagueModal)return;
     setCustomLeaguesRaw(p=>({...p,[addLeagueModal.cat]:[...(p[addLeagueModal.cat]||[]),name]}));
@@ -378,7 +560,7 @@ export default function App() {
   const handleSiteChange=(s:string)=>{setForm(f=>({...f,site:s,amount:isUSD(s)?7:10000}));};
   const getOdds=()=>{const s=form.oddsRaw;if(!s||s.length<3)return null;return parseFloat((parseInt(s)/100).toFixed(2));};
 
-  // ── 베팅 추가 ─────────────────────────────────────────────────
+  // ── 베팅 추가 ────────────────────────────────────────────
   const handleAdd=()=>{
     const o=getOdds();if(!o)return alert("배당률을 3자리 입력해주세요.");
     if(!form.site)return alert("베팅사이트를 선택해주세요.");
@@ -392,11 +574,9 @@ export default function App() {
     const titleParts=isOverUnder(form.betOption)?[homeTeam,awayTeam].filter(Boolean).join(" vs "):teamName;
     if(!titleParts)return alert("팀 이름을 입력해주세요.");
     const bet:Bet={id:String(Date.now()),date:form.date,category:form.category,league:form.league,site:form.site,betOption:finalOpt,homeTeam,awayTeam,teamName,amount:form.amount,odds:o,profit:null,result:"진행중",includeStats:true,isDollar:dollar};
-    setBetsRaw(b=>{const n=[...b,bet];return n;});
-    db.upsertBet(bet);
+    setBetsRaw(b=>[...b,bet]);db.upsertBet(bet);
     const newSS={...siteStates,[form.site]:{...siteStates[form.site],betTotal:parseFloat((siteStates[form.site].betTotal+form.amount).toFixed(2))}};
-    setSiteStatesRaw(newSS);
-    db.upsertSiteState(form.site,newSS[form.site]);
+    setSiteStatesRaw(newSS);db.upsertSiteState(form.site,newSS[form.site]);
     addLog("➕ 베팅",`${titleParts}/${finalOpt}/${fmtDisp(form.amount,dollar)}/배당${o}`);
     const dg=getDefaultGroup(form.category);
     setForm(f=>({...f,site:"",homeTeam:"",awayTeam:"",teamName:"",oddsRaw:"",optGroup:dg,betOption:getDefaultOpt(f.category,dg,f.league),amount:10000,includeStats:true}));
@@ -406,25 +586,38 @@ export default function App() {
   const cancelBet=(id:string)=>{
     if(!window.confirm("베팅을 취소하시겠습니까?"))return;
     const bet=bets.find(b=>b.id===id);if(!bet)return;
-    setBetsRaw(b=>b.filter(x=>x.id!==id));
-    db.deleteBet(id);
+    setBetsRaw(b=>b.filter(x=>x.id!==id));db.deleteBet(id);
     const newSS2={...siteStates,[bet.site]:{...siteStates[bet.site],betTotal:parseFloat(Math.max(0,siteStates[bet.site].betTotal-bet.amount).toFixed(2))}};
-    setSiteStatesRaw(newSS2);
-    db.upsertSiteState(bet.site,newSS2[bet.site]);
+    setSiteStatesRaw(newSS2);db.upsertSiteState(bet.site,newSS2[bet.site]);
     addLog("🚫 취소",bet.homeTeam||bet.teamName||id);
   };
 
   const handleDeposit=()=>{
     if(!depSite)return alert("사이트를 선택해주세요.");
-    if(depAmt<=0)return;
-    const newDep={id:String(Date.now()),site:depSite,amount:depAmt,date:today,isDollar:depIsDollar};
-    setDepositsRaw(d=>[...d,newDep]);
-    db.insertDeposit(newDep);
-    const newSS3={...siteStates,[depSite]:{...siteStates[depSite],deposited:parseFloat((siteStates[depSite].deposited+depAmt).toFixed(2)),active:true,isDollar:depIsDollar}};
-    setSiteStatesRaw(newSS3);
-    db.upsertSiteState(depSite,newSS3[depSite]);
-    addLog("💵 입금",`${depSite}/${fmtDisp(depAmt,depIsDollar)}`);
-    setDepSite("");setDepAmt(0);
+    if(depAmt<=0&&depPoint<=0)return;
+    // 실제 입금 추가 (포인트 제외)
+    if(depAmt>0){
+      const newDep={id:String(Date.now()),site:depSite,amount:depAmt,date:today,isDollar:depIsDollar};
+      setDepositsRaw(d=>[...d,newDep]);db.insertDeposit(newDep);
+      const newSS3={...siteStates,[depSite]:{...siteStates[depSite],deposited:parseFloat((siteStates[depSite].deposited+depAmt).toFixed(2)),active:true,isDollar:depIsDollar}};
+      setSiteStatesRaw(newSS3);db.upsertSiteState(depSite,newSS3[depSite]);
+      addLog("💵 입금",`${depSite}/${fmtDisp(depAmt,depIsDollar)}`);
+    }
+    // 포인트는 betTotal에만 추가 (입금액에는 미포함, 진행률에는 포함)
+    if(depPoint>0){
+      const curSS=siteStates[depSite];
+      const newSS4={...siteStates,[depSite]:{
+        ...curSS,
+        active:true,
+        isDollar:depIsDollar,
+        betTotal:parseFloat((curSS.betTotal+depPoint).toFixed(2)),
+        // pointTotal은 별도 추적용
+        pointTotal:parseFloat(((curSS as any).pointTotal||0)+depPoint).toFixed(2),
+      }};
+      setSiteStatesRaw(newSS4 as any);db.upsertSiteState(depSite,newSS4[depSite] as any);
+      addLog("🎁 포인트",`${depSite}/${fmtDisp(depPoint,depIsDollar)}`);
+    }
+    setDepSite("");setDepAmt(0);setDepPoint(0);
   };
 
   const handleClose=(site:string)=>{setCloseWithdrawAmt(0);setCloseModal({site});};
@@ -433,30 +626,25 @@ export default function App() {
     if(closeWithdrawAmt>0){
       const dollar=isUSD(site);
       const newWth={id:String(Date.now()),site,amount:closeWithdrawAmt,date:today,isDollar:dollar};
-      setWithdrawalsRaw(w=>[...w,newWth]);
-      db.insertWithdrawal(newWth);
+      setWithdrawalsRaw(w=>[...w,newWth]);db.insertWithdrawal(newWth);
     }
-    const closedSS={...siteStates,[site]:{...siteStates[site],deposited:0,betTotal:0,active:false}};
-    setSiteStatesRaw(closedSS);
-    db.upsertSiteState(site,closedSS[site]);
+    const closedSS={...siteStates,[site]:{...siteStates[site],deposited:0,betTotal:0,active:false,pointTotal:0}};
+    setSiteStatesRaw(closedSS);db.upsertSiteState(site,closedSS[site]);
     addLog("🔒 마감",`${site}/출금${fmtDisp(closeWithdrawAmt,isUSD(site))}`);
     setCloseModal(null);
   };
   const cancelSite=(site:string)=>{
     if(!window.confirm(`${site} 취소? 입금 금액도 삭제됩니다.`))return;
-    const cancelledSS={...siteStates,[site]:{...siteStates[site],deposited:0,betTotal:0,active:false}};
-    setSiteStatesRaw(cancelledSS);
-    db.upsertSiteState(site,cancelledSS[site]);
-    setDepositsRaw(d=>d.filter(dep=>dep.site!==site));
-    db.deleteDepositsBySite(site);
+    const cancelledSS={...siteStates,[site]:{...siteStates[site],deposited:0,betTotal:0,active:false,pointTotal:0}};
+    setSiteStatesRaw(cancelledSS);db.upsertSiteState(site,cancelledSS[site]);
+    setDepositsRaw(d=>d.filter(dep=>dep.site!==site));db.deleteDepositsBySite(site);
     addLog("❌ 사이트 취소",site);
   };
   const updateResult=(id:string,result:string)=>{
     setBetsRaw(b=>b.map(bet=>{
       if(bet.id!==id)return bet;
       const profit=result==="승"?parseFloat((bet.amount*bet.odds-bet.amount).toFixed(2)):result==="패"?-bet.amount:0;
-      const updated={...bet,result,profit};
-      db.upsertBet(updated);
+      const updated={...bet,result,profit};db.upsertBet(updated);
       addLog(result==="승"?"✅ 적중":"❌ 실패",bet.homeTeam||bet.teamName||"");
       return updated;
     }));
@@ -464,11 +652,9 @@ export default function App() {
   const revertToPending=(id:string)=>{
     const bet=bets.find(b=>b.id===id);if(!bet)return;
     const reverted={...bet,result:"진행중",profit:null};
-    setBetsRaw(b=>b.map(x=>x.id===id?reverted:x));
-    db.upsertBet(reverted);
+    setBetsRaw(b=>b.map(x=>x.id===id?reverted:x));db.upsertBet(reverted);
     const revertSS={...siteStates,[bet.site]:{...siteStates[bet.site],betTotal:parseFloat((siteStates[bet.site].betTotal+bet.amount).toFixed(2))}};
-    setSiteStatesRaw(revertSS);
-    db.upsertSiteState(bet.site,revertSS[bet.site]);
+    setSiteStatesRaw(revertSS);db.upsertSiteState(bet.site,revertSS[bet.site]);
     addLog("🔄 복귀",bet.homeTeam||bet.teamName||id);
   };
   const deleteFromStats=(id:string)=>{
@@ -476,27 +662,23 @@ export default function App() {
     addLog("🗑 통계삭제","");
   };
   const deleteForever=(id:string)=>{
-    setBetsRaw(b=>b.filter(x=>x.id!==id));
-    db.deleteBet(id);
-    addLog("💥 영구삭제","");
+    setBetsRaw(b=>b.filter(x=>x.id!==id));db.deleteBet(id);addLog("💥 영구삭제","");
   };
   const handleDeleteChoice=(choice:"stats"|"forever")=>{if(!deleteModal)return;choice==="stats"?deleteFromStats(deleteModal.betId):deleteForever(deleteModal.betId);setDeleteModal(null);};
 
-  // ── 통계 계산 ─────────────────────────────────────────────────
+  // ── 통계 계산 ─────────────────────────────────────────────
   const weekDeposits=useMemo(()=>{
     const wm=weekMonday(),m:Record<string,number>=Object.fromEntries(ALL_SITES.map(s=>[s,0]));
     deposits.filter(d=>d.date>=wm).forEach(d=>{m[d.site]+=d.amount;});return m;
-  },[deposits]);
+  },[deposits,ALL_SITES]);
 
-  // 이번주 입금 원화환산 차트 데이터
   const weekDepChartData=useMemo(()=>{
     return ALL_SITES.map(site=>{
-      const amt=weekDeposits[site]||0;
-      if(amt===0)return null;
+      const amt=weekDeposits[site]||0;if(amt===0)return null;
       const krwAmt=isUSD(site)?amt*usdKrw:amt;
       return{site,amt,krwAmt,isDollar:isUSD(site)};
     }).filter(Boolean) as {site:string,amt:number,krwAmt:number,isDollar:boolean}[];
-  },[weekDeposits,usdKrw]);
+  },[weekDeposits,usdKrw,ALL_SITES,isUSD]);
 
   const pending=bets.filter(b=>b.result==="진행중");
   const done=bets.filter(b=>b.result!=="진행중"&&b.includeStats!==false);
@@ -531,12 +713,11 @@ export default function App() {
     return[...new Set(catDone.map(b=>b.betOption))].map(opt=>({key:opt,subs:[...new Set(catDone.filter(b=>b.betOption===opt).map(b=>b.league))].map(league=>{const bs=catDone.filter(b=>b.betOption===opt&&b.league===league);const wins=bs.filter(b=>b.result==="승").length;const profit=bs.reduce((s,b)=>s+(b.profit??0),0);const bet=bs.reduce((s,b)=>s+b.amount,0);return{name:league,count:bs.length,wins,profit,roi:bet>0?((profit/bet)*100).toFixed(1):"0",winRate:bs.length>0?Math.round(wins/bs.length*100):0};})}));
   },[done,advCat,advMode]);
 
-  // 수익률: 마감(출금) 이력이 있는 사이트만, 마감 세션별 계산
   const roiStats=useMemo(()=>{
     return ALL_SITES.map(site=>{
       const dollar=isUSD(site);
       const siteWths=withdrawals.filter(w=>w.site===site).sort((a,b)=>a.date.localeCompare(b.date));
-      if(siteWths.length===0) return null;
+      if(siteWths.length===0)return null;
       const siteDepsAll=deposits.filter(d=>d.site===site).sort((a,b)=>a.date.localeCompare(b.date));
       const sessions=siteWths.map((wth,idx)=>{
         const prevWthDate=idx>0?siteWths[idx-1].date:"0000-00-00";
@@ -550,9 +731,8 @@ export default function App() {
       const netKRW=sessions.reduce((s,ss)=>s+ss.netKRW,0);
       return{site,dollar,totalDep,totalWth,netKRW,sessions,hasData:true};
     }).filter(Boolean) as {site:string,dollar:boolean,totalDep:number,totalWth:number,netKRW:number,sessions:any[],hasData:boolean}[];
-  },[deposits,withdrawals,usdKrw]);
+  },[deposits,withdrawals,usdKrw,ALL_SITES,isUSD]);
 
-  // 현재 활성 입금/베팅 합계
   const activeTotalKrwDep=ALL_SITES.filter(s=>!isUSD(s)).reduce((s,site)=>s+(siteStates[site]?.active?siteStates[site].deposited:0),0);
   const activeTotalUsdDep=ALL_SITES.filter(s=>isUSD(s)).reduce((s,site)=>s+(siteStates[site]?.active?siteStates[site].deposited:0),0);
   const activeTotalKrwBet=ALL_SITES.filter(s=>!isUSD(s)).reduce((s,site)=>s+(siteStates[site]?.active?siteStates[site].betTotal:0),0);
@@ -577,15 +757,12 @@ export default function App() {
     });return teams;
   },[esportsRecords,esportsStratLeague]);
 
-  const allEsportsLeagues=[...MAJOR["E스포츠"],...(customLeagues["E스포츠"]||[])];
-
-  // 잔여금/진행률
   const krwRemaining=activeSiteNames.filter(s=>!isUSD(s)).reduce((sum,site)=>{const st=siteStates[site]||{deposited:0,betTotal:0};return sum+Math.max(0,st.deposited-st.betTotal);},0);
   const usdRemaining=activeSiteNames.filter(s=>isUSD(s)).reduce((sum,site)=>{const st=siteStates[site]||{deposited:0,betTotal:0};return sum+Math.max(0,st.deposited-st.betTotal);},0);
   const optGroups=getOptGroups(form.category);
   const curOpts=optGroups.find(g=>g.g===form.optGroup)?.opts||[];
 
-  // ── 서브 컴포넌트 ─────────────────────────────────────────────
+  // ── 서브 컴포넌트 ─────────────────────────────────────────
   const StatCard=({label,value,color,sub}:{label:string,value:string|number,color?:string,sub?:string})=>(
     <div style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:10,padding:"14px 16px"}}>
       <div style={{fontSize:11,color:C.muted,marginBottom:4}}>{label}</div>
@@ -648,25 +825,302 @@ export default function App() {
     );
   };
 
-  // 버튼 스타일 헬퍼
   const tabBtn=(active:boolean,ac:string)=>({padding:"7px 18px",borderRadius:7,border:active?`1px solid ${ac}`:`1px solid ${C.border}`,background:active?`${ac}22`:"transparent",color:active?ac:C.muted,cursor:"pointer",fontWeight:700,fontSize:12} as React.CSSProperties);
   const siteBtn=(active:boolean,dollar:boolean)=>({padding:"4px 10px",borderRadius:5,border:active?`1px solid ${dollar?C.amber:C.green}`:`1px solid ${C.border}`,background:active?`${dollar?C.amber:C.green}22`:C.bg2,color:active?dollar?C.amber:C.green:C.muted,cursor:"pointer",fontSize:11,fontWeight:active?700:400} as React.CSSProperties);
 
+  if(!authed) return <PasswordScreen onAuth={handleAuth}/>;
   if(!dbReady) return(
     <div style={{minHeight:"100vh",background:C.bg,display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:16}}>
       <div style={{fontSize:32}}>⚡</div>
       <div style={{color:C.orange,fontSize:18,fontWeight:800,letterSpacing:2}}>BET TRACKER</div>
       <div style={{color:C.muted,fontSize:13}}>Supabase에서 데이터 불러오는 중...</div>
-      <div style={{width:200,height:3,background:C.border,borderRadius:3,overflow:"hidden"}}>
-        <div style={{width:"60%",height:"100%",background:C.green,borderRadius:3,animation:"none"}}/>
-      </div>
     </div>
   );
+
+  // ══ 포인트 탭 렌더 ══
+  const renderPointsTab=()=>{
+    // 최근 한달 입금 합산 계산
+    const oneMonthAgo=(baseDate:string)=>{
+      const d=new Date(baseDate);d.setMonth(d.getMonth()-1);return d.toISOString().slice(0,10);
+    };
+    return(
+      <div style={{flex:1,overflowY:"auto",padding:20}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+          <div style={{fontSize:16,fontWeight:800,color:C.teal}}>🎁 포인트 관리</div>
+          <button onClick={()=>setAddPointSiteModal(true)} style={{padding:"6px 14px",borderRadius:7,border:`1px solid ${C.teal}`,background:`${C.teal}22`,color:C.teal,cursor:"pointer",fontWeight:700,fontSize:12}}>+ 포인트 사이트 추가</button>
+        </div>
+        {pointSites.length===0&&(
+          <div style={{textAlign:"center",color:C.dim,padding:"60px 0"}}>
+            <div style={{fontSize:24,marginBottom:8}}>🎁</div>
+            <div>포인트 사이트를 추가해주세요</div>
+            <div style={{fontSize:11,color:C.muted,marginTop:8}}>예) 올인구조대 포인트교환 목표</div>
+          </div>
+        )}
+        {pointSites.map(ps=>{
+          // 현재 활성 세션의 기준 날짜 결정
+          const lastSession=ps.sessions[ps.sessions.length-1];
+          const isCompleted=!!lastSession;
+          const baseDate=isCompleted?lastSession.nextTargetDate:ps.exchangeDate;
+          // 기준일 하루 전부터 계산 시작
+          const startDate=new Date(baseDate);startDate.setDate(startDate.getDate()-1);
+          const startStr=startDate.toISOString().slice(0,10);
+          const fromStr=oneMonthAgo(startStr);
+          // 해당 기간의 입금 합산 (전체 사이트 원화 환산)
+          const periodDeps=deposits.filter(d=>d.date>=fromStr&&d.date<=startStr);
+          const totalKrw=periodDeps.reduce((s,d)=>s+(isUSD(d.site)?d.amount*usdKrw:d.amount),0);
+          const achieved=totalKrw>=ps.targetAmount;
+          // 사이트별 분류
+          const bysite:Record<string,number>={};
+          periodDeps.forEach(d=>{
+            const amt=isUSD(d.site)?d.amount*usdKrw:d.amount;
+            bysite[d.site]=(bysite[d.site]||0)+amt;
+          });
+          return(
+            <div key={ps.id} style={{background:C.bg3,border:`1px solid ${achieved?C.green+"66":C.border2}`,borderRadius:14,padding:18,marginBottom:16}}>
+              <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",marginBottom:12}}>
+                <div>
+                  <div style={{display:"flex",alignItems:"center",gap:10}}>
+                    <span style={{fontSize:16,fontWeight:900,color:C.text}}>{ps.name}</span>
+                    <span style={{fontSize:13,color:C.teal,fontWeight:700}}>{ps.exchangeName}</span>
+                    <span style={{fontSize:12,color:C.amber,fontWeight:600}}>{baseDate.slice(5).replace("-","월 ")}일</span>
+                    {achieved&&(
+                      <span style={{
+                        fontSize:13,fontWeight:900,color:C.green,
+                        border:`2px solid ${C.green}`,borderRadius:6,
+                        padding:"2px 8px",transform:"rotate(-5deg)",display:"inline-block",
+                        background:`${C.green}11`,letterSpacing:1
+                      }}>✅ 포인트전환 가능</span>
+                    )}
+                  </div>
+                  <div style={{fontSize:11,color:C.muted,marginTop:4}}>
+                    기준기간: {fromStr} ~ {startStr} (최근 1개월)
+                  </div>
+                </div>
+                <button
+                  onClick={()=>{if(!window.confirm("현금교환 완료 처리하시겠습니까?"))return;handlePointExchangeComplete(ps.id);}}
+                  style={{padding:"7px 14px",borderRadius:7,border:`1px solid ${C.orange}`,background:`${C.orange}22`,color:C.orange,cursor:"pointer",fontWeight:700,fontSize:12,flexShrink:0}}
+                >현금교환 완료</button>
+              </div>
+              {/* 진행률 */}
+              <div style={{marginBottom:12}}>
+                <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:4}}>
+                  <span style={{color:C.muted}}>누적 입금</span>
+                  <span style={{color:achieved?C.green:C.amber,fontWeight:800}}>{totalKrw.toLocaleString()}원 / {ps.targetAmount.toLocaleString()}원</span>
+                </div>
+                <div style={{height:8,background:C.bg,borderRadius:4,overflow:"hidden"}}>
+                  <div style={{width:`${Math.min(100,Math.round(totalKrw/ps.targetAmount*100))}%`,height:"100%",background:achieved?C.green:C.amber,borderRadius:4,transition:"width 0.3s"}}/>
+                </div>
+                <div style={{fontSize:11,color:C.muted,marginTop:3,textAlign:"right"}}>{Math.min(100,Math.round(totalKrw/ps.targetAmount*100))}%</div>
+              </div>
+              {/* 사이트별 입금 */}
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(130px,1fr))",gap:6}}>
+                {Object.entries(bysite).filter(([,v])=>v>0).map(([site,amt])=>(
+                  <div key={site} style={{background:C.bg2,border:`1px solid ${C.border}`,borderRadius:8,padding:"8px 10px"}}>
+                    <div style={{fontSize:10,color:C.muted,marginBottom:2}}>{site}</div>
+                    <div style={{fontSize:13,fontWeight:800,color:C.green}}>₩{Math.round(amt).toLocaleString()}</div>
+                  </div>
+                ))}
+                {Object.keys(bysite).length===0&&<div style={{fontSize:11,color:C.dim,gridColumn:"1/-1"}}>해당 기간 입금 없음</div>}
+              </div>
+              {/* 이전 세션 */}
+              {ps.sessions.length>0&&(
+                <div style={{marginTop:12,borderTop:`1px solid ${C.border}`,paddingTop:10}}>
+                  <div style={{fontSize:11,color:C.muted,marginBottom:6}}>교환 이력</div>
+                  {ps.sessions.map((s,i)=>(
+                    <div key={s.id} style={{fontSize:11,color:C.dim,marginBottom:3}}>
+                      {i+1}회 · 완료 {s.completedAt} → 다음 목표 {s.nextTargetDate}
+                    </div>
+                  ))}
+                </div>
+              )}
+              <button onClick={()=>{if(!window.confirm(`"${ps.name}" 삭제?`))return;savePointSites(pointSites.filter(x=>x.id!==ps.id));}} style={{marginTop:10,fontSize:10,padding:"3px 10px",borderRadius:4,border:`1px solid ${C.red}44`,background:C.bg2,color:C.red,cursor:"pointer"}}>삭제</button>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  // ══ 경기 일정 탭 렌더 ══
+  const renderScheduleTab=()=>{
+    const catOf=(g:OddsGame)=>g.sport.startsWith("soccer")?"축구":g.sport.startsWith("basketball")?"농구":g.sport.startsWith("baseball")?"야구":"기타";
+    const filtered=scheduleCatFilter==="전체"?scheduleGames:scheduleGames.filter(g=>catOf(g)===scheduleCatFilter);
+    const groups:Record<string,OddsGame[]>={};
+    filtered.forEach(g=>{if(!groups[g.leagueName])groups[g.leagueName]=[];groups[g.leagueName].push(g);});
+
+    return(
+      <div style={{flex:1,overflowY:"auto",padding:20}}>
+        <div style={{display:"flex",alignItems:"flex-start",gap:16,marginBottom:16,flexWrap:"wrap"}}>
+          <div style={{flex:1,minWidth:260}}>
+            <div style={{fontSize:16,fontWeight:800,color:C.amber,marginBottom:8}}>
+              📅 경기 일정 (24시간 이내)
+              {scheduleLastFetch>0&&<span style={{fontSize:10,color:C.muted,marginLeft:10,fontWeight:400}}>업데이트 {new Date(scheduleLastFetch).toLocaleTimeString("ko-KR")} · 90분마다 갱신</span>}
+            </div>
+            <div style={{fontSize:11,color:C.muted,marginBottom:10}}>더블클릭 → 모의 베팅</div>
+            {/* 리그 선택 */}
+            <div style={{display:"flex",flexWrap:"wrap",gap:5,marginBottom:10}}>
+              {Object.keys(SPORT_KEY_MAP).map(lg=>{const on=scheduleLeagues.includes(lg);return<button key={lg} onClick={()=>{const next=on?scheduleLeagues.filter(x=>x!==lg):[...scheduleLeagues,lg];setScheduleLeagues(next);try{localStorage.setItem("bt_sched_leagues",JSON.stringify(next));}catch{};}} style={{padding:"3px 10px",borderRadius:5,border:on?`1px solid ${C.amber}55`:`1px solid ${C.border}`,background:on?`${C.amber}11`:C.bg2,color:on?C.amber:C.muted,cursor:"pointer",fontSize:11,fontWeight:on?700:400}}>{lg}</button>;})}
+            </div>
+            {/* 종목 필터 */}
+            <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+              {["전체","축구","농구","야구","기타"].map(c=><button key={c} onClick={()=>setScheduleCatFilter(c)} style={{padding:"4px 12px",borderRadius:5,border:scheduleCatFilter===c?`1px solid ${C.amber}`:`1px solid ${C.border}`,background:scheduleCatFilter===c?`${C.amber}22`:C.bg2,color:scheduleCatFilter===c?C.amber:C.muted,cursor:"pointer",fontSize:11,fontWeight:700}}>{c}</button>)}
+            </div>
+          </div>
+          <button onClick={fetchSchedule} disabled={scheduleLoading} style={{padding:"10px 20px",borderRadius:8,border:`1px solid ${C.amber}`,background:scheduleLoading?C.bg2:`${C.amber}22`,color:scheduleLoading?C.muted:C.amber,cursor:scheduleLoading?"default":"pointer",fontWeight:700,fontSize:13,flexShrink:0}}>{scheduleLoading?"⏳ 불러오는 중...":"🔄 새로고침"}</button>
+        </div>
+        {scheduleGames.length===0&&!scheduleLoading&&<div style={{textAlign:"center",color:C.dim,padding:"60px 0"}}><div style={{fontSize:30,marginBottom:10}}>📅</div><div>리그를 선택하고 새로고침을 눌러주세요</div><div style={{fontSize:11,color:C.muted,marginTop:8}}>24시간 이내 예정 경기만 표시됩니다</div></div>}
+        {filtered.length===0&&scheduleGames.length>0&&<div style={{textAlign:"center",color:C.muted,padding:"40px 0"}}>조건에 맞는 경기가 없습니다</div>}
+        {Object.entries(groups).map(([league,games])=>(
+          <div key={league} style={{marginBottom:24}}>
+            <div style={{fontSize:13,fontWeight:800,color:C.purple,marginBottom:8}}>{league} <span style={{fontSize:11,color:C.muted,fontWeight:400}}>{games.length}경기</span></div>
+            <div style={{display:"flex",flexDirection:"column",gap:6}}>
+              {games.map(g=>{
+                const commence=new Date(g.commence);
+                const timeStr=commence.toLocaleString("ko-KR",{month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit",timeZone:"Asia/Seoul"});
+                const diffMs=commence.getTime()-Date.now();
+                const diffH=Math.floor(diffMs/3600000);
+                const diffM=Math.floor((diffMs%3600000)/60000);
+                return(
+                  <div
+                    key={g.id}
+                    onClick={()=>handleGameClick(g)}
+                    style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:10,padding:"12px 14px",cursor:"pointer",transition:"border-color 0.2s"}}
+                    onMouseEnter={e=>e.currentTarget.style.borderColor=C.amber+"88"}
+                    onMouseLeave={e=>e.currentTarget.style.borderColor=C.border}
+                    title="더블클릭으로 모의 베팅"
+                  >
+                    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+                      <div style={{flex:1}}>
+                        <div style={{fontSize:13,fontWeight:800,color:C.text,display:"flex",alignItems:"center",gap:8}}>
+                          <span style={{background:`${C.green}22`,color:C.green,border:`1px solid ${C.green}44`,borderRadius:4,padding:"1px 6px",fontSize:10}}>홈</span>
+                          {g.home}
+                          <span style={{color:C.dim,fontWeight:400}}>vs</span>
+                          {g.away}
+                          <span style={{background:`${C.teal}22`,color:C.teal,border:`1px solid ${C.teal}44`,borderRadius:4,padding:"1px 6px",fontSize:10}}>원정</span>
+                        </div>
+                        <div style={{fontSize:10,color:C.muted,marginTop:2}}>⏰ {timeStr} · <span style={{color:diffH<3?C.red:C.amber}}>약 {diffH}시간 {diffM}분 후</span></div>
+                      </div>
+                    </div>
+                    <div style={{display:"grid",gridTemplateColumns:g.bestDraw?"1fr 1fr 1fr":"1fr 1fr",gap:8}}>
+                      {[
+                        {label:`홈 ${g.home.split(" ").pop()}`,val:g.bestHome,color:C.green},
+                        ...(g.bestDraw?[{label:"무",val:g.bestDraw,color:C.muted}]:[]),
+                        {label:`원정 ${g.away.split(" ").pop()}`,val:g.bestAway,color:C.teal}
+                      ].filter(d=>d.val).map((d,i)=>(
+                        <div key={i} style={{background:C.bg2,border:`1px solid ${C.border}`,borderRadius:7,padding:"8px 10px",textAlign:"center"}}>
+                          <div style={{fontSize:10,color:C.muted,marginBottom:2}}>{d.label}</div>
+                          <div style={{fontSize:20,fontWeight:900,color:d.color}}>{(d.val as number).toFixed(2)}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  };
 
   return (
     <div style={{minHeight:"100vh",background:C.bg,color:C.text,fontFamily:"'Segoe UI',system-ui,sans-serif",display:"flex",flexDirection:"column"}}>
 
       {/* ── 모달들 ── */}
+      {/* 사이트 관리 모달 */}
+      {siteManageModal&&(
+        <div style={{position:"fixed",inset:0,background:"#000b",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center"}}>
+          <div style={{background:C.bg3,border:`1px solid ${C.teal}`,borderRadius:14,padding:24,width:380,maxHeight:"80vh",overflowY:"auto"}}>
+            <div style={{fontSize:14,fontWeight:700,color:C.teal,marginBottom:16}}>🏢 사이트 관리</div>
+            <div style={{display:"flex",gap:6,marginBottom:10}}>
+              <input value={newSiteName} onChange={e=>setNewSiteName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleAddSite()} placeholder="사이트 이름" style={{...S,flex:1,boxSizing:"border-box"}}/>
+              <select value={newSiteType} onChange={e=>setNewSiteType(e.target.value as "krw"|"usd")} style={{...S,width:"auto"}}>
+                <option value="krw">₩ 원화</option>
+                <option value="usd">$ 달러</option>
+              </select>
+              <button onClick={handleAddSite} style={{padding:"7px 14px",background:`${C.teal}22`,border:`1px solid ${C.teal}`,color:C.teal,borderRadius:6,cursor:"pointer",fontWeight:700,whiteSpace:"nowrap"}}>추가</button>
+            </div>
+            <div style={{fontSize:12,color:C.muted,marginBottom:8}}>원화 사이트</div>
+            {krwSites.map(s=>(
+              <div key={s} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 10px",background:C.bg2,borderRadius:6,marginBottom:4}}>
+                <span style={{fontSize:12,color:C.green}}>₩ {s}</span>
+                <button onClick={()=>handleDeleteSite(s)} style={{background:"transparent",border:`1px solid ${C.red}44`,color:C.red,padding:"2px 8px",borderRadius:4,cursor:"pointer",fontSize:11}}>삭제</button>
+              </div>
+            ))}
+            <div style={{fontSize:12,color:C.muted,margin:"12px 0 8px"}}>달러 사이트</div>
+            {usdSites.map(s=>(
+              <div key={s} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 10px",background:C.bg2,borderRadius:6,marginBottom:4}}>
+                <span style={{fontSize:12,color:C.amber}}>$ {s}</span>
+                <button onClick={()=>handleDeleteSite(s)} style={{background:"transparent",border:`1px solid ${C.red}44`,color:C.red,padding:"2px 8px",borderRadius:4,cursor:"pointer",fontSize:11}}>삭제</button>
+              </div>
+            ))}
+            <button onClick={()=>setSiteManageModal(false)} style={{width:"100%",marginTop:16,background:C.bg2,border:`1px solid ${C.border}`,color:C.muted,padding:"8px",borderRadius:6,cursor:"pointer"}}>닫기</button>
+          </div>
+        </div>
+      )}
+
+      {/* 포인트 사이트 추가 모달 */}
+      {addPointSiteModal&&(
+        <div style={{position:"fixed",inset:0,background:"#000b",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center"}}>
+          <div style={{background:C.bg3,border:`1px solid ${C.teal}`,borderRadius:14,padding:24,width:340}}>
+            <div style={{fontSize:14,fontWeight:700,color:C.teal,marginBottom:16}}>🎁 포인트 사이트 추가</div>
+            <div style={{marginBottom:8}}><div style={L}>사이트명</div><input value={newPointSite.name} onChange={e=>setNewPointSite(p=>({...p,name:e.target.value}))} style={{...S,boxSizing:"border-box"}}/></div>
+            <div style={{marginBottom:8}}><div style={L}>교환 이름</div><input value={newPointSite.exchangeName} onChange={e=>setNewPointSite(p=>({...p,exchangeName:e.target.value}))} style={{...S,boxSizing:"border-box"}}/></div>
+            <div style={{marginBottom:8}}><div style={L}>교환 목표 날짜</div><input type="date" value={newPointSite.exchangeDate} onChange={e=>setNewPointSite(p=>({...p,exchangeDate:e.target.value}))} style={{...S,boxSizing:"border-box"}}/></div>
+            <div style={{marginBottom:16}}><div style={L}>목표 금액 (원화)</div><input type="number" value={newPointSite.targetAmount} onChange={e=>setNewPointSite(p=>({...p,targetAmount:parseInt(e.target.value)||0}))} style={{...S,boxSizing:"border-box",...noSpin}}/></div>
+            <div style={{display:"flex",gap:8}}><button onClick={handleAddPointSite} style={{flex:1,background:`${C.teal}22`,border:`1px solid ${C.teal}`,color:C.teal,padding:"8px",borderRadius:6,cursor:"pointer",fontWeight:700}}>추가</button><button onClick={()=>setAddPointSiteModal(false)} style={{flex:1,background:C.bg2,border:`1px solid ${C.border}`,color:C.muted,padding:"8px",borderRadius:6,cursor:"pointer"}}>취소</button></div>
+          </div>
+        </div>
+      )}
+
+      {/* 모의 베팅 모달 */}
+      {mockBetGame&&(
+        <div style={{position:"fixed",inset:0,background:"#000b",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center"}}>
+          <div style={{background:C.bg3,border:`1px solid ${C.amber}`,borderRadius:14,padding:24,width:380}}>
+            <div style={{fontSize:14,fontWeight:700,color:C.amber,marginBottom:4}}>🎯 모의 베팅</div>
+            <div style={{fontSize:12,color:C.muted,marginBottom:16}}>{mockBetGame.home} vs {mockBetGame.away} · {mockBetGame.leagueName}</div>
+            {/* 베팅 방향 */}
+            <div style={{marginBottom:10}}>
+              <div style={L}>베팅 방향</div>
+              <div style={{display:"grid",gridTemplateColumns:mockBetGame.bestDraw?"1fr 1fr 1fr":"1fr 1fr",gap:6}}>
+                {[
+                  {side:"home" as const,label:`홈 ${mockBetGame.home}`,odds:mockBetGame.bestHome,color:C.green},
+                  ...(mockBetGame.bestDraw?[{side:"draw" as const,label:"무",odds:mockBetGame.bestDraw,color:C.muted}]:[]),
+                  {side:"away" as const,label:`원정 ${mockBetGame.away}`,odds:mockBetGame.bestAway,color:C.teal},
+                ].map(d=>(
+                  <button key={d.side} onClick={()=>{setMockForm(f=>({...f,betSide:d.side,oddsRaw:String(Math.round((d.odds||0)*100))}));}}
+                    style={{padding:"10px 8px",borderRadius:7,border:mockForm.betSide===d.side?`2px solid ${d.color}`:`1px solid ${C.border}`,background:mockForm.betSide===d.side?`${d.color}22`:C.bg2,color:mockForm.betSide===d.side?d.color:C.muted,cursor:"pointer",textAlign:"center"}}>
+                    <div style={{fontSize:10,marginBottom:3}}>{d.label}</div>
+                    <div style={{fontSize:18,fontWeight:900}}>{(d.odds||0).toFixed(2)}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+            {/* 사이트 */}
+            <div style={{marginBottom:10}}>
+              <div style={L}>베팅 사이트</div>
+              <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                {ALL_SITES.map(s=><button key={s} onClick={()=>setMockForm(f=>({...f,site:s}))} style={{...siteBtn(mockForm.site===s,isUSD(s)),fontSize:11}}>{isUSD(s)?"$":"₩"} {s}</button>)}
+              </div>
+            </div>
+            {/* 금액 */}
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}}>
+              <div><div style={L}>베팅금액</div>
+                <input type="number" value={mockForm.amount} onChange={e=>setMockForm(f=>({...f,amount:parseFloat(e.target.value)||0}))} style={{...S,boxSizing:"border-box",...noSpin}}/>
+              </div>
+              <div><div style={L}>배당 (3자리)</div>
+                <input type="text" value={mockForm.oddsRaw} onChange={e=>setMockForm(f=>({...f,oddsRaw:e.target.value.replace(/[^0-9]/g,"")}))} style={{...S,boxSizing:"border-box"}}/>
+                {mockForm.oddsRaw.length>=3&&<div style={{fontSize:11,color:C.teal,marginTop:2}}>{(parseInt(mockForm.oddsRaw)/100).toFixed(2)}</div>}
+              </div>
+            </div>
+            <div style={{display:"flex",gap:8}}>
+              <button onClick={handleAddMockBet} style={{flex:1,background:`${C.amber}22`,border:`1px solid ${C.amber}`,color:C.amber,padding:"10px",borderRadius:7,cursor:"pointer",fontWeight:700}}>모의 베팅 추가</button>
+              <button onClick={()=>setMockBetGame(null)} style={{flex:1,background:C.bg2,border:`1px solid ${C.border}`,color:C.muted,padding:"10px",borderRadius:7,cursor:"pointer"}}>취소</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {addLeagueModal&&(
         <div style={{position:"fixed",inset:0,background:"#000a",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center"}}>
           <div style={{background:C.bg3,border:`1px solid ${C.purple}`,borderRadius:12,padding:24,width:300}}>
@@ -718,17 +1172,19 @@ export default function App() {
             <div style={{textAlign:"center"}}><div style={{color:C.muted,fontSize:9}}>달러 수익</div><div style={{color:usdProfit>=0?C.green:C.red,fontWeight:800,fontSize:13}}>{fmtProfit(usdProfit,true)}</div></div>
             <div style={{textAlign:"center"}}><div style={{color:C.muted,fontSize:9}}>승률</div><div style={{color:C.teal,fontWeight:800,fontSize:13}}>{winRate}%</div></div>
             <div style={{textAlign:"center"}}><div style={{color:C.muted,fontSize:9}}>진행중</div><div style={{color:C.amber,fontWeight:800,fontSize:13}}>{pending.length}건</div></div>
-            {/* 백업/복구 버튼 */}
             <div style={{display:"flex",gap:4}}>
               <button onClick={exportData} style={{fontSize:11,padding:"5px 11px",borderRadius:5,border:`1px solid ${C.green}44`,background:`${C.green}11`,color:C.green,cursor:"pointer",fontWeight:700}} title="데이터 백업">📤</button>
               <button onClick={()=>fileRef.current?.click()} style={{fontSize:11,padding:"5px 11px",borderRadius:5,border:`1px solid ${C.amber}44`,background:`${C.amber}11`,color:C.amber,cursor:"pointer",fontWeight:700}} title="데이터 불러오기">📥</button>
+              <button onClick={logout} style={{fontSize:11,padding:"5px 11px",borderRadius:5,border:`1px solid ${C.red}44`,background:`${C.red}11`,color:C.red,cursor:"pointer",fontWeight:700}} title="로그아웃">🔒</button>
               <input ref={fileRef} type="file" accept=".json" onChange={importData} style={{display:"none"}}/>
             </div>
           </div>
         </div>
         <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
-          {([["betting","🎯 베팅"],["stats","📊 통계"],["roi","💹 수익률"],["odds","📡 배당"],["strategy","📋 전략"],["log","🗒 로그"]] as [string,string][]).map(([k,l])=>(
-            <button key={k} onClick={()=>setTab(k as any)} style={tabBtn(tab===k,C.orange)}>{l}</button>
+          {([
+            ["betting","🎯 베팅"],["stats","📊 통계"],["roi","💹 수익률"],["odds","📡 배당"],["strategy","📋 전략"],["log","🗒 로그"],["schedule","📅 경기일정"],["points","🎁 포인트"],
+          ] as [string,string][]).map(([k,l])=>(
+            <button key={k} onClick={()=>setTab(k as any)} style={tabBtn(tab===k,k==="schedule"?C.amber:k==="points"?C.teal:C.orange)}>{l}</button>
           ))}
         </div>
       </div>
@@ -742,20 +1198,42 @@ export default function App() {
 
               {/* 입금 */}
               <div style={{padding:"14px 16px",borderBottom:`1px solid ${C.border}`}}>
-                <div style={{fontSize:16,fontWeight:800,color:C.green,marginBottom:10}}>💵 입금</div>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                  <div style={{fontSize:16,fontWeight:800,color:C.green}}>💵 입금</div>
+                  <button onClick={()=>setSiteManageModal(true)} style={{fontSize:10,padding:"3px 10px",borderRadius:5,border:`1px solid ${C.teal}44`,background:`${C.teal}11`,color:C.teal,cursor:"pointer"}}>🏢 사이트 관리</button>
+                </div>
                 <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:8}}>
-                  {KRW_SITES.map(s=><button key={s} onClick={()=>setDepSite(s)} style={siteBtn(depSite===s,false)}>₩ {s}</button>)}
-                  {USD_SITES.map(s=><button key={s} onClick={()=>setDepSite(s)} style={siteBtn(depSite===s,true)}>$ {s}</button>)}
+                  {krwSites.map(s=><button key={s} onClick={()=>setDepSite(s)} style={siteBtn(depSite===s,false)}>₩ {s}</button>)}
+                  {usdSites.map(s=><button key={s} onClick={()=>setDepSite(s)} style={siteBtn(depSite===s,true)}>$ {s}</button>)}
                 </div>
-                <div style={{display:"flex",gap:4,alignItems:"center",marginBottom:8}}>
-                  <button onClick={()=>setDepAmt(a=>Math.max(0,a-(depIsDollar?1:10000)))} style={{background:C.bg2,border:`1px solid ${C.border}`,color:C.red,width:30,height:32,borderRadius:6,cursor:"pointer",fontSize:16,fontWeight:700}}>−</button>
-                  <div style={{position:"relative",flex:1}}>
-                    <span style={{position:"absolute",left:9,top:"50%",transform:"translateY(-50%)",color:depIsDollar?C.amber:C.green,fontWeight:700,fontSize:13,pointerEvents:"none"}}>{depSite?(depIsDollar?"$":"₩"):""}</span>
-                    <input type="number" value={depAmt||""} onChange={e=>setDepAmt(parseFloat(e.target.value)||0)} placeholder="금액 입력" style={{...S,textAlign:"right",fontWeight:800,color:depIsDollar?C.amber:C.green,fontSize:14,paddingLeft:26,boxSizing:"border-box",...noSpin}}/>
+                {/* 입금 금액 */}
+                <div style={{marginBottom:6}}>
+                  <div style={L}>입금 금액</div>
+                  <div style={{display:"flex",gap:4,alignItems:"center"}}>
+                    <button onClick={()=>setDepAmt(a=>Math.max(0,a-(depIsDollar?1:10000)))} style={{background:C.bg2,border:`1px solid ${C.border}`,color:C.red,width:30,height:32,borderRadius:6,cursor:"pointer",fontSize:16,fontWeight:700}}>−</button>
+                    <div style={{position:"relative",flex:1}}>
+                      <span style={{position:"absolute",left:9,top:"50%",transform:"translateY(-50%)",color:depIsDollar?C.amber:C.green,fontWeight:700,fontSize:13,pointerEvents:"none"}}>{depSite?(depIsDollar?"$":"₩"):""}</span>
+                      <input type="number" value={depAmt||""} onChange={e=>setDepAmt(parseFloat(e.target.value)||0)} placeholder="금액 입력" style={{...S,textAlign:"right",fontWeight:800,color:depIsDollar?C.amber:C.green,fontSize:14,paddingLeft:26,boxSizing:"border-box",...noSpin}}/>
+                    </div>
+                    <button onClick={()=>setDepAmt(a=>a+(depIsDollar?1:10000))} style={{background:C.bg2,border:`1px solid ${C.border}`,color:C.green,width:30,height:32,borderRadius:6,cursor:"pointer",fontSize:16,fontWeight:700}}>+</button>
                   </div>
-                  <button onClick={()=>setDepAmt(a=>a+(depIsDollar?1:10000))} style={{background:C.bg2,border:`1px solid ${C.border}`,color:C.green,width:30,height:32,borderRadius:6,cursor:"pointer",fontSize:16,fontWeight:700}}>+</button>
                 </div>
-                <button onClick={handleDeposit} style={{width:"100%",background:`${C.green}22`,border:`1px solid ${C.green}`,color:C.green,padding:"8px",borderRadius:7,cursor:"pointer",fontWeight:700,fontSize:13,marginBottom:10}}>💰 입금 추가</button>
+                {/* 포인트 금액 */}
+                <div style={{marginBottom:8}}>
+                  <div style={L}>포인트 금액 <span style={{fontSize:10,color:C.dim}}>(입금액 제외, 진행률 포함)</span></div>
+                  <div style={{display:"flex",gap:4,alignItems:"center"}}>
+                    <button onClick={()=>setDepPoint(a=>Math.max(0,a-(depIsDollar?1:10000)))} style={{background:C.bg2,border:`1px solid ${C.border}`,color:C.red,width:30,height:32,borderRadius:6,cursor:"pointer",fontSize:16,fontWeight:700}}>−</button>
+                    <div style={{position:"relative",flex:1}}>
+                      <span style={{position:"absolute",left:9,top:"50%",transform:"translateY(-50%)",color:C.purple,fontWeight:700,fontSize:13,pointerEvents:"none"}}>🎁</span>
+                      <input type="number" value={depPoint||""} onChange={e=>setDepPoint(parseFloat(e.target.value)||0)} placeholder="포인트 금액" style={{...S,textAlign:"right",fontWeight:800,color:C.purple,fontSize:14,paddingLeft:26,boxSizing:"border-box",...noSpin}}/>
+                    </div>
+                    <button onClick={()=>setDepPoint(a=>a+(depIsDollar?1:10000))} style={{background:C.bg2,border:`1px solid ${C.border}`,color:C.purple,width:30,height:32,borderRadius:6,cursor:"pointer",fontSize:16,fontWeight:700}}>+</button>
+                  </div>
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:10}}>
+                  <button onClick={handleDeposit} style={{background:`${C.green}22`,border:`1px solid ${C.green}`,color:C.green,padding:"8px",borderRadius:7,cursor:"pointer",fontWeight:700,fontSize:13}}>💰 입금 추가</button>
+                  <button onClick={()=>{if(!depSite)return alert("사이트를 선택해주세요.");if(depPoint<=0)return alert("포인트 금액을 입력해주세요.");const curSS=siteStates[depSite];const newSS4={...siteStates,[depSite]:{...curSS,active:true,isDollar:depIsDollar,betTotal:parseFloat((curSS.betTotal+depPoint).toFixed(2)),(pointTotal as any):parseFloat(((curSS as any).pointTotal||0)+depPoint).toFixed(2)}};setSiteStatesRaw(newSS4 as any);db.upsertSiteState(depSite,newSS4[depSite] as any);addLog("🎁 포인트",`${depSite}/${fmtDisp(depPoint,depIsDollar)}`);setDepPoint(0);}} style={{background:`${C.purple}22`,border:`1px solid ${C.purple}`,color:C.purple,padding:"8px",borderRadius:7,cursor:"pointer",fontWeight:700,fontSize:13}}>🎁 포인트 추가</button>
+                </div>
                 <div style={{background:C.bg,borderRadius:8,padding:"8px 10px"}}>
                   <div style={{fontSize:10,color:C.muted,marginBottom:4}}>이번주 입금 (월~일)</div>
                   <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
@@ -768,21 +1246,18 @@ export default function App() {
               {/* 베팅 */}
               <div style={{padding:"14px 16px",borderBottom:`1px solid ${C.border}`}}>
                 <div style={{fontSize:16,fontWeight:800,color:C.orange,marginBottom:10}}>🎯 베팅</div>
-                {/* 사이트 */}
                 <div style={{marginBottom:8}}>
                   <div style={L}>베팅사이트</div>
                   {activeSiteNames.length===0?<div style={{fontSize:11,color:C.dim}}>활성 사이트 없음</div>:
                   <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
-                    {activeSiteNames.filter(s=>KRW_SITES.includes(s)).map(s=><button key={s} onClick={()=>handleSiteChange(s)} style={siteBtn(form.site===s,false)}>₩ {s}</button>)}
-                    {activeSiteNames.filter(s=>USD_SITES.includes(s)).map(s=><button key={s} onClick={()=>handleSiteChange(s)} style={siteBtn(form.site===s,true)}>$ {s}</button>)}
+                    {activeSiteNames.filter(s=>krwSites.includes(s)).map(s=><button key={s} onClick={()=>handleSiteChange(s)} style={siteBtn(form.site===s,false)}>₩ {s}</button>)}
+                    {activeSiteNames.filter(s=>usdSites.includes(s)).map(s=><button key={s} onClick={()=>handleSiteChange(s)} style={siteBtn(form.site===s,true)}>$ {s}</button>)}
                   </div>}
                 </div>
-                {/* 날짜/종목 */}
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:6}}>
                   <div><div style={L}>날짜</div><input type="date" value={form.date} onChange={e=>setForm(f=>({...f,date:e.target.value}))} style={{...S,boxSizing:"border-box"}}/></div>
                   <div><div style={L}>종목</div><select value={form.category} onChange={e=>handleCatChange(e.target.value)} style={S}>{CATS.map(c=><option key={c}>{c}</option>)}</select></div>
                 </div>
-                {/* 리그 */}
                 <div style={{marginBottom:6}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:3}}>
                     <div style={L}>리그</div>
@@ -796,7 +1271,6 @@ export default function App() {
                     {fOthers.length>0&&<optgroup label="─────────">{fOthers.map(l=><option key={l}>{l}</option>)}</optgroup>}
                   </select>
                 </div>
-                {/* 베팅 옵션 */}
                 <div style={{marginBottom:6}}>
                   <div style={L}>베팅 옵션</div>
                   {form.category==="E스포츠"?(
@@ -810,7 +1284,6 @@ export default function App() {
                   )}
                   {form.betOption&&form.betOption!=="직접입력"&&<div style={{fontSize:11,color:C.purple,marginTop:4,fontWeight:700}}>✓ {form.betOption}</div>}
                 </div>
-                {/* 팀 이름 */}
                 <div style={{marginBottom:6}}>
                   {isOverUnder(form.betOption)?(
                     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
@@ -821,7 +1294,6 @@ export default function App() {
                     <div><div style={L}>팀 이름</div><TeamInput value={form.teamName||""} onChange={v=>setForm(f=>({...f,teamName:v}))} placeholder="팀 이름"/></div>
                   )}
                 </div>
-                {/* 배당률 + 금액 */}
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:8}}>
                   <div>
                     <div style={L}>배당률</div>
@@ -850,23 +1322,23 @@ export default function App() {
                 <button onClick={handleAdd} style={{width:"100%",background:`linear-gradient(135deg,${C.orange}33,${C.green}22)`,border:`1px solid ${C.orange}`,color:C.orange,padding:"11px",borderRadius:8,cursor:"pointer",fontWeight:800,fontSize:15}}>베팅 추가</button>
               </div>
 
-              {/* 이번주 입금 비교 그래프 */}
+              {/* 이번주 입금 그래프 (10번 요청: 비교 글자 제거, 가로 방향, 얇게) */}
               {weekDepChartData.length>0&&(
                 <div style={{padding:"14px 16px",borderBottom:`1px solid ${C.border}`}}>
-                  <div style={{fontSize:12,fontWeight:700,color:C.muted,marginBottom:8}}>📊 이번주 사이트별 입금 비교 (원화환산)</div>
-                  <ResponsiveContainer width="100%" height={120}>
-                    <BarChart data={weekDepChartData} margin={{top:4,right:4,left:0,bottom:0}}>
-                      <XAxis dataKey="site" tick={{fill:C.muted,fontSize:10}} axisLine={false} tickLine={false}/>
-                      <YAxis tick={{fill:C.muted,fontSize:9}} axisLine={false} tickLine={false} width={50} tickFormatter={v=>`${(v/10000).toFixed(0)}만`}/>
+                  <div style={{fontSize:12,fontWeight:700,color:C.muted,marginBottom:8}}>📊 이번주 사이트별 입금 (원화환산)</div>
+                  <ResponsiveContainer width="100%" height={Math.max(60, weekDepChartData.length * 28)}>
+                    <BarChart data={weekDepChartData} layout="vertical" margin={{top:2,right:50,left:0,bottom:2}}>
+                      <XAxis type="number" tick={{fill:C.muted,fontSize:9}} axisLine={false} tickLine={false} tickFormatter={v=>`${(v/10000).toFixed(0)}만`}/>
+                      <YAxis type="category" dataKey="site" tick={{fill:C.muted,fontSize:10}} axisLine={false} tickLine={false} width={50}/>
                       <Tooltip contentStyle={{background:C.bg3,border:`1px solid ${C.border2}`,borderRadius:8,fontSize:11}} formatter={(value:any,name:any,props:any)=>[`₩${Number(value).toLocaleString()}`,props.payload.isDollar?`$${props.payload.amt} → ₩환산`:props.payload.site]}/>
-                      <Bar dataKey="krwAmt" radius={[4,4,0,0]}>
+                      <Bar dataKey="krwAmt" radius={[0,3,3,0]} maxBarSize={14}>
                         {weekDepChartData.map((d,i)=><Cell key={i} fill={d.isDollar?C.amber:C.green}/>)}
                       </Bar>
                     </BarChart>
                   </ResponsiveContainer>
                   <div style={{display:"flex",gap:8,fontSize:10,color:C.muted,marginTop:4}}>
                     <span style={{color:C.green}}>■ 원화</span><span style={{color:C.amber}}>■ 달러(환산)</span>
-                    <span style={{marginLeft:"auto"}}>환율 $1=₩{usdKrw.toLocaleString()}</span>
+                    <span style={{marginLeft:"auto"}}>$1=₩{usdKrw.toLocaleString()}</span>
                   </div>
                 </div>
               )}
@@ -895,16 +1367,18 @@ export default function App() {
                   const st=siteStates[site]||{deposited:0,betTotal:0,active:false,isDollar:false};
                   const dollar=isUSD(site);
                   const remaining=Math.max(0,parseFloat((st.deposited-st.betTotal).toFixed(2)));
-                  const pct=st.deposited>0?Math.min(100,Math.round(st.betTotal/st.deposited*100)):0;
+                  // 진행률: (입금 + 포인트) 기준
+                  const totalBase=parseFloat((st.deposited+((st as any).pointTotal||0)).toFixed(2));
+                  const pct=totalBase>0?Math.min(100,Math.round(st.betTotal/totalBase*100)):0;
                   const barColor=pct>=90?C.red:pct>=70?C.amber:C.green;
                   const sitePending=pending.filter(b=>b.site===site);
                   const is100=pct>=100;
+                  const pointAmt=(st as any).pointTotal||0;
                   return(
                     <div key={site} style={{background:C.bg3,border:`1px solid ${barColor}33`,borderRadius:12,padding:13}}>
                       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
                         <div style={{display:"flex",alignItems:"center",gap:6}}>
                           <span style={{fontSize:13,fontWeight:800,color:C.text}}>{dollar?"$":"₩"} {site}</span>
-                          {/* 진행완료 도장 — 헤더 줄에 표시 */}
                           {is100&&<span style={{fontSize:11,fontWeight:900,color:C.red,border:`2px solid ${C.red}`,borderRadius:5,padding:"1px 6px",opacity:0.7,transform:"rotate(-8deg)",display:"inline-block",letterSpacing:0.5}}>완료</span>}
                         </div>
                         <div style={{display:"flex",gap:3}}>
@@ -917,6 +1391,13 @@ export default function App() {
                           <div style={{fontSize:9,color:C.muted,marginBottom:2}}>입금</div>
                           <EditableCell value={st.deposited} dollar={dollar} color={C.muted} onSave={v=>{const u={...siteStates[site],deposited:v};setSiteStatesRaw(p=>({...p,[site]:u}));db.upsertSiteState(site,u);addLog("✏️ 입금수정",`${site}:${fmtDisp(v,dollar)}`);}}/>
                         </div>
+                        {pointAmt>0&&<>
+                          <div style={{width:1,height:22,background:C.border}}/>
+                          <div style={{flex:1,textAlign:"center"}}>
+                            <div style={{fontSize:9,color:C.purple,marginBottom:2}}>포인트</div>
+                            <div style={{fontSize:12,fontWeight:700,color:C.purple}}>{fmtDisp(pointAmt,dollar)}</div>
+                          </div>
+                        </>}
                         <div style={{width:1,height:22,background:C.border}}/>
                         <div style={{flex:1,textAlign:"center"}}>
                           <div style={{fontSize:9,color:C.muted,marginBottom:2}}>베팅</div>
@@ -928,7 +1409,7 @@ export default function App() {
                           <div style={{fontSize:14,fontWeight:800,color:C.teal}}>{fmtDisp(remaining,dollar)}</div>
                         </div>
                       </div>
-                      <div style={{display:"flex",justifyContent:"space-between",fontSize:10,marginBottom:3}}><span style={{color:C.muted}}>진행률</span><span style={{color:barColor,fontWeight:700}}>{pct}%</span></div>
+                      <div style={{display:"flex",justifyContent:"space-between",fontSize:10,marginBottom:3}}><span style={{color:C.muted}}>진행률{pointAmt>0?" (입금+포인트)":""}</span><span style={{color:barColor,fontWeight:700}}>{pct}%</span></div>
                       <div style={{height:5,background:C.bg,borderRadius:3,overflow:"hidden",marginBottom:8}}><div style={{width:`${pct}%`,height:"100%",background:barColor,borderRadius:3,transition:"width 0.3s"}}/></div>
                       {sitePending.length>0&&(
                         <div style={{borderTop:`1px solid ${C.border}`,paddingTop:7}}>
@@ -941,7 +1422,26 @@ export default function App() {
                   );
                 })}
               </div>}
-
+              {/* 모의 베팅 진행률 */}
+              {mockBets.length>0&&(
+                <div style={{marginBottom:18}}>
+                  <div style={{fontSize:13,fontWeight:700,color:C.amber,marginBottom:8}}>🎯 모의 베팅 ({mockBets.length}건)</div>
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8}}>
+                    {mockBets.map(b=>{
+                      const title=b.home?`${b.homeTeam} vs ${b.awayTeam}`:b.teamName||"";
+                      return(
+                        <div key={b.id} style={{background:C.bg3,border:`1px solid ${C.amber}44`,borderRadius:10,padding:10}}>
+                          <div style={{fontSize:10,color:C.text,fontWeight:700,marginBottom:4,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{title}</div>
+                          <div style={{fontSize:10,color:C.muted,marginBottom:2}}>{b.league}</div>
+                          <div style={{fontSize:11,color:C.amber,fontWeight:700,marginBottom:4}}>배당 {b.odds} · {fmtDisp(b.amount,b.isDollar)}</div>
+                          <div style={{fontSize:10,color:C.purple}}>{b.betOption}</div>
+                          <button onClick={()=>removeMockBet(b.id)} style={{marginTop:6,width:"100%",background:"transparent",border:`1px solid ${C.border}`,color:C.muted,padding:"3px",borderRadius:4,cursor:"pointer",fontSize:10}}>제거</button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
               {/* 완료 경기 */}
               {doneFull.length>0&&(
                 <div>
@@ -975,13 +1475,8 @@ export default function App() {
               {([["overview","📈 총괄"],["daily","📅 날짜별"],["baseball","⚾ 야구"],["adv","🔬 심화"]] as [string,string][]).map(([k,l])=><button key={k} onClick={()=>setStatTab(k as any)} style={tabBtn(statTab===k,C.purple)}>{l}</button>)}
             </div>
             <div style={{display:"flex",gap:6}}>
-              <button onClick={async()=>{if(!window.confirm("통계 초기화?"))return;
-              const cleared=bets.map(x=>({...x,includeStats:false}));
-              setBetsRaw(cleared);
-              for(const b of cleared) await db.upsertBet(b);}} style={{fontSize:10,padding:"4px 10px",borderRadius:5,border:`1px solid ${C.amber}44`,background:`${C.amber}11`,color:C.amber,cursor:"pointer"}}>통계 초기화</button>
-              <button onClick={async()=>{if(!window.confirm("전체 영구 삭제?"))return;
-              for(const b of bets) await db.deleteBet(b.id);
-              setBetsRaw([]);}} style={{fontSize:10,padding:"4px 10px",borderRadius:5,border:`1px solid ${C.red}44`,background:`${C.red}11`,color:C.red,cursor:"pointer"}}>전체 삭제</button>
+              <button onClick={async()=>{if(!window.confirm("통계 초기화?"))return;const cleared=bets.map(x=>({...x,includeStats:false}));setBetsRaw(cleared);for(const b of cleared) await db.upsertBet(b);}} style={{fontSize:10,padding:"4px 10px",borderRadius:5,border:`1px solid ${C.amber}44`,background:`${C.amber}11`,color:C.amber,cursor:"pointer"}}>통계 초기화</button>
+              <button onClick={async()=>{if(!window.confirm("전체 영구 삭제?"))return;for(const b of bets) await db.deleteBet(b.id);setBetsRaw([]);}} style={{fontSize:10,padding:"4px 10px",borderRadius:5,border:`1px solid ${C.red}44`,background:`${C.red}11`,color:C.red,cursor:"pointer"}}>전체 삭제</button>
             </div>
           </div>
           {done.length===0&&<div style={{textAlign:"center",color:C.dim,padding:"60px 0",fontSize:14}}>완료된 베팅이 없습니다</div>}
@@ -1030,41 +1525,23 @@ export default function App() {
       {tab==="roi"&&(
         <div style={{flex:1,overflowY:"auto",padding:20}}>
           <div style={{fontSize:16,fontWeight:800,color:C.green,marginBottom:16}}>💹 수익률 분석</div>
-
-          {/* 전체 마감 기준 순손익 */}
           <div style={{background:C.bg3,border:`1px solid ${totalRoiKRW>=0?C.green:C.red}44`,borderRadius:12,padding:16,marginBottom:12,textAlign:"center"}}>
             <div style={{fontSize:11,color:C.muted,marginBottom:4}}>전체 순손익 (마감 완료 세션 합산 · 원화 환산)</div>
             <div style={{fontSize:28,fontWeight:900,color:totalRoiKRW>=0?C.green:C.red}}>{fmtProfit(totalRoiKRW,false)}</div>
             <div style={{fontSize:10,color:C.muted,marginTop:4}}>실시간 환율 $1 = ₩{usdKrw.toLocaleString()}</div>
           </div>
-
-          {/* 현재 입금/베팅 중 현황 */}
           <div style={{background:C.bg3,border:`1px solid ${C.border2}`,borderRadius:10,padding:14,marginBottom:16}}>
             <div style={{fontSize:12,fontWeight:700,color:C.amber,marginBottom:10}}>📊 현재 진행 중 (마감 전)</div>
             <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8}}>
-              <div style={{textAlign:"center"}}>
-                <div style={{fontSize:10,color:C.muted,marginBottom:3}}>원화 입금중</div>
-                <div style={{fontSize:16,fontWeight:800,color:C.green}}>₩{activeTotalKrwDep.toLocaleString()}</div>
-              </div>
-              <div style={{textAlign:"center"}}>
-                <div style={{fontSize:10,color:C.muted,marginBottom:3}}>원화 베팅중</div>
-                <div style={{fontSize:16,fontWeight:800,color:C.amber}}>₩{activeTotalKrwBet.toLocaleString()}</div>
-              </div>
-              <div style={{textAlign:"center"}}>
-                <div style={{fontSize:10,color:C.muted,marginBottom:3}}>달러 입금중</div>
-                <div style={{fontSize:16,fontWeight:800,color:C.green}}>${activeTotalUsdDep.toFixed(2)}</div>
-              </div>
-              <div style={{textAlign:"center"}}>
-                <div style={{fontSize:10,color:C.muted,marginBottom:3}}>달러 베팅중</div>
-                <div style={{fontSize:16,fontWeight:800,color:C.amber}}>${activeTotalUsdBet.toFixed(2)}</div>
-              </div>
+              <div style={{textAlign:"center"}}><div style={{fontSize:10,color:C.muted,marginBottom:3}}>원화 입금중</div><div style={{fontSize:16,fontWeight:800,color:C.green}}>₩{activeTotalKrwDep.toLocaleString()}</div></div>
+              <div style={{textAlign:"center"}}><div style={{fontSize:10,color:C.muted,marginBottom:3}}>원화 베팅중</div><div style={{fontSize:16,fontWeight:800,color:C.amber}}>₩{activeTotalKrwBet.toLocaleString()}</div></div>
+              <div style={{textAlign:"center"}}><div style={{fontSize:10,color:C.muted,marginBottom:3}}>달러 입금중</div><div style={{fontSize:16,fontWeight:800,color:C.green}}>${activeTotalUsdDep.toFixed(2)}</div></div>
+              <div style={{textAlign:"center"}}><div style={{fontSize:10,color:C.muted,marginBottom:3}}>달러 베팅중</div><div style={{fontSize:16,fontWeight:800,color:C.amber}}>${activeTotalUsdBet.toFixed(2)}</div></div>
             </div>
             <div style={{fontSize:10,color:C.dim,marginTop:8,textAlign:"center"}}>※ 마감 전 입금은 수익률에 포함되지 않습니다</div>
           </div>
-
-          {/* 사이트별 마감 세션 수익 */}
           <div style={{fontSize:13,fontWeight:700,color:C.teal,marginBottom:10}}>사이트별 마감 세션 수익</div>
-          {roiStats.length===0&&<div style={{color:C.muted,fontSize:12,marginBottom:16,padding:"20px",textAlign:"center",background:C.bg3,borderRadius:10}}>마감 이력이 없습니다. 사이트를 마감하면 수익률이 계산됩니다.</div>}
+          {roiStats.length===0&&<div style={{color:C.muted,fontSize:12,marginBottom:16,padding:"20px",textAlign:"center",background:C.bg3,borderRadius:10}}>마감 이력이 없습니다.</div>}
           <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:20}}>
             {roiStats.map(r=>(
               <div key={r.site} style={{background:C.bg3,border:`1px solid ${r.netKRW>=0?C.green+"44":C.red+"44"}`,borderRadius:10,padding:14}}>
@@ -1074,11 +1551,10 @@ export default function App() {
                 </div>
                 <div style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:3}}><span style={{color:C.muted}}>총 입금(마감분)</span><span style={{color:C.teal}}>{r.dollar?`$${r.totalDep}`:r.totalDep.toLocaleString()}</span></div>
                 <div style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:8}}><span style={{color:C.muted}}>총 출금</span><span style={{color:C.amber}}>{r.dollar?`$${r.totalWth}`:r.totalWth.toLocaleString()}</span></div>
-                {/* 세션별 내역 */}
                 {r.sessions.map((ss:any)=>(
                   <div key={ss.sessionIdx} style={{background:C.bg2,borderRadius:7,padding:"8px 10px",marginBottom:5,border:`1px solid ${ss.netKRW>=0?C.green+"22":C.red+"22"}`}}>
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
-                      <span style={{fontSize:10,fontWeight:700,color:C.muted}}>세션 {ss.sessionIdx} · 마감 {ss.wthDate}</span>
+                      <span style={{fontSize:10,fontWeight:700,color:C.muted}}>세션 {ss.sessionIdx} · {ss.wthDate}</span>
                       <span style={{fontSize:11,fontWeight:800,color:ss.netKRW>=0?C.green:C.red}}>{fmtProfit(ss.netKRW,r.dollar)}</span>
                     </div>
                     {ss.deps.map((d:any)=><div key={d.id} style={{display:"flex",justifyContent:"space-between",fontSize:9,color:C.dim,marginBottom:1}}><span>{d.date} 입금</span><span style={{color:C.teal}}>+{r.dollar?`$${d.amount}`:d.amount.toLocaleString()}</span></div>)}
@@ -1088,11 +1564,37 @@ export default function App() {
               </div>
             ))}
           </div>
+
+          {/* 기타 수익/지출 (4번 요청: 사이트/분류 선택 목록 추가) */}
           <div style={{fontSize:13,fontWeight:700,color:C.purple,marginBottom:10}}>기타 수익 / 지출</div>
           <div style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:10,padding:14,marginBottom:12}}>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr auto",gap:6,alignItems:"end"}}>
-              <div><div style={L}>상위 카테고리</div><input value={pextForm.category} onChange={e=>setPextForm(f=>({...f,category:e.target.value}))} placeholder="예) 알바" style={{...S,boxSizing:"border-box"}}/></div>
-              <div><div style={L}>하위 카테고리</div><input value={pextForm.subCategory} onChange={e=>setPextForm(f=>({...f,subCategory:e.target.value}))} placeholder="예) 편의점" style={{...S,boxSizing:"border-box"}}/></div>
+              <div>
+                <div style={L}>사이트 (상위)</div>
+                <div style={{display:"flex",gap:4}}>
+                  <select value={pextForm.category} onChange={e=>setPextForm(f=>({...f,category:e.target.value}))} style={{...S,flex:1,boxSizing:"border-box"}}>
+                    <option value="">선택...</option>
+                    {pextSiteList.map(s=><option key={s} value={s}>{s}</option>)}
+                    <option value="__custom__">직접 입력</option>
+                  </select>
+                </div>
+                {(pextForm.category==="" || pextForm.category==="__custom__")&&(
+                  <input value={pextForm.category==="__custom__"?"":pextForm.category} onChange={e=>setPextForm(f=>({...f,category:e.target.value}))} placeholder="직접 입력" style={{...S,boxSizing:"border-box",marginTop:4}}/>
+                )}
+              </div>
+              <div>
+                <div style={L}>분류 (하위)</div>
+                <div style={{display:"flex",gap:4}}>
+                  <select value={pextForm.subCategory} onChange={e=>setPextForm(f=>({...f,subCategory:e.target.value}))} style={{...S,flex:1,boxSizing:"border-box"}}>
+                    <option value="">선택...</option>
+                    {pextCatList.map(s=><option key={s} value={s}>{s}</option>)}
+                    <option value="__custom__">직접 입력</option>
+                  </select>
+                </div>
+                {(pextForm.subCategory===""||pextForm.subCategory==="__custom__")&&(
+                  <input value={pextForm.subCategory==="__custom__"?"":pextForm.subCategory} onChange={e=>setPextForm(f=>({...f,subCategory:e.target.value}))} placeholder="직접 입력" style={{...S,boxSizing:"border-box",marginTop:4}}/>
+                )}
+              </div>
               <div><div style={L}>금액 (원화)</div><input type="number" value={pextForm.amount||""} onChange={e=>setPextForm(f=>({...f,amount:parseFloat(e.target.value)||0}))} style={{...S,boxSizing:"border-box",...noSpin}}/></div>
               <div><div style={L}>메모</div><input value={pextForm.note} onChange={e=>setPextForm(f=>({...f,note:e.target.value}))} style={{...S,boxSizing:"border-box"}}/></div>
               <div style={{display:"flex",flexDirection:"column",gap:4}}>
@@ -1100,7 +1602,39 @@ export default function App() {
                 <button onClick={()=>setPextForm(f=>({...f,isIncome:false}))} style={{padding:"5px 10px",borderRadius:4,border:!pextForm.isIncome?`1px solid ${C.red}`:`1px solid ${C.border}`,background:!pextForm.isIncome?`${C.red}22`:C.bg2,color:!pextForm.isIncome?C.red:C.muted,cursor:"pointer",fontSize:11}}>지출</button>
               </div>
             </div>
-            <button onClick={()=>{if(!pextForm.category||pextForm.amount<=0)return;const newPe={id:String(Date.now()),...pextForm,date:today};setProfitExtrasRaw(p=>[...p,newPe]);db.insertProfitExtra(newPe);setPextForm({category:"",subCategory:"",amount:0,note:"",isIncome:true});}} style={{marginTop:10,width:"100%",background:`${C.purple}22`,border:`1px solid ${C.purple}`,color:C.purple,padding:"7px",borderRadius:6,cursor:"pointer",fontWeight:700}}>추가</button>
+            {/* 목록 관리 */}
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:10}}>
+              <div style={{background:C.bg2,borderRadius:6,padding:"8px 10px"}}>
+                <div style={{fontSize:10,color:C.muted,marginBottom:6}}>사이트 목록 관리</div>
+                <div style={{display:"flex",gap:4,marginBottom:6}}>
+                  <input value={newPextSite} onChange={e=>setNewPextSite(e.target.value)} placeholder="사이트 추가" style={{...S,flex:1,boxSizing:"border-box",fontSize:11,padding:"4px 7px"}}/>
+                  <button onClick={()=>{const v=newPextSite.trim();if(!v)return;savePextSiteList([...new Set([...pextSiteList,v])]);setNewPextSite("");}} style={{padding:"4px 10px",background:`${C.green}22`,border:`1px solid ${C.green}`,color:C.green,borderRadius:5,cursor:"pointer",fontSize:11,fontWeight:700}}>+</button>
+                </div>
+                <div style={{display:"flex",flexWrap:"wrap",gap:3}}>
+                  {pextSiteList.map(s=><div key={s} style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:4,padding:"2px 6px",fontSize:10,color:C.text,display:"flex",gap:4,alignItems:"center"}}>{s}<button onClick={()=>savePextSiteList(pextSiteList.filter(x=>x!==s))} style={{background:"none",border:"none",color:C.red,cursor:"pointer",fontSize:10,padding:0}}>✕</button></div>)}
+                </div>
+              </div>
+              <div style={{background:C.bg2,borderRadius:6,padding:"8px 10px"}}>
+                <div style={{fontSize:10,color:C.muted,marginBottom:6}}>분류 목록 관리</div>
+                <div style={{display:"flex",gap:4,marginBottom:6}}>
+                  <input value={newPextCat} onChange={e=>setNewPextCat(e.target.value)} placeholder="분류 추가" style={{...S,flex:1,boxSizing:"border-box",fontSize:11,padding:"4px 7px"}}/>
+                  <button onClick={()=>{const v=newPextCat.trim();if(!v)return;savePextCatList([...new Set([...pextCatList,v])]);setNewPextCat("");}} style={{padding:"4px 10px",background:`${C.teal}22`,border:`1px solid ${C.teal}`,color:C.teal,borderRadius:5,cursor:"pointer",fontSize:11,fontWeight:700}}>+</button>
+                </div>
+                <div style={{display:"flex",flexWrap:"wrap",gap:3}}>
+                  {pextCatList.map(s=><div key={s} style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:4,padding:"2px 6px",fontSize:10,color:C.text,display:"flex",gap:4,alignItems:"center"}}>{s}<button onClick={()=>savePextCatList(pextCatList.filter(x=>x!==s))} style={{background:"none",border:"none",color:C.red,cursor:"pointer",fontSize:10,padding:0}}>✕</button></div>)}
+                </div>
+              </div>
+            </div>
+            <button onClick={()=>{
+              if(!pextForm.category||pextForm.category==="__custom__")return alert("사이트를 선택/입력해주세요.");
+              if(pextForm.amount<=0)return;
+              const newPe={id:String(Date.now()),...pextForm,subCategory:pextForm.subCategory==="__custom__"?"":pextForm.subCategory,date:today};
+              setProfitExtrasRaw(p=>[...p,newPe]);db.insertProfitExtra(newPe);
+              // 목록 자동 추가
+              if(!pextSiteList.includes(pextForm.category))savePextSiteList([...pextSiteList,pextForm.category]);
+              if(pextForm.subCategory&&pextForm.subCategory!=="__custom__"&&!pextCatList.includes(pextForm.subCategory))savePextCatList([...pextCatList,pextForm.subCategory]);
+              setPextForm({category:"",subCategory:"",amount:0,note:"",isIncome:true});
+            }} style={{marginTop:10,width:"100%",background:`${C.purple}22`,border:`1px solid ${C.purple}`,color:C.purple,padding:"7px",borderRadius:6,cursor:"pointer",fontWeight:700}}>추가</button>
           </div>
           {Object.entries(extraRoiStats).map(([cat,{income,expense,items}])=>(
             <div key={cat} style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:10,padding:14,marginBottom:10}}>
@@ -1149,7 +1683,7 @@ export default function App() {
             const catOf=(g:OddsGame)=>g.sport.startsWith("soccer")?"축구":g.sport.startsWith("basketball")?"농구":g.sport.startsWith("baseball")?"야구":"기타";
             const now=new Date();
             const filtered=oddsGames.filter(g=>{
-              if(new Date(g.commence)<=now)return false; // 예정 경기만 표시
+              if(new Date(g.commence)<=now)return false;
               if(oddsCatFilter!=="전체"&&catOf(g)!==oddsCatFilter)return false;
               if(oddsFilter==="전체")return true;
               const hist=oddsHistory[g.id]??[];const hA=classifyAlert(hist,"home");const aA=classifyAlert(hist,"away");
@@ -1220,19 +1754,8 @@ export default function App() {
               ))}
             </div>
           )}
-          {stratCat==="농구"&&(
-            <div style={{background:C.bg3,border:`1px solid ${C.purple}33`,borderRadius:10,padding:16}}>
-              <div style={{fontSize:14,fontWeight:800,color:C.purple,marginBottom:10}}>🏀 농구 전략</div>
-              <div style={{fontSize:12,color:C.text,padding:"5px 0",borderBottom:`1px solid ${C.border}`}}>• 5.5 ~ 29.5 플핸 → 플핸 베팅</div>
-              <div style={{fontSize:12,color:C.text,padding:"5px 0"}}>• 30.5 이상 → 마핸 베팅</div>
-            </div>
-          )}
-          {stratCat==="야구"&&(
-            <div style={{display:"flex",flexDirection:"column",gap:12}}>
-              <div style={{background:C.bg3,border:`1px solid ${C.red}33`,borderRadius:10,padding:16}}><div style={{fontSize:14,fontWeight:800,color:C.red,marginBottom:8}}>⚾ 역배 전략</div><div style={{fontSize:12,color:C.text}}>• 무지성 역배 전략 테스트 중</div></div>
-              <div style={{background:C.bg3,border:`1px solid ${C.amber}33`,borderRadius:10,padding:16}}><div style={{fontSize:14,fontWeight:800,color:C.amber,marginBottom:8}}>⚾ 언오버 전략</div><div style={{fontSize:12,color:C.text}}>• 야구 언오버는 베팅 분석 사이트(아톰) 픽으로 베팅 테스트</div></div>
-            </div>
-          )}
+          {stratCat==="농구"&&(<div style={{background:C.bg3,border:`1px solid ${C.purple}33`,borderRadius:10,padding:16}}><div style={{fontSize:14,fontWeight:800,color:C.purple,marginBottom:10}}>🏀 농구 전략</div><div style={{fontSize:12,color:C.text,padding:"5px 0",borderBottom:`1px solid ${C.border}`}}>• 5.5 ~ 29.5 플핸 → 플핸 베팅</div><div style={{fontSize:12,color:C.text,padding:"5px 0"}}>• 30.5 이상 → 마핸 베팅</div></div>)}
+          {stratCat==="야구"&&(<div style={{display:"flex",flexDirection:"column",gap:12}}><div style={{background:C.bg3,border:`1px solid ${C.red}33`,borderRadius:10,padding:16}}><div style={{fontSize:14,fontWeight:800,color:C.red,marginBottom:8}}>⚾ 역배 전략</div><div style={{fontSize:12,color:C.text}}>• 무지성 역배 전략 테스트 중</div></div><div style={{background:C.bg3,border:`1px solid ${C.amber}33`,borderRadius:10,padding:16}}><div style={{fontSize:14,fontWeight:800,color:C.amber,marginBottom:8}}>⚾ 언오버 전략</div><div style={{fontSize:12,color:C.text}}>• 야구 언오버는 베팅 분석 사이트(아톰) 픽으로 베팅 테스트</div></div></div>)}
           {stratCat==="E스포츠"&&(
             <div>
               <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:12}}>
@@ -1299,16 +1822,20 @@ export default function App() {
               {logs.map(l=>(
                 <div key={l.id} style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:8,padding:"10px 14px",display:"flex",gap:12,alignItems:"center"}}>
                   <div style={{fontSize:13,minWidth:28,textAlign:"center"}}>{l.type.split(" ")[0]}</div>
-                  <div style={{flex:1}}>
-                    <div style={{fontSize:12,fontWeight:700,color:C.text}}>{l.type.replace(/^.\s/,"")}</div>
-                    <div style={{fontSize:11,color:C.muted,marginTop:1}}>{l.desc}</div>
-                  </div>
+                  <div style={{flex:1}}><div style={{fontSize:12,fontWeight:700,color:C.text}}>{l.type.replace(/^.\s/,"")}</div><div style={{fontSize:11,color:C.muted,marginTop:1}}>{l.desc}</div></div>
                   <div style={{fontSize:10,color:C.dim,flexShrink:0}}>{l.ts}</div>
                 </div>
               ))}
             </div>}
         </div>
       )}
+
+      {/* ══ 경기 일정 탭 ══ */}
+      {tab==="schedule"&&renderScheduleTab()}
+
+      {/* ══ 포인트 탭 ══ */}
+      {tab==="points"&&renderPointsTab()}
+
     </div>
   );
 }
