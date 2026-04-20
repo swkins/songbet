@@ -1,7 +1,10 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, LineChart, Line, CartesianGrid } from "recharts";
 import * as db from "./lib/db";
-import type { Bet, Deposit, Withdrawal, SiteState, Log, EsportsRecord, ProfitExtra, OddsGame, OddsSnapshot, OddsAlert } from "./types";
+import type { Bet, Deposit, Withdrawal, SiteState as SiteStateBase, Log, EsportsRecord, ProfitExtra, OddsGame, OddsSnapshot, OddsAlert } from "./types";
+
+// SiteState에 pointTotal 필드 확장
+type SiteState = SiteStateBase & { pointTotal?: number };
 
 // ── 테마 컬러 ─────────────────────────────────────────────────
 const C = {
@@ -606,15 +609,11 @@ export default function App() {
     // 포인트는 betTotal에만 추가 (입금액에는 미포함, 진행률에는 포함)
     if(depPoint>0){
       const curSS=siteStates[depSite];
-      const newSS4={...siteStates,[depSite]:{
-        ...curSS,
-        active:true,
-        isDollar:depIsDollar,
-        betTotal:parseFloat((curSS.betTotal+depPoint).toFixed(2)),
-        // pointTotal은 별도 추적용
-        pointTotal:parseFloat(((curSS as any).pointTotal||0)+depPoint).toFixed(2),
-      }};
-      setSiteStatesRaw(newSS4 as any);db.upsertSiteState(depSite,newSS4[depSite] as any);
+      const prevPoint=parseFloat(String(curSS.pointTotal||0));
+      const updatedSiteP={...curSS,active:true,isDollar:depIsDollar,betTotal:parseFloat((curSS.betTotal+depPoint).toFixed(2)),pointTotal:parseFloat((prevPoint+depPoint).toFixed(2))};
+      const newSS4={...siteStates,[depSite]:updatedSiteP};
+      setSiteStatesRaw(newSS4);
+      db.upsertSiteState(depSite,updatedSiteP);
       addLog("🎁 포인트",`${depSite}/${fmtDisp(depPoint,depIsDollar)}`);
     }
     setDepSite("");setDepAmt(0);setDepPoint(0);
@@ -770,7 +769,7 @@ export default function App() {
       {sub&&<div style={{fontSize:11,color:C.dim,marginTop:3}}>{sub}</div>}
     </div>
   );
-  const SubRow=({s}:{s:any})=>(
+  const SubRow=({s}:{s:any,key?:any})=>(
     <div style={{display:"flex",alignItems:"center",gap:8,padding:"7px 10px",borderBottom:`1px solid ${C.border}`,fontSize:12}}>
       <div style={{flex:1,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.name}</div>
       <div style={{color:s.profit>=0?C.green:C.red,fontWeight:700,minWidth:70,textAlign:"right"}}>{fmtProfit(s.profit,false)}</div>
@@ -783,7 +782,7 @@ export default function App() {
   const KRW_HK=[10000,20000,30000,40000,50000];
   const USD_HK=[10,20,30,40,50];
 
-  const PendingCard=({b}:{b:Bet})=>{
+  const PendingCard=({b}:{b:Bet,key?:any})=>{
     const title=isOverUnder(b.betOption)?[b.homeTeam,b.awayTeam].filter(Boolean).join(" vs "):b.teamName||"";
     return(
       <div style={{background:C.bg2,border:`1px solid ${C.amber}22`,borderRadius:6,padding:"7px 10px",marginBottom:5}}>
@@ -803,7 +802,7 @@ export default function App() {
     );
   };
 
-  const DoneCard=({b}:{b:Bet})=>{
+  const DoneCard=({b}:{b:Bet,key?:any})=>{
     const rc=b.result==="승"?C.green:b.result==="패"?C.red:C.amber;
     const title=isOverUnder(b.betOption)?[b.homeTeam,b.awayTeam].filter(Boolean).join(" vs "):b.teamName||"";
     return(
@@ -1232,7 +1231,24 @@ export default function App() {
                 </div>
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:10}}>
                   <button onClick={handleDeposit} style={{background:`${C.green}22`,border:`1px solid ${C.green}`,color:C.green,padding:"8px",borderRadius:7,cursor:"pointer",fontWeight:700,fontSize:13}}>💰 입금 추가</button>
-                  <button onClick={()=>{if(!depSite)return alert("사이트를 선택해주세요.");if(depPoint<=0)return alert("포인트 금액을 입력해주세요.");const curSS=siteStates[depSite];const newSS4={...siteStates,[depSite]:{...curSS,active:true,isDollar:depIsDollar,betTotal:parseFloat((curSS.betTotal+depPoint).toFixed(2)),(pointTotal as any):parseFloat(((curSS as any).pointTotal||0)+depPoint).toFixed(2)}};setSiteStatesRaw(newSS4 as any);db.upsertSiteState(depSite,newSS4[depSite] as any);addLog("🎁 포인트",`${depSite}/${fmtDisp(depPoint,depIsDollar)}`);setDepPoint(0);}} style={{background:`${C.purple}22`,border:`1px solid ${C.purple}`,color:C.purple,padding:"8px",borderRadius:7,cursor:"pointer",fontWeight:700,fontSize:13}}>🎁 포인트 추가</button>
+                  <button onClick={()=>{
+                    if(!depSite)return alert("사이트를 선택해주세요.");
+                    if(depPoint<=0)return alert("포인트 금액을 입력해주세요.");
+                    const curSS=siteStates[depSite];
+                    const prevPoint=parseFloat(String(curSS.pointTotal||0));
+                    const updatedSite={
+                      ...curSS,
+                      active:true,
+                      isDollar:depIsDollar,
+                      betTotal:parseFloat((curSS.betTotal+depPoint).toFixed(2)),
+                      pointTotal:parseFloat((prevPoint+depPoint).toFixed(2)),
+                    };
+                    const newSS4={...siteStates,[depSite]:updatedSite};
+                    setSiteStatesRaw(newSS4);
+                    db.upsertSiteState(depSite,updatedSite);
+                    addLog("🎁 포인트",`${depSite}/${fmtDisp(depPoint,depIsDollar)}`);
+                    setDepPoint(0);
+                  }} style={{background:`${C.purple}22`,border:`1px solid ${C.purple}`,color:C.purple,padding:"8px",borderRadius:7,cursor:"pointer",fontWeight:700,fontSize:13}}>🎁 포인트 추가</button>
                 </div>
                 <div style={{background:C.bg,borderRadius:8,padding:"8px 10px"}}>
                   <div style={{fontSize:10,color:C.muted,marginBottom:4}}>이번주 입금 (월~일)</div>
@@ -1368,12 +1384,12 @@ export default function App() {
                   const dollar=isUSD(site);
                   const remaining=Math.max(0,parseFloat((st.deposited-st.betTotal).toFixed(2)));
                   // 진행률: (입금 + 포인트) 기준
-                  const totalBase=parseFloat((st.deposited+((st as any).pointTotal||0)).toFixed(2));
+                  const totalBase=parseFloat((st.deposited+(st.pointTotal||0)).toFixed(2));
                   const pct=totalBase>0?Math.min(100,Math.round(st.betTotal/totalBase*100)):0;
                   const barColor=pct>=90?C.red:pct>=70?C.amber:C.green;
                   const sitePending=pending.filter(b=>b.site===site);
                   const is100=pct>=100;
-                  const pointAmt=(st as any).pointTotal||0;
+                  const pointAmt=st.pointTotal||0;
                   return(
                     <div key={site} style={{background:C.bg3,border:`1px solid ${barColor}33`,borderRadius:12,padding:13}}>
                       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
