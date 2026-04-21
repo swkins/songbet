@@ -79,47 +79,54 @@ async function fetchOAIOSport(sport: string): Promise<OAIOEvent[]> {
     console.warn("[OAIO] 시간당 요청 한도 근접, 캐시 반환");
     return cached?.data ?? [];
   }
-  // MLB는 sport key가 "baseball"이 아니라 "mlb"
+  // odds-api.io sport slug
   const sportKeyMap: Record<string,string> = {
-    "축구":      "football",
-    "농구":      "basketball",
-    "야구":      "mlb",
-    "야구_mlb":  "mlb",
-    "야구_kbo":  "kbo",
-    "야구_npb":  "npb",
-    "배구":      "volleyball",
+    "축구":       "football",
+    "농구":       "basketball",
+    "야구":       "baseball",
+    "야구_mlb":   "mlb",
+    "야구_kbo":   "kbo",
+    "야구_npb":   "npb",
+    "야구_cpbl":  "cpbl",
+    "배구":       "volleyball",
   };
-  const sportKey = sportKeyMap[sport] || "football";
+  const sportKey = sportKeyMap[sport] || sport;
   try {
     oaioLogRequest();
-    const url = `${OAIO_BASE}/events?apiKey=${OAIO_KEY}&sport=${sportKey}&limit=300`;
+    const url = `${OAIO_BASE}/events?apiKey=${OAIO_KEY}&sport=${sportKey}&limit=500`;
     const res = await fetch(url);
-    if(!res.ok) throw new Error(`HTTP ${res.status}`);
+    if(!res.ok) {
+      console.error(`[OAIO] ${sport}(${sportKey}) HTTP ${res.status}`);
+      // 404면 이 sport key가 지원 안 됨
+      if(res.status === 404) {
+        oaioCache[sport] = { data: [], fetchedAt: now };
+        return [];
+      }
+      throw new Error(`HTTP ${res.status}`);
+    }
     const json = await res.json();
-    // API 응답은 배열 직접 or { data: [] } 형식
     const raw: any[] = Array.isArray(json) ? json : (json.data || json.events || []);
     const events: OAIOEvent[] = raw.map((item:any) => {
-      // home/away 는 string 또는 객체 둘 다 처리
       const homeTeam = typeof item.home === "string" ? item.home
         : item.home?.name || item.home_team || item.participants?.[0]?.name || "";
       const awayTeam = typeof item.away === "string" ? item.away
         : item.away?.name || item.away_team || item.participants?.[1]?.name || "";
-      // 날짜: "date" 필드가 실제 키
       const startTime = item.date || item.start_time || item.commence_time || item.starts_at || "";
-      // 상태: "pending" → upcoming, "live"/"inprogress" → live, "settled"/"finished" → finished
       const rawStatus = (item.status || "").toLowerCase();
-      const status = rawStatus === "pending" || rawStatus === "upcoming" || rawStatus === "scheduled" ? "upcoming"
-        : rawStatus === "live" || rawStatus === "inprogress" || rawStatus === "in_progress" ? "live"
-        : rawStatus === "settled" || rawStatus === "finished" || rawStatus === "completed" ? "finished"
+      const status = ["pending","upcoming","scheduled","pre_match"].includes(rawStatus) ? "upcoming"
+        : ["live","inprogress","in_progress","in progress"].includes(rawStatus) ? "live"
+        : ["settled","finished","completed","closed"].includes(rawStatus) ? "finished"
         : "upcoming";
-      // 리그
       const rawLeague = typeof item.league === "string" ? item.league
-        : item.league?.name || item.competition?.name || item.tournament?.name || "";
-      const leagueId = String(item.league?.id || item.league_id || item.league?.slug || "");
-      // country: API 제공값 또는 리그명에서 파싱
+        : item.league?.name || item.competition?.name || "";
+      const leagueId = String(item.league?.slug || item.league?.id || item.league_id || "");
       const rawCountry = item.league?.country || item.country || "";
       const parsed = parseLeagueName(rawLeague);
       const country = rawCountry ? (COUNTRY_KR[rawCountry] || rawCountry) : parsed.country;
+      // 배당: events 응답에 포함된 경우 바로 파싱
+      const homeOdds = item.odds?.home ?? item.home_odds ?? item.markets?.ML?.home ?? undefined;
+      const awayOdds = item.odds?.away ?? item.away_odds ?? item.markets?.ML?.away ?? undefined;
+      const drawOdds = item.odds?.draw ?? item.draw_odds ?? item.markets?.ML?.draw ?? undefined;
       return {
         id: String(item.id || item.event_id || Math.random()),
         sport: sportKey,
@@ -130,15 +137,16 @@ async function fetchOAIOSport(sport: string): Promise<OAIOEvent[]> {
         awayTeam,
         startTime,
         status,
-        homeOdds: item.odds?.home ?? item.home_odds ?? undefined,
-        awayOdds: item.odds?.away ?? item.away_odds ?? undefined,
-        drawOdds: item.odds?.draw ?? item.draw_odds ?? undefined,
+        homeOdds,
+        awayOdds,
+        drawOdds,
       };
     }).filter(e => e.homeTeam && e.awayTeam);
     oaioCache[sport] = { data: events, fetchedAt: now };
+    console.log(`[OAIO] ${sport}(${sportKey}): ${events.length}개 경기`);
     return events;
   } catch(err) {
-    console.error("[OAIO] fetch 실패:", err);
+    console.error("[OAIO] fetch 실패:", sport, err);
     return cached?.data ?? [];
   }
 }
@@ -175,7 +183,7 @@ const COUNTRY_KR: Record<string,string> = {
   "North Korea":"북한","Indonesia":"인도네시아","Thailand":"태국","Vietnam":"베트남",
   "Malaysia":"말레이시아","Philippines":"필리핀","Singapore":"싱가포르",
   "International":"국제","United States":"미국","Republic of Ireland":"아일랜드",
-  "Wales":"웨일즈","Northern Ireland":"북아일랜드",
+  "Wales":"웨일즈","Northern Ireland":"북아일랜드","Taiwan":"대만","Chinese Taipei":"대만",
 };
 
 // 리그명 한글 매핑 (odds-api.io는 "국가 - 리그명" 또는 단순 리그명 형식)
@@ -219,9 +227,10 @@ const LEAGUE_KR: Record<string,string> = {
   "EuroLeague":"유로리그","Europe - EuroLeague":"🌍 유로리그",
   "KBL":"KBL","South Korea - KBL":"🇰🇷 KBL",
   // 야구
-  "MLB":"MLB","USA - MLB":"🇺🇸 MLB","MLB Season":"MLB",
-  "KBO":"KBO","KBO League":"KBO","South Korea - KBO":"🇰🇷 KBO",
-  "NPB":"NPB","Japan - NPB":"🇯🇵 NPB","NPB Season":"NPB",
+  "MLB":"MLB","USA - MLB":"🇺🇸 MLB","MLB Season":"MLB","MLB Regular Season":"🇺🇸 MLB",
+  "KBO":"KBO","KBO League":"KBO","South Korea - KBO":"🇰🇷 KBO","Korea - KBO":"🇰🇷 KBO",
+  "NPB":"NPB","Japan - NPB":"🇯🇵 NPB","NPB Season":"NPB","Japan - Nippon Professional Baseball":"🇯🇵 NPB",
+  "CPBL":"CPBL","Chinese Professional Baseball League":"🇹🇼 CPBL","Taiwan - CPBL":"🇹🇼 CPBL","cpbl":"🇹🇼 CPBL",
   // 배구
   "Volleyball Nations League":"배구 네이션스리그",
 };
@@ -516,8 +525,8 @@ export default function App() {
   const oddsReqRemaining = () => Math.max(0, 95 - oaioReqLog.filter(t=>t>Date.now()-3600_000).length);
 
   // OAIO 전용 경기 로딩
-  // 축구/농구/배구 = 1 req, 야구 = mlb+kbo+npb = 3 req → 총 6 req
-  const OAIO_FETCH_KEYS = ["축구","농구","배구","야구_mlb","야구_kbo","야구_npb"] as const;
+  // 축구/농구/배구 = 1 req씩, 야구 = baseball+mlb+kbo+npb+cpbl = 5 req → 총 8 req/새로고침
+  const OAIO_FETCH_KEYS = ["축구","농구","배구","야구","야구_mlb","야구_kbo","야구_npb","야구_cpbl"] as const;
 
   const loadOddsTabEvents = async(dayOffset:number=0, forceRefresh=false) => {
     if(!OAIO_KEY) { setOddsTabEvents([]); return; }
@@ -541,16 +550,18 @@ export default function App() {
     } finally { setOddsTabLoading(false); }
   };
 
-  // 날짜 필터 헬퍼 — KST 날짜 문자열로 단순 비교
+  // 날짜 필터 헬퍼 — KST 날짜 문자열로 비교
+  // dayOffset=0 이면 오늘+내일까지 포함 (MLB는 KST 기준 새벽~아침에 열림)
   function filterByDay(events: OAIOEvent[], dayOffset: number): OAIOEvent[] {
-    const targetDate = getKSTDateStr(dayOffset); // "2026-04-22" 형식
+    const targetDate = getKSTDateStr(dayOffset);
+    const nextDate   = getKSTDateStr(dayOffset + 1);
     return events
       .filter(e => {
         if(!e.startTime) return false;
-        // startTime을 KST로 변환 후 날짜 부분만 비교
         const kstDate = new Date(new Date(e.startTime).getTime() + 9*60*60*1000)
           .toISOString().slice(0,10);
-        return kstDate === targetDate;
+        // dayOffset=0(오늘) 이면 오늘 + 내일 새벽까지 포함
+        return kstDate === targetDate || (dayOffset === 0 && kstDate === nextDate);
       })
       .sort((a,b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
   }
@@ -1745,7 +1756,7 @@ export default function App() {
             {!oddsTabLoading&&oddsTabEvents.length>0&&(()=>{
               const sportMap: Record<string,string> = {
                 "football":"축구","basketball":"농구",
-                "baseball":"야구","mlb":"야구","kbo":"야구","npb":"야구",
+                "baseball":"야구","mlb":"야구","kbo":"야구","npb":"야구","cpbl":"야구",
                 "volleyball":"배구","esports":"E스포츠"
               };
 
