@@ -121,7 +121,7 @@ async function fetchOAIOSport(sport: string): Promise<OAIOEvent[]> {
 
   const doFetch = async(key: string): Promise<any[]> => {
     oaioLogRequest();
-    const url = `${OAIO_BASE}/events?apiKey=${OAIO_KEY}&sport=${key}&limit=500&bookmaker=Bet365`;
+    const url = `${OAIO_BASE}/events?apiKey=${OAIO_KEY}&sport=${key}&limit=500`;
     console.log(`[OAIO] fetch: ${url}`);
     const res = await fetch(url);
     if(res.status === 429) {
@@ -135,15 +135,20 @@ async function fetchOAIOSport(sport: string): Promise<OAIOEvent[]> {
     if(!res.ok) {
       const txt = await res.text().catch(()=>"");
       console.error(`[OAIO] HTTP ${res.status} - ${key}: ${txt.slice(0,200)}`);
-      throw new Error(`HTTP ${res.status}`);
+      throw new Error(`HTTP ${res.status}: ${txt.slice(0,100)}`);
     }
-    const json = await res.json();
-    // 첫 번째 아이템 구조 로그
+    const rawText = await res.text();
+    console.log(`[OAIO] ${key} 원문(200자):`, rawText.slice(0,200));
+    let json: any;
+    try { json = JSON.parse(rawText); } catch(e) {
+      console.error(`[OAIO] JSON 파싱 실패:`, rawText.slice(0,200));
+      throw new Error(`JSON 파싱 실패: ${rawText.slice(0,100)}`);
+    }
     const arr = Array.isArray(json) ? json : (json.data || json.events || []);
-    if(arr.length > 0) {
-      console.log(`[OAIO] ${key} 첫번째 아이템:`, JSON.stringify(arr[0]).slice(0, 300));
+    if(arr.length === 0) {
+      console.warn(`[OAIO] ${key} 빈 배열. 원본:`, JSON.stringify(json).slice(0, 200));
     } else {
-      console.warn(`[OAIO] ${key} 빈 배열. 원본:`, JSON.stringify(json).slice(0, 300));
+      console.log(`[OAIO] ${key} 첫번째 아이템:`, JSON.stringify(arr[0]).slice(0, 300));
     }
     console.log(`[OAIO] ${key}: ${arr.length}개`);
     return arr;
@@ -630,7 +635,7 @@ export default function App() {
 
   // 경기+배당 데이터 전체 로드 (베팅탭 진입 시 자동 호출)
   const loadOddsTabEvents = async(dayOffset:number=0, forceRefresh=false) => {
-    if(!OAIO_KEY) return;
+    if(!OAIO_KEY) { setFetchDebug("❌ API 키 없음 (VITE_ODDSAPI_IO_KEY)"); return; }
     if(!forceRefresh) {
       const now = Date.now();
       const store = loadCache();
@@ -639,7 +644,7 @@ export default function App() {
       );
       if(allCached) {
         console.log("[OAIO] 모든 종목 캐시 유효, API 호출 생략");
-        refreshCachedEvents(); // 캐시 유효해도 state 동기화
+        refreshCachedEvents();
         return;
       }
     }
@@ -648,8 +653,12 @@ export default function App() {
     try {
       const results: string[] = [];
       for(const s of OAIO_FETCH_KEYS) {
-        const data = await fetchOAIOSport(s);
-        results.push(`${s}:${data.length}개`);
+        try {
+          const data = await fetchOAIOSport(s);
+          results.push(`${s}:${data.length}개`);
+        } catch(e: any) {
+          results.push(`${s}:오류(${e.message?.slice(0,30)})`);
+        }
         setFetchDebug(results.join(" | "));
       }
       const events = refreshCachedEvents();
