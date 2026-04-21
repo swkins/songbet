@@ -1473,7 +1473,7 @@ export default function App() {
                       return(
                         <div key={l.id} style={{display:"flex",alignItems:"center",gap:2,padding:"4px 6px"}}>
                           <span style={{flex:1,fontSize:11,color:C.muted}}>{nameKr}</span>
-                          <button onClick={()=>showLeague(bettingSportCat,l.id)}
+                          <button onClick={()=>restoreLeague(bettingSportCat,l.id)}
                             style={{fontSize:9,padding:"2px 7px",borderRadius:4,border:`1px solid ${C.green}44`,background:`${C.green}11`,color:C.green,cursor:"pointer"}}>복원</button>
                         </div>
                       );
@@ -1493,7 +1493,7 @@ export default function App() {
                         if(leagueEditMode)return;
                         setBettingLeague(`${l.id}`);
                         setBettingSelectedGame(null);
-                        const td=new Date(Date.now()+afDateOffset*24*60*60*1000).toISOString().slice(0,10);fetchAfLeague(bettingSportCat, l.name, l.id, l.season, td);
+                        fetchAfLeague(bettingSportCat, l.name, l.id, l.season, afDateOffset);
                       }}
                         style={{flex:1,textAlign:"left",padding:"6px 10px",background:sel?`${C.teal}22`:"transparent",border:"none",borderLeft:sel?`3px solid ${C.teal}`:"3px solid transparent",color:sel?C.teal:C.text,cursor:leagueEditMode?"default":"pointer",fontSize:12,fontWeight:sel?700:400,lineHeight:1.3}}>
                         {nameKr}
@@ -1520,7 +1520,7 @@ export default function App() {
                           if(k){const m={...countryOverrides,[orig]:k};setCountryOverrides(m);saveCountryOverrides(m);}
                         }} style={{background:"transparent",border:"none",color:C.dim,cursor:"pointer",fontSize:8,padding:"1px 3px"}}>✏️</button>
                       </div>
-                      {countryGroups[country].map(renderBtn)}
+                      {countryGroups[country].map(l=>renderBtn(l))}
                     </div>
                   ))}
                   {allLeagueList.length===0&&<div style={{textAlign:"center",color:C.dim,padding:"20px 0",fontSize:10}}>API 키 확인 또는<br/>종목 다시 선택</div>}
