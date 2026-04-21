@@ -71,8 +71,10 @@ const AF_CACHE_TTL = 15 * 60 * 1000; // 15분
 const AF_BASES: Record<string,string> = {
   "축구":    "https://v3.football.api-sports.io",
   "농구":    "https://v1.basketball.api-sports.io",
+  "NBA":     "https://v2.nba.api-sports.io",
   "야구":    "https://v1.baseball.api-sports.io",
   "배구":    "https://v1.volleyball.api-sports.io",
+  "하키":    "https://v1.hockey.api-sports.io",
 };
 // 야구는 시즌이 연도 기준 다름 (MLB는 현재연도)
 const getSeasonForSport = (sport: string): number => {
@@ -112,7 +114,10 @@ async function fetchAllLeagues(sport: string): Promise<AFLeagueInfo[]> {
     }).filter((l: AFLeagueInfo) => l.id && l.name);
     afLeagueCache[sport] = list;
     afLeagueListFetched[sport] = true;
-    return list;
+    // 폴백: 야구/농구 리그 목록이 비어있으면 하드코딩 사용
+    if(list.length===0 && sport==="야구") { afLeagueCache[sport]=BASEBALL_FALLBACK; }
+    if(list.length===0 && sport==="농구") { afLeagueCache[sport]=BASKETBALL_FALLBACK; }
+    return afLeagueCache[sport];
   } catch { return []; }
 }
 
@@ -123,6 +128,16 @@ const AF_MAJOR_IDS: Record<string, number[]> = {
   "야구":  [1,2,3],
   "배구":  [1,2,3,4,5],
 };
+
+// 야구 하드코딩 폴백 (API 리그목록 실패시)
+const BASEBALL_FALLBACK: AFLeagueInfo[] = [
+  {id:1, name:"MLB", country:"USA", season:2025},
+  {id:2, name:"KBO", country:"South Korea", season:2025},
+  {id:3, name:"NPB", country:"Japan", season:2025},
+];
+const BASKETBALL_FALLBACK: AFLeagueInfo[] = [
+  {id:12, name:"NBA", country:"USA", season:2024},
+];
 
 // 한글 팀명 매핑 (사용자가 추가/수정 가능)
 type TeamNameMap = Record<string,string>;
@@ -197,10 +212,12 @@ async function fetchAFFixtures(sport:string, leagueId:number, leagueName:string,
   const cached = afFixtureCache[cacheKey];
   if (cached && now - cached.fetchedAt < AF_CACHE_TTL) return cached.data;
   const base = AF_BASES[sport] || AF_BASES["축구"];
-  // 종목별 엔드포인트: 축구=fixtures, 농구/야구/배구=games
+  // 종목별 엔드포인트: 축구=fixtures, 나머지=games
   const endpoint = sport==="축구" ? "fixtures" : "games";
+  // 야구는 날짜 파라미터명이 다를 수 있으므로 두 가지 시도
+  const dateParam = `date=${dateKey}`;
   try {
-    const url = `${base}/${endpoint}?league=${leagueId}&season=${season}&date=${dateKey}`;
+    const url = `${base}/${endpoint}?league=${leagueId}&season=${season}&${dateParam}`;
     const res = await fetch(url, { headers:{"x-apisports-key":AF_KEY} });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const json = await res.json();
@@ -531,9 +548,11 @@ export default function App() {
     setAfLeagueLoading(true);
     try {
       const list = await fetchAllLeagues(sport);
-      // 시즌 재계산
       const yr = getSeasonForSport(sport);
-      const fixed = list.map(l=>({...l, season: l.season||yr}));
+      let fixed = list.map(l=>({...l, season: l.season||yr}));
+      // 폴백
+      if(fixed.length===0 && sport==="야구") fixed=BASEBALL_FALLBACK;
+      if(fixed.length===0 && sport==="농구") fixed=BASKETBALL_FALLBACK;
       setAfLeagues(p=>({...p,[sport]:fixed}));
     } finally { setAfLeagueLoading(false); }
   };
