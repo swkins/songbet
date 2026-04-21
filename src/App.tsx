@@ -175,7 +175,7 @@ const COUNTRY_KR: Record<string,string> = {
   "North Korea":"북한","Indonesia":"인도네시아","Thailand":"태국","Vietnam":"베트남",
   "Malaysia":"말레이시아","Philippines":"필리핀","Singapore":"싱가포르",
   "International":"국제","United States":"미국","Republic of Ireland":"아일랜드",
-  "Wales":"웨일즈","Northern Ireland":"북아일랜드","Switzerland":"스위스",
+  "Wales":"웨일즈","Northern Ireland":"북아일랜드",
 };
 
 // 리그명 한글 매핑 (odds-api.io는 "국가 - 리그명" 또는 단순 리그명 형식)
