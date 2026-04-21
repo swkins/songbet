@@ -30,10 +30,9 @@ const OAIO_KEY = (import.meta.env.VITE_ODDSAPI_IO_KEY as string) ?? "";
 const OAIO_BASE = "https://api.odds-api.io/v3";
 
 // ★ 시간당 100회 제한 보호
-// - 종목 4개 × 1회 fetch = 4회 소모
-// - TTL 30분 → 시간에 자동 최대 8회 (여유 92회)
-// - 강제 새로고침도 캐시가 살아있으면 API 호출 안 함
-const OAIO_CACHE_TTL = 30 * 60 * 1000; // 30분
+// - 종목 4개 × 1회 fetch = 4 req
+// - TTL 60분 → 시간에 최대 4회만 소모 (여유 96회)
+const OAIO_CACHE_TTL = 60 * 60 * 1000; // 1시간
 
 // 요청 카운터 (디버그용, 시간 단위 리셋)
 const oaioReqLog: number[] = [];
@@ -73,110 +72,6 @@ interface OAIOEvent {
 // 캐시: 종목별로 저장
 const oaioCache: Record<string,{data:OAIOEvent[];fetchedAt:number}> = {};
 
-// 배당 캐시: eventId → 배당 데이터 (TTL 5분)
-const oddsCache: Record<string,{data:Partial<OAIOEvent>;fetchedAt:number}> = {};
-const ODDS_CACHE_TTL = 5 * 60 * 1000;
-
-// /odds/multi 로 최대 10개 경기 배당 한꺼번에 가져오기 (1 req)
-async function fetchOddsMulti(eventIds: string[]): Promise<Record<string,Partial<OAIOEvent>>> {
-  if(!OAIO_KEY || eventIds.length===0) return {};
-  const result: Record<string,Partial<OAIOEvent>> = {};
-  const now = Date.now();
-  // 캐시 유효한 것 제외
-  const toFetch = eventIds.filter(id => {
-    const c = oddsCache[id];
-    if(c && now - c.fetchedAt < ODDS_CACHE_TTL) {
-      result[id] = c.data;
-      return false;
-    }
-    return true;
-  });
-  if(toFetch.length === 0) return result;
-
-  // 10개씩 묶어서 요청
-  const chunks: string[][] = [];
-  for(let i=0; i<toFetch.length; i+=10) chunks.push(toFetch.slice(i,i+10));
-
-  for(const chunk of chunks) {
-    try {
-      oaioLogRequest();
-      // MLB는 DraftKings, FanDuel 같은 미국 북메이커가 필요할 수 있음
-      const url = `${OAIO_BASE}/odds/multi?apiKey=${OAIO_KEY}&eventIds=${chunk.join(",")}&bookmakers=Bet365,1xBet,Pinnacle,DraftKings,FanDuel,Unibet`;
-      const res = await fetch(url);
-      if(!res.ok) {
-        console.error(`[OAIO odds/multi] HTTP ${res.status}`, await res.text().catch(()=>""));
-        continue;
-      }
-      const json = await res.json();
-      console.log("[OAIO odds/multi] 응답:", JSON.stringify(json).slice(0,500));
-      const list: any[] = Array.isArray(json) ? json : (json.data || []);
-      list.forEach((item: any) => {
-        const id = String(item.id);
-        const parsed = parseOddsResponse(item);
-        console.log(`[OAIO odds] id=${id} homeOdds=${parsed.homeOdds} awayOdds=${parsed.awayOdds} ouLines=${parsed.ouLines?.length??0}`);
-        oddsCache[id] = { data: parsed, fetchedAt: now };
-        result[id] = parsed;
-      });
-    } catch(e) { console.error("[OAIO odds/multi] 실패", e); }
-  }
-  return result;
-}
-
-// 배당 응답 파싱 → ML + Over/Under 추출
-function parseOddsResponse(item: any): Partial<OAIOEvent> {
-  const out: Partial<OAIOEvent> = {};
-  const bookmakers: Record<string,any[]> = item.bookmakers || {};
-  const priority = ["Pinnacle","Bet365","DraftKings","FanDuel","1xBet","Unibet"];
-  const allBkNames = Object.keys(bookmakers);
-  const bkOrder = [
-    ...priority.filter(b=>allBkNames.includes(b)),
-    ...allBkNames.filter(b=>!priority.includes(b))
-  ];
-
-  for(const bk of bkOrder) {
-    const markets: any[] = bookmakers[bk] || [];
-
-    // ML (승무패/머니라인) — 이름이 다양함
-    if(!out.homeOdds) {
-      const ml = markets.find((m:any) =>
-        ["ML","Moneyline","Match Result","1X2","Head to Head","Winner"].includes(m.name)
-      );
-      if(ml?.odds?.[0]) {
-        const o = ml.odds[0];
-        const h = parseFloat(String(o.home ?? o["1"] ?? "0"));
-        const a = parseFloat(String(o.away ?? o["2"] ?? "0"));
-        const d = parseFloat(String(o.draw ?? o.x ?? o["X"] ?? "0"));
-        if(h>1) out.homeOdds = h;
-        if(a>1) out.awayOdds = a;
-        if(d>1) out.drawOdds = d;
-      }
-    }
-
-    // Over/Under (토탈) — Totals, Over/Under, Total, Total Goals 등
-    if(!out.ouLines || out.ouLines.length===0) {
-      const ou = markets.find((m:any) =>
-        ["Over/Under","Totals","Total","Total Goals","Total Runs","Total Points"].includes(m.name)
-      );
-      if(ou?.odds) {
-        const lines: {line:number;over:number;under:number}[] = [];
-        ou.odds.forEach((o:any) => {
-          const line = parseFloat(String(o.max ?? o.line ?? o.total ?? o.hdp ?? "0"));
-          const over = parseFloat(String(o.over ?? o.o ?? "0"));
-          const under = parseFloat(String(o.under ?? o.u ?? "0"));
-          if(line>0 && over>1 && under>1) lines.push({line,over,under});
-        });
-        if(lines.length>0) {
-          lines.sort((a,b)=>a.line-b.line);
-          out.ouLines = lines;
-        }
-      }
-    }
-
-    if(out.homeOdds && out.ouLines?.length) break;
-  }
-  return out;
-}
-
 async function fetchOAIOSport(sport: string): Promise<OAIOEvent[]> {
   const now = Date.now();
   const cached = oaioCache[sport];
@@ -187,31 +82,44 @@ async function fetchOAIOSport(sport: string): Promise<OAIOEvent[]> {
     return cached?.data ?? [];
   }
   const sportKeyMap: Record<string,string> = {
-    "축구":       "football",
-    "농구":       "basketball",
-    "야구":       "baseball",
-    "야구_mlb":   "mlb",
-    "야구_kbo":   "kbo",
-    "야구_npb":   "npb",
-    "야구_cpbl":  "cpbl",
-    "배구":       "volleyball",
+    "축구": "football",
+    "농구": "basketball",
+    "야구": "baseball",
+    "배구": "volleyball",
   };
   const sportKey = sportKeyMap[sport] || sport;
-  try {
+
+  const doFetch = async(key: string): Promise<any[]> => {
     oaioLogRequest();
-    // bookmaker 파라미터 추가 → 배당 데이터 함께 반환
-    const url = `${OAIO_BASE}/events?apiKey=${OAIO_KEY}&sport=${sportKey}&limit=500&bookmaker=Bet365`;
+    // bookmaker 파라미터로 배당 함께 요청
+    const url = `${OAIO_BASE}/events?apiKey=${OAIO_KEY}&sport=${key}&limit=500&bookmaker=Bet365`;
     const res = await fetch(url);
-    if(!res.ok) {
-      console.error(`[OAIO] ${sport}(${sportKey}) HTTP ${res.status}`);
-      if(res.status === 404) { oaioCache[sport] = {data:[],fetchedAt:now}; return []; }
-      throw new Error(`HTTP ${res.status}`);
+    if(res.status === 429) {
+      console.warn(`[OAIO] 429 Too Many Requests - sport:${key}`);
+      return [];
     }
+    if(res.status === 404) return null as any; // null = 이 키 지원 안 함
+    if(!res.ok) throw new Error(`HTTP ${res.status}`);
     const json = await res.json();
-    const raw: any[] = Array.isArray(json) ? json : (json.data || json.events || []);
-    const events: OAIOEvent[] = raw.map((item:any) => {
+    return Array.isArray(json) ? json : (json.data || json.events || []);
+  };
+
+  try {
+    let raw = await doFetch(sportKey);
+    // baseball이 빈 배열이면 mlb로 폴백
+    if(raw !== null && raw.length === 0 && sport === "야구") {
+      console.log("[OAIO] baseball 결과 없음, mlb로 재시도");
+      raw = await doFetch("mlb") ?? [];
+    }
+    if(!raw || raw.length === 0) {
+      oaioCache[sport] = { data: [], fetchedAt: now };
+      return [];
+    }
+
+    const parseItem = (item: any): OAIOEvent | null => {
       const homeTeam = typeof item.home === "string" ? item.home : item.home?.name || "";
       const awayTeam = typeof item.away === "string" ? item.away : item.away?.name || "";
+      if(!homeTeam || !awayTeam) return null;
       const startTime = item.date || item.start_time || item.commence_time || "";
       const rawStatus = (item.status || "").toLowerCase();
       const status = ["pending","upcoming","scheduled","pre_match"].includes(rawStatus) ? "upcoming"
@@ -224,44 +132,45 @@ async function fetchOAIOSport(sport: string): Promise<OAIOEvent[]> {
       const parsed = parseLeagueName(rawLeague);
       const country = rawCountry ? (COUNTRY_KR[rawCountry] || rawCountry) : parsed.country;
 
-      // 배당 파싱 — bookmaker 파라미터 있으면 bookmakers 객체로 옴
+      // 배당 파싱 — bookmakers 객체에서 추출
       let homeOdds: number|undefined, awayOdds: number|undefined, drawOdds: number|undefined;
       const ouLines: {line:number;over:number;under:number}[] = [];
 
-      // 방법1: bookmakers 객체 (bookmaker 파라미터 사용 시)
-      if(item.bookmakers && typeof item.bookmakers === "object") {
-        const bkNames = Object.keys(item.bookmakers);
-        for(const bk of bkNames) {
-          const markets: any[] = item.bookmakers[bk] || [];
-          if(!homeOdds) {
-            const ml = markets.find((m:any) => ["ML","Moneyline","Match Result","1X2","Head to Head","Winner"].includes(m.name));
-            if(ml?.odds?.[0]) {
-              const o = ml.odds[0];
-              const h = parseFloat(String(o.home ?? o["1"] ?? ""));
-              const a = parseFloat(String(o.away ?? o["2"] ?? ""));
-              const d = parseFloat(String(o.draw ?? o.x ?? ""));
-              if(h>1) homeOdds=h;
-              if(a>1) awayOdds=a;
-              if(d>1) drawOdds=d;
-            }
+      const bkObj: Record<string,any[]> = item.bookmakers || {};
+      for(const bk of Object.keys(bkObj)) {
+        const markets: any[] = bkObj[bk] || [];
+        if(!homeOdds) {
+          const ml = markets.find((m:any) =>
+            ["ML","Moneyline","Match Result","1X2","Head to Head","Winner","Money Line"].includes(m.name)
+          );
+          if(ml?.odds?.[0]) {
+            const o = ml.odds[0];
+            const h = parseFloat(String(o.home ?? o["1"] ?? ""));
+            const a = parseFloat(String(o.away ?? o["2"] ?? ""));
+            const d = parseFloat(String(o.draw ?? o.x ?? ""));
+            if(h > 1) homeOdds = h;
+            if(a > 1) awayOdds = a;
+            if(d > 1) drawOdds = d;
           }
-          if(!ouLines.length) {
-            const ou = markets.find((m:any) => ["Over/Under","Totals","Total","Total Goals","Total Runs","Total Points","Over/Under 2-way"].includes(m.name));
-            if(ou?.odds) {
-              ou.odds.forEach((o:any) => {
-                const line = parseFloat(String(o.max ?? o.line ?? o.total ?? o.hdp ?? ""));
-                const over = parseFloat(String(o.over ?? o.o ?? ""));
-                const under = parseFloat(String(o.under ?? o.u ?? ""));
-                if(line>0 && over>1 && under>1) ouLines.push({line,over,under});
-              });
-              ouLines.sort((a,b)=>a.line-b.line);
-            }
-          }
-          if(homeOdds && ouLines.length) break;
         }
+        if(!ouLines.length) {
+          const ou = markets.find((m:any) =>
+            ["Over/Under","Totals","Total","Total Goals","Total Runs","Total Points"].includes(m.name)
+          );
+          if(ou?.odds) {
+            ou.odds.forEach((o:any) => {
+              const line = parseFloat(String(o.max ?? o.line ?? o.total ?? o.hdp ?? ""));
+              const over = parseFloat(String(o.over ?? o.o ?? ""));
+              const under = parseFloat(String(o.under ?? o.u ?? ""));
+              if(line > 0 && over > 1 && under > 1) ouLines.push({line, over, under});
+            });
+            ouLines.sort((a,b) => a.line - b.line);
+          }
+        }
+        if(homeOdds && ouLines.length) break;
       }
 
-      // 방법2: 단순 odds 객체 (폴백)
+      // bookmakers 없으면 단순 odds 폴백
       if(!homeOdds) {
         homeOdds = item.odds?.home ?? item.home_odds ?? undefined;
         awayOdds = item.odds?.away ?? item.away_odds ?? undefined;
@@ -275,9 +184,12 @@ async function fetchOAIOSport(sport: string): Promise<OAIOEvent[]> {
         homeOdds, awayOdds, drawOdds,
         ouLines: ouLines.length ? ouLines : undefined,
       };
-    }).filter(e => e.homeTeam && e.awayTeam);
+    };
+
+    const events = raw.map(parseItem).filter(Boolean) as OAIOEvent[];
     oaioCache[sport] = { data: events, fetchedAt: now };
-    console.log(`[OAIO] ${sport}(${sportKey}): ${events.length}개 경기, 배당있는경기: ${events.filter(e=>e.homeOdds).length}개`);
+    const withOdds = events.filter(e => e.homeOdds && e.homeOdds > 1).length;
+    console.log(`[OAIO] ${sport}(${sportKey}): ${events.length}경기, 배당있음: ${withOdds}건`);
     return events;
   } catch(err) {
     console.error("[OAIO] fetch 실패:", sport, err);
@@ -649,9 +561,8 @@ export default function App() {
   // ── 배당 탭 상태 ─────────────────────────────────────────────
   const [oddsTabLoading,setOddsTabLoading] = useState(false);
 
-  // OAIO 전용 경기 로딩
-  // 축구/농구/배구 = 1 req씩, 야구 = baseball+mlb+kbo+npb+cpbl = 5 req → 총 8 req/새로고침
-  const OAIO_FETCH_KEYS = ["축구","농구","배구","야구","야구_mlb","야구_kbo","야구_npb","야구_cpbl"] as const;
+  // 종목별 1회 fetch = 총 4 req/새로고침 (30분 캐시)
+  const OAIO_FETCH_KEYS = ["축구","농구","배구","야구"] as const;
 
   // 경기+배당 데이터 전체 로드 (베팅탭 진입 시 자동 호출)
   const loadOddsTabEvents = async(dayOffset:number=0, forceRefresh=false) => {
@@ -829,9 +740,9 @@ export default function App() {
   };
 
 
-  // 리그 선택 시 배당 fetch — /odds 직접 호출 (이벤트당 1회)
+  // 리그 선택 시 — events fetch 때 이미 배당 포함됨, 캐시에서 읽기만
   useEffect(()=>{
-    if(!bettingLeague || !OAIO_KEY) return;
+    if(!bettingLeague) return;
     const SPORT_MAP: Record<string,string> = {
       "football":"축구","basketball":"농구",
       "baseball":"야구","mlb":"야구","kbo":"야구","npb":"야구","cpbl":"야구",
@@ -839,65 +750,16 @@ export default function App() {
     };
     const events = OAIO_FETCH_KEYS.flatMap(k=>oaioCache[k]?.data??[])
       .filter(e=>SPORT_MAP[e.sport]===bettingSportCat && e.league===bettingLeague && e.status!=="finished");
-    if(events.length===0) { setBettingOddsDebug("경기 없음"); return; }
+    if(events.length===0) { setBettingOddsDebug(""); return; }
 
-    // 1단계: events 캐시에 이미 배당 있는지 확인
-    const fromCache: Record<string,Partial<OAIOEvent>> = {};
+    const map: Record<string,Partial<OAIOEvent>> = {};
+    let hasOdds = 0;
     events.forEach(e=>{
-      if((e.homeOdds&&e.homeOdds>1)||(e.awayOdds&&e.awayOdds>1)) {
-        fromCache[e.id] = {homeOdds:e.homeOdds,awayOdds:e.awayOdds,drawOdds:e.drawOdds,ouLines:e.ouLines};
-      }
+      map[e.id] = {homeOdds:e.homeOdds, awayOdds:e.awayOdds, drawOdds:e.drawOdds, ouLines:e.ouLines};
+      if(e.homeOdds && e.homeOdds > 1) hasOdds++;
     });
-    if(Object.keys(fromCache).length>0) {
-      setBettingOddsMap(prev=>({...prev,...fromCache}));
-      setBettingOddsDebug(`캐시에서 배당 ${Object.keys(fromCache).length}건 로드`);
-      return;
-    }
-
-    // 2단계: /odds 직접 호출 (첫 번째 경기로 테스트 → 성공하면 나머지도)
-    setBettingOddsLoading(true);
-    setBettingOddsDebug("배당 API 호출 중...");
-
-    const fetchSingle = async(eventId: string) => {
-      oaioLogRequest();
-      const url = `${OAIO_BASE}/odds?apiKey=${OAIO_KEY}&eventId=${eventId}&bookmakers=Bet365,Pinnacle,1xBet,DraftKings,FanDuel`;
-      const res = await fetch(url);
-      if(!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
-      return json;
-    };
-
-    (async()=>{
-      try {
-        // 첫 경기로 응답 구조 테스트
-        const firstEvent = events[0];
-        const testResponse = await fetchSingle(firstEvent.id);
-
-        // 디버그: 실제 응답 구조 표시
-        const debugInfo = `이벤트ID:${firstEvent.id} | 응답키:${Object.keys(testResponse).join(",")} | bookmakers:${Object.keys(testResponse.bookmakers||{}).join(",") || "없음"} | 원본:${JSON.stringify(testResponse).slice(0,200)}`;
-        setBettingOddsDebug(debugInfo);
-
-        const parsed = parseOddsResponse(testResponse);
-
-        // 응답 구조 파악 후 나머지 경기들도 fetch (최대 10개)
-        const remaining = events.slice(1, 10);
-        const restResults = await Promise.allSettled(remaining.map(e=>fetchSingle(e.id)));
-
-        const newMap: Record<string,Partial<OAIOEvent>> = {};
-        newMap[firstEvent.id] = parsed;
-        restResults.forEach((r,i)=>{
-          if(r.status==="fulfilled") {
-            newMap[remaining[i].id] = parseOddsResponse(r.value);
-          }
-        });
-        setBettingOddsMap(prev=>({...prev,...newMap}));
-        setBettingOddsDebug(`배당 로드 완료: ${Object.keys(newMap).length}건 | homeOdds=${parsed.homeOdds} awayOdds=${parsed.awayOdds}`);
-      } catch(err:any) {
-        setBettingOddsDebug(`오류: ${err.message}`);
-      } finally {
-        setBettingOddsLoading(false);
-      }
-    })();
+    setBettingOddsMap(prev=>({...prev,...map}));
+    setBettingOddsDebug(hasOdds > 0 ? `배당 ${hasOdds}건 로드됨` : "배당 정보 없음 (Bet365 미지원 리그)");
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[bettingLeague]);
 
