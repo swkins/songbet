@@ -1604,11 +1604,11 @@ export default function App() {
               {afLeagueLoading&&<div style={{textAlign:"center",color:C.muted,padding:"20px 0",fontSize:11}}>⏳ 리그 목록 로드중...</div>}
               {!afLeagueLoading&&(()=>{
                 const allLeagueList = (afLeagues[bettingSportCat]||[]).filter(l=>!(hiddenLeagues[bettingSportCat]||[]).includes(l.id));
-                const majorIds = AF_MAJOR_IDS[bettingSportCat]||[];
-                const major = allLeagueList.filter(l=>majorIds.includes(l.id));
+                const afMajorIds = AF_MAJOR_IDS[bettingSportCat]||[];
+                const major = allLeagueList.filter(l=>afMajorIds.includes(l.id));
                 // 국가별 그룹
                 const countryGroups: Record<string,AFLeagueInfo[]> = {};
-                allLeagueList.filter(l=>!majorIds.includes(l.id)).forEach(l=>{
+                allLeagueList.filter(l=>!afMajorIds.includes(l.id)).forEach(l=>{
                   const c = countryOverrides[l.country]||COUNTRY_KR[l.country]||l.country||"기타";
                   if(!countryGroups[c]) countryGroups[c]=[];
                   countryGroups[c].push(l);
