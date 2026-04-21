@@ -190,8 +190,9 @@ const afFixtureCache: Record<string,{data:AFFixture[];fetchedAt:number}> = {};
 const afResultCache: {data:AFFixture[];fetchedAt:number}|null = null;
 let afResultCacheStore: {data:AFFixture[];fetchedAt:number}|null = null;
 
-async function fetchAFFixtures(sport:string, leagueId:number, leagueName:string, season:number): Promise<AFFixture[]> {
-  const cacheKey = `${sport}_${leagueId}_${season}`;
+async function fetchAFFixtures(sport:string, leagueId:number, leagueName:string, season:number, targetDate:string=""): Promise<AFFixture[]> {
+  const dateKey = targetDate || new Date().toISOString().slice(0,10);
+  const cacheKey = `${sport}_${leagueId}_${season}_${dateKey}`;
   const now = Date.now();
   const cached = afFixtureCache[cacheKey];
   if (cached && now - cached.fetchedAt < AF_CACHE_TTL) return cached.data;
@@ -199,9 +200,7 @@ async function fetchAFFixtures(sport:string, leagueId:number, leagueName:string,
   // 종목별 엔드포인트: 축구=fixtures, 농구/야구/배구=games
   const endpoint = sport==="축구" ? "fixtures" : "games";
   try {
-    const today = new Date().toISOString().slice(0,10);
-    const tomorrow = new Date(Date.now()+24*60*60*1000).toISOString().slice(0,10);
-    const url = `${base}/${endpoint}?league=${leagueId}&season=${season}&date=${today}`;
+    const url = `${base}/${endpoint}?league=${leagueId}&season=${season}&date=${dateKey}`;
     const res = await fetch(url, { headers:{"x-apisports-key":AF_KEY} });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const json = await res.json();
@@ -516,6 +515,16 @@ export default function App() {
   const [afLoading,setAfLoading] = useState(false);
   const [afLeagues,setAfLeagues] = useState<Record<string,AFLeagueInfo[]>>({});
   const [afLeagueLoading,setAfLeagueLoading] = useState(false);
+  const [afDateOffset,setAfDateOffset] = useState(0); // 0=오늘, 1=내일, -1=어제 등
+  // 숨긴 리그 관리
+  const [showHiddenPanel,setShowHiddenPanel] = useState(false);
+  const [leagueEditMode,setLeagueEditMode] = useState(false);
+  const [hiddenLeagues,setHiddenLeagues] = useState<Record<string,number[]>>(()=>{
+    try{const v=localStorage.getItem("bt_hidden_leagues");return v?JSON.parse(v):{};}catch{return {};}
+  });
+  const saveHiddenLeagues=(m:Record<string,number[]>)=>{setHiddenLeagues(m);try{localStorage.setItem("bt_hidden_leagues",JSON.stringify(m));}catch{}};
+  const hideLeague=(sport:string,id:number)=>{const m={...hiddenLeagues,[sport]:[...(hiddenLeagues[sport]||[]),id]};saveHiddenLeagues(m);};
+  const restoreLeague=(sport:string,id:number)=>{const m={...hiddenLeagues,[sport]:(hiddenLeagues[sport]||[]).filter(x=>x!==id)};saveHiddenLeagues(m);};
 
   const loadAfLeagues = async(sport: string) => {
     if (afLeagueListFetched[sport]) { setAfLeagues(p=>({...p,[sport]:afLeagueCache[sport]||[]})); return; }
@@ -529,12 +538,13 @@ export default function App() {
     } finally { setAfLeagueLoading(false); }
   };
 
-  const fetchAfLeague = async(sport: string, leagueName: string, leagueId: number, season: number) => {
+  const fetchAfLeague = async(sport: string, leagueName: string, leagueId: number, season: number, dayOffset:number=0) => {
     setAfLoading(true);
     try {
-      const games = await fetchAFFixtures(sport, leagueId, leagueName, season);
+      const dateKey = new Date(Date.now()+dayOffset*24*60*60*1000).toISOString().slice(0,10);
+      const games = await fetchAFFixtures(sport, leagueId, leagueName, season, dateKey);
       setAfGames(prev=>{
-        const others = prev.filter(g=>!(g.league.id===leagueId));
+        const others = prev.filter(g=>!(g.league.id===leagueId && g.fixture.date.slice(0,10)===dateKey));
         return [...others,...games];
       });
     } finally { setAfLoading(false); }
@@ -1407,11 +1417,40 @@ export default function App() {
                   </button>
                 ))}
               </div>
+              <div style={{display:"flex",gap:3,marginTop:4}}>
+                <button onClick={()=>{setLeagueEditMode(p=>!p);setShowHiddenPanel(false);}}
+                  style={{flex:1,padding:"3px 0",fontSize:9,borderRadius:4,border:`1px solid ${leagueEditMode?C.red:C.border}`,background:leagueEditMode?`${C.red}22`:C.bg2,color:leagueEditMode?C.red:C.muted,cursor:"pointer",fontWeight:leagueEditMode?700:400}}>
+                  {leagueEditMode?"✓ 완료":"✏️ 편집"}
+                </button>
+                <button onClick={()=>{setShowHiddenPanel(p=>!p);setLeagueEditMode(false);}}
+                  style={{flex:1,padding:"3px 0",fontSize:9,borderRadius:4,border:`1px solid ${showHiddenPanel?C.amber:C.border}`,background:showHiddenPanel?`${C.amber}22`:C.bg2,color:showHiddenPanel?C.amber:C.muted,cursor:"pointer"}}>
+                  🗑 숨긴리그 ({Object.values(hiddenLeagues).flat().length})
+                </button>
+              </div>
             </div>
             <div style={{flex:1,overflowY:"auto",padding:"6px 0"}}>
+              {/* 숨긴 리그 패널 */}
+              {showHiddenPanel&&(
+                <div style={{padding:"8px 10px",borderBottom:`1px solid ${C.border}`,background:C.bg}}>
+                  <div style={{fontSize:10,fontWeight:700,color:C.purple,marginBottom:6}}>🗄 숨긴 리그 (클릭으로 복원)</div>
+                  {(hiddenLeagues[bettingSportCat]||[]).length===0&&<div style={{fontSize:10,color:C.dim}}>숨긴 리그 없음</div>}
+                  {(hiddenLeagues[bettingSportCat]||[]).map(hid=>{
+                    const info=(afLeagues[bettingSportCat]||[]).find(l=>l.id===hid);
+                    if(!info)return null;
+                    const nameKr=leagueOverrides[info.name]||LEAGUE_KR[info.name]||info.name;
+                    return(
+                      <div key={hid} style={{display:"flex",alignItems:"center",gap:4,marginBottom:3}}>
+                        <span style={{flex:1,fontSize:10,color:C.muted}}>{nameKr}</span>
+                        <button onClick={()=>restoreLeague(bettingSportCat,hid)}
+                          style={{fontSize:9,padding:"1px 6px",borderRadius:3,border:`1px solid ${C.green}44`,background:`${C.green}11`,color:C.green,cursor:"pointer"}}>복원</button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
               {afLeagueLoading&&<div style={{textAlign:"center",color:C.muted,padding:"20px 0",fontSize:11}}>⏳ 리그 목록 로드중...</div>}
               {!afLeagueLoading&&(()=>{
-                const allLeagueList = afLeagues[bettingSportCat]||[];
+                const allLeagueList = (afLeagues[bettingSportCat]||[]).filter(l=>!(hiddenLeagues[bettingSportCat]||[]).includes(l.id));
                 const majorIds = AF_MAJOR_IDS[bettingSportCat]||[];
                 const major = allLeagueList.filter(l=>majorIds.includes(l.id));
                 // 국가별 그룹
@@ -1422,29 +1461,53 @@ export default function App() {
                   countryGroups[c].push(l);
                 });
                 const sortedCountries = Object.keys(countryGroups).sort((a,b)=>a.localeCompare(b,"ko"));
-                const renderBtn = (l: AFLeagueInfo) => {
+                // 숨긴 리그 패널 - 복원 목록
+                if(showHiddenPanel) {
+                  const hiddenIds = hiddenLeagues[bettingSportCat]||[];
+                  const hiddenList = allLeagueList.filter(l=>hiddenIds.includes(l.id));
+                  return(<>
+                    <div style={{padding:"4px 10px",fontSize:9,color:C.amber,fontWeight:700}}>🗑 숨긴 리그 ({hiddenList.length})</div>
+                    {hiddenList.length===0&&<div style={{textAlign:"center",color:C.dim,padding:"20px 0",fontSize:10}}>숨긴 리그 없음</div>}
+                    {hiddenList.map(l=>{
+                      const nameKr=leagueOverrides[l.name]||LEAGUE_KR[l.name]||l.name;
+                      return(
+                        <div key={l.id} style={{display:"flex",alignItems:"center",gap:2,padding:"4px 6px"}}>
+                          <span style={{flex:1,fontSize:11,color:C.muted}}>{nameKr}</span>
+                          <button onClick={()=>showLeague(bettingSportCat,l.id)}
+                            style={{fontSize:9,padding:"2px 7px",borderRadius:4,border:`1px solid ${C.green}44`,background:`${C.green}11`,color:C.green,cursor:"pointer"}}>복원</button>
+                        </div>
+                      );
+                    })}
+                  </>);
+                }
+                const hiddenIds = hiddenLeagues[bettingSportCat]||[];
+                const renderBtn = (l: AFLeagueInfo, isMajor=false) => {
+                  if(hiddenIds.includes(l.id)) return null;
                   const sel = bettingLeague===`${l.id}`;
                   const nameKr = leagueOverrides[l.name]||LEAGUE_KR[l.name]||l.name;
                   return(
-                    <div key={l.id} style={{display:"flex",alignItems:"center",gap:2}}>
+                    <div key={l.id} style={{display:"flex",alignItems:"center",gap:1}}>
+                      {leagueEditMode&&<button onClick={()=>hideLeague(bettingSportCat,l.id)}
+                        style={{background:"transparent",border:"none",color:C.red,cursor:"pointer",fontSize:12,padding:"2px 4px",flexShrink:0}}>✕</button>}
                       <button onClick={()=>{
+                        if(leagueEditMode)return;
                         setBettingLeague(`${l.id}`);
                         setBettingSelectedGame(null);
-                        fetchAfLeague(bettingSportCat, l.name, l.id, l.season);
+                        const td=new Date(Date.now()+afDateOffset*24*60*60*1000).toISOString().slice(0,10);fetchAfLeague(bettingSportCat, l.name, l.id, l.season, td);
                       }}
-                        style={{flex:1,textAlign:"left",padding:"5px 10px",background:sel?`${C.teal}22`:"transparent",border:"none",borderLeft:sel?`3px solid ${C.teal}`:"3px solid transparent",color:sel?C.teal:C.text,cursor:"pointer",fontSize:10,fontWeight:sel?700:400,lineHeight:1.3}}>
+                        style={{flex:1,textAlign:"left",padding:"6px 10px",background:sel?`${C.teal}22`:"transparent",border:"none",borderLeft:sel?`3px solid ${C.teal}`:"3px solid transparent",color:sel?C.teal:C.text,cursor:leagueEditMode?"default":"pointer",fontSize:12,fontWeight:sel?700:400,lineHeight:1.3}}>
                         {nameKr}
                       </button>
-                      <button onClick={()=>{const k=prompt(`"${l.name}" 한글 이름:`,nameKr);if(k){const m={...leagueOverrides,[l.name]:k};setLeagueOverrides(m);saveLeagueOverrides(m);}}}
-                        style={{background:"transparent",border:"none",color:C.dim,cursor:"pointer",fontSize:9,padding:"2px 4px",flexShrink:0}}>✏️</button>
+                      {leagueEditMode&&<button onClick={()=>{const k=prompt(`한글 이름:`,nameKr);if(k){const m={...leagueOverrides,[l.name]:k};setLeagueOverrides(m);saveLeagueOverrides(m);}}}
+                        style={{background:"transparent",border:"none",color:C.dim,cursor:"pointer",fontSize:9,padding:"2px 3px",flexShrink:0}}>✏️</button>}
                     </div>
                   );
                 };
                 return(<>
                   {major.length>0&&(
                     <>
-                      <div style={{padding:"3px 10px",fontSize:9,color:C.amber,fontWeight:700,letterSpacing:1}}>★ 주요 리그</div>
-                      {major.map(renderBtn)}
+                      <div style={{padding:"5px 10px",fontSize:11,color:C.amber,fontWeight:800,letterSpacing:1}}>★ 주요 리그</div>
+                      {major.map(l=>renderBtn(l,true))}
                     </>
                   )}
                   {sortedCountries.map(country=>(
@@ -1468,17 +1531,36 @@ export default function App() {
 
           {/* 열2 - 경기 목록 (AF) */}
           <div style={{width:290,flexShrink:0,borderRight:`1px solid ${C.border2}`,display:"flex",flexDirection:"column",overflow:"hidden"}}>
-            <div style={{padding:"8px 10px",borderBottom:`1px solid ${C.border}`,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-              <div style={{fontSize:11,fontWeight:800,color:C.amber}}>{(()=>{const l=(afLeagues[bettingSportCat]||[]).find(l=>`${l.id}`===bettingLeague);if(!l)return bettingLeague||"리그 선택";return leagueOverrides[l.name]||LEAGUE_KR[l.name]||l.name;})()} <span style={{fontSize:9,color:C.dim}}>24h</span></div>
-              <button onClick={()=>{
-                if(!bettingLeague)return;
-                const lid=parseInt(bettingLeague)||0;
-                const info=(afLeagues[bettingSportCat]||[]).find(l=>l.id===lid);
-                if(info)fetchAfLeague(bettingSportCat,info.name,info.id,info.season);
-              }} disabled={afLoading}
-                style={{fontSize:10,padding:"2px 7px",borderRadius:4,border:`1px solid ${C.teal}44`,background:`${C.teal}11`,color:afLoading?C.muted:C.teal,cursor:"pointer"}}>
-                {afLoading?"⏳":"🔄"}
-              </button>
+            <div style={{borderBottom:`1px solid ${C.border}`,flexShrink:0}}>
+              <div style={{padding:"6px 10px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                <div style={{fontSize:11,fontWeight:800,color:C.amber,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>
+                  {(()=>{const l=(afLeagues[bettingSportCat]||[]).find(l=>`${l.id}`===bettingLeague);if(!l)return bettingLeague||"리그 선택";return leagueOverrides[l.name]||LEAGUE_KR[l.name]||l.name;})()}
+                </div>
+                <button onClick={()=>{
+                  if(!bettingLeague)return;
+                  const lid=parseInt(bettingLeague)||0;
+                  const info=(afLeagues[bettingSportCat]||[]).find(l=>l.id===lid);
+                  if(info)fetchAfLeague(bettingSportCat,info.name,info.id,info.season,afDateOffset);
+                }} disabled={afLoading}
+                  style={{fontSize:10,padding:"2px 7px",borderRadius:4,border:`1px solid ${C.teal}44`,background:`${C.teal}11`,color:afLoading?C.muted:C.teal,cursor:"pointer",flexShrink:0}}>
+                  {afLoading?"⏳":"🔄"}
+                </button>
+              </div>
+              {/* 날짜 필터 탭 */}
+              <div style={{display:"flex",gap:3,padding:"4px 8px",overflowX:"auto"}}>
+                {[{label:"오늘",off:0},{label:"내일",off:1},{label:"2일후",off:2},{label:"3일후",off:3},{label:"4일후",off:4},{label:"5일후",off:5}].map(({label,off})=>(
+                  <button key={off} onClick={()=>{
+                    setAfDateOffset(off);
+                    const lid=parseInt(bettingLeague)||0;
+                    const info=(afLeagues[bettingSportCat]||[]).find(l=>l.id===lid);
+                    const td=new Date(Date.now()+off*24*60*60*1000).toISOString().slice(0,10);
+                    if(info)fetchAfLeague(bettingSportCat,info.name,info.id,info.season,off);
+                  }}
+                    style={{padding:"3px 8px",borderRadius:4,border:afDateOffset===off?`1px solid ${C.amber}`:`1px solid ${C.border}`,background:afDateOffset===off?`${C.amber}22`:C.bg2,color:afDateOffset===off?C.amber:C.muted,cursor:"pointer",fontSize:9,fontWeight:afDateOffset===off?700:400,flexShrink:0}}>
+                    {label}
+                  </button>
+                ))}
+              </div>
             </div>
             <div style={{flex:1,overflowY:"auto",padding:8}}>
               {!bettingLeague&&<div style={{textAlign:"center",color:C.dim,padding:"30px 0",fontSize:11}}>리그를 선택하세요</div>}
@@ -1486,13 +1568,12 @@ export default function App() {
               {bettingLeague&&bettingSportCat==="축구"&&afLoading&&<div style={{textAlign:"center",color:C.teal,padding:"30px 0",fontSize:11}}>⏳ 불러오는 중...</div>}
               {bettingLeague&&!afLoading&&(()=>{
                 const lid=parseInt(bettingLeague)||0;
-                const now=Date.now();
-                const in24h=now+24*60*60*1000;
+                const targetDate=new Date(Date.now()+afDateOffset*24*60*60*1000).toISOString().slice(0,10);
                 const games=afGames.filter(g=>{
-                  const gt=new Date(g.fixture.date).getTime();
-                  return (lid?g.league.id===lid:true)&&gt>=now&&gt<=in24h;
+                  const gdate=g.fixture.date?g.fixture.date.slice(0,10):"";
+                  return (lid?g.league.id===lid:true)&&gdate===targetDate;
                 }).sort((a,b)=>new Date(a.fixture.date).getTime()-new Date(b.fixture.date).getTime());
-                if(games.length===0)return<div style={{textAlign:"center",color:C.dim,padding:"30px 0",fontSize:11}}>24시간 이내 경기 없음<br/><span style={{fontSize:9}}>🔄 새로고침</span></div>;
+                if(games.length===0)return<div style={{textAlign:"center",color:C.dim,padding:"30px 0",fontSize:11}}>{targetDate} 경기 없음<br/><span style={{fontSize:9}}>🔄 새로고침</span></div>;
                 return games.map(g=>{
                   const sel=bettingSelectedGame?.id===String(g.fixture.id);
                   const dt=new Date(g.fixture.date);
