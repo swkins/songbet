@@ -100,14 +100,20 @@ async function fetchOddsMulti(eventIds: string[]): Promise<Record<string,Partial
   for(const chunk of chunks) {
     try {
       oaioLogRequest();
-      const url = `${OAIO_BASE}/odds/multi?apiKey=${OAIO_KEY}&eventIds=${chunk.join(",")}&bookmakers=Bet365,1xBet,Pinnacle,Unibet`;
+      // MLB는 DraftKings, FanDuel 같은 미국 북메이커가 필요할 수 있음
+      const url = `${OAIO_BASE}/odds/multi?apiKey=${OAIO_KEY}&eventIds=${chunk.join(",")}&bookmakers=Bet365,1xBet,Pinnacle,DraftKings,FanDuel,Unibet`;
       const res = await fetch(url);
-      if(!res.ok) { console.error("[OAIO odds/multi]", res.status); continue; }
+      if(!res.ok) {
+        console.error(`[OAIO odds/multi] HTTP ${res.status}`, await res.text().catch(()=>""));
+        continue;
+      }
       const json = await res.json();
+      console.log("[OAIO odds/multi] 응답:", JSON.stringify(json).slice(0,500));
       const list: any[] = Array.isArray(json) ? json : (json.data || []);
       list.forEach((item: any) => {
         const id = String(item.id);
         const parsed = parseOddsResponse(item);
+        console.log(`[OAIO odds] id=${id} homeOdds=${parsed.homeOdds} awayOdds=${parsed.awayOdds} ouLines=${parsed.ouLines?.length??0}`);
         oddsCache[id] = { data: parsed, fetchedAt: now };
         result[id] = parsed;
       });
@@ -120,8 +126,7 @@ async function fetchOddsMulti(eventIds: string[]): Promise<Record<string,Partial
 function parseOddsResponse(item: any): Partial<OAIOEvent> {
   const out: Partial<OAIOEvent> = {};
   const bookmakers: Record<string,any[]> = item.bookmakers || {};
-  // 북메이커 우선순위
-  const priority = ["Pinnacle","Bet365","1xBet","Unibet"];
+  const priority = ["Pinnacle","Bet365","DraftKings","FanDuel","1xBet","Unibet"];
   const allBkNames = Object.keys(bookmakers);
   const bkOrder = [
     ...priority.filter(b=>allBkNames.includes(b)),
@@ -131,39 +136,43 @@ function parseOddsResponse(item: any): Partial<OAIOEvent> {
   for(const bk of bkOrder) {
     const markets: any[] = bookmakers[bk] || [];
 
-    // ML (승무패)
+    // ML (승무패/머니라인) — 이름이 다양함
     if(!out.homeOdds) {
-      const ml = markets.find((m:any) => m.name==="ML" || m.name==="Match Result" || m.name==="1X2");
+      const ml = markets.find((m:any) =>
+        ["ML","Moneyline","Match Result","1X2","Head to Head","Winner"].includes(m.name)
+      );
       if(ml?.odds?.[0]) {
         const o = ml.odds[0];
-        if(parseFloat(o.home)>1) out.homeOdds = parseFloat(o.home);
-        if(parseFloat(o.away)>1) out.awayOdds = parseFloat(o.away);
-        if(o.draw && parseFloat(o.draw)>1) out.drawOdds = parseFloat(o.draw);
+        const h = parseFloat(String(o.home ?? o["1"] ?? "0"));
+        const a = parseFloat(String(o.away ?? o["2"] ?? "0"));
+        const d = parseFloat(String(o.draw ?? o.x ?? o["X"] ?? "0"));
+        if(h>1) out.homeOdds = h;
+        if(a>1) out.awayOdds = a;
+        if(d>1) out.drawOdds = d;
       }
     }
 
-    // Over/Under
+    // Over/Under (토탈) — Totals, Over/Under, Total, Total Goals 등
     if(!out.ouLines || out.ouLines.length===0) {
       const ou = markets.find((m:any) =>
-        m.name==="Over/Under" || m.name==="Totals" || m.name==="Total Goals" || m.name==="Total"
+        ["Over/Under","Totals","Total","Total Goals","Total Runs","Total Points"].includes(m.name)
       );
       if(ou?.odds) {
         const lines: {line:number;over:number;under:number}[] = [];
         ou.odds.forEach((o:any) => {
-          const line = parseFloat(o.max ?? o.line ?? o.total ?? "0");
-          const over = parseFloat(o.over ?? "0");
-          const under = parseFloat(o.under ?? "0");
+          const line = parseFloat(String(o.max ?? o.line ?? o.total ?? o.hdp ?? "0"));
+          const over = parseFloat(String(o.over ?? o.o ?? "0"));
+          const under = parseFloat(String(o.under ?? o.u ?? "0"));
           if(line>0 && over>1 && under>1) lines.push({line,over,under});
         });
         if(lines.length>0) {
-          // 2.5, 3.5 우선으로 정렬
           lines.sort((a,b)=>a.line-b.line);
           out.ouLines = lines;
         }
       }
     }
 
-    if(out.homeOdds && out.ouLines?.length) break; // 둘 다 찾으면 종료
+    if(out.homeOdds && out.ouLines?.length) break;
   }
   return out;
 }
@@ -853,7 +862,10 @@ export default function App() {
   },[bettingLeague]);
 
   useEffect(()=>{
-    if(tab==="odds") loadOddsTabEvents(oddsDateOffset);
+    // 베팅탭 또는 배당탭 진입 시 자동 fetch
+    if(tab==="odds" || tab==="betting") {
+      loadOddsTabEvents(oddsDateOffset);
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[tab, oddsDateOffset]);
 
@@ -1546,7 +1558,7 @@ export default function App() {
                 const countries = Object.keys(tree).sort((a,b)=>a.localeCompare(b,"ko"));
                 if(countries.length===0) return(
                   <div style={{textAlign:"center",color:C.dim,padding:"30px 10px",fontSize:11}}>
-                    배당탭에서 먼저<br/>경기를 불러오세요
+                    ⏳ 경기 불러오는 중...
                   </div>
                 );
                 return countries.map(country=>{
