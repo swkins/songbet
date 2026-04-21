@@ -567,6 +567,34 @@ export default function App() {
     } finally { setAfLeagueLoading(false); }
   };
 
+  // 리그 선택 없이 오늘 전체 경기 가져오기
+  const fetchAfAllToday = async(sport: string, dayOffset:number=0) => {
+    setAfLoading(true);
+    try {
+      const dateKey = getKSTDateStr(dayOffset);
+      const base = AF_BASES[sport] || AF_BASES["축구"];
+      const endpoint = sport==="축구" ? "fixtures" : "games";
+      const url = sport==="축구"
+        ? `${base}/${endpoint}?date=${dateKey}`
+        : `${base}/${endpoint}?date=${dateKey}&season=${getSeasonForSport(sport)}`;
+      const res = await fetch(url, {headers:{"x-apisports-key":AF_KEY}});
+      if(!res.ok) return;
+      const json = await res.json();
+      const raw: any[] = json.response||[];
+      const toFix = (item:any) => {
+        if(item.fixture) return item as AFFixture;
+        const hs=item.scores?.home?.total??item.scores?.home?.points??null;
+        const as_=item.scores?.away?.total??item.scores?.away?.points??null;
+        return {id:item.id,fixture:{id:item.id,date:item.date||item.time||"",status:{short:item.status?.short||"NS",elapsed:null}},league:item.league||{id:0,name:"",country:"",logo:""},teams:{home:item.teams?.home||{id:0,name:"홈팀",logo:""},away:item.teams?.away||{id:0,name:"원정팀",logo:""}},goals:{home:hs,away:as_},score:{fulltime:{home:hs,away:as_}}} as AFFixture;
+      };
+      const games = raw.map(toFix);
+      setAfGames(prev=>{
+        const others = prev.filter(g=>g.fixture.date.slice(0,10)!==dateKey);
+        return [...others,...games];
+      });
+    } finally { setAfLoading(false); }
+  };
+
   const fetchAfLeague = async(sport: string, leagueName: string, leagueId: number, season: number, dayOffset:number=0) => {
     setAfLoading(true);
     try {
@@ -1595,17 +1623,27 @@ export default function App() {
               </div>
             </div>
             <div style={{flex:1,overflowY:"auto",padding:8}}>
-              {!bettingLeague&&<div style={{textAlign:"center",color:C.dim,padding:"30px 0",fontSize:11}}>리그를 선택하세요</div>}
-
-              {bettingLeague&&bettingSportCat==="축구"&&afLoading&&<div style={{textAlign:"center",color:C.teal,padding:"30px 0",fontSize:11}}>⏳ 불러오는 중...</div>}
-              {bettingLeague&&!afLoading&&(()=>{
+              {/* 리그 미선택시 전체경기 버튼 */}
+              {!bettingLeague&&(
+                <div style={{textAlign:"center",padding:"20px 10px"}}>
+                  <div style={{fontSize:11,color:C.dim,marginBottom:10}}>리그를 선택하거나<br/>전체 경기를 불러오세요</div>
+                  <button onClick={()=>fetchAfAllToday(bettingSportCat,afDateOffset)}
+                    disabled={afLoading}
+                    style={{padding:"8px 20px",borderRadius:7,border:`1px solid ${C.amber}`,background:`${C.amber}22`,color:afLoading?C.muted:C.amber,cursor:"pointer",fontWeight:700,fontSize:12}}>
+                    {afLoading?"⏳ 불러오는 중...":"📅 전체 경기 불러오기"}
+                  </button>
+                </div>
+              )}
+              {afLoading&&<div style={{textAlign:"center",color:C.teal,padding:"20px 0",fontSize:11}}>⏳ 불러오는 중...</div>}
+              {!afLoading&&(()=>{
                 const lid=parseInt(bettingLeague)||0;
                 const targetDate=getKSTDateStr(afDateOffset);
                 const games=afGames.filter(g=>{
                   const gdate=g.fixture.date?g.fixture.date.slice(0,10):"";
                   return (lid?g.league.id===lid:true)&&gdate===targetDate;
                 }).sort((a,b)=>new Date(a.fixture.date).getTime()-new Date(b.fixture.date).getTime());
-                if(games.length===0)return<div style={{textAlign:"center",color:C.dim,padding:"30px 0",fontSize:11}}>{targetDate} 경기 없음<br/><span style={{fontSize:9}}>🔄 새로고침</span></div>;
+                if(games.length===0&&(bettingLeague||afGames.length>0))return<div style={{textAlign:"center",color:C.dim,padding:"20px 0",fontSize:11}}>{targetDate} 경기 없음<br/><span style={{fontSize:9}}>🔄 새로고침</span></div>;
+                if(games.length===0)return null;
                 return games.map(g=>{
                   const sel=bettingSelectedGame?.id===String(g.fixture.id);
                   const dt=new Date(g.fixture.date);
@@ -1625,6 +1663,7 @@ export default function App() {
                         </div>
                         {isFinished&&<div style={{fontSize:10,fontWeight:800,color:C.amber}}>{g.goals.home} - {g.goals.away}</div>}
                       </div>
+                      {!bettingLeague&&<div style={{fontSize:8,color:C.purple,marginBottom:2}}>{leagueOverrides[g.league.name]||LEAGUE_KR[g.league.name]||g.league.name}</div>}
                       <div style={{fontSize:11,fontWeight:700,color:C.text}}>{homeKr}</div>
                       <div style={{fontSize:9,color:C.dim,margin:"2px 0"}}>vs</div>
                       <div style={{fontSize:11,fontWeight:700,color:C.text}}>{awayKr}</div>
