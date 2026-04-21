@@ -1339,7 +1339,7 @@ export default function App() {
                     <div style={{fontSize:10,marginBottom:3}}>{d.label}</div>
                     <div style={{fontSize:18,fontWeight:900}}>{(d.odds||0).toFixed(2)}</div>
                   </button>
-                );}).filter(Boolean)}
+                );})}
               </div>
             </div>
             {/* 사이트 */}
@@ -1577,18 +1577,20 @@ export default function App() {
               </div>
               {/* 날짜 필터 탭 */}
               <div style={{display:"flex",gap:3,padding:"4px 8px",overflowX:"auto"}}>
-                {[0,1,2,3,4,5].map((off)=>{const label=off===0?"오늘":getKSTDateStr(off).slice(5);return(
-                  <button key={off} onClick={()=>{
-                    setAfDateOffset(off);
-                    const lid=parseInt(bettingLeague)||0;
-                    const info=(afLeagues[bettingSportCat]||[]).find(l=>l.id===lid);
-                    const td=getKSTDateStr(off);
-                    if(info)fetchAfLeague(bettingSportCat,info.name,info.id,info.season,off);
-                  }}
-                    style={{padding:"3px 8px",borderRadius:4,border:afDateOffset===off?`1px solid ${C.amber}`:`1px solid ${C.border}`,background:afDateOffset===off?`${C.amber}22`:C.bg2,color:afDateOffset===off?C.amber:C.muted,cursor:"pointer",fontSize:9,fontWeight:afDateOffset===off?700:400,flexShrink:0}}>
-                    {label}
-                  </button>
-                ))}
+                {([0,1,2,3,4,5] as number[]).map((off:number)=>{
+                  const label=off===0?"오늘":getKSTDateStr(off).slice(5);
+                  return(
+                    <button key={off} onClick={()=>{
+                      setAfDateOffset(off);
+                      const lid=parseInt(bettingLeague)||0;
+                      const info=(afLeagues[bettingSportCat]||[]).find(l=>l.id===lid);
+                      if(info)fetchAfLeague(bettingSportCat,info.name,info.id,info.season,off);
+                    }}
+                      style={{padding:"3px 8px",borderRadius:4,border:afDateOffset===off?`1px solid ${C.amber}`:`1px solid ${C.border}`,background:afDateOffset===off?`${C.amber}22`:C.bg2,color:afDateOffset===off?C.amber:C.muted,cursor:"pointer",fontSize:9,fontWeight:afDateOffset===off?700:400,flexShrink:0}}>
+                      {label}
+                    </button>
+                  );
+                })}
               </div>
             </div>
             <div style={{flex:1,overflowY:"auto",padding:8}}>
