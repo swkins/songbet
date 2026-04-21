@@ -121,14 +121,14 @@ async function fetchOAIOSport(sport: string): Promise<OAIOEvent[]> {
 
   const doFetch = async(key: string): Promise<any[]> => {
     oaioLogRequest();
-    // bookmaker 파라미터로 배당 함께 요청
-    const url = `${OAIO_BASE}/events?apiKey=${OAIO_KEY}&sport=${key}&limit=500&bookmaker=Bet365`;
+    // status=pending,live 로 예정+진행중 경기만 가져옴, bookmaker로 배당 함께
+    const url = `${OAIO_BASE}/events?apiKey=${OAIO_KEY}&sport=${key}&limit=500&bookmaker=Bet365&status=pending,live`;
     const res = await fetch(url);
     if(res.status === 429) {
       console.warn(`[OAIO] 429 Too Many Requests - sport:${key}`);
       return [];
     }
-    if(res.status === 404) return null as any; // null = 이 키 지원 안 함
+    if(res.status === 404) return null as any;
     if(!res.ok) throw new Error(`HTTP ${res.status}`);
     const json = await res.json();
     return Array.isArray(json) ? json : (json.data || json.events || []);
@@ -614,15 +614,18 @@ export default function App() {
       for(const s of OAIO_FETCH_KEYS) {
         await fetchOAIOSport(s);
       }
+      // fetch 완료 후 캐시 전체 다시 읽어서 상태 업데이트
+      const store = loadCache();
+      setCachedEvents(OAIO_FETCH_KEYS.flatMap(k => store[k]?.data ?? []));
     } finally { setOddsTabLoading(false); }
   };
 
-  // 캐시에서 전체 이벤트 읽기 — oddsTabLoading 토글 시 갱신
-  const cachedEvents = useMemo(()=>{
+  // 캐시 이벤트 — 초기 로드 + fetch 완료 후 갱신
+  const [cachedEvents, setCachedEvents] = useState<OAIOEvent[]>(()=>{
+    // 앱 시작 시 localStorage에서 즉시 로드
     const store = loadCache();
     return OAIO_FETCH_KEYS.flatMap(k => store[k]?.data ?? []);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[oddsTabLoading]);
+  });
 
 
 
@@ -1554,7 +1557,7 @@ export default function App() {
                 const countries = Object.keys(tree).sort((a,b)=>a.localeCompare(b,"ko"));
                 if(countries.length===0) return(
                   <div style={{textAlign:"center",color:C.dim,padding:"30px 10px",fontSize:11}}>
-                    ⏳ 경기 불러오는 중...
+                    {oddsTabLoading ? "⏳ 불러오는 중..." : "경기 없음"}
                   </div>
                 );
                 return countries.map(country=>{
@@ -1623,7 +1626,9 @@ export default function App() {
                   .filter(e=>SPORT_MAP[e.sport]===bettingSportCat && e.league===bettingLeague && e.status!=="finished")
                   .sort((a,b)=>new Date(a.startTime).getTime()-new Date(b.startTime).getTime());
                 if(events.length===0) return(
-                  <div style={{textAlign:"center",color:C.dim,padding:"40px 12px",fontSize:11}}>예정 경기 없음</div>
+                  <div style={{textAlign:"center",color:C.dim,padding:"40px 12px",fontSize:11}}>
+                    {oddsTabLoading ? "⏳ 불러오는 중..." : "예정 경기 없음"}
+                  </div>
                 );
                 return events.map(e=>{
                   const sel = bettingSelectedGame?.id===e.id;
