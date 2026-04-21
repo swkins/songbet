@@ -28,19 +28,108 @@ const C = {
 const ODDS_API_KEY = (import.meta.env.VITE_ODDS_API_KEY as string) ?? "";
 const ODDS_BASE    = "https://api.the-odds-api.com/v4";
 const SPORT_KEY_MAP: Record<string, string> = {
-  "프리미어리그": "soccer_epl",
-  "라리가":       "soccer_spain_la_liga",
-  "분데스리가":   "soccer_germany_bundesliga",
-  "세리에A":      "soccer_italy_serie_a",
-  "리그1":        "soccer_france_ligue_one",
-  "챔피언스리그": "soccer_uefa_champs_league",
-  "유로파리그":   "soccer_uefa_europa_league",
-  "K리그":        "soccer_korea_kleague1",
-  "NBA":          "basketball_nba",
-  "MLB":          "baseball_mlb",
-  "KBO":          "baseball_korea",
-  "NPB":          "baseball_npb",
+  // ── 축구 ──
+  "프리미어리그":       "soccer_epl",
+  "라리가":             "soccer_spain_la_liga",
+  "분데스리가":         "soccer_germany_bundesliga",
+  "세리에A":            "soccer_italy_serie_a",
+  "리그1":              "soccer_france_ligue_one",
+  "챔피언스리그":       "soccer_uefa_champs_league",
+  "유로파리그":         "soccer_uefa_europa_league",
+  "유로파컨퍼런스리그": "soccer_uefa_europa_conference_league",
+  "UEFA 네이션스리그":  "soccer_uefa_nations_league",
+  "K리그":              "soccer_korea_kleague1",
+  "에레디비시":         "soccer_netherlands_eredivisie",
+  "포르투갈리그":       "soccer_portugal_primeira_liga",
+  "터키 쉬퍼리그":      "soccer_turkey_super_league",
+  "벨기에 퍼스트A":     "soccer_belgium_first_div",
+  "MLS":                "soccer_usa_mls",
+  "브라질 세리에A":     "soccer_brazil_campeonato",
+  "아르헨티나 프리메라":"soccer_argentina_primera_division",
+  "일본 J리그":         "soccer_japan_j_league",
+  "호주 A리그":         "soccer_australia_aleague",
+  // ── 농구 ──
+  "NBA":                "basketball_nba",
+  "NCAA":               "basketball_ncaab",
+  "유로리그":           "basketball_euroleague",
+  // ── 야구 ──
+  "MLB":                "baseball_mlb",
+  "KBO":                "baseball_korea",
+  "NPB":                "baseball_npb",
+  // ── 아이스하키 ──
+  "NHL":                "icehockey_nhl",
+  // ── 미식축구 ──
+  "NFL":                "americanfootball_nfl",
+  // ── 종합격투기 ──
+  "UFC":                "mma_mixed_martial_arts",
 };
+
+// ── API-Football ─────────────────────────────────────────────
+const AF_KEY = (import.meta.env.VITE_APIFOOTBALL_KEY as string) ?? "";
+const AF_BASE = "https://v3.football.api-sports.io";
+const AF_CACHE_TTL = 15 * 60 * 1000; // 15분
+
+// API-Football 리그 ID 맵 (주요리그)
+const AF_LEAGUE_ID: Record<string,number> = {
+  "프리미어리그":2,"라리가":140,"분데스리가":78,"세리에A":135,"리그1":61,
+  "챔피언스리그":2,"유로파리그":3,"유로파컨퍼런스리그":848,"UEFA 네이션스리그":5,
+  "K리그":292,"에레디비시":88,"포르투갈리그":94,"터키 쉬퍼리그":203,
+  "벨기에 퍼스트A":144,"MLS":253,"브라질 세리에A":71,"아르헨티나 프리메라":128,
+  "일본 J리그":98,"호주 A리그":188,"스코틀랜드 프리미어":179,
+};
+
+// 한글 팀명 매핑 (사용자가 추가/수정 가능)
+type TeamNameMap = Record<string,string>;
+const loadTeamNames = (): TeamNameMap => { try { const v=localStorage.getItem("bt_team_names"); return v?JSON.parse(v):{}; } catch { return {}; } };
+const saveTeamNames = (m:TeamNameMap) => { try { localStorage.setItem("bt_team_names",JSON.stringify(m)); } catch {} };
+const translateTeam = (name:string, map:TeamNameMap): string => map[name]||name;
+
+// API-Football 경기 타입
+interface AFFixture {
+  id: number;
+  league: { id:number; name:string; country:string; logo:string };
+  teams: { home:{id:number;name:string;logo:string}; away:{id:number;name:string;logo:string} };
+  fixture: { date:string; status:{short:string;elapsed:number|null} };
+  goals: { home:number|null; away:number|null };
+  score: { fulltime:{home:number|null;away:number|null} };
+}
+
+const afFixtureCache: Record<string,{data:AFFixture[];fetchedAt:number}> = {};
+const afResultCache: {data:AFFixture[];fetchedAt:number}|null = null;
+let afResultCacheStore: {data:AFFixture[];fetchedAt:number}|null = null;
+
+async function fetchAFFixtures(leagueId:number, leagueName:string, season:number=2024): Promise<AFFixture[]> {
+  const cacheKey = \`\${leagueId}_\${season}\`;
+  const now = Date.now();
+  const cached = afFixtureCache[cacheKey];
+  if (cached && now - cached.fetchedAt < AF_CACHE_TTL) return cached.data;
+  try {
+    const today = new Date().toISOString().slice(0,10);
+    const tomorrow = new Date(Date.now()+24*60*60*1000).toISOString().slice(0,10);
+    const url = \`\${AF_BASE}/fixtures?league=\${leagueId}&season=\${season}&from=\${today}&to=\${tomorrow}\`;
+    const res = await fetch(url, { headers:{"x-apisports-key":AF_KEY} });
+    if (!res.ok) throw new Error(\`HTTP \${res.status}\`);
+    const json = await res.json();
+    const data: AFFixture[] = json.response || [];
+    afFixtureCache[cacheKey] = {data, fetchedAt:now};
+    return data;
+  } catch(e) { return cached?.data??[]; }
+}
+
+async function fetchAFTodayResults(): Promise<AFFixture[]> {
+  const now = Date.now();
+  if (afResultCacheStore && now - afResultCacheStore.fetchedAt < AF_CACHE_TTL) return afResultCacheStore.data;
+  try {
+    const today = new Date().toISOString().slice(0,10);
+    const url = \`\${AF_BASE}/fixtures?date=\${today}&status=FT-AET-PEN\`;
+    const res = await fetch(url, { headers:{"x-apisports-key":AF_KEY} });
+    if (!res.ok) throw new Error(\`HTTP \${res.status}\`);
+    const json = await res.json();
+    const data: AFFixture[] = json.response || [];
+    afResultCacheStore = {data, fetchedAt:now};
+    return data;
+  } catch(e) { return afResultCacheStore?.data??[]; }
+}
 
 const SCHEDULE_CACHE_TTL = 90 * 60 * 1000; // 90분
 const oddsCache: Record<string,{data:OddsGame[];fetchedAt:number}> = {};
@@ -125,13 +214,21 @@ const fmtProfit = (n:number,dollar:boolean) => { const abs=Math.abs(n); const st
 
 const MAJOR:Record<string,string[]> = {
   축구:["프리미어리그","라리가","분데스리가","세리에A","리그1","챔피언스리그"],
-  농구:["NBA","KBL"], 야구:["MLB","KBO","NPB"], 배구:["V리그 남자","V리그 여자"], E스포츠:["LCK","LPL","LEC","LCS","LCP","CBLOL"],
+  농구:["NBA","NCAA","유로리그"],
+  야구:["MLB","KBO","NPB"],
+  배구:["V리그 남자","V리그 여자"],
+  E스포츠:["LCK","LPL","LEC","LCS","LCP","CBLOL"],
 };
 const EXTRA:Record<string,string[]> = {
-  축구:["K리그","유로파리그","유로파컨퍼런스리그","UEFA 네이션스리그"].sort(),
-  농구:["NCAA","유로리그"].sort(), 야구:[], 배구:["이탈리아 세리에A","일본 V리그"].sort(),
+  축구:["K리그","유로파리그","유로파컨퍼런스리그","UEFA 네이션스리그","에레디비시","포르투갈리그","터키 쉬퍼리그","벨기에 퍼스트A","MLS","브라질 세리에A","아르헨티나 프리메라","일본 J리그","호주 A리그"].sort(),
+  농구:["NHL","NFL","UFC"].sort(),
+  야구:[],
+  배구:["이탈리아 세리에A","일본 V리그"].sort(),
   E스포츠:["MSI","롤드컵","발로란트 챔피언스","오버워치 리그"].sort(),
 };
+
+// API 지원 여부 확인 (배당 없는 리그)
+const NO_API_LEAGUES = new Set(["KBL","V리그 남자","V리그 여자","이탈리아 세리에A","일본 V리그","LCK","LPL","LEC","LCS","LCP","CBLOL","MSI","롤드컵","발로란트 챔피언스","오버워치 리그"]);
 
 const getOptGroups = (cat:string) => {
   if(cat==="축구") return [{g:"홈",opts:["홈 0.5","홈 1.5","홈 2.5"]},{g:"원정",opts:["원정 0.5","원정 1.5","원정 2.5"]}];
@@ -243,7 +340,7 @@ export default function App() {
   const today = useTodayStr();
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const [tab,setTab]=useState<"betting"|"stats"|"roi"|"strategy"|"log"|"points"|"pending">("betting");
+  const [tab,setTab]=useState<"home"|"betting"|"stats"|"roi"|"strategy"|"log"|"points"|"pending">("home");
   const [statTab,setStatTab]=useState<"overview"|"daily"|"baseball"|"adv">("overview");
   const [bbSub,setBbSub]=useState<"league"|"option">("league");
   const [advCat,setAdvCat]=useState("축구");
@@ -278,6 +375,73 @@ export default function App() {
     if(krwSites.includes(site))saveKrwSites(krwSites.filter(s=>s!==site));
     else saveUsdSites(usdSites.filter(s=>s!==site));
   };
+
+  // ── 팀명 한글 매핑 ───────────────────────────────────────────
+  const [teamNameMap,setTeamNameMap] = useState<Record<string,string>>(loadTeamNames);
+  const [teamNameModal,setTeamNameModal] = useState(false);
+  const [tnSearch,setTnSearch] = useState("");
+  const [tnNewEng,setTnNewEng] = useState("");
+  const [tnNewKor,setTnNewKor] = useState("");
+  const saveTeamNameEntry = (eng:string,kor:string) => {
+    const m = {...teamNameMap,[eng.trim()]:kor.trim()};
+    setTeamNameMap(m); saveTeamNames(m);
+  };
+  const deleteTeamNameEntry = (eng:string) => {
+    const m = {...teamNameMap}; delete m[eng];
+    setTeamNameMap(m); saveTeamNames(m);
+  };
+  const t = (name:string) => teamNameMap[name]||name;
+
+  // ── API-Football 경기목록 ─────────────────────────────────
+  const [afGames,setAfGames] = useState<AFFixture[]>([]);
+  const [afLoading,setAfLoading] = useState(false);
+
+  const fetchAfLeague = async(leagueName:string) => {
+    const lid = AF_LEAGUE_ID[leagueName];
+    if(!lid) return;
+    setAfLoading(true);
+    try {
+      // 현재 시즌 자동 계산
+      const yr = new Date().getMonth()>=6?new Date().getFullYear():new Date().getFullYear()-1;
+      const games = await fetchAFFixtures(lid, leagueName, yr);
+      setAfGames(prev=>{
+        const others = prev.filter(g=>g.league.name!==leagueName&&!Object.keys(AF_LEAGUE_ID).find(k=>AF_LEAGUE_ID[k]===lid&&g.league.id===lid));
+        return [...others,...games];
+      });
+    } finally { setAfLoading(false); }
+  };
+
+  // 15분마다 오늘 종료경기 자동체크 → 베팅 결과 자동표시
+  useEffect(()=>{
+    const checkResults = async () => {
+      const results = await fetchAFTodayResults();
+      if(!results.length) return;
+      setBetsRaw(prev => prev.map(bet => {
+        if(bet.result!=="진행중"||bet.category!=="축구") return bet;
+        const match = results.find(r => {
+          const home = t(r.teams.home.name);
+          const away = t(r.teams.away.name);
+          return (bet.homeTeam&&bet.awayTeam&&
+            ((home===bet.homeTeam&&away===bet.awayTeam)||(home===bet.awayTeam&&away===bet.homeTeam)));
+        });
+        if(!match) return bet;
+        const homeGoals = match.score.fulltime.home??0;
+        const awayGoals = match.score.fulltime.away??0;
+        // 홈승/원정승/무승부 자동판별
+        let autoResult: string|null = null;
+        if(bet.betOption==="홈승") autoResult = homeGoals>awayGoals?"auto_win":"auto_lose";
+        else if(bet.betOption==="원정승") autoResult = awayGoals>homeGoals?"auto_win":"auto_lose";
+        else if(bet.betOption==="무승부") autoResult = homeGoals===awayGoals?"auto_win":"auto_lose";
+        if(!autoResult) return bet;
+        const updated = {...bet, autoResult};
+        return updated;
+      }));
+    };
+    const id = setInterval(checkResults, 15*60*1000);
+    checkResults();
+    return () => clearInterval(id);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[]);
 
   // ── 베팅 페이지 상태 ──────────────────────────────────────
   const [bettingSportCat,setBettingSportCat]=useState<string>("축구");
@@ -774,8 +938,13 @@ export default function App() {
         </div>
       );
     }
+    const autoRes = (b as any).autoResult as string|undefined;
     return(
-      <div style={{background:C.bg2,border:`1px solid ${C.amber}22`,borderRadius:6,padding:"7px 10px",marginBottom:5}}>
+      <div style={{background:autoRes==="auto_win"?`${C.green}11`:autoRes==="auto_lose"?`${C.red}11`:C.bg2,border:`1px solid ${autoRes==="auto_win"?C.green+"44":autoRes==="auto_lose"?C.red+"44":C.amber+"22"}`,borderRadius:6,padding:"7px 10px",marginBottom:5}}>
+        {autoRes&&<div style={{display:"flex",alignItems:"center",gap:4,marginBottom:4}}>
+          <span style={{fontSize:10,fontWeight:900,color:autoRes==="auto_win"?C.green:C.red,border:`1px solid ${autoRes==="auto_win"?C.green:C.red}`,borderRadius:4,padding:"1px 6px"}}>{autoRes==="auto_win"?"✅ 적중예상":"❌ 실패예상"}</span>
+          <span style={{fontSize:9,color:C.muted}}>자동감지 · 수동확인 후 완료처리</span>
+        </div>}
         <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
           <span style={{fontSize:14,flexShrink:0}}>{SPORT_ICON[b.category]||"🎯"}</span>
           <div style={{fontSize:12,fontWeight:700,color:C.text,flex:1,minWidth:80,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{title}</div>
@@ -1077,348 +1246,262 @@ export default function App() {
             <div style={{fontSize:10,color:C.muted}}>{today} · $1 = ₩{usdKrw.toLocaleString()}</div>
           </div>
           <div style={{display:"flex",gap:12,alignItems:"center"}}>
-            <div style={{textAlign:"center"}}><div style={{color:C.muted,fontSize:9}}>원화 수익</div><div style={{color:krwProfit>=0?C.green:C.red,fontWeight:800,fontSize:13}}>{fmtProfit(krwProfit,false)}</div></div>
-            <div style={{textAlign:"center"}}><div style={{color:C.muted,fontSize:9}}>달러 수익</div><div style={{color:usdProfit>=0?C.green:C.red,fontWeight:800,fontSize:13}}>{fmtProfit(usdProfit,true)}</div></div>
             <div style={{textAlign:"center"}}><div style={{color:C.muted,fontSize:9}}>승률</div><div style={{color:C.teal,fontWeight:800,fontSize:13}}>{winRate}%</div></div>
             <div style={{textAlign:"center"}}><div style={{color:C.muted,fontSize:9}}>진행중</div><div style={{color:C.amber,fontWeight:800,fontSize:13}}>{pending.length}건</div></div>
             <div style={{display:"flex",gap:4}}>
-              <button onClick={exportData} style={{fontSize:11,padding:"5px 11px",borderRadius:5,border:`1px solid ${C.green}44`,background:`${C.green}11`,color:C.green,cursor:"pointer",fontWeight:700}} title="데이터 백업">📤</button>
-              <button onClick={()=>fileRef.current?.click()} style={{fontSize:11,padding:"5px 11px",borderRadius:5,border:`1px solid ${C.amber}44`,background:`${C.amber}11`,color:C.amber,cursor:"pointer",fontWeight:700}} title="데이터 불러오기">📥</button>
               <button onClick={logout} style={{fontSize:11,padding:"5px 11px",borderRadius:5,border:`1px solid ${C.red}44`,background:`${C.red}11`,color:C.red,cursor:"pointer",fontWeight:700}} title="로그아웃">🔒</button>
-              <input ref={fileRef} type="file" accept=".json" onChange={importData} style={{display:"none"}}/>
             </div>
           </div>
         </div>
         <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
           {([
-            ["betting","🎯 베팅"],["pending","⏳ 진행중"],["stats","📊 통계"],["roi","💹 수익률"],["strategy","📋 전략"],["log","🗒 로그"],["points","🎁 포인트"],
+            ["home","🏠 홈"],["betting","🎯 베팅"],["pending","⏳ 진행중"],["stats","📊 통계"],["roi","💹 수익률"],["strategy","📋 전략"],["log","🗒 로그"],["points","🎁 포인트"],
           ] as [string,string][]).map(([k,l])=>(
-            <button key={k} onClick={()=>setTab(k as any)} style={tabBtn(tab===k,k==="pending"?C.amber:k==="points"?C.teal:C.orange)}>{l}</button>
+            <button key={k} onClick={()=>setTab(k as any)} style={tabBtn(tab===k,k==="pending"?C.amber:k==="points"?C.teal:k==="home"?C.green:C.orange)}>{l}</button>
           ))}
         </div>
       </div>
 
       {/* ══ 베팅 탭 ══ */}
       {tab==="betting"&&(
-        <div style={{display:"flex",flex:1,overflow:"hidden"}}>
-          {/* 왼쪽 패널 - 입금/베팅 폼 */}
-          <div style={{width:300,flexShrink:0,borderRight:`1px solid ${C.border2}`,display:"flex",flexDirection:"column",overflow:"hidden"}}>
-            <div style={{flex:1,overflowY:"auto"}}>
+        <div style={{display:"flex",flex:1,overflow:"hidden",minWidth:0}}>
 
-              {/* 입금 */}
-              <div style={{padding:"14px 16px",borderBottom:`1px solid ${C.border}`}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-                  <div style={{fontSize:16,fontWeight:800,color:C.green}}>💵 입금</div>
-                  <button onClick={()=>setSiteManageModal(true)} style={{fontSize:10,padding:"3px 10px",borderRadius:5,border:`1px solid ${C.teal}44`,background:`${C.teal}11`,color:C.teal,cursor:"pointer"}}>🏢 사이트 관리</button>
-                </div>
-                <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:8}}>
-                  {krwSites.map(s=><button key={s} onClick={()=>setDepSite(s)} style={siteBtn(depSite===s,false)}>₩ {s}</button>)}
-                  {usdSites.map(s=><button key={s} onClick={()=>setDepSite(s)} style={siteBtn(depSite===s,true)}>$ {s}</button>)}
-                </div>
-                <div style={{marginBottom:6}}>
-                  <div style={L}>입금 금액</div>
-                  <div style={{display:"flex",gap:4,alignItems:"center"}}>
-                    <button onClick={()=>setDepAmt(a=>Math.max(0,a-(depIsDollar?1:10000)))} style={{background:C.bg2,border:`1px solid ${C.border}`,color:C.red,width:30,height:32,borderRadius:6,cursor:"pointer",fontSize:16,fontWeight:700}}>−</button>
-                    <div style={{position:"relative",flex:1}}>
-                      <span style={{position:"absolute",left:9,top:"50%",transform:"translateY(-50%)",color:depIsDollar?C.amber:C.green,fontWeight:700,fontSize:13,pointerEvents:"none"}}>{depSite?(depIsDollar?"$":"₩"):""}</span>
-                      <input type="number" value={depAmt||""} onChange={e=>setDepAmt(parseFloat(e.target.value)||0)} placeholder="금액 입력" style={{...S,textAlign:"right",fontWeight:800,color:depIsDollar?C.amber:C.green,fontSize:14,paddingLeft:26,boxSizing:"border-box",...noSpin}}/>
-                    </div>
-                    <button onClick={()=>setDepAmt(a=>a+(depIsDollar?1:10000))} style={{background:C.bg2,border:`1px solid ${C.border}`,color:C.green,width:30,height:32,borderRadius:6,cursor:"pointer",fontSize:16,fontWeight:700}}>+</button>
-                  </div>
-                </div>
-                <div style={{display:"grid",gridTemplateColumns:"1fr",gap:6,marginBottom:10}}>
-                  <button onClick={handleDeposit} style={{background:`${C.green}22`,border:`1px solid ${C.green}`,color:C.green,padding:"8px",borderRadius:7,cursor:"pointer",fontWeight:700,fontSize:13}}>💰 입금 추가</button>
-                </div>
-              </div>
-
-              {/* 베팅 */}
-              <div style={{padding:"14px 16px",borderBottom:`1px solid ${C.border}`}}>
-                <div style={{fontSize:16,fontWeight:800,color:C.orange,marginBottom:10}}>🎯 베팅</div>
-                <div style={{marginBottom:8}}>
-                  <div style={L}>베팅사이트</div>
-                  {activeSiteNames.length===0?<div style={{fontSize:11,color:C.dim}}>활성 사이트 없음</div>:
-                  <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
-                    {activeSiteNames.filter(s=>krwSites.includes(s)).map(s=><button key={s} onClick={()=>handleSiteChange(s)} style={siteBtn(form.site===s,false)}>₩ {s}</button>)}
-                    {activeSiteNames.filter(s=>usdSites.includes(s)).map(s=><button key={s} onClick={()=>handleSiteChange(s)} style={siteBtn(form.site===s,true)}>$ {s}</button>)}
-                  </div>}
-                </div>
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:6}}>
-                  <div><div style={L}>날짜</div><div style={{...S,boxSizing:"border-box",color:C.teal,fontWeight:700,fontSize:12,display:"flex",alignItems:"center"}}>{form.date}</div></div>
-                  <div><div style={L}>종목</div><select value={form.category} onChange={e=>handleCatChange(e.target.value)} style={S}>{CATS.map(c=><option key={c}>{c}</option>)}</select></div>
-                </div>
-                <div style={{marginBottom:6}}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:3}}>
-                    <div style={L}>리그</div>
-                    <div style={{display:"flex",gap:4}}>
-                      <button onClick={()=>{const cl=customLeagues[form.category]||[];const idx=cl.indexOf(form.league);if(idx>=0){setEditLeagueModal({cat:form.category,old:form.league,idx});setEditLeagueName(form.league);}else alert("기본 리그는 수정 불가");}} style={{fontSize:10,padding:"2px 7px",borderRadius:4,border:`1px solid ${C.amber}44`,background:`${C.amber}11`,color:C.amber,cursor:"pointer"}}>✏️</button>
-                      <button onClick={()=>setAddLeagueModal({cat:form.category})} style={{fontSize:10,padding:"2px 7px",borderRadius:4,border:`1px solid ${C.purple}44`,background:`${C.purple}11`,color:C.purple,cursor:"pointer"}}>+ 추가</button>
-                    </div>
-                  </div>
-                  <select value={form.league} onChange={e=>handleLeagueChange(e.target.value)} style={S}>
-                    <optgroup label="★ 주요 리그">{fMajor.map(l=><option key={l}>{l}</option>)}</optgroup>
-                    {fOthers.length>0&&<optgroup label="─────────">{fOthers.map(l=><option key={l}>{l}</option>)}</optgroup>}
-                  </select>
-                </div>
-                <div style={{marginBottom:6}}>
-                  <div style={L}>베팅 옵션</div>
-                  {form.category==="E스포츠"?(
-                    <div><div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:5}}>{["일반승","1.5","−1.5","직접입력"].map(o=><button key={o} onClick={()=>setForm(f=>({...f,betOption:o}))} style={{padding:"5px 10px",borderRadius:5,border:form.betOption===o?`1px solid ${C.purple}`:`1px solid ${C.border}`,background:form.betOption===o?`${C.purple}22`:C.bg2,color:form.betOption===o?C.purple:C.muted,cursor:"pointer",fontSize:11,fontWeight:form.betOption===o?700:400}}>{o}</button>)}</div>
-                    {form.betOption==="직접입력"&&<input value={esportsCustomOpt} onChange={e=>setEsportsCustomOpt(e.target.value)} placeholder="옵션 입력" style={{...S,boxSizing:"border-box"}}/>}</div>
-                  ):(
-                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
-                      <select value={form.optGroup} onChange={e=>handleGroupChange(e.target.value)} style={S}><option value="">그룹</option>{optGroups.map(g=><option key={g.g} value={g.g}>{g.g}</option>)}</select>
-                      <select value={form.betOption} onChange={e=>setForm(f=>({...f,betOption:e.target.value}))} style={{...S,opacity:form.optGroup?1:0.4}} disabled={!form.optGroup}><option value="">옵션</option>{curOpts.map(o=><option key={o} value={o}>{o}</option>)}</select>
-                    </div>
-                  )}
-                  {form.betOption&&form.betOption!=="직접입력"&&<div style={{fontSize:11,color:C.purple,marginTop:4,fontWeight:700}}>✓ {form.betOption}</div>}
-                </div>
-                <div style={{marginBottom:6}}>
-                  {isOverUnder(form.betOption)?(
-                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
-                      <div><div style={L}>홈팀</div><TeamInput value={form.homeTeam||""} onChange={v=>setForm(f=>({...f,homeTeam:v}))} placeholder="홈팀"/></div>
-                      <div><div style={L}>원정팀</div><TeamInput value={form.awayTeam||""} onChange={v=>setForm(f=>({...f,awayTeam:v}))} placeholder="원정팀"/></div>
-                    </div>
-                  ):(
-                    <div><div style={L}>팀 이름</div><TeamInput value={form.teamName||""} onChange={v=>setForm(f=>({...f,teamName:v}))} placeholder="팀 이름"/></div>
-                  )}
-                </div>
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:8}}>
-                  <div>
-                    <div style={L}>배당률</div>
-                    <input type="text" inputMode="numeric" value={form.oddsRaw} onChange={e=>setForm(f=>({...f,oddsRaw:e.target.value.replace(/[^0-9]/g,"")}))} placeholder="예) 185" style={{...S,fontSize:15,padding:"9px 8px",boxSizing:"border-box"}}/>
-                    {form.oddsRaw.length>=3&&<div style={{fontSize:11,color:C.teal,marginTop:2,fontWeight:700}}>{(parseInt(form.oddsRaw)/100).toFixed(2)}</div>}
-                  </div>
-                  <div>
-                    <div style={L}>베팅금액</div>
-                    <div style={{display:"flex",gap:3,alignItems:"center",marginBottom:4}}>
-                      <button onClick={()=>setForm(f=>({...f,amount:Math.max(formIsDollar?1:1000,f.amount-(formIsDollar?1:10000))}))} style={{background:C.bg2,border:`1px solid ${C.border}`,color:C.red,width:26,height:32,borderRadius:5,cursor:"pointer",fontSize:14,fontWeight:700}}>−</button>
-                      <div style={{position:"relative",flex:1}}>
-                        <span style={{position:"absolute",left:7,top:"50%",transform:"translateY(-50%)",color:formIsDollar?C.amber:C.green,fontWeight:700,fontSize:12,pointerEvents:"none"}}>{formIsDollar?"$":"₩"}</span>
-                        <input type="number" value={form.amount} onChange={e=>setForm(f=>({...f,amount:parseFloat(e.target.value)||0}))} style={{...S,textAlign:"right",fontWeight:800,color:formIsDollar?C.amber:C.green,fontSize:13,padding:"5px 5px 5px 20px",boxSizing:"border-box",...noSpin}}/>
-                      </div>
-                      <button onClick={()=>setForm(f=>({...f,amount:f.amount+(formIsDollar?1:10000)}))} style={{background:C.bg2,border:`1px solid ${C.border}`,color:C.green,width:26,height:32,borderRadius:5,cursor:"pointer",fontSize:14,fontWeight:700}}>+</button>
-                    </div>
-                    <div style={{display:"flex",gap:3}}>
-                      {(formIsDollar?USD_HK:KRW_HK).map(v=><button key={v} onClick={()=>setForm(f=>({...f,amount:v}))} style={{flex:1,padding:"3px 0",borderRadius:4,border:`1px solid ${formIsDollar?C.amber+"55":C.green+"55"}`,background:C.bg2,color:formIsDollar?C.amber:C.green,cursor:"pointer",fontSize:10,fontWeight:600}}>{formIsDollar?`$${v}`:`${v/10000}만`}</button>)}
-                    </div>
-                  </div>
-                </div>
-                <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8}}>
-                  <input type="checkbox" id="inclStats" checked={form.includeStats} onChange={e=>setForm(f=>({...f,includeStats:e.target.checked}))} style={{width:12,height:12,accentColor:C.purple}}/>
-                  <label htmlFor="inclStats" style={{fontSize:10,color:C.muted,cursor:"pointer"}}>통계 자료에 포함</label>
-                </div>
-                <button onClick={handleAdd} style={{width:"100%",background:`linear-gradient(135deg,${C.orange}33,${C.green}22)`,border:`1px solid ${C.orange}`,color:C.orange,padding:"11px",borderRadius:8,cursor:"pointer",fontWeight:800,fontSize:15}}>베팅 추가</button>
-              </div>
-
-              {/* 이번주 입금 그래프 */}
-              {weekDepChartData.length>0&&(
-                <div style={{padding:"14px 16px",borderBottom:`1px solid ${C.border}`}}>
-                  <div style={{fontSize:12,fontWeight:700,color:C.muted,marginBottom:8}}>📊 이번주 사이트별 입금 (원화환산)</div>
-                  <div style={{display:"flex",flexDirection:"column",gap:6}}>
-                    {weekDepChartData.map((d,i)=>{
-                      const maxKrw=Math.max(...weekDepChartData.map(x=>x.krwAmt));
-                      const pct=maxKrw>0?Math.round(d.krwAmt/maxKrw*100):0;
-                      const manAmt=Math.round(d.krwAmt/10000);
-                      return(
-                        <div key={i} style={{display:"flex",alignItems:"center",gap:8}}>
-                          <div style={{width:52,fontSize:11,color:d.isDollar?C.amber:C.green,fontWeight:700,flexShrink:0,textAlign:"right"}}>{d.site}</div>
-                          <div style={{flex:1,height:14,background:C.bg,borderRadius:3,overflow:"hidden"}}>
-                            <div style={{width:`${pct}%`,height:"100%",background:d.isDollar?C.amber:C.green,borderRadius:3}}/>
-                          </div>
-                          <div style={{width:40,fontSize:11,color:d.isDollar?C.amber:C.green,fontWeight:700,flexShrink:0}}>{manAmt}만</div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                  <div style={{display:"flex",gap:8,fontSize:10,color:C.muted,marginTop:6}}>
-                    <span style={{color:C.green}}>■ 원화</span><span style={{color:C.amber}}>■ 달러(환산)</span>
-                    <span style={{marginLeft:"auto"}}>$1=₩{usdKrw.toLocaleString()}</span>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* 가운데 패널 - 경기 일정 & 리그 */}
-          <div style={{width:260,flexShrink:0,borderRight:`1px solid ${C.border2}`,display:"flex",flexDirection:"column",overflow:"hidden"}}>
-            {/* 종목 탭 */}
-            <div style={{padding:"10px 12px",borderBottom:`1px solid ${C.border}`,flexShrink:0}}>
-              <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+          {/* 열1 - 종목+리그 */}
+          <div style={{width:180,flexShrink:0,borderRight:`1px solid ${C.border2}`,display:"flex",flexDirection:"column",overflow:"hidden"}}>
+            <div style={{padding:"8px 8px",borderBottom:`1px solid ${C.border}`,flexShrink:0}}>
+              <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
                 {(["축구","야구","농구","배구","E스포츠"] as const).map(cat=>(
                   <button key={cat} onClick={()=>setBettingSportCat(cat)}
-                    style={{padding:"5px 10px",borderRadius:6,border:bettingSportCat===cat?`1px solid ${C.orange}`:`1px solid ${C.border}`,background:bettingSportCat===cat?`${C.orange}22`:C.bg2,color:bettingSportCat===cat?C.orange:C.muted,cursor:"pointer",fontSize:11,fontWeight:bettingSportCat===cat?800:400}}>
+                    style={{padding:"4px 7px",borderRadius:5,border:bettingSportCat===cat?`1px solid ${C.orange}`:`1px solid ${C.border}`,background:bettingSportCat===cat?`${C.orange}22`:C.bg2,color:bettingSportCat===cat?C.orange:C.muted,cursor:"pointer",fontSize:10,fontWeight:bettingSportCat===cat?800:400}}>
                     {SPORT_ICON[cat]} {cat}
                   </button>
                 ))}
               </div>
             </div>
-            {/* 리그 목록 */}
-            <div style={{flex:1,overflowY:"auto",padding:"8px 0"}}>
-              {/* 주요 리그 */}
-              <div style={{padding:"4px 12px",fontSize:9,color:C.dim,fontWeight:700,letterSpacing:1,textTransform:"uppercase"}}>주요 리그</div>
-              {(MAJOR[bettingSportCat]||[]).map(lg=>(
-                <button key={lg} onClick={()=>setBettingLeague(lg)}
-                  style={{width:"100%",textAlign:"left",padding:"8px 14px",background:bettingLeague===lg?`${C.teal}22`:"transparent",border:"none",borderLeft:bettingLeague===lg?`3px solid ${C.teal}`:"3px solid transparent",color:bettingLeague===lg?C.teal:C.text,cursor:"pointer",fontSize:12,fontWeight:bettingLeague===lg?700:400,display:"block"}}>
-                  {lg}
-                </button>
-              ))}
-              {/* 잡리그 */}
+            <div style={{flex:1,overflowY:"auto",padding:"6px 0"}}>
+              <div style={{padding:"3px 10px",fontSize:9,color:C.dim,fontWeight:700,letterSpacing:1}}>주요 리그</div>
+              {(MAJOR[bettingSportCat]||[]).map(lg=>{
+                const sel=bettingLeague===lg;
+                return(
+                  <button key={lg} onClick={()=>{setBettingLeague(lg);if(bettingSportCat==="축구")fetchAfLeague(lg);}}
+                    style={{width:"100%",textAlign:"left",padding:"7px 10px",background:sel?`${C.teal}22`:"transparent",border:"none",borderLeft:sel?`3px solid ${C.teal}`:"3px solid transparent",color:sel?C.teal:C.text,cursor:"pointer",fontSize:11,fontWeight:sel?700:400,display:"block"}}>
+                    {lg}
+                  </button>
+                );
+              })}
               {((EXTRA[bettingSportCat]||[]).length>0||(customLeagues[bettingSportCat]||[]).length>0)&&(
                 <>
-                  <div style={{padding:"8px 12px 4px",fontSize:9,color:C.dim,fontWeight:700,letterSpacing:1,borderTop:`1px solid ${C.border}`,marginTop:4}}>기타 리그</div>
-                  {[...(EXTRA[bettingSportCat]||[]),...(customLeagues[bettingSportCat]||[])].sort((a,b)=>a.localeCompare(b,"ko")).map(lg=>(
-                    <button key={lg} onClick={()=>setBettingLeague(lg)}
-                      style={{width:"100%",textAlign:"left",padding:"7px 14px",background:bettingLeague===lg?`${C.teal}22`:"transparent",border:"none",borderLeft:bettingLeague===lg?`3px solid ${C.teal}`:"3px solid transparent",color:bettingLeague===lg?C.teal:C.muted,cursor:"pointer",fontSize:11,fontWeight:bettingLeague===lg?700:400,display:"block"}}>
-                      {lg}
-                    </button>
-                  ))}
+                  <div style={{padding:"6px 10px 3px",fontSize:9,color:C.dim,fontWeight:700,borderTop:`1px solid ${C.border}`,marginTop:3}}>기타 리그</div>
+                  {[...(EXTRA[bettingSportCat]||[]),...(customLeagues[bettingSportCat]||[])].sort((a,b)=>a.localeCompare(b,"ko")).map(lg=>{
+                    const sel=bettingLeague===lg;
+                    return(
+                      <button key={lg} onClick={()=>{setBettingLeague(lg);if(bettingSportCat==="축구")fetchAfLeague(lg);}}
+                        style={{width:"100%",textAlign:"left",padding:"6px 10px",background:sel?`${C.teal}22`:"transparent",border:"none",borderLeft:sel?`3px solid ${C.teal}`:"3px solid transparent",color:sel?C.teal:C.muted,cursor:"pointer",fontSize:10,fontWeight:sel?700:400,display:"block"}}>
+                        {lg}
+                      </button>
+                    );
+                  })}
                 </>
               )}
             </div>
           </div>
 
-          {/* 오른쪽 - 경기 목록 & 배당 */}
-          <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}}>
-            {/* 경기 목록 */}
-            <div style={{flex:bettingSelectedGame?1:1,display:"flex",flexDirection:"column",overflow:"hidden"}}>
-              <div style={{padding:"10px 16px",borderBottom:`1px solid ${C.border2}`,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-                <div style={{fontSize:14,fontWeight:800,color:C.amber}}>
-                  📅 {bettingLeague||"리그를 선택하세요"} <span style={{fontSize:10,color:C.dim,fontWeight:400}}>24시간 이내 경기</span>
-                </div>
-                <button onClick={()=>fetchBettingSchedule(bettingLeague)} disabled={bettingLoading}
-                  style={{fontSize:11,padding:"4px 12px",borderRadius:5,border:`1px solid ${C.teal}44`,background:bettingLoading?C.bg2:`${C.teal}11`,color:bettingLoading?C.muted:C.teal,cursor:bettingLoading?"default":"pointer",fontWeight:700}}>
-                  {bettingLoading?"⏳":"🔄"} 새로고침
-                </button>
-              </div>
-              <div style={{flex:1,overflowY:"auto",padding:10}}>
-                {!bettingLeague&&<div style={{textAlign:"center",color:C.dim,padding:"40px 0"}}><div style={{fontSize:28,marginBottom:8}}>📋</div><div>좌측에서 리그를 선택하세요</div></div>}
-                {bettingLeague&&bettingGames.length===0&&!bettingLoading&&<div style={{textAlign:"center",color:C.dim,padding:"40px 0"}}><div style={{fontSize:28,marginBottom:8}}>🔍</div><div>경기 없음 (새로고침을 눌러보세요)</div></div>}
-                {bettingLoading&&<div style={{textAlign:"center",color:C.teal,padding:"40px 0"}}>⏳ 불러오는 중...</div>}
-                {bettingGames.filter(g=>g.leagueName===bettingLeague).map(g=>{
-                  const sel=bettingSelectedGame?.id===g.id;
-                  const commence=new Date(g.commence);
-                  const timeStr=commence.toLocaleString("ko-KR",{month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit",timeZone:"Asia/Seoul"});
-                  const isSoccer=g.sport.startsWith("soccer");
+          {/* 열2 - 경기 목록 (AF) */}
+          <div style={{width:240,flexShrink:0,borderRight:`1px solid ${C.border2}`,display:"flex",flexDirection:"column",overflow:"hidden"}}>
+            <div style={{padding:"8px 10px",borderBottom:`1px solid ${C.border}`,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+              <div style={{fontSize:11,fontWeight:800,color:C.amber}}>{bettingLeague||"리그 선택"} <span style={{fontSize:9,color:C.dim}}>24h</span></div>
+              <button onClick={()=>{if(bettingLeague&&bettingSportCat==="축구")fetchAfLeague(bettingLeague);}} disabled={afLoading}
+                style={{fontSize:10,padding:"2px 7px",borderRadius:4,border:`1px solid ${C.teal}44`,background:`${C.teal}11`,color:afLoading?C.muted:C.teal,cursor:"pointer"}}>
+                {afLoading?"⏳":"🔄"}
+              </button>
+            </div>
+            <div style={{flex:1,overflowY:"auto",padding:8}}>
+              {!bettingLeague&&<div style={{textAlign:"center",color:C.dim,padding:"30px 0",fontSize:11}}>리그를 선택하세요</div>}
+              {bettingLeague&&bettingSportCat!=="축구"&&<div style={{textAlign:"center",color:C.dim,padding:"30px 0",fontSize:11}}>축구만 자동 경기목록 지원<br/><span style={{fontSize:9}}>우측 폼에서 직접 입력하세요</span></div>}
+              {bettingLeague&&bettingSportCat==="축구"&&afLoading&&<div style={{textAlign:"center",color:C.teal,padding:"30px 0",fontSize:11}}>⏳ 불러오는 중...</div>}
+              {bettingLeague&&bettingSportCat==="축구"&&!afLoading&&(()=>{
+                const lid=AF_LEAGUE_ID[bettingLeague];
+                const now=Date.now();
+                const in24h=now+24*60*60*1000;
+                const games=afGames.filter(g=>{
+                  const gt=new Date(g.fixture.date).getTime();
+                  return (lid?g.league.id===lid:true)&&gt>=now&&gt<=in24h;
+                }).sort((a,b)=>new Date(a.fixture.date).getTime()-new Date(b.fixture.date).getTime());
+                if(games.length===0)return<div style={{textAlign:"center",color:C.dim,padding:"30px 0",fontSize:11}}>24시간 이내 경기 없음<br/><span style={{fontSize:9}}>🔄 새로고침</span></div>;
+                return games.map(g=>{
+                  const sel=bettingSelectedGame?.id===String(g.fixture.id);
+                  const dt=new Date(g.fixture.date);
+                  const timeStr=dt.toLocaleString("ko-KR",{month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit",timeZone:"Asia/Seoul"});
+                  const homeKr=t(g.teams.home.name);
+                  const awayKr=t(g.teams.away.name);
+                  const status=g.fixture.status.short;
+                  const isFinished=["FT","AET","PEN"].includes(status);
+                  const isLive=["1H","HT","2H","ET","BT","P","SUSP","INT","LIVE"].includes(status);
                   return(
-                    <div key={g.id} onClick={()=>setBettingSelectedGame(sel?null:g)}
-                      style={{background:sel?`${C.teal}11`:C.bg3,border:`1px solid ${sel?C.teal:C.border}`,borderRadius:10,padding:"10px 12px",marginBottom:7,cursor:"pointer",transition:"all 0.15s"}}>
-                      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
-                        <div style={{fontSize:12,fontWeight:700,color:C.text}}>{g.away} <span style={{color:C.dim,fontWeight:400,fontSize:10}}>vs</span> {g.home}</div>
-                        <div style={{fontSize:10,color:C.muted}}>⏰ {timeStr}</div>
-                      </div>
-                      <div style={{display:"grid",gridTemplateColumns:isSoccer?"1fr 1fr 1fr":"1fr 1fr",gap:4}}>
-                        <div style={{background:`${C.green}11`,border:`1px solid ${C.green}33`,borderRadius:5,padding:"5px 6px",textAlign:"center"}}>
-                          <div style={{fontSize:9,color:C.muted,marginBottom:1}}>홈</div>
-                          <div style={{fontSize:13,fontWeight:800,color:C.green}}>{g.bestHome.toFixed(2)}</div>
+                    <div key={g.fixture.id}
+                      onClick={()=>setBettingSelectedGame(sel?null:{id:String(g.fixture.id),sport:"soccer",leagueName:bettingLeague,commence:g.fixture.date,home:homeKr,away:awayKr,bookmakers:[],bestHome:0,bestAway:0,bestDraw:undefined})}
+                      style={{background:sel?`${C.teal}11`:C.bg3,border:`1px solid ${sel?C.teal:C.border}`,borderRadius:8,padding:"9px 10px",marginBottom:6,cursor:"pointer"}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:3}}>
+                        <div style={{fontSize:9,color:isLive?C.green:isFinished?C.muted:C.muted}}>
+                          {isLive?"🟢 LIVE":isFinished?"종료":timeStr}
                         </div>
-                        {isSoccer&&g.bestDraw&&(
-                          <div style={{background:`${C.muted}11`,border:`1px solid ${C.muted}33`,borderRadius:5,padding:"5px 6px",textAlign:"center"}}>
-                            <div style={{fontSize:9,color:C.muted,marginBottom:1}}>무</div>
-                            <div style={{fontSize:13,fontWeight:800,color:C.muted}}>{g.bestDraw.toFixed(2)}</div>
-                          </div>
-                        )}
-                        <div style={{background:`${C.teal}11`,border:`1px solid ${C.teal}33`,borderRadius:5,padding:"5px 6px",textAlign:"center"}}>
-                          <div style={{fontSize:9,color:C.muted,marginBottom:1}}>원정</div>
-                          <div style={{fontSize:13,fontWeight:800,color:C.teal}}>{g.bestAway.toFixed(2)}</div>
-                        </div>
+                        {isFinished&&<div style={{fontSize:10,fontWeight:800,color:C.amber}}>{g.goals.home} - {g.goals.away}</div>}
                       </div>
+                      <div style={{fontSize:11,fontWeight:700,color:C.text}}>{homeKr}</div>
+                      <div style={{fontSize:9,color:C.dim,margin:"2px 0"}}>vs</div>
+                      <div style={{fontSize:11,fontWeight:700,color:C.text}}>{awayKr}</div>
                     </div>
                   );
-                })}
-              </div>
+                });
+              })()}
             </div>
           </div>
 
-          {/* 맨 우측 - 베팅 슬립 (경기 선택 시) */}
-          {bettingSelectedGame&&(
-            <div style={{width:300,flexShrink:0,borderLeft:`1px solid ${C.border2}`,display:"flex",flexDirection:"column",overflow:"hidden"}}>
-              <div style={{padding:"12px 14px",borderBottom:`1px solid ${C.border}`,flexShrink:0}}>
-                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:4}}>
-                  <div style={{fontSize:13,fontWeight:800,color:C.amber}}>🎰 베팅 슬립</div>
-                  <button onClick={()=>setBettingSelectedGame(null)} style={{background:"transparent",border:"none",color:C.muted,cursor:"pointer",fontSize:16}}>✕</button>
-                </div>
-                <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:2}}>{bettingSelectedGame.away} vs {bettingSelectedGame.home}</div>
-                <div style={{fontSize:10,color:C.muted}}>{bettingSelectedGame.leagueName}</div>
-              </div>
-              <div style={{flex:1,overflowY:"auto",padding:12}}>
-                {/* 승무패 or 승패 */}
-                <div style={{marginBottom:12}}>
-                  <div style={{fontSize:11,fontWeight:700,color:C.purple,marginBottom:6}}>{bettingSelectedGame.sport.startsWith("soccer")?"⚽ 승무패":"🏆 승패"}</div>
-                  <div style={{display:"grid",gridTemplateColumns:bettingSelectedGame.sport.startsWith("soccer")&&bettingSelectedGame.bestDraw?"1fr 1fr 1fr":"1fr 1fr",gap:5}}>
-                    {[
-                      {label:`홈\n${bettingSelectedGame.home.split(" ").slice(-1)[0]}`,odds:bettingSelectedGame.bestHome,opt:"홈승",color:C.green},
-                      ...(bettingSelectedGame.sport.startsWith("soccer")&&bettingSelectedGame.bestDraw?[{label:"무승부",odds:bettingSelectedGame.bestDraw,opt:"무승부",color:C.muted}]:[]),
-                      {label:`원정\n${bettingSelectedGame.away.split(" ").slice(-1)[0]}`,odds:bettingSelectedGame.bestAway,opt:"원정승",color:C.teal},
-                    ].map(d=>(
-                      <button key={d.opt} onClick={()=>setBettingSlipOpt(d.opt)}
-                        style={{padding:"8px 4px",borderRadius:7,border:bettingSlipOpt===d.opt?`2px solid ${d.color}`:`1px solid ${C.border}`,background:bettingSlipOpt===d.opt?`${d.color}22`:C.bg2,color:bettingSlipOpt===d.opt?d.color:C.muted,cursor:"pointer",textAlign:"center",lineHeight:1.4}}>
-                        <div style={{fontSize:9,marginBottom:2,whiteSpace:"pre-line"}}>{d.label}</div>
-                        <div style={{fontSize:16,fontWeight:900}}>{d.odds.toFixed(2)}</div>
+          {/* 열3 - 배당 옵션 */}
+          <div style={{width:210,flexShrink:0,borderRight:`1px solid ${C.border2}`,display:"flex",flexDirection:"column",overflow:"hidden"}}>
+            <div style={{padding:"8px 10px",borderBottom:`1px solid ${C.border}`,flexShrink:0}}>
+              <div style={{fontSize:11,fontWeight:800,color:C.purple}}>배당 옵션</div>
+            </div>
+            <div style={{flex:1,overflowY:"auto",padding:8}}>
+              {!bettingSelectedGame&&<div style={{textAlign:"center",color:C.dim,padding:"30px 0",fontSize:11}}>경기를 선택하세요</div>}
+              {bettingSelectedGame&&(
+                <>
+                  <div style={{background:C.bg2,borderRadius:6,padding:"7px 9px",marginBottom:10,fontSize:10}}>
+                    <div style={{fontWeight:700,color:C.text,marginBottom:1}}>{bettingSelectedGame.home}</div>
+                    <div style={{color:C.dim,fontSize:9}}>vs {bettingSelectedGame.away}</div>
+                  </div>
+                  <div style={{marginBottom:10}}>
+                    <div style={{fontSize:10,fontWeight:700,color:C.purple,marginBottom:5}}>⚽ 승무패</div>
+                    {[{opt:"홈승",label:`홈승 (${bettingSelectedGame.home})`},{opt:"무승부",label:"무승부"},{opt:"원정승",label:`원정승 (${bettingSelectedGame.away})`}].map(({opt,label})=>(
+                      <button key={opt} onClick={()=>setBettingSlipOpt(bettingSlipOpt===opt?"":opt)}
+                        style={{display:"block",width:"100%",textAlign:"left",padding:"6px 9px",marginBottom:3,borderRadius:5,border:bettingSlipOpt===opt?`1px solid ${C.green}`:`1px solid ${C.border}`,background:bettingSlipOpt===opt?`${C.green}22`:C.bg2,color:bettingSlipOpt===opt?C.green:C.text,cursor:"pointer",fontSize:10,fontWeight:bettingSlipOpt===opt?700:400}}>
+                        {label}
                       </button>
                     ))}
                   </div>
-                </div>
-
-                {/* 언오버 */}
-                <div style={{marginBottom:12}}>
-                  <div style={{fontSize:11,fontWeight:700,color:C.purple,marginBottom:6}}>📊 언오버</div>
-                  <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
-                    {["오버 1.5","언더 1.5","오버 2.5","언더 2.5","오버 3.5","언더 3.5"].map(opt=>(
-                      <button key={opt} onClick={()=>setBettingSlipOpt(opt)}
-                        style={{padding:"5px 8px",borderRadius:5,border:bettingSlipOpt===opt?`1px solid ${C.amber}`:`1px solid ${C.border}`,background:bettingSlipOpt===opt?`${C.amber}22`:C.bg2,color:bettingSlipOpt===opt?C.amber:C.muted,cursor:"pointer",fontSize:10,fontWeight:bettingSlipOpt===opt?700:400}}>
+                  <div style={{marginBottom:10}}>
+                    <div style={{fontSize:10,fontWeight:700,color:C.amber,marginBottom:5}}>📊 언오버</div>
+                    {["오버 1.5","언더 1.5","오버 2.5","언더 2.5","오버 3.5","언더 3.5","오버 4.5","언더 4.5"].map(opt=>(
+                      <button key={opt} onClick={()=>setBettingSlipOpt(bettingSlipOpt===opt?"":opt)}
+                        style={{display:"block",width:"100%",textAlign:"left",padding:"6px 9px",marginBottom:3,borderRadius:5,border:bettingSlipOpt===opt?`1px solid ${C.amber}`:`1px solid ${C.border}`,background:bettingSlipOpt===opt?`${C.amber}22`:C.bg2,color:bettingSlipOpt===opt?C.amber:C.text,cursor:"pointer",fontSize:10,fontWeight:bettingSlipOpt===opt?700:400}}>
                         {opt}
                       </button>
                     ))}
                   </div>
-                </div>
-
-                {/* 축구 핸디캡 */}
-                {bettingSelectedGame.sport.startsWith("soccer")&&(
-                  <div style={{marginBottom:12}}>
-                    <div style={{fontSize:11,fontWeight:700,color:C.purple,marginBottom:6}}>⚽ 핸디캡</div>
-                    <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
-                      {["-2.5 마핸","-1.5 마핸","-0.5 마핸","+0.5 플핸","+1.5 플핸","+2.5 플핸"].map(opt=>(
-                        <button key={opt} onClick={()=>setBettingSlipOpt(opt)}
-                          style={{padding:"5px 8px",borderRadius:5,border:bettingSlipOpt===opt?`1px solid ${C.green}`:`1px solid ${C.border}`,background:bettingSlipOpt===opt?`${C.green}22`:C.bg2,color:bettingSlipOpt===opt?C.green:C.muted,cursor:"pointer",fontSize:10,fontWeight:bettingSlipOpt===opt?700:400}}>
-                          {opt}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* 선택된 옵션 표시 */}
-                {bettingSlipOpt&&(
-                  <div style={{background:`${C.orange}11`,border:`1px solid ${C.orange}44`,borderRadius:8,padding:"10px 12px",marginBottom:10}}>
-                    <div style={{fontSize:10,color:C.muted,marginBottom:3}}>선택된 베팅</div>
-                    <div style={{fontSize:13,fontWeight:800,color:C.orange}}>{bettingSlipOpt}</div>
-                    <div style={{fontSize:11,color:C.muted,marginTop:3}}>{bettingSelectedGame.away} vs {bettingSelectedGame.home}</div>
-                  </div>
-                )}
-
-                {/* 베팅 등록 버튼 */}
-                <button
-                  onClick={()=>{
-                    if(!bettingSlipOpt)return alert("베팅 옵션을 선택하세요");
-                    const isSoccer=bettingSelectedGame.sport.startsWith("soccer");
-                    const isOu=bettingSlipOpt.includes("오버")||bettingSlipOpt.includes("언더");
-                    handleCatChange(isSoccer?"축구":bettingSelectedGame.sport.startsWith("basketball")?"농구":bettingSelectedGame.sport.startsWith("baseball")?"야구":"E스포츠");
-                    setForm(f=>({...f,
-                      league:bettingSelectedGame.leagueName,
-                      homeTeam:isOu?bettingSelectedGame.home:"",
-                      awayTeam:isOu?bettingSelectedGame.away:"",
-                      teamName:!isOu?(bettingSlipOpt==="홈승"?bettingSelectedGame.home:bettingSlipOpt==="원정승"?bettingSelectedGame.away:bettingSlipOpt):"",
-                      betOption:bettingSlipOpt,
-                    }));
-                    setBettingSlipOpt("");
-                    alert("베팅 폼에 자동입력됐습니다. 좌측에서 배당과 금액을 확인 후 추가하세요.");
-                  }}
-                  style={{width:"100%",background:`linear-gradient(135deg,${C.orange}33,${C.amber}22)`,border:`1px solid ${C.orange}`,color:C.orange,padding:"11px",borderRadius:8,cursor:"pointer",fontWeight:800,fontSize:13,marginBottom:6}}>
-                  📋 베팅 폼에 적용
-                </button>
-              </div>
+                  {bettingSportCat==="축구"&&<div style={{marginBottom:10}}>
+                    <div style={{fontSize:10,fontWeight:700,color:C.teal,marginBottom:5}}>🎯 핸디캡</div>
+                    {["-2.5 마핸","-1.5 마핸","-0.5 마핸","+0.5 플핸","+1.5 플핸","+2.5 플핸"].map(opt=>(
+                      <button key={opt} onClick={()=>setBettingSlipOpt(bettingSlipOpt===opt?"":opt)}
+                        style={{display:"block",width:"100%",textAlign:"left",padding:"6px 9px",marginBottom:3,borderRadius:5,border:bettingSlipOpt===opt?`1px solid ${C.teal}`:`1px solid ${C.border}`,background:bettingSlipOpt===opt?`${C.teal}22`:C.bg2,color:bettingSlipOpt===opt?C.teal:C.text,cursor:"pointer",fontSize:10,fontWeight:bettingSlipOpt===opt?700:400}}>
+                        {opt}
+                      </button>
+                    ))}
+                  </div>}
+                </>
+              )}
             </div>
-          )}
+          </div>
+
+          {/* 열4 - 베팅슬립+폼 (항상 표시) */}
+          <div style={{flex:1,minWidth:260,display:"flex",flexDirection:"column",overflow:"hidden",background:C.bg2,borderLeft:`1px solid ${C.border2}`}}>
+            <div style={{padding:"8px 12px",borderBottom:`1px solid ${C.border}`,flexShrink:0,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div style={{fontSize:12,fontWeight:800,color:C.orange}}>🎯 베팅 추가</div>
+              <button onClick={()=>setTeamNameModal(true)} style={{fontSize:9,padding:"2px 7px",borderRadius:4,border:`1px solid ${C.purple}44`,background:`${C.purple}11`,color:C.purple,cursor:"pointer"}}>🌐 팀명관리</button>
+            </div>
+            <div style={{flex:1,overflowY:"auto",padding:"10px 12px"}}>
+              {bettingSelectedGame&&(
+                <div style={{background:`${C.teal}11`,border:`1px solid ${C.teal}33`,borderRadius:7,padding:"8px 10px",marginBottom:8}}>
+                  <div style={{fontSize:9,color:C.muted,marginBottom:2}}>선택 경기</div>
+                  <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:1}}>{bettingSelectedGame.home} vs {bettingSelectedGame.away}</div>
+                  {bettingSlipOpt&&<div style={{fontSize:11,color:C.amber,fontWeight:700}}>✓ {bettingSlipOpt}</div>}
+                </div>
+              )}
+              {bettingSelectedGame&&bettingSlipOpt&&(
+                <button onClick={()=>{
+                  const isOu=bettingSlipOpt.includes("오버")||bettingSlipOpt.includes("언더");
+                  handleCatChange("축구");
+                  setForm(f=>({...f,
+                    league:bettingSelectedGame.leagueName,
+                    homeTeam:isOu?bettingSelectedGame.home:"",
+                    awayTeam:isOu?bettingSelectedGame.away:"",
+                    teamName:!isOu?(bettingSlipOpt==="홈승"?bettingSelectedGame.home:bettingSlipOpt==="원정승"?bettingSelectedGame.away:""),
+                    betOption:bettingSlipOpt,
+                  }));
+                }} style={{width:"100%",background:`${C.teal}22`,border:`1px solid ${C.teal}`,color:C.teal,padding:"6px",borderRadius:6,cursor:"pointer",fontWeight:700,fontSize:11,marginBottom:10}}>← 아래 폼에 적용</button>
+              )}
+              <div style={{borderTop:`1px solid ${C.border}`,paddingTop:8,marginBottom:6}}>
+                <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:6}}>— 베팅 폼 —</div>
+              </div>
+              <div style={{marginBottom:6}}>
+                <div style={L}>베팅사이트</div>
+                {activeSiteNames.length===0?<div style={{fontSize:11,color:C.dim}}>활성 사이트 없음</div>:
+                <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
+                  {activeSiteNames.filter(s=>krwSites.includes(s)).map(s=><button key={s} onClick={()=>handleSiteChange(s)} style={siteBtn(form.site===s,false)}>₩ {s}</button>)}
+                  {activeSiteNames.filter(s=>usdSites.includes(s)).map(s=><button key={s} onClick={()=>handleSiteChange(s)} style={siteBtn(form.site===s,true)}>$ {s}</button>)}
+                </div>}
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:5,marginBottom:5}}>
+                <div><div style={L}>날짜</div><div style={{...S,boxSizing:"border-box",color:C.teal,fontWeight:700,fontSize:11,display:"flex",alignItems:"center"}}>{form.date}</div></div>
+                <div><div style={L}>종목</div><select value={form.category} onChange={e=>handleCatChange(e.target.value)} style={S}>{CATS.map(c=><option key={c}>{c}</option>)}</select></div>
+              </div>
+              <div style={{marginBottom:5}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:2}}>
+                  <div style={L}>리그</div>
+                  <button onClick={()=>setAddLeagueModal({cat:form.category})} style={{fontSize:9,padding:"1px 6px",borderRadius:3,border:`1px solid ${C.purple}44`,background:`${C.purple}11`,color:C.purple,cursor:"pointer"}}>+ 추가</button>
+                </div>
+                <select value={form.league} onChange={e=>handleLeagueChange(e.target.value)} style={S}>
+                  <optgroup label="★ 주요 리그">{fMajor.map(l=><option key={l}>{l}</option>)}</optgroup>
+                  {fOthers.length>0&&<optgroup label="─────────">{fOthers.map(l=><option key={l}>{l}</option>)}</optgroup>}
+                </select>
+              </div>
+              <div style={{marginBottom:5}}>
+                <div style={L}>베팅 옵션</div>
+                {form.category==="E스포츠"?(
+                  <div><div style={{display:"flex",gap:3,flexWrap:"wrap",marginBottom:4}}>{["일반승","1.5","−1.5","직접입력"].map(o=><button key={o} onClick={()=>setForm(f=>({...f,betOption:o}))} style={{padding:"3px 7px",borderRadius:4,border:form.betOption===o?`1px solid ${C.purple}`:`1px solid ${C.border}`,background:form.betOption===o?`${C.purple}22`:C.bg2,color:form.betOption===o?C.purple:C.muted,cursor:"pointer",fontSize:10}}>{o}</button>)}</div>
+                  {form.betOption==="직접입력"&&<input value={esportsCustomOpt} onChange={e=>setEsportsCustomOpt(e.target.value)} placeholder="옵션 입력" style={{...S,boxSizing:"border-box"}}/>}</div>
+                ):(
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:4}}>
+                    <select value={form.optGroup} onChange={e=>handleGroupChange(e.target.value)} style={S}><option value="">그룹</option>{optGroups.map(g=><option key={g.g} value={g.g}>{g.g}</option>)}</select>
+                    <select value={form.betOption} onChange={e=>setForm(f=>({...f,betOption:e.target.value}))} style={{...S,opacity:form.optGroup?1:0.4}} disabled={!form.optGroup}><option value="">옵션</option>{curOpts.map(o=><option key={o} value={o}>{o}</option>)}</select>
+                  </div>
+                )}
+                {form.betOption&&form.betOption!=="직접입력"&&<div style={{fontSize:10,color:C.purple,marginTop:2,fontWeight:700}}>✓ {form.betOption}</div>}
+              </div>
+              <div style={{marginBottom:5}}>
+                {isOverUnder(form.betOption)?(
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:4}}>
+                    <div><div style={L}>홈팀</div><TeamInput value={form.homeTeam||""} onChange={v=>setForm(f=>({...f,homeTeam:v}))} placeholder="홈팀"/></div>
+                    <div><div style={L}>원정팀</div><TeamInput value={form.awayTeam||""} onChange={v=>setForm(f=>({...f,awayTeam:v}))} placeholder="원정팀"/></div>
+                  </div>
+                ):(
+                  <div><div style={L}>팀 이름</div><TeamInput value={form.teamName||""} onChange={v=>setForm(f=>({...f,teamName:v}))} placeholder="팀 이름"/></div>
+                )}
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:5,marginBottom:5}}>
+                <div>
+                  <div style={L}>배당률</div>
+                  <input type="text" inputMode="numeric" value={form.oddsRaw} onChange={e=>setForm(f=>({...f,oddsRaw:e.target.value.replace(/[^0-9]/g,"")}))} placeholder="예) 185" style={{...S,fontSize:14,padding:"7px",boxSizing:"border-box"}}/>
+                  {form.oddsRaw.length>=3&&<div style={{fontSize:10,color:C.teal,marginTop:2,fontWeight:700}}>{(parseInt(form.oddsRaw)/100).toFixed(2)}</div>}
+                </div>
+                <div>
+                  <div style={L}>베팅금액</div>
+                  <div style={{display:"flex",gap:2,alignItems:"center",marginBottom:3}}>
+                    <button onClick={()=>setForm(f=>({...f,amount:Math.max(formIsDollar?1:1000,f.amount-(formIsDollar?1:10000))}))} style={{background:C.bg,border:`1px solid ${C.border}`,color:C.red,width:20,height:28,borderRadius:4,cursor:"pointer",fontSize:12,fontWeight:700}}>−</button>
+                    <input type="number" value={form.amount} onChange={e=>setForm(f=>({...f,amount:parseFloat(e.target.value)||0}))} style={{...S,textAlign:"center",fontWeight:800,color:formIsDollar?C.amber:C.green,fontSize:11,padding:"4px 2px",boxSizing:"border-box",...noSpin}}/>
+                    <button onClick={()=>setForm(f=>({...f,amount:f.amount+(formIsDollar?1:10000)}))} style={{background:C.bg,border:`1px solid ${C.border}`,color:C.green,width:20,height:28,borderRadius:4,cursor:"pointer",fontSize:12,fontWeight:700}}>+</button>
+                  </div>
+                  <div style={{display:"flex",gap:2}}>
+                    {(formIsDollar?USD_HK:KRW_HK).map(v=><button key={v} onClick={()=>setForm(f=>({...f,amount:v}))} style={{flex:1,padding:"2px 0",borderRadius:3,border:`1px solid ${formIsDollar?C.amber+"44":C.green+"44"}`,background:C.bg,color:formIsDollar?C.amber:C.green,cursor:"pointer",fontSize:9}}>{formIsDollar?`$${v}`:`${v/10000}만`}</button>)}
+                  </div>
+                </div>
+              </div>
+              <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:8}}>
+                <input type="checkbox" id="inclStats2" checked={form.includeStats} onChange={e=>setForm(f=>({...f,includeStats:e.target.checked}))} style={{width:11,height:11,accentColor:C.purple}}/>
+                <label htmlFor="inclStats2" style={{fontSize:10,color:C.muted,cursor:"pointer"}}>통계 자료에 포함</label>
+              </div>
+              <button onClick={handleAdd} style={{width:"100%",background:`linear-gradient(135deg,${C.orange}33,${C.green}22)`,border:`1px solid ${C.orange}`,color:C.orange,padding:"10px",borderRadius:8,cursor:"pointer",fontWeight:800,fontSize:14}}>✅ 베팅 추가</button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -1440,7 +1523,7 @@ export default function App() {
           </div>
           <div style={{flex:1,overflowY:"auto",padding:16}}>
             {activeSiteNames.length===0?<div style={{textAlign:"center",color:C.dim,padding:"50px 0"}}><div style={{fontSize:24,marginBottom:8}}>💳</div><div>사이트를 활성화하면 표시됩니다</div></div>:
-            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:18}}>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:14,marginBottom:18}}>
               {activeSiteNames.map(site=>{
                 const st=siteStates[site]||{deposited:0,betTotal:0,active:false,isDollar:false};
                 const dollar=isUSD(site);
@@ -1455,7 +1538,7 @@ export default function App() {
                   <div key={site} style={{background:C.bg3,border:`1px solid ${barColor}33`,borderRadius:12,padding:13}}>
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
                       <div style={{display:"flex",alignItems:"center",gap:6}}>
-                        <span style={{fontSize:13,fontWeight:800,color:C.text}}>{dollar?"$":"₩"} {site}</span>
+                        <span style={{fontSize:15,fontWeight:800,color:C.text}}>{dollar?"$":"₩"} {site}</span>
                         {is100&&<span style={{fontSize:11,fontWeight:900,color:C.red,border:`2px solid ${C.red}`,borderRadius:5,padding:"1px 6px",opacity:0.7,transform:"rotate(-8deg)",display:"inline-block",letterSpacing:0.5}}>완료</span>}
                       </div>
                       <div style={{display:"flex",gap:3}}>
@@ -1600,7 +1683,13 @@ export default function App() {
       {/* ══ 수익률 탭 ══ */}
       {tab==="roi"&&(
         <div style={{flex:1,overflowY:"auto",padding:20}}>
-          <div style={{fontSize:16,fontWeight:800,color:C.green,marginBottom:16}}>💹 수익률 분석</div>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}}>
+            <div style={{fontSize:16,fontWeight:800,color:C.green}}>💹 수익률 분석</div>
+            <div style={{background:C.bg3,border:`1px solid ${totalRoiKRW>=0?C.green:C.red}44`,borderRadius:10,padding:"8px 18px",textAlign:"center"}}>
+              <div style={{fontSize:9,color:C.muted,marginBottom:2}}>전체 순손익</div>
+              <div style={{fontSize:22,fontWeight:900,color:totalRoiKRW>=0?C.green:C.red}}>{fmtProfit(totalRoiKRW,false)}</div>
+            </div>
+          </div>
           <div style={{background:C.bg3,border:`1px solid ${totalRoiKRW>=0?C.green:C.red}44`,borderRadius:12,padding:16,marginBottom:12,textAlign:"center"}}>
             <div style={{fontSize:11,color:C.muted,marginBottom:4}}>전체 순손익 (마감 완료 세션 합산 · 원화 환산)</div>
             <div style={{fontSize:28,fontWeight:900,color:totalRoiKRW>=0?C.green:C.red}}>{fmtProfit(totalRoiKRW,false)}</div>
@@ -1817,6 +1906,101 @@ export default function App() {
                 </div>
               ))}
             </div>}
+        </div>
+      )}
+
+      {/* ══ 팀명 관리 모달 ══ */}
+      {teamNameModal&&(
+        <div style={{position:"fixed",inset:0,background:"#000b",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center"}}>
+          <div style={{background:C.bg3,border:`1px solid ${C.purple}`,borderRadius:14,padding:24,width:420,maxHeight:"80vh",overflowY:"auto"}}>
+            <div style={{fontSize:14,fontWeight:700,color:C.purple,marginBottom:14}}>🌐 팀명 한글 관리</div>
+            <div style={{fontSize:11,color:C.muted,marginBottom:12}}>영어 팀명 → 한글로 표시됩니다. 경기목록에서 자동 적용됩니다.</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr auto",gap:6,marginBottom:12}}>
+              <input value={tnNewEng} onChange={e=>setTnNewEng(e.target.value)} placeholder="영어 팀명 (예: Manchester City)" style={{...S,boxSizing:"border-box"}}/>
+              <input value={tnNewKor} onChange={e=>setTnNewKor(e.target.value)} placeholder="한글 (예: 맨체스터시티)" style={{...S,boxSizing:"border-box"}}/>
+              <button onClick={()=>{if(!tnNewEng.trim()||!tnNewKor.trim())return;saveTeamNameEntry(tnNewEng,tnNewKor);setTnNewEng("");setTnNewKor("");}} style={{padding:"7px 14px",background:`${C.purple}22`,border:`1px solid ${C.purple}`,color:C.purple,borderRadius:6,cursor:"pointer",fontWeight:700,whiteSpace:"nowrap"}}>추가</button>
+            </div>
+            <input value={tnSearch} onChange={e=>setTnSearch(e.target.value)} placeholder="검색..." style={{...S,boxSizing:"border-box",marginBottom:10}}/>
+            <div style={{display:"flex",flexDirection:"column",gap:3,maxHeight:300,overflowY:"auto"}}>
+              {Object.entries(teamNameMap).filter(([eng,kor])=>!tnSearch||eng.toLowerCase().includes(tnSearch.toLowerCase())||kor.includes(tnSearch)).map(([eng,kor])=>(
+                <div key={eng} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 10px",background:C.bg2,borderRadius:6}}>
+                  <div style={{flex:1}}><span style={{fontSize:11,color:C.muted}}>{eng}</span><span style={{fontSize:11,color:C.text,marginLeft:8}}>→ {kor}</span></div>
+                  <button onClick={()=>deleteTeamNameEntry(eng)} style={{background:"transparent",border:`1px solid ${C.red}44`,color:C.red,padding:"2px 7px",borderRadius:4,cursor:"pointer",fontSize:10}}>삭제</button>
+                </div>
+              ))}
+              {Object.keys(teamNameMap).length===0&&<div style={{textAlign:"center",color:C.dim,padding:"20px",fontSize:12}}>등록된 팀명 없음</div>}
+            </div>
+            <button onClick={()=>setTeamNameModal(false)} style={{width:"100%",marginTop:14,background:C.bg2,border:`1px solid ${C.border}`,color:C.muted,padding:"8px",borderRadius:6,cursor:"pointer"}}>닫기</button>
+          </div>
+        </div>
+      )}
+
+      {/* ══ 홈 탭 ══ */}
+      {tab==="home"&&(
+        <div style={{flex:1,overflowY:"auto",padding:20}}>
+          <div style={{fontSize:18,fontWeight:900,color:C.orange,marginBottom:20}}>🏠 홈</div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:16,marginBottom:20}}>
+            {/* 수익 요약 */}
+            <div style={{background:C.bg3,border:`1px solid ${totalRoiKRW>=0?C.green:C.red}44`,borderRadius:14,padding:16}}>
+              <div style={{fontSize:11,color:C.muted,marginBottom:4}}>전체 순손익</div>
+              <div style={{fontSize:26,fontWeight:900,color:totalRoiKRW>=0?C.green:C.red}}>{fmtProfit(totalRoiKRW,false)}</div>
+              <div style={{fontSize:10,color:C.muted,marginTop:4}}>$1 = ₩{usdKrw.toLocaleString()}</div>
+            </div>
+            {/* 승률 */}
+            <div style={{background:C.bg3,border:`1px solid ${C.teal}44`,borderRadius:14,padding:16}}>
+              <div style={{fontSize:11,color:C.muted,marginBottom:4}}>승률</div>
+              <div style={{fontSize:26,fontWeight:900,color:C.teal}}>{winRate}%</div>
+              <div style={{fontSize:10,color:C.muted,marginTop:4}}>{wins}승 {done.filter(b=>b.result==="패").length}패</div>
+            </div>
+            {/* 진행중 */}
+            <div style={{background:C.bg3,border:`1px solid ${C.amber}44`,borderRadius:14,padding:16}}>
+              <div style={{fontSize:11,color:C.muted,marginBottom:4}}>진행중 베팅</div>
+              <div style={{fontSize:26,fontWeight:900,color:C.amber}}>{pending.length}건</div>
+              <div style={{fontSize:10,color:C.muted,marginTop:4}}>잔여 ₩{krwRemaining.toLocaleString()}</div>
+            </div>
+          </div>
+
+          {/* 입금 섹션 */}
+          <div style={{background:C.bg3,border:`1px solid ${C.green}33`,borderRadius:14,padding:16,marginBottom:16}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+              <div style={{fontSize:14,fontWeight:800,color:C.green}}>💵 입금 추가</div>
+              <button onClick={()=>setSiteManageModal(true)} style={{fontSize:10,padding:"3px 10px",borderRadius:5,border:`1px solid ${C.teal}44`,background:`${C.teal}11`,color:C.teal,cursor:"pointer"}}>🏢 사이트 관리</button>
+            </div>
+            <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:8}}>
+              {krwSites.map(s=><button key={s} onClick={()=>setDepSite(s)} style={siteBtn(depSite===s,false)}>₩ {s}</button>)}
+              {usdSites.map(s=><button key={s} onClick={()=>setDepSite(s)} style={siteBtn(depSite===s,true)}>$ {s}</button>)}
+            </div>
+            <div style={{display:"flex",gap:8,alignItems:"flex-end"}}>
+              <div style={{flex:1}}>
+                <div style={L}>입금 금액</div>
+                <div style={{display:"flex",gap:4,alignItems:"center"}}>
+                  <button onClick={()=>setDepAmt(a=>Math.max(0,a-(depIsDollar?1:10000)))} style={{background:C.bg2,border:`1px solid ${C.border}`,color:C.red,width:30,height:32,borderRadius:6,cursor:"pointer",fontSize:16,fontWeight:700}}>−</button>
+                  <div style={{position:"relative",flex:1}}>
+                    <span style={{position:"absolute",left:9,top:"50%",transform:"translateY(-50%)",color:depIsDollar?C.amber:C.green,fontWeight:700,fontSize:13,pointerEvents:"none"}}>{depSite?(depIsDollar?"$":"₩"):""}</span>
+                    <input type="number" value={depAmt||""} onChange={e=>setDepAmt(parseFloat(e.target.value)||0)} placeholder="금액 입력" style={{...S,textAlign:"right",fontWeight:800,color:depIsDollar?C.amber:C.green,fontSize:14,paddingLeft:26,boxSizing:"border-box",...noSpin}}/>
+                  </div>
+                  <button onClick={()=>setDepAmt(a=>a+(depIsDollar?1:10000))} style={{background:C.bg2,border:`1px solid ${C.border}`,color:C.green,width:30,height:32,borderRadius:6,cursor:"pointer",fontSize:16,fontWeight:700}}>+</button>
+                </div>
+              </div>
+              <button onClick={handleDeposit} style={{background:`${C.green}22`,border:`1px solid ${C.green}`,color:C.green,padding:"8px 20px",borderRadius:7,cursor:"pointer",fontWeight:700,fontSize:13,flexShrink:0}}>💰 입금 추가</button>
+            </div>
+          </div>
+
+          {/* 바로가기 */}
+          <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10}}>
+            {[
+              {tab:"betting",icon:"🎯",label:"베팅",color:C.orange},
+              {tab:"pending",icon:"⏳",label:"진행중",color:C.amber},
+              {tab:"stats",icon:"📊",label:"통계",color:C.purple},
+              {tab:"roi",icon:"💹",label:"수익률",color:C.green},
+            ].map(item=>(
+              <button key={item.tab} onClick={()=>setTab(item.tab as any)}
+                style={{background:C.bg3,border:`1px solid ${item.color}33`,borderRadius:12,padding:"16px 10px",cursor:"pointer",textAlign:"center"}}>
+                <div style={{fontSize:24,marginBottom:6}}>{item.icon}</div>
+                <div style={{fontSize:12,fontWeight:700,color:item.color}}>{item.label}</div>
+              </button>
+            ))}
+          </div>
         </div>
       )}
 
