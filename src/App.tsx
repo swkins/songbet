@@ -77,6 +77,12 @@ const AF_BASES: Record<string,string> = {
   "하키":    "https://v1.hockey.api-sports.io",
 };
 // 야구는 시즌이 연도 기준 다름 (MLB는 현재연도)
+// 한국시간(KST) 기준 날짜 반환
+const getKSTDateStr = (offsetDays: number = 0): string => {
+  const d = new Date(Date.now() + 9*60*60*1000 + offsetDays*24*60*60*1000);
+  return d.toISOString().slice(0,10);
+};
+
 const getSeasonForSport = (sport: string): number => {
   const now = new Date();
   if(sport==="야구") return now.getFullYear(); // MLB 시즌 = 현재연도
@@ -206,7 +212,7 @@ const afResultCache: {data:AFFixture[];fetchedAt:number}|null = null;
 let afResultCacheStore: {data:AFFixture[];fetchedAt:number}|null = null;
 
 async function fetchAFFixtures(sport:string, leagueId:number, leagueName:string, season:number, targetDate:string=""): Promise<AFFixture[]> {
-  const dateKey = targetDate || new Date().toISOString().slice(0,10);
+  const dateKey = targetDate || getKSTDateStr(0);
   const cacheKey = `${sport}_${leagueId}_${season}_${dateKey}`;
   const now = Date.now();
   const cached = afFixtureCache[cacheKey];
@@ -256,7 +262,7 @@ async function fetchAFTodayResults(): Promise<AFFixture[]> {
   const now = Date.now();
   if (afResultCacheStore && now - afResultCacheStore.fetchedAt < AF_CACHE_TTL) return afResultCacheStore.data;
   try {
-    const today = new Date().toISOString().slice(0,10);
+    const today = getKSTDateStr(0);
     const url = `${AF_BASES["축구"]}/fixtures?date=${today}&status=FT-AET-PEN`;
     const res = await fetch(url, { headers:{"x-apisports-key":AF_KEY} });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -563,7 +569,7 @@ export default function App() {
   const fetchAfLeague = async(sport: string, leagueName: string, leagueId: number, season: number, dayOffset:number=0) => {
     setAfLoading(true);
     try {
-      const dateKey = new Date(Date.now()+dayOffset*24*60*60*1000).toISOString().slice(0,10);
+      const dateKey = getKSTDateStr(dayOffset);
       const games = await fetchAFFixtures(sport, leagueId, leagueName, season, dateKey);
       setAfGames(prev=>{
         const others = prev.filter(g=>!(g.league.id===leagueId && g.fixture.date.slice(0,10)===dateKey));
@@ -1333,7 +1339,7 @@ export default function App() {
                     <div style={{fontSize:10,marginBottom:3}}>{d.label}</div>
                     <div style={{fontSize:18,fontWeight:900}}>{(d.odds||0).toFixed(2)}</div>
                   </button>
-                ))}
+                );}).filter(Boolean)}
               </div>
             </div>
             {/* 사이트 */}
@@ -1557,6 +1563,7 @@ export default function App() {
               <div style={{padding:"6px 10px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
                 <div style={{fontSize:11,fontWeight:800,color:C.amber,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>
                   {(()=>{const l=(afLeagues[bettingSportCat]||[]).find(l=>`${l.id}`===bettingLeague);if(!l)return bettingLeague||"리그 선택";return leagueOverrides[l.name]||LEAGUE_KR[l.name]||l.name;})()}
+                  <span style={{fontSize:9,color:C.dim,marginLeft:6}}>{getKSTDateStr(afDateOffset)}</span>
                 </div>
                 <button onClick={()=>{
                   if(!bettingLeague)return;
@@ -1570,12 +1577,12 @@ export default function App() {
               </div>
               {/* 날짜 필터 탭 */}
               <div style={{display:"flex",gap:3,padding:"4px 8px",overflowX:"auto"}}>
-                {[{label:"오늘",off:0},{label:"내일",off:1},{label:"2일후",off:2},{label:"3일후",off:3},{label:"4일후",off:4},{label:"5일후",off:5}].map(({label,off})=>(
+                {[0,1,2,3,4,5].map((off)=>{const label=off===0?"오늘":getKSTDateStr(off).slice(5);return(
                   <button key={off} onClick={()=>{
                     setAfDateOffset(off);
                     const lid=parseInt(bettingLeague)||0;
                     const info=(afLeagues[bettingSportCat]||[]).find(l=>l.id===lid);
-                    const td=new Date(Date.now()+off*24*60*60*1000).toISOString().slice(0,10);
+                    const td=getKSTDateStr(off);
                     if(info)fetchAfLeague(bettingSportCat,info.name,info.id,info.season,off);
                   }}
                     style={{padding:"3px 8px",borderRadius:4,border:afDateOffset===off?`1px solid ${C.amber}`:`1px solid ${C.border}`,background:afDateOffset===off?`${C.amber}22`:C.bg2,color:afDateOffset===off?C.amber:C.muted,cursor:"pointer",fontSize:9,fontWeight:afDateOffset===off?700:400,flexShrink:0}}>
@@ -1590,7 +1597,7 @@ export default function App() {
               {bettingLeague&&bettingSportCat==="축구"&&afLoading&&<div style={{textAlign:"center",color:C.teal,padding:"30px 0",fontSize:11}}>⏳ 불러오는 중...</div>}
               {bettingLeague&&!afLoading&&(()=>{
                 const lid=parseInt(bettingLeague)||0;
-                const targetDate=new Date(Date.now()+afDateOffset*24*60*60*1000).toISOString().slice(0,10);
+                const targetDate=getKSTDateStr(afDateOffset);
                 const games=afGames.filter(g=>{
                   const gdate=g.fixture.date?g.fixture.date.slice(0,10):"";
                   return (lid?g.league.id===lid:true)&&gdate===targetDate;
