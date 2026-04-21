@@ -1424,7 +1424,7 @@ export default function App() {
                     league:bettingSelectedGame.leagueName,
                     homeTeam:isOu?bettingSelectedGame.home:"",
                     awayTeam:isOu?bettingSelectedGame.away:"",
-                    teamName:!isOu?(bettingSlipOpt==="홈승"?bettingSelectedGame.home:bettingSlipOpt==="원정승"?bettingSelectedGame.away:""),
+                    teamName:!isOu?(bettingSlipOpt==="홈승"?bettingSelectedGame.home:bettingSlipOpt==="원정승"?bettingSelectedGame.away:""):"",
                     betOption:bettingSlipOpt,
                   }));
                 }} style={{width:"100%",background:`${C.teal}22`,border:`1px solid ${C.teal}`,color:C.teal,padding:"6px",borderRadius:6,cursor:"pointer",fontWeight:700,fontSize:11,marginBottom:10}}>← 아래 폼에 적용</button>
