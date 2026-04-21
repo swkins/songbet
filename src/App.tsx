@@ -99,16 +99,16 @@ const afResultCache: {data:AFFixture[];fetchedAt:number}|null = null;
 let afResultCacheStore: {data:AFFixture[];fetchedAt:number}|null = null;
 
 async function fetchAFFixtures(leagueId:number, leagueName:string, season:number=2024): Promise<AFFixture[]> {
-  const cacheKey = \`\${leagueId}_\${season}\`;
+  const cacheKey = `${leagueId}_${season}`;
   const now = Date.now();
   const cached = afFixtureCache[cacheKey];
   if (cached && now - cached.fetchedAt < AF_CACHE_TTL) return cached.data;
   try {
     const today = new Date().toISOString().slice(0,10);
     const tomorrow = new Date(Date.now()+24*60*60*1000).toISOString().slice(0,10);
-    const url = \`\${AF_BASE}/fixtures?league=\${leagueId}&season=\${season}&from=\${today}&to=\${tomorrow}\`;
+    const url = `${AF_BASE}/fixtures?league=${leagueId}&season=${season}&from=${today}&to=${tomorrow}`;
     const res = await fetch(url, { headers:{"x-apisports-key":AF_KEY} });
-    if (!res.ok) throw new Error(\`HTTP \${res.status}\`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const json = await res.json();
     const data: AFFixture[] = json.response || [];
     afFixtureCache[cacheKey] = {data, fetchedAt:now};
@@ -121,9 +121,9 @@ async function fetchAFTodayResults(): Promise<AFFixture[]> {
   if (afResultCacheStore && now - afResultCacheStore.fetchedAt < AF_CACHE_TTL) return afResultCacheStore.data;
   try {
     const today = new Date().toISOString().slice(0,10);
-    const url = \`\${AF_BASE}/fixtures?date=\${today}&status=FT-AET-PEN\`;
+    const url = `${AF_BASE}/fixtures?date=${today}&status=FT-AET-PEN`;
     const res = await fetch(url, { headers:{"x-apisports-key":AF_KEY} });
-    if (!res.ok) throw new Error(\`HTTP \${res.status}\`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const json = await res.json();
     const data: AFFixture[] = json.response || [];
     afResultCacheStore = {data, fetchedAt:now};
