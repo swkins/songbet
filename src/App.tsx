@@ -196,31 +196,34 @@ async function fetchAFFixtures(sport:string, leagueId:number, leagueName:string,
   const cached = afFixtureCache[cacheKey];
   if (cached && now - cached.fetchedAt < AF_CACHE_TTL) return cached.data;
   const base = AF_BASES[sport] || AF_BASES["축구"];
+  // 종목별 엔드포인트: 축구=fixtures, 농구/야구/배구=games
+  const endpoint = sport==="축구" ? "fixtures" : "games";
   try {
     const today = new Date().toISOString().slice(0,10);
     const tomorrow = new Date(Date.now()+24*60*60*1000).toISOString().slice(0,10);
-    const url = `${base}/fixtures?league=${leagueId}&season=${season}&from=${today}&to=${tomorrow}`;
+    const url = `${base}/${endpoint}?league=${leagueId}&season=${season}&date=${today}`;
     const res = await fetch(url, { headers:{"x-apisports-key":AF_KEY} });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const json = await res.json();
     const data: AFFixture[] = (json.response || []).map((item: any) => {
       // 축구: item.fixture 구조
       if (item.fixture) return item as AFFixture;
-      // 농구/야구/배구: 다른 구조
-      const homeScore = item.scores?.home?.total ?? item.scores?.home ?? null;
-      const awayScore = item.scores?.away?.total ?? item.scores?.away ?? null;
+      // 농구/야구/배구: games 응답 구조
+      // 야구: item.teams.home.name, item.date, item.status.short, item.scores
+      // 농구: 유사 구조
+      const homeScore = item.scores?.home?.total ?? item.scores?.home?.points ?? null;
+      const awayScore = item.scores?.away?.total ?? item.scores?.away?.points ?? null;
+      const homeTeam = item.teams?.home || { id:0, name:"홈팀", logo:"" };
+      const awayTeam = item.teams?.away || { id:0, name:"원정팀", logo:"" };
       return {
         id: item.id,
         fixture: {
           id: item.id,
           date: item.date || item.time || "",
-          status: { short: item.status?.short || "NS", elapsed: null }
+          status: { short: item.status?.short||"NS", elapsed: item.status?.timer??null }
         },
-        league: item.league || { id: leagueId, name: leagueName, country: "", logo: "" },
-        teams: item.teams || {
-          home: { id: item.home?.id||0, name: item.home?.name||"홈팀", logo: "" },
-          away: { id: item.away?.id||0, name: item.away?.name||"원정팀", logo: "" }
-        },
+        league: item.league || { id:leagueId, name:leagueName, country:"", logo:"" },
+        teams: { home: homeTeam, away: awayTeam },
         goals: { home: homeScore, away: awayScore },
         score: { fulltime: { home: homeScore, away: awayScore } },
       } as AFFixture;
@@ -1394,7 +1397,7 @@ export default function App() {
         <div style={{display:"flex",flex:1,overflow:"hidden",minWidth:0}}>
 
           {/* 열1 - 종목+리그 */}
-          <div style={{width:180,flexShrink:0,borderRight:`1px solid ${C.border2}`,display:"flex",flexDirection:"column",overflow:"hidden"}}>
+          <div style={{width:220,flexShrink:0,borderRight:`1px solid ${C.border2}`,display:"flex",flexDirection:"column",overflow:"hidden"}}>
             <div style={{padding:"8px 8px",borderBottom:`1px solid ${C.border}`,flexShrink:0}}>
               <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
                 {(["축구","야구","농구","배구","E스포츠"] as const).map(cat=>(
@@ -1464,7 +1467,7 @@ export default function App() {
           </div>
 
           {/* 열2 - 경기 목록 (AF) */}
-          <div style={{width:240,flexShrink:0,borderRight:`1px solid ${C.border2}`,display:"flex",flexDirection:"column",overflow:"hidden"}}>
+          <div style={{width:290,flexShrink:0,borderRight:`1px solid ${C.border2}`,display:"flex",flexDirection:"column",overflow:"hidden"}}>
             <div style={{padding:"8px 10px",borderBottom:`1px solid ${C.border}`,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
               <div style={{fontSize:11,fontWeight:800,color:C.amber}}>{(()=>{const l=(afLeagues[bettingSportCat]||[]).find(l=>`${l.id}`===bettingLeague);if(!l)return bettingLeague||"리그 선택";return leagueOverrides[l.name]||LEAGUE_KR[l.name]||l.name;})()} <span style={{fontSize:9,color:C.dim}}>24h</span></div>
               <button onClick={()=>{
@@ -1520,7 +1523,7 @@ export default function App() {
           </div>
 
           {/* 열3 - 배당 옵션 */}
-          <div style={{width:210,flexShrink:0,borderRight:`1px solid ${C.border2}`,display:"flex",flexDirection:"column",overflow:"hidden"}}>
+          <div style={{width:260,flexShrink:0,borderRight:`1px solid ${C.border2}`,display:"flex",flexDirection:"column",overflow:"hidden"}}>
             <div style={{padding:"8px 10px",borderBottom:`1px solid ${C.border}`,flexShrink:0}}>
               <div style={{fontSize:11,fontWeight:800,color:C.purple}}>배당 옵션</div>
             </div>
@@ -1533,28 +1536,28 @@ export default function App() {
                     <div style={{color:C.dim,fontSize:9}}>vs {bettingSelectedGame.away}</div>
                   </div>
                   <div style={{marginBottom:10}}>
-                    <div style={{fontSize:10,fontWeight:700,color:C.purple,marginBottom:5}}>⚽ 승무패</div>
+                    <div style={{fontSize:12,fontWeight:700,color:C.purple,marginBottom:8}}>⚽ 승무패</div>
                     {[{opt:"홈승",label:`홈승 (${bettingSelectedGame.home})`},{opt:"무승부",label:"무승부"},{opt:"원정승",label:`원정승 (${bettingSelectedGame.away})`}].map(({opt,label})=>(
                       <button key={opt} onClick={()=>setBettingSlipOpt(bettingSlipOpt===opt?"":opt)}
-                        style={{display:"block",width:"100%",textAlign:"left",padding:"6px 9px",marginBottom:3,borderRadius:5,border:bettingSlipOpt===opt?`1px solid ${C.green}`:`1px solid ${C.border}`,background:bettingSlipOpt===opt?`${C.green}22`:C.bg2,color:bettingSlipOpt===opt?C.green:C.text,cursor:"pointer",fontSize:10,fontWeight:bettingSlipOpt===opt?700:400}}>
+                        style={{display:"block",width:"100%",textAlign:"left",padding:"9px 12px",marginBottom:4,borderRadius:6,border:bettingSlipOpt===opt?`1px solid ${C.green}`:`1px solid ${C.border}`,background:bettingSlipOpt===opt?`${C.green}22`:C.bg2,color:bettingSlipOpt===opt?C.green:C.text,cursor:"pointer",fontSize:12,fontWeight:bettingSlipOpt===opt?700:400}}>
                         {label}
                       </button>
                     ))}
                   </div>
                   <div style={{marginBottom:10}}>
-                    <div style={{fontSize:10,fontWeight:700,color:C.amber,marginBottom:5}}>📊 언오버</div>
+                    <div style={{fontSize:12,fontWeight:700,color:C.amber,marginBottom:8}}>📊 언오버</div>
                     {["오버 1.5","언더 1.5","오버 2.5","언더 2.5","오버 3.5","언더 3.5","오버 4.5","언더 4.5"].map(opt=>(
                       <button key={opt} onClick={()=>setBettingSlipOpt(bettingSlipOpt===opt?"":opt)}
-                        style={{display:"block",width:"100%",textAlign:"left",padding:"6px 9px",marginBottom:3,borderRadius:5,border:bettingSlipOpt===opt?`1px solid ${C.amber}`:`1px solid ${C.border}`,background:bettingSlipOpt===opt?`${C.amber}22`:C.bg2,color:bettingSlipOpt===opt?C.amber:C.text,cursor:"pointer",fontSize:10,fontWeight:bettingSlipOpt===opt?700:400}}>
+                        style={{display:"block",width:"100%",textAlign:"left",padding:"9px 12px",marginBottom:4,borderRadius:6,border:bettingSlipOpt===opt?`1px solid ${C.amber}`:`1px solid ${C.border}`,background:bettingSlipOpt===opt?`${C.amber}22`:C.bg2,color:bettingSlipOpt===opt?C.amber:C.text,cursor:"pointer",fontSize:12,fontWeight:bettingSlipOpt===opt?700:400}}>
                         {opt}
                       </button>
                     ))}
                   </div>
                   {bettingSportCat==="축구"&&<div style={{marginBottom:10}}>
-                    <div style={{fontSize:10,fontWeight:700,color:C.teal,marginBottom:5}}>🎯 핸디캡</div>
+                    <div style={{fontSize:12,fontWeight:700,color:C.teal,marginBottom:8}}>🎯 핸디캡</div>
                     {["-2.5 마핸","-1.5 마핸","-0.5 마핸","+0.5 플핸","+1.5 플핸","+2.5 플핸"].map(opt=>(
                       <button key={opt} onClick={()=>setBettingSlipOpt(bettingSlipOpt===opt?"":opt)}
-                        style={{display:"block",width:"100%",textAlign:"left",padding:"6px 9px",marginBottom:3,borderRadius:5,border:bettingSlipOpt===opt?`1px solid ${C.teal}`:`1px solid ${C.border}`,background:bettingSlipOpt===opt?`${C.teal}22`:C.bg2,color:bettingSlipOpt===opt?C.teal:C.text,cursor:"pointer",fontSize:10,fontWeight:bettingSlipOpt===opt?700:400}}>
+                        style={{display:"block",width:"100%",textAlign:"left",padding:"9px 12px",marginBottom:4,borderRadius:6,border:bettingSlipOpt===opt?`1px solid ${C.teal}`:`1px solid ${C.border}`,background:bettingSlipOpt===opt?`${C.teal}22`:C.bg2,color:bettingSlipOpt===opt?C.teal:C.text,cursor:"pointer",fontSize:12,fontWeight:bettingSlipOpt===opt?700:400}}>
                         {opt}
                       </button>
                     ))}
@@ -1565,7 +1568,7 @@ export default function App() {
           </div>
 
           {/* 열4 - 베팅슬립+폼 (항상 표시) */}
-          <div style={{width:220,flexShrink:0,display:"flex",flexDirection:"column",overflow:"hidden",background:C.bg2,borderLeft:`1px solid ${C.border2}`}}>
+          <div style={{width:270,flexShrink:0,display:"flex",flexDirection:"column",overflow:"hidden",background:C.bg2,borderLeft:`1px solid ${C.border2}`}}>
             <div style={{padding:"8px 12px",borderBottom:`1px solid ${C.border}`,flexShrink:0,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
               <div style={{fontSize:12,fontWeight:800,color:C.orange}}>🎯 베팅 추가</div>
               <button onClick={()=>setTeamNameModal(true)} style={{fontSize:9,padding:"2px 7px",borderRadius:4,border:`1px solid ${C.purple}44`,background:`${C.purple}11`,color:C.purple,cursor:"pointer"}}>🌐 팀명관리</button>
@@ -1661,7 +1664,7 @@ export default function App() {
                 <input type="checkbox" id="inclStats2" checked={form.includeStats} onChange={e=>setForm(f=>({...f,includeStats:e.target.checked}))} style={{width:11,height:11,accentColor:C.purple}}/>
                 <label htmlFor="inclStats2" style={{fontSize:10,color:C.muted,cursor:"pointer"}}>통계 자료에 포함</label>
               </div>
-              <button onClick={handleAdd} style={{width:"100%",background:`linear-gradient(135deg,${C.orange}33,${C.green}22)`,border:`1px solid ${C.orange}`,color:C.orange,padding:"10px",borderRadius:8,cursor:"pointer",fontWeight:800,fontSize:14}}>✅ 베팅 추가</button>
+              <button onClick={handleAdd} style={{width:"100%",background:`linear-gradient(135deg,${C.orange}44,${C.green}22)`,border:`2px solid ${C.orange}`,color:C.orange,padding:"14px",borderRadius:10,cursor:"pointer",fontWeight:900,fontSize:16,marginTop:4}}>✅ 베팅 추가</button>
             </div>
           </div>
         </div>
