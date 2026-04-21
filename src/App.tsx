@@ -1339,7 +1339,7 @@ export default function App() {
                     <div style={{fontSize:10,marginBottom:3}}>{d.label}</div>
                     <div style={{fontSize:18,fontWeight:900}}>{(d.odds||0).toFixed(2)}</div>
                   </button>
-                );})}
+                ))}
               </div>
             </div>
             {/* 사이트 */}
