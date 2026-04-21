@@ -141,18 +141,12 @@ const getOptGroups = (cat:string) => {
   return [];
 };
 const getDefaultGroup = (cat:string) => cat==="축구"?"홈":cat==="농구"?"플핸":cat==="야구"?"승패":"";
-const getDefaultOpt = (cat:string,g:string,league="") => {
-  if(cat==="축구"&&g==="홈") return "홈 0.5";
-  if(cat==="축구"&&g==="원정") return "원정 0.5";
-  if(cat==="야구"&&g==="승패") return "역배";
-  if(cat==="야구"&&g==="오버") return ({MLB:"8.5 오버",KBO:"9.5 오버",NPB:"5.5 오버"} as any)[league]||"8.5 오버";
-  if(cat==="야구"&&g==="언더") return ({MLB:"8.5 언더",KBO:"9.5 언더",NPB:"5.5 언더"} as any)[league]||"8.5 언더";
-  return "";
-};
+const getDefaultOpt = (_cat:string,_g:string,_league="") => "";
 
 const TEAM_DB = ["뉴욕 양키스","LA 다저스","보스턴 레드삭스","시카고 컵스","샌프란시스코 자이언츠","휴스턴 애스트로스","애틀란타 브레이브스","뉴욕 메츠","필라델피아 필리스","샌디에이고 파드리스","시애틀 매리너스","토론토 블루제이스","미네소타 트윈스","클리블랜드 가디언스","텍사스 레인저스","탬파베이 레이스","볼티모어 오리올스","밀워키 브루어스","애리조나 다이아몬드백스","LA 에인절스","오클랜드 애슬레틱스","콜로라도 로키스","캔자스시티 로열스","피츠버그 파이리츠","신시내티 레즈","마이애미 말린스","워싱턴 내셔널스","디트로이트 타이거스","시카고 화이트삭스","세인트루이스 카디널스","LA 레이커스","골든스테이트 워리어스","보스턴 셀틱스","마이애미 히트","시카고 불스","브루클린 네츠","밀워키 벅스","피닉스 선즈","댈러스 매버릭스","덴버 너기츠","멤피스 그리즐리스","필라델피아 세븐티식서스","애틀란타 호크스","클리블랜드 캐벌리어스","뉴욕 닉스","토론토 랩터스","새크라멘토 킹스","뉴올리언스 펠리컨스","인디애나 페이서스","미네소타 팀버울브스","오클라호마시티 선더","포틀랜드 트레일블레이저스","유타 재즈","샌안토니오 스퍼스","샬럿 호네츠","워싱턴 위저즈","올랜도 매직","디트로이트 피스톤스","휴스턴 로케츠","LA 클리퍼스","맨체스터 시티","아스날","리버풀","첼시","맨체스터 유나이티드","토트넘","레알 마드리드","바르셀로나","아틀레티코 마드리드","바이에른 뮌헨","도르트문트","인테르 밀란","AC 밀란","유벤투스","파리 생제르맹","T1","Gen.G","DK","KT","BRO","NS","DRX","HLE","FNC","G2","C9","TL","NRG","100T","EG","FLY","BLG","JDG","EDG","WBG"];
 
 const CATS = ["축구","농구","야구","배구","E스포츠"];
+const SPORT_ICON:Record<string,string> = {"축구":"⚽","농구":"🏀","야구":"⚾","배구":"🏐","E스포츠":"🎮","모의":"🎯"};
 const USD_TO_KRW = 1380;
 
 const noSpin:React.CSSProperties = {MozAppearance:"textfield"} as any;
@@ -782,17 +776,48 @@ export default function App() {
   const KRW_HK=[10000,20000,30000,40000,50000];
   const USD_HK=[10,20,30,40,50];
 
+  const [editingBetId,setEditingBetId]=useState<string|null>(null);
+  const [editBetForm,setEditBetForm]=useState<Partial<Bet>>({});
+
   const PendingCard=({b}:{b:Bet,key?:any})=>{
     const title=isOverUnder(b.betOption)?[b.homeTeam,b.awayTeam].filter(Boolean).join(" vs "):b.teamName||"";
+    const isEditing=editingBetId===b.id;
+    if(isEditing){
+      return(
+        <div style={{background:C.bg2,border:`1px solid ${C.teal}44`,borderRadius:6,padding:"9px 10px",marginBottom:5}}>
+          <div style={{fontSize:11,color:C.teal,fontWeight:700,marginBottom:6}}>✏️ 수정</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:5,marginBottom:5}}>
+            <div><div style={L}>팀/홈팀</div><input value={editBetForm.homeTeam??editBetForm.teamName??""} onChange={e=>{if(isOverUnder(b.betOption))setEditBetForm(f=>({...f,homeTeam:e.target.value}));else setEditBetForm(f=>({...f,teamName:e.target.value}));}} style={{...S,boxSizing:"border-box",fontSize:11}}/></div>
+            {isOverUnder(b.betOption)&&<div><div style={L}>원정팀</div><input value={editBetForm.awayTeam??""} onChange={e=>setEditBetForm(f=>({...f,awayTeam:e.target.value}))} style={{...S,boxSizing:"border-box",fontSize:11}}/></div>}
+            <div><div style={L}>배당(3자리)</div><input value={editBetForm.oddsRaw??String(Math.round((b.odds||0)*100))} onChange={e=>setEditBetForm(f=>({...f,oddsRaw:e.target.value.replace(/[^0-9]/g,"")}))} style={{...S,boxSizing:"border-box",fontSize:11}}/></div>
+            <div><div style={L}>금액</div><input type="number" value={editBetForm.amount??b.amount} onChange={e=>setEditBetForm(f=>({...f,amount:parseFloat(e.target.value)||0}))} style={{...S,boxSizing:"border-box",fontSize:11,...noSpin}}/></div>
+          </div>
+          <div style={{marginBottom:5}}><div style={L}>베팅 옵션</div><input value={editBetForm.betOption??b.betOption} onChange={e=>setEditBetForm(f=>({...f,betOption:e.target.value}))} style={{...S,boxSizing:"border-box",fontSize:11}}/></div>
+          <div style={{display:"flex",gap:4}}>
+            <button onClick={()=>{
+              const rawOdds=editBetForm.oddsRaw??String(Math.round((b.odds||0)*100));
+              const newOdds=rawOdds.length>=3?parseFloat((parseInt(rawOdds)/100).toFixed(2)):b.odds;
+              const updated={...b,...editBetForm,odds:newOdds};
+              delete (updated as any).oddsRaw;
+              setBetsRaw(prev=>prev.map(x=>x.id===b.id?updated:x));db.upsertBet(updated);
+              setEditingBetId(null);setEditBetForm({});
+            }} style={{flex:1,background:`${C.teal}22`,border:`1px solid ${C.teal}`,color:C.teal,padding:"5px",borderRadius:4,cursor:"pointer",fontWeight:700,fontSize:11}}>저장</button>
+            <button onClick={()=>{setEditingBetId(null);setEditBetForm({});}} style={{flex:1,background:C.bg,border:`1px solid ${C.border}`,color:C.muted,padding:"5px",borderRadius:4,cursor:"pointer",fontSize:11}}>취소</button>
+          </div>
+        </div>
+      );
+    }
     return(
       <div style={{background:C.bg2,border:`1px solid ${C.amber}22`,borderRadius:6,padding:"7px 10px",marginBottom:5}}>
         <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+          <span style={{fontSize:14,flexShrink:0}}>{SPORT_ICON[b.category]||"🎯"}</span>
           <div style={{fontSize:12,fontWeight:700,color:C.text,flex:1,minWidth:80,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{title}</div>
           <span style={{fontSize:10,color:C.muted}}>[{b.league}]</span>
-          <span style={{fontSize:10,color:C.purple,fontWeight:600}}>{b.betOption}</span>
+          <span style={{fontSize:12,color:C.purple,fontWeight:700}}>{b.betOption}</span>
           <span style={{fontSize:10,color:C.muted}}>배당 <span style={{color:C.teal,fontWeight:700}}>{b.odds}</span></span>
           <span style={{fontSize:10,color:C.amber,fontWeight:700}}>{fmtDisp(b.amount,b.isDollar)}</span>
           <div style={{display:"flex",gap:2,flexShrink:0}}>
+            <button onClick={()=>{setEditingBetId(b.id);setEditBetForm({homeTeam:b.homeTeam,awayTeam:b.awayTeam,teamName:b.teamName,betOption:b.betOption,amount:b.amount,oddsRaw:String(Math.round((b.odds||0)*100))});}} style={{background:`${C.teal}11`,border:`1px solid ${C.teal}44`,color:C.teal,padding:"2px 6px",borderRadius:3,cursor:"pointer",fontSize:10}}>✏️</button>
             <button onClick={()=>updateResult(b.id,"승")} style={{background:`${C.green}22`,border:`1px solid ${C.green}`,color:C.green,padding:"2px 6px",borderRadius:3,cursor:"pointer",fontWeight:700,fontSize:10}}>✅</button>
             <button onClick={()=>updateResult(b.id,"패")} style={{background:`${C.red}22`,border:`1px solid ${C.red}`,color:C.red,padding:"2px 6px",borderRadius:3,cursor:"pointer",fontWeight:700,fontSize:10}}>❌</button>
             <button onClick={()=>cancelBet(b.id)} style={{background:C.bg,border:`1px solid ${C.border2}`,color:C.muted,padding:"2px 6px",borderRadius:3,cursor:"pointer",fontSize:10}}>취소</button>
@@ -955,7 +980,7 @@ export default function App() {
               📅 경기 일정 (24시간 이내)
               {scheduleLastFetch>0&&<span style={{fontSize:10,color:C.muted,marginLeft:10,fontWeight:400}}>업데이트 {new Date(scheduleLastFetch).toLocaleTimeString("ko-KR")} · 90분마다 갱신</span>}
             </div>
-            <div style={{fontSize:11,color:C.muted,marginBottom:10}}>더블클릭 → 모의 베팅</div>
+            <div style={{fontSize:11,color:C.muted,marginBottom:10}}>클릭 → 모의 베팅</div>
             {/* 리그 선택 */}
             <div style={{display:"flex",flexWrap:"wrap",gap:5,marginBottom:10}}>
               {Object.keys(SPORT_KEY_MAP).map(lg=>{const on=scheduleLeagues.includes(lg);return<button key={lg} onClick={()=>{const next=on?scheduleLeagues.filter(x=>x!==lg):[...scheduleLeagues,lg];setScheduleLeagues(next);try{localStorage.setItem("bt_sched_leagues",JSON.stringify(next));}catch{};}} style={{padding:"3px 10px",borderRadius:5,border:on?`1px solid ${C.amber}55`:`1px solid ${C.border}`,background:on?`${C.amber}11`:C.bg2,color:on?C.amber:C.muted,cursor:"pointer",fontSize:11,fontWeight:on?700:400}}>{lg}</button>;})}
@@ -982,11 +1007,11 @@ export default function App() {
                 return(
                   <div
                     key={g.id}
-                    onClick={()=>handleGameClick(g)}
+                    onClick={()=>handleGameDoubleClick(g)}
                     style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:10,padding:"12px 14px",cursor:"pointer",transition:"border-color 0.2s"}}
                     onMouseEnter={e=>e.currentTarget.style.borderColor=C.amber+"88"}
                     onMouseLeave={e=>e.currentTarget.style.borderColor=C.border}
-                    title="더블클릭으로 모의 베팅"
+                    title="클릭으로 모의 베팅"
                   >
                     <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
                       <div style={{flex:1}}>
@@ -1192,7 +1217,7 @@ export default function App() {
       {tab==="betting"&&(
         <div style={{display:"flex",flex:1,overflow:"hidden"}}>
           {/* 왼쪽 패널 */}
-          <div style={{width:360,flexShrink:0,borderRight:`1px solid ${C.border2}`,display:"flex",flexDirection:"column",overflow:"hidden"}}>
+          <div style={{width:300,flexShrink:0,borderRight:`1px solid ${C.border2}`,display:"flex",flexDirection:"column",overflow:"hidden"}}>
             <div style={{flex:1,overflowY:"auto"}}>
 
               {/* 입금 */}
@@ -1217,45 +1242,9 @@ export default function App() {
                     <button onClick={()=>setDepAmt(a=>a+(depIsDollar?1:10000))} style={{background:C.bg2,border:`1px solid ${C.border}`,color:C.green,width:30,height:32,borderRadius:6,cursor:"pointer",fontSize:16,fontWeight:700}}>+</button>
                   </div>
                 </div>
-                {/* 포인트 금액 */}
-                <div style={{marginBottom:8}}>
-                  <div style={L}>포인트 금액 <span style={{fontSize:10,color:C.dim}}>(입금액 제외, 진행률 포함)</span></div>
-                  <div style={{display:"flex",gap:4,alignItems:"center"}}>
-                    <button onClick={()=>setDepPoint(a=>Math.max(0,a-(depIsDollar?1:10000)))} style={{background:C.bg2,border:`1px solid ${C.border}`,color:C.red,width:30,height:32,borderRadius:6,cursor:"pointer",fontSize:16,fontWeight:700}}>−</button>
-                    <div style={{position:"relative",flex:1}}>
-                      <span style={{position:"absolute",left:9,top:"50%",transform:"translateY(-50%)",color:C.purple,fontWeight:700,fontSize:13,pointerEvents:"none"}}>🎁</span>
-                      <input type="number" value={depPoint||""} onChange={e=>setDepPoint(parseFloat(e.target.value)||0)} placeholder="포인트 금액" style={{...S,textAlign:"right",fontWeight:800,color:C.purple,fontSize:14,paddingLeft:26,boxSizing:"border-box",...noSpin}}/>
-                    </div>
-                    <button onClick={()=>setDepPoint(a=>a+(depIsDollar?1:10000))} style={{background:C.bg2,border:`1px solid ${C.border}`,color:C.purple,width:30,height:32,borderRadius:6,cursor:"pointer",fontSize:16,fontWeight:700}}>+</button>
-                  </div>
-                </div>
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:10}}>
+                {/* 포인트 금액 - 제거됨 */}
+                <div style={{display:"grid",gridTemplateColumns:"1fr",gap:6,marginBottom:10}}>
                   <button onClick={handleDeposit} style={{background:`${C.green}22`,border:`1px solid ${C.green}`,color:C.green,padding:"8px",borderRadius:7,cursor:"pointer",fontWeight:700,fontSize:13}}>💰 입금 추가</button>
-                  <button onClick={()=>{
-                    if(!depSite)return alert("사이트를 선택해주세요.");
-                    if(depPoint<=0)return alert("포인트 금액을 입력해주세요.");
-                    const curSS=siteStates[depSite];
-                    const prevPoint=parseFloat(String(curSS.pointTotal||0));
-                    const updatedSite={
-                      ...curSS,
-                      active:true,
-                      isDollar:depIsDollar,
-                      betTotal:parseFloat((curSS.betTotal+depPoint).toFixed(2)),
-                      pointTotal:parseFloat((prevPoint+depPoint).toFixed(2)),
-                    };
-                    const newSS4={...siteStates,[depSite]:updatedSite};
-                    setSiteStatesRaw(newSS4);
-                    db.upsertSiteState(depSite,updatedSite);
-                    addLog("🎁 포인트",`${depSite}/${fmtDisp(depPoint,depIsDollar)}`);
-                    setDepPoint(0);
-                  }} style={{background:`${C.purple}22`,border:`1px solid ${C.purple}`,color:C.purple,padding:"8px",borderRadius:7,cursor:"pointer",fontWeight:700,fontSize:13}}>🎁 포인트 추가</button>
-                </div>
-                <div style={{background:C.bg,borderRadius:8,padding:"8px 10px"}}>
-                  <div style={{fontSize:10,color:C.muted,marginBottom:4}}>이번주 입금 (월~일)</div>
-                  <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
-                    {ALL_SITES.filter(s=>weekDeposits[s]>0).map(s=><div key={s} style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:4,padding:"2px 8px",fontSize:11}}><span style={{color:C.muted}}>{s} </span><span style={{color:isUSD(s)?C.amber:C.green,fontWeight:700}}>{isUSD(s)?`$${weekDeposits[s]}`:weekDeposits[s].toLocaleString()}</span></div>)}
-                    {ALL_SITES.every(s=>weekDeposits[s]===0)&&<div style={{fontSize:10,color:C.dim}}>이번주 입금 없음</div>}
-                  </div>
                 </div>
               </div>
 
@@ -1271,7 +1260,7 @@ export default function App() {
                   </div>}
                 </div>
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:6}}>
-                  <div><div style={L}>날짜</div><input type="date" value={form.date} onChange={e=>setForm(f=>({...f,date:e.target.value}))} style={{...S,boxSizing:"border-box"}}/></div>
+                  <div><div style={L}>날짜</div><div style={{...S,boxSizing:"border-box",color:C.teal,fontWeight:700,fontSize:12,display:"flex",alignItems:"center"}}>{form.date}</div></div>
                   <div><div style={L}>종목</div><select value={form.category} onChange={e=>handleCatChange(e.target.value)} style={S}>{CATS.map(c=><option key={c}>{c}</option>)}</select></div>
                 </div>
                 <div style={{marginBottom:6}}>
@@ -1338,21 +1327,27 @@ export default function App() {
                 <button onClick={handleAdd} style={{width:"100%",background:`linear-gradient(135deg,${C.orange}33,${C.green}22)`,border:`1px solid ${C.orange}`,color:C.orange,padding:"11px",borderRadius:8,cursor:"pointer",fontWeight:800,fontSize:15}}>베팅 추가</button>
               </div>
 
-              {/* 이번주 입금 그래프 (10번 요청: 비교 글자 제거, 가로 방향, 얇게) */}
+              {/* 이번주 입금 그래프 */}
               {weekDepChartData.length>0&&(
                 <div style={{padding:"14px 16px",borderBottom:`1px solid ${C.border}`}}>
                   <div style={{fontSize:12,fontWeight:700,color:C.muted,marginBottom:8}}>📊 이번주 사이트별 입금 (원화환산)</div>
-                  <ResponsiveContainer width="100%" height={Math.max(60, weekDepChartData.length * 28)}>
-                    <BarChart data={weekDepChartData} layout="vertical" margin={{top:2,right:50,left:0,bottom:2}}>
-                      <XAxis type="number" tick={{fill:C.muted,fontSize:9}} axisLine={false} tickLine={false} tickFormatter={v=>`${(v/10000).toFixed(0)}만`}/>
-                      <YAxis type="category" dataKey="site" tick={{fill:C.muted,fontSize:10}} axisLine={false} tickLine={false} width={50}/>
-                      <Tooltip contentStyle={{background:C.bg3,border:`1px solid ${C.border2}`,borderRadius:8,fontSize:11}} formatter={(value:any,name:any,props:any)=>[`₩${Number(value).toLocaleString()}`,props.payload.isDollar?`$${props.payload.amt} → ₩환산`:props.payload.site]}/>
-                      <Bar dataKey="krwAmt" radius={[0,3,3,0]} maxBarSize={14}>
-                        {weekDepChartData.map((d,i)=><Cell key={i} fill={d.isDollar?C.amber:C.green}/>)}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
-                  <div style={{display:"flex",gap:8,fontSize:10,color:C.muted,marginTop:4}}>
+                  <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                    {weekDepChartData.map((d,i)=>{
+                      const maxKrw=Math.max(...weekDepChartData.map(x=>x.krwAmt));
+                      const pct=maxKrw>0?Math.round(d.krwAmt/maxKrw*100):0;
+                      const manAmt=Math.round(d.krwAmt/10000);
+                      return(
+                        <div key={i} style={{display:"flex",alignItems:"center",gap:8}}>
+                          <div style={{width:52,fontSize:11,color:d.isDollar?C.amber:C.green,fontWeight:700,flexShrink:0,textAlign:"right"}}>{d.site}</div>
+                          <div style={{flex:1,height:14,background:C.bg,borderRadius:3,overflow:"hidden"}}>
+                            <div style={{width:`${pct}%`,height:"100%",background:d.isDollar?C.amber:C.green,borderRadius:3}}/>
+                          </div>
+                          <div style={{width:40,fontSize:11,color:d.isDollar?C.amber:C.green,fontWeight:700,flexShrink:0}}>{manAmt}만</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div style={{display:"flex",gap:8,fontSize:10,color:C.muted,marginTop:6}}>
                     <span style={{color:C.green}}>■ 원화</span><span style={{color:C.amber}}>■ 달러(환산)</span>
                     <span style={{marginLeft:"auto"}}>$1=₩{usdKrw.toLocaleString()}</span>
                   </div>
@@ -1450,7 +1445,7 @@ export default function App() {
                           <div style={{fontSize:10,color:C.text,fontWeight:700,marginBottom:4,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{title}</div>
                           <div style={{fontSize:10,color:C.muted,marginBottom:2}}>{b.league}</div>
                           <div style={{fontSize:11,color:C.amber,fontWeight:700,marginBottom:4}}>배당 {b.odds} · {fmtDisp(b.amount,b.isDollar)}</div>
-                          <div style={{fontSize:10,color:C.purple}}>{b.betOption}</div>
+                          <div style={{fontSize:10,color:C.purple,fontWeight:700}}>{b.betOption}</div>
                           <button onClick={()=>removeMockBet(b.id)} style={{marginTop:6,width:"100%",background:"transparent",border:`1px solid ${C.border}`,color:C.muted,padding:"3px",borderRadius:4,cursor:"pointer",fontSize:10}}>제거</button>
                         </div>
                       );
@@ -1581,63 +1576,59 @@ export default function App() {
             ))}
           </div>
 
-          {/* 기타 수익/지출 (4번 요청: 사이트/분류 선택 목록 추가) */}
+          {/* 기타 수익/지출 */}
           <div style={{fontSize:13,fontWeight:700,color:C.purple,marginBottom:10}}>기타 수익 / 지출</div>
           <div style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:10,padding:14,marginBottom:12}}>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr auto",gap:6,alignItems:"end"}}>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,alignItems:"end",marginBottom:8}}>
               <div>
-                <div style={L}>사이트 (상위)</div>
-                <div style={{display:"flex",gap:4}}>
-                  <select value={pextForm.category} onChange={e=>setPextForm(f=>({...f,category:e.target.value}))} style={{...S,flex:1,boxSizing:"border-box"}}>
-                    <option value="">선택...</option>
-                    {pextSiteList.map(s=><option key={s} value={s}>{s}</option>)}
-                    <option value="__custom__">직접 입력</option>
-                  </select>
-                </div>
-                {(pextForm.category==="" || pextForm.category==="__custom__")&&(
-                  <input value={pextForm.category==="__custom__"?"":pextForm.category} onChange={e=>setPextForm(f=>({...f,category:e.target.value}))} placeholder="직접 입력" style={{...S,boxSizing:"border-box",marginTop:4}}/>
+                <div style={L}>사이트</div>
+                <select value={pextForm.category} onChange={e=>setPextForm(f=>({...f,category:e.target.value}))} style={{...S,boxSizing:"border-box"}}>
+                  <option value="">선택...</option>
+                  {pextSiteList.map(s=><option key={s} value={s}>{s}</option>)}
+                  <option value="__custom__">직접 입력</option>
+                </select>
+                {(pextForm.category==="__custom__")&&(
+                  <input value="" onChange={e=>setPextForm(f=>({...f,category:e.target.value}))} placeholder="직접 입력" style={{...S,boxSizing:"border-box",marginTop:4}}/>
                 )}
               </div>
               <div>
-                <div style={L}>분류 (하위)</div>
-                <div style={{display:"flex",gap:4}}>
-                  <select value={pextForm.subCategory} onChange={e=>setPextForm(f=>({...f,subCategory:e.target.value}))} style={{...S,flex:1,boxSizing:"border-box"}}>
-                    <option value="">선택...</option>
-                    {pextCatList.map(s=><option key={s} value={s}>{s}</option>)}
-                    <option value="__custom__">직접 입력</option>
-                  </select>
-                </div>
-                {(pextForm.subCategory===""||pextForm.subCategory==="__custom__")&&(
-                  <input value={pextForm.subCategory==="__custom__"?"":pextForm.subCategory} onChange={e=>setPextForm(f=>({...f,subCategory:e.target.value}))} placeholder="직접 입력" style={{...S,boxSizing:"border-box",marginTop:4}}/>
+                <div style={L}>분류</div>
+                <select value={pextForm.subCategory} onChange={e=>setPextForm(f=>({...f,subCategory:e.target.value}))} style={{...S,boxSizing:"border-box"}}>
+                  <option value="">선택...</option>
+                  {pextCatList.map(s=><option key={s} value={s}>{s}</option>)}
+                  <option value="__custom__">직접 입력</option>
+                </select>
+                {(pextForm.subCategory==="__custom__")&&(
+                  <input value="" onChange={e=>setPextForm(f=>({...f,subCategory:e.target.value}))} placeholder="직접 입력" style={{...S,boxSizing:"border-box",marginTop:4}}/>
                 )}
               </div>
               <div><div style={L}>금액 (원화)</div><input type="number" value={pextForm.amount||""} onChange={e=>setPextForm(f=>({...f,amount:parseFloat(e.target.value)||0}))} style={{...S,boxSizing:"border-box",...noSpin}}/></div>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr auto auto",gap:6,alignItems:"end",marginBottom:8}}>
               <div><div style={L}>메모</div><input value={pextForm.note} onChange={e=>setPextForm(f=>({...f,note:e.target.value}))} style={{...S,boxSizing:"border-box"}}/></div>
-              <div style={{display:"flex",flexDirection:"column",gap:4}}>
-                <button onClick={()=>setPextForm(f=>({...f,isIncome:true}))} style={{padding:"5px 10px",borderRadius:4,border:pextForm.isIncome?`1px solid ${C.green}`:`1px solid ${C.border}`,background:pextForm.isIncome?`${C.green}22`:C.bg2,color:pextForm.isIncome?C.green:C.muted,cursor:"pointer",fontSize:11}}>수입</button>
-                <button onClick={()=>setPextForm(f=>({...f,isIncome:false}))} style={{padding:"5px 10px",borderRadius:4,border:!pextForm.isIncome?`1px solid ${C.red}`:`1px solid ${C.border}`,background:!pextForm.isIncome?`${C.red}22`:C.bg2,color:!pextForm.isIncome?C.red:C.muted,cursor:"pointer",fontSize:11}}>지출</button>
-              </div>
+              <button onClick={()=>setPextForm(f=>({...f,isIncome:true}))} style={{padding:"7px 14px",borderRadius:5,border:pextForm.isIncome?`1px solid ${C.green}`:`1px solid ${C.border}`,background:pextForm.isIncome?`${C.green}22`:C.bg2,color:pextForm.isIncome?C.green:C.muted,cursor:"pointer",fontSize:12,fontWeight:700}}>수입</button>
+              <button onClick={()=>setPextForm(f=>({...f,isIncome:false}))} style={{padding:"7px 14px",borderRadius:5,border:!pextForm.isIncome?`1px solid ${C.red}`:`1px solid ${C.border}`,background:!pextForm.isIncome?`${C.red}22`:C.bg2,color:!pextForm.isIncome?C.red:C.muted,cursor:"pointer",fontSize:12,fontWeight:700}}>지출</button>
             </div>
             {/* 목록 관리 */}
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:10}}>
-              <div style={{background:C.bg2,borderRadius:6,padding:"8px 10px"}}>
-                <div style={{fontSize:10,color:C.muted,marginBottom:6}}>사이트 목록 관리</div>
-                <div style={{display:"flex",gap:4,marginBottom:6}}>
-                  <input value={newPextSite} onChange={e=>setNewPextSite(e.target.value)} placeholder="사이트 추가" style={{...S,flex:1,boxSizing:"border-box",fontSize:11,padding:"4px 7px"}}/>
-                  <button onClick={()=>{const v=newPextSite.trim();if(!v)return;savePextSiteList([...new Set([...pextSiteList,v])]);setNewPextSite("");}} style={{padding:"4px 10px",background:`${C.green}22`,border:`1px solid ${C.green}`,color:C.green,borderRadius:5,cursor:"pointer",fontSize:11,fontWeight:700}}>+</button>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:6}}>
+              <div style={{background:C.bg2,borderRadius:6,padding:"6px 8px"}}>
+                <div style={{fontSize:10,color:C.muted,marginBottom:4}}>사이트 목록</div>
+                <div style={{display:"flex",gap:4,marginBottom:4}}>
+                  <input value={newPextSite} onChange={e=>setNewPextSite(e.target.value)} placeholder="추가" style={{...S,flex:1,boxSizing:"border-box",fontSize:11,padding:"3px 6px"}}/>
+                  <button onClick={()=>{const v=newPextSite.trim();if(!v)return;savePextSiteList([...new Set([...pextSiteList,v])]);setNewPextSite("");}} style={{padding:"3px 8px",background:`${C.green}22`,border:`1px solid ${C.green}`,color:C.green,borderRadius:4,cursor:"pointer",fontSize:11,fontWeight:700}}>+</button>
                 </div>
                 <div style={{display:"flex",flexWrap:"wrap",gap:3}}>
-                  {pextSiteList.map(s=><div key={s} style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:4,padding:"2px 6px",fontSize:10,color:C.text,display:"flex",gap:4,alignItems:"center"}}>{s}<button onClick={()=>savePextSiteList(pextSiteList.filter(x=>x!==s))} style={{background:"none",border:"none",color:C.red,cursor:"pointer",fontSize:10,padding:0}}>✕</button></div>)}
+                  {pextSiteList.map(s=><div key={s} style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:4,padding:"1px 5px",fontSize:10,color:C.text,display:"flex",gap:3,alignItems:"center"}}>{s}<button onClick={()=>savePextSiteList(pextSiteList.filter(x=>x!==s))} style={{background:"none",border:"none",color:C.red,cursor:"pointer",fontSize:9,padding:0}}>✕</button></div>)}
                 </div>
               </div>
-              <div style={{background:C.bg2,borderRadius:6,padding:"8px 10px"}}>
-                <div style={{fontSize:10,color:C.muted,marginBottom:6}}>분류 목록 관리</div>
-                <div style={{display:"flex",gap:4,marginBottom:6}}>
-                  <input value={newPextCat} onChange={e=>setNewPextCat(e.target.value)} placeholder="분류 추가" style={{...S,flex:1,boxSizing:"border-box",fontSize:11,padding:"4px 7px"}}/>
-                  <button onClick={()=>{const v=newPextCat.trim();if(!v)return;savePextCatList([...new Set([...pextCatList,v])]);setNewPextCat("");}} style={{padding:"4px 10px",background:`${C.teal}22`,border:`1px solid ${C.teal}`,color:C.teal,borderRadius:5,cursor:"pointer",fontSize:11,fontWeight:700}}>+</button>
+              <div style={{background:C.bg2,borderRadius:6,padding:"6px 8px"}}>
+                <div style={{fontSize:10,color:C.muted,marginBottom:4}}>분류 목록</div>
+                <div style={{display:"flex",gap:4,marginBottom:4}}>
+                  <input value={newPextCat} onChange={e=>setNewPextCat(e.target.value)} placeholder="추가" style={{...S,flex:1,boxSizing:"border-box",fontSize:11,padding:"3px 6px"}}/>
+                  <button onClick={()=>{const v=newPextCat.trim();if(!v)return;savePextCatList([...new Set([...pextCatList,v])]);setNewPextCat("");}} style={{padding:"3px 8px",background:`${C.teal}22`,border:`1px solid ${C.teal}`,color:C.teal,borderRadius:4,cursor:"pointer",fontSize:11,fontWeight:700}}>+</button>
                 </div>
                 <div style={{display:"flex",flexWrap:"wrap",gap:3}}>
-                  {pextCatList.map(s=><div key={s} style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:4,padding:"2px 6px",fontSize:10,color:C.text,display:"flex",gap:4,alignItems:"center"}}>{s}<button onClick={()=>savePextCatList(pextCatList.filter(x=>x!==s))} style={{background:"none",border:"none",color:C.red,cursor:"pointer",fontSize:10,padding:0}}>✕</button></div>)}
+                  {pextCatList.map(s=><div key={s} style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:4,padding:"1px 5px",fontSize:10,color:C.text,display:"flex",gap:3,alignItems:"center"}}>{s}<button onClick={()=>savePextCatList(pextCatList.filter(x=>x!==s))} style={{background:"none",border:"none",color:C.red,cursor:"pointer",fontSize:9,padding:0}}>✕</button></div>)}
                 </div>
               </div>
             </div>
@@ -1646,11 +1637,10 @@ export default function App() {
               if(pextForm.amount<=0)return;
               const newPe={id:String(Date.now()),...pextForm,subCategory:pextForm.subCategory==="__custom__"?"":pextForm.subCategory,date:today};
               setProfitExtrasRaw(p=>[...p,newPe]);db.insertProfitExtra(newPe);
-              // 목록 자동 추가
               if(!pextSiteList.includes(pextForm.category))savePextSiteList([...pextSiteList,pextForm.category]);
               if(pextForm.subCategory&&pextForm.subCategory!=="__custom__"&&!pextCatList.includes(pextForm.subCategory))savePextCatList([...pextCatList,pextForm.subCategory]);
               setPextForm({category:"",subCategory:"",amount:0,note:"",isIncome:true});
-            }} style={{marginTop:10,width:"100%",background:`${C.purple}22`,border:`1px solid ${C.purple}`,color:C.purple,padding:"7px",borderRadius:6,cursor:"pointer",fontWeight:700}}>추가</button>
+            }} style={{marginTop:8,width:"100%",background:`${C.purple}22`,border:`1px solid ${C.purple}`,color:C.purple,padding:"7px",borderRadius:6,cursor:"pointer",fontWeight:700}}>추가</button>
           </div>
           {Object.entries(extraRoiStats).map(([cat,{income,expense,items}])=>(
             <div key={cat} style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:10,padding:14,marginBottom:10}}>
