@@ -74,6 +74,12 @@ const AF_BASES: Record<string,string> = {
   "야구":    "https://v1.baseball.api-sports.io",
   "배구":    "https://v1.volleyball.api-sports.io",
 };
+// 야구는 시즌이 연도 기준 다름 (MLB는 현재연도)
+const getSeasonForSport = (sport: string): number => {
+  const now = new Date();
+  if(sport==="야구") return now.getFullYear(); // MLB 시즌 = 현재연도
+  return now.getMonth()>=7?now.getFullYear():now.getFullYear()-1;
+};
 
 // 동적으로 불러온 리그 캐시 (종목별)
 interface AFLeagueInfo {
@@ -93,10 +99,10 @@ async function fetchAllLeagues(sport: string): Promise<AFLeagueInfo[]> {
     const res = await fetch(`${base}/leagues`, { headers: { "x-apisports-key": AF_KEY } });
     if (!res.ok) return [];
     const json = await res.json();
-    const yr = new Date().getMonth() >= 7 ? new Date().getFullYear() : new Date().getFullYear() - 1;
+    const yr = getSeasonForSport(sport);
     const list: AFLeagueInfo[] = (json.response || []).map((item: any) => {
       const seasons: any[] = item.seasons || [];
-      const curSeason = seasons.find((s: any) => s.year === yr) || seasons[seasons.length - 1];
+      const curSeason = seasons.find((s: any) => s.year === yr) || seasons.find((s:any)=>s.current) || seasons[seasons.length - 1];
       return {
         id: item.league?.id ?? item.id,
         name: item.league?.name ?? item.name,
@@ -123,6 +129,52 @@ type TeamNameMap = Record<string,string>;
 const loadTeamNames = (): TeamNameMap => { try { const v=localStorage.getItem("bt_team_names"); return v?JSON.parse(v):{}; } catch { return {}; } };
 const saveTeamNames = (m:TeamNameMap) => { try { localStorage.setItem("bt_team_names",JSON.stringify(m)); } catch {} };
 const translateTeam = (name:string, map:TeamNameMap): string => map[name]||name;
+
+// 국가명 한글 매핑
+const COUNTRY_KR: Record<string,string> = {
+  "England":"잉글랜드","Spain":"스페인","Germany":"독일","Italy":"이탈리아","France":"프랑스",
+  "Netherlands":"네덜란드","Portugal":"포르투갈","Belgium":"벨기에","Turkey":"터키","Scotland":"스코틀랜드",
+  "USA":"미국","Brazil":"브라질","Argentina":"아르헨티나","Mexico":"멕시코","Colombia":"콜롬비아",
+  "Chile":"칠레","Peru":"페루","Bolivia":"볼리비아","Ecuador":"에콰도르","Uruguay":"우루과이",
+  "Paraguay":"파라과이","Venezuela":"베네수엘라","Costa Rica":"코스타리카","Guatemala":"과테말라",
+  "Japan":"일본","South Korea":"한국","China":"중국","Australia":"호주","India":"인도",
+  "Saudi Arabia":"사우디아라비아","UAE":"아랍에미리트","Qatar":"카타르","Iran":"이란","Iraq":"이라크",
+  "Greece":"그리스","Croatia":"크로아티아","Serbia":"세르비아","Poland":"폴란드","Russia":"러시아",
+  "Ukraine":"우크라이나","Czech Republic":"체코","Slovakia":"슬로바키아","Hungary":"헝가리",
+  "Romania":"루마니아","Bulgaria":"불가리아","Austria":"오스트리아","Switzerland":"스위스",
+  "Denmark":"덴마크","Sweden":"스웨덴","Norway":"노르웨이","Finland":"핀란드",
+  "Nigeria":"나이지리아","Ghana":"가나","Egypt":"이집트","Morocco":"모로코","South Africa":"남아프리카",
+  "Cameroon":"카메룬","Senegal":"세네갈","Algeria":"알제리","Tunisia":"튀니지",
+  "World":"국제","Europe":"유럽","South America":"남미","Africa":"아프리카","Asia":"아시아",
+  "Canada":"캐나다","Israel":"이스라엘","Cyprus":"키프로스","Albania":"알바니아",
+  "North Korea":"북한","Indonesia":"인도네시아","Thailand":"태국","Vietnam":"베트남",
+  "Malaysia":"말레이시아","Philippines":"필리핀","Singapore":"싱가포르",
+};
+
+// 리그명 한글 매핑
+const LEAGUE_KR: Record<string,string> = {
+  "Premier League":"프리미어리그","La Liga":"라리가","Bundesliga":"분데스리가",
+  "Serie A":"세리에A","Ligue 1":"리그1","UEFA Champions League":"챔피언스리그",
+  "UEFA Europa League":"유로파리그","UEFA Europa Conference League":"유로파컨퍼런스리그",
+  "UEFA Nations League":"UEFA 네이션스리그","K League 1":"K리그1","K League 2":"K리그2",
+  "Eredivisie":"에레디비시","Primeira Liga":"포르투갈리그","Super Lig":"터키 쉬퍼리그",
+  "First Division A":"벨기에 퍼스트A","MLS":"MLS","Série A":"브라질 세리에A",
+  "Primera Division":"아르헨티나 프리메라","J1 League":"J1리그","J2 League":"J2리그",
+  "A-League Men":"호주 A리그","Scottish Premiership":"스코틀랜드 프리미어십",
+  "2. Bundesliga":"분데스리가2","Championship":"챔피언십","League One":"리그1(잉글랜드)",
+  "Serie B":"세리에B","Liga MX":"리가MX","Copa Libertadores":"코파리베르타도레스",
+  "Copa Sudamericana":"코파수다메리카나","AFC Champions League":"AFC 챔피언스리그",
+  "NBA":"NBA","NCAA":"NCAA","EuroLeague":"유로리그","KBL":"KBL",
+  "MLB":"MLB","KBO":"KBO","NPB":"NPB","KBO League":"KBO","MLB Season":"MLB",
+  "Volleyball Nations League":"배구 네이션스리그",
+};
+
+// localStorage에서 커스텀 한글 매핑 로드
+type NameOverrideMap = Record<string,string>;
+const loadCountryOverrides = (): NameOverrideMap => { try{const v=localStorage.getItem("bt_country_kr");return v?JSON.parse(v):{};}catch{return{};} };
+const saveCountryOverrides = (m:NameOverrideMap) => { try{localStorage.setItem("bt_country_kr",JSON.stringify(m));}catch{} };
+const loadLeagueOverrides = (): NameOverrideMap => { try{const v=localStorage.getItem("bt_league_kr");return v?JSON.parse(v):{};}catch{return{};} };
+const saveLeagueOverrides = (m:NameOverrideMap) => { try{localStorage.setItem("bt_league_kr",JSON.stringify(m));}catch{} };
 
 // API-Football 경기 타입
 interface AFFixture {
@@ -152,15 +204,25 @@ async function fetchAFFixtures(sport:string, leagueId:number, leagueName:string,
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const json = await res.json();
     const data: AFFixture[] = (json.response || []).map((item: any) => {
-      // 축구는 item.fixture, 농구/야구/배구는 item 직접
-      if (item.fixture) return item;
+      // 축구: item.fixture 구조
+      if (item.fixture) return item as AFFixture;
+      // 농구/야구/배구: 다른 구조
+      const homeScore = item.scores?.home?.total ?? item.scores?.home ?? null;
+      const awayScore = item.scores?.away?.total ?? item.scores?.away ?? null;
       return {
-        fixture: { id: item.id, date: item.date||item.time, status: { short: item.status?.short||"NS", elapsed: null } },
-        league: item.league || { id: leagueId, name: leagueName, country: "", logo: "" },
-        teams: item.teams || { home: { id:0, name: item.home?.name||"", logo:"" }, away: { id:0, name: item.away?.name||"", logo:"" } },
-        goals: item.scores ? { home: item.scores?.home?.total??null, away: item.scores?.away?.total??null } : { home: null, away: null },
-        score: { fulltime: { home: item.scores?.home?.total??null, away: item.scores?.away?.total??null } },
         id: item.id,
+        fixture: {
+          id: item.id,
+          date: item.date || item.time || "",
+          status: { short: item.status?.short || "NS", elapsed: null }
+        },
+        league: item.league || { id: leagueId, name: leagueName, country: "", logo: "" },
+        teams: item.teams || {
+          home: { id: item.home?.id||0, name: item.home?.name||"홈팀", logo: "" },
+          away: { id: item.away?.id||0, name: item.away?.name||"원정팀", logo: "" }
+        },
+        goals: { home: homeScore, away: awayScore },
+        score: { fulltime: { home: homeScore, away: awayScore } },
       } as AFFixture;
     });
     afFixtureCache[cacheKey] = {data, fetchedAt:now};
@@ -434,6 +496,8 @@ export default function App() {
   const [tnSearch,setTnSearch] = useState("");
   const [tnNewEng,setTnNewEng] = useState("");
   const [tnNewKor,setTnNewKor] = useState("");
+  const [countryOverrides,setCountryOverrides] = useState<NameOverrideMap>(loadCountryOverrides);
+  const [leagueOverrides,setLeagueOverrides] = useState<NameOverrideMap>(loadLeagueOverrides);
   const saveTeamNameEntry = (eng:string,kor:string) => {
     const m = {...teamNameMap,[eng.trim()]:kor.trim()};
     setTeamNameMap(m); saveTeamNames(m);
@@ -455,7 +519,10 @@ export default function App() {
     setAfLeagueLoading(true);
     try {
       const list = await fetchAllLeagues(sport);
-      setAfLeagues(p=>({...p,[sport]:list}));
+      // 시즌 재계산
+      const yr = getSeasonForSport(sport);
+      const fixed = list.map(l=>({...l, season: l.season||yr}));
+      setAfLeagues(p=>({...p,[sport]:fixed}));
     } finally { setAfLeagueLoading(false); }
   };
 
@@ -1344,26 +1411,53 @@ export default function App() {
                 const allLeagueList = afLeagues[bettingSportCat]||[];
                 const majorIds = AF_MAJOR_IDS[bettingSportCat]||[];
                 const major = allLeagueList.filter(l=>majorIds.includes(l.id));
-                const others = allLeagueList.filter(l=>!majorIds.includes(l.id)).sort((a,b)=>a.country.localeCompare(b.country)||(a.name.localeCompare(b.name)));
+                // 국가별 그룹
+                const countryGroups: Record<string,AFLeagueInfo[]> = {};
+                allLeagueList.filter(l=>!majorIds.includes(l.id)).forEach(l=>{
+                  const c = countryOverrides[l.country]||COUNTRY_KR[l.country]||l.country||"기타";
+                  if(!countryGroups[c]) countryGroups[c]=[];
+                  countryGroups[c].push(l);
+                });
+                const sortedCountries = Object.keys(countryGroups).sort((a,b)=>a.localeCompare(b,"ko"));
                 const renderBtn = (l: AFLeagueInfo) => {
                   const sel = bettingLeague===`${l.id}`;
+                  const nameKr = leagueOverrides[l.name]||LEAGUE_KR[l.name]||l.name;
                   return(
-                    <button key={l.id} onClick={()=>{
-                      const lid=`${l.id}`;
-                      setBettingLeague(lid);
-                      setBettingSelectedGame(null);
-                      fetchAfLeague(bettingSportCat, l.name, l.id, l.season);
-                    }}
-                      style={{width:"100%",textAlign:"left",padding:"6px 10px",background:sel?`${C.teal}22`:"transparent",border:"none",borderLeft:sel?`3px solid ${C.teal}`:"3px solid transparent",color:sel?C.teal:C.text,cursor:"pointer",fontSize:10,fontWeight:sel?700:400,display:"block",lineHeight:1.3}}>
-                      <div>{l.name}</div>
-                      <div style={{fontSize:8,color:C.dim}}>{l.country}</div>
-                    </button>
+                    <div key={l.id} style={{display:"flex",alignItems:"center",gap:2}}>
+                      <button onClick={()=>{
+                        setBettingLeague(`${l.id}`);
+                        setBettingSelectedGame(null);
+                        fetchAfLeague(bettingSportCat, l.name, l.id, l.season);
+                      }}
+                        style={{flex:1,textAlign:"left",padding:"5px 10px",background:sel?`${C.teal}22`:"transparent",border:"none",borderLeft:sel?`3px solid ${C.teal}`:"3px solid transparent",color:sel?C.teal:C.text,cursor:"pointer",fontSize:10,fontWeight:sel?700:400,lineHeight:1.3}}>
+                        {nameKr}
+                      </button>
+                      <button onClick={()=>{const k=prompt(`"${l.name}" 한글 이름:`,nameKr);if(k){const m={...leagueOverrides,[l.name]:k};setLeagueOverrides(m);saveLeagueOverrides(m);}}}
+                        style={{background:"transparent",border:"none",color:C.dim,cursor:"pointer",fontSize:9,padding:"2px 4px",flexShrink:0}}>✏️</button>
+                    </div>
                   );
                 };
                 return(<>
-                  {major.length>0&&<><div style={{padding:"3px 10px",fontSize:9,color:C.dim,fontWeight:700,letterSpacing:1}}>주요 리그</div>{major.map(renderBtn)}</>}
-                  {others.length>0&&<><div style={{padding:"6px 10px 3px",fontSize:9,color:C.dim,fontWeight:700,borderTop:`1px solid ${C.border}`,marginTop:3}}>전체 리그 ({others.length})</div>{others.map(renderBtn)}</>}
-                  {allLeagueList.length===0&&!afLeagueLoading&&<div style={{textAlign:"center",color:C.dim,padding:"20px 0",fontSize:10}}>API 키를 확인하거나<br/>종목을 다시 선택하세요</div>}
+                  {major.length>0&&(
+                    <>
+                      <div style={{padding:"3px 10px",fontSize:9,color:C.amber,fontWeight:700,letterSpacing:1}}>★ 주요 리그</div>
+                      {major.map(renderBtn)}
+                    </>
+                  )}
+                  {sortedCountries.map(country=>(
+                    <div key={country}>
+                      <div style={{padding:"5px 10px 3px",fontSize:9,color:C.dim,fontWeight:700,borderTop:`1px solid ${C.border}`,marginTop:2,display:"flex",alignItems:"center",gap:3}}>
+                        <span>{country}</span>
+                        <button onClick={()=>{
+                          const orig=Object.keys(COUNTRY_KR).find(k=>(countryOverrides[k]||COUNTRY_KR[k])===country)||countryGroups[country]?.[0]?.country||country;
+                          const k=prompt(`"${orig}" 한글 이름:`,country);
+                          if(k){const m={...countryOverrides,[orig]:k};setCountryOverrides(m);saveCountryOverrides(m);}
+                        }} style={{background:"transparent",border:"none",color:C.dim,cursor:"pointer",fontSize:8,padding:"1px 3px"}}>✏️</button>
+                      </div>
+                      {countryGroups[country].map(renderBtn)}
+                    </div>
+                  ))}
+                  {allLeagueList.length===0&&<div style={{textAlign:"center",color:C.dim,padding:"20px 0",fontSize:10}}>API 키 확인 또는<br/>종목 다시 선택</div>}
                 </>);
               })()}
             </div>
@@ -1372,7 +1466,7 @@ export default function App() {
           {/* 열2 - 경기 목록 (AF) */}
           <div style={{width:240,flexShrink:0,borderRight:`1px solid ${C.border2}`,display:"flex",flexDirection:"column",overflow:"hidden"}}>
             <div style={{padding:"8px 10px",borderBottom:`1px solid ${C.border}`,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-              <div style={{fontSize:11,fontWeight:800,color:C.amber}}>{(afLeagues[bettingSportCat]||[]).find(l=>`${l.id}`===bettingLeague)?.name||bettingLeague||"리그 선택"} <span style={{fontSize:9,color:C.dim}}>24h</span></div>
+              <div style={{fontSize:11,fontWeight:800,color:C.amber}}>{(()=>{const l=(afLeagues[bettingSportCat]||[]).find(l=>`${l.id}`===bettingLeague);if(!l)return bettingLeague||"리그 선택";return leagueOverrides[l.name]||LEAGUE_KR[l.name]||l.name;})()} <span style={{fontSize:9,color:C.dim}}>24h</span></div>
               <button onClick={()=>{
                 if(!bettingLeague)return;
                 const lid=parseInt(bettingLeague)||0;
