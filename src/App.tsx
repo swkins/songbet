@@ -64,18 +64,58 @@ const SPORT_KEY_MAP: Record<string, string> = {
   "UFC":                "mma_mixed_martial_arts",
 };
 
-// ── API-Football ─────────────────────────────────────────────
+// ── API-Sports (Football/Basketball/Baseball/Volleyball) ─────
 const AF_KEY = (import.meta.env.VITE_APIFOOTBALL_KEY as string) ?? "";
-const AF_BASE = "https://v3.football.api-sports.io";
 const AF_CACHE_TTL = 15 * 60 * 1000; // 15분
 
-// API-Football 리그 ID 맵 (주요리그)
-const AF_LEAGUE_ID: Record<string,number> = {
-  "프리미어리그":2,"라리가":140,"분데스리가":78,"세리에A":135,"리그1":61,
-  "챔피언스리그":2,"유로파리그":3,"유로파컨퍼런스리그":848,"UEFA 네이션스리그":5,
-  "K리그":292,"에레디비시":88,"포르투갈리그":94,"터키 쉬퍼리그":203,
-  "벨기에 퍼스트A":144,"MLS":253,"브라질 세리에A":71,"아르헨티나 프리메라":128,
-  "일본 J리그":98,"호주 A리그":188,"스코틀랜드 프리미어":179,
+const AF_BASES: Record<string,string> = {
+  "축구":    "https://v3.football.api-sports.io",
+  "농구":    "https://v1.basketball.api-sports.io",
+  "야구":    "https://v1.baseball.api-sports.io",
+  "배구":    "https://v1.volleyball.api-sports.io",
+};
+
+// 동적으로 불러온 리그 캐시 (종목별)
+interface AFLeagueInfo {
+  id: number;
+  name: string;
+  country: string;
+  season: number;
+}
+const afLeagueCache: Record<string, AFLeagueInfo[]> = {};
+const afLeagueListFetched: Record<string, boolean> = {};
+
+async function fetchAllLeagues(sport: string): Promise<AFLeagueInfo[]> {
+  if (afLeagueListFetched[sport]) return afLeagueCache[sport] || [];
+  const base = AF_BASES[sport];
+  if (!base || !AF_KEY) return [];
+  try {
+    const res = await fetch(`${base}/leagues`, { headers: { "x-apisports-key": AF_KEY } });
+    if (!res.ok) return [];
+    const json = await res.json();
+    const yr = new Date().getMonth() >= 7 ? new Date().getFullYear() : new Date().getFullYear() - 1;
+    const list: AFLeagueInfo[] = (json.response || []).map((item: any) => {
+      const seasons: any[] = item.seasons || [];
+      const curSeason = seasons.find((s: any) => s.year === yr) || seasons[seasons.length - 1];
+      return {
+        id: item.league?.id ?? item.id,
+        name: item.league?.name ?? item.name,
+        country: item.country?.name ?? item.country ?? "",
+        season: curSeason?.year ?? yr,
+      };
+    }).filter((l: AFLeagueInfo) => l.id && l.name);
+    afLeagueCache[sport] = list;
+    afLeagueListFetched[sport] = true;
+    return list;
+  } catch { return []; }
+}
+
+// 주요리그 ID (고정, 상단 표시용)
+const AF_MAJOR_IDS: Record<string, number[]> = {
+  "축구":  [39,140,78,135,61,2,3,848,292,253,71,128,98,88,94,203,144,188,179],
+  "농구":  [12,116,117,118,119],
+  "야구":  [1,2,3],
+  "배구":  [1,2,3,4,5],
 };
 
 // 한글 팀명 매핑 (사용자가 추가/수정 가능)
@@ -98,19 +138,31 @@ const afFixtureCache: Record<string,{data:AFFixture[];fetchedAt:number}> = {};
 const afResultCache: {data:AFFixture[];fetchedAt:number}|null = null;
 let afResultCacheStore: {data:AFFixture[];fetchedAt:number}|null = null;
 
-async function fetchAFFixtures(leagueId:number, leagueName:string, season:number=2024): Promise<AFFixture[]> {
-  const cacheKey = `${leagueId}_${season}`;
+async function fetchAFFixtures(sport:string, leagueId:number, leagueName:string, season:number): Promise<AFFixture[]> {
+  const cacheKey = `${sport}_${leagueId}_${season}`;
   const now = Date.now();
   const cached = afFixtureCache[cacheKey];
   if (cached && now - cached.fetchedAt < AF_CACHE_TTL) return cached.data;
+  const base = AF_BASES[sport] || AF_BASES["축구"];
   try {
     const today = new Date().toISOString().slice(0,10);
     const tomorrow = new Date(Date.now()+24*60*60*1000).toISOString().slice(0,10);
-    const url = `${AF_BASE}/fixtures?league=${leagueId}&season=${season}&from=${today}&to=${tomorrow}`;
+    const url = `${base}/fixtures?league=${leagueId}&season=${season}&from=${today}&to=${tomorrow}`;
     const res = await fetch(url, { headers:{"x-apisports-key":AF_KEY} });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const json = await res.json();
-    const data: AFFixture[] = json.response || [];
+    const data: AFFixture[] = (json.response || []).map((item: any) => {
+      // 축구는 item.fixture, 농구/야구/배구는 item 직접
+      if (item.fixture) return item;
+      return {
+        fixture: { id: item.id, date: item.date||item.time, status: { short: item.status?.short||"NS", elapsed: null } },
+        league: item.league || { id: leagueId, name: leagueName, country: "", logo: "" },
+        teams: item.teams || { home: { id:0, name: item.home?.name||"", logo:"" }, away: { id:0, name: item.away?.name||"", logo:"" } },
+        goals: item.scores ? { home: item.scores?.home?.total??null, away: item.scores?.away?.total??null } : { home: null, away: null },
+        score: { fulltime: { home: item.scores?.home?.total??null, away: item.scores?.away?.total??null } },
+        id: item.id,
+      } as AFFixture;
+    });
     afFixtureCache[cacheKey] = {data, fetchedAt:now};
     return data;
   } catch(e) { return cached?.data??[]; }
@@ -121,7 +173,7 @@ async function fetchAFTodayResults(): Promise<AFFixture[]> {
   if (afResultCacheStore && now - afResultCacheStore.fetchedAt < AF_CACHE_TTL) return afResultCacheStore.data;
   try {
     const today = new Date().toISOString().slice(0,10);
-    const url = `${AF_BASE}/fixtures?date=${today}&status=FT-AET-PEN`;
+    const url = `${AF_BASES["축구"]}/fixtures?date=${today}&status=FT-AET-PEN`;
     const res = await fetch(url, { headers:{"x-apisports-key":AF_KEY} });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const json = await res.json();
@@ -392,20 +444,27 @@ export default function App() {
   };
   const t = (name:string) => teamNameMap[name]||name;
 
-  // ── API-Football 경기목록 ─────────────────────────────────
+  // ── API-Sports 동적 리그 목록 ──────────────────────────────
   const [afGames,setAfGames] = useState<AFFixture[]>([]);
   const [afLoading,setAfLoading] = useState(false);
+  const [afLeagues,setAfLeagues] = useState<Record<string,AFLeagueInfo[]>>({});
+  const [afLeagueLoading,setAfLeagueLoading] = useState(false);
 
-  const fetchAfLeague = async(leagueName:string) => {
-    const lid = AF_LEAGUE_ID[leagueName];
-    if(!lid) return;
+  const loadAfLeagues = async(sport: string) => {
+    if (afLeagueListFetched[sport]) { setAfLeagues(p=>({...p,[sport]:afLeagueCache[sport]||[]})); return; }
+    setAfLeagueLoading(true);
+    try {
+      const list = await fetchAllLeagues(sport);
+      setAfLeagues(p=>({...p,[sport]:list}));
+    } finally { setAfLeagueLoading(false); }
+  };
+
+  const fetchAfLeague = async(sport: string, leagueName: string, leagueId: number, season: number) => {
     setAfLoading(true);
     try {
-      // 현재 시즌 자동 계산
-      const yr = new Date().getMonth()>=6?new Date().getFullYear():new Date().getFullYear()-1;
-      const games = await fetchAFFixtures(lid, leagueName, yr);
+      const games = await fetchAFFixtures(sport, leagueId, leagueName, season);
       setAfGames(prev=>{
-        const others = prev.filter(g=>g.league.name!==leagueName&&!Object.keys(AF_LEAGUE_ID).find(k=>AF_LEAGUE_ID[k]===lid&&g.league.id===lid));
+        const others = prev.filter(g=>!(g.league.id===leagueId));
         return [...others,...games];
       });
     } finally { setAfLoading(false); }
@@ -614,12 +673,13 @@ export default function App() {
     fetchBettingSchedule(bettingLeague);
   },[bettingLeague,tab,fetchBettingSchedule]);
 
-  // 종목 변경 시 첫번째 리그 자동선택
+  // 종목 변경 시 리그목록 로드 + 초기화
   useEffect(()=>{
-    const firstMajor=(MAJOR[bettingSportCat]||[])[0]||"";
-    setBettingLeague(firstMajor);
+    setBettingLeague("");
     setBettingSelectedGame(null);
     setBettingSlipOpt("");
+    loadAfLeagues(bettingSportCat);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   },[bettingSportCat]);
 
   // ── 리그 ─────────────────────────────────────────────────
@@ -1279,48 +1339,56 @@ export default function App() {
               </div>
             </div>
             <div style={{flex:1,overflowY:"auto",padding:"6px 0"}}>
-              <div style={{padding:"3px 10px",fontSize:9,color:C.dim,fontWeight:700,letterSpacing:1}}>주요 리그</div>
-              {(MAJOR[bettingSportCat]||[]).map(lg=>{
-                const sel=bettingLeague===lg;
-                return(
-                  <button key={lg} onClick={()=>{setBettingLeague(lg);if(bettingSportCat==="축구")fetchAfLeague(lg);}}
-                    style={{width:"100%",textAlign:"left",padding:"7px 10px",background:sel?`${C.teal}22`:"transparent",border:"none",borderLeft:sel?`3px solid ${C.teal}`:"3px solid transparent",color:sel?C.teal:C.text,cursor:"pointer",fontSize:11,fontWeight:sel?700:400,display:"block"}}>
-                    {lg}
-                  </button>
-                );
-              })}
-              {((EXTRA[bettingSportCat]||[]).length>0||(customLeagues[bettingSportCat]||[]).length>0)&&(
-                <>
-                  <div style={{padding:"6px 10px 3px",fontSize:9,color:C.dim,fontWeight:700,borderTop:`1px solid ${C.border}`,marginTop:3}}>기타 리그</div>
-                  {[...(EXTRA[bettingSportCat]||[]),...(customLeagues[bettingSportCat]||[])].sort((a,b)=>a.localeCompare(b,"ko")).map(lg=>{
-                    const sel=bettingLeague===lg;
-                    return(
-                      <button key={lg} onClick={()=>{setBettingLeague(lg);if(bettingSportCat==="축구")fetchAfLeague(lg);}}
-                        style={{width:"100%",textAlign:"left",padding:"6px 10px",background:sel?`${C.teal}22`:"transparent",border:"none",borderLeft:sel?`3px solid ${C.teal}`:"3px solid transparent",color:sel?C.teal:C.muted,cursor:"pointer",fontSize:10,fontWeight:sel?700:400,display:"block"}}>
-                        {lg}
-                      </button>
-                    );
-                  })}
-                </>
-              )}
+              {afLeagueLoading&&<div style={{textAlign:"center",color:C.muted,padding:"20px 0",fontSize:11}}>⏳ 리그 목록 로드중...</div>}
+              {!afLeagueLoading&&(()=>{
+                const allLeagueList = afLeagues[bettingSportCat]||[];
+                const majorIds = AF_MAJOR_IDS[bettingSportCat]||[];
+                const major = allLeagueList.filter(l=>majorIds.includes(l.id));
+                const others = allLeagueList.filter(l=>!majorIds.includes(l.id)).sort((a,b)=>a.country.localeCompare(b.country)||(a.name.localeCompare(b.name)));
+                const renderBtn = (l: AFLeagueInfo) => {
+                  const sel = bettingLeague===`${l.id}`;
+                  return(
+                    <button key={l.id} onClick={()=>{
+                      const lid=`${l.id}`;
+                      setBettingLeague(lid);
+                      setBettingSelectedGame(null);
+                      fetchAfLeague(bettingSportCat, l.name, l.id, l.season);
+                    }}
+                      style={{width:"100%",textAlign:"left",padding:"6px 10px",background:sel?`${C.teal}22`:"transparent",border:"none",borderLeft:sel?`3px solid ${C.teal}`:"3px solid transparent",color:sel?C.teal:C.text,cursor:"pointer",fontSize:10,fontWeight:sel?700:400,display:"block",lineHeight:1.3}}>
+                      <div>{l.name}</div>
+                      <div style={{fontSize:8,color:C.dim}}>{l.country}</div>
+                    </button>
+                  );
+                };
+                return(<>
+                  {major.length>0&&<><div style={{padding:"3px 10px",fontSize:9,color:C.dim,fontWeight:700,letterSpacing:1}}>주요 리그</div>{major.map(renderBtn)}</>}
+                  {others.length>0&&<><div style={{padding:"6px 10px 3px",fontSize:9,color:C.dim,fontWeight:700,borderTop:`1px solid ${C.border}`,marginTop:3}}>전체 리그 ({others.length})</div>{others.map(renderBtn)}</>}
+                  {allLeagueList.length===0&&!afLeagueLoading&&<div style={{textAlign:"center",color:C.dim,padding:"20px 0",fontSize:10}}>API 키를 확인하거나<br/>종목을 다시 선택하세요</div>}
+                </>);
+              })()}
             </div>
           </div>
 
           {/* 열2 - 경기 목록 (AF) */}
           <div style={{width:240,flexShrink:0,borderRight:`1px solid ${C.border2}`,display:"flex",flexDirection:"column",overflow:"hidden"}}>
             <div style={{padding:"8px 10px",borderBottom:`1px solid ${C.border}`,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-              <div style={{fontSize:11,fontWeight:800,color:C.amber}}>{bettingLeague||"리그 선택"} <span style={{fontSize:9,color:C.dim}}>24h</span></div>
-              <button onClick={()=>{if(bettingLeague&&bettingSportCat==="축구")fetchAfLeague(bettingLeague);}} disabled={afLoading}
+              <div style={{fontSize:11,fontWeight:800,color:C.amber}}>{(afLeagues[bettingSportCat]||[]).find(l=>`${l.id}`===bettingLeague)?.name||bettingLeague||"리그 선택"} <span style={{fontSize:9,color:C.dim}}>24h</span></div>
+              <button onClick={()=>{
+                if(!bettingLeague)return;
+                const lid=parseInt(bettingLeague)||0;
+                const info=(afLeagues[bettingSportCat]||[]).find(l=>l.id===lid);
+                if(info)fetchAfLeague(bettingSportCat,info.name,info.id,info.season);
+              }} disabled={afLoading}
                 style={{fontSize:10,padding:"2px 7px",borderRadius:4,border:`1px solid ${C.teal}44`,background:`${C.teal}11`,color:afLoading?C.muted:C.teal,cursor:"pointer"}}>
                 {afLoading?"⏳":"🔄"}
               </button>
             </div>
             <div style={{flex:1,overflowY:"auto",padding:8}}>
               {!bettingLeague&&<div style={{textAlign:"center",color:C.dim,padding:"30px 0",fontSize:11}}>리그를 선택하세요</div>}
-              {bettingLeague&&bettingSportCat!=="축구"&&<div style={{textAlign:"center",color:C.dim,padding:"30px 0",fontSize:11}}>축구만 자동 경기목록 지원<br/><span style={{fontSize:9}}>우측 폼에서 직접 입력하세요</span></div>}
+
               {bettingLeague&&bettingSportCat==="축구"&&afLoading&&<div style={{textAlign:"center",color:C.teal,padding:"30px 0",fontSize:11}}>⏳ 불러오는 중...</div>}
-              {bettingLeague&&bettingSportCat==="축구"&&!afLoading&&(()=>{
-                const lid=AF_LEAGUE_ID[bettingLeague];
+              {bettingLeague&&!afLoading&&(()=>{
+                const lid=parseInt(bettingLeague)||0;
                 const now=Date.now();
                 const in24h=now+24*60*60*1000;
                 const games=afGames.filter(g=>{
@@ -1403,12 +1471,12 @@ export default function App() {
           </div>
 
           {/* 열4 - 베팅슬립+폼 (항상 표시) */}
-          <div style={{flex:1,minWidth:260,display:"flex",flexDirection:"column",overflow:"hidden",background:C.bg2,borderLeft:`1px solid ${C.border2}`}}>
+          <div style={{width:220,flexShrink:0,display:"flex",flexDirection:"column",overflow:"hidden",background:C.bg2,borderLeft:`1px solid ${C.border2}`}}>
             <div style={{padding:"8px 12px",borderBottom:`1px solid ${C.border}`,flexShrink:0,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
               <div style={{fontSize:12,fontWeight:800,color:C.orange}}>🎯 베팅 추가</div>
               <button onClick={()=>setTeamNameModal(true)} style={{fontSize:9,padding:"2px 7px",borderRadius:4,border:`1px solid ${C.purple}44`,background:`${C.purple}11`,color:C.purple,cursor:"pointer"}}>🌐 팀명관리</button>
             </div>
-            <div style={{flex:1,overflowY:"auto",padding:"10px 12px"}}>
+            <div style={{flex:1,overflowY:"auto",padding:"8px 10px"}}>
               {bettingSelectedGame&&(
                 <div style={{background:`${C.teal}11`,border:`1px solid ${C.teal}33`,borderRadius:7,padding:"8px 10px",marginBottom:8}}>
                   <div style={{fontSize:9,color:C.muted,marginBottom:2}}>선택 경기</div>
@@ -1430,7 +1498,7 @@ export default function App() {
                 }} style={{width:"100%",background:`${C.teal}22`,border:`1px solid ${C.teal}`,color:C.teal,padding:"6px",borderRadius:6,cursor:"pointer",fontWeight:700,fontSize:11,marginBottom:10}}>← 아래 폼에 적용</button>
               )}
               <div style={{borderTop:`1px solid ${C.border}`,paddingTop:8,marginBottom:6}}>
-                <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:6}}>— 베팅 폼 —</div>
+                <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:5,textAlign:"center",letterSpacing:1}}>— 베팅 폼 —</div>
               </div>
               <div style={{marginBottom:6}}>
                 <div style={L}>베팅사이트</div>
