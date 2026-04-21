@@ -64,6 +64,84 @@ const SPORT_KEY_MAP: Record<string, string> = {
   "UFC":                "mma_mixed_martial_arts",
 };
 
+// ── odds-api.io ──────────────────────────────────────────────
+const OAIO_KEY = (import.meta.env.VITE_ODDSAPI_IO_KEY as string) ?? "";
+const OAIO_BASE = "https://api.odds-api.io/v3";
+const OAIO_CACHE_TTL = 10 * 60 * 1000; // 10분
+
+// 종목별 sport 파라미터
+const OAIO_SPORT: Record<string,string> = {
+  "축구":    "football",
+  "농구":    "basketball",
+  "야구":    "baseball",
+  "배구":    "volleyball",
+  "E스포츠": "esports",
+};
+
+interface OAIOEvent {
+  id: string;
+  sport: string;
+  league: string;
+  leagueId?: string;
+  country?: string;
+  homeTeam: string;
+  awayTeam: string;
+  startTime: string; // ISO
+  status: string; // "upcoming" | "live" | "finished"
+  homeOdds?: number;
+  awayOdds?: number;
+  drawOdds?: number;
+}
+
+const oaioCache: Record<string,{data:OAIOEvent[];fetchedAt:number}> = {};
+
+async function fetchOAIOEvents(sport:string, limit=200): Promise<OAIOEvent[]> {
+  const cacheKey = `${sport}`;
+  const now = Date.now();
+  const cached = oaioCache[cacheKey];
+  if(cached && now - cached.fetchedAt < OAIO_CACHE_TTL) return cached.data;
+  const sportKey = OAIO_SPORT[sport] || "football";
+  try {
+    const url = `${OAIO_BASE}/events?apiKey=${OAIO_KEY}&sport=${sportKey}&limit=${limit}`;
+    const res = await fetch(url);
+    if(!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json = await res.json();
+    const raw: any[] = json.data || json.events || json || [];
+    const events: OAIOEvent[] = raw.map((item:any) => ({
+      id: String(item.id||item.event_id||""),
+      sport: sportKey,
+      league: item.league?.name || item.league || item.competition?.name || "",
+      leagueId: String(item.league?.id || item.league_id || ""),
+      country: item.league?.country || item.country || "",
+      homeTeam: item.home?.name || item.home_team || item.participants?.[0]?.name || "",
+      awayTeam: item.away?.name || item.away_team || item.participants?.[1]?.name || "",
+      startTime: item.start_time || item.commence_time || item.date || "",
+      status: item.status || "upcoming",
+      homeOdds: item.odds?.home || item.home_odds,
+      awayOdds: item.odds?.away || item.away_odds,
+      drawOdds: item.odds?.draw || item.draw_odds,
+    })).filter(e=>e.homeTeam && e.awayTeam);
+    oaioCache[cacheKey] = {data:events, fetchedAt:now};
+    return events;
+  } catch(e) { return cached?.data??[]; }
+}
+
+async function fetchOAIOLeagues(sport:string): Promise<{id:string,name:string,country:string}[]> {
+  const sportKey = OAIO_SPORT[sport] || "football";
+  try {
+    const url = `${OAIO_BASE}/leagues?apiKey=${OAIO_KEY}&sport=${sportKey}`;
+    const res = await fetch(url);
+    if(!res.ok) return [];
+    const json = await res.json();
+    const raw: any[] = json.data || json.leagues || json || [];
+    return raw.map((item:any) => ({
+      id: String(item.id || ""),
+      name: item.name || "",
+      country: item.country || "",
+    })).filter(l=>l.name);
+  } catch { return []; }
+}
+
 // ── API-Sports (Football/Basketball/Baseball/Volleyball) ─────
 const AF_KEY = (import.meta.env.VITE_APIFOOTBALL_KEY as string) ?? "";
 const AF_CACHE_TTL = 15 * 60 * 1000; // 15분
@@ -537,6 +615,23 @@ export default function App() {
   };
   const t = (name:string) => teamNameMap[name]||name;
 
+  // ── odds-api.io 상태 ─────────────────────────────────────────
+  const [oaioEvents,setOaioEvents] = useState<OAIOEvent[]>([]);
+  const [oaioLeagues,setOaioLeagues] = useState<{id:string,name:string,country:string}[]>([]);
+  const [oaioLoading,setOaioLoading] = useState(false);
+
+  const loadOAIOEvents = async(sport:string) => {
+    setOaioLoading(true);
+    try {
+      const [events, leagues] = await Promise.all([
+        fetchOAIOEvents(sport),
+        fetchOAIOLeagues(sport),
+      ]);
+      setOaioEvents(events);
+      setOaioLeagues(leagues);
+    } finally { setOaioLoading(false); }
+  };
+
   // ── API-Sports 동적 리그 목록 ──────────────────────────────
   const [afGames,setAfGames] = useState<AFFixture[]>([]);
   const [afLoading,setAfLoading] = useState(false);
@@ -816,6 +911,7 @@ export default function App() {
     setBettingSelectedGame(null);
     setBettingSlipOpt("");
     loadAfLeagues(bettingSportCat);
+    loadOAIOEvents(bettingSportCat);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[bettingSportCat]);
 
@@ -1538,21 +1634,31 @@ export default function App() {
                   </>);
                 }
                 const hiddenIds = hiddenLeagues[bettingSportCat]||[];
-                const renderBtn = (l: AFLeagueInfo, isMajor=false) => {
-                  if(hiddenIds.includes(l.id)) return null;
-                  const sel = bettingLeague===`${l.id}`;
+                // oaioLeagues 기반으로 리그 목록 표시
+                const oaioLgList = oaioLeagues.length>0 ? oaioLeagues : allLeagueList.map(l=>({id:`${l.id}`,name:l.name,country:l.country}));
+                const oaioCountryGroups: Record<string,typeof oaioLgList> = {};
+                oaioLgList.forEach(l=>{
+                  const c = countryOverrides[l.country]||COUNTRY_KR[l.country]||l.country||"기타";
+                  if(!oaioCountryGroups[c]) oaioCountryGroups[c]=[];
+                  oaioCountryGroups[c].push(l);
+                });
+                const oaioSortedCountries = Object.keys(oaioCountryGroups).sort((a,b)=>a.localeCompare(b,"ko"));
+
+                const renderBtn = (l:{id:string,name:string,country:string}, isMajor=false) => {
+                  const numId = parseInt(l.id)||0;
+                  if(hiddenIds.includes(numId)) return null;
+                  const sel = bettingLeague===l.id;
                   const nameKr = leagueOverrides[l.name]||LEAGUE_KR[l.name]||l.name;
                   return(
                     <div key={l.id} style={{display:"flex",alignItems:"center",gap:1}}>
-                      {leagueEditMode&&<button onClick={()=>hideLeague(bettingSportCat,l.id)}
+                      {leagueEditMode&&<button onClick={()=>hideLeague(bettingSportCat,numId)}
                         style={{background:"transparent",border:"none",color:C.red,cursor:"pointer",fontSize:12,padding:"2px 4px",flexShrink:0}}>✕</button>}
                       <button onClick={()=>{
                         if(leagueEditMode)return;
-                        setBettingLeague(`${l.id}`);
+                        setBettingLeague(l.id);
                         setBettingSelectedGame(null);
-                        fetchAfLeague(bettingSportCat, l.name, l.id, l.season, afDateOffset);
                       }}
-                        style={{flex:1,textAlign:"left",padding:"6px 10px",background:sel?`${C.teal}22`:"transparent",border:"none",borderLeft:sel?`3px solid ${C.teal}`:"3px solid transparent",color:sel?C.teal:C.text,cursor:leagueEditMode?"default":"pointer",fontSize:12,fontWeight:sel?700:400,lineHeight:1.3}}>
+                        style={{flex:1,textAlign:"left",padding:isMajor?"7px 10px":"6px 10px",background:sel?`${C.teal}22`:"transparent",border:"none",borderLeft:sel?`3px solid ${C.teal}`:"3px solid transparent",color:sel?C.teal:isMajor?C.text:C.muted,cursor:leagueEditMode?"default":"pointer",fontSize:isMajor?12:10,fontWeight:sel?700:isMajor?600:400,lineHeight:1.3}}>
                         {nameKr}
                       </button>
                       {leagueEditMode&&<button onClick={()=>{const k=prompt(`한글 이름:`,nameKr);if(k){const m={...leagueOverrides,[l.name]:k};setLeagueOverrides(m);saveLeagueOverrides(m);}}}
@@ -1560,110 +1666,96 @@ export default function App() {
                     </div>
                   );
                 };
+
+                // 주요리그 (majorIds 기반)
+                const majorIds = AF_MAJOR_IDS[bettingSportCat]||[];
+                const majorLeagues = oaioLgList.filter(l=>majorIds.includes(parseInt(l.id)||0));
+
                 return(<>
-                  {major.length>0&&(
+                  {majorLeagues.length>0&&(
                     <>
-                      <div style={{padding:"5px 10px",fontSize:11,color:C.amber,fontWeight:800,letterSpacing:1}}>★ 주요 리그</div>
-                      {major.map(l=>renderBtn(l,true))}
+                      <div style={{padding:"5px 10px",fontSize:11,color:C.amber,fontWeight:800}}>★ 주요 리그</div>
+                      {majorLeagues.map(l=>renderBtn(l,true))}
                     </>
                   )}
-                  {sortedCountries.map(country=>(
+                  {oaioSortedCountries.map(country=>(
                     <div key={country}>
                       <div style={{padding:"5px 10px 3px",fontSize:9,color:C.dim,fontWeight:700,borderTop:`1px solid ${C.border}`,marginTop:2,display:"flex",alignItems:"center",gap:3}}>
                         <span>{country}</span>
                         <button onClick={()=>{
-                          const orig=Object.keys(COUNTRY_KR).find(k=>(countryOverrides[k]||COUNTRY_KR[k])===country)||countryGroups[country]?.[0]?.country||country;
+                          const orig=Object.keys(COUNTRY_KR).find(k=>(countryOverrides[k]||COUNTRY_KR[k])===country)||oaioCountryGroups[country]?.[0]?.country||country;
                           const k=prompt(`"${orig}" 한글 이름:`,country);
                           if(k){const m={...countryOverrides,[orig]:k};setCountryOverrides(m);saveCountryOverrides(m);}
                         }} style={{background:"transparent",border:"none",color:C.dim,cursor:"pointer",fontSize:8,padding:"1px 3px"}}>✏️</button>
                       </div>
-                      {countryGroups[country].map(l=>renderBtn(l))}
+                      {oaioCountryGroups[country].map(l=>renderBtn(l))}
                     </div>
                   ))}
-                  {allLeagueList.length===0&&<div style={{textAlign:"center",color:C.dim,padding:"20px 0",fontSize:10}}>API 키 확인 또는<br/>종목 다시 선택</div>}
+                  {oaioLgList.length===0&&<div style={{textAlign:"center",color:C.dim,padding:"20px 0",fontSize:10}}>리그 목록 없음<br/>🔄 새로고침</div>}
                 </>);
               })()}
             </div>
           </div>
 
-          {/* 열2 - 경기 목록 (AF) */}
+          {/* 열2 - 경기 목록 (odds-api.io) */}
           <div style={{width:290,flexShrink:0,borderRight:`1px solid ${C.border2}`,display:"flex",flexDirection:"column",overflow:"hidden"}}>
-            <div style={{borderBottom:`1px solid ${C.border}`,flexShrink:0}}>
-              <div style={{padding:"6px 10px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-                <div style={{fontSize:11,fontWeight:800,color:C.amber,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>
-                  {(()=>{const l=(afLeagues[bettingSportCat]||[]).find(l=>`${l.id}`===bettingLeague);if(!l)return bettingLeague||"리그 선택";return leagueOverrides[l.name]||LEAGUE_KR[l.name]||l.name;})()}
-                  <span style={{fontSize:9,color:C.dim,marginLeft:6}}>{getKSTDateStr(afDateOffset)}</span>
-                </div>
-                <button onClick={()=>{
-                  if(!bettingLeague)return;
-                  const lid=parseInt(bettingLeague)||0;
-                  const info=(afLeagues[bettingSportCat]||[]).find(l=>l.id===lid);
-                  if(info)fetchAfLeague(bettingSportCat,info.name,info.id,info.season,afDateOffset);
-                }} disabled={afLoading}
-                  style={{fontSize:10,padding:"2px 7px",borderRadius:4,border:`1px solid ${C.teal}44`,background:`${C.teal}11`,color:afLoading?C.muted:C.teal,cursor:"pointer",flexShrink:0}}>
-                  {afLoading?"⏳":"🔄"}
-                </button>
+            <div style={{padding:"6px 10px",borderBottom:`1px solid ${C.border}`,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+              <div style={{fontSize:11,fontWeight:800,color:C.amber}}>
+                {bettingLeague
+                  ? (oaioLeagues.find(l=>l.id===bettingLeague)?.name || leagueOverrides[bettingLeague] || bettingLeague)
+                  : "전체 경기"}
+                <span style={{fontSize:9,color:C.dim,marginLeft:6}}>{getKSTDateStr(afDateOffset)}</span>
               </div>
-              {/* 날짜 필터 탭 */}
-              <div style={{display:"flex",gap:3,padding:"4px 8px",overflowX:"auto"}}>
-                {([0,1,2,3,4,5] as number[]).map((off:number)=>{
-                  const label=off===0?"오늘":getKSTDateStr(off).slice(5);
-                  return(
-                    <button key={off} onClick={()=>{
-                      setAfDateOffset(off);
-                      const lid=parseInt(bettingLeague)||0;
-                      const info=(afLeagues[bettingSportCat]||[]).find(l=>l.id===lid);
-                      if(info)fetchAfLeague(bettingSportCat,info.name,info.id,info.season,off);
-                    }}
-                      style={{padding:"3px 8px",borderRadius:4,border:afDateOffset===off?`1px solid ${C.amber}`:`1px solid ${C.border}`,background:afDateOffset===off?`${C.amber}22`:C.bg2,color:afDateOffset===off?C.amber:C.muted,cursor:"pointer",fontSize:9,fontWeight:afDateOffset===off?700:400,flexShrink:0}}>
-                      {label}
-                    </button>
-                  );
-                })}
-              </div>
+              <button onClick={()=>loadOAIOEvents(bettingSportCat)} disabled={oaioLoading}
+                style={{fontSize:10,padding:"2px 7px",borderRadius:4,border:`1px solid ${C.teal}44`,background:`${C.teal}11`,color:oaioLoading?C.muted:C.teal,cursor:"pointer",flexShrink:0}}>
+                {oaioLoading?"⏳":"🔄"}
+              </button>
             </div>
             <div style={{flex:1,overflowY:"auto",padding:8}}>
-              {/* 리그 미선택시 전체경기 버튼 */}
-              {!bettingLeague&&(
-                <div style={{textAlign:"center",padding:"20px 10px"}}>
-                  <div style={{fontSize:11,color:C.dim,marginBottom:10}}>리그를 선택하거나<br/>전체 경기를 불러오세요</div>
-                  <button onClick={()=>fetchAfAllToday(bettingSportCat,afDateOffset)}
-                    disabled={afLoading}
-                    style={{padding:"8px 20px",borderRadius:7,border:`1px solid ${C.amber}`,background:`${C.amber}22`,color:afLoading?C.muted:C.amber,cursor:"pointer",fontWeight:700,fontSize:12}}>
-                    {afLoading?"⏳ 불러오는 중...":"📅 전체 경기 불러오기"}
-                  </button>
-                </div>
-              )}
-              {afLoading&&<div style={{textAlign:"center",color:C.teal,padding:"20px 0",fontSize:11}}>⏳ 불러오는 중...</div>}
-              {!afLoading&&(()=>{
-                const lid=parseInt(bettingLeague)||0;
-                const targetDate=getKSTDateStr(afDateOffset);
-                const games=afGames.filter(g=>{
-                  const gdate=g.fixture.date?g.fixture.date.slice(0,10):"";
-                  return (lid?g.league.id===lid:true)&&gdate===targetDate;
-                }).sort((a,b)=>new Date(a.fixture.date).getTime()-new Date(b.fixture.date).getTime());
-                if(games.length===0&&(bettingLeague||afGames.length>0))return<div style={{textAlign:"center",color:C.dim,padding:"20px 0",fontSize:11}}>{targetDate} 경기 없음<br/><span style={{fontSize:9}}>🔄 새로고침</span></div>;
-                if(games.length===0)return null;
-                return games.map(g=>{
-                  const sel=bettingSelectedGame?.id===String(g.fixture.id);
-                  const dt=new Date(g.fixture.date);
-                  const timeStr=dt.toLocaleString("ko-KR",{month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit",timeZone:"Asia/Seoul"});
-                  const homeKr=t(g.teams.home.name);
-                  const awayKr=t(g.teams.away.name);
-                  const status=g.fixture.status.short;
-                  const isFinished=["FT","AET","PEN"].includes(status);
-                  const isLive=["1H","HT","2H","ET","BT","P","SUSP","INT","LIVE"].includes(status);
+              {oaioLoading&&<div style={{textAlign:"center",color:C.teal,padding:"30px 0",fontSize:11}}>⏳ 불러오는 중...</div>}
+              {!oaioLoading&&(()=>{
+                const now = Date.now();
+                const targetDate = getKSTDateStr(afDateOffset);
+                const events = oaioEvents.filter(e=>{
+                  if(!e.startTime) return false;
+                  const eDate = new Date(e.startTime);
+                  const eDateStr = new Date(eDate.getTime()+9*60*60*1000).toISOString().slice(0,10);
+                  const leagueMatch = !bettingLeague || e.leagueId===bettingLeague || e.league===bettingLeague;
+                  return leagueMatch && eDateStr===targetDate;
+                }).sort((a,b)=>new Date(a.startTime).getTime()-new Date(b.startTime).getTime());
+
+                if(events.length===0) return(
+                  <div style={{textAlign:"center",color:C.dim,padding:"30px 10px"}}>
+                    <div style={{fontSize:11,marginBottom:8}}>{targetDate} 경기 없음</div>
+                    <div style={{fontSize:9,color:C.dim}}>🔄 새로고침 또는 다른 날짜 선택</div>
+                  </div>
+                );
+
+                return events.map(e=>{
+                  const sel = bettingSelectedGame?.id===e.id;
+                  const dt = new Date(e.startTime);
+                  const timeStr = dt.toLocaleString("ko-KR",{month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit",timeZone:"Asia/Seoul"});
+                  const homeKr = t(e.homeTeam);
+                  const awayKr = t(e.awayTeam);
+                  const isLive = e.status==="live" || e.status==="inprogress";
+                  const isFinished = e.status==="finished" || e.status==="completed";
+                  const leagueName = leagueOverrides[e.league]||LEAGUE_KR[e.league]||e.league;
                   return(
-                    <div key={g.fixture.id}
-                      onClick={()=>setBettingSelectedGame(sel?null:{id:String(g.fixture.id),sport:"soccer",leagueName:bettingLeague,commence:g.fixture.date,home:homeKr,away:awayKr,bookmakers:[],bestHome:0,bestAway:0,bestDraw:undefined})}
+                    <div key={e.id}
+                      onClick={()=>setBettingSelectedGame(sel?null:{
+                        id:e.id, sport:OAIO_SPORT[bettingSportCat]||"football",
+                        leagueName:leagueName, commence:e.startTime,
+                        home:homeKr, away:awayKr,
+                        bookmakers:[], bestHome:e.homeOdds||0, bestAway:e.awayOdds||0, bestDraw:e.drawOdds
+                      })}
                       style={{background:sel?`${C.teal}11`:C.bg3,border:`1px solid ${sel?C.teal:C.border}`,borderRadius:8,padding:"9px 10px",marginBottom:6,cursor:"pointer"}}>
                       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:3}}>
-                        <div style={{fontSize:9,color:isLive?C.green:isFinished?C.muted:C.muted}}>
+                        <div style={{fontSize:9,color:isLive?C.green:C.muted}}>
                           {isLive?"🟢 LIVE":isFinished?"종료":timeStr}
                         </div>
-                        {isFinished&&<div style={{fontSize:10,fontWeight:800,color:C.amber}}>{g.goals.home} - {g.goals.away}</div>}
+                        {(e.homeOdds||e.awayOdds)&&<div style={{fontSize:8,color:C.teal}}>{e.homeOdds?.toFixed(2)} / {e.awayOdds?.toFixed(2)}</div>}
                       </div>
-                      {!bettingLeague&&<div style={{fontSize:8,color:C.purple,marginBottom:2}}>{leagueOverrides[g.league.name]||LEAGUE_KR[g.league.name]||g.league.name}</div>}
+                      {!bettingLeague&&<div style={{fontSize:8,color:C.purple,marginBottom:2}}>{leagueName}</div>}
                       <div style={{fontSize:11,fontWeight:700,color:C.text}}>{homeKr}</div>
                       <div style={{fontSize:9,color:C.dim,margin:"2px 0"}}>vs</div>
                       <div style={{fontSize:11,fontWeight:700,color:C.text}}>{awayKr}</div>
