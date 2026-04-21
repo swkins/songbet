@@ -121,17 +121,22 @@ async function fetchOAIOSport(sport: string): Promise<OAIOEvent[]> {
 
   const doFetch = async(key: string): Promise<any[]> => {
     oaioLogRequest();
-    // status=pending,live 로 예정+진행중 경기만 가져옴, bookmaker로 배당 함께
-    const url = `${OAIO_BASE}/events?apiKey=${OAIO_KEY}&sport=${key}&limit=500&bookmaker=Bet365&status=pending,live`;
+    const url = `${OAIO_BASE}/events?apiKey=${OAIO_KEY}&sport=${key}&limit=500&bookmaker=Bet365`;
+    console.log(`[OAIO] fetch: ${key}`);
     const res = await fetch(url);
     if(res.status === 429) {
-      console.warn(`[OAIO] 429 Too Many Requests - sport:${key}`);
+      console.warn(`[OAIO] 429 - sport:${key}, 현재요청수:${oaioReqCount()}`);
       return [];
     }
     if(res.status === 404) return null as any;
-    if(!res.ok) throw new Error(`HTTP ${res.status}`);
+    if(!res.ok) {
+      console.error(`[OAIO] HTTP ${res.status} - sport:${key}`);
+      throw new Error(`HTTP ${res.status}`);
+    }
     const json = await res.json();
-    return Array.isArray(json) ? json : (json.data || json.events || []);
+    const arr = Array.isArray(json) ? json : (json.data || json.events || []);
+    console.log(`[OAIO] ${key} 응답: ${arr.length}개`);
+    return arr;
   };
 
   try {
@@ -591,8 +596,27 @@ export default function App() {
   // ── 배당 탭 상태 ─────────────────────────────────────────────
   const [oddsTabLoading,setOddsTabLoading] = useState(false);
 
-  // 종목별 1회 fetch = 총 4 req/새로고침 (30분 캐시)
+
+  // 종목별 1회 fetch = 총 4 req/새로고침 (1시간 캐시)
   const OAIO_FETCH_KEYS = ["축구","농구","배구","야구"] as const;
+
+  // 캐시 이벤트 state — 앱 시작 시 localStorage에서 즉시 로드
+  const [cachedEvents, setCachedEvents] = useState<OAIOEvent[]>(()=>{
+    try {
+      const store = loadCache();
+      const events = OAIO_FETCH_KEYS.flatMap(k => store[k]?.data ?? []);
+      console.log(`[OAIO] 앱 시작: localStorage 캐시 ${events.length}개 경기 로드`);
+      return events;
+    } catch { return []; }
+  });
+
+  // 캐시 갱신 헬퍼
+  const refreshCachedEvents = () => {
+    const store = loadCache();
+    const events = OAIO_FETCH_KEYS.flatMap(k => store[k]?.data ?? []);
+    setCachedEvents(events);
+    return events;
+  };
 
   // 경기+배당 데이터 전체 로드 (베팅탭 진입 시 자동 호출)
   const loadOddsTabEvents = async(dayOffset:number=0, forceRefresh=false) => {
@@ -605,27 +629,18 @@ export default function App() {
       );
       if(allCached) {
         console.log("[OAIO] 모든 종목 캐시 유효, API 호출 생략");
+        refreshCachedEvents(); // 캐시 유효해도 state 동기화
         return;
       }
     }
     setOddsTabLoading(true);
     try {
-      // 종목별 순차 fetch (병렬 시 429 위험)
       for(const s of OAIO_FETCH_KEYS) {
         await fetchOAIOSport(s);
       }
-      // fetch 완료 후 캐시 전체 다시 읽어서 상태 업데이트
-      const store = loadCache();
-      setCachedEvents(OAIO_FETCH_KEYS.flatMap(k => store[k]?.data ?? []));
+      refreshCachedEvents(); // fetch 완료 후 state 갱신
     } finally { setOddsTabLoading(false); }
   };
-
-  // 캐시 이벤트 — 초기 로드 + fetch 완료 후 갱신
-  const [cachedEvents, setCachedEvents] = useState<OAIOEvent[]>(()=>{
-    // 앱 시작 시 localStorage에서 즉시 로드
-    const store = loadCache();
-    return OAIO_FETCH_KEYS.flatMap(k => store[k]?.data ?? []);
-  });
 
 
 
