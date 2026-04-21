@@ -778,6 +778,7 @@ export default function App() {
 
   const [editingBetId,setEditingBetId]=useState<string|null>(null);
   const [editBetForm,setEditBetForm]=useState<Partial<Bet>>({});
+  const [editBetOddsRaw,setEditBetOddsRaw]=useState<string>("");
 
   const PendingCard=({b}:{b:Bet,key?:any})=>{
     const title=isOverUnder(b.betOption)?[b.homeTeam,b.awayTeam].filter(Boolean).join(" vs "):b.teamName||"";
@@ -789,20 +790,18 @@ export default function App() {
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:5,marginBottom:5}}>
             <div><div style={L}>팀/홈팀</div><input value={editBetForm.homeTeam??editBetForm.teamName??""} onChange={e=>{if(isOverUnder(b.betOption))setEditBetForm(f=>({...f,homeTeam:e.target.value}));else setEditBetForm(f=>({...f,teamName:e.target.value}));}} style={{...S,boxSizing:"border-box",fontSize:11}}/></div>
             {isOverUnder(b.betOption)&&<div><div style={L}>원정팀</div><input value={editBetForm.awayTeam??""} onChange={e=>setEditBetForm(f=>({...f,awayTeam:e.target.value}))} style={{...S,boxSizing:"border-box",fontSize:11}}/></div>}
-            <div><div style={L}>배당(3자리)</div><input value={editBetForm.oddsRaw??String(Math.round((b.odds||0)*100))} onChange={e=>setEditBetForm(f=>({...f,oddsRaw:e.target.value.replace(/[^0-9]/g,"")}))} style={{...S,boxSizing:"border-box",fontSize:11}}/></div>
+            <div><div style={L}>배당(3자리)</div><input value={editBetOddsRaw} onChange={e=>setEditBetOddsRaw(e.target.value.replace(/[^0-9]/g,""))} style={{...S,boxSizing:"border-box",fontSize:11}}/></div>
             <div><div style={L}>금액</div><input type="number" value={editBetForm.amount??b.amount} onChange={e=>setEditBetForm(f=>({...f,amount:parseFloat(e.target.value)||0}))} style={{...S,boxSizing:"border-box",fontSize:11,...noSpin}}/></div>
           </div>
           <div style={{marginBottom:5}}><div style={L}>베팅 옵션</div><input value={editBetForm.betOption??b.betOption} onChange={e=>setEditBetForm(f=>({...f,betOption:e.target.value}))} style={{...S,boxSizing:"border-box",fontSize:11}}/></div>
           <div style={{display:"flex",gap:4}}>
             <button onClick={()=>{
-              const rawOdds=editBetForm.oddsRaw??String(Math.round((b.odds||0)*100));
-              const newOdds=rawOdds.length>=3?parseFloat((parseInt(rawOdds)/100).toFixed(2)):b.odds;
-              const updated={...b,...editBetForm,odds:newOdds};
-              delete (updated as any).oddsRaw;
+              const newOdds=editBetOddsRaw.length>=3?parseFloat((parseInt(editBetOddsRaw)/100).toFixed(2)):b.odds;
+              const updated:Bet={...b,...editBetForm,odds:newOdds};
               setBetsRaw(prev=>prev.map(x=>x.id===b.id?updated:x));db.upsertBet(updated);
-              setEditingBetId(null);setEditBetForm({});
+              setEditingBetId(null);setEditBetForm({});setEditBetOddsRaw("");
             }} style={{flex:1,background:`${C.teal}22`,border:`1px solid ${C.teal}`,color:C.teal,padding:"5px",borderRadius:4,cursor:"pointer",fontWeight:700,fontSize:11}}>저장</button>
-            <button onClick={()=>{setEditingBetId(null);setEditBetForm({});}} style={{flex:1,background:C.bg,border:`1px solid ${C.border}`,color:C.muted,padding:"5px",borderRadius:4,cursor:"pointer",fontSize:11}}>취소</button>
+            <button onClick={()=>{setEditingBetId(null);setEditBetForm({});setEditBetOddsRaw("");}} style={{flex:1,background:C.bg,border:`1px solid ${C.border}`,color:C.muted,padding:"5px",borderRadius:4,cursor:"pointer",fontSize:11}}>취소</button>
           </div>
         </div>
       );
@@ -817,7 +816,7 @@ export default function App() {
           <span style={{fontSize:10,color:C.muted}}>배당 <span style={{color:C.teal,fontWeight:700}}>{b.odds}</span></span>
           <span style={{fontSize:10,color:C.amber,fontWeight:700}}>{fmtDisp(b.amount,b.isDollar)}</span>
           <div style={{display:"flex",gap:2,flexShrink:0}}>
-            <button onClick={()=>{setEditingBetId(b.id);setEditBetForm({homeTeam:b.homeTeam,awayTeam:b.awayTeam,teamName:b.teamName,betOption:b.betOption,amount:b.amount,oddsRaw:String(Math.round((b.odds||0)*100))});}} style={{background:`${C.teal}11`,border:`1px solid ${C.teal}44`,color:C.teal,padding:"2px 6px",borderRadius:3,cursor:"pointer",fontSize:10}}>✏️</button>
+            <button onClick={()=>{setEditingBetId(b.id);setEditBetForm({homeTeam:b.homeTeam,awayTeam:b.awayTeam,teamName:b.teamName,betOption:b.betOption,amount:b.amount});setEditBetOddsRaw(String(Math.round((b.odds||0)*100)));}} style={{background:`${C.teal}11`,border:`1px solid ${C.teal}44`,color:C.teal,padding:"2px 6px",borderRadius:3,cursor:"pointer",fontSize:10}}>✏️</button>
             <button onClick={()=>updateResult(b.id,"승")} style={{background:`${C.green}22`,border:`1px solid ${C.green}`,color:C.green,padding:"2px 6px",borderRadius:3,cursor:"pointer",fontWeight:700,fontSize:10}}>✅</button>
             <button onClick={()=>updateResult(b.id,"패")} style={{background:`${C.red}22`,border:`1px solid ${C.red}`,color:C.red,padding:"2px 6px",borderRadius:3,cursor:"pointer",fontWeight:700,fontSize:10}}>❌</button>
             <button onClick={()=>cancelBet(b.id)} style={{background:C.bg,border:`1px solid ${C.border2}`,color:C.muted,padding:"2px 6px",borderRadius:3,cursor:"pointer",fontSize:10}}>취소</button>
