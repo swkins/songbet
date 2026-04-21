@@ -212,42 +212,45 @@ async function fetchAFFixtures(sport:string, leagueId:number, leagueName:string,
   const cached = afFixtureCache[cacheKey];
   if (cached && now - cached.fetchedAt < AF_CACHE_TTL) return cached.data;
   const base = AF_BASES[sport] || AF_BASES["축구"];
-  // 종목별 엔드포인트: 축구=fixtures, 나머지=games
   const endpoint = sport==="축구" ? "fixtures" : "games";
-  // 야구는 날짜 파라미터명이 다를 수 있으므로 두 가지 시도
-  const dateParam = `date=${dateKey}`;
+
+  const toFixture = (item:any): AFFixture => {
+    if(item.fixture) return item as AFFixture;
+    const homeScore = item.scores?.home?.total ?? item.scores?.home?.points ?? null;
+    const awayScore = item.scores?.away?.total ?? item.scores?.away?.points ?? null;
+    return {
+      id: item.id,
+      fixture: { id:item.id, date:item.date||item.time||"", status:{short:item.status?.short||"NS",elapsed:item.status?.timer??null} },
+      league: item.league||{id:leagueId,name:leagueName,country:"",logo:""},
+      teams: { home:item.teams?.home||{id:0,name:"홈팀",logo:""}, away:item.teams?.away||{id:0,name:"원정팀",logo:""} },
+      goals: {home:homeScore,away:awayScore},
+      score: {fulltime:{home:homeScore,away:awayScore}},
+    } as AFFixture;
+  };
+
   try {
-    const url = `${base}/${endpoint}?league=${leagueId}&season=${season}&${dateParam}`;
-    const res = await fetch(url, { headers:{"x-apisports-key":AF_KEY} });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const json = await res.json();
-    const data: AFFixture[] = (json.response || []).map((item: any) => {
-      // 축구: item.fixture 구조
-      if (item.fixture) return item as AFFixture;
-      // 농구/야구/배구: games 응답 구조
-      // 야구: item.teams.home.name, item.date, item.status.short, item.scores
-      // 농구: 유사 구조
-      const homeScore = item.scores?.home?.total ?? item.scores?.home?.points ?? null;
-      const awayScore = item.scores?.away?.total ?? item.scores?.away?.points ?? null;
-      const homeTeam = item.teams?.home || { id:0, name:"홈팀", logo:"" };
-      const awayTeam = item.teams?.away || { id:0, name:"원정팀", logo:"" };
-      return {
-        id: item.id,
-        fixture: {
-          id: item.id,
-          date: item.date || item.time || "",
-          status: { short: item.status?.short||"NS", elapsed: item.status?.timer??null }
-        },
-        league: item.league || { id:leagueId, name:leagueName, country:"", logo:"" },
-        teams: { home: homeTeam, away: awayTeam },
-        goals: { home: homeScore, away: awayScore },
-        score: { fulltime: { home: homeScore, away: awayScore } },
-      } as AFFixture;
-    });
+    const fetchDate = async(d:string) => {
+      const r = await fetch(`${base}/${endpoint}?league=${leagueId}&season=${season}&date=${d}`, {headers:{"x-apisports-key":AF_KEY}});
+      if(!r.ok) return [];
+      const j = await r.json();
+      return (j.response||[]).map(toFixture);
+    };
+
+    let data: AFFixture[] = await fetchDate(dateKey);
+
+    // 결과 없으면 전날/다음날도 시도 (시간대 차이 보정)
+    if(data.length===0) {
+      const prev = new Date(new Date(dateKey).getTime()-24*60*60*1000).toISOString().slice(0,10);
+      const next = new Date(new Date(dateKey).getTime()+24*60*60*1000).toISOString().slice(0,10);
+      const [d1,d2] = await Promise.all([fetchDate(prev), fetchDate(next)]);
+      data = [...d1,...d2];
+    }
+
     afFixtureCache[cacheKey] = {data, fetchedAt:now};
     return data;
   } catch(e) { return cached?.data??[]; }
 }
+
 
 async function fetchAFTodayResults(): Promise<AFFixture[]> {
   const now = Date.now();
