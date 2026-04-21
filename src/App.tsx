@@ -851,6 +851,9 @@ export default function App() {
       .finally(()=>setBettingOddsLoading(false));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[bettingLeague]);
+
+  useEffect(()=>{
+    if(tab==="odds") loadOddsTabEvents(oddsDateOffset);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[tab, oddsDateOffset]);
 
