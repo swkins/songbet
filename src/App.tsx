@@ -121,8 +121,9 @@ async function fetchAllLeagues(sport: string): Promise<AFLeagueInfo[]> {
     afLeagueCache[sport] = list;
     afLeagueListFetched[sport] = true;
     // 폴백: 야구/농구 리그 목록이 비어있으면 하드코딩 사용
-    if(list.length===0 && sport==="야구") { afLeagueCache[sport]=BASEBALL_FALLBACK; }
-    if(list.length===0 && sport==="농구") { afLeagueCache[sport]=BASKETBALL_FALLBACK; }
+    const curYr = new Date().getFullYear();
+    if(list.length===0 && sport==="야구") { afLeagueCache[sport]=BASEBALL_FALLBACK.map(l=>({...l,season:curYr})); }
+    if(list.length===0 && sport==="농구") { afLeagueCache[sport]=BASKETBALL_FALLBACK.map(l=>({...l,season:curYr-1})); }
     return afLeagueCache[sport];
   } catch { return []; }
 }
@@ -137,12 +138,12 @@ const AF_MAJOR_IDS: Record<string, number[]> = {
 
 // 야구 하드코딩 폴백 (API 리그목록 실패시)
 const BASEBALL_FALLBACK: AFLeagueInfo[] = [
-  {id:1, name:"MLB", country:"USA", season:2025},
-  {id:2, name:"KBO", country:"South Korea", season:2025},
-  {id:3, name:"NPB", country:"Japan", season:2025},
+  {id:1, name:"MLB", country:"USA", season:2026},
+  {id:2, name:"KBO", country:"South Korea", season:2026},
+  {id:3, name:"NPB", country:"Japan", season:2026},
 ];
 const BASKETBALL_FALLBACK: AFLeagueInfo[] = [
-  {id:12, name:"NBA", country:"USA", season:2024},
+  {id:12, name:"NBA", country:"USA", season:2025},
 ];
 
 // 한글 팀명 매핑 (사용자가 추가/수정 가능)
@@ -559,9 +560,9 @@ export default function App() {
       const list = await fetchAllLeagues(sport);
       const yr = getSeasonForSport(sport);
       let fixed = list.map(l=>({...l, season: l.season||yr}));
-      // 폴백
-      if(fixed.length===0 && sport==="야구") fixed=BASEBALL_FALLBACK;
-      if(fixed.length===0 && sport==="농구") fixed=BASKETBALL_FALLBACK;
+      // 폴백 - 동적 시즌 적용
+      if(fixed.length===0 && sport==="야구") fixed=BASEBALL_FALLBACK.map(l=>({...l,season:new Date().getFullYear()}));
+      if(fixed.length===0 && sport==="농구") fixed=BASKETBALL_FALLBACK.map(l=>({...l,season:new Date().getFullYear()-1}));
       setAfLeagues(p=>({...p,[sport]:fixed}));
     } finally { setAfLeagueLoading(false); }
   };
