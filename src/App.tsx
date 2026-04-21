@@ -113,14 +113,17 @@ async function fetchOAIOSport(sport: string): Promise<OAIOEvent[]> {
         : rawStatus === "settled" || rawStatus === "finished" || rawStatus === "completed" ? "finished"
         : "upcoming";
       // 리그
-      const league = typeof item.league === "string" ? item.league
+      const rawLeague = typeof item.league === "string" ? item.league
         : item.league?.name || item.competition?.name || item.tournament?.name || "";
       const leagueId = String(item.league?.id || item.league_id || item.league?.slug || "");
-      const country = item.league?.country || item.country || "";
+      // country: API 제공값 또는 리그명에서 파싱
+      const rawCountry = item.league?.country || item.country || "";
+      const parsed = parseLeagueName(rawLeague);
+      const country = rawCountry ? (COUNTRY_KR[rawCountry] || rawCountry) : parsed.country;
       return {
         id: String(item.id || item.event_id || Math.random()),
         sport: sportKey,
-        league,
+        league: rawLeague,
         leagueId,
         country,
         homeTeam,
@@ -171,25 +174,115 @@ const COUNTRY_KR: Record<string,string> = {
   "Canada":"캐나다","Israel":"이스라엘","Cyprus":"키프로스","Albania":"알바니아",
   "North Korea":"북한","Indonesia":"인도네시아","Thailand":"태국","Vietnam":"베트남",
   "Malaysia":"말레이시아","Philippines":"필리핀","Singapore":"싱가포르",
+  "International":"국제","United States":"미국","Republic of Ireland":"아일랜드",
+  "Wales":"웨일즈","Northern Ireland":"북아일랜드","Switzerland":"스위스",
 };
 
-// 리그명 한글 매핑
+// 리그명 한글 매핑 (odds-api.io는 "국가 - 리그명" 또는 단순 리그명 형식)
 const LEAGUE_KR: Record<string,string> = {
-  "Premier League":"프리미어리그","La Liga":"라리가","Bundesliga":"분데스리가",
-  "Serie A":"세리에A","Ligue 1":"리그1","UEFA Champions League":"챔피언스리그",
-  "UEFA Europa League":"유로파리그","UEFA Europa Conference League":"유로파컨퍼런스리그",
-  "UEFA Nations League":"UEFA 네이션스리그","K League 1":"K리그1","K League 2":"K리그2",
-  "Eredivisie":"에레디비시","Primeira Liga":"포르투갈리그","Super Lig":"터키 쉬퍼리그",
-  "First Division A":"벨기에 퍼스트A","MLS":"MLS","Série A":"브라질 세리에A",
-  "Primera Division":"아르헨티나 프리메라","J1 League":"J1리그","J2 League":"J2리그",
-  "A-League Men":"호주 A리그","Scottish Premiership":"스코틀랜드 프리미어십",
-  "2. Bundesliga":"분데스리가2","Championship":"챔피언십","League One":"리그1(잉글랜드)",
-  "Serie B":"세리에B","Liga MX":"리가MX","Copa Libertadores":"코파리베르타도레스",
-  "Copa Sudamericana":"코파수다메리카나","AFC Champions League":"AFC 챔피언스리그",
-  "NBA":"NBA","NCAA":"NCAA","EuroLeague":"유로리그","KBL":"KBL",
-  "MLB":"MLB","KBO":"KBO","NPB":"NPB","KBO League":"KBO","MLB Season":"MLB",
+  // 축구 - 유럽
+  "Premier League":"프리미어리그","England - Premier League":"🏴󠁧󠁢󠁥󠁮󠁧󠁿 프리미어리그",
+  "La Liga":"라리가","Spain - La Liga":"🇪🇸 라리가",
+  "Bundesliga":"분데스리가","Germany - Bundesliga":"🇩🇪 분데스리가","Germany - 1. Bundesliga":"🇩🇪 분데스리가",
+  "Serie A":"세리에A","Italy - Serie A":"🇮🇹 세리에A",
+  "Ligue 1":"리그1","France - Ligue 1":"🇫🇷 리그1",
+  "UEFA Champions League":"챔피언스리그","Europe - UEFA Champions League":"🏆 챔피언스리그",
+  "UEFA Europa League":"유로파리그","Europe - UEFA Europa League":"🌍 유로파리그",
+  "UEFA Europa Conference League":"유로파컨퍼런스리그","Europe - UEFA Europa Conference League":"🌍 유로파컨퍼런스리그",
+  "UEFA Nations League":"UEFA 네이션스리그","Europe - UEFA Nations League":"🌍 네이션스리그",
+  "Eredivisie":"에레디비시","Netherlands - Eredivisie":"🇳🇱 에레디비시",
+  "Primeira Liga":"포르투갈리그","Portugal - Primeira Liga":"🇵🇹 포르투갈리그",
+  "Super Lig":"터키 쉬퍼리그","Turkey - Super Lig":"🇹🇷 쉬퍼리그",
+  "First Division A":"벨기에 퍼스트A","Belgium - First Division A":"🇧🇪 퍼스트A",
+  "Scottish Premiership":"스코틀랜드 프리미어십","Scotland - Premiership":"🏴󠁧󠁢󠁳󠁣󠁴󠁿 프리미어십",
+  "2. Bundesliga":"분데스리가2","Germany - 2. Bundesliga":"🇩🇪 분데스리가2",
+  "Championship":"챔피언십","England - Championship":"🏴󠁧󠁢󠁥󠁮󠁧󠁿 챔피언십",
+  "League One":"리그1(잉글랜드)","England - League One":"🏴󠁧󠁢󠁥󠁮󠁧󠁿 리그원",
+  "Serie B":"세리에B","Italy - Serie B":"🇮🇹 세리에B",
+  // 축구 - 아시아/한국
+  "K League 1":"K리그1","South Korea - K League 1":"🇰🇷 K리그1",
+  "K League 2":"K리그2","South Korea - K League 2":"🇰🇷 K리그2",
+  "J1 League":"J1리그","Japan - J1 League":"🇯🇵 J1리그",
+  "J2 League":"J2리그","Japan - J2 League":"🇯🇵 J2리그",
+  "AFC Champions League":"AFC 챔피언스리그","Asia - AFC Champions League":"🌏 AFC 챔피언스리그",
+  // 축구 - 아메리카
+  "MLS":"MLS","USA - MLS":"🇺🇸 MLS",
+  "Série A":"브라질 세리에A","Brazil - Série A":"🇧🇷 브라질 세리에A",
+  "Primera Division":"아르헨티나 프리메라","Argentina - Primera Division":"🇦🇷 아르헨티나 프리메라",
+  "Liga MX":"리가MX","Mexico - Liga MX":"🇲🇽 리가MX",
+  "Copa Libertadores":"코파리베르타도레스","South America - Copa Libertadores":"🌎 코파리베르타도레스",
+  "Copa Sudamericana":"코파수다메리카나","South America - Copa Sudamericana":"🌎 코파수다메리카나",
+  "A-League Men":"호주 A리그","Australia - A-League Men":"🇦🇺 A리그",
+  // 농구
+  "NBA":"NBA","USA - NBA":"🇺🇸 NBA",
+  "NCAA":"NCAA","USA - NCAA":"🇺🇸 NCAA",
+  "EuroLeague":"유로리그","Europe - EuroLeague":"🌍 유로리그",
+  "KBL":"KBL","South Korea - KBL":"🇰🇷 KBL",
+  // 야구
+  "MLB":"MLB","USA - MLB":"🇺🇸 MLB","MLB Season":"MLB",
+  "KBO":"KBO","KBO League":"KBO","South Korea - KBO":"🇰🇷 KBO",
+  "NPB":"NPB","Japan - NPB":"🇯🇵 NPB","NPB Season":"NPB",
+  // 배구
   "Volleyball Nations League":"배구 네이션스리그",
 };
+
+// odds-api.io 리그명 파싱: "England - Premier League" → {country:"England", league:"Premier League"}
+function parseLeagueName(raw: string): {country:string; leagueKr:string} {
+  const sep = raw.indexOf(" - ");
+  if(sep > 0) {
+    const country = raw.slice(0, sep).trim();
+    const league  = raw.slice(sep + 3).trim();
+    const countryKr = COUNTRY_KR[country] || country;
+    const leagueKr  = LEAGUE_KR[league] || LEAGUE_KR[raw] || league;
+    return { country: countryKr, leagueKr };
+  }
+  return { country: "", leagueKr: LEAGUE_KR[raw] || raw };
+}
+
+// MLB 팀명 한글
+const MLB_TEAMS: Record<string,string> = {
+  "Arizona Diamondbacks":"애리조나 다이아몬드백스","Atlanta Braves":"애틀랜타 브레이브스",
+  "Baltimore Orioles":"볼티모어 오리올스","Boston Red Sox":"보스턴 레드삭스",
+  "Chicago Cubs":"시카고 컵스","Chicago White Sox":"시카고 화이트삭스",
+  "Cincinnati Reds":"신시내티 레즈","Cleveland Guardians":"클리블랜드 가디언스",
+  "Colorado Rockies":"콜로라도 로키스","Detroit Tigers":"디트로이트 타이거스",
+  "Houston Astros":"휴스턴 애스트로스","Kansas City Royals":"캔자스시티 로열스",
+  "Los Angeles Angels":"LA 에인절스","Los Angeles Dodgers":"LA 다저스",
+  "Miami Marlins":"마이애미 말린스","Milwaukee Brewers":"밀워키 브루어스",
+  "Minnesota Twins":"미네소타 트윈스","New York Mets":"뉴욕 메츠",
+  "New York Yankees":"뉴욕 양키스","Oakland Athletics":"오클랜드 애슬레틱스",
+  "Athletics":"오클랜드 애슬레틱스","Philadelphia Phillies":"필라델피아 필리스",
+  "Pittsburgh Pirates":"피츠버그 파이리츠","San Diego Padres":"샌디에이고 파드리스",
+  "San Francisco Giants":"샌프란시스코 자이언츠","Seattle Mariners":"시애틀 매리너스",
+  "St. Louis Cardinals":"세인트루이스 카디널스","Tampa Bay Rays":"탬파베이 레이스",
+  "Texas Rangers":"텍사스 레인저스","Toronto Blue Jays":"토론토 블루제이스",
+  "Washington Nationals":"워싱턴 내셔널스",
+};
+
+// NBA 팀명 한글
+const NBA_TEAMS: Record<string,string> = {
+  "Atlanta Hawks":"애틀랜타 호크스","Boston Celtics":"보스턴 셀틱스",
+  "Brooklyn Nets":"브루클린 네츠","Charlotte Hornets":"샬럿 호네츠",
+  "Chicago Bulls":"시카고 불스","Cleveland Cavaliers":"클리블랜드 캐벌리어스",
+  "Dallas Mavericks":"댈러스 매버릭스","Denver Nuggets":"덴버 너기츠",
+  "Detroit Pistons":"디트로이트 피스톤스","Golden State Warriors":"골든스테이트 워리어스",
+  "Houston Rockets":"휴스턴 로케츠","Indiana Pacers":"인디애나 페이서스",
+  "LA Clippers":"LA 클리퍼스","Los Angeles Clippers":"LA 클리퍼스",
+  "Los Angeles Lakers":"LA 레이커스","Memphis Grizzlies":"멤피스 그리즐리스",
+  "Miami Heat":"마이애미 히트","Milwaukee Bucks":"밀워키 벅스",
+  "Minnesota Timberwolves":"미네소타 팀버울브스","New Orleans Pelicans":"뉴올리언스 펠리컨스",
+  "New York Knicks":"뉴욕 닉스","Oklahoma City Thunder":"오클라호마시티 선더",
+  "Orlando Magic":"올랜도 매직","Philadelphia 76ers":"필라델피아 세븐티식서스",
+  "Phoenix Suns":"피닉스 선즈","Portland Trail Blazers":"포틀랜드 트레일블레이저스",
+  "Sacramento Kings":"새크라멘토 킹스","San Antonio Spurs":"샌안토니오 스퍼스",
+  "Toronto Raptors":"토론토 랩터스","Utah Jazz":"유타 재즈",
+  "Washington Wizards":"워싱턴 위저즈",
+};
+
+// 팀명 한글 변환 (MLB/NBA 내장 + 사용자 설정)
+function translateTeamName(name: string, userMap: Record<string,string>): string {
+  return userMap[name] || MLB_TEAMS[name] || NBA_TEAMS[name] || name;
+}
 
 // localStorage에서 커스텀 한글 매핑 로드
 type NameOverrideMap = Record<string,string>;
@@ -1688,15 +1781,20 @@ export default function App() {
               const upcomingGames = sorted.filter(e=>e.status!=="live"&&e.status!=="finished");
               const doneGames  = sorted.filter(e=>e.status==="finished");
 
-              // 리그별 그룹화
-              const groupByLeague = (arr: OAIOEvent[]) => {
-                const groups: Record<string,OAIOEvent[]> = {};
-                arr.forEach(e=>{
-                  const lg = leagueOverrides[e.league]||LEAGUE_KR[e.league]||e.league||"기타";
-                  if(!groups[lg]) groups[lg]=[];
-                  groups[lg].push(e);
+              // 국가 > 리그별 그룹화 (국가 가나다순)
+              const groupByCountryLeague = (arr: OAIOEvent[]) => {
+                // { 국가: { 리그: events[] } }
+                const cMap: Record<string, Record<string, OAIOEvent[]>> = {};
+                arr.forEach(e => {
+                  const parsed = parseLeagueName(e.league);
+                  const country = e.country || parsed.country || "기타";
+                  const leagueKr = leagueOverrides[e.league] || parsed.leagueKr || e.league || "기타";
+                  if(!cMap[country]) cMap[country] = {};
+                  if(!cMap[country][leagueKr]) cMap[country][leagueKr] = [];
+                  cMap[country][leagueKr].push(e);
                 });
-                return groups;
+                // 국가 가나다순 정렬
+                return Object.entries(cMap).sort((a,b) => a[0].localeCompare(b[0], "ko"));
               };
 
               const renderGameCard = (e: OAIOEvent) => {
@@ -1704,8 +1802,8 @@ export default function App() {
                 const timeStr = e.startTime
                   ? dt.toLocaleString("ko-KR",{month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit",timeZone:"Asia/Seoul"})
                   : "-";
-                const homeKr = teamNameMap[e.homeTeam]||e.homeTeam;
-                const awayKr = teamNameMap[e.awayTeam]||e.awayTeam;
+                const homeKr = translateTeamName(e.homeTeam, teamNameMap);
+                const awayKr = translateTeamName(e.awayTeam, teamNameMap);
                 const isSoccer = e.sport==="football";
                 const isLive = e.status==="live";
                 const isDone = e.status==="finished";
@@ -1773,9 +1871,9 @@ export default function App() {
                 );
               };
 
-              const renderSection = (title:string, color:string, games:OAIOEvent[], defaultOpen=true) => {
+              const renderSection = (title:string, color:string, games:OAIOEvent[]) => {
                 if(games.length===0) return null;
-                const groups = groupByLeague(games);
+                const countryGroups = groupByCountryLeague(games);
                 return(
                   <div style={{marginBottom:20}}>
                     <div style={{fontSize:11,fontWeight:700,color,marginBottom:10,display:"flex",alignItems:"center",gap:6,
@@ -1783,15 +1881,25 @@ export default function App() {
                       <span>{title}</span>
                       <span style={{fontSize:10,color:C.dim,fontWeight:400}}>{games.length}경기</span>
                     </div>
-                    {Object.entries(groups).map(([league,evts])=>(
-                      <div key={league} style={{marginBottom:16}}>
-                        <div style={{fontSize:12,fontWeight:800,color:C.purple,marginBottom:8,display:"flex",alignItems:"center",gap:6}}>
-                          <span>{SPORT_ICON[oddsCat]||""} {league}</span>
-                          <span style={{fontSize:10,color:C.dim,fontWeight:400}}>{evts.length}경기</span>
-                        </div>
-                        <div style={{display:"flex",flexDirection:"column",gap:6}}>
-                          {evts.map(renderGameCard)}
-                        </div>
+                    {countryGroups.map(([country, leagueMap])=>(
+                      <div key={country} style={{marginBottom:14}}>
+                        {/* 국가 헤더 */}
+                        {country&&<div style={{fontSize:10,fontWeight:700,color:C.amber,marginBottom:6,
+                          padding:"3px 8px",background:`${C.amber}11`,borderRadius:4,display:"inline-block"}}>
+                          {country}
+                        </div>}
+                        {/* 리그별 */}
+                        {Object.entries(leagueMap).map(([leagueKr, evts])=>(
+                          <div key={leagueKr} style={{marginBottom:12}}>
+                            <div style={{fontSize:11,fontWeight:700,color:C.purple,marginBottom:6,display:"flex",alignItems:"center",gap:6}}>
+                              <span>{leagueKr}</span>
+                              <span style={{fontSize:9,color:C.dim,fontWeight:400}}>{evts.length}경기</span>
+                            </div>
+                            <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                              {evts.map(renderGameCard)}
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     ))}
                   </div>
