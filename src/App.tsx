@@ -678,9 +678,8 @@ export default function App() {
   const [bettingLeague,setBettingLeague]=useState<string>("");
   const [bettingSelectedGame,setBettingSelectedGame]=useState<OAIOEvent|null>(null);
   const [bettingSlipOpt,setBettingSlipOpt]=useState<string>("");
-  // 배당 로딩 상태 (리그 선택 시)
   const [bettingOddsLoading,setBettingOddsLoading]=useState(false);
-  // eventId → 배당 데이터 (로컬 상태로 유지)
+  const [bettingOddsDebug,setBettingOddsDebug]=useState<string>("");
   const [bettingOddsMap,setBettingOddsMap]=useState<Record<string,Partial<OAIOEvent>>>({});
 
 
@@ -830,33 +829,75 @@ export default function App() {
   };
 
 
-  // 리그 선택 시 해당 경기들의 배당 자동 fetch
+  // 리그 선택 시 배당 fetch — /odds 직접 호출 (이벤트당 1회)
   useEffect(()=>{
-    if(!bettingLeague) return;
-    const sportMap: Record<string,string> = {
+    if(!bettingLeague || !OAIO_KEY) return;
+    const SPORT_MAP: Record<string,string> = {
       "football":"축구","basketball":"농구",
       "baseball":"야구","mlb":"야구","kbo":"야구","npb":"야구","cpbl":"야구",
       "volleyball":"배구","esports":"E스포츠"
     };
     const events = OAIO_FETCH_KEYS.flatMap(k=>oaioCache[k]?.data??[])
-      .filter(e=>sportMap[e.sport]===bettingSportCat && e.league===bettingLeague && e.status!=="finished");
-    if(events.length===0) return;
-    // 배당은 이미 events fetch 시 포함됨 → 캐시에서 바로 읽기
-    const map: Record<string,Partial<OAIOEvent>> = {};
+      .filter(e=>SPORT_MAP[e.sport]===bettingSportCat && e.league===bettingLeague && e.status!=="finished");
+    if(events.length===0) { setBettingOddsDebug("경기 없음"); return; }
+
+    // 1단계: events 캐시에 이미 배당 있는지 확인
+    const fromCache: Record<string,Partial<OAIOEvent>> = {};
     events.forEach(e=>{
-      if(e.homeOdds||e.awayOdds||e.ouLines?.length) {
-        map[e.id] = { homeOdds:e.homeOdds, awayOdds:e.awayOdds, drawOdds:e.drawOdds, ouLines:e.ouLines };
+      if((e.homeOdds&&e.homeOdds>1)||(e.awayOdds&&e.awayOdds>1)) {
+        fromCache[e.id] = {homeOdds:e.homeOdds,awayOdds:e.awayOdds,drawOdds:e.drawOdds,ouLines:e.ouLines};
       }
     });
-    if(Object.keys(map).length > 0) {
-      setBettingOddsMap(prev=>({...prev,...map}));
-    } else {
-      // 배당 없으면 /odds/multi 로 별도 fetch 시도
-      setBettingOddsLoading(true);
-      fetchOddsMulti(events.map(e=>e.id))
-        .then(m=>setBettingOddsMap(prev=>({...prev,...m})))
-        .finally(()=>setBettingOddsLoading(false));
+    if(Object.keys(fromCache).length>0) {
+      setBettingOddsMap(prev=>({...prev,...fromCache}));
+      setBettingOddsDebug(`캐시에서 배당 ${Object.keys(fromCache).length}건 로드`);
+      return;
     }
+
+    // 2단계: /odds 직접 호출 (첫 번째 경기로 테스트 → 성공하면 나머지도)
+    setBettingOddsLoading(true);
+    setBettingOddsDebug("배당 API 호출 중...");
+
+    const fetchSingle = async(eventId: string) => {
+      oaioLogRequest();
+      const url = `${OAIO_BASE}/odds?apiKey=${OAIO_KEY}&eventId=${eventId}&bookmakers=Bet365,Pinnacle,1xBet,DraftKings,FanDuel`;
+      const res = await fetch(url);
+      if(!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json();
+      return json;
+    };
+
+    (async()=>{
+      try {
+        // 첫 경기로 응답 구조 테스트
+        const firstEvent = events[0];
+        const testResponse = await fetchSingle(firstEvent.id);
+
+        // 디버그: 실제 응답 구조 표시
+        const debugInfo = `이벤트ID:${firstEvent.id} | 응답키:${Object.keys(testResponse).join(",")} | bookmakers:${Object.keys(testResponse.bookmakers||{}).join(",") || "없음"} | 원본:${JSON.stringify(testResponse).slice(0,200)}`;
+        setBettingOddsDebug(debugInfo);
+
+        const parsed = parseOddsResponse(testResponse);
+
+        // 응답 구조 파악 후 나머지 경기들도 fetch (최대 10개)
+        const remaining = events.slice(1, 10);
+        const restResults = await Promise.allSettled(remaining.map(e=>fetchSingle(e.id)));
+
+        const newMap: Record<string,Partial<OAIOEvent>> = {};
+        newMap[firstEvent.id] = parsed;
+        restResults.forEach((r,i)=>{
+          if(r.status==="fulfilled") {
+            newMap[remaining[i].id] = parseOddsResponse(r.value);
+          }
+        });
+        setBettingOddsMap(prev=>({...prev,...newMap}));
+        setBettingOddsDebug(`배당 로드 완료: ${Object.keys(newMap).length}건 | homeOdds=${parsed.homeOdds} awayOdds=${parsed.awayOdds}`);
+      } catch(err:any) {
+        setBettingOddsDebug(`오류: ${err.message}`);
+      } finally {
+        setBettingOddsLoading(false);
+      }
+    })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[bettingLeague]);
 
@@ -1671,6 +1712,12 @@ export default function App() {
               <div style={{fontSize:12,fontWeight:700,color:C.purple}}>배당</div>
               {bettingOddsLoading&&<div style={{fontSize:10,color:C.muted}}>⏳ 로딩중...</div>}
             </div>
+            {/* 디버그 패널 */}
+            {bettingOddsDebug&&(
+              <div style={{padding:"6px 10px",background:`${C.amber}11`,borderBottom:`1px solid ${C.amber}33`,fontSize:9,color:C.amber,wordBreak:"break-all",lineHeight:1.4}}>
+                🔍 {bettingOddsDebug}
+              </div>
+            )}
             <div style={{flex:1,overflowY:"auto",padding:"0 0 12px 0"}}>
               {!bettingSelectedGame?(
                 <div style={{textAlign:"center",color:C.dim,padding:"40px 12px",fontSize:11}}>경기를 선택하세요</div>
