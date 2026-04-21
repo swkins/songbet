@@ -31,18 +31,47 @@ const OAIO_BASE = "https://api.odds-api.io/v3";
 
 // ★ 시간당 100회 제한 보호
 // - 종목 4개 × 1회 fetch = 4 req
-// - TTL 60분 → 시간에 최대 4회만 소모 (여유 96회)
+// - localStorage 캐시 TTL 1시간 → 새로고침해도 캐시 유지, 시간당 최대 4회 소모
 const OAIO_CACHE_TTL = 60 * 60 * 1000; // 1시간
+const OAIO_CACHE_KEY = "oaio_cache_v2";
+const OAIO_REQLOG_KEY = "oaio_reqlog_v1";
 
-// 요청 카운터 (디버그용, 시간 단위 리셋)
-const oaioReqLog: number[] = [];
-function oaioCanRequest(): boolean {
-  const now = Date.now();
-  // 최근 1시간 요청만 유지
-  while(oaioReqLog.length && oaioReqLog[0] < now - 3600_000) oaioReqLog.shift();
-  return oaioReqLog.length < 95; // 5회 여유
+// localStorage 기반 캐시 읽기/쓰기
+type OAIOCacheStore = Record<string,{data:OAIOEvent[];fetchedAt:number}>;
+
+function loadCache(): OAIOCacheStore {
+  try {
+    const raw = localStorage.getItem(OAIO_CACHE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch { return {}; }
 }
-function oaioLogRequest() { oaioReqLog.push(Date.now()); }
+function saveCache(store: OAIOCacheStore) {
+  try { localStorage.setItem(OAIO_CACHE_KEY, JSON.stringify(store)); } catch {}
+}
+
+// 요청 로그도 localStorage에 저장 (새로고침해도 카운트 유지)
+function loadReqLog(): number[] {
+  try {
+    const raw = localStorage.getItem(OAIO_REQLOG_KEY);
+    const all: number[] = raw ? JSON.parse(raw) : [];
+    const now = Date.now();
+    return all.filter(t => t > now - 3600_000); // 1시간 내 것만
+  } catch { return []; }
+}
+function saveReqLog(log: number[]) {
+  try { localStorage.setItem(OAIO_REQLOG_KEY, JSON.stringify(log)); } catch {}
+}
+
+function oaioCanRequest(): boolean {
+  const log = loadReqLog();
+  return log.length < 90; // 10회 여유
+}
+function oaioLogRequest() {
+  const log = loadReqLog();
+  log.push(Date.now());
+  saveReqLog(log);
+}
+function oaioReqCount(): number { return loadReqLog().length; }
 
 const OAIO_SPORT: Record<string,string> = {
   "축구":    "football",
@@ -69,16 +98,17 @@ interface OAIOEvent {
   ouLines?: { line: number; over: number; under: number }[];
 }
 
-// 캐시: 종목별로 저장
-const oaioCache: Record<string,{data:OAIOEvent[];fetchedAt:number}> = {};
-
 async function fetchOAIOSport(sport: string): Promise<OAIOEvent[]> {
   const now = Date.now();
-  const cached = oaioCache[sport];
-  if(cached && now - cached.fetchedAt < OAIO_CACHE_TTL) return cached.data;
+  const store = loadCache();
+  const cached = store[sport];
+  if(cached && now - cached.fetchedAt < OAIO_CACHE_TTL) {
+    console.log(`[OAIO] ${sport} 캐시 사용 (${Math.round((OAIO_CACHE_TTL-(now-cached.fetchedAt))/60000)}분 남음)`);
+    return cached.data;
+  }
   if(!OAIO_KEY) return cached?.data ?? [];
   if(!oaioCanRequest()) {
-    console.warn("[OAIO] 시간당 요청 한도 근접, 캐시 반환");
+    console.warn(`[OAIO] 시간당 요청 한도 근접(${oaioReqCount()}회), 캐시 반환`);
     return cached?.data ?? [];
   }
   const sportKeyMap: Record<string,string> = {
@@ -112,7 +142,7 @@ async function fetchOAIOSport(sport: string): Promise<OAIOEvent[]> {
       raw = await doFetch("mlb") ?? [];
     }
     if(!raw || raw.length === 0) {
-      oaioCache[sport] = { data: [], fetchedAt: now };
+      const store2 = loadCache(); store2[sport] = { data: [], fetchedAt: now }; saveCache(store2);
       return [];
     }
 
@@ -187,9 +217,9 @@ async function fetchOAIOSport(sport: string): Promise<OAIOEvent[]> {
     };
 
     const events = raw.map(parseItem).filter(Boolean) as OAIOEvent[];
-    oaioCache[sport] = { data: events, fetchedAt: now };
+    const store2 = loadCache(); store2[sport] = { data: events, fetchedAt: now }; saveCache(store2);
     const withOdds = events.filter(e => e.homeOdds && e.homeOdds > 1).length;
-    console.log(`[OAIO] ${sport}(${sportKey}): ${events.length}경기, 배당있음: ${withOdds}건`);
+    console.log(`[OAIO] ${sport}(${sportKey}): ${events.length}경기, 배당있음: ${withOdds}건, 누적요청: ${oaioReqCount()}회`);
     return events;
   } catch(err) {
     console.error("[OAIO] fetch 실패:", sport, err);
@@ -569,16 +599,30 @@ export default function App() {
     if(!OAIO_KEY) return;
     if(!forceRefresh) {
       const now = Date.now();
+      const store = loadCache();
       const allCached = OAIO_FETCH_KEYS.every(s =>
-        oaioCache[s] && now - oaioCache[s].fetchedAt < OAIO_CACHE_TTL
+        store[s] && now - store[s].fetchedAt < OAIO_CACHE_TTL
       );
-      if(allCached) return; // 캐시 유효 → 재요청 없음
+      if(allCached) {
+        console.log("[OAIO] 모든 종목 캐시 유효, API 호출 생략");
+        return;
+      }
     }
     setOddsTabLoading(true);
     try {
-      await Promise.all(OAIO_FETCH_KEYS.map(s => fetchOAIOSport(s)));
+      // 종목별 순차 fetch (병렬 시 429 위험)
+      for(const s of OAIO_FETCH_KEYS) {
+        await fetchOAIOSport(s);
+      }
     } finally { setOddsTabLoading(false); }
   };
+
+  // 캐시에서 전체 이벤트 읽기 — oddsTabLoading 토글 시 갱신
+  const cachedEvents = useMemo(()=>{
+    const store = loadCache();
+    return OAIO_FETCH_KEYS.flatMap(k => store[k]?.data ?? []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[oddsTabLoading]);
 
 
 
@@ -801,7 +845,7 @@ export default function App() {
       "baseball":"야구","mlb":"야구","kbo":"야구","npb":"야구","cpbl":"야구",
       "volleyball":"배구","esports":"E스포츠"
     };
-    const events = OAIO_FETCH_KEYS.flatMap(k=>oaioCache[k]?.data??[])
+    const events = cachedEvents
       .filter(e=>SPORT_MAP[e.sport]===bettingSportCat && e.league===bettingLeague && e.status!=="finished");
     if(events.length===0) { setBettingOddsDebug(""); return; }
 
@@ -814,7 +858,7 @@ export default function App() {
     setBettingOddsMap(prev=>({...prev,...map}));
     setBettingOddsDebug(hasOdds > 0 ? `배당 ${hasOdds}건 로드됨` : "배당 정보 없음 (Bet365 미지원 리그)");
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[bettingLeague]);
+  },[bettingLeague, cachedEvents]);
 
   useEffect(()=>{
     if(tab==="betting") loadOddsTabEvents(0);
@@ -1497,7 +1541,7 @@ export default function App() {
                 };
                 // 국가 → { 리그raw: 리그kr, events[] } 구조
                 const tree: Record<string, Map<string,string>> = {};
-                OAIO_FETCH_KEYS.flatMap(k=>oaioCache[k]?.data??[])
+                cachedEvents
                   .filter(e=>SPORT_MAP[e.sport]===bettingSportCat && e.status!=="finished")
                   .forEach(e=>{
                     const c = e.country || parseLeagueName(e.league).country || "기타";
@@ -1557,11 +1601,14 @@ export default function App() {
               <div style={{fontSize:12,fontWeight:700,color:C.amber,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>
                 {bettingLeague ? (leagueOverrides[bettingLeague]||parseLeagueName(bettingLeague).leagueKr||bettingLeague) : "리그를 선택하세요"}
               </div>
-              <button onClick={()=>loadOddsTabEvents(0,true)} disabled={oddsTabLoading}
-                style={{fontSize:11,padding:"3px 8px",borderRadius:4,border:`1px solid ${C.teal}44`,
-                  background:`${C.teal}11`,color:oddsTabLoading?C.muted:C.teal,cursor:"pointer",flexShrink:0,marginLeft:6}}>
-                {oddsTabLoading?"⏳":"🔄"}
-              </button>
+              <div style={{display:"flex",alignItems:"center",gap:4,flexShrink:0}}>
+                <span style={{fontSize:9,color:C.dim}}>{oaioReqCount()}/90</span>
+                <button onClick={()=>loadOddsTabEvents(0,true)} disabled={oddsTabLoading}
+                  style={{fontSize:11,padding:"3px 8px",borderRadius:4,border:`1px solid ${C.teal}44`,
+                    background:`${C.teal}11`,color:oddsTabLoading?C.muted:C.teal,cursor:"pointer"}}>
+                  {oddsTabLoading?"⏳":"🔄"}
+                </button>
+              </div>
             </div>
             <div style={{flex:1,overflowY:"auto"}}>
               {!bettingLeague?(
@@ -1572,7 +1619,7 @@ export default function App() {
                   "baseball":"야구","mlb":"야구","kbo":"야구","npb":"야구","cpbl":"야구",
                   "volleyball":"배구","esports":"E스포츠"
                 };
-                const events = OAIO_FETCH_KEYS.flatMap(k=>oaioCache[k]?.data??[])
+                const events = cachedEvents
                   .filter(e=>SPORT_MAP[e.sport]===bettingSportCat && e.league===bettingLeague && e.status!=="finished")
                   .sort((a,b)=>new Date(a.startTime).getTime()-new Date(b.startTime).getTime());
                 if(events.length===0) return(
