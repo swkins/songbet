@@ -73,35 +73,65 @@ const oaioCache: Record<string,{data:OAIOEvent[];fetchedAt:number}> = {};
 async function fetchOAIOSport(sport: string): Promise<OAIOEvent[]> {
   const now = Date.now();
   const cached = oaioCache[sport];
-  // 캐시 유효하면 API 호출 없이 반환
   if(cached && now - cached.fetchedAt < OAIO_CACHE_TTL) return cached.data;
   if(!OAIO_KEY) return cached?.data ?? [];
   if(!oaioCanRequest()) {
     console.warn("[OAIO] 시간당 요청 한도 근접, 캐시 반환");
     return cached?.data ?? [];
   }
-  const sportKey = OAIO_SPORT[sport] || "football";
+  // MLB는 sport key가 "baseball"이 아니라 "mlb"
+  const sportKeyMap: Record<string,string> = {
+    "축구":      "football",
+    "농구":      "basketball",
+    "야구":      "mlb",
+    "야구_mlb":  "mlb",
+    "야구_kbo":  "kbo",
+    "야구_npb":  "npb",
+    "배구":      "volleyball",
+  };
+  const sportKey = sportKeyMap[sport] || "football";
   try {
     oaioLogRequest();
     const url = `${OAIO_BASE}/events?apiKey=${OAIO_KEY}&sport=${sportKey}&limit=300`;
     const res = await fetch(url);
     if(!res.ok) throw new Error(`HTTP ${res.status}`);
     const json = await res.json();
-    const raw: any[] = json.data || json.events || (Array.isArray(json) ? json : []);
-    const events: OAIOEvent[] = raw.map((item:any) => ({
-      id: String(item.id || item.event_id || Math.random()),
-      sport: sportKey,
-      league: item.league?.name || item.league || item.competition?.name || item.tournament?.name || "",
-      leagueId: String(item.league?.id || item.league_id || ""),
-      country: item.league?.country || item.country || item.tournament?.country || "",
-      homeTeam: item.home?.name || item.home_team || item.participants?.[0]?.name || item.home || "",
-      awayTeam: item.away?.name || item.away_team || item.participants?.[1]?.name || item.away || "",
-      startTime: item.start_time || item.commence_time || item.starts_at || item.date || "",
-      status: item.status || "upcoming",
-      homeOdds: item.odds?.home ?? item.home_odds ?? item.markets?.h2h?.home ?? undefined,
-      awayOdds: item.odds?.away ?? item.away_odds ?? item.markets?.h2h?.away ?? undefined,
-      drawOdds: item.odds?.draw ?? item.draw_odds ?? item.markets?.h2h?.draw ?? undefined,
-    })).filter(e => e.homeTeam && e.awayTeam);
+    // API 응답은 배열 직접 or { data: [] } 형식
+    const raw: any[] = Array.isArray(json) ? json : (json.data || json.events || []);
+    const events: OAIOEvent[] = raw.map((item:any) => {
+      // home/away 는 string 또는 객체 둘 다 처리
+      const homeTeam = typeof item.home === "string" ? item.home
+        : item.home?.name || item.home_team || item.participants?.[0]?.name || "";
+      const awayTeam = typeof item.away === "string" ? item.away
+        : item.away?.name || item.away_team || item.participants?.[1]?.name || "";
+      // 날짜: "date" 필드가 실제 키
+      const startTime = item.date || item.start_time || item.commence_time || item.starts_at || "";
+      // 상태: "pending" → upcoming, "live"/"inprogress" → live, "settled"/"finished" → finished
+      const rawStatus = (item.status || "").toLowerCase();
+      const status = rawStatus === "pending" || rawStatus === "upcoming" || rawStatus === "scheduled" ? "upcoming"
+        : rawStatus === "live" || rawStatus === "inprogress" || rawStatus === "in_progress" ? "live"
+        : rawStatus === "settled" || rawStatus === "finished" || rawStatus === "completed" ? "finished"
+        : "upcoming";
+      // 리그
+      const league = typeof item.league === "string" ? item.league
+        : item.league?.name || item.competition?.name || item.tournament?.name || "";
+      const leagueId = String(item.league?.id || item.league_id || item.league?.slug || "");
+      const country = item.league?.country || item.country || "";
+      return {
+        id: String(item.id || item.event_id || Math.random()),
+        sport: sportKey,
+        league,
+        leagueId,
+        country,
+        homeTeam,
+        awayTeam,
+        startTime,
+        status,
+        homeOdds: item.odds?.home ?? item.home_odds ?? undefined,
+        awayOdds: item.odds?.away ?? item.away_odds ?? undefined,
+        drawOdds: item.odds?.draw ?? item.draw_odds ?? undefined,
+      };
+    }).filter(e => e.homeTeam && e.awayTeam);
     oaioCache[sport] = { data: events, fetchedAt: now };
     return events;
   } catch(err) {
@@ -393,27 +423,25 @@ export default function App() {
   const oddsReqRemaining = () => Math.max(0, 95 - oaioReqLog.filter(t=>t>Date.now()-3600_000).length);
 
   // OAIO 전용 경기 로딩
+  // 축구/농구/배구 = 1 req, 야구 = mlb+kbo+npb = 3 req → 총 6 req
+  const OAIO_FETCH_KEYS = ["축구","농구","배구","야구_mlb","야구_kbo","야구_npb"] as const;
+
   const loadOddsTabEvents = async(dayOffset:number=0, forceRefresh=false) => {
     if(!OAIO_KEY) { setOddsTabEvents([]); return; }
-    // 강제 새로고침 아니면 캐시가 모두 살아있을 때 API 호출 생략
     if(!forceRefresh) {
       const now = Date.now();
-      const allCached = ["축구","야구","농구","배구"].every(s=>
+      const allCached = OAIO_FETCH_KEYS.every(s =>
         oaioCache[s] && now - oaioCache[s].fetchedAt < OAIO_CACHE_TTL
       );
       if(allCached) {
-        // 캐시에서 바로 필터링
-        const all = ["축구","야구","농구","배구"].flatMap(s=>oaioCache[s].data);
+        const all = OAIO_FETCH_KEYS.flatMap(s => oaioCache[s].data);
         setOddsTabEvents(filterByDay(all, dayOffset));
         return;
       }
     }
     setOddsTabLoading(true);
     try {
-      // 종목 4개 순차 fetch (Promise.all 4번 = 4 req)
-      const results = await Promise.all(
-        ["축구","야구","농구","배구"].map(s => fetchOAIOSport(s))
-      );
+      const results = await Promise.all(OAIO_FETCH_KEYS.map(s => fetchOAIOSport(s)));
       const all = results.flat();
       setOddsTabEvents(filterByDay(all, dayOffset));
       setOddsLastFetched(Date.now());
@@ -1622,7 +1650,11 @@ export default function App() {
               </div>
             )}
             {!oddsTabLoading&&oddsTabEvents.length>0&&(()=>{
-              const sportMap: Record<string,string> = {"football":"축구","basketball":"농구","baseball":"야구","volleyball":"배구","esports":"E스포츠"};
+              const sportMap: Record<string,string> = {
+                "football":"축구","basketball":"농구",
+                "baseball":"야구","mlb":"야구","kbo":"야구","npb":"야구",
+                "volleyball":"배구","esports":"E스포츠"
+              };
 
               // 종목 필터
               let filtered = oddsCat==="전체" ? oddsTabEvents : oddsTabEvents.filter(e=>sportMap[e.sport]===oddsCat);
