@@ -122,20 +122,30 @@ async function fetchOAIOSport(sport: string): Promise<OAIOEvent[]> {
   const doFetch = async(key: string): Promise<any[]> => {
     oaioLogRequest();
     const url = `${OAIO_BASE}/events?apiKey=${OAIO_KEY}&sport=${key}&limit=500&bookmaker=Bet365`;
-    console.log(`[OAIO] fetch: ${key}`);
+    console.log(`[OAIO] fetch: ${url}`);
     const res = await fetch(url);
     if(res.status === 429) {
-      console.warn(`[OAIO] 429 - sport:${key}, 현재요청수:${oaioReqCount()}`);
+      console.warn(`[OAIO] 429 - sport:${key}`);
       return [];
     }
-    if(res.status === 404) return null as any;
+    if(res.status === 404) {
+      console.warn(`[OAIO] 404 - sport:${key} (지원 안 됨)`);
+      return null as any;
+    }
     if(!res.ok) {
-      console.error(`[OAIO] HTTP ${res.status} - sport:${key}`);
+      const txt = await res.text().catch(()=>"");
+      console.error(`[OAIO] HTTP ${res.status} - ${key}: ${txt.slice(0,200)}`);
       throw new Error(`HTTP ${res.status}`);
     }
     const json = await res.json();
+    // 첫 번째 아이템 구조 로그
     const arr = Array.isArray(json) ? json : (json.data || json.events || []);
-    console.log(`[OAIO] ${key} 응답: ${arr.length}개`);
+    if(arr.length > 0) {
+      console.log(`[OAIO] ${key} 첫번째 아이템:`, JSON.stringify(arr[0]).slice(0, 300));
+    } else {
+      console.warn(`[OAIO] ${key} 빈 배열. 원본:`, JSON.stringify(json).slice(0, 300));
+    }
+    console.log(`[OAIO] ${key}: ${arr.length}개`);
     return arr;
   };
 
@@ -634,11 +644,16 @@ export default function App() {
       }
     }
     setOddsTabLoading(true);
+    setFetchDebug("fetch 시작...");
     try {
+      const results: string[] = [];
       for(const s of OAIO_FETCH_KEYS) {
-        await fetchOAIOSport(s);
+        const data = await fetchOAIOSport(s);
+        results.push(`${s}:${data.length}개`);
+        setFetchDebug(results.join(" | "));
       }
-      refreshCachedEvents(); // fetch 완료 후 state 갱신
+      const events = refreshCachedEvents();
+      setFetchDebug(`완료 - 전체 ${events.length}개 | ${results.join(" | ")}`);
     } finally { setOddsTabLoading(false); }
   };
 
@@ -654,6 +669,7 @@ export default function App() {
   const [bettingOddsLoading,setBettingOddsLoading]=useState(false);
   const [bettingOddsDebug,setBettingOddsDebug]=useState<string>("");
   const [bettingOddsMap,setBettingOddsMap]=useState<Record<string,Partial<OAIOEvent>>>({});
+  const [fetchDebug,setFetchDebug]=useState<string>("");
 
   // ── 베팅 슬립 ─────────────────────────────────────────────
   interface SlipItem {
@@ -1549,6 +1565,12 @@ export default function App() {
                 </button>
               ))}
             </div>
+            {/* 디버그 상태 표시 */}
+            {fetchDebug&&(
+              <div style={{padding:"4px 8px",background:`${C.amber}11`,borderBottom:`1px solid ${C.amber}22`,fontSize:9,color:C.amber,wordBreak:"break-all",lineHeight:1.4}}>
+                {oddsTabLoading?"⏳ ":"✓ "}{fetchDebug}
+              </div>
+            )}
             {/* 국가 → 리그 트리 */}
             <div style={{flex:1,overflowY:"auto"}}>
               {(()=>{
