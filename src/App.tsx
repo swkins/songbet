@@ -83,7 +83,7 @@ async function fetchOAIOSport(sport: string): Promise<OAIOEvent[]> {
   const sportKey = OAIO_SPORT[sport] || "football";
   try {
     oaioLogRequest();
-    const url = `${OAIO_BASE}/events?apiKey=${OAIO_KEY}&sport=${sportKey}&limit=300&status=upcoming,live`;
+    const url = `${OAIO_BASE}/events?apiKey=${OAIO_KEY}&sport=${sportKey}&limit=300`;
     const res = await fetch(url);
     if(!res.ok) throw new Error(`HTTP ${res.status}`);
     const json = await res.json();
@@ -420,20 +420,16 @@ export default function App() {
     } finally { setOddsTabLoading(false); }
   };
 
-  // 날짜 필터 헬퍼
+  // 날짜 필터 헬퍼 — KST 날짜 문자열로 단순 비교
   function filterByDay(events: OAIOEvent[], dayOffset: number): OAIOEvent[] {
-    // 오늘/내일은 해당 날짜만, dayOffset=0이면 향후 48시간도 포함 옵션 없이 오늘만
-    const kstNow = Date.now() + 9*60*60*1000;
-    const base = new Date(kstNow);
-    base.setUTCHours(0,0,0,0);
-    base.setUTCDate(base.getUTCDate() + dayOffset);
-    const dayStart = base.getTime() - 9*60*60*1000; // UTC로 변환
-    const dayEnd = dayStart + 24*60*60*1000;
+    const targetDate = getKSTDateStr(dayOffset); // "2026-04-22" 형식
     return events
       .filter(e => {
         if(!e.startTime) return false;
-        const t = new Date(e.startTime).getTime();
-        return t >= dayStart && t < dayEnd;
+        // startTime을 KST로 변환 후 날짜 부분만 비교
+        const kstDate = new Date(new Date(e.startTime).getTime() + 9*60*60*1000)
+          .toISOString().slice(0,10);
+        return kstDate === targetDate;
       })
       .sort((a,b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
   }
