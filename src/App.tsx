@@ -679,6 +679,8 @@ function AppMain() {
       // 모달 유지, 홈팀 input으로 포커스 이동
       setTimeout(()=>{const el=document.getElementById("add-game-home")as HTMLInputElement|null;if(el)el.focus();},30);
     } else {
+      // 모달 닫고 추가한 경기 자동 선택 (베팅 옵션 영역이 바로 보이도록)
+      setManualExpandedId(g.id);
       setAddGameModal(false);
     }
   };
@@ -2430,8 +2432,8 @@ function AppMain() {
 
                     {/* 농구: 핸디캡 -19.5 ~ -1.5, +1.5 ~ +19.5 */}
                     {g.sportCat==="농구" && (()=>{
-                      // 플핸만 표시 (+5.5 ~ +29.5, 2씩 증가)
-                      const plusLines=[5.5,7.5,9.5,11.5,13.5,15.5,17.5,19.5,21.5,23.5,25.5,27.5,29.5];
+                      // 플핸만 표시 (+5.5 ~ +29.5, 1단위)
+                      const plusLines=[5.5,6.5,7.5,8.5,9.5,10.5,11.5,12.5,13.5,14.5,15.5,16.5,17.5,18.5,19.5,20.5,21.5,22.5,23.5,24.5,25.5,26.5,27.5,28.5,29.5];
                       return (
                         <div>
                           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:7,paddingBottom:5,borderBottom:`1px solid ${C.border}`}}>
