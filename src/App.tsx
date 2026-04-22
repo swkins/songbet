@@ -1,3 +1,7 @@
+// ─────────────────────────────────────────────────────────────
+// BET TRACKER · App.tsx
+// 변경: 실시간 스코어(test) + 배당(test) 메뉴 추가 (rev.2 - 2026-04-22)
+// ─────────────────────────────────────────────────────────────
 import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, LineChart, Line, CartesianGrid } from "recharts";
 import * as db from "./lib/db";
