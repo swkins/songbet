@@ -1255,7 +1255,7 @@ function AppMain() {
         <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6,flexWrap:"wrap"}}>
           <span style={{fontSize:14,flexShrink:0}}>{SPORT_ICON[b.category]||"🎯"}</span>
           <span style={{fontSize:10,color:C.muted,background:C.bg,padding:"2px 6px",borderRadius:3}}>{b.league}</span>
-          <span style={{fontSize:13,color:C.purple,fontWeight:800,marginLeft:"auto"}}>{displayBetOption}</span>
+          <span style={{fontSize:13,color:C.orange,fontWeight:800,marginLeft:"auto"}}>{displayBetOption}</span>
         </div>
         {/* 중단: 팀 이름 크게 */}
         <div style={{fontSize:14,fontWeight:800,color:C.text,marginBottom:7,lineHeight:1.3,wordBreak:"break-word"}}>
@@ -1267,11 +1267,10 @@ function AppMain() {
             <span style={{fontSize:11,color:C.muted}}>배당 <span style={{color:C.teal,fontWeight:800,fontSize:13}}>{b.odds}</span></span>
             <span style={{fontSize:13,color:C.amber,fontWeight:800}}>{fmtDisp(b.amount,b.isDollar)}</span>
           </div>
-          <div style={{display:"flex",gap:3,flexShrink:0}}>
-            <button onClick={()=>{setEditingBetId(b.id);setEditBetForm({homeTeam:b.homeTeam,awayTeam:b.awayTeam,teamName:b.teamName,betOption:b.betOption,amount:b.amount});setEditBetOddsRaw(String(Math.round((b.odds||0)*100)));}} style={{background:`${C.teal}11`,border:`1px solid ${C.teal}44`,color:C.teal,padding:"4px 9px",borderRadius:4,cursor:"pointer",fontSize:12}}>✏️</button>
-            <button onClick={()=>updateResult(b.id,"승")} style={{background:`${C.green}22`,border:`1px solid ${C.green}`,color:C.green,padding:"4px 9px",borderRadius:4,cursor:"pointer",fontWeight:700,fontSize:12}}>✅</button>
-            <button onClick={()=>updateResult(b.id,"패")} style={{background:`${C.red}22`,border:`1px solid ${C.red}`,color:C.red,padding:"4px 9px",borderRadius:4,cursor:"pointer",fontWeight:700,fontSize:12}}>❌</button>
-            <button onClick={()=>cancelBet(b.id)} style={{background:C.bg,border:`1px solid ${C.border2}`,color:C.muted,padding:"4px 9px",borderRadius:4,cursor:"pointer",fontSize:11}}>취소</button>
+          <div style={{display:"flex",gap:4,flexShrink:0}}>
+            <button onClick={()=>updateResult(b.id,"승")} style={{background:`${C.green}22`,border:`1px solid ${C.green}`,color:C.green,padding:"5px 12px",borderRadius:4,cursor:"pointer",fontWeight:800,fontSize:12}}>적중</button>
+            <button onClick={()=>updateResult(b.id,"패")} style={{background:`${C.red}22`,border:`1px solid ${C.red}`,color:C.red,padding:"5px 12px",borderRadius:4,cursor:"pointer",fontWeight:800,fontSize:12}}>실패</button>
+            <button onClick={()=>cancelBet(b.id)} style={{background:C.bg,border:`1px solid ${C.border2}`,color:C.muted,padding:"5px 12px",borderRadius:4,cursor:"pointer",fontSize:12}}>취소</button>
           </div>
         </div>
       </div>
@@ -2060,7 +2059,7 @@ function AppMain() {
                           {dollar?"$":"₩"} {b.site}
                         </span>
                         {b.league && <span style={{fontSize:9,color:C.muted,background:C.bg,padding:"1px 5px",borderRadius:3}}>{b.league}</span>}
-                        <span style={{fontSize:11,color:C.purple,fontWeight:800,marginLeft:"auto"}}>{displayBetOption}</span>
+                        <span style={{fontSize:11,color:C.orange,fontWeight:800,marginLeft:"auto"}}>{displayBetOption}</span>
                       </div>
                       <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:6,lineHeight:1.3,wordBreak:"break-word"}}>{title}</div>
                       <div style={{display:"flex",alignItems:"center",gap:7,flexWrap:"wrap"}}>
@@ -2068,11 +2067,10 @@ function AppMain() {
                           <span style={{fontSize:10,color:C.muted}}>배당 <span style={{color:C.teal,fontWeight:800,fontSize:11}}>{b.odds}</span></span>
                           <span style={{fontSize:11,color:C.amber,fontWeight:800}}>{fmtDisp(b.amount,b.isDollar)}</span>
                         </div>
-                        <div style={{display:"flex",gap:2,flexShrink:0}}>
-                          <button onClick={()=>{setEditingBetId(b.id);setEditBetForm({homeTeam:b.homeTeam,awayTeam:b.awayTeam,teamName:b.teamName,betOption:b.betOption,amount:b.amount});setEditBetOddsRaw(String(Math.round((b.odds||0)*100)));}} style={{background:`${C.teal}11`,border:`1px solid ${C.teal}44`,color:C.teal,padding:"3px 7px",borderRadius:3,cursor:"pointer",fontSize:10}}>✏️</button>
-                          <button onClick={()=>updateResult(b.id,"승")} style={{background:`${C.green}22`,border:`1px solid ${C.green}`,color:C.green,padding:"3px 7px",borderRadius:3,cursor:"pointer",fontWeight:700,fontSize:10}}>✅</button>
-                          <button onClick={()=>updateResult(b.id,"패")} style={{background:`${C.red}22`,border:`1px solid ${C.red}`,color:C.red,padding:"3px 7px",borderRadius:3,cursor:"pointer",fontWeight:700,fontSize:10}}>❌</button>
-                          <button onClick={()=>cancelBet(b.id)} style={{background:C.bg,border:`1px solid ${C.border2}`,color:C.muted,padding:"3px 7px",borderRadius:3,cursor:"pointer",fontSize:10}}>취소</button>
+                        <div style={{display:"flex",gap:3,flexShrink:0}}>
+                          <button onClick={()=>updateResult(b.id,"승")} style={{background:`${C.green}22`,border:`1px solid ${C.green}`,color:C.green,padding:"4px 10px",borderRadius:4,cursor:"pointer",fontWeight:800,fontSize:11}}>적중</button>
+                          <button onClick={()=>updateResult(b.id,"패")} style={{background:`${C.red}22`,border:`1px solid ${C.red}`,color:C.red,padding:"4px 10px",borderRadius:4,cursor:"pointer",fontWeight:800,fontSize:11}}>실패</button>
+                          <button onClick={()=>cancelBet(b.id)} style={{background:C.bg,border:`1px solid ${C.border2}`,color:C.muted,padding:"4px 10px",borderRadius:4,cursor:"pointer",fontSize:11}}>취소</button>
                         </div>
                       </div>
                     </div>
