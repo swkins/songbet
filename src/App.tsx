@@ -909,6 +909,8 @@ function AppMain() {
       addLog("➕ 베팅",`${item.game.homeTeam} vs ${item.game.awayTeam}/${displayOpt}/${fmtDisp(manualSlipAmount,dollar)}`);
     });
     setManualSlip([]);
+    setManualSlipSite("");
+    setManualSlipAmount(0);
   };
 
   // ══════════════════════════════════════════════════════════
@@ -928,6 +930,9 @@ function AppMain() {
     if (b.homeTeam && opt === `${b.homeTeam} 승`) return homeScore>awayScore ? "승" : "패";
     if (b.awayTeam && opt === `${b.awayTeam} 승`) return awayScore>homeScore ? "승" : "패";
     // 3) "오버 (X.X)" / "언더 (X.X)"
+    //  - 오버 6.5, 합 7 → 적중 / 합 6 → 실패
+    //  - 언더 8.5, 합 8 → 적중 / 합 9 → 실패
+    //  - 정수 라인(드문 경우)에서 합 == line이면 푸시(null) = 수동 확인 필요
     const ouMatch = opt.match(/^(오버|언더)\s*\(([\d.]+)\)$/) || opt.match(/^(오버|언더)\s+([\d.]+)$/);
     if (ouMatch) {
       const kind = ouMatch[1];
@@ -1996,7 +2001,7 @@ function AppMain() {
         const selGame = manualExpandedId ? manualGames.find(g=>g.id===manualExpandedId) : null;
         const selectedGames = (mSport && mCountry && mLeague)
           ? manualGames.filter(g=>g.sportCat===mSport && g.country===mCountry && g.league===mLeague && !g.finished)
-              .sort((a,b)=>b.createdAt-a.createdAt)
+              .sort((a,b)=>a.createdAt-b.createdAt)
           : [];
         // 진행중 정렬: 최신순
         const pendingSorted = [...pending].sort((a,b)=>{
@@ -2183,13 +2188,13 @@ function AppMain() {
                               <div>
                                 <div style={{fontSize:11,color:C.green,marginBottom:6,fontWeight:800,textAlign:"center",background:`${C.green}22`,borderRadius:5,padding:"3px 0"}}>{g.homeTeam}</div>
                                 <div style={{display:"flex",flexDirection:"column",gap:4}}>
-                                  {handiLines.map(ln=>{const opt=`${g.homeTeam} (${ln})`;const added=inSlip(opt);return <button key={opt} onClick={()=>handleManualSlipPick(g,opt)} style={{padding:"10px 8px",borderRadius:6,cursor:"pointer",border:added?`2px solid ${C.green}`:`1px solid ${C.border}`,background:added?`${C.green}33`:C.bg2,color:added?C.green:C.text,fontWeight:added?800:600,fontSize:12,display:"flex",justifyContent:"space-between",alignItems:"center"}}><span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{g.homeTeam}</span><span style={{fontWeight:800,flexShrink:0}}>({ln})</span></button>;})}
+                                  {handiLines.map(ln=>{const opt=`${g.homeTeam} (${ln})`;const added=inSlip(opt);return <button key={opt} onClick={()=>handleManualSlipPick(g,opt)} style={{padding:"10px 8px",borderRadius:6,cursor:"pointer",border:added?`2px solid ${C.green}`:`1px solid ${C.border}`,background:added?`${C.green}33`:C.bg2,color:added?C.green:C.text,fontWeight:added?800:600,fontSize:12,display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}><span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flexShrink:0}}>{g.homeTeam} <b>({ln})</b></span><span style={{fontSize:10,color:C.dim,flexShrink:0}}>배당</span></button>;})}
                                 </div>
                               </div>
                               <div>
                                 <div style={{fontSize:11,color:C.teal,marginBottom:6,fontWeight:800,textAlign:"center",background:`${C.teal}22`,borderRadius:5,padding:"3px 0"}}>{g.awayTeam}</div>
                                 <div style={{display:"flex",flexDirection:"column",gap:4}}>
-                                  {handiLines.map(ln=>{const opt=`${g.awayTeam} (${ln})`;const added=inSlip(opt);return <button key={opt} onClick={()=>handleManualSlipPick(g,opt)} style={{padding:"10px 8px",borderRadius:6,cursor:"pointer",border:added?`2px solid ${C.teal}`:`1px solid ${C.border}`,background:added?`${C.teal}33`:C.bg2,color:added?C.teal:C.text,fontWeight:added?800:600,fontSize:12,display:"flex",justifyContent:"space-between",alignItems:"center"}}><span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{g.awayTeam}</span><span style={{fontWeight:800,flexShrink:0}}>({ln})</span></button>;})}
+                                  {handiLines.map(ln=>{const opt=`${g.awayTeam} (${ln})`;const added=inSlip(opt);return <button key={opt} onClick={()=>handleManualSlipPick(g,opt)} style={{padding:"10px 8px",borderRadius:6,cursor:"pointer",border:added?`2px solid ${C.teal}`:`1px solid ${C.border}`,background:added?`${C.teal}33`:C.bg2,color:added?C.teal:C.text,fontWeight:added?800:600,fontSize:12,display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}><span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flexShrink:0}}>{g.awayTeam} <b>({ln})</b></span><span style={{fontSize:10,color:C.dim,flexShrink:0}}>배당</span></button>;})}
                                 </div>
                               </div>
                             </div>
@@ -2200,13 +2205,13 @@ function AppMain() {
                               <div>
                                 <div style={{fontSize:11,color:"#e05a9a",marginBottom:6,fontWeight:800,textAlign:"center",background:"#e05a9a22",borderRadius:5,padding:"3px 0"}}>오버</div>
                                 <div style={{display:"flex",flexDirection:"column",gap:4}}>
-                                  {ouLinesSoccer.map(ln=>{const opt=`오버 (${ln})`;const added=inSlip(opt);return <button key={opt} onClick={()=>handleManualSlipPick(g,opt)} style={{padding:"10px 8px",borderRadius:6,cursor:"pointer",border:added?`2px solid #e05a9a`:`1px solid ${C.border}`,background:added?`#e05a9a33`:C.bg2,color:added?"#e05a9a":C.text,fontWeight:added?800:600,fontSize:12,display:"flex",justifyContent:"space-between",alignItems:"center"}}><span>오버</span><span style={{fontWeight:800}}>({ln})</span></button>;})}
+                                  {ouLinesSoccer.map(ln=>{const opt=`오버 (${ln})`;const added=inSlip(opt);return <button key={opt} onClick={()=>handleManualSlipPick(g,opt)} style={{padding:"10px 8px",borderRadius:6,cursor:"pointer",border:added?`2px solid #e05a9a`:`1px solid ${C.border}`,background:added?`#e05a9a33`:C.bg2,color:added?"#e05a9a":C.text,fontWeight:added?800:600,fontSize:12,display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}><span style={{flexShrink:0}}>오버 <b>({ln})</b></span><span style={{fontSize:10,color:C.dim,flexShrink:0}}>배당</span></button>;})}
                                 </div>
                               </div>
                               <div>
                                 <div style={{fontSize:11,color:"#7ac4ff",marginBottom:6,fontWeight:800,textAlign:"center",background:"#7ac4ff22",borderRadius:5,padding:"3px 0"}}>언더</div>
                                 <div style={{display:"flex",flexDirection:"column",gap:4}}>
-                                  {ouLinesSoccer.map(ln=>{const opt=`언더 (${ln})`;const added=inSlip(opt);return <button key={opt} onClick={()=>handleManualSlipPick(g,opt)} style={{padding:"10px 8px",borderRadius:6,cursor:"pointer",border:added?`2px solid #7ac4ff`:`1px solid ${C.border}`,background:added?`#7ac4ff33`:C.bg2,color:added?"#7ac4ff":C.text,fontWeight:added?800:600,fontSize:12,display:"flex",justifyContent:"space-between",alignItems:"center"}}><span>언더</span><span style={{fontWeight:800}}>({ln})</span></button>;})}
+                                  {ouLinesSoccer.map(ln=>{const opt=`언더 (${ln})`;const added=inSlip(opt);return <button key={opt} onClick={()=>handleManualSlipPick(g,opt)} style={{padding:"10px 8px",borderRadius:6,cursor:"pointer",border:added?`2px solid #7ac4ff`:`1px solid ${C.border}`,background:added?`#7ac4ff33`:C.bg2,color:added?"#7ac4ff":C.text,fontWeight:added?800:600,fontSize:12,display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}><span style={{flexShrink:0}}>언더 <b>({ln})</b></span><span style={{fontSize:10,color:C.dim,flexShrink:0}}>배당</span></button>;})}
                                 </div>
                               </div>
                             </div>
@@ -2223,13 +2228,13 @@ function AppMain() {
                           <div>
                             <div style={{fontSize:11,color:"#e05a9a",marginBottom:6,fontWeight:800,textAlign:"center",background:"#e05a9a22",borderRadius:5,padding:"3px 0"}}>오버</div>
                             <div style={{display:"flex",flexDirection:"column",gap:4}}>
-                              {[4.5,5.5,6.5,7.5,8.5,9.5,10.5,11.5,12.5].map(ln=>{const opt=`오버 (${ln})`;const added=inSlip(opt);return <button key={opt} onClick={()=>handleManualSlipPick(g,opt)} style={{padding:"10px 8px",borderRadius:6,cursor:"pointer",border:added?`2px solid #e05a9a`:`1px solid ${C.border}`,background:added?`#e05a9a33`:C.bg2,color:added?"#e05a9a":C.text,fontWeight:added?800:600,fontSize:12,display:"flex",justifyContent:"space-between",alignItems:"center"}}><span>오버</span><span style={{fontWeight:800}}>({ln})</span></button>;})}
+                              {[4.5,5.5,6.5,7.5,8.5,9.5,10.5,11.5,12.5].map(ln=>{const opt=`오버 (${ln})`;const added=inSlip(opt);return <button key={opt} onClick={()=>handleManualSlipPick(g,opt)} style={{padding:"10px 8px",borderRadius:6,cursor:"pointer",border:added?`2px solid #e05a9a`:`1px solid ${C.border}`,background:added?`#e05a9a33`:C.bg2,color:added?"#e05a9a":C.text,fontWeight:added?800:600,fontSize:12,display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}><span style={{flexShrink:0}}>오버 <b>({ln})</b></span><span style={{fontSize:10,color:C.dim,flexShrink:0}}>배당</span></button>;})}
                             </div>
                           </div>
                           <div>
                             <div style={{fontSize:11,color:"#7ac4ff",marginBottom:6,fontWeight:800,textAlign:"center",background:"#7ac4ff22",borderRadius:5,padding:"3px 0"}}>언더</div>
                             <div style={{display:"flex",flexDirection:"column",gap:4}}>
-                              {[4.5,5.5,6.5,7.5,8.5,9.5,10.5,11.5,12.5].map(ln=>{const opt=`언더 (${ln})`;const added=inSlip(opt);return <button key={opt} onClick={()=>handleManualSlipPick(g,opt)} style={{padding:"10px 8px",borderRadius:6,cursor:"pointer",border:added?`2px solid #7ac4ff`:`1px solid ${C.border}`,background:added?`#7ac4ff33`:C.bg2,color:added?"#7ac4ff":C.text,fontWeight:added?800:600,fontSize:12,display:"flex",justifyContent:"space-between",alignItems:"center"}}><span>언더</span><span style={{fontWeight:800}}>({ln})</span></button>;})}
+                              {[4.5,5.5,6.5,7.5,8.5,9.5,10.5,11.5,12.5].map(ln=>{const opt=`언더 (${ln})`;const added=inSlip(opt);return <button key={opt} onClick={()=>handleManualSlipPick(g,opt)} style={{padding:"10px 8px",borderRadius:6,cursor:"pointer",border:added?`2px solid #7ac4ff`:`1px solid ${C.border}`,background:added?`#7ac4ff33`:C.bg2,color:added?"#7ac4ff":C.text,fontWeight:added?800:600,fontSize:12,display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}><span style={{flexShrink:0}}>언더 <b>({ln})</b></span><span style={{fontSize:10,color:C.dim,flexShrink:0}}>배당</span></button>;})}
                             </div>
                           </div>
                         </div>
@@ -2244,13 +2249,13 @@ function AppMain() {
                           <div>
                             <div style={{fontSize:11,color:C.green,marginBottom:6,fontWeight:800,textAlign:"center",background:`${C.green}22`,borderRadius:5,padding:"3px 0"}}>{g.homeTeam}</div>
                             <div style={{display:"flex",flexDirection:"column",gap:4}}>
-                              {[-1.5,1.5].map(ln=>{const lbl=ln>0?`(+${ln})`:`(${ln})`;const opt=`${g.homeTeam} ${lbl}`;const added=inSlip(opt);return <button key={String(ln)} onClick={()=>handleManualSlipPick(g,opt)} style={{padding:"10px 8px",borderRadius:6,cursor:"pointer",border:added?`2px solid ${C.green}`:`1px solid ${C.border}`,background:added?`${C.green}33`:C.bg2,color:added?C.green:C.text,fontWeight:added?800:600,fontSize:12,display:"flex",justifyContent:"space-between",alignItems:"center"}}><span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{g.homeTeam}</span><span style={{fontWeight:800,flexShrink:0}}>{lbl}</span></button>;})}
+                              {[-1.5,1.5].map(ln=>{const lbl=ln>0?`(+${ln})`:`(${ln})`;const opt=`${g.homeTeam} ${lbl}`;const added=inSlip(opt);return <button key={String(ln)} onClick={()=>handleManualSlipPick(g,opt)} style={{padding:"10px 8px",borderRadius:6,cursor:"pointer",border:added?`2px solid ${C.green}`:`1px solid ${C.border}`,background:added?`${C.green}33`:C.bg2,color:added?C.green:C.text,fontWeight:added?800:600,fontSize:12,display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}><span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flexShrink:0}}>{g.homeTeam} <b>{lbl}</b></span><span style={{fontSize:10,color:C.dim,flexShrink:0}}>배당</span></button>;})}
                             </div>
                           </div>
                           <div>
                             <div style={{fontSize:11,color:C.teal,marginBottom:6,fontWeight:800,textAlign:"center",background:`${C.teal}22`,borderRadius:5,padding:"3px 0"}}>{g.awayTeam}</div>
                             <div style={{display:"flex",flexDirection:"column",gap:4}}>
-                              {[-1.5,1.5].map(ln=>{const lbl=ln>0?`(+${ln})`:`(${ln})`;const opt=`${g.awayTeam} ${lbl}`;const added=inSlip(opt);return <button key={String(ln)} onClick={()=>handleManualSlipPick(g,opt)} style={{padding:"10px 8px",borderRadius:6,cursor:"pointer",border:added?`2px solid ${C.teal}`:`1px solid ${C.border}`,background:added?`${C.teal}33`:C.bg2,color:added?C.teal:C.text,fontWeight:added?800:600,fontSize:12,display:"flex",justifyContent:"space-between",alignItems:"center"}}><span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{g.awayTeam}</span><span style={{fontWeight:800,flexShrink:0}}>{lbl}</span></button>;})}
+                              {[-1.5,1.5].map(ln=>{const lbl=ln>0?`(+${ln})`:`(${ln})`;const opt=`${g.awayTeam} ${lbl}`;const added=inSlip(opt);return <button key={String(ln)} onClick={()=>handleManualSlipPick(g,opt)} style={{padding:"10px 8px",borderRadius:6,cursor:"pointer",border:added?`2px solid ${C.teal}`:`1px solid ${C.border}`,background:added?`${C.teal}33`:C.bg2,color:added?C.teal:C.text,fontWeight:added?800:600,fontSize:12,display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}><span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flexShrink:0}}>{g.awayTeam} <b>{lbl}</b></span><span style={{fontSize:10,color:C.dim,flexShrink:0}}>배당</span></button>;})}
                             </div>
                           </div>
                         </div>
@@ -2269,13 +2274,13 @@ function AppMain() {
                             <div>
                               <div style={{fontSize:11,color:C.green,marginBottom:6,fontWeight:800,textAlign:"center",background:`${C.green}22`,borderRadius:5,padding:"3px 0"}}>{g.homeTeam}</div>
                               <div style={{display:"flex",flexDirection:"column",gap:3,maxHeight:380,overflowY:"auto"}}>
-                                {allLines.map(ln=>{const lbl=ln>0?`(+${ln})`:`(${ln})`;const opt=`${g.homeTeam} ${lbl}`;const added=inSlip(opt);return <button key={String(ln)} onClick={()=>handleManualSlipPick(g,opt)} style={{padding:"7px 8px",borderRadius:5,cursor:"pointer",border:added?`2px solid ${C.green}`:`1px solid ${C.border}`,background:added?`${C.green}33`:C.bg2,color:added?C.green:C.text,fontWeight:added?800:600,fontSize:11,display:"flex",justifyContent:"space-between",alignItems:"center"}}><span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{g.homeTeam}</span><span style={{fontWeight:800,flexShrink:0}}>{lbl}</span></button>;})}
+                                {allLines.map(ln=>{const lbl=ln>0?`(+${ln})`:`(${ln})`;const opt=`${g.homeTeam} ${lbl}`;const added=inSlip(opt);return <button key={String(ln)} onClick={()=>handleManualSlipPick(g,opt)} style={{padding:"7px 8px",borderRadius:5,cursor:"pointer",border:added?`2px solid ${C.green}`:`1px solid ${C.border}`,background:added?`${C.green}33`:C.bg2,color:added?C.green:C.text,fontWeight:added?800:600,fontSize:11,display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}><span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flexShrink:0}}>{g.homeTeam} <b>{lbl}</b></span><span style={{fontSize:10,color:C.dim,flexShrink:0}}>배당</span></button>;})}
                               </div>
                             </div>
                             <div>
                               <div style={{fontSize:11,color:C.teal,marginBottom:6,fontWeight:800,textAlign:"center",background:`${C.teal}22`,borderRadius:5,padding:"3px 0"}}>{g.awayTeam}</div>
                               <div style={{display:"flex",flexDirection:"column",gap:3,maxHeight:380,overflowY:"auto"}}>
-                                {allLines.map(ln=>{const lbl=ln>0?`(+${ln})`:`(${ln})`;const opt=`${g.awayTeam} ${lbl}`;const added=inSlip(opt);return <button key={String(ln)} onClick={()=>handleManualSlipPick(g,opt)} style={{padding:"7px 8px",borderRadius:5,cursor:"pointer",border:added?`2px solid ${C.teal}`:`1px solid ${C.border}`,background:added?`${C.teal}33`:C.bg2,color:added?C.teal:C.text,fontWeight:added?800:600,fontSize:11,display:"flex",justifyContent:"space-between",alignItems:"center"}}><span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{g.awayTeam}</span><span style={{fontWeight:800,flexShrink:0}}>{lbl}</span></button>;})}
+                                {allLines.map(ln=>{const lbl=ln>0?`(+${ln})`:`(${ln})`;const opt=`${g.awayTeam} ${lbl}`;const added=inSlip(opt);return <button key={String(ln)} onClick={()=>handleManualSlipPick(g,opt)} style={{padding:"7px 8px",borderRadius:5,cursor:"pointer",border:added?`2px solid ${C.teal}`:`1px solid ${C.border}`,background:added?`${C.teal}33`:C.bg2,color:added?C.teal:C.text,fontWeight:added?800:600,fontSize:11,display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}><span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flexShrink:0}}>{g.awayTeam} <b>{lbl}</b></span><span style={{fontSize:10,color:C.dim,flexShrink:0}}>배당</span></button>;})}
                               </div>
                             </div>
                           </div>
@@ -2347,8 +2352,8 @@ function AppMain() {
                     <div style={{...L,fontSize:12,marginBottom:5}}>1️⃣ 사이트</div>
                     {activeSiteNames.length===0 ? <div style={{fontSize:11,color:C.dim}}>활성 사이트 없음</div> :
                       <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
-                        {activeSiteNames.filter(s=>krwSites.includes(s)).map(s=><button key={s} onClick={()=>{setManualSlipSite(s);setTimeout(()=>{const el=document.getElementById("slip-odds-input")as HTMLInputElement|null;if(el)el.focus();},10);}} style={{...siteBtn(manualSlipSite===s,false),fontSize:12,padding:"5px 10px"}}>₩ {s}</button>)}
-                        {activeSiteNames.filter(s=>usdSites.includes(s)).map(s=><button key={s} onClick={()=>{setManualSlipSite(s);setTimeout(()=>{const el=document.getElementById("slip-odds-input")as HTMLInputElement|null;if(el)el.focus();},10);}} style={{...siteBtn(manualSlipSite===s,true),fontSize:12,padding:"5px 10px"}}>$ {s}</button>)}
+                        {activeSiteNames.filter(s=>krwSites.includes(s)).map(s=><button key={s} onClick={()=>{setManualSlipSite(s);if(manualSlipAmount===0)setManualSlipAmount(10000);setTimeout(()=>{const el=document.getElementById("slip-odds-input")as HTMLInputElement|null;if(el)el.focus();},10);}} style={{...siteBtn(manualSlipSite===s,false),fontSize:12,padding:"5px 10px"}}>₩ {s}</button>)}
+                        {activeSiteNames.filter(s=>usdSites.includes(s)).map(s=><button key={s} onClick={()=>{setManualSlipSite(s);if(manualSlipAmount===0||manualSlipAmount===10000)setManualSlipAmount(7);setTimeout(()=>{const el=document.getElementById("slip-odds-input")as HTMLInputElement|null;if(el)el.focus();},10);}} style={{...siteBtn(manualSlipSite===s,true),fontSize:12,padding:"5px 10px"}}>$ {s}</button>)}
                       </div>}
                   </div>
 
@@ -2518,7 +2523,7 @@ function AppMain() {
         // 현재 선택된 리그의 경기들
         const selectedGames = (mSport && mCountry && mLeague)
           ? manualGames.filter(g=>g.sportCat===mSport&&g.country===mCountry&&g.league===mLeague&&!g.finished)
-              .sort((a,b)=>b.createdAt-a.createdAt)
+              .sort((a,b)=>a.createdAt-b.createdAt)
           : [];
 
         return (
