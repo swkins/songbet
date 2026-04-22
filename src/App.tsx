@@ -720,6 +720,13 @@ function AppMain() {
     const list=mLeagues[key]||[];
     if(list.includes(n)||allLeaguesForCountry(sport,country).includes(n))return alert("이미 존재합니다.");
     saveMLeaguesStore({...mLeagues,[key]:[...list,n]});
+    // 추가된 리그 자동 선택
+    setMSport(sport);
+    setMCountry(country);
+    setMLeague(n);
+    setMExpandedSports(p=>({...p,[sport]:true}));
+    setMExpandedCountries(p=>({...p,[key]:true}));
+    setManualExpandedId(null);
     setAddLeagueModalM(null);setNewLeagueNameM("");
   };
 
@@ -862,6 +869,11 @@ function AppMain() {
   const [manualSlipInclude,setManualSlipInclude]=useState<boolean>(true);
   const [manualExpandedId,setManualExpandedId]=useState<string|null>(null);
   const [slipOddsInputStr,setSlipOddsInputStr]=useState<string>(""); // 배당 입력 중인 문자열 (포커스 중에만 사용)
+  // 농구 기타 베팅 수동 입력 모달 (마핸/플핸 숫자 직접 입력)
+  const [customHandiModal,setCustomHandiModal]=useState<{game:ManualGame}|null>(null);
+  const [customHandiType,setCustomHandiType]=useState<"플핸"|"마핸">("플핸");
+  const [customHandiTeam,setCustomHandiTeam]=useState<"home"|"away">("home");
+  const [customHandiLine,setCustomHandiLine]=useState<string>("");
 
   const manualSlipKeys = useMemo(()=>new Set(manualSlip.map(s=>s.id)),[manualSlip]);
 
@@ -1235,6 +1247,24 @@ function AppMain() {
   const [deleteModal,setDeleteModal]=useState<{betId:string}|null>(null);
   const leagueInputRef=useRef<HTMLInputElement>(null);
   useEffect(()=>{if(addLeagueModal&&leagueInputRef.current)setTimeout(()=>leagueInputRef.current?.focus(),50);},[addLeagueModal]);
+
+  // ESC 키로 모든 팝업 닫기
+  useEffect(()=>{
+    const handler = (e:KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (customHandiModal) { setCustomHandiModal(null); setCustomHandiLine(""); return; }
+      if (addGameModal) { setAddGameModal(false); setNewGame({homeTeam:"",awayTeam:""}); return; }
+      if (addSportModal) { setAddSportModal(false); setNewSportName(""); return; }
+      if (addCountryModal) { setAddCountryModal(null); setNewCountryName(""); return; }
+      if (addLeagueModalM) { setAddLeagueModalM(null); setNewLeagueNameM(""); return; }
+      if (addLeagueModal) { setAddLeagueModal(null); setNewLeagueName(""); return; }
+      if (editMetaModal) { setEditMetaModal(null); setEditMetaNewName(""); return; }
+      if (closeModal) { setCloseModal(null); return; }
+      if (deleteModal) { setDeleteModal(null); return; }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [customHandiModal,addGameModal,addSportModal,addCountryModal,addLeagueModalM,addLeagueModal,editMetaModal,closeModal,deleteModal]);
 
   // ── 입금 폼 ──────────────────────────────────────────────
   const [depSite,setDepSite]=useState("");
@@ -1784,6 +1814,89 @@ function AppMain() {
         </div>
       )}
 
+      {/* 기타 베팅 - 마핸/플핸 숫자 직접 입력 (농구) */}
+      {customHandiModal && (()=>{
+        const g = customHandiModal.game;
+        const team = customHandiTeam==="home" ? g.homeTeam : g.awayTeam;
+        const teamColor = customHandiTeam==="home" ? C.green : C.teal;
+        return (
+          <div style={{position:"fixed",inset:0,background:"#000b",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center"}}>
+            <div style={{background:C.bg3,border:`1px solid ${C.purple}`,borderRadius:14,padding:24,width:400}}>
+              <div style={{fontSize:15,fontWeight:800,color:C.purple,marginBottom:8}}>🎯 기타 베팅 (핸디캡 수동 입력)</div>
+              <div style={{fontSize:11,color:C.muted,marginBottom:14,background:C.bg2,padding:"8px 12px",borderRadius:6}}>
+                {g.homeTeam} vs {g.awayTeam}
+              </div>
+
+              {/* 플핸 / 마핸 선택 */}
+              <div style={{marginBottom:12}}>
+                <div style={{...L,fontSize:12,marginBottom:5}}>1️⃣ 핸디캡 유형</div>
+                <div style={{display:"flex",gap:6}}>
+                  {(["플핸","마핸"] as const).map(t=>{
+                    const active=customHandiType===t;
+                    return <button key={t} onClick={()=>setCustomHandiType(t)}
+                      style={{flex:1,padding:"10px",borderRadius:6,cursor:"pointer",border:active?`2px solid ${C.amber}`:`1px solid ${C.border}`,background:active?`${C.amber}22`:C.bg2,color:active?C.amber:C.muted,fontWeight:active?800:600,fontSize:13}}>
+                      {t==="플핸"?"➕ 플핸 (플러스)":"➖ 마핸 (마이너스)"}
+                    </button>;
+                  })}
+                </div>
+              </div>
+
+              {/* 팀 선택 */}
+              <div style={{marginBottom:12}}>
+                <div style={{...L,fontSize:12,marginBottom:5}}>2️⃣ 어느 팀</div>
+                <div style={{display:"flex",gap:6}}>
+                  <button onClick={()=>setCustomHandiTeam("home")}
+                    style={{flex:1,padding:"10px",borderRadius:6,cursor:"pointer",border:customHandiTeam==="home"?`2px solid ${C.green}`:`1px solid ${C.border}`,background:customHandiTeam==="home"?`${C.green}22`:C.bg2,color:customHandiTeam==="home"?C.green:C.muted,fontWeight:customHandiTeam==="home"?800:600,fontSize:13}}>
+                    🏠 {g.homeTeam}
+                  </button>
+                  <button onClick={()=>setCustomHandiTeam("away")}
+                    style={{flex:1,padding:"10px",borderRadius:6,cursor:"pointer",border:customHandiTeam==="away"?`2px solid ${C.teal}`:`1px solid ${C.border}`,background:customHandiTeam==="away"?`${C.teal}22`:C.bg2,color:customHandiTeam==="away"?C.teal:C.muted,fontWeight:customHandiTeam==="away"?800:600,fontSize:13}}>
+                    ✈️ {g.awayTeam}
+                  </button>
+                </div>
+              </div>
+
+              {/* 숫자 입력 */}
+              <div style={{marginBottom:14}}>
+                <div style={{...L,fontSize:12,marginBottom:5}}>3️⃣ 숫자 (소수점 .5 권장)</div>
+                <input autoFocus type="text" inputMode="decimal" value={customHandiLine}
+                  onChange={e=>setCustomHandiLine(e.target.value.replace(/[^0-9.]/g,""))}
+                  onKeyDown={e=>{
+                    if(e.key==="Enter"){
+                      e.preventDefault();
+                      const n=parseFloat(customHandiLine);
+                      if(!n||n<=0)return alert("유효한 숫자를 입력해주세요.");
+                      const signedLine = customHandiType==="플핸" ? n : -n;
+                      const lbl = signedLine>0 ? `(+${n})` : `(-${n})`;
+                      const opt = `${team} ${lbl}`;
+                      handleManualSlipPick(g,opt);
+                      setCustomHandiModal(null);setCustomHandiLine("");
+                    }
+                  }}
+                  placeholder="예: 4.5, 31.5"
+                  style={{...S,boxSizing:"border-box",fontSize:20,padding:"12px",fontWeight:800,textAlign:"center" as const,color:teamColor,letterSpacing:1}}/>
+                <div style={{fontSize:10,color:C.dim,marginTop:6,textAlign:"center"}}>
+                  미리보기: <b style={{color:teamColor}}>{team} {customHandiType==="플핸"?"+":"-"}{customHandiLine||"?"}</b>
+                </div>
+              </div>
+
+              <div style={{display:"flex",gap:8}}>
+                <button onClick={()=>{
+                  const n=parseFloat(customHandiLine);
+                  if(!n||n<=0)return alert("유효한 숫자를 입력해주세요.");
+                  const signedLine = customHandiType==="플핸" ? n : -n;
+                  const lbl = signedLine>0 ? `(+${n})` : `(-${n})`;
+                  const opt = `${team} ${lbl}`;
+                  handleManualSlipPick(g,opt);
+                  setCustomHandiModal(null);setCustomHandiLine("");
+                }} style={{flex:1,background:`${C.purple}22`,border:`1px solid ${C.purple}`,color:C.purple,padding:"10px",borderRadius:7,cursor:"pointer",fontWeight:800}}>✅ 슬립에 추가</button>
+                <button onClick={()=>{setCustomHandiModal(null);setCustomHandiLine("");}} style={{flex:1,background:C.bg2,border:`1px solid ${C.border}`,color:C.muted,padding:"10px",borderRadius:7,cursor:"pointer"}}>취소</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {addGameModal&&(()=>{
         // 현재 선택된 종목의 경기들에서 팀 이름 추출 (중복 제거)
         const sportTeams = Array.from(new Set(
@@ -2317,23 +2430,28 @@ function AppMain() {
 
                     {/* 농구: 핸디캡 -19.5 ~ -1.5, +1.5 ~ +19.5 */}
                     {g.sportCat==="농구" && (()=>{
-                      const negLines=[-19.5,-17.5,-15.5,-13.5,-11.5,-9.5,-7.5,-5.5,-3.5,-1.5];
-                      const posLines=[1.5,3.5,5.5,7.5,9.5,11.5,13.5,15.5,17.5,19.5];
-                      const allLines=[...negLines,...posLines];
+                      // 플핸만 표시 (+5.5 ~ +29.5, 2씩 증가)
+                      const plusLines=[5.5,7.5,9.5,11.5,13.5,15.5,17.5,19.5,21.5,23.5,25.5,27.5,29.5];
                       return (
                         <div>
-                          <div style={{fontSize:11,fontWeight:800,color:C.amber,marginBottom:7,paddingBottom:5,borderBottom:`1px solid ${C.border}`,letterSpacing:1}}>핸디캡</div>
+                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:7,paddingBottom:5,borderBottom:`1px solid ${C.border}`}}>
+                            <div style={{fontSize:11,fontWeight:800,color:C.amber,letterSpacing:1}}>플러스 핸디캡</div>
+                            <button onClick={()=>{setCustomHandiModal({game:g});setCustomHandiType("플핸");setCustomHandiTeam("home");setCustomHandiLine("");}}
+                              style={{padding:"4px 10px",borderRadius:5,border:`1px solid ${C.purple}`,background:`${C.purple}22`,color:C.purple,cursor:"pointer",fontSize:11,fontWeight:700}}>
+                              🎯 기타 베팅
+                            </button>
+                          </div>
                           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
                             <div>
                               <div style={{fontSize:11,color:C.green,marginBottom:6,fontWeight:800,textAlign:"center",background:`${C.green}22`,borderRadius:5,padding:"3px 0"}}>{g.homeTeam}</div>
-                              <div style={{display:"flex",flexDirection:"column",gap:3,maxHeight:380,overflowY:"auto"}}>
-                                {allLines.map(ln=>{const lbl=ln>0?`(+${ln})`:`(${ln})`;const opt=`${g.homeTeam} ${lbl}`;const added=inSlip(opt);return <button key={String(ln)} onClick={()=>handleManualSlipPick(g,opt)} style={{padding:"7px 8px",borderRadius:5,cursor:"pointer",border:added?`2px solid ${C.green}`:`1px solid ${C.border}`,background:added?`${C.green}33`:C.bg2,color:added?C.green:C.text,fontWeight:added?800:600,fontSize:11,display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}><span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flexShrink:0}}>{g.homeTeam} <b>{lbl}</b></span><span style={{fontSize:10,color:C.dim,flexShrink:0}}>배당</span></button>;})}
+                              <div style={{display:"flex",flexDirection:"column",gap:3,maxHeight:430,overflowY:"auto"}}>
+                                {plusLines.map(ln=>{const lbl=`(+${ln})`;const opt=`${g.homeTeam} ${lbl}`;const added=inSlip(opt);return <button key={String(ln)} onClick={()=>handleManualSlipPick(g,opt)} style={{padding:"7px 8px",borderRadius:5,cursor:"pointer",border:added?`2px solid ${C.green}`:`1px solid ${C.border}`,background:added?`${C.green}33`:C.bg2,color:added?C.green:C.text,fontWeight:added?800:600,fontSize:11,display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}><span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flexShrink:0}}>{g.homeTeam} <b>{lbl}</b></span><span style={{fontSize:10,color:C.dim,flexShrink:0}}>배당</span></button>;})}
                               </div>
                             </div>
                             <div>
                               <div style={{fontSize:11,color:C.teal,marginBottom:6,fontWeight:800,textAlign:"center",background:`${C.teal}22`,borderRadius:5,padding:"3px 0"}}>{g.awayTeam}</div>
-                              <div style={{display:"flex",flexDirection:"column",gap:3,maxHeight:380,overflowY:"auto"}}>
-                                {allLines.map(ln=>{const lbl=ln>0?`(+${ln})`:`(${ln})`;const opt=`${g.awayTeam} ${lbl}`;const added=inSlip(opt);return <button key={String(ln)} onClick={()=>handleManualSlipPick(g,opt)} style={{padding:"7px 8px",borderRadius:5,cursor:"pointer",border:added?`2px solid ${C.teal}`:`1px solid ${C.border}`,background:added?`${C.teal}33`:C.bg2,color:added?C.teal:C.text,fontWeight:added?800:600,fontSize:11,display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}><span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flexShrink:0}}>{g.awayTeam} <b>{lbl}</b></span><span style={{fontSize:10,color:C.dim,flexShrink:0}}>배당</span></button>;})}
+                              <div style={{display:"flex",flexDirection:"column",gap:3,maxHeight:430,overflowY:"auto"}}>
+                                {plusLines.map(ln=>{const lbl=`(+${ln})`;const opt=`${g.awayTeam} ${lbl}`;const added=inSlip(opt);return <button key={String(ln)} onClick={()=>handleManualSlipPick(g,opt)} style={{padding:"7px 8px",borderRadius:5,cursor:"pointer",border:added?`2px solid ${C.teal}`:`1px solid ${C.border}`,background:added?`${C.teal}33`:C.bg2,color:added?C.teal:C.text,fontWeight:added?800:600,fontSize:11,display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}><span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flexShrink:0}}>{g.awayTeam} <b>{lbl}</b></span><span style={{fontSize:10,color:C.dim,flexShrink:0}}>배당</span></button>;})}
                               </div>
                             </div>
                           </div>
