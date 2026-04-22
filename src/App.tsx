@@ -6,7 +6,7 @@
 //  - 종목 메뉴 크게 · 국가 메뉴 크게 · 3컬럼 독립 스크롤
 //  - Supabase events 테이블 의존 제거 (베팅 탭 한정)
 // ─────────────────────────────────────────────────────────────
-import { useState, useMemo, useRef, useEffect, useCallback } from "react";
+import React, { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, LineChart, Line, CartesianGrid } from "recharts";
 import * as db from "./lib/db";
 import type { Bet, Deposit, Withdrawal, SiteState as SiteStateBase, Log, EsportsRecord, ProfitExtra } from "./types";
@@ -52,7 +52,10 @@ interface LiveFixture {
   away_score: number | null;
 }
 
-const API_SPORTS_KEY = (import.meta.env.VITE_API_SPORTS_KEY as string) || (import.meta.env.API_SPORTS_KEY as string) || "";
+const API_SPORTS_KEY: string = (() => {
+  try { return (import.meta as any)?.env?.VITE_API_SPORTS_KEY || ""; }
+  catch { return ""; }
+})();
 const API_CACHE_TTL = 15 * 60 * 1000;
 const API_CACHE_PREFIX = "bt_apisports_";
 
@@ -366,7 +369,40 @@ async function fetchUsdKrw():Promise<number> {
 }
 
 // ═════════════════════════════════════════════════════════════
-export default function App() {
+// ErrorBoundary - 어떤 에러가 나도 흰 화면 안 나오게 방어
+// ═════════════════════════════════════════════════════════════
+class ErrorBoundary extends React.Component<{children:React.ReactNode},{err:Error|null}> {
+  constructor(p:any){super(p);this.state={err:null};}
+  static getDerivedStateFromError(err:Error){return {err};}
+  componentDidCatch(err:Error,info:any){console.error("[BetTracker Crash]",err,info);}
+  render(){
+    if(this.state.err){
+      return (
+        <div style={{minHeight:"100vh",background:"#111614",color:"#dde8dd",padding:24,fontFamily:"system-ui"}}>
+          <div style={{fontSize:20,color:"#e05a5a",fontWeight:900,marginBottom:12}}>⚠ 앱에 에러가 발생했습니다</div>
+          <div style={{fontSize:12,color:"#7a9a7a",marginBottom:8}}>에러 메시지:</div>
+          <pre style={{background:"#1e261e",border:"1px solid #2a3a2a",borderRadius:8,padding:12,fontSize:11,overflow:"auto",color:"#f0944a",whiteSpace:"pre-wrap",wordBreak:"break-word"}}>
+{String(this.state.err?.message || this.state.err)}
+{"\n\n"}
+{String(this.state.err?.stack || "")}
+          </pre>
+          <button onClick={()=>{try{sessionStorage.clear();localStorage.clear();}catch{};location.reload();}}
+            style={{marginTop:16,padding:"10px 20px",background:"#5ddb8a22",border:"1px solid #5ddb8a",color:"#5ddb8a",borderRadius:8,cursor:"pointer",fontWeight:700}}>
+            🔄 세션 초기화 후 다시 시작
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+// ═════════════════════════════════════════════════════════════
+export default function AppWrapper() {
+  return <ErrorBoundary><AppMain/></ErrorBoundary>;
+}
+
+function AppMain() {
   // ── 비밀번호 / 세션 ───────────────────────────────────────
   const [authed,setAuthed]=useState(()=>{
     try{const v=sessionStorage.getItem("bt_auth");const t=sessionStorage.getItem("bt_auth_ts");
