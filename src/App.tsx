@@ -952,24 +952,26 @@ function AppMain() {
     return null;
   };
 
-  // 스코어 입력 (실시간 저장만, 종료는 별도)
+  // 스코어 입력 (저장만)
   const handleScoreChange = (gameId:string, field:"homeScore"|"awayScore", value:number) => {
     setManualGames(prev=>{
-      const updated = prev.map(g => {
-        if (g.id!==gameId) return g;
-        const newGame = {...g, [field]:value};
-        // 양쪽 다 입력되면 자동 종료
-        const h = field==="homeScore" ? value : g.homeScore;
-        const a = field==="awayScore" ? value : g.awayScore;
-        if (h!==undefined && a!==undefined && !g.finished) {
-          newGame.finished = true;
-          addLog("🏁 경기 종료",`${g.homeTeam} ${h}:${a} ${g.awayTeam}`);
-        }
-        return newGame;
-      });
+      const updated = prev.map(g => g.id===gameId ? {...g, [field]:value} : g);
       try{localStorage.setItem("bt_manual_games",JSON.stringify(updated));}catch{}
       return updated;
     });
+  };
+
+  // 양쪽 스코어가 다 입력됐을 때 종료 처리 (blur/Tab 시 호출)
+  const finishGameIfReady = (gameId:string) => {
+    const g = manualGames.find(x=>x.id===gameId);
+    if (!g || g.finished) return;
+    if (g.homeScore===undefined || g.awayScore===undefined) return;
+    setManualGames(prev=>{
+      const updated = prev.map(x => x.id===gameId ? {...x, finished:true} : x);
+      try{localStorage.setItem("bt_manual_games",JSON.stringify(updated));}catch{}
+      return updated;
+    });
+    addLog("🏁 경기 종료",`${g.homeTeam} ${g.homeScore}:${g.awayScore} ${g.awayTeam}`);
   };
 
   // 종료된 경기 일괄 제거 (라이브 스코어 영역에서)
@@ -3346,7 +3348,15 @@ function AppMain() {
                     <div style={{fontSize:10,marginTop:6}}>🎯 베팅 탭에서 경기를 추가하세요</div>
                   </div>
                 );
-                return sportGames.map(g=>{
+                return sportGames.map((g,idx)=>{
+                  const nextGame = sportGames[idx+1]; // 다음 경기 (Tab으로 이동 대상)
+                  const focusNextGame = () => {
+                    if (!nextGame) return;
+                    setTimeout(()=>{
+                      const el = document.getElementById(`score-home-${nextGame.id}`) as HTMLInputElement|null;
+                      if (el && !nextGame.finished) { el.focus(); el.select(); }
+                    },30);
+                  };
                   return (
                     <div key={g.id} style={{background:g.finished?`${C.amber}11`:C.bg3,border:`2px solid ${g.finished?C.amber:C.border}`,borderRadius:9,padding:"12px 14px",marginBottom:10,position:"relative",overflow:"hidden"}}>
                       {/* 종료 도장 - 가운데 크게 반투명 */}
@@ -3359,14 +3369,37 @@ function AppMain() {
                       {/* 팀 + 스코어 입력 */}
                       <div style={{display:"grid",gridTemplateColumns:"1fr 60px 30px 60px 1fr",alignItems:"center",gap:6}}>
                         <div style={{fontSize:13,fontWeight:800,color:C.text,textAlign:"right"}}>{g.homeTeam}</div>
-                        <input type="number" value={g.homeScore??""} placeholder="0"
+                        <input id={`score-home-${g.id}`} type="number" value={g.homeScore??""} placeholder="0"
                           disabled={g.finished}
                           onChange={e=>handleScoreChange(g.id,"homeScore",parseInt(e.target.value)||0)}
+                          onBlur={()=>finishGameIfReady(g.id)}
+                          onKeyDown={e=>{
+                            if (e.key==="Tab" && !e.shiftKey) {
+                              // 홈→원정으로 이동 (기본 동작 허용, blur 시 종료는 양쪽 있을 때만)
+                              // 기본 Tab 동작 (다음 input = 원정 input)
+                            }
+                          }}
                           style={{...S,boxSizing:"border-box",fontSize:18,padding:"6px",textAlign:"center" as const,fontWeight:900,color:C.green,...noSpin,opacity:g.finished?0.6:1}}/>
                         <div style={{textAlign:"center",fontSize:14,color:C.orange,fontWeight:800}}>:</div>
-                        <input type="number" value={g.awayScore??""} placeholder="0"
+                        <input id={`score-away-${g.id}`} type="number" value={g.awayScore??""} placeholder="0"
                           disabled={g.finished}
                           onChange={e=>handleScoreChange(g.id,"awayScore",parseInt(e.target.value)||0)}
+                          onBlur={()=>finishGameIfReady(g.id)}
+                          onKeyDown={e=>{
+                            if (e.key==="Tab" && !e.shiftKey) {
+                              // 원정팀 input에서 Tab → 종료 처리 + 다음 경기 홈팀 input으로 이동
+                              const g2 = manualGames.find(x=>x.id===g.id);
+                              if (g2 && g2.homeScore!==undefined && g2.awayScore!==undefined && !g2.finished) {
+                                e.preventDefault();
+                                finishGameIfReady(g.id);
+                                focusNextGame();
+                              }
+                            } else if (e.key==="Enter") {
+                              e.preventDefault();
+                              finishGameIfReady(g.id);
+                              focusNextGame();
+                            }
+                          }}
                           style={{...S,boxSizing:"border-box",fontSize:18,padding:"6px",textAlign:"center" as const,fontWeight:900,color:C.teal,...noSpin,opacity:g.finished?0.6:1}}/>
                         <div style={{fontSize:13,fontWeight:800,color:C.text,textAlign:"left"}}>{g.awayTeam}</div>
                       </div>
