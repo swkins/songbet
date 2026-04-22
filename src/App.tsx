@@ -818,11 +818,11 @@ function AppMain() {
     const dollar=isUSD(manualSlipSite);
     manualSlip.forEach(item=>{
       const opt=item.optLabel;
+      // 선택한 옵션 (홈승/원정승/무승부 등)
       const teamName =
         opt==="홈승" ? item.game.homeTeam :
         opt==="원정승" ? item.game.awayTeam :
         opt==="무승부" ? "무승부" : "";
-      const isOU = opt==="오버"||opt==="언더";
       const bet:Bet={
         id:String(Date.now()+Math.random()),
         date:today,
@@ -830,9 +830,10 @@ function AppMain() {
         league:item.game.league,
         site:manualSlipSite,
         betOption:opt,
-        homeTeam:isOU?item.game.homeTeam:"",
-        awayTeam:isOU?item.game.awayTeam:"",
-        teamName:isOU?"":teamName,
+        // ★ 모든 경우에 홈/원정 둘 다 저장 (표시는 PendingCard에서 결정)
+        homeTeam:item.game.homeTeam,
+        awayTeam:item.game.awayTeam,
+        teamName,
         amount:manualSlipAmount,
         odds:item.odds,
         profit:null,
@@ -1189,7 +1190,12 @@ function AppMain() {
   const [editBetOddsRaw,setEditBetOddsRaw]=useState<string>("");
 
   const PendingCard=({b}:{b:Bet,key?:any})=>{
-    const title=isOverUnder(b.betOption)?[b.homeTeam,b.awayTeam].filter(Boolean).join(" vs "):b.teamName||"";
+    // 홈 vs 원정이 있으면 무조건 그 형식으로, 없으면 teamName 폴백 (구 데이터 호환)
+    const matchTitle = (b.homeTeam && b.awayTeam)
+      ? `${b.homeTeam} vs ${b.awayTeam}`
+      : (b.teamName || "-");
+    // 호환용 (아래 코드에서 title 사용)
+    const title = matchTitle;
     const isEditing=editingBetId===b.id;
     if(isEditing){
       return(
@@ -1245,7 +1251,7 @@ function AppMain() {
 
   const DoneCard=({b}:{b:Bet,key?:any})=>{
     const rc=b.result==="승"?C.green:b.result==="패"?C.red:C.amber;
-    const title=isOverUnder(b.betOption)?[b.homeTeam,b.awayTeam].filter(Boolean).join(" vs "):b.teamName||"";
+    const title = (b.homeTeam && b.awayTeam) ? `${b.homeTeam} vs ${b.awayTeam}` : (b.teamName || "-");
     return(
       <div style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:7,padding:9,opacity:b.includeStats===false?0.5:0.9}}>
         {!b.includeStats&&<div style={{fontSize:8,color:C.dim,marginBottom:2}}>통계제외</div>}
