@@ -870,6 +870,11 @@ function AppMain() {
   const [manualSlipAmount,setManualSlipAmount]=useState<number>(10000);
   const [manualSlipInclude,setManualSlipInclude]=useState<boolean>(true);
   const [manualExpandedId,setManualExpandedId]=useState<string|null>(null);
+  // 빠른 입금/포인트 모달 (홈 대시보드에서 호출)
+  const [quickActionMode,setQuickActionMode]=useState<"deposit"|"point"|null>(null);
+  const [quickActionSite,setQuickActionSite]=useState<string>("");
+  const [quickActionAmt,setQuickActionAmt]=useState<number>(0);
+
   const [slipOddsInputStr,setSlipOddsInputStr]=useState<string>(""); // 배당 입력 중인 문자열 (포커스 중에만 사용)
   // 농구 기타 베팅 수동 입력 모달 (마핸/플핸 숫자 직접 입력)
   const [customHandiModal,setCustomHandiModal]=useState<{game:ManualGame}|null>(null);
@@ -1262,6 +1267,7 @@ function AppMain() {
   useEffect(()=>{
     const handler = (e:KeyboardEvent) => {
       if (e.key !== "Escape") return;
+      if (quickActionMode) { setQuickActionMode(null); setQuickActionSite(""); setQuickActionAmt(0); return; }
       if (customHandiModal) { setCustomHandiModal(null); setCustomHandiLine(""); return; }
       if (addGameModal) { setAddGameModal(false); setNewGame({homeTeam:"",awayTeam:""}); return; }
       if (addSportModal) { setAddSportModal(false); setNewSportName(""); return; }
@@ -1274,7 +1280,7 @@ function AppMain() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [customHandiModal,addGameModal,addSportModal,addCountryModal,addLeagueModalM,addLeagueModal,editMetaModal,closeModal,deleteModal]);
+  }, [quickActionMode,customHandiModal,addGameModal,addSportModal,addCountryModal,addLeagueModalM,addLeagueModal,editMetaModal,closeModal,deleteModal]);
 
   // ── 입금 폼 ──────────────────────────────────────────────
   const [depSite,setDepSite]=useState("");
@@ -1340,6 +1346,27 @@ function AppMain() {
       addLog("🎁 포인트",`${depSite}/${fmtDisp(depPoint,depIsDollar)}`);
     }
     setDepSite("");setDepAmt(0);setDepPoint(0);
+  };
+
+  // 포인트 전용 추가 (입금 통계엔 기록 X, 사이트 잔여금만 증가)
+  const handleAddPoint=(site:string, amount:number)=>{
+    if(!site) return alert("사이트를 선택해주세요.");
+    if(!amount||amount<=0) return alert("포인트 금액을 입력해주세요.");
+    const dollar=isUSD(site);
+    const curSS = siteStates[site] || {deposited:0,betTotal:0,active:false,isDollar:dollar,pointTotal:0};
+    const prevPoint = parseFloat(String(curSS.pointTotal||0));
+    const updated = {
+      ...curSS,
+      active: true,
+      isDollar: dollar,
+      // deposited에 +하여 잔여금(=deposited-betTotal) 증가 → 베팅 가능 금액 증가
+      deposited: parseFloat((curSS.deposited + amount).toFixed(2)),
+      pointTotal: parseFloat((prevPoint + amount).toFixed(2)),
+    };
+    setSiteStatesRaw(p=>({...p,[site]:updated}));
+    db.upsertSiteState(site,updated);
+    addLog("🎁 포인트",`${site}/${fmtDisp(amount,dollar)}`);
+    // deposits 배열(입금 통계)엔 추가하지 않음 - 수익률 계산에서 제외
   };
 
   const handleClose=(site:string)=>{setCloseWithdrawAmt(0);setCloseModal({site});};
@@ -1824,6 +1851,77 @@ function AppMain() {
         </div>
       )}
 
+      {/* 빠른 입금/포인트 모달 (홈 대시보드에서 호출) */}
+      {quickActionMode && (()=>{
+        const isDep = quickActionMode==="deposit";
+        const color = isDep ? C.green : C.amber;
+        const icon = isDep ? "💵" : "🎁";
+        const title = isDep ? "입금 추가" : "포인트 추가";
+        const desc = isDep ? "입금 통계에 기록됩니다" : "입금 통계엔 기록되지 않고 사이트 잔여금만 증가합니다";
+        const confirm = () => {
+          if (!quickActionSite) return alert("사이트를 선택해주세요.");
+          if (quickActionAmt<=0) return alert("금액을 입력해주세요.");
+          if (isDep) {
+            const dollar = isUSD(quickActionSite);
+            const newDep = {id:String(Date.now()),site:quickActionSite,amount:quickActionAmt,date:today,isDollar:dollar};
+            setDepositsRaw(d=>[...d,newDep]);
+            db.insertDeposit(newDep);
+            const curSS = siteStates[quickActionSite] || {deposited:0,betTotal:0,active:false,isDollar:dollar,pointTotal:0};
+            const newSS = {...curSS,deposited:parseFloat((curSS.deposited+quickActionAmt).toFixed(2)),active:true,isDollar:dollar};
+            setSiteStatesRaw(p=>({...p,[quickActionSite]:newSS}));
+            db.upsertSiteState(quickActionSite,newSS);
+            addLog("💵 입금",`${quickActionSite}/${fmtDisp(quickActionAmt,dollar)}`);
+          } else {
+            handleAddPoint(quickActionSite, quickActionAmt);
+          }
+          setQuickActionMode(null); setQuickActionSite(""); setQuickActionAmt(0);
+        };
+        return (
+          <div style={{position:"fixed",inset:0,background:"#000b",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center"}}>
+            <div style={{background:C.bg3,border:`1px solid ${color}`,borderRadius:14,padding:22,width:380}}>
+              <div style={{fontSize:15,fontWeight:800,color:color,marginBottom:5}}>{icon} {title}</div>
+              <div style={{fontSize:10,color:C.dim,marginBottom:12}}>{desc}</div>
+
+              {/* 사이트 선택 */}
+              <div style={{marginBottom:11}}>
+                <div style={{...L,fontSize:12,marginBottom:5}}>1️⃣ 사이트</div>
+                <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                  {ALL_SITES.map(s=>{
+                    const dollar=isUSD(s);
+                    const active=quickActionSite===s;
+                    return <button key={s} onClick={()=>{setQuickActionSite(s);if(quickActionAmt===0)setQuickActionAmt(dollar?(isDep?7:5):(isDep?10000:5000));}}
+                      style={{padding:"6px 10px",borderRadius:5,border:active?`2px solid ${dollar?C.amber:C.green}`:`1px solid ${C.border}`,background:active?`${dollar?C.amber:C.green}33`:C.bg2,color:active?(dollar?C.amber:C.green):C.muted,cursor:"pointer",fontSize:11,fontWeight:active?800:500}}>
+                      {dollar?"$":"₩"} {s}
+                    </button>;
+                  })}
+                </div>
+              </div>
+
+              {/* 금액 */}
+              <div style={{marginBottom:14}}>
+                <div style={{...L,fontSize:12,marginBottom:5}}>2️⃣ 금액</div>
+                <div style={{display:"flex",gap:4,alignItems:"center",marginBottom:5}}>
+                  <button onClick={()=>setQuickActionAmt(a=>Math.max(0,a-(isUSD(quickActionSite)?1:10000)))} style={{background:C.bg2,border:`1px solid ${C.border}`,color:C.red,width:32,height:38,borderRadius:5,cursor:"pointer",fontSize:16,fontWeight:700}}>−</button>
+                  <input autoFocus type="number" value={quickActionAmt||""} onChange={e=>setQuickActionAmt(parseFloat(e.target.value)||0)}
+                    onKeyDown={e=>{if(e.key==="Enter"){e.preventDefault();confirm();}}}
+                    placeholder={isUSD(quickActionSite)?"$ 금액":"₩ 금액"}
+                    style={{...S,boxSizing:"border-box",fontSize:15,padding:"9px",fontWeight:800,textAlign:"center" as const,color:isUSD(quickActionSite)?C.amber:C.green,...noSpin}}/>
+                  <button onClick={()=>setQuickActionAmt(a=>a+(isUSD(quickActionSite)?1:10000))} style={{background:C.bg2,border:`1px solid ${C.border}`,color:C.green,width:32,height:38,borderRadius:5,cursor:"pointer",fontSize:16,fontWeight:700}}>+</button>
+                </div>
+                {quickActionSite && <div style={{display:"flex",gap:3}}>
+                  {(isUSD(quickActionSite)?USD_HK:KRW_HK).map(v=><button key={v} onClick={()=>setQuickActionAmt(v)} style={{flex:1,padding:"4px 0",borderRadius:4,border:`1px solid ${isUSD(quickActionSite)?C.amber+"44":C.green+"44"}`,background:quickActionAmt===v?`${isUSD(quickActionSite)?C.amber:C.green}22`:C.bg,color:isUSD(quickActionSite)?C.amber:C.green,cursor:"pointer",fontSize:10,fontWeight:700}}>{isUSD(quickActionSite)?`$${v}`:`${v/10000}만`}</button>)}
+                </div>}
+              </div>
+
+              <div style={{display:"flex",gap:8}}>
+                <button onClick={confirm} style={{flex:1,background:`${color}22`,border:`1px solid ${color}`,color:color,padding:"10px",borderRadius:7,cursor:"pointer",fontWeight:800}}>✅ {title}</button>
+                <button onClick={()=>{setQuickActionMode(null);setQuickActionSite("");setQuickActionAmt(0);}} style={{flex:1,background:C.bg2,border:`1px solid ${C.border}`,color:C.muted,padding:"10px",borderRadius:7,cursor:"pointer"}}>취소</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* 기타 베팅 - 마핸/플핸 숫자 직접 입력 (농구) */}
       {customHandiModal && (()=>{
         const g = customHandiModal.game;
@@ -2165,7 +2263,7 @@ function AppMain() {
         </div>
         <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
           {([
-            ["home","🏠 홈"],["bettingCombo","🎯 베팅"],["pending","⏳ 진행중"],["stats","📊 통계"],["roi","💹 수익률"],["strategy","📋 전략"],["log","🗒 로그"],["points","🎁 포인트"],["betting","🔬 베팅(환경변수)"],["bettingManual","🧪 베팅(테스트)"],
+            ["home","🏠 홈"],["bettingCombo","🎯 스포츠"],["pending","⏳ 베팅 내역"],["stats","📊 통계"],["roi","💹 수익률"],["strategy","📋 전략"],["log","🗒 로그"],["points","🎁 포인트"],["betting","🔬 베팅(환경변수)"],["bettingManual","🧪 베팅(테스트)"],
           ] as [string,string][]).map(([k,l])=>(
             <button key={k} onClick={()=>setTab(k as any)} style={tabBtn(tab===k,k==="pending"?C.amber:k==="points"?C.teal:k==="home"?C.green:C.orange)}>{l}</button>
           ))}
@@ -3987,68 +4085,212 @@ function AppMain() {
       )}
 
       {/* ══ 홈 탭 ══ */}
-      {tab==="home"&&(
-        <div style={{flex:1,overflowY:"auto",padding:20}}>
-          <div style={{fontSize:18,fontWeight:900,color:C.orange,marginBottom:20}}>🏠 홈</div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:16,marginBottom:20}}>
-            <div style={{background:C.bg3,border:`1px solid ${totalRoiKRW>=0?C.green:C.red}44`,borderRadius:14,padding:16}}>
-              <div style={{fontSize:11,color:C.muted,marginBottom:4}}>전체 순손익</div>
-              <div style={{fontSize:26,fontWeight:900,color:totalRoiKRW>=0?C.green:C.red}}>{fmtProfit(totalRoiKRW,false)}</div>
-              <div style={{fontSize:10,color:C.muted,marginTop:4}}>$1 = ₩{usdKrw.toLocaleString()}</div>
-            </div>
-            <div style={{background:C.bg3,border:`1px solid ${C.teal}44`,borderRadius:14,padding:16}}>
-              <div style={{fontSize:11,color:C.muted,marginBottom:4}}>승률</div>
-              <div style={{fontSize:26,fontWeight:900,color:C.teal}}>{winRate}%</div>
-              <div style={{fontSize:10,color:C.muted,marginTop:4}}>{wins}승 {done.filter(b=>b.result==="패").length}패</div>
-            </div>
-            <div style={{background:C.bg3,border:`1px solid ${C.amber}44`,borderRadius:14,padding:16}}>
-              <div style={{fontSize:11,color:C.muted,marginBottom:4}}>진행중 베팅</div>
-              <div style={{fontSize:26,fontWeight:900,color:C.amber}}>{pending.length}건</div>
-              <div style={{fontSize:10,color:C.muted,marginTop:4}}>잔여 ₩{krwRemaining.toLocaleString()}</div>
-            </div>
+      {tab==="home"&&(()=>{
+        const losses = done.filter(b=>b.result==="패").length;
+        const totalBetAmt = done.reduce((s,b)=>s+b.amount,0);
+        const totalProfit = done.reduce((s,b)=>s+(b.profit??0),0);
+        const roiPct = totalBetAmt>0 ? (totalProfit/totalBetAmt*100).toFixed(1) : "0";
+        // 오늘 베팅 통계
+        const todayBets = bets.filter(b=>b.date===today);
+        const todayDone = todayBets.filter(b=>b.result==="승"||b.result==="패");
+        const todayProfit = todayDone.reduce((s,b)=>s+(b.profit??0),0);
+        // 포인트 사이트 요약
+        const pointSitesTotal = pointSites.length;
+        const pointSitesCompleted = pointSites.filter(ps=>(ps.sessions[ps.sessions.length-1]||{}).completedAt).length;
+        const pointSitesUpcoming = pointSites.filter(ps=>{
+          const latest = ps.sessions[ps.sessions.length-1];
+          if(!latest||!latest.nextTargetDate) return false;
+          const days = Math.ceil((new Date(latest.nextTargetDate).getTime()-Date.now())/(1000*60*60*24));
+          return days>=0 && days<=7;
+        }).length;
+        // 사이트 수익률 TOP 3
+        const topSites = [...roiStats].sort((a,b)=>b.netKRW-a.netKRW).slice(0,3);
+        // 최근 완료 베팅 5건
+        const recentDone = [...done].sort((a,b)=>parseFloat(b.id)-parseFloat(a.id)).slice(0,5);
+
+        return (
+        <div style={{flex:1,overflowY:"auto",padding:18}}>
+          <div style={{display:"flex",alignItems:"center",marginBottom:14,gap:10}}>
+            <div style={{fontSize:19,fontWeight:900,color:C.orange}}>🏠 대시보드</div>
+            <span style={{fontSize:10,color:C.dim,fontWeight:400,marginLeft:"auto"}}>$1 = ₩{usdKrw.toLocaleString()} · {today}</span>
           </div>
 
-          <div style={{background:C.bg3,border:`1px solid ${C.green}33`,borderRadius:14,padding:16,marginBottom:16}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
-              <div style={{fontSize:14,fontWeight:800,color:C.green}}>💵 입금 추가</div>
-              <button onClick={()=>setSiteManageModal(true)} style={{fontSize:10,padding:"3px 10px",borderRadius:5,border:`1px solid ${C.teal}44`,background:`${C.teal}11`,color:C.teal,cursor:"pointer"}}>🏢 사이트 관리</button>
+          {/* ─── 1행: 빠른 액션 (작게, 좌측 정렬) + 핵심 지표 ─── */}
+          <div style={{display:"flex",gap:10,marginBottom:14,alignItems:"stretch"}}>
+            {/* 좌측: 입금/포인트 버튼 (작게) */}
+            <div style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:10,padding:8,display:"flex",flexDirection:"column",gap:6,flexShrink:0,width:105}}>
+              <button onClick={()=>{setQuickActionMode("deposit");setQuickActionSite("");setQuickActionAmt(0);}}
+                style={{padding:"7px 8px",borderRadius:6,border:`1px solid ${C.green}`,background:`${C.green}22`,color:C.green,cursor:"pointer",fontWeight:800,fontSize:11,whiteSpace:"nowrap"}}>
+                💵 입금
+              </button>
+              <button onClick={()=>{setQuickActionMode("point");setQuickActionSite("");setQuickActionAmt(0);}}
+                style={{padding:"7px 8px",borderRadius:6,border:`1px solid ${C.amber}`,background:`${C.amber}22`,color:C.amber,cursor:"pointer",fontWeight:800,fontSize:11,whiteSpace:"nowrap"}}>
+                🎁 포인트
+              </button>
+              <button onClick={()=>setSiteManageModal(true)}
+                style={{padding:"5px 8px",borderRadius:6,border:`1px solid ${C.teal}44`,background:`${C.teal}11`,color:C.teal,cursor:"pointer",fontWeight:700,fontSize:10,whiteSpace:"nowrap"}}>
+                🏢 사이트 관리
+              </button>
             </div>
-            <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:8}}>
-              {krwSites.map(s=><button key={s} onClick={()=>setDepSite(s)} style={siteBtn(depSite===s,false)}>₩ {s}</button>)}
-              {usdSites.map(s=><button key={s} onClick={()=>setDepSite(s)} style={siteBtn(depSite===s,true)}>$ {s}</button>)}
-            </div>
-            <div style={{display:"flex",gap:8,alignItems:"flex-end"}}>
-              <div style={{flex:1}}>
-                <div style={L}>입금 금액</div>
-                <div style={{display:"flex",gap:4,alignItems:"center"}}>
-                  <button onClick={()=>setDepAmt(a=>Math.max(0,a-(depIsDollar?1:10000)))} style={{background:C.bg2,border:`1px solid ${C.border}`,color:C.red,width:30,height:32,borderRadius:6,cursor:"pointer",fontSize:16,fontWeight:700}}>−</button>
-                  <div style={{position:"relative",flex:1}}>
-                    <span style={{position:"absolute",left:9,top:"50%",transform:"translateY(-50%)",color:depIsDollar?C.amber:C.green,fontWeight:700,fontSize:13,pointerEvents:"none"}}>{depSite?(depIsDollar?"$":"₩"):""}</span>
-                    <input type="number" value={depAmt||""} onChange={e=>setDepAmt(parseFloat(e.target.value)||0)} placeholder="금액 입력" style={{...S,textAlign:"right",fontWeight:800,color:depIsDollar?C.amber:C.green,fontSize:14,paddingLeft:26,boxSizing:"border-box",...noSpin}}/>
-                  </div>
-                  <button onClick={()=>setDepAmt(a=>a+(depIsDollar?1:10000))} style={{background:C.bg2,border:`1px solid ${C.border}`,color:C.green,width:30,height:32,borderRadius:6,cursor:"pointer",fontSize:16,fontWeight:700}}>+</button>
-                </div>
+            {/* 우측: 핵심 지표 4개 */}
+            <div style={{flex:1,display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10}}>
+              <div style={{background:`linear-gradient(135deg,${totalRoiKRW>=0?C.green:C.red}15,${C.bg3})`,border:`1px solid ${totalRoiKRW>=0?C.green:C.red}55`,borderRadius:10,padding:12}}>
+                <div style={{fontSize:10,color:C.muted,marginBottom:3,fontWeight:700}}>💰 전체 순손익</div>
+                <div style={{fontSize:20,fontWeight:900,color:totalRoiKRW>=0?C.green:C.red,lineHeight:1.1}}>{fmtProfit(totalRoiKRW,false)}</div>
+                <div style={{fontSize:9,color:C.muted,marginTop:2}}>ROI {roiPct}%</div>
               </div>
-              <button onClick={handleDeposit} style={{background:`${C.green}22`,border:`1px solid ${C.green}`,color:C.green,padding:"8px 20px",borderRadius:7,cursor:"pointer",fontWeight:700,fontSize:13,flexShrink:0}}>💰 입금 추가</button>
+              <div style={{background:`linear-gradient(135deg,${C.teal}15,${C.bg3})`,border:`1px solid ${C.teal}55`,borderRadius:10,padding:12}}>
+                <div style={{fontSize:10,color:C.muted,marginBottom:3,fontWeight:700}}>🎯 승률</div>
+                <div style={{fontSize:20,fontWeight:900,color:C.teal,lineHeight:1.1}}>{winRate}%</div>
+                <div style={{fontSize:9,color:C.muted,marginTop:2}}>{wins}승 {losses}패 · {done.length}건</div>
+              </div>
+              <div style={{background:`linear-gradient(135deg,${C.amber}15,${C.bg3})`,border:`1px solid ${C.amber}55`,borderRadius:10,padding:12,cursor:"pointer"}} onClick={()=>setTab("pending")}>
+                <div style={{fontSize:10,color:C.muted,marginBottom:3,fontWeight:700}}>⏳ 진행중</div>
+                <div style={{fontSize:20,fontWeight:900,color:C.amber,lineHeight:1.1}}>{pending.length}<span style={{fontSize:11,fontWeight:400}}>건</span></div>
+                <div style={{fontSize:9,color:C.muted,marginTop:2}}>잔여 ₩{krwRemaining.toLocaleString()}{usdRemaining>0?` · $${usdRemaining.toFixed(2)}`:""}</div>
+              </div>
+              <div style={{background:`linear-gradient(135deg,${todayProfit>=0?C.green:C.red}10,${C.bg3})`,border:`1px solid ${C.purple}55`,borderRadius:10,padding:12}}>
+                <div style={{fontSize:10,color:C.muted,marginBottom:3,fontWeight:700}}>📅 오늘</div>
+                <div style={{fontSize:20,fontWeight:900,color:todayProfit>=0?C.green:C.red,lineHeight:1.1}}>{todayDone.length>0?fmtProfit(todayProfit,false):"—"}</div>
+                <div style={{fontSize:9,color:C.muted,marginTop:2}}>베팅 {todayBets.length}건 · 완료 {todayDone.length}</div>
+              </div>
             </div>
           </div>
 
-          <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10}}>
+          {/* ─── 2행: 전체 사이트 진행률 ─── */}
+          <div style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:12,padding:14,marginBottom:14}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+              <div style={{fontSize:13,fontWeight:800,color:C.text}}>💳 전체 사이트 진행률</div>
+              <span style={{fontSize:10,color:C.dim}}>{activeSiteNames.length}개 운영중 · 잔여 <b style={{color:C.green}}>₩{krwRemaining.toLocaleString()}</b> / <b style={{color:C.amber}}>${usdRemaining.toFixed(2)}</b></span>
+            </div>
+            {activeSiteNames.length===0 ? (
+              <div style={{textAlign:"center",color:C.dim,padding:"20px 0",fontSize:11}}>활성 사이트가 없습니다 · 입금 또는 사이트 관리에서 활성화하세요</div>
+            ) : (
+              <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8}}>
+                {activeSiteNames.map(site=>{
+                  const st=siteStates[site]||{deposited:0,betTotal:0,active:false,isDollar:false};
+                  const dollar=isUSD(site);
+                  const remaining=Math.max(0,parseFloat((st.deposited-st.betTotal).toFixed(2)));
+                  const totalBase=parseFloat(st.deposited.toFixed(2));
+                  const pct=totalBase>0?Math.min(100,Math.round(st.betTotal/totalBase*100)):0;
+                  const barColor=pct>=90?C.red:pct>=70?C.amber:C.green;
+                  const sitePending=pending.filter(b=>b.site===site).length;
+                  return (
+                    <div key={site} style={{background:C.bg2,border:`1px solid ${barColor}33`,borderRadius:8,padding:"9px 10px"}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+                        <span style={{fontSize:11,fontWeight:800,color:C.text}}>{dollar?"$":"₩"} {site}</span>
+                        <span style={{fontSize:10,color:barColor,fontWeight:800}}>{pct}%</span>
+                      </div>
+                      <div style={{fontSize:9,color:C.muted,marginBottom:4,display:"flex",justifyContent:"space-between"}}>
+                        <span>잔 <b style={{color:C.teal,fontSize:10}}>{fmtDisp(remaining,dollar)}</b></span>
+                        {sitePending>0 && <span style={{color:C.amber,fontWeight:700}}>{sitePending}건</span>}
+                      </div>
+                      <div style={{height:4,background:C.bg,borderRadius:2,overflow:"hidden"}}>
+                        <div style={{width:`${pct}%`,height:"100%",background:barColor,transition:"width 0.3s"}}/>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* ─── 3행: 수익률 TOP 3 + 포인트 요약 + 최근 베팅 ─── */}
+          <div style={{display:"grid",gridTemplateColumns:"1.2fr 1fr 1.2fr",gap:10,marginBottom:14}}>
+            {/* 수익률 TOP 3 */}
+            <div style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:12,padding:13,cursor:"pointer"}} onClick={()=>setTab("roi")}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:9}}>
+                <div style={{fontSize:12,fontWeight:800,color:C.green}}>💹 수익률 TOP</div>
+                <span style={{fontSize:9,color:C.dim}}>클릭 →</span>
+              </div>
+              {topSites.length===0 ? (
+                <div style={{textAlign:"center",color:C.dim,padding:"18px 0",fontSize:10}}>출금 기록이 있어야 표시됩니다</div>
+              ) : (
+                <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                  {topSites.map((r,i)=>(
+                    <div key={r.site} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 8px",background:C.bg2,borderRadius:5}}>
+                      <span style={{fontSize:11,fontWeight:700,color:C.text}}>{i===0?"🥇":i===1?"🥈":"🥉"} {r.dollar?"$":"₩"} {r.site}</span>
+                      <span style={{fontSize:11,fontWeight:800,color:r.netKRW>=0?C.green:C.red}}>{fmtProfit(r.netKRW,false)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* 포인트 사이트 요약 */}
+            <div style={{background:C.bg3,border:`1px solid ${C.purple}44`,borderRadius:12,padding:13,cursor:"pointer"}} onClick={()=>setTab("points")}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:9}}>
+                <div style={{fontSize:12,fontWeight:800,color:C.purple}}>🎁 포인트 사이트</div>
+                <span style={{fontSize:9,color:C.dim}}>클릭 →</span>
+              </div>
+              {pointSitesTotal===0 ? (
+                <div style={{textAlign:"center",color:C.dim,padding:"18px 0",fontSize:10}}>등록된 포인트 사이트 없음</div>
+              ) : (
+                <div>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:6}}>
+                    <div style={{background:C.bg2,borderRadius:5,padding:"6px 8px",textAlign:"center"}}>
+                      <div style={{fontSize:9,color:C.muted}}>전체</div>
+                      <div style={{fontSize:17,fontWeight:900,color:C.purple}}>{pointSitesTotal}</div>
+                    </div>
+                    <div style={{background:C.bg2,borderRadius:5,padding:"6px 8px",textAlign:"center"}}>
+                      <div style={{fontSize:9,color:C.muted}}>완료</div>
+                      <div style={{fontSize:17,fontWeight:900,color:C.green}}>{pointSitesCompleted}</div>
+                    </div>
+                  </div>
+                  {pointSitesUpcoming>0 && (
+                    <div style={{fontSize:10,color:C.amber,textAlign:"center",padding:"4px",background:`${C.amber}11`,borderRadius:4}}>
+                      ⚡ 7일 이내 환전 임박 <b>{pointSitesUpcoming}건</b>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* 최근 베팅 */}
+            <div style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:12,padding:13,cursor:"pointer"}} onClick={()=>setTab("pending")}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:9}}>
+                <div style={{fontSize:12,fontWeight:800,color:C.teal}}>📜 최근 완료</div>
+                <span style={{fontSize:9,color:C.dim}}>클릭 →</span>
+              </div>
+              {recentDone.length===0 ? (
+                <div style={{textAlign:"center",color:C.dim,padding:"18px 0",fontSize:10}}>완료된 베팅 없음</div>
+              ) : (
+                <div style={{display:"flex",flexDirection:"column",gap:4}}>
+                  {recentDone.map(b=>{
+                    const title = (b.homeTeam && b.awayTeam) ? `${b.homeTeam} vs ${b.awayTeam}` : (b.teamName || "-");
+                    const rc = b.result==="승"?C.green:b.result==="패"?C.red:C.muted;
+                    return (
+                      <div key={b.id} style={{display:"flex",alignItems:"center",gap:6,padding:"5px 7px",background:C.bg2,borderRadius:5}}>
+                        <span style={{fontSize:10,color:rc,fontWeight:700,flexShrink:0}}>{b.result==="승"?"✅":b.result==="패"?"❌":"·"}</span>
+                        <span style={{fontSize:10,color:C.text,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{title}</span>
+                        <span style={{fontSize:10,fontWeight:800,color:b.profit&&b.profit>=0?C.green:C.red,flexShrink:0}}>{b.profit!==null?fmtProfit(b.profit,b.isDollar):"-"}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* ─── 4행: 탭 바로가기 ─── */}
+          <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:8}}>
             {[
-              {tab:"betting",icon:"🎯",label:"베팅",color:C.orange},
-              {tab:"pending",icon:"⏳",label:"진행중",color:C.amber},
+              {tab:"bettingCombo",icon:"🎯",label:"스포츠",color:C.orange},
+              {tab:"pending",icon:"⏳",label:"베팅 내역",color:C.amber},
               {tab:"stats",icon:"📊",label:"통계",color:C.purple},
               {tab:"roi",icon:"💹",label:"수익률",color:C.green},
+              {tab:"points",icon:"🎁",label:"포인트",color:C.teal},
             ].map(item=>(
               <button key={item.tab} onClick={()=>setTab(item.tab as any)}
-                style={{background:C.bg3,border:`1px solid ${item.color}33`,borderRadius:12,padding:"16px 10px",cursor:"pointer",textAlign:"center"}}>
-                <div style={{fontSize:24,marginBottom:6}}>{item.icon}</div>
-                <div style={{fontSize:12,fontWeight:700,color:item.color}}>{item.label}</div>
+                style={{background:C.bg3,border:`1px solid ${item.color}44`,borderRadius:10,padding:"11px 8px",cursor:"pointer",textAlign:"center"}}>
+                <div style={{fontSize:20,marginBottom:3}}>{item.icon}</div>
+                <div style={{fontSize:11,fontWeight:700,color:item.color}}>{item.label}</div>
               </button>
             ))}
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* ══ 포인트 탭 ══ */}
       {tab==="points"&&renderPointsTab()}
