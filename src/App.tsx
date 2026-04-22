@@ -31,12 +31,6 @@ const C = {
   teal:    "#4ad4c8",
 };
 
-// ── Supabase 클라이언트 (다른 탭에서 여전히 사용) ────────────
-import { createClient } from "@supabase/supabase-js";
-const SUPA_URL = import.meta.env.VITE_SUPABASE_URL as string ?? "";
-const SUPA_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY as string ?? "";
-const supabaseClient = createClient(SUPA_URL, SUPA_ANON);
-
 // ══════════════════════════════════════════════════════════════
 // API-Sports 직접 호출 + localStorage 15분 캐시
 // ══════════════════════════════════════════════════════════════
