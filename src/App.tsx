@@ -526,7 +526,7 @@ export default function App() {
 
   const handleGameDoubleClick=(game:SportEvent)=>{
     setMockBetGame(game);
-    setMockForm({site:"",betSide:"home",amount:10000,oddsRaw:"185"});
+    setMockForm({site:"",betSide:"home",amount:10000,oddsRaw:""});
   };
   const handleGameClick=(game:SportEvent)=>{
     const now=Date.now();
@@ -1220,15 +1220,14 @@ export default function App() {
         <div style={{position:"fixed",inset:0,background:"#000b",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center"}}>
           <div style={{background:C.bg3,border:`1px solid ${C.amber}`,borderRadius:14,padding:24,width:380}}>
             <div style={{fontSize:14,fontWeight:700,color:C.amber,marginBottom:4}}>🎯 모의 베팅</div>
-            <div style={{fontSize:12,color:C.muted,marginBottom:16}}>{mockBetGame.home_team} vs {mockBetGame.away_team} · {mockBetGame.league}</div>
+            <div style={{fontSize:12,color:C.muted,marginBottom:16}}>{mockBetGame.home_team} vs {mockBetGame.away_team} · {mockBetGame.league_name}</div>
             {/* 베팅 방향 */}
             <div style={{marginBottom:10}}>
               <div style={L}>베팅 방향</div>
-              <div style={{display:"grid",gridTemplateColumns:mockBetGame.drawOdds?"1fr 1fr 1fr":"1fr 1fr",gap:6}}>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
                 {[
-                  {side:"home" as const,label:`홈 ${mockBetGame.home_team}`,odds:mockBetGame.homeOdds,color:C.green},
-                  ...(mockBetGame.drawOdds?[{side:"draw" as const,label:"무",odds:mockBetGame.drawOdds,color:C.muted}]:[]),
-                  {side:"away" as const,label:`원정 ${mockBetGame.away_team}`,odds:mockBetGame.awayOdds,color:C.teal},
+                  {side:"home" as const,label:`홈 ${mockBetGame.home_team}`,odds:0,color:C.green},
+                  {side:"away" as const,label:`원정 ${mockBetGame.away_team}`,odds:0,color:C.teal},
                 ].map(d=>(
                   <button key={d.side} onClick={()=>{setMockForm(f=>({...f,betSide:d.side,oddsRaw:String(Math.round((d.odds||0)*100))}));}}
                     style={{padding:"10px 8px",borderRadius:7,border:mockForm.betSide===d.side?`2px solid ${d.color}`:`1px solid ${C.border}`,background:mockForm.betSide===d.side?`${d.color}22`:C.bg2,color:mockForm.betSide===d.side?d.color:C.muted,cursor:"pointer",textAlign:"center"}}>
