@@ -1726,31 +1726,89 @@ function AppMain() {
         </div>
       )}
 
-      {addGameModal&&(
+      {addGameModal&&(()=>{
+        // 현재 선택된 종목의 경기들에서 팀 이름 추출 (중복 제거)
+        const sportTeams = Array.from(new Set(
+          manualGames
+            .filter(g=>g.sportCat===mSport)
+            .flatMap(g=>[g.homeTeam,g.awayTeam])
+            .filter(t=>t && t.trim())
+        )).sort();
+
+        const getSuggestions = (input:string, excludeTeam:string) => {
+          const q = input.trim().toLowerCase();
+          if (!q) return []; // 1글자 이상 입력해야 추천
+          return sportTeams
+            .filter(t => t.toLowerCase().includes(q) && t !== excludeTeam)
+            .slice(0, 5);
+        };
+
+        const homeSuggestions = getSuggestions(newGame.homeTeam, newGame.awayTeam);
+        const awaySuggestions = getSuggestions(newGame.awayTeam, newGame.homeTeam);
+
+        return (
         <div style={{position:"fixed",inset:0,background:"#000b",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center"}}>
-          <div style={{background:C.bg3,border:`1px solid ${C.green}`,borderRadius:14,padding:24,width:400}}>
+          <div style={{background:C.bg3,border:`1px solid ${C.green}`,borderRadius:14,padding:24,width:440}}>
             <div style={{fontSize:15,fontWeight:800,color:C.green,marginBottom:8}}>⚽ 경기 추가</div>
             <div style={{fontSize:11,color:C.muted,marginBottom:14,background:C.bg2,padding:"8px 12px",borderRadius:6}}>
               {SPORT_ICON[mSport]||"🏅"} <b style={{color:C.orange}}>{mSport}</b> · <b style={{color:C.teal}}>{mCountry}</b> · <b style={{color:C.amber}}>{mLeague}</b>
+              <span style={{marginLeft:8,color:C.dim}}>· 저장된 {mSport} 팀 {sportTeams.length}개</span>
             </div>
 
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:16}}>
-              <div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}}>
+              {/* 홈팀 */}
+              <div style={{position:"relative"}}>
                 <div style={L}>홈팀 <span style={{color:C.red}}>*</span></div>
-                <input value={newGame.homeTeam} onChange={e=>setNewGame(p=>({...p,homeTeam:e.target.value}))}
-                  placeholder="홈팀 이름" list="team-list-add" autoFocus
+                <input id="add-game-home" value={newGame.homeTeam}
+                  onChange={e=>setNewGame(p=>({...p,homeTeam:e.target.value}))}
+                  onKeyDown={e=>{
+                    if (e.key==="Tab" && homeSuggestions.length>0 && newGame.homeTeam.trim() && !sportTeams.includes(newGame.homeTeam)) {
+                      e.preventDefault();
+                      setNewGame(p=>({...p,homeTeam:homeSuggestions[0]}));
+                      setTimeout(()=>{const el=document.getElementById("add-game-away")as HTMLInputElement|null;if(el)el.focus();},10);
+                    }
+                  }}
+                  placeholder="홈팀 이름 (1글자 입력시 추천)" autoFocus autoComplete="off"
                   style={{...S,boxSizing:"border-box"}}/>
+                {homeSuggestions.length>0 && (
+                  <div style={{position:"absolute",top:"100%",left:0,right:0,background:C.bg,border:`1px solid ${C.green}66`,borderRadius:6,marginTop:2,maxHeight:150,overflowY:"auto",zIndex:10}}>
+                    {homeSuggestions.map((t,i)=>(
+                      <div key={t} onClick={()=>setNewGame(p=>({...p,homeTeam:t}))}
+                        style={{padding:"6px 10px",cursor:"pointer",fontSize:12,color:C.text,borderBottom:i<homeSuggestions.length-1?`1px solid ${C.border}`:"none",background:i===0?`${C.green}11`:"transparent"}}>
+                        {i===0 && <span style={{fontSize:9,color:C.green,marginRight:5,fontWeight:700}}>TAB</span>}
+                        {t}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
-              <div>
+              {/* 원정팀 */}
+              <div style={{position:"relative"}}>
                 <div style={L}>원정팀 <span style={{color:C.red}}>*</span></div>
-                <input value={newGame.awayTeam} onChange={e=>setNewGame(p=>({...p,awayTeam:e.target.value}))}
-                  onKeyDown={e=>e.key==="Enter"&&handleAddManualGame()}
-                  placeholder="원정팀 이름" list="team-list-add"
+                <input id="add-game-away" value={newGame.awayTeam}
+                  onChange={e=>setNewGame(p=>({...p,awayTeam:e.target.value}))}
+                  onKeyDown={e=>{
+                    if (e.key==="Tab" && awaySuggestions.length>0 && newGame.awayTeam.trim() && !sportTeams.includes(newGame.awayTeam)) {
+                      e.preventDefault();
+                      setNewGame(p=>({...p,awayTeam:awaySuggestions[0]}));
+                    } else if (e.key==="Enter") {
+                      handleAddManualGame();
+                    }
+                  }}
+                  placeholder="원정팀 이름 (1글자 입력시 추천)" autoComplete="off"
                   style={{...S,boxSizing:"border-box"}}/>
+                {awaySuggestions.length>0 && (
+                  <div style={{position:"absolute",top:"100%",left:0,right:0,background:C.bg,border:`1px solid ${C.teal}66`,borderRadius:6,marginTop:2,maxHeight:150,overflowY:"auto",zIndex:10}}>
+                    {awaySuggestions.map((t,i)=>(
+                      <div key={t} onClick={()=>setNewGame(p=>({...p,awayTeam:t}))}
+                        style={{padding:"6px 10px",cursor:"pointer",fontSize:12,color:C.text,borderBottom:i<awaySuggestions.length-1?`1px solid ${C.border}`:"none",background:i===0?`${C.teal}11`:"transparent"}}>
+                        {i===0 && <span style={{fontSize:9,color:C.teal,marginRight:5,fontWeight:700}}>TAB</span>}
+                        {t}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
-              <datalist id="team-list-add">
-                {TEAM_DB.map(t=><option key={t} value={t}/>)}
-              </datalist>
             </div>
 
             <div style={{display:"flex",gap:8}}>
@@ -1759,7 +1817,8 @@ function AppMain() {
             </div>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* 종목 추가 모달 */}
       {addSportModal&&(
