@@ -662,7 +662,7 @@ function AppMain() {
   const [addLeagueModalM,setAddLeagueModalM]=useState<{sport:string;country:string}|null>(null);
   const [newLeagueNameM,setNewLeagueNameM]=useState("");
 
-  const handleAddManualGame=()=>{
+  const handleAddManualGame=(continueAdd=false)=>{
     const {homeTeam,awayTeam}=newGame;
     if(!mSport||!mCountry||!mLeague)return alert("먼저 좌측에서 종목/국가/리그를 선택해주세요.");
     if(!homeTeam.trim()||!awayTeam.trim())return alert("홈팀과 원정팀을 입력해주세요.");
@@ -673,9 +673,14 @@ function AppMain() {
       sportCat:mSport,createdAt:Date.now(),
     };
     saveManualGames([g,...manualGames]);
-    setAddGameModal(false);
     setNewGame({homeTeam:"",awayTeam:""});
     addLog("➕ 경기 추가",`${mCountry}/${mLeague}/${homeTeam} vs ${awayTeam}`);
+    if (continueAdd) {
+      // 모달 유지, 홈팀 input으로 포커스 이동
+      setTimeout(()=>{const el=document.getElementById("add-game-home")as HTMLInputElement|null;if(el)el.focus();},30);
+    } else {
+      setAddGameModal(false);
+    }
   };
 
   const handleAddSport=()=>{
@@ -1790,11 +1795,20 @@ function AppMain() {
                 <input id="add-game-away" value={newGame.awayTeam}
                   onChange={e=>setNewGame(p=>({...p,awayTeam:e.target.value}))}
                   onKeyDown={e=>{
-                    if (e.key==="Tab" && awaySuggestions.length>0 && newGame.awayTeam.trim() && !sportTeams.includes(newGame.awayTeam)) {
-                      e.preventDefault();
-                      setNewGame(p=>({...p,awayTeam:awaySuggestions[0]}));
+                    if (e.key==="Tab" && !e.shiftKey) {
+                      // 원정팀 자동완성이 있고 아직 선택되지 않았다면 → 자동완성
+                      if (awaySuggestions.length>0 && newGame.awayTeam.trim() && !sportTeams.includes(newGame.awayTeam)) {
+                        e.preventDefault();
+                        setNewGame(p=>({...p,awayTeam:awaySuggestions[0]}));
+                      }
+                      // 홈/원정 둘 다 채워졌다면 → 경기 연속 추가
+                      else if (newGame.homeTeam.trim() && newGame.awayTeam.trim()) {
+                        e.preventDefault();
+                        handleAddManualGame(true); // 모달 유지 + 홈팀 포커스
+                      }
                     } else if (e.key==="Enter") {
-                      handleAddManualGame();
+                      e.preventDefault();
+                      handleAddManualGame(false); // 단일 추가 후 모달 닫기
                     }
                   }}
                   placeholder="원정팀 이름 (1글자 입력시 추천)" autoComplete="off"
@@ -1813,8 +1827,13 @@ function AppMain() {
               </div>
             </div>
 
+            <div style={{fontSize:10,color:C.dim,marginBottom:10,padding:"6px 10px",background:C.bg2,borderRadius:5,lineHeight:1.6}}>
+              💡 <b style={{color:C.amber}}>Enter</b>: 한 경기 추가 후 닫기 · <b style={{color:C.teal}}>Tab</b>: 추가 후 계속 입력 (연속 추가)
+            </div>
+
             <div style={{display:"flex",gap:8}}>
-              <button onClick={handleAddManualGame} style={{flex:1,background:`${C.green}22`,border:`1px solid ${C.green}`,color:C.green,padding:"10px",borderRadius:7,cursor:"pointer",fontWeight:800}}>추가</button>
+              <button onClick={()=>handleAddManualGame(true)} style={{flex:1,background:`${C.teal}22`,border:`1px solid ${C.teal}`,color:C.teal,padding:"10px",borderRadius:7,cursor:"pointer",fontWeight:800,fontSize:12}}>➕ 추가 후 계속</button>
+              <button onClick={()=>handleAddManualGame(false)} style={{flex:1,background:`${C.green}22`,border:`1px solid ${C.green}`,color:C.green,padding:"10px",borderRadius:7,cursor:"pointer",fontWeight:800}}>✅ 추가 후 닫기</button>
               <button onClick={()=>{setAddGameModal(false);setNewGame({homeTeam:"",awayTeam:""});}} style={{flex:1,background:C.bg2,border:`1px solid ${C.border}`,color:C.muted,padding:"10px",borderRadius:7,cursor:"pointer"}}>취소</button>
             </div>
           </div>
