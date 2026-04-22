@@ -1022,10 +1022,18 @@ function AppMain() {
     return null;
   };
 
-  // 스코어 입력 (저장만)
+  // 스코어 입력 (저장만). NaN이면 필드 삭제.
   const handleScoreChange = (gameId:string, field:"homeScore"|"awayScore", value:number) => {
     setManualGames(prev=>{
-      const updated = prev.map(g => g.id===gameId ? {...g, [field]:value} : g);
+      const updated = prev.map(g => {
+        if (g.id!==gameId) return g;
+        if (Number.isNaN(value)) {
+          const ng = {...g};
+          delete ng[field];
+          return ng;
+        }
+        return {...g, [field]:value};
+      });
       try{localStorage.setItem("bt_manual_games",JSON.stringify(updated));}catch{}
       return updated;
     });
@@ -3568,13 +3576,20 @@ function AppMain() {
                   </div>
                 );
                 return sportGames.map((g,idx)=>{
-                  const nextGame = sportGames[idx+1]; // 다음 경기 (Tab으로 이동 대상)
+                  const nextGame = sportGames[idx+1]; // 다음 경기 (종료 후 자동 이동 대상)
                   const focusNextGame = () => {
                     if (!nextGame) return;
                     setTimeout(()=>{
                       const el = document.getElementById(`score-home-${nextGame.id}`) as HTMLInputElement|null;
                       if (el && !nextGame.finished) { el.focus(); el.select(); }
                     },30);
+                  };
+                  const bothEntered = g.homeScore!==undefined && g.awayScore!==undefined;
+                  const sanitizeScore = (v:string) => {
+                    const cleaned = v.replace(/[^0-9]/g,"");
+                    if (cleaned === "") return undefined;
+                    // 앞자리 0 제거 (08 → 8)
+                    return parseInt(cleaned,10);
                   };
                   return (
                     <div key={g.id} style={{background:g.finished?`${C.amber}11`:C.bg3,border:`2px solid ${g.finished?C.amber:C.border}`,borderRadius:9,padding:"12px 14px",marginBottom:10,position:"relative",overflow:"hidden"}}>
@@ -3586,45 +3601,69 @@ function AppMain() {
                       )}
                       <div style={{fontSize:9,color:C.dim,marginBottom:5}}>{g.country} · {g.league}</div>
                       {/* 팀 + 스코어 입력 */}
-                      <div style={{display:"grid",gridTemplateColumns:"1fr 60px 30px 60px 1fr",alignItems:"center",gap:6}}>
+                      <div style={{display:"grid",gridTemplateColumns:"1fr 60px 30px 60px 1fr",alignItems:"center",gap:6,marginBottom:8}}>
                         <div style={{fontSize:13,fontWeight:800,color:C.text,textAlign:"right"}}>{g.homeTeam}</div>
-                        <input id={`score-home-${g.id}`} type="number" value={g.homeScore??""} placeholder="0"
+                        <input id={`score-home-${g.id}`} type="text" inputMode="numeric"
+                          value={g.homeScore===undefined ? "" : String(g.homeScore)}
+                          placeholder="0"
                           disabled={g.finished}
-                          onChange={e=>handleScoreChange(g.id,"homeScore",parseInt(e.target.value)||0)}
-                          onBlur={()=>finishGameIfReady(g.id)}
-                          onKeyDown={e=>{
-                            if (e.key==="Tab" && !e.shiftKey) {
-                              // 홈→원정으로 이동 (기본 동작 허용, blur 시 종료는 양쪽 있을 때만)
-                              // 기본 Tab 동작 (다음 input = 원정 input)
-                            }
+                          onChange={e=>{
+                            const val=sanitizeScore(e.target.value);
+                            handleScoreChange(g.id,"homeScore",val===undefined?NaN:val);
                           }}
-                          style={{...S,boxSizing:"border-box",fontSize:18,padding:"6px",textAlign:"center" as const,fontWeight:900,color:C.green,...noSpin,opacity:g.finished?0.6:1}}/>
+                          style={{...S,boxSizing:"border-box",fontSize:18,padding:"6px",textAlign:"center" as const,fontWeight:900,color:C.green,opacity:g.finished?0.6:1}}/>
                         <div style={{textAlign:"center",fontSize:14,color:C.orange,fontWeight:800}}>:</div>
-                        <input id={`score-away-${g.id}`} type="number" value={g.awayScore??""} placeholder="0"
+                        <input id={`score-away-${g.id}`} type="text" inputMode="numeric"
+                          value={g.awayScore===undefined ? "" : String(g.awayScore)}
+                          placeholder="0"
                           disabled={g.finished}
-                          onChange={e=>handleScoreChange(g.id,"awayScore",parseInt(e.target.value)||0)}
-                          onBlur={()=>finishGameIfReady(g.id)}
+                          onChange={e=>{
+                            const val=sanitizeScore(e.target.value);
+                            handleScoreChange(g.id,"awayScore",val===undefined?NaN:val);
+                          }}
                           onKeyDown={e=>{
                             if (e.key==="Tab" && !e.shiftKey) {
-                              // 원정팀 input에서 Tab → 종료 처리 + 다음 경기 홈팀 input으로 이동
-                              const g2 = manualGames.find(x=>x.id===g.id);
-                              if (g2 && g2.homeScore!==undefined && g2.awayScore!==undefined && !g2.finished) {
+                              // 원정 스코어에서 Tab → 확인 버튼으로 포커스
+                              const btn = document.getElementById(`score-confirm-${g.id}`) as HTMLButtonElement|null;
+                              if (btn && !g.finished) {
                                 e.preventDefault();
-                                finishGameIfReady(g.id);
-                                focusNextGame();
+                                btn.focus();
                               }
                             } else if (e.key==="Enter") {
                               e.preventDefault();
-                              finishGameIfReady(g.id);
-                              focusNextGame();
+                              // 양쪽 다 입력됐으면 종료 처리 + 다음 경기로
+                              if (bothEntered && !g.finished) {
+                                finishGameIfReady(g.id);
+                                focusNextGame();
+                              }
                             }
                           }}
-                          style={{...S,boxSizing:"border-box",fontSize:18,padding:"6px",textAlign:"center" as const,fontWeight:900,color:C.teal,...noSpin,opacity:g.finished?0.6:1}}/>
+                          style={{...S,boxSizing:"border-box",fontSize:18,padding:"6px",textAlign:"center" as const,fontWeight:900,color:C.teal,opacity:g.finished?0.6:1}}/>
                         <div style={{fontSize:13,fontWeight:800,color:C.text,textAlign:"left"}}>{g.awayTeam}</div>
                       </div>
-                      {/* 종료된 경기는 취소 버튼 */}
-                      {g.finished && (
-                        <div style={{marginTop:7,display:"flex",justifyContent:"flex-end",position:"relative",zIndex:3}}>
+                      {/* 확인 버튼 / 종료 취소 버튼 */}
+                      {!g.finished ? (
+                        <div style={{display:"flex",justifyContent:"flex-end"}}>
+                          <button id={`score-confirm-${g.id}`}
+                            onClick={()=>{
+                              if (!bothEntered) return alert("양쪽 스코어를 모두 입력해주세요.");
+                              finishGameIfReady(g.id);
+                              focusNextGame();
+                            }}
+                            onKeyDown={e=>{
+                              if (e.key==="Enter" || e.key===" ") {
+                                e.preventDefault();
+                                if (!bothEntered) return alert("양쪽 스코어를 모두 입력해주세요.");
+                                finishGameIfReady(g.id);
+                                focusNextGame();
+                              }
+                            }}
+                            style={{padding:"6px 16px",borderRadius:5,border:`1px solid ${bothEntered?C.amber:C.border}`,background:bothEntered?`${C.amber}22`:C.bg2,color:bothEntered?C.amber:C.dim,cursor:bothEntered?"pointer":"default",fontWeight:800,fontSize:12}}>
+                            ✓ 확인 (경기 종료)
+                          </button>
+                        </div>
+                      ) : (
+                        <div style={{display:"flex",justifyContent:"flex-end",position:"relative",zIndex:3}}>
                           <button onClick={()=>handleUnfinishGame(g.id)}
                             style={{padding:"4px 12px",borderRadius:5,border:`1px solid ${C.muted}66`,background:C.bg,color:C.muted,cursor:"pointer",fontWeight:700,fontSize:10}}>
                             ↩ 종료 취소
