@@ -666,15 +666,23 @@ function AppMain() {
     const {homeTeam,awayTeam}=newGame;
     if(!mSport||!mCountry||!mLeague)return alert("먼저 좌측에서 종목/국가/리그를 선택해주세요.");
     if(!homeTeam.trim()||!awayTeam.trim())return alert("홈팀과 원정팀을 입력해주세요.");
+    const h=homeTeam.trim(), a=awayTeam.trim();
+    if (h===a) return alert("홈팀과 원정팀이 같을 수 없습니다.");
+    // 중복 체크: 같은 종목/국가/리그/홈팀/원정팀 + 미종료
+    const dup = manualGames.find(x =>
+      x.sportCat===mSport && x.country===mCountry && x.league===mLeague &&
+      x.homeTeam===h && x.awayTeam===a && !x.finished
+    );
+    if (dup) return alert(`이미 추가된 경기입니다.\n${mCountry}/${mLeague}\n${h} vs ${a}`);
     const g:ManualGame={
       id:String(Date.now()),
       country:mCountry,league:mLeague,
-      homeTeam:homeTeam.trim(),awayTeam:awayTeam.trim(),
+      homeTeam:h,awayTeam:a,
       sportCat:mSport,createdAt:Date.now(),
     };
     saveManualGames([g,...manualGames]);
     setNewGame({homeTeam:"",awayTeam:""});
-    addLog("➕ 경기 추가",`${mCountry}/${mLeague}/${homeTeam} vs ${awayTeam}`);
+    addLog("➕ 경기 추가",`${mCountry}/${mLeague}/${h} vs ${a}`);
     if (continueAdd) {
       // 모달 유지, 홈팀 input으로 포커스 이동
       setTimeout(()=>{const el=document.getElementById("add-game-home")as HTMLInputElement|null;if(el)el.focus();},30);
@@ -687,7 +695,7 @@ function AppMain() {
 
   const handleAddSport=()=>{
     const n=newSportName.trim();if(!n)return;
-    if(allSportsList.includes(n))return alert("이미 존재합니다.");
+    if(allSportsList.includes(n))return alert(`이미 존재하는 종목입니다: "${n}"`);
     saveCustomSports([...customSports,n]);
     setAddSportModal(false);setNewSportName("");
     setMExpandedSports(p=>({...p,[n]:true}));
@@ -699,7 +707,7 @@ function AppMain() {
     const sport=addCountryModal.sport;
     const list=mCountries[sport]||[];
     if(list.includes(n)||allCountriesForSport(sport).includes(n)){
-      if(!continueToLeague) return alert("이미 존재합니다.");
+      if(!continueToLeague) return alert(`이미 존재하는 국가입니다: "${sport} / ${n}"`);
       // 이미 있으면 그냥 바로 리그 추가로 넘어감
       setAddCountryModal(null);setNewCountryName("");
       setAddLeagueModalM({sport,country:n});
@@ -720,7 +728,7 @@ function AppMain() {
     const {sport,country}=addLeagueModalM;
     const key=`${sport}__${country}`;
     const list=mLeagues[key]||[];
-    if(list.includes(n)||allLeaguesForCountry(sport,country).includes(n))return alert("이미 존재합니다.");
+    if(list.includes(n)||allLeaguesForCountry(sport,country).includes(n))return alert(`이미 존재하는 리그입니다: "${sport} / ${country} / ${n}"`);
     saveMLeaguesStore({...mLeagues,[key]:[...list,n]});
     // 추가된 리그 자동 선택
     setMSport(sport);
@@ -2742,14 +2750,21 @@ function AppMain() {
                     const dollar=isUSD(site);
                     const remaining=Math.max(0,parseFloat((st.deposited-st.betTotal).toFixed(2)));
                     const totalBase=parseFloat((st.deposited+(st.pointTotal||0)).toFixed(2));
-                    const pct=totalBase>0?Math.min(100,Math.round(st.betTotal/totalBase*100)):0;
-                    const barColor=pct>=90?C.red:pct>=70?C.amber:C.green;
+                    const pctRaw=totalBase>0?Math.round(st.betTotal/totalBase*100):0;
+                    const pct=Math.min(100,pctRaw);
+                    const isComplete=pctRaw>=100;
+                    const barColor=isComplete?C.purple:pctRaw>=90?C.red:pctRaw>=70?C.amber:C.green;
                     const sitePendingCount=pending.filter(b=>b.site===site).length;
                     return(
-                      <div key={site} style={{background:C.bg,border:`1px solid ${barColor}33`,borderRadius:7,padding:"9px 12px"}}>
+                      <div key={site} style={{background:C.bg,border:`1px solid ${barColor}33`,borderRadius:7,padding:"9px 12px",position:"relative",overflow:"hidden"}}>
+                        {isComplete && (
+                          <div style={{position:"absolute",top:"50%",right:8,transform:"translateY(-50%) rotate(-12deg)",fontSize:10,fontWeight:900,color:C.purple,border:`2px solid ${C.purple}`,borderRadius:4,padding:"1px 6px",letterSpacing:1,opacity:0.45,pointerEvents:"none",whiteSpace:"nowrap",zIndex:2}}>
+                            {pctRaw>100 ? `✓ ${pctRaw}%` : "✓ 완료"}
+                          </div>
+                        )}
                         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5}}>
                           <span style={{fontSize:12,fontWeight:800,color:C.text}}>{dollar?"$":"₩"} {site}</span>
-                          <span style={{fontSize:11,color:barColor,fontWeight:800}}>{pct}%</span>
+                          <span style={{fontSize:11,color:barColor,fontWeight:800}}>{pctRaw}%</span>
                         </div>
                         <div style={{fontSize:10,color:C.muted,marginBottom:5,display:"flex",justifyContent:"space-between"}}>
                           <span>잔여 <span style={{color:C.teal,fontWeight:700,fontSize:11}}>{fmtDisp(remaining,dollar)}</span></span>
@@ -3798,17 +3813,19 @@ function AppMain() {
                 const dollar=isUSD(site);
                 const remaining=Math.max(0,parseFloat((st.deposited-st.betTotal).toFixed(2)));
                 const totalBase=parseFloat((st.deposited+(st.pointTotal||0)).toFixed(2));
-                const pct=totalBase>0?Math.min(100,Math.round(st.betTotal/totalBase*100)):0;
-                const barColor=pct>=90?C.red:pct>=70?C.amber:C.green;
+                const pctRaw=totalBase>0?Math.round(st.betTotal/totalBase*100):0;
+                const pct=Math.min(100,pctRaw);
+                const is100=pctRaw>=100;
+                const isOver=pctRaw>100;
+                const barColor=is100?C.purple:pctRaw>=90?C.red:pctRaw>=70?C.amber:C.green;
                 const sitePending=pending.filter(b=>b.site===site);
-                const is100=pct>=100;
                 const pointAmt=st.pointTotal||0;
                 return(
                   <div key={site} style={{background:C.bg3,border:`1px solid ${barColor}33`,borderRadius:12,padding:13}}>
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
                       <div style={{display:"flex",alignItems:"center",gap:6}}>
                         <span style={{fontSize:15,fontWeight:800,color:C.text}}>{dollar?"$":"₩"} {site}</span>
-                        {is100&&<span style={{fontSize:11,fontWeight:900,color:C.red,border:`2px solid ${C.red}`,borderRadius:5,padding:"1px 6px",opacity:0.7,transform:"rotate(-8deg)",display:"inline-block"}}>완료</span>}
+                        {is100&&<span style={{fontSize:10,fontWeight:900,color:C.purple,border:`2px solid ${C.purple}`,borderRadius:4,padding:"1px 6px",opacity:0.75,transform:"rotate(-8deg)",display:"inline-block",letterSpacing:1}}>{isOver?`${pctRaw}%`:"✓ 완료"}</span>}
                       </div>
                       <div style={{display:"flex",gap:3}}>
                         <button onClick={()=>cancelSite(site)} title="사이트 취소" style={{fontSize:9,padding:"2px 6px",borderRadius:3,border:`1px solid ${C.border2}`,background:C.bg2,color:C.muted,cursor:"pointer"}}>✕</button>
@@ -3838,7 +3855,7 @@ function AppMain() {
                         <div style={{fontSize:14,fontWeight:800,color:C.teal}}>{fmtDisp(remaining,dollar)}</div>
                       </div>
                     </div>
-                    <div style={{display:"flex",justifyContent:"space-between",fontSize:10,marginBottom:3}}><span style={{color:C.muted}}>진행률</span><span style={{color:barColor,fontWeight:700}}>{pct}%</span></div>
+                    <div style={{display:"flex",justifyContent:"space-between",fontSize:10,marginBottom:3}}><span style={{color:C.muted}}>진행률</span><span style={{color:barColor,fontWeight:700}}>{pctRaw}%</span></div>
                     <div style={{height:5,background:C.bg,borderRadius:3,overflow:"hidden",marginBottom:8}}><div style={{width:`${pct}%`,height:"100%",background:barColor,borderRadius:3}}/></div>
                     {sitePending.length>0&&(
                       <div style={{borderTop:`1px solid ${C.border}`,paddingTop:7}}>
@@ -4172,14 +4189,21 @@ function AppMain() {
                   const dollar=isUSD(site);
                   const remaining=Math.max(0,parseFloat((st.deposited-st.betTotal).toFixed(2)));
                   const totalBase=parseFloat(st.deposited.toFixed(2));
-                  const pct=totalBase>0?Math.min(100,Math.round(st.betTotal/totalBase*100)):0;
-                  const barColor=pct>=90?C.red:pct>=70?C.amber:C.green;
+                  const pctRaw=totalBase>0?Math.round(st.betTotal/totalBase*100):0;
+                  const pct=Math.min(100,pctRaw);
+                  const isComplete=pctRaw>=100;
+                  const barColor=isComplete?C.purple:pctRaw>=90?C.red:pctRaw>=70?C.amber:C.green;
                   const sitePending=pending.filter(b=>b.site===site).length;
                   return (
-                    <div key={site} style={{background:C.bg2,border:`1px solid ${barColor}33`,borderRadius:8,padding:"9px 10px"}}>
+                    <div key={site} style={{background:C.bg2,border:`1px solid ${barColor}33`,borderRadius:8,padding:"9px 10px",position:"relative",overflow:"hidden"}}>
+                      {isComplete && (
+                        <div style={{position:"absolute",top:"50%",right:8,transform:"translateY(-50%) rotate(-12deg)",fontSize:9,fontWeight:900,color:C.purple,border:`2px solid ${C.purple}`,borderRadius:4,padding:"1px 5px",letterSpacing:1,opacity:0.45,pointerEvents:"none",whiteSpace:"nowrap",zIndex:2}}>
+                          {pctRaw>100?`${pctRaw}%`:"✓ 완료"}
+                        </div>
+                      )}
                       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
                         <span style={{fontSize:11,fontWeight:800,color:C.text}}>{dollar?"$":"₩"} {site}</span>
-                        <span style={{fontSize:10,color:barColor,fontWeight:800}}>{pct}%</span>
+                        <span style={{fontSize:10,color:barColor,fontWeight:800}}>{pctRaw}%</span>
                       </div>
                       <div style={{fontSize:9,color:C.muted,marginBottom:4,display:"flex",justifyContent:"space-between"}}>
                         <span>잔 <b style={{color:C.teal,fontSize:10}}>{fmtDisp(remaining,dollar)}</b></span>
