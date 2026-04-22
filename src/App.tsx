@@ -1678,7 +1678,7 @@ function AppMain() {
         <div style={{display:"flex",flex:1,overflow:"hidden",minWidth:0,minHeight:0}}>
 
           {/* ─── 1. 카테고리 (종목/국가/리그) ─── */}
-          <div style={{width:220,flexShrink:0,background:C.bg2,borderRight:`1px solid ${C.border2}`,display:"flex",flexDirection:"column",overflow:"hidden",minHeight:0}}>
+          <div style={{width:320,flexShrink:0,background:C.bg2,borderRight:`1px solid ${C.border2}`,display:"flex",flexDirection:"column",overflow:"hidden",minHeight:0}}>
             <div style={{padding:"10px 12px",borderBottom:`1px solid ${C.border}`,flexShrink:0,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
               <div>
                 <div style={{fontSize:12,fontWeight:800,color:C.text}}>📂 카테고리</div>
@@ -1838,13 +1838,21 @@ function AppMain() {
                     {showOU && isBaseball && (
                       <div>
                         <div style={{fontSize:11,fontWeight:800,color:"#e05a9a",marginBottom:7,paddingBottom:5,borderBottom:`1px solid ${C.border}`,letterSpacing:1}}>오버/언더 (기준점수)</div>
-                        <div style={{fontSize:10,color:C.muted,marginBottom:4,fontWeight:700}}>오버</div>
-                        <div style={{display:"grid",gridTemplateColumns:"repeat(9,1fr)",gap:3,marginBottom:8}}>
-                          {ouLines.map(ln=>{const opt=`오버 ${ln}`;const added=inSlip(opt);return <button key={opt} onClick={()=>handleManualSlipPick(g,opt)} style={{padding:"11px 2px",borderRadius:5,cursor:"pointer",border:added?`2px solid #e05a9a`:`1px solid ${C.border}`,background:added?`#e05a9a33`:C.bg2,color:added?"#e05a9a":C.text,fontWeight:added?800:600,fontSize:11}}>{ln}</button>;})}
-                        </div>
-                        <div style={{fontSize:10,color:C.muted,marginBottom:4,fontWeight:700}}>언더</div>
-                        <div style={{display:"grid",gridTemplateColumns:"repeat(9,1fr)",gap:3}}>
-                          {ouLines.map(ln=>{const opt=`언더 ${ln}`;const added=inSlip(opt);return <button key={opt} onClick={()=>handleManualSlipPick(g,opt)} style={{padding:"11px 2px",borderRadius:5,cursor:"pointer",border:added?`2px solid #7ac4ff`:`1px solid ${C.border}`,background:added?`#7ac4ff33`:C.bg2,color:added?"#7ac4ff":C.text,fontWeight:added?800:600,fontSize:11}}>{ln}</button>;})}
+                        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                          {/* 좌: 오버 세로 나열 */}
+                          <div>
+                            <div style={{fontSize:11,color:"#e05a9a",marginBottom:6,fontWeight:800,textAlign:"center",background:"#e05a9a22",borderRadius:5,padding:"3px 0"}}>오버</div>
+                            <div style={{display:"flex",flexDirection:"column",gap:4}}>
+                              {ouLines.map(ln=>{const opt=`오버 ${ln}`;const added=inSlip(opt);return <button key={opt} onClick={()=>handleManualSlipPick(g,opt)} style={{padding:"10px 8px",borderRadius:6,cursor:"pointer",border:added?`2px solid #e05a9a`:`1px solid ${C.border}`,background:added?`#e05a9a33`:C.bg2,color:added?"#e05a9a":C.text,fontWeight:added?800:600,fontSize:12,display:"flex",justifyContent:"space-between",alignItems:"center"}}><span>오버</span><span style={{fontWeight:800}}>{ln}</span></button>;})}
+                            </div>
+                          </div>
+                          {/* 우: 언더 세로 나열 */}
+                          <div>
+                            <div style={{fontSize:11,color:"#7ac4ff",marginBottom:6,fontWeight:800,textAlign:"center",background:"#7ac4ff22",borderRadius:5,padding:"3px 0"}}>언더</div>
+                            <div style={{display:"flex",flexDirection:"column",gap:4}}>
+                              {ouLines.map(ln=>{const opt=`언더 ${ln}`;const added=inSlip(opt);return <button key={opt} onClick={()=>handleManualSlipPick(g,opt)} style={{padding:"10px 8px",borderRadius:6,cursor:"pointer",border:added?`2px solid #7ac4ff`:`1px solid ${C.border}`,background:added?`#7ac4ff33`:C.bg2,color:added?"#7ac4ff":C.text,fontWeight:added?800:600,fontSize:12,display:"flex",justifyContent:"space-between",alignItems:"center"}}><span>언더</span><span style={{fontWeight:800}}>{ln}</span></button>;})}
+                            </div>
+                          </div>
                         </div>
                       </div>
                     )}
@@ -1871,7 +1879,7 @@ function AppMain() {
           </div>
 
           {/* ─── 4. 베팅 슬립 ─── */}
-          <div style={{width:310,flexShrink:0,display:"flex",flexDirection:"column",overflow:"hidden",background:C.bg2,borderLeft:`1px solid ${C.border2}`,minHeight:0}}>
+          <div style={{width:330,flexShrink:0,display:"flex",flexDirection:"column",overflow:"hidden",background:C.bg2,borderLeft:`1px solid ${C.border2}`,minHeight:0}}>
             <div style={{padding:"10px 12px",borderBottom:`1px solid ${C.border}`,flexShrink:0,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
               <div style={{fontSize:13,fontWeight:800,color:C.orange}}>
                 📋 베팅 슬립
@@ -1955,7 +1963,7 @@ function AppMain() {
           </div>
 
           {/* ─── 5. 진행중 + 사이트 진행률 (우측 끝) ─── */}
-          <div style={{width:460,flexShrink:0,display:"flex",flexDirection:"column",overflow:"hidden",background:C.bg2,borderLeft:`1px solid ${C.border2}`,minHeight:0}}>
+          <div style={{width:330,flexShrink:0,display:"flex",flexDirection:"column",overflow:"hidden",background:C.bg2,borderLeft:`1px solid ${C.border2}`,minHeight:0}}>
 
             {/* 상: 사이트 진행률 */}
             <div style={{flexShrink:0,padding:"10px 12px",borderBottom:`1px solid ${C.border2}`,background:C.bg3}}>
@@ -1974,7 +1982,7 @@ function AppMain() {
               {activeSiteNames.length===0 ? (
                 <div style={{textAlign:"center",color:C.dim,padding:"15px 0",fontSize:10}}>사이트를 활성화하세요</div>
               ) : (
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
+                <div style={{display:"flex",flexDirection:"column",gap:6}}>
                   {activeSiteNames.map(site=>{
                     const st=siteStates[site]||{deposited:0,betTotal:0,active:false,isDollar:false};
                     const dollar=isUSD(site);
@@ -1984,16 +1992,16 @@ function AppMain() {
                     const barColor=pct>=90?C.red:pct>=70?C.amber:C.green;
                     const sitePendingCount=pending.filter(b=>b.site===site).length;
                     return(
-                      <div key={site} style={{background:C.bg,border:`1px solid ${barColor}33`,borderRadius:6,padding:"7px 9px"}}>
-                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
-                          <span style={{fontSize:10,fontWeight:800,color:C.text}}>{dollar?"$":"₩"} {site}</span>
-                          <span style={{fontSize:9,color:barColor,fontWeight:700}}>{pct}%</span>
+                      <div key={site} style={{background:C.bg,border:`1px solid ${barColor}33`,borderRadius:7,padding:"9px 12px"}}>
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5}}>
+                          <span style={{fontSize:12,fontWeight:800,color:C.text}}>{dollar?"$":"₩"} {site}</span>
+                          <span style={{fontSize:11,color:barColor,fontWeight:800}}>{pct}%</span>
                         </div>
-                        <div style={{fontSize:9,color:C.muted,marginBottom:4}}>
-                          잔 <span style={{color:C.teal,fontWeight:700}}>{fmtDisp(remaining,dollar)}</span>
-                          {sitePendingCount>0 && <span style={{color:C.amber,marginLeft:5,fontWeight:700}}>· {sitePendingCount}건</span>}
+                        <div style={{fontSize:10,color:C.muted,marginBottom:5,display:"flex",justifyContent:"space-between"}}>
+                          <span>잔여 <span style={{color:C.teal,fontWeight:700,fontSize:11}}>{fmtDisp(remaining,dollar)}</span></span>
+                          {sitePendingCount>0 && <span style={{color:C.amber,fontWeight:700}}>{sitePendingCount}건 진행중</span>}
                         </div>
-                        <div style={{height:4,background:C.bg2,borderRadius:2,overflow:"hidden"}}>
+                        <div style={{height:5,background:C.bg2,borderRadius:3,overflow:"hidden"}}>
                           <div style={{width:`${pct}%`,height:"100%",background:barColor,transition:"width 0.3s"}}/>
                         </div>
                       </div>
