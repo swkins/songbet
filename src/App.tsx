@@ -909,33 +909,37 @@ function AppMain() {
 
   // 스코어 입력 (실시간 저장만, 종료는 별도)
   const handleScoreChange = (gameId:string, field:"homeScore"|"awayScore", value:number) => {
-    saveManualGames(manualGames.map(g => g.id===gameId ? {...g, [field]:value} : g));
+    setManualGames(prev=>{
+      const updated = prev.map(g => {
+        if (g.id!==gameId) return g;
+        const newGame = {...g, [field]:value};
+        // 양쪽 다 입력되면 자동 종료
+        const h = field==="homeScore" ? value : g.homeScore;
+        const a = field==="awayScore" ? value : g.awayScore;
+        if (h!==undefined && a!==undefined && !g.finished) {
+          newGame.finished = true;
+          addLog("🏁 경기 종료",`${g.homeTeam} ${h}:${a} ${g.awayTeam}`);
+        }
+        return newGame;
+      });
+      try{localStorage.setItem("bt_manual_games",JSON.stringify(updated));}catch{}
+      return updated;
+    });
   };
 
-  // 경기 종료 도장 - 자동 판정만 수행 (확인은 별도)
-  const handleFinishGame = (gameId:string) => {
-    const game = manualGames.find(g=>g.id===gameId);
-    if (!game) return;
-    if (game.homeScore===undefined || game.awayScore===undefined) {
-      return alert("스코어를 입력해주세요.");
-    }
-    if (!window.confirm(`${game.homeTeam} ${game.homeScore} : ${game.awayScore} ${game.awayTeam}\n경기 종료 처리하시겠습니까?\n진행중 베팅이 자동 판정됩니다.`)) return;
-
-    // 경기를 종료 상태로
-    saveManualGames(manualGames.map(g => g.id===gameId ? {...g, finished:true} : g));
-    addLog("🏁 경기 종료",`${game.homeTeam} ${game.homeScore}:${game.awayScore} ${game.awayTeam}`);
-    // 베팅에는 직접 결과를 안 적용 - 표시만 (확인 버튼으로 적용)
+  // 종료된 경기 일괄 제거 (라이브 스코어 영역에서)
+  const handleClearFinishedGames = () => {
+    const sportFinished = manualGames.filter(g=>g.sportCat===liveScoreSport && g.finished);
+    if (sportFinished.length===0) return alert("종료된 경기가 없습니다.");
+    if (!window.confirm(`${liveScoreSport} 종료된 경기 ${sportFinished.length}건을 라이브 스코어에서 제거합니다.\n(베팅 데이터는 유지됩니다.)`)) return;
+    // 종료된 경기는 manualGames에서 완전 삭제 (카테고리에서도 사라짐)
+    saveManualGames(manualGames.filter(g => !(g.sportCat===liveScoreSport && g.finished)));
+    addLog("🗑 일괄 제거",`${liveScoreSport} ${sportFinished.length}건`);
   };
 
-  // 경기 종료 취소
+  // 경기 종료 토글 (수동 - 양쪽 스코어 다 비웠을 때 등 예외 케이스용, 더 이상 UI 없음)
   const handleUnfinishGame = (gameId:string) => {
     saveManualGames(manualGames.map(g => g.id===gameId ? {...g, finished:false} : g));
-  };
-
-  // 라이브 스코어 영역에서 경기 삭제 (확인 후)
-  const handleRemoveLiveGame = (gameId:string) => {
-    if (!window.confirm("이 경기를 라이브 스코어에서 제거하시겠습니까?\n(경기 데이터는 카테고리에 남아있습니다.)")) return;
-    saveManualGames(manualGames.map(g => g.id===gameId ? {...g, finished:false, homeScore:undefined, awayScore:undefined} : g));
   };
 
   // 베팅 결과 확인 (적중/실패 도장 후 사용자가 확인 → updateResult 호출)
@@ -1345,15 +1349,15 @@ function AppMain() {
       );
     }
     return(
-      <div style={{background:C.bg2,border:`1px solid ${verdict==="승"?C.green:verdict==="패"?C.red:C.amber}44`,borderRadius:8,padding:"10px 12px",marginBottom:7,position:"relative"}}>
-        {/* 적중/실패 도장 (자동 판정 시) */}
+      <div style={{background:C.bg2,border:`1px solid ${verdict==="승"?C.green:verdict==="패"?C.red:C.amber}44`,borderRadius:8,padding:"10px 12px",marginBottom:7,position:"relative",overflow:"hidden"}}>
+        {/* 적중/실패 도장 - 가운데 크게 반투명 */}
         {verdict && (
-          <span style={{position:"absolute",top:6,right:6,fontSize:11,fontWeight:900,color:verdict==="승"?C.green:C.red,border:`2px solid ${verdict==="승"?C.green:C.red}`,borderRadius:5,padding:"2px 8px",transform:"rotate(-8deg)",letterSpacing:1,background:`${verdict==="승"?C.green:C.red}22`}}>
+          <div style={{position:"absolute",top:"50%",left:"50%",transform:"translate(-50%,-50%) rotate(-15deg)",fontSize:34,fontWeight:900,color:verdict==="승"?C.green:C.red,border:`5px solid ${verdict==="승"?C.green:C.red}`,borderRadius:10,padding:"6px 22px",letterSpacing:3,opacity:0.32,pointerEvents:"none",whiteSpace:"nowrap",zIndex:2}}>
             {verdict==="승"?"✅ 적중":"❌ 실패"}
-          </span>
+          </div>
         )}
         {/* 상단: 카테고리/리그 + 옵션 */}
-        <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6,flexWrap:"wrap",paddingRight:verdict?70:0}}>
+        <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6,flexWrap:"wrap"}}>
           <span style={{fontSize:14,flexShrink:0}}>{SPORT_ICON[b.category]||"🎯"}</span>
           <span style={{fontSize:10,color:C.muted,background:C.bg,padding:"2px 6px",borderRadius:3}}>{b.league}</span>
           <span style={{fontSize:13,color:C.orange,fontWeight:800,marginLeft:"auto"}}>{displayBetOption}</span>
@@ -3119,7 +3123,10 @@ function AppMain() {
             <div style={{padding:"12px 14px",borderBottom:`1px solid ${C.border2}`,flexShrink:0}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
                 <div style={{fontSize:14,fontWeight:800,color:C.teal}}>📺 라이브 스코어</div>
-                <span style={{fontSize:10,color:C.dim}}>스코어 입력 → 자동 판정</span>
+                <button onClick={handleClearFinishedGames}
+                  style={{padding:"4px 10px",borderRadius:5,border:`1px solid ${C.red}66`,background:`${C.red}11`,color:C.red,cursor:"pointer",fontSize:10,fontWeight:700}}>
+                  🗑 종료 일괄 제거
+                </button>
               </div>
               {/* 종목 가로 탭 */}
               <div style={{display:"flex",gap:5}}>
@@ -3152,16 +3159,16 @@ function AppMain() {
                 );
                 return sportGames.map(g=>{
                   return (
-                    <div key={g.id} style={{background:g.finished?`${C.amber}11`:C.bg3,border:`2px solid ${g.finished?C.amber:C.border}`,borderRadius:9,padding:"12px 14px",marginBottom:10,position:"relative"}}>
-                      {/* 종료 도장 */}
+                    <div key={g.id} style={{background:g.finished?`${C.amber}11`:C.bg3,border:`2px solid ${g.finished?C.amber:C.border}`,borderRadius:9,padding:"12px 14px",marginBottom:10,position:"relative",overflow:"hidden"}}>
+                      {/* 종료 도장 - 가운데 크게 반투명 */}
                       {g.finished && (
-                        <span style={{position:"absolute",top:8,right:8,fontSize:11,fontWeight:900,color:C.amber,border:`2px solid ${C.amber}`,borderRadius:5,padding:"2px 8px",transform:"rotate(-8deg)",letterSpacing:1,background:`${C.amber}22`}}>
+                        <div style={{position:"absolute",top:"50%",left:"50%",transform:"translate(-50%,-50%) rotate(-15deg)",fontSize:38,fontWeight:900,color:C.amber,border:`5px solid ${C.amber}`,borderRadius:10,padding:"8px 24px",letterSpacing:3,opacity:0.35,pointerEvents:"none",whiteSpace:"nowrap",zIndex:2}}>
                           🏁 종료
-                        </span>
+                        </div>
                       )}
                       <div style={{fontSize:9,color:C.dim,marginBottom:5}}>{g.country} · {g.league}</div>
                       {/* 팀 + 스코어 입력 */}
-                      <div style={{display:"grid",gridTemplateColumns:"1fr 60px 30px 60px 1fr",alignItems:"center",gap:6,marginBottom:8}}>
+                      <div style={{display:"grid",gridTemplateColumns:"1fr 60px 30px 60px 1fr",alignItems:"center",gap:6}}>
                         <div style={{fontSize:13,fontWeight:800,color:C.text,textAlign:"right"}}>{g.homeTeam}</div>
                         <input type="number" value={g.homeScore??""} placeholder="0"
                           disabled={g.finished}
@@ -3174,16 +3181,6 @@ function AppMain() {
                           style={{...S,boxSizing:"border-box",fontSize:18,padding:"6px",textAlign:"center" as const,fontWeight:900,color:C.teal,...noSpin,opacity:g.finished?0.6:1}}/>
                         <div style={{fontSize:13,fontWeight:800,color:C.text,textAlign:"left"}}>{g.awayTeam}</div>
                       </div>
-                      {/* 액션 버튼 */}
-                      <div style={{display:"flex",gap:5}}>
-                        {!g.finished ? (
-                          <button onClick={()=>handleFinishGame(g.id)} style={{flex:1,padding:"7px",borderRadius:5,border:`1px solid ${C.amber}`,background:`${C.amber}22`,color:C.amber,cursor:"pointer",fontWeight:800,fontSize:12}}>🏁 경기 종료</button>
-                        ) : (
-                          <button onClick={()=>handleUnfinishGame(g.id)} style={{flex:1,padding:"7px",borderRadius:5,border:`1px solid ${C.muted}66`,background:C.bg,color:C.muted,cursor:"pointer",fontWeight:600,fontSize:11}}>↩ 종료 취소</button>
-                        )}
-                        <button onClick={()=>handleRemoveLiveGame(g.id)} style={{padding:"7px 11px",borderRadius:5,border:`1px solid ${C.red}44`,background:`${C.red}11`,color:C.red,cursor:"pointer",fontSize:11}}>제거</button>
-                      </div>
-
                     </div>
                   );
                 });
