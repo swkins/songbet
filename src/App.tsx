@@ -443,69 +443,24 @@ export default function App() {
   const [sportEvents,setSportEvents]=useState<SportEvent[]>([]);
   const [eventsLoading,setEventsLoading]=useState(false);
   const [lastFetched,setLastFetched]=useState<string>("");
-  const [eventsError,setEventsError]=useState<string>("");
-  const [eventsDebug,setEventsDebug]=useState<{total:number;sports:Record<string,number>}>({total:0,sports:{}});
 
   // Supabase에서 오늘 경기 로드
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const loadEvents = useCallback(async(_forceRefresh=false) => {
-    // 환경변수 체크
-    if(!SUPA_URL||!SUPA_ANON) {
-      setEventsError("⚠️ Supabase 환경변수(VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY) 미설정. Vercel 배포 환경변수를 확인하세요.");
-      return;
-    }
+  const loadEvents = useCallback(async(forceRefresh=false) => {
+    if(!SUPA_URL||!SUPA_ANON) return;
     setEventsLoading(true);
-    setEventsError("");
     try {
-      // 한국시간 기준 "오늘" 범위. 단, KST 새벽 경기(예: 01:00 KST = 전날 16:00 UTC)도 잡기 위해
-      // 어제 12시 ~ 내일 06시 (KST 기준) 까지 넓게 가져온다.
-      const nowKST = new Date(Date.now()+9*3600_000);
-      const yesterdayKST = new Date(nowKST.getTime() - 12*3600_000);
-      const tomorrowKST = new Date(nowKST.getTime() + 30*3600_000);
-      // ISO (UTC) 로 변환해서 쿼리
-      const fromIso = new Date(yesterdayKST.getTime() - 9*3600_000).toISOString();
-      const toIso   = new Date(tomorrowKST.getTime()  - 9*3600_000).toISOString();
-
+      const todayKST = new Date(Date.now()+9*3600_000).toISOString().slice(0,10);
+      const from = `${todayKST}T00:00:00+09:00`;
+      const to   = `${todayKST}T23:59:59+09:00`;
       const { data, error } = await supabaseClient
         .from("events")
         .select("*")
-        .gte("start_time", fromIso)
-        .lte("start_time", toIso)
+        .gte("start_time", from)
+        .lte("start_time", to)
         .order("start_time", { ascending: true });
-
-      if(error) {
-        console.error("[Supabase]", error);
-        setEventsError(`Supabase 오류: ${error.message} ${error.code?`(코드:${error.code})`:""}`);
-        return;
-      }
-
-      const rows = (data as SportEvent[]) ?? [];
-
-      // KST 기준 "오늘" 경기만 필터링 (Supabase에서는 넓게 가져왔지만 화면엔 오늘만)
-      const todayKstStr = nowKST.toISOString().slice(0,10);
-      const filtered = rows.filter(r => {
-        if(!r.start_time) return false;
-        const kstDateStr = new Date(new Date(r.start_time).getTime()+9*3600_000).toISOString().slice(0,10);
-        return kstDateStr === todayKstStr;
-      });
-
-      setSportEvents(filtered);
-
-      // 디버그 정보
-      const sportCounts: Record<string,number> = {};
-      filtered.forEach(e=>{sportCounts[e.sport]=(sportCounts[e.sport]||0)+1;});
-      setEventsDebug({total:filtered.length, sports:sportCounts});
-
-      if(filtered.length===0 && rows.length===0) {
-        setEventsError(`최근 42시간 내 경기 데이터 0건. events 테이블이 비었거나 cron이 멈췄을 수 있습니다.`);
-      } else if(filtered.length===0 && rows.length>0) {
-        setEventsError(`인접 시간대 ${rows.length}건은 있으나 오늘(${todayKstStr}) KST 경기는 0건입니다.`);
-      }
-
+      if(error) { console.error("[Supabase]", error.message); return; }
+      setSportEvents(data as SportEvent[] ?? []);
       setLastFetched(new Date().toLocaleTimeString("ko-KR"));
-    } catch(err:any) {
-      console.error("[loadEvents]", err);
-      setEventsError(`예외: ${err?.message||String(err)}`);
     } finally { setEventsLoading(false); }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[]);
@@ -1378,20 +1333,16 @@ export default function App() {
           <div style={{width:220,flexShrink:0,borderRight:`1px solid ${C.border2}`,display:"flex",flexDirection:"column",overflow:"hidden",background:C.bg2}}>
             {/* 종목 버튼 */}
             <div style={{padding:"8px 6px",borderBottom:`1px solid ${C.border}`,flexShrink:0,display:"flex",gap:3,flexWrap:"wrap"}}>
-              {(["football","baseball","basketball","volleyball"] as const).map(sp=>{
-                const cnt = sportEvents.filter(e=>e.sport===sp).length;
-                return(
+              {(["football","baseball","basketball","volleyball"] as const).map(sp=>(
                 <button key={sp} onClick={()=>{setBettingSport(sp);setBettingCountry("");setBettingLeague("");setBettingSelectedGame(null);}}
-                  style={{padding:"4px 7px",borderRadius:4,position:"relative",
+                  style={{padding:"4px 7px",borderRadius:4,
                     border:bettingSport===sp?`1px solid ${C.orange}`:`1px solid ${C.border}`,
                     background:bettingSport===sp?`${C.orange}22`:C.bg3,
                     color:bettingSport===sp?C.orange:C.muted,
                     cursor:"pointer",fontSize:10,fontWeight:bettingSport===sp?800:400}}>
                   {SPORT_ICON2[sp]} {SPORT_KR[sp]}
-                  {cnt>0 && <span style={{marginLeft:4,fontSize:9,color:C.green,fontWeight:700}}>{cnt}</span>}
                 </button>
-                );
-              })}
+              ))}
             </div>
             {/* 로드 상태 */}
             <div style={{padding:"4px 8px",borderBottom:`1px solid ${C.border}`,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
@@ -1414,32 +1365,8 @@ export default function App() {
                 });
                 const countries = Object.keys(tree).sort((a,b)=>a.localeCompare(b,"ko"));
                 if(countries.length===0) return(
-                  <div style={{padding:"20px 10px",fontSize:11}}>
-                    <div style={{textAlign:"center",color:C.dim,marginBottom:12}}>
-                      {eventsLoading?"⏳ 불러오는 중...":"경기 없음"}
-                    </div>
-                    {!eventsLoading && (
-                      <div style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:6,padding:"10px",fontSize:10,color:C.muted,lineHeight:1.6}}>
-                        <div style={{color:C.amber,fontWeight:700,marginBottom:6,fontSize:11}}>🔍 진단 정보</div>
-                        <div>• Supabase URL: {SUPA_URL?<span style={{color:C.green}}>설정됨</span>:<span style={{color:C.red}}>❌ 없음</span>}</div>
-                        <div>• Anon Key: {SUPA_ANON?<span style={{color:C.green}}>설정됨</span>:<span style={{color:C.red}}>❌ 없음</span>}</div>
-                        <div>• 오늘 전체 경기: <span style={{color:C.text}}>{eventsDebug.total}건</span></div>
-                        <div>• 현재 종목({SPORT_KR[bettingSport]}): <span style={{color:C.text}}>{eventsDebug.sports[bettingSport]||0}건</span></div>
-                        {Object.keys(eventsDebug.sports).length>0 && (
-                          <div style={{marginTop:4,color:C.dim}}>
-                            종목별: {Object.entries(eventsDebug.sports).map(([k,v])=>`${SPORT_ICON2[k]||k}${v}`).join(" ")}
-                          </div>
-                        )}
-                        {eventsError && (
-                          <div style={{marginTop:8,padding:"6px",background:`${C.red}11`,border:`1px solid ${C.red}44`,borderRadius:4,color:C.red,fontSize:10,wordBreak:"break-all"}}>
-                            {eventsError}
-                          </div>
-                        )}
-                        <button onClick={()=>loadEvents(true)} style={{marginTop:10,width:"100%",padding:"6px",background:C.bg2,border:`1px solid ${C.teal}44`,borderRadius:4,color:C.teal,cursor:"pointer",fontSize:10,fontWeight:700}}>
-                          🔄 다시 시도
-                        </button>
-                      </div>
-                    )}
+                  <div style={{textAlign:"center",color:C.dim,padding:"30px 10px",fontSize:11}}>
+                    {eventsLoading?"⏳ 불러오는 중...":"경기 없음"}
                   </div>
                 );
                 return countries.map(country=>{
