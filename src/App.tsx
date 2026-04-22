@@ -990,6 +990,35 @@ function AppMain() {
   const tabBtn=(active:boolean,ac:string)=>({padding:"7px 18px",borderRadius:7,border:active?`1px solid ${ac}`:`1px solid ${C.border}`,background:active?`${ac}22`:"transparent",color:active?ac:C.muted,cursor:"pointer",fontWeight:700,fontSize:12} as React.CSSProperties);
   const siteBtn=(active:boolean,dollar:boolean)=>({padding:"4px 10px",borderRadius:5,border:active?`1px solid ${dollar?C.amber:C.green}`:`1px solid ${C.border}`,background:active?`${dollar?C.amber:C.green}22`:C.bg2,color:active?dollar?C.amber:C.green:C.muted,cursor:"pointer",fontSize:11,fontWeight:active?700:400} as React.CSSProperties);
 
+  // ── 베팅 탭 트리 & 리그 게임 계산 (반드시 early return 전에 호출) ──
+  const bettingTree = useMemo(()=>{
+    const tree:Record<string,Record<string,LiveFixture[]>> = {};
+    for (const f of bettingFixtures) {
+      const c = ktr(f.country); const l = f.league_name;
+      if (!tree[c]) tree[c] = {};
+      if (!tree[c][l]) tree[c][l] = [];
+      tree[c][l].push(f);
+    }
+    return tree;
+  },[bettingFixtures]);
+
+  const bettingCountries = useMemo(()=>{
+    const ord = ["한국","미국","일본","잉글랜드","스페인","독일","이탈리아","프랑스","유럽","국제"];
+    return Object.keys(bettingTree).sort((a,b)=>{
+      const ai=ord.indexOf(a), bi=ord.indexOf(b);
+      if (ai>=0 && bi>=0) return ai-bi;
+      if (ai>=0) return -1;
+      if (bi>=0) return 1;
+      return a.localeCompare(b,"ko");
+    });
+  },[bettingTree]);
+
+  const bettingLeagueGames = useMemo(()=>{
+    if (!bettingCountry || !bettingLeague) return [];
+    return (bettingTree[bettingCountry]?.[bettingLeague] || [])
+      .sort((a,b)=>new Date(a.start_time).getTime()-new Date(b.start_time).getTime());
+  },[bettingTree, bettingCountry, bettingLeague]);
+
   if(!authed) return <PasswordScreen onAuth={handleAuth}/>;
   if(!dbReady) return(
     <div style={{minHeight:"100vh",background:C.bg,display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:16}}>
@@ -1073,35 +1102,6 @@ function AppMain() {
       </div>
     );
   };
-
-  // ── 베팅 탭 트리 & 리그 게임 계산 ──
-  const bettingTree = useMemo(()=>{
-    const tree:Record<string,Record<string,LiveFixture[]>> = {};
-    for (const f of bettingFixtures) {
-      const c = ktr(f.country); const l = f.league_name;
-      if (!tree[c]) tree[c] = {};
-      if (!tree[c][l]) tree[c][l] = [];
-      tree[c][l].push(f);
-    }
-    return tree;
-  },[bettingFixtures]);
-
-  const bettingCountries = useMemo(()=>{
-    const ord = ["한국","미국","일본","잉글랜드","스페인","독일","이탈리아","프랑스","유럽","국제"];
-    return Object.keys(bettingTree).sort((a,b)=>{
-      const ai=ord.indexOf(a), bi=ord.indexOf(b);
-      if (ai>=0 && bi>=0) return ai-bi;
-      if (ai>=0) return -1;
-      if (bi>=0) return 1;
-      return a.localeCompare(b,"ko");
-    });
-  },[bettingTree]);
-
-  const bettingLeagueGames = useMemo(()=>{
-    if (!bettingCountry || !bettingLeague) return [];
-    return (bettingTree[bettingCountry]?.[bettingLeague] || [])
-      .sort((a,b)=>new Date(a.start_time).getTime()-new Date(b.start_time).getTime());
-  },[bettingTree, bettingCountry, bettingLeague]);
 
   const bettingCacheMsg = (()=>{
     if (!bettingCacheInfo.fetchedAt || !bettingCacheInfo.expiresAt) return "캐시 없음";
