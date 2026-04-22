@@ -1678,7 +1678,7 @@ function AppMain() {
         <div style={{display:"flex",flex:1,overflow:"hidden",minWidth:0,minHeight:0}}>
 
           {/* ─── 1. 카테고리 (종목/국가/리그) ─── */}
-          <div style={{width:320,flexShrink:0,background:C.bg2,borderRight:`1px solid ${C.border2}`,display:"flex",flexDirection:"column",overflow:"hidden",minHeight:0}}>
+          <div style={{width:380,flexShrink:0,background:C.bg2,borderRight:`1px solid ${C.border2}`,display:"flex",flexDirection:"column",overflow:"hidden",minHeight:0}}>
             <div style={{padding:"10px 12px",borderBottom:`1px solid ${C.border}`,flexShrink:0,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
               <div>
                 <div style={{fontSize:12,fontWeight:800,color:C.text}}>📂 카테고리</div>
@@ -1756,7 +1756,7 @@ function AppMain() {
           </div>
 
           {/* ─── 2. 경기 리스트 ─── */}
-          <div style={{width:230,flexShrink:0,background:C.bg2,borderRight:`1px solid ${C.border2}`,display:"flex",flexDirection:"column",overflow:"hidden",minHeight:0}}>
+          <div style={{width:210,flexShrink:0,background:C.bg2,borderRight:`1px solid ${C.border2}`,display:"flex",flexDirection:"column",overflow:"hidden",minHeight:0}}>
             <div style={{padding:"10px 12px",borderBottom:`1px solid ${C.border}`,flexShrink:0,display:"flex",justifyContent:"space-between",alignItems:"center",gap:6}}>
               <div style={{fontSize:12,fontWeight:800,color:C.orange,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>
                 {mSport&&mCountry&&mLeague ? `${SPORT_ICON[mSport]||"🏅"} ${mLeague}` : "← 리그 선택"}
@@ -1879,7 +1879,7 @@ function AppMain() {
           </div>
 
           {/* ─── 4. 베팅 슬립 ─── */}
-          <div style={{width:330,flexShrink:0,display:"flex",flexDirection:"column",overflow:"hidden",background:C.bg2,borderLeft:`1px solid ${C.border2}`,minHeight:0}}>
+          <div style={{width:380,flexShrink:0,display:"flex",flexDirection:"column",overflow:"hidden",background:C.bg2,borderLeft:`1px solid ${C.border2}`,minHeight:0}}>
             <div style={{padding:"10px 12px",borderBottom:`1px solid ${C.border}`,flexShrink:0,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
               <div style={{fontSize:13,fontWeight:800,color:C.orange}}>
                 📋 베팅 슬립
@@ -1963,7 +1963,7 @@ function AppMain() {
           </div>
 
           {/* ─── 5. 진행중 + 사이트 진행률 (우측 끝) ─── */}
-          <div style={{width:330,flexShrink:0,display:"flex",flexDirection:"column",overflow:"hidden",background:C.bg2,borderLeft:`1px solid ${C.border2}`,minHeight:0}}>
+          <div style={{width:380,flexShrink:0,display:"flex",flexDirection:"column",overflow:"hidden",background:C.bg2,borderLeft:`1px solid ${C.border2}`,minHeight:0}}>
 
             {/* 상: 사이트 진행률 */}
             <div style={{flexShrink:0,padding:"10px 12px",borderBottom:`1px solid ${C.border2}`,background:C.bg3}}>
