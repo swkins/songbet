@@ -3825,7 +3825,7 @@ function AppMain() {
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
                       <div style={{display:"flex",alignItems:"center",gap:6}}>
                         <span style={{fontSize:15,fontWeight:800,color:C.text}}>{dollar?"$":"₩"} {site}</span>
-                        {is100&&<span style={{fontSize:10,fontWeight:900,color:C.purple,border:`2px solid ${C.purple}`,borderRadius:4,padding:"1px 6px",opacity:0.75,transform:"rotate(-8deg)",display:"inline-block",letterSpacing:1}}>{isOver?`${pctRaw}%`:"✓ 완료"}</span>}
+                        {is100&&<span style={{fontSize:10,fontWeight:900,color:C.purple,border:`2px solid ${C.purple}`,borderRadius:4,padding:"1px 6px",opacity:0.75,transform:"rotate(-8deg)",display:"inline-block",letterSpacing:1}}>{isOver?`✓ ${pctRaw}%`:"✓ 완료"}</span>}
                       </div>
                       <div style={{display:"flex",gap:3}}>
                         <button onClick={()=>cancelSite(site)} title="사이트 취소" style={{fontSize:9,padding:"2px 6px",borderRadius:3,border:`1px solid ${C.border2}`,background:C.bg2,color:C.muted,cursor:"pointer"}}>✕</button>
@@ -4198,7 +4198,7 @@ function AppMain() {
                     <div key={site} style={{background:C.bg2,border:`1px solid ${barColor}33`,borderRadius:8,padding:"9px 10px",position:"relative",overflow:"hidden"}}>
                       {isComplete && (
                         <div style={{position:"absolute",top:"50%",right:8,transform:"translateY(-50%) rotate(-12deg)",fontSize:9,fontWeight:900,color:C.purple,border:`2px solid ${C.purple}`,borderRadius:4,padding:"1px 5px",letterSpacing:1,opacity:0.45,pointerEvents:"none",whiteSpace:"nowrap",zIndex:2}}>
-                          {pctRaw>100?`${pctRaw}%`:"✓ 완료"}
+                          {pctRaw>100?`✓ ${pctRaw}%`:"✓ 완료"}
                         </div>
                       )}
                       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
