@@ -783,6 +783,51 @@ function AppMain() {
     setEditMetaModal(null);setEditMetaNewName("");
   };
 
+  // 카테고리 메타 삭제 (수정 모달에서)
+  const handleDeleteMeta = () => {
+    if(!editMetaModal)return;
+    const {type,sport,country,oldName}=editMetaModal;
+
+    if(type==="sport"){
+      const relatedGames = manualGames.filter(g=>g.sportCat===oldName).length;
+      if(!window.confirm(`종목 "${oldName}" 을(를) 삭제하시겠습니까?\n이 종목의 경기 ${relatedGames}개와 모든 국가/리그가 함께 삭제됩니다.\n\n(진행중 베팅은 유지되지만 카테고리 링크가 끊어집니다.)`)) return;
+      // customSports에서 제거
+      saveCustomSports(customSports.filter(s=>s!==oldName));
+      // 관련 경기 삭제
+      saveManualGames(manualGames.filter(g=>g.sportCat!==oldName));
+      // 관련 국가/리그 삭제
+      const newCountries={...mCountries};delete newCountries[oldName];saveMCountries(newCountries);
+      const newLeagues={...mLeagues};
+      Object.keys(newLeagues).forEach(k=>{if(k.startsWith(oldName+"__"))delete newLeagues[k];});
+      saveMLeaguesStore(newLeagues);
+      if(mSport===oldName){setMSport("");setMCountry("");setMLeague("");}
+      addLog("🗑 종목 삭제",oldName);
+    }
+    else if(type==="country" && sport){
+      const relatedGames = manualGames.filter(g=>g.sportCat===sport&&g.country===oldName).length;
+      if(!window.confirm(`국가 "${oldName}" 을(를) 삭제하시겠습니까?\n이 국가의 경기 ${relatedGames}개와 모든 리그가 함께 삭제됩니다.`)) return;
+      // mCountries에서 제거
+      saveMCountries({...mCountries,[sport]:(mCountries[sport]||[]).filter(c=>c!==oldName)});
+      // 관련 경기 삭제
+      saveManualGames(manualGames.filter(g=>!(g.sportCat===sport&&g.country===oldName)));
+      // 관련 리그 삭제
+      const oldKey=`${sport}__${oldName}`;
+      const newLeagues={...mLeagues};delete newLeagues[oldKey];saveMLeaguesStore(newLeagues);
+      if(mCountry===oldName){setMCountry("");setMLeague("");}
+      addLog("🗑 국가 삭제",`${sport}/${oldName}`);
+    }
+    else if(type==="league" && sport && country){
+      const relatedGames = manualGames.filter(g=>g.sportCat===sport&&g.country===country&&g.league===oldName).length;
+      if(!window.confirm(`리그 "${oldName}" 을(를) 삭제하시겠습니까?\n이 리그의 경기 ${relatedGames}개가 함께 삭제됩니다.`)) return;
+      const key=`${sport}__${country}`;
+      saveMLeaguesStore({...mLeagues,[key]:(mLeagues[key]||[]).filter(l=>l!==oldName)});
+      saveManualGames(manualGames.filter(g=>!(g.sportCat===sport&&g.country===country&&g.league===oldName)));
+      if(mLeague===oldName)setMLeague("");
+      addLog("🗑 리그 삭제",`${sport}/${country}/${oldName}`);
+    }
+    setEditMetaModal(null);setEditMetaNewName("");
+  };
+
   const handleDeleteManualGame=(id:string)=>{
     if(!window.confirm("이 경기를 삭제하시겠습니까?"))return;
     saveManualGames(manualGames.filter(g=>g.id!==id));
@@ -1024,6 +1069,71 @@ function AppMain() {
 
   const addLog=(type:string,desc:string)=>setLogs(p=>[{id:String(Date.now()),ts:new Date().toLocaleString("ko-KR"),type,desc},...p].slice(0,200));
 
+  // 최근 로그 행동 취소 (첫번째 로그만)
+  const undoLastLog = () => {
+    if (logs.length===0) return alert("취소할 로그가 없습니다.");
+    const log = logs[0];
+    const t = log.type;
+    const d = log.desc;
+    // 취소 가능 타입 처리
+    if (t==="➕ 베팅") {
+      // 가장 최근 베팅 영구삭제
+      const latestBet = [...bets].sort((a,b)=>parseFloat(b.id)-parseFloat(a.id))[0];
+      if (!latestBet) return alert("취소할 베팅 데이터가 없습니다.");
+      if (!window.confirm(`최근 베팅을 취소하시겠습니까?\n${d}`)) return;
+      setBetsRaw(b=>b.filter(x=>x.id!==latestBet.id));
+      db.deleteBet(latestBet.id);
+      // 사이트 betTotal 감소
+      if (siteStates[latestBet.site]) {
+        const updated = {...siteStates[latestBet.site],betTotal:parseFloat(Math.max(0, siteStates[latestBet.site].betTotal-latestBet.amount).toFixed(2))};
+        setSiteStatesRaw(p=>({...p,[latestBet.site]:updated}));
+        db.upsertSiteState(latestBet.site,updated);
+      }
+      setLogs(p=>p.slice(1));
+      addLog("↶ 로그 취소",`${t} 취소됨`);
+      return;
+    }
+    if (t==="✅ 적중" || t==="❌ 실패") {
+      // 가장 최근 결과 처리된 베팅 찾기 (desc에 homeTeam/teamName 포함)
+      const targetResult = t==="✅ 적중" ? "승" : "패";
+      const candidates = bets.filter(b=>b.result===targetResult && (b.homeTeam===d||b.teamName===d));
+      const latestProcessed = [...candidates].sort((a,b)=>parseFloat(b.id)-parseFloat(a.id))[0];
+      if (!latestProcessed) return alert(`해당 ${t} 처리된 베팅을 찾을 수 없습니다.`);
+      if (!window.confirm(`${t} 처리를 취소하고 진행중으로 되돌리시겠습니까?\n${d}`)) return;
+      revertToPending(latestProcessed.id);
+      setLogs(p=>p.slice(1));
+      return;
+    }
+    if (t==="🚫 취소") {
+      // 취소된 베팅을 다시 진행중으로
+      const candidates = bets.filter(b=>b.result==="취소" && (b.homeTeam===d||b.teamName===d));
+      const latest = [...candidates].sort((a,b)=>parseFloat(b.id)-parseFloat(a.id))[0];
+      if (!latest) return alert("취소된 베팅을 찾을 수 없습니다.");
+      if (!window.confirm(`취소를 되돌려 진행중으로 복귀합니다.\n${d}`)) return;
+      revertToPending(latest.id);
+      setLogs(p=>p.slice(1));
+      return;
+    }
+    if (t==="💵 입금") {
+      // 가장 최근 deposit 삭제
+      const latestDep = [...deposits].sort((a,b)=>parseFloat(b.id)-parseFloat(a.id))[0];
+      if (!latestDep) return alert("취소할 입금 기록이 없습니다.");
+      if (!window.confirm(`최근 입금을 취소하시겠습니까?\n${d}`)) return;
+      setDepositsRaw(dp=>dp.filter(x=>x.id!==latestDep.id));
+      // NOTE: db.deleteDeposit 미구현 상태이므로 로컬만 반영 (새로고침 시 복원될 수 있음)
+      // 사이트 deposited 감소
+      if (siteStates[latestDep.site]) {
+        const updated = {...siteStates[latestDep.site],deposited:parseFloat(Math.max(0, siteStates[latestDep.site].deposited-latestDep.amount).toFixed(2))};
+        setSiteStatesRaw(p=>({...p,[latestDep.site]:updated}));
+        db.upsertSiteState(latestDep.site,updated);
+      }
+      setLogs(p=>p.slice(1));
+      addLog("↶ 로그 취소",`${t} 취소됨`);
+      return;
+    }
+    alert(`"${t}" 유형의 로그는 자동 취소할 수 없습니다.\n해당 탭에서 직접 되돌려주세요.`);
+  };
+
   const exportData = () => {
     const data={exportedAt:new Date().toISOString(),bets,deposits,withdrawals,siteStates,customLeagues,esportsRecords,profitExtras};
     const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
@@ -1074,7 +1184,12 @@ function AppMain() {
   const [depAmt,setDepAmt]=useState(0);
   const [depPoint,setDepPoint]=useState(0);
 
-  const activeSiteNames=ALL_SITES.filter(s=>siteStates[s]?.active);
+  // 활성 상태 OR 입금액 있는 사이트 모두 포함 (마감 전까지 유지)
+  const activeSiteNames=ALL_SITES.filter(s=>{
+    const st=siteStates[s];
+    if (!st) return false;
+    return st.active || (st.deposited||0) > 0;
+  });
 
   // ── E스포츠 기록 ─────────────────────────────────────────
   const [esRec,setEsRec]=useState({league:"LCK",date:today,teamA:"",teamB:"",scoreA:0,scoreB:0});
@@ -1179,9 +1294,20 @@ function AppMain() {
     const bet=bets.find(b=>b.id===id);if(!bet)return;
     const reverted={...bet,result:"진행중",profit:null};
     setBetsRaw(b=>b.map(x=>x.id===id?reverted:x));db.upsertBet(reverted);
-    const revertSS={...siteStates,[bet.site]:{...siteStates[bet.site],betTotal:parseFloat((siteStates[bet.site].betTotal+bet.amount).toFixed(2))}};
-    setSiteStatesRaw(revertSS);db.upsertSiteState(bet.site,revertSS[bet.site]);
-    addLog("🔄 복귀",bet.homeTeam||bet.teamName||id);
+    // 사이트 상태 복구: deposited 재계산 + active 복구 + betTotal 더하기
+    const siteDeposits = deposits.filter(d=>d.site===bet.site).reduce((s,d)=>s+d.amount,0);
+    const sitePoints = (siteStates[bet.site]?.pointTotal)||0;
+    const curSS = siteStates[bet.site] || {deposited:0,betTotal:0,active:false,isDollar:isUSD(bet.site),pointTotal:0};
+    const revertedSS = {
+      ...curSS,
+      deposited: siteDeposits,  // 입금 기록 기반 재계산
+      betTotal: parseFloat((curSS.betTotal + bet.amount).toFixed(2)),
+      pointTotal: sitePoints,
+      active: true,
+    };
+    setSiteStatesRaw(p=>({...p,[bet.site]:revertedSS}));
+    db.upsertSiteState(bet.site,revertedSS);
+    addLog("↩ 처리 취소",`${bet.site}/${bet.homeTeam||bet.teamName||id}`);
   };
   const deleteFromStats=(id:string)=>{
     setBetsRaw(b=>b.map(bet=>{if(bet.id!==id)return bet;const u={...bet,includeStats:false};db.upsertBet(u);return u;}));
@@ -1352,7 +1478,7 @@ function AppMain() {
       <div style={{background:C.bg2,border:`1px solid ${verdict==="승"?C.green:verdict==="패"?C.red:C.amber}44`,borderRadius:8,padding:"10px 12px",marginBottom:7,position:"relative",overflow:"hidden"}}>
         {/* 적중/실패 도장 - 가운데 크게 반투명 */}
         {verdict && (
-          <div style={{position:"absolute",top:"50%",left:"50%",transform:"translate(-50%,-50%) rotate(-15deg)",fontSize:34,fontWeight:900,color:verdict==="승"?C.green:C.red,border:`5px solid ${verdict==="승"?C.green:C.red}`,borderRadius:10,padding:"6px 22px",letterSpacing:3,opacity:0.32,pointerEvents:"none",whiteSpace:"nowrap",zIndex:2}}>
+          <div style={{position:"absolute",top:"50%",left:"50%",transform:"translate(-50%,-50%) rotate(-15deg)",fontSize:17,fontWeight:900,color:verdict==="승"?C.green:C.red,border:`3px solid ${verdict==="승"?C.green:C.red}`,borderRadius:6,padding:"3px 11px",letterSpacing:2,opacity:0.32,pointerEvents:"none",whiteSpace:"nowrap",zIndex:2}}>
             {verdict==="승"?"✅ 적중":"❌ 실패"}
           </div>
         )}
@@ -1418,8 +1544,8 @@ function AppMain() {
           </div>
         </div>
         <div style={{display:"flex",gap:3}}>
-          {["승","패"].map(r=>(<button key={r} onClick={()=>updateResult(b.id,r)} style={{flex:1,background:b.result===r?C.border2:"transparent",border:`1px solid ${b.result===r?C.border2:C.border}`,color:b.result===r?C.text:C.dim,padding:"3px",borderRadius:3,cursor:"pointer",fontSize:10}}>{r==="승"?"✅":"❌"}</button>))}
-          <button onClick={()=>revertToPending(b.id)} title="진행중으로" style={{background:"transparent",border:`1px solid ${C.border}`,color:C.dim,padding:"3px 5px",borderRadius:3,cursor:"pointer",fontSize:10}}>🔄</button>
+          {["승","패"].map(r=>(<button key={r} onClick={()=>updateResult(b.id,r)} style={{flex:1,background:b.result===r?C.border2:"transparent",border:`1px solid ${b.result===r?C.border2:C.border}`,color:b.result===r?C.text:C.dim,padding:"3px",borderRadius:3,cursor:"pointer",fontSize:10}}>{r==="승"?"적중":"실패"}</button>))}
+          <button onClick={()=>revertToPending(b.id)} title="진행중으로 되돌리기" style={{background:`${C.amber}11`,border:`1px solid ${C.amber}66`,color:C.amber,padding:"3px 8px",borderRadius:3,cursor:"pointer",fontSize:10,fontWeight:700}}>↩ 처리취소</button>
           <button onClick={()=>setDeleteModal({betId:b.id})} title="삭제" style={{background:"transparent",border:`1px solid ${C.border}`,color:C.dim,padding:"3px 5px",borderRadius:3,cursor:"pointer",fontSize:10}}>🗑</button>
         </div>
       </div>
@@ -1715,10 +1841,14 @@ function AppMain() {
               placeholder="새 이름"
               style={{...S,boxSizing:"border-box",marginBottom:14}}/>
             <div style={{fontSize:10,color:C.dim,marginBottom:10}}>※ 기존 경기 데이터의 이름도 함께 변경됩니다.</div>
-            <div style={{display:"flex",gap:8}}>
+            <div style={{display:"flex",gap:8,marginBottom:8}}>
               <button onClick={handleEditMeta} style={{flex:1,background:`${C.purple}22`,border:`1px solid ${C.purple}`,color:C.purple,padding:"9px",borderRadius:7,cursor:"pointer",fontWeight:700}}>수정</button>
               <button onClick={()=>{setEditMetaModal(null);setEditMetaNewName("");}} style={{flex:1,background:C.bg2,border:`1px solid ${C.border}`,color:C.muted,padding:"9px",borderRadius:7,cursor:"pointer"}}>취소</button>
             </div>
+            <button onClick={handleDeleteMeta}
+              style={{width:"100%",background:`${C.red}22`,border:`1px solid ${C.red}`,color:C.red,padding:"8px",borderRadius:7,cursor:"pointer",fontWeight:700,fontSize:12}}>
+              🗑 이 {editMetaModal.type==="sport"?"종목":editMetaModal.type==="country"?"국가":"리그"} 삭제
+            </button>
           </div>
         </div>
       )}
@@ -3162,7 +3292,7 @@ function AppMain() {
                     <div key={g.id} style={{background:g.finished?`${C.amber}11`:C.bg3,border:`2px solid ${g.finished?C.amber:C.border}`,borderRadius:9,padding:"12px 14px",marginBottom:10,position:"relative",overflow:"hidden"}}>
                       {/* 종료 도장 - 가운데 크게 반투명 */}
                       {g.finished && (
-                        <div style={{position:"absolute",top:"50%",left:"50%",transform:"translate(-50%,-50%) rotate(-15deg)",fontSize:38,fontWeight:900,color:C.amber,border:`5px solid ${C.amber}`,borderRadius:10,padding:"8px 24px",letterSpacing:3,opacity:0.35,pointerEvents:"none",whiteSpace:"nowrap",zIndex:2}}>
+                        <div style={{position:"absolute",top:"50%",left:"50%",transform:"translate(-50%,-50%) rotate(-15deg)",fontSize:19,fontWeight:900,color:C.amber,border:`3px solid ${C.amber}`,borderRadius:6,padding:"4px 12px",letterSpacing:2,opacity:0.35,pointerEvents:"none",whiteSpace:"nowrap",zIndex:2}}>
                           🏁 종료
                         </div>
                       )}
@@ -3181,6 +3311,15 @@ function AppMain() {
                           style={{...S,boxSizing:"border-box",fontSize:18,padding:"6px",textAlign:"center" as const,fontWeight:900,color:C.teal,...noSpin,opacity:g.finished?0.6:1}}/>
                         <div style={{fontSize:13,fontWeight:800,color:C.text,textAlign:"left"}}>{g.awayTeam}</div>
                       </div>
+                      {/* 종료된 경기는 취소 버튼 */}
+                      {g.finished && (
+                        <div style={{marginTop:7,display:"flex",justifyContent:"flex-end",position:"relative",zIndex:3}}>
+                          <button onClick={()=>handleUnfinishGame(g.id)}
+                            style={{padding:"4px 12px",borderRadius:5,border:`1px solid ${C.muted}66`,background:C.bg,color:C.muted,cursor:"pointer",fontWeight:700,fontSize:10}}>
+                            ↩ 종료 취소
+                          </button>
+                        </div>
+                      )}
                     </div>
                   );
                 });
@@ -3474,16 +3613,22 @@ function AppMain() {
       {/* ══ 로그 탭 ══ */}
       {tab==="log"&&(
         <div style={{flex:1,overflowY:"auto",padding:20}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,gap:10}}>
             <div style={{fontSize:16,fontWeight:800,color:C.purple}}>🗒 활동 로그</div>
-            <button onClick={()=>setLogs([])} style={{fontSize:11,padding:"5px 12px",borderRadius:5,border:`1px solid ${C.red}44`,background:`${C.red}11`,color:C.red,cursor:"pointer"}}>전체 삭제</button>
+            <div style={{display:"flex",gap:8}}>
+              {logs.length>0 && <button onClick={undoLastLog}
+                style={{fontSize:11,padding:"5px 14px",borderRadius:5,border:`1px solid ${C.amber}`,background:`${C.amber}22`,color:C.amber,cursor:"pointer",fontWeight:700}}>
+                ↶ 최근 행동 취소
+              </button>}
+              <button onClick={()=>setLogs([])} style={{fontSize:11,padding:"5px 12px",borderRadius:5,border:`1px solid ${C.red}44`,background:`${C.red}11`,color:C.red,cursor:"pointer"}}>전체 삭제</button>
+            </div>
           </div>
           {logs.length===0?<div style={{textAlign:"center",color:C.dim,padding:"60px 0",fontSize:14}}>활동 기록이 없습니다</div>:
             <div style={{display:"flex",flexDirection:"column",gap:5}}>
-              {logs.map(l=>(
-                <div key={l.id} style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:8,padding:"10px 14px",display:"flex",gap:12,alignItems:"center"}}>
+              {logs.map((l,idx)=>(
+                <div key={l.id} style={{background:idx===0?`${C.amber}11`:C.bg3,border:`1px solid ${idx===0?C.amber+"55":C.border}`,borderRadius:8,padding:"10px 14px",display:"flex",gap:12,alignItems:"center"}}>
                   <div style={{fontSize:13,minWidth:28,textAlign:"center"}}>{l.type.split(" ")[0]}</div>
-                  <div style={{flex:1}}><div style={{fontSize:12,fontWeight:700,color:C.text}}>{l.type.replace(/^.\s/,"")}</div><div style={{fontSize:11,color:C.muted,marginTop:1}}>{l.desc}</div></div>
+                  <div style={{flex:1}}><div style={{fontSize:12,fontWeight:700,color:C.text}}>{l.type.replace(/^.\s/,"")}{idx===0 && <span style={{marginLeft:7,fontSize:9,color:C.amber,background:`${C.amber}22`,padding:"1px 5px",borderRadius:3}}>최근</span>}</div><div style={{fontSize:11,color:C.muted,marginTop:1}}>{l.desc}</div></div>
                   <div style={{fontSize:10,color:C.dim,flexShrink:0}}>{l.ts}</div>
                 </div>
               ))}
