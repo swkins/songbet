@@ -691,15 +691,25 @@ function AppMain() {
     setMExpandedSports(p=>({...p,[n]:true}));
   };
 
-  const handleAddCountry=()=>{
+  const handleAddCountry=(continueToLeague=false)=>{
     if(!addCountryModal)return;
     const n=newCountryName.trim();if(!n)return;
     const sport=addCountryModal.sport;
     const list=mCountries[sport]||[];
-    if(list.includes(n)||allCountriesForSport(sport).includes(n))return alert("이미 존재합니다.");
+    if(list.includes(n)||allCountriesForSport(sport).includes(n)){
+      if(!continueToLeague) return alert("이미 존재합니다.");
+      // 이미 있으면 그냥 바로 리그 추가로 넘어감
+      setAddCountryModal(null);setNewCountryName("");
+      setAddLeagueModalM({sport,country:n});
+      return;
+    }
     saveMCountries({...mCountries,[sport]:[...list,n]});
-    setAddCountryModal(null);setNewCountryName("");
     setMExpandedCountries(p=>({...p,[`${sport}__${n}`]:true}));
+    setAddCountryModal(null);setNewCountryName("");
+    if (continueToLeague) {
+      // 바로 리그 추가 모달 열기
+      setAddLeagueModalM({sport,country:n});
+    }
   };
 
   const handleAddLeagueM=()=>{
@@ -851,6 +861,7 @@ function AppMain() {
   const [manualSlipAmount,setManualSlipAmount]=useState<number>(10000);
   const [manualSlipInclude,setManualSlipInclude]=useState<boolean>(true);
   const [manualExpandedId,setManualExpandedId]=useState<string|null>(null);
+  const [slipOddsInputStr,setSlipOddsInputStr]=useState<string>(""); // 배당 입력 중인 문자열 (포커스 중에만 사용)
 
   const manualSlipKeys = useMemo(()=>new Set(manualSlip.map(s=>s.id)),[manualSlip]);
 
@@ -869,6 +880,41 @@ function AppMain() {
     if(!manualSlipSite)return alert("베팅사이트를 선택해주세요.");
     const missing = manualSlip.find(s => !s.odds || s.odds < 1);
     if(missing)return alert(`${missing.game.homeTeam} vs ${missing.game.awayTeam} 의 배당률을 입력해주세요.`);
+
+    // 베팅 옵션 카테고리 분류 (승패 | 오언 | 핸디캡)
+    const categorizeOpt = (opt:string): "승패"|"오언"|"핸디캡"|"기타" => {
+      if (opt==="홈승"||opt==="원정승"||opt==="무승부") return "승패";
+      if (opt.endsWith(" 승")) return "승패";
+      if (/^(오버|언더)/.test(opt)) return "오언";
+      if (/\([+-]?[\d.]+\)$/.test(opt)) return "핸디캡"; // "팀명 (1.5)" 형식
+      return "기타";
+    };
+
+    // 같은 경기 + 같은 카테고리로 이미 진행중 베팅이 있는지 검사
+    for (const item of manualSlip) {
+      const g = item.game;
+      const newCat = categorizeOpt(item.optLabel);
+      const existing = pending.find(b => {
+        if (!b.homeTeam || !b.awayTeam) return false;
+        if (b.homeTeam !== g.homeTeam || b.awayTeam !== g.awayTeam) return false;
+        if (b.league !== g.league) return false;
+        return categorizeOpt(b.betOption) === newCat;
+      });
+      if (existing) {
+        const existingDisplay = existing.betOption==="홈승" && existing.homeTeam ? `${existing.homeTeam} 승` :
+                                existing.betOption==="원정승" && existing.awayTeam ? `${existing.awayTeam} 승` :
+                                existing.betOption;
+        const ok = window.confirm(
+          `⚠️ 중복 베팅 경고\n\n` +
+          `${g.homeTeam} vs ${g.awayTeam} 경기에\n` +
+          `이미 "${newCat}" 카테고리로 베팅이 진행중입니다:\n\n` +
+          `  기존: ${existingDisplay} (${existing.site}, ${fmtDisp(existing.amount,existing.isDollar)})\n` +
+          `  신규: ${item.optLabel} (${manualSlipSite})\n\n` +
+          `그래도 베팅하시겠습니까?`
+        );
+        if (!ok) return;
+      }
+    }
 
     const dollar=isUSD(manualSlipSite);
     manualSlip.forEach(item=>{
@@ -1866,19 +1912,26 @@ function AppMain() {
       {/* 국가 추가 모달 */}
       {addCountryModal&&(
         <div style={{position:"fixed",inset:0,background:"#000b",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center"}}>
-          <div style={{background:C.bg3,border:`1px solid ${C.teal}`,borderRadius:14,padding:24,width:340}}>
+          <div style={{background:C.bg3,border:`1px solid ${C.teal}`,borderRadius:14,padding:24,width:360}}>
             <div style={{fontSize:15,fontWeight:800,color:C.teal,marginBottom:6}}>➕ 국가 추가</div>
             <div style={{fontSize:11,color:C.muted,marginBottom:14}}>종목: <b style={{color:C.orange}}>{SPORT_ICON[addCountryModal.sport]||"🏅"} {addCountryModal.sport}</b></div>
             <input autoFocus value={newCountryName} onChange={e=>setNewCountryName(e.target.value)}
-              onKeyDown={e=>e.key==="Enter"&&handleAddCountry()}
+              onKeyDown={e=>{
+                if(e.key==="Enter"){e.preventDefault();handleAddCountry(false);}
+                else if(e.key==="Tab" && !e.shiftKey && newCountryName.trim()){e.preventDefault();handleAddCountry(true);}
+              }}
               placeholder="예: 잉글랜드, 한국, 미국"
               list="country-list-add"
-              style={{...S,boxSizing:"border-box",marginBottom:14}}/>
+              style={{...S,boxSizing:"border-box",marginBottom:10}}/>
             <datalist id="country-list-add">
               {["잉글랜드","스페인","독일","이탈리아","프랑스","한국","일본","미국","브라질","네덜란드","포르투갈","국제","유럽","남미","아시아","중국","멕시코","터키","러시아","아르헨티나"].map(c=><option key={c} value={c}/>)}
             </datalist>
-            <div style={{display:"flex",gap:8}}>
-              <button onClick={handleAddCountry} style={{flex:1,background:`${C.teal}22`,border:`1px solid ${C.teal}`,color:C.teal,padding:"9px",borderRadius:7,cursor:"pointer",fontWeight:700}}>추가</button>
+            <div style={{fontSize:10,color:C.dim,marginBottom:12,padding:"6px 10px",background:C.bg2,borderRadius:5,lineHeight:1.6}}>
+              💡 <b style={{color:C.amber}}>Enter</b>: 추가 후 닫기 · <b style={{color:C.teal}}>Tab</b>: 추가 후 리그 추가 계속
+            </div>
+            <div style={{display:"flex",gap:6}}>
+              <button onClick={()=>handleAddCountry(true)} style={{flex:1,background:`${C.amber}22`,border:`1px solid ${C.amber}`,color:C.amber,padding:"9px",borderRadius:7,cursor:"pointer",fontWeight:700,fontSize:12}}>➕ 추가 후 리그</button>
+              <button onClick={()=>handleAddCountry(false)} style={{flex:1,background:`${C.teal}22`,border:`1px solid ${C.teal}`,color:C.teal,padding:"9px",borderRadius:7,cursor:"pointer",fontWeight:700}}>✅ 추가</button>
               <button onClick={()=>{setAddCountryModal(null);setNewCountryName("");}} style={{flex:1,background:C.bg2,border:`1px solid ${C.border}`,color:C.muted,padding:"9px",borderRadius:7,cursor:"pointer"}}>취소</button>
             </div>
           </div>
@@ -2361,15 +2414,37 @@ function AppMain() {
                   {(()=>{
                     const item = manualSlip[0];
                     if(!item) return null;
-                    const oddsRaw = item.odds>0 ? String(item.odds) : "";
+                    // 표시: 입력 중이면 입력 문자열, 아니면 odds를 2자리로 포맷
+                    const displayValue = slipOddsInputStr !== "" 
+                      ? slipOddsInputStr 
+                      : (item.odds>0 ? item.odds.toFixed(2) : "");
                     return (
                       <div style={{marginBottom:11}}>
-                        <div style={{...L,fontSize:12,marginBottom:5}}>2️⃣ 배당 <span style={{fontSize:10,color:C.dim,fontWeight:400}}>(321 → 3.21 자동변환)</span></div>
+                        <div style={{...L,fontSize:12,marginBottom:5}}>2️⃣ 배당 <span style={{fontSize:10,color:C.dim,fontWeight:400}}>(180 → 1.80 자동변환)</span></div>
                         <input id="slip-odds-input" type="text" inputMode="decimal" placeholder="배당 입력"
                           tabIndex={1}
-                          value={oddsRaw}
-                          onChange={e=>{let raw=e.target.value.replace(/[^0-9.]/g,"");let v=0;if(/^\d{3,}$/.test(raw)){v=parseFloat((parseInt(raw,10)/100).toFixed(2));}else{v=parseFloat(raw)||0;}setManualSlip(prev=>prev.map(s=>s.id===item.id?{...s,odds:v}:s));}}
-                          onKeyDown={e=>{if(e.key==="Enter"||e.key==="Tab"){e.preventDefault();const el=document.getElementById("slip-amount-input")as HTMLInputElement|null;if(el){el.focus();el.select();}}}}
+                          value={displayValue}
+                          onFocus={()=>{
+                            // 포커스 시 현재 odds를 입력 문자열로
+                            if(item.odds>0) setSlipOddsInputStr(item.odds.toFixed(2));
+                          }}
+                          onChange={e=>{
+                            let raw=e.target.value.replace(/[^0-9.]/g,"");
+                            setSlipOddsInputStr(raw); // 입력 문자열 그대로 저장
+                            let v=0;
+                            if(/^\d{3,}$/.test(raw)){
+                              // 3자리 이상 정수 → 100으로 나누기 (180 → 1.80)
+                              v=parseFloat((parseInt(raw,10)/100).toFixed(2));
+                            } else {
+                              v=parseFloat(raw)||0;
+                            }
+                            setManualSlip(prev=>prev.map(s=>s.id===item.id?{...s,odds:v}:s));
+                          }}
+                          onBlur={()=>{
+                            // 입력 종료 시 공식 표시(2자리)로 동기화
+                            setSlipOddsInputStr("");
+                          }}
+                          onKeyDown={e=>{if(e.key==="Enter"||e.key==="Tab"){e.preventDefault();setSlipOddsInputStr("");const el=document.getElementById("slip-amount-input")as HTMLInputElement|null;if(el){el.focus();el.select();}}}}
                           style={{...S,boxSizing:"border-box",fontSize:18,padding:"12px 14px",fontWeight:800,textAlign:"center" as const,color:C.teal,letterSpacing:1}}/>
                       </div>
                     );
