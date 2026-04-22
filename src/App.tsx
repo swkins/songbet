@@ -1755,7 +1755,7 @@ function AppMain() {
           </div>
 
           {/* ─── 2. 경기 리스트 ─── */}
-          <div style={{width:280,flexShrink:0,background:C.bg2,borderRight:`1px solid ${C.border2}`,display:"flex",flexDirection:"column",overflow:"hidden",minHeight:0}}>
+          <div style={{width:380,flexShrink:0,background:C.bg2,borderRight:`1px solid ${C.border2}`,display:"flex",flexDirection:"column",overflow:"hidden",minHeight:0}}>
             <div style={{padding:"10px 12px",borderBottom:`1px solid ${C.border}`,flexShrink:0,display:"flex",justifyContent:"space-between",alignItems:"center",gap:6}}>
               <div style={{fontSize:12,fontWeight:800,color:C.orange,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>
                 {mSport&&mCountry&&mLeague ? `${SPORT_ICON[mSport]||"🏅"} ${mLeague}` : "← 리그 선택"}
