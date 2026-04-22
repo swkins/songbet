@@ -1310,6 +1310,16 @@ function AppMain() {
       b.betOption==="홈승" && b.homeTeam ? `${b.homeTeam} 승` :
       b.betOption==="원정승" && b.awayTeam ? `${b.awayTeam} 승` :
       b.betOption;
+    // ★ 라이브 스코어와 매칭: 종료된 경기에 대한 베팅이면 자동 판정
+    const matchedGame = (b.homeTeam && b.awayTeam) ? manualGames.find(g =>
+      g.finished &&
+      g.homeTeam===b.homeTeam &&
+      g.awayTeam===b.awayTeam &&
+      g.league===b.league
+    ) : undefined;
+    const verdict = (matchedGame && matchedGame.homeScore!==undefined && matchedGame.awayScore!==undefined)
+      ? judgeBetResult(b, matchedGame.homeScore, matchedGame.awayScore)
+      : null;
     const isEditing=editingBetId===b.id;
     if(isEditing){
       return(
@@ -1335,9 +1345,15 @@ function AppMain() {
       );
     }
     return(
-      <div style={{background:C.bg2,border:`1px solid ${C.amber}44`,borderRadius:8,padding:"10px 12px",marginBottom:7}}>
+      <div style={{background:C.bg2,border:`1px solid ${verdict==="승"?C.green:verdict==="패"?C.red:C.amber}44`,borderRadius:8,padding:"10px 12px",marginBottom:7,position:"relative"}}>
+        {/* 적중/실패 도장 (자동 판정 시) */}
+        {verdict && (
+          <span style={{position:"absolute",top:6,right:6,fontSize:11,fontWeight:900,color:verdict==="승"?C.green:C.red,border:`2px solid ${verdict==="승"?C.green:C.red}`,borderRadius:5,padding:"2px 8px",transform:"rotate(-8deg)",letterSpacing:1,background:`${verdict==="승"?C.green:C.red}22`}}>
+            {verdict==="승"?"✅ 적중":"❌ 실패"}
+          </span>
+        )}
         {/* 상단: 카테고리/리그 + 옵션 */}
-        <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6,flexWrap:"wrap"}}>
+        <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6,flexWrap:"wrap",paddingRight:verdict?70:0}}>
           <span style={{fontSize:14,flexShrink:0}}>{SPORT_ICON[b.category]||"🎯"}</span>
           <span style={{fontSize:10,color:C.muted,background:C.bg,padding:"2px 6px",borderRadius:3}}>{b.league}</span>
           <span style={{fontSize:13,color:C.orange,fontWeight:800,marginLeft:"auto"}}>{displayBetOption}</span>
@@ -1346,6 +1362,12 @@ function AppMain() {
         <div style={{fontSize:14,fontWeight:800,color:C.text,marginBottom:7,lineHeight:1.3,wordBreak:"break-word"}}>
           {title || "-"}
         </div>
+        {/* 종료된 경기면 스코어 표시 */}
+        {matchedGame && (
+          <div style={{fontSize:11,color:C.muted,marginBottom:7,padding:"4px 8px",background:C.bg,borderRadius:4,textAlign:"center"}}>
+            🏁 종료: <b style={{color:C.green}}>{matchedGame.homeScore}</b> : <b style={{color:C.teal}}>{matchedGame.awayScore}</b>
+          </div>
+        )}
         {/* 하단: 배당 + 금액 + 버튼들 */}
         <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
           <div style={{display:"flex",gap:10,flex:1,minWidth:120}}>
@@ -1353,9 +1375,20 @@ function AppMain() {
             <span style={{fontSize:13,color:C.amber,fontWeight:800}}>{fmtDisp(b.amount,b.isDollar)}</span>
           </div>
           <div style={{display:"flex",gap:4,flexShrink:0}}>
-            <button onClick={()=>updateResult(b.id,"승")} style={{background:`${C.green}22`,border:`1px solid ${C.green}`,color:C.green,padding:"5px 12px",borderRadius:4,cursor:"pointer",fontWeight:800,fontSize:12}}>적중</button>
-            <button onClick={()=>updateResult(b.id,"패")} style={{background:`${C.red}22`,border:`1px solid ${C.red}`,color:C.red,padding:"5px 12px",borderRadius:4,cursor:"pointer",fontWeight:800,fontSize:12}}>실패</button>
-            <button onClick={()=>cancelBet(b.id)} style={{background:C.bg,border:`1px solid ${C.border2}`,color:C.muted,padding:"5px 12px",borderRadius:4,cursor:"pointer",fontSize:12}}>취소</button>
+            {verdict ? (
+              // 자동 판정 결과 있을 때: 확인 버튼만
+              <button onClick={()=>updateResult(b.id,verdict)}
+                style={{background:`${verdict==="승"?C.green:C.red}33`,border:`2px solid ${verdict==="승"?C.green:C.red}`,color:verdict==="승"?C.green:C.red,padding:"6px 16px",borderRadius:5,cursor:"pointer",fontWeight:900,fontSize:13}}>
+                ✓ 확인
+              </button>
+            ) : (
+              // 자동 판정 없을 때: 수동 적중/실패/취소
+              <>
+                <button onClick={()=>updateResult(b.id,"승")} style={{background:`${C.green}22`,border:`1px solid ${C.green}`,color:C.green,padding:"5px 12px",borderRadius:4,cursor:"pointer",fontWeight:800,fontSize:12}}>적중</button>
+                <button onClick={()=>updateResult(b.id,"패")} style={{background:`${C.red}22`,border:`1px solid ${C.red}`,color:C.red,padding:"5px 12px",borderRadius:4,cursor:"pointer",fontWeight:800,fontSize:12}}>실패</button>
+                <button onClick={()=>cancelBet(b.id)} style={{background:C.bg,border:`1px solid ${C.border2}`,color:C.muted,padding:"5px 12px",borderRadius:4,cursor:"pointer",fontSize:12}}>취소</button>
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -1748,7 +1781,7 @@ function AppMain() {
       {tab==="bettingCombo" && (()=>{
         const selGame = manualExpandedId ? manualGames.find(g=>g.id===manualExpandedId) : null;
         const selectedGames = (mSport && mCountry && mLeague)
-          ? manualGames.filter(g=>g.sportCat===mSport && g.country===mCountry && g.league===mLeague)
+          ? manualGames.filter(g=>g.sportCat===mSport && g.country===mCountry && g.league===mLeague && !g.finished)
               .sort((a,b)=>b.createdAt-a.createdAt)
           : [];
         // 진행중 정렬: 최신순
@@ -2270,7 +2303,7 @@ function AppMain() {
 
         // 현재 선택된 리그의 경기들
         const selectedGames = (mSport && mCountry && mLeague)
-          ? manualGames.filter(g=>g.sportCat===mSport&&g.country===mCountry&&g.league===mLeague)
+          ? manualGames.filter(g=>g.sportCat===mSport&&g.country===mCountry&&g.league===mLeague&&!g.finished)
               .sort((a,b)=>b.createdAt-a.createdAt)
           : [];
 
@@ -3118,12 +3151,6 @@ function AppMain() {
                   </div>
                 );
                 return sportGames.map(g=>{
-                  // 이 경기에 대한 진행중 베팅들
-                  const gameBets = pending.filter(b=>{
-                    // 같은 홈팀/원정팀이면 같은 경기로 간주
-                    return (b.homeTeam===g.homeTeam && b.awayTeam===g.awayTeam) ||
-                           ((b.teamName===g.homeTeam||b.teamName===g.awayTeam) && b.league===g.league);
-                  });
                   return (
                     <div key={g.id} style={{background:g.finished?`${C.amber}11`:C.bg3,border:`2px solid ${g.finished?C.amber:C.border}`,borderRadius:9,padding:"12px 14px",marginBottom:10,position:"relative"}}>
                       {/* 종료 도장 */}
@@ -3157,55 +3184,6 @@ function AppMain() {
                         <button onClick={()=>handleRemoveLiveGame(g.id)} style={{padding:"7px 11px",borderRadius:5,border:`1px solid ${C.red}44`,background:`${C.red}11`,color:C.red,cursor:"pointer",fontSize:11}}>제거</button>
                       </div>
 
-                      {/* 종료 시: 자동 판정된 베팅들 */}
-                      {g.finished && gameBets.length>0 && (
-                        <div style={{marginTop:10,paddingTop:10,borderTop:`1px dashed ${C.border}`}}>
-                          <div style={{fontSize:10,color:C.muted,marginBottom:6,fontWeight:700}}>📊 자동 판정 결과 ({gameBets.length}건)</div>
-                          {gameBets.map(b=>{
-                            const verdict = judgeBetResult(b, g.homeScore!, g.awayScore!);
-                            const dollar=b.isDollar;
-                            const profit = verdict==="승" ? parseFloat((b.amount*b.odds-b.amount).toFixed(2)) : verdict==="패" ? -b.amount : 0;
-                            const stampColor = verdict==="승" ? C.green : verdict==="패" ? C.red : C.dim;
-                            const stampText = verdict==="승" ? "✅ 적중" : verdict==="패" ? "❌ 실패" : "❓ 판정불가";
-                            const displayBetOption =
-                              b.betOption==="홈승" && b.homeTeam ? `${b.homeTeam} 승` :
-                              b.betOption==="원정승" && b.awayTeam ? `${b.awayTeam} 승` :
-                              b.betOption;
-                            return (
-                              <div key={b.id} style={{background:C.bg2,border:`1px solid ${stampColor}66`,borderRadius:6,padding:"8px 10px",marginBottom:5}}>
-                                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:6,marginBottom:5}}>
-                                  <div style={{display:"flex",gap:5,alignItems:"center",flex:1,minWidth:0}}>
-                                    <span style={{fontSize:9,color:dollar?C.amber:C.green,background:`${dollar?C.amber:C.green}22`,padding:"1px 5px",borderRadius:3,fontWeight:700,flexShrink:0}}>{dollar?"$":"₩"}{b.site}</span>
-                                    <span style={{fontSize:11,color:C.orange,fontWeight:800,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{displayBetOption}</span>
-                                  </div>
-                                  <span style={{fontSize:11,fontWeight:900,color:stampColor,border:`2px solid ${stampColor}`,borderRadius:4,padding:"2px 7px",letterSpacing:1,flexShrink:0}}>
-                                    {stampText}
-                                  </span>
-                                </div>
-                                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:6}}>
-                                  <div style={{fontSize:10,color:C.muted}}>
-                                    {fmtDisp(b.amount,dollar)} × {b.odds} = <b style={{color:verdict==="승"?C.green:verdict==="패"?C.red:C.muted}}>{verdict==="승"?`+${isUSD(b.site)?"$":""}${profit.toLocaleString()}`:verdict==="패"?`${isUSD(b.site)?"$":""}${profit.toLocaleString()}`:"-"}</b>
-                                  </div>
-                                  {verdict && (
-                                    <button onClick={()=>handleConfirmBetResult(b.id, verdict)}
-                                      style={{padding:"4px 12px",borderRadius:4,border:`1px solid ${stampColor}`,background:`${stampColor}33`,color:stampColor,cursor:"pointer",fontWeight:800,fontSize:11,flexShrink:0}}>
-                                      ✓ 확인
-                                    </button>
-                                  )}
-                                  {!verdict && (
-                                    <span style={{fontSize:9,color:C.dim}}>수동 입력 필요</span>
-                                  )}
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-                      {g.finished && gameBets.length===0 && (
-                        <div style={{marginTop:10,paddingTop:10,borderTop:`1px dashed ${C.border}`,fontSize:10,color:C.dim,textAlign:"center"}}>
-                          이 경기에 진행중 베팅 없음
-                        </div>
-                      )}
                     </div>
                   );
                 });
