@@ -1393,14 +1393,30 @@ function AppMain() {
   const handleClose=(site:string)=>{setCloseWithdrawAmt(0);setCloseModal({site});};
   const confirmClose=()=>{
     if(!closeModal)return;const site=closeModal.site;
+    const dollar=isUSD(site);
+    // 진행중 베팅 있으면 재확인
+    const pendingBetsAtSite = bets.filter(b=>b.site===site && b.result==="진행중");
+    if(pendingBetsAtSite.length>0){
+      if(!window.confirm(`⚠ ${site}에 진행중 베팅 ${pendingBetsAtSite.length}건이 있습니다.\n\n그래도 마감하시겠어요?\n(진행중 베팅은 결과 확정 시까지 유지됩니다)`)){
+        return;
+      }
+    }
+    // 세션 수익 계산 (직전 출금 이후 입금액 - 이번 출금액)
+    const siteWths = withdrawals.filter(w=>w.site===site).sort((a,b)=>a.date.localeCompare(b.date));
+    const prevWthDate = siteWths.length>0 ? siteWths[siteWths.length-1].date : "0000-00-00";
+    const sessionDepSum = deposits.filter(d=>d.site===site && d.date>prevWthDate).reduce((s,d)=>s+d.amount,0);
+    const sessionNet = closeWithdrawAmt - sessionDepSum;
+
     if(closeWithdrawAmt>0){
-      const dollar=isUSD(site);
       const newWth={id:String(Date.now()),site,amount:closeWithdrawAmt,date:today,isDollar:dollar};
       setWithdrawalsRaw(w=>[...w,newWth]);db.insertWithdrawal(newWth);
     }
+    // ★ 마감 시에만 사이트 초기화 (deposited, betTotal, pointTotal 모두 0)
     const closedSS={...siteStates,[site]:{...siteStates[site],deposited:0,betTotal:0,active:false,pointTotal:0}};
     setSiteStatesRaw(closedSS);db.upsertSiteState(site,closedSS[site]);
-    addLog("🔒 마감",`${site}/출금${fmtDisp(closeWithdrawAmt,isUSD(site))}`);
+    // 로그에 세션 수익 표시
+    const netStr = `${sessionNet>=0?"+":""}${fmtDisp(sessionNet,dollar)}`;
+    addLog("🔒 마감",`${site} · 입금 ${fmtDisp(sessionDepSum,dollar)} → 출금 ${fmtDisp(closeWithdrawAmt,dollar)} = ${netStr}`);
     setCloseModal(null);
   };
   const cancelSite=(site:string)=>{
@@ -1419,20 +1435,8 @@ function AppMain() {
         addLog(result==="승"?"✅ 적중":"❌ 실패",bet.homeTeam||bet.teamName||"");
         return updated;
       });
-      // ★ 방금 결과 입력한 베팅이 속한 사이트 확인
-      const target=b.find(x=>x.id===id);
-      if(target){
-        const site=target.site;
-        // 해당 사이트의 남은 진행중 베팅이 있는지
-        const stillPending=next.some(x=>x.site===site&&x.result==="진행중");
-        if(!stillPending && siteStates[site]){
-          // 남은 진행중 베팅 없으면 사이트 초기화
-          const resetSS={...siteStates,[site]:{...siteStates[site],deposited:0,betTotal:0,active:false,pointTotal:0}};
-          setSiteStatesRaw(resetSS);
-          db.upsertSiteState(site,resetSS[site]);
-          addLog("🔄 사이트 초기화",`${site} (베팅 완료)`);
-        }
-      }
+      // ★ 자동 사이트 초기화 제거 - 사용자가 직접 "마감" 버튼을 눌러야 초기화됨
+      // (베팅 결과 입력만으로는 사이트 상태 유지)
       return next;
     });
   };
@@ -2430,16 +2434,103 @@ function AppMain() {
           </div>
         </div>
       )}
-      {closeModal&&(
-        <div style={{position:"fixed",inset:0,background:"#000b",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center"}}>
-          <div style={{background:C.bg3,border:`1px solid ${C.red}`,borderRadius:12,padding:24,width:320}}>
-            <div style={{fontSize:14,fontWeight:700,color:C.red,marginBottom:8}}>🔒 {closeModal.site} 마감</div>
-            <div style={{fontSize:12,color:C.muted,marginBottom:12}}>출금 금액 입력 (없으면 0)</div>
-            <input autoFocus type="number" value={closeWithdrawAmt||""} onChange={e=>setCloseWithdrawAmt(parseFloat(e.target.value)||0)} placeholder="출금 금액" style={{...S,boxSizing:"border-box",marginBottom:12,...noSpin}}/>
-            <div style={{display:"flex",gap:8}}><button onClick={confirmClose} style={{flex:1,background:`${C.red}22`,border:`1px solid ${C.red}`,color:C.red,padding:"8px",borderRadius:6,cursor:"pointer",fontWeight:700}}>마감 확정</button><button onClick={()=>setCloseModal(null)} style={{flex:1,background:C.bg2,border:`1px solid ${C.border}`,color:C.muted,padding:"8px",borderRadius:6,cursor:"pointer"}}>취소</button></div>
+      {closeModal&&(()=>{
+        const site = closeModal.site;
+        const dollar = isUSD(site);
+        const curSS = siteStates[site] || {deposited:0,betTotal:0,active:false,isDollar:dollar,pointTotal:0};
+        // 직전 마감 날짜 찾기 (이전 출금 = 직전 마감 시점)
+        const siteWths = withdrawals.filter(w=>w.site===site).sort((a,b)=>a.date.localeCompare(b.date));
+        const prevWthDate = siteWths.length>0 ? siteWths[siteWths.length-1].date : "0000-00-00";
+        // 직전 마감 이후 입금 내역
+        const sessionDeps = deposits.filter(d=>d.site===site && d.date>prevWthDate).sort((a,b)=>a.date.localeCompare(b.date));
+        const sessionDepSum = sessionDeps.reduce((s,d)=>s+d.amount,0);
+        // 포인트 누적 (입금으로 카운트 X)
+        const pointSum = curSS.pointTotal||0;
+        // 이번 세션 베팅 내역
+        const sessionBets = bets.filter(b=>b.site===site);
+        const pendingCnt = sessionBets.filter(b=>b.result==="진행중").length;
+        const doneCnt = sessionBets.filter(b=>b.result==="승"||b.result==="패").length;
+        const winCnt = sessionBets.filter(b=>b.result==="승").length;
+        // 예상 세션 수익 = 출금액 - 입금액 (포인트는 포함 안 함)
+        const estNet = closeWithdrawAmt - sessionDepSum;
+        const estNetKRW = dollar ? estNet * usdKrw : estNet;
+        return (
+          <div style={{position:"fixed",inset:0,background:"#000b",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center"}}>
+            <div style={{background:C.bg3,border:`1px solid ${C.red}`,borderRadius:12,padding:20,width:420,maxHeight:"90vh",overflowY:"auto"}}>
+              <div style={{fontSize:15,fontWeight:800,color:C.red,marginBottom:4}}>🔒 {dollar?"$":"₩"} {site} 마감</div>
+              <div style={{fontSize:10,color:C.muted,marginBottom:14}}>이번 세션을 마감하고 다음 세션을 시작합니다</div>
+
+              {/* 이번 세션 요약 */}
+              <div style={{background:C.bg2,border:`1px solid ${C.border}`,borderRadius:8,padding:12,marginBottom:12}}>
+                <div style={{fontSize:11,fontWeight:700,color:C.teal,marginBottom:8}}>📊 이번 세션 요약</div>
+                {prevWthDate==="0000-00-00" ? (
+                  <div style={{fontSize:10,color:C.muted,marginBottom:6}}>첫 번째 세션 (이전 마감 없음)</div>
+                ) : (
+                  <div style={{fontSize:10,color:C.muted,marginBottom:6}}>직전 마감: <b style={{color:C.orange}}>{prevWthDate}</b></div>
+                )}
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,fontSize:10}}>
+                  <div style={{background:C.bg3,padding:"6px 8px",borderRadius:5}}>
+                    <div style={{color:C.muted,fontSize:9}}>💵 세션 입금 ({sessionDeps.length}회)</div>
+                    <div style={{color:C.green,fontWeight:800,fontSize:13}}>{fmtDisp(sessionDepSum,dollar)}</div>
+                  </div>
+                  <div style={{background:C.bg3,padding:"6px 8px",borderRadius:5}}>
+                    <div style={{color:C.muted,fontSize:9}}>🎁 누적 포인트</div>
+                    <div style={{color:C.purple,fontWeight:800,fontSize:13}}>{pointSum>0?fmtDisp(pointSum,dollar):"—"}</div>
+                  </div>
+                  <div style={{background:C.bg3,padding:"6px 8px",borderRadius:5}}>
+                    <div style={{color:C.muted,fontSize:9}}>🎯 총 베팅</div>
+                    <div style={{color:C.amber,fontWeight:800,fontSize:13}}>{fmtDisp(curSS.betTotal,dollar)}</div>
+                  </div>
+                  <div style={{background:C.bg3,padding:"6px 8px",borderRadius:5}}>
+                    <div style={{color:C.muted,fontSize:9}}>📦 잔여 (투입-베팅)</div>
+                    <div style={{color:C.teal,fontWeight:800,fontSize:13}}>{fmtDisp(Math.max(0,curSS.deposited-curSS.betTotal),dollar)}</div>
+                  </div>
+                </div>
+                {(pendingCnt>0 || doneCnt>0) && (
+                  <div style={{marginTop:7,fontSize:10,color:C.muted,paddingTop:6,borderTop:`1px dashed ${C.border}`}}>
+                    베팅: <b style={{color:C.green}}>{winCnt}승</b> / <b style={{color:C.red}}>{doneCnt-winCnt}패</b>{pendingCnt>0 && <> · <b style={{color:C.amber}}>진행중 {pendingCnt}건</b> <span style={{color:C.dim}}>(결과 확정 전)</span></>}
+                  </div>
+                )}
+                {pendingCnt>0 && (
+                  <div style={{marginTop:6,fontSize:10,color:C.red,background:`${C.red}11`,padding:"5px 8px",borderRadius:4,border:`1px solid ${C.red}44`}}>
+                    ⚠ 진행중 베팅 {pendingCnt}건이 있습니다. 그래도 마감하시겠어요?
+                  </div>
+                )}
+              </div>
+
+              {/* 출금 금액 입력 */}
+              <div style={{marginBottom:12}}>
+                <div style={{fontSize:11,color:C.muted,marginBottom:4}}>💸 출금 금액 {dollar?"($)":"(₩)"}</div>
+                <input autoFocus type="number" value={closeWithdrawAmt||""} onChange={e=>setCloseWithdrawAmt(parseFloat(e.target.value)||0)} placeholder="출금액 입력 (없으면 0)" style={{...S,boxSizing:"border-box",fontSize:15,padding:"9px 11px",...noSpin}}/>
+                <div style={{fontSize:9,color:C.dim,marginTop:4}}>💡 포인트로 베팅한 수익도 출금에 포함됩니다</div>
+              </div>
+
+              {/* 예상 수익 미리보기 */}
+              <div style={{background:estNet>=0?`${C.green}11`:`${C.red}11`,border:`1px solid ${estNet>=0?C.green:C.red}55`,borderRadius:8,padding:12,marginBottom:14}}>
+                <div style={{fontSize:10,color:C.muted,marginBottom:6,fontWeight:700}}>🧮 예상 세션 수익 (출금 - 입금)</div>
+                <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:5}}>
+                  <span style={{fontSize:11,color:C.green}}>출금 {fmtDisp(closeWithdrawAmt,dollar)}</span>
+                  <span style={{fontSize:11,color:C.muted}}>-</span>
+                  <span style={{fontSize:11,color:C.red}}>입금 {fmtDisp(sessionDepSum,dollar)}</span>
+                  <span style={{fontSize:11,color:C.muted}}>=</span>
+                  <span style={{fontSize:17,fontWeight:900,color:estNet>=0?C.green:C.red,marginLeft:"auto"}}>{estNet>=0?"+":""}{fmtDisp(estNet,dollar)}</span>
+                </div>
+                {dollar && (
+                  <div style={{fontSize:10,color:C.muted,textAlign:"right"}}>원화 환산: <b style={{color:estNetKRW>=0?C.green:C.red}}>{estNetKRW>=0?"+":""}₩{Math.round(estNetKRW).toLocaleString()}</b></div>
+                )}
+                <div style={{fontSize:9,color:C.dim,marginTop:5,paddingTop:5,borderTop:`1px dashed ${C.border}`}}>
+                  * 포인트는 수익 계산에 포함되지 않습니다 (입금액으로 카운트 X)
+                </div>
+              </div>
+
+              <div style={{display:"flex",gap:8}}>
+                <button onClick={confirmClose} style={{flex:1,background:`${C.red}33`,border:`1px solid ${C.red}`,color:C.red,padding:"10px",borderRadius:6,cursor:"pointer",fontWeight:800,fontSize:13}}>🔒 마감 확정</button>
+                <button onClick={()=>setCloseModal(null)} style={{flex:1,background:C.bg2,border:`1px solid ${C.border}`,color:C.muted,padding:"10px",borderRadius:6,cursor:"pointer",fontSize:12}}>취소</button>
+              </div>
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
       {deleteModal&&(
         <div style={{position:"fixed",inset:0,background:"#000b",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center"}}>
           <div style={{background:C.bg3,border:`1px solid ${C.border2}`,borderRadius:12,padding:24,width:300}}>
@@ -4064,7 +4155,13 @@ function AppMain() {
                         {sitePending.map(b=><PendingCard key={b.id} b={b}/>)}
                       </div>
                     )}
-                    {sitePending.length===0&&<div style={{textAlign:"center",fontSize:10,color:C.dim,padding:"4px 0"}}>진행중 없음</div>}
+                    {sitePending.length===0&&(()=>{
+                      const hasDoneAtSite = bets.some(b=>b.site===site && (b.result==="승"||b.result==="패"));
+                      if(hasDoneAtSite){
+                        return <div style={{textAlign:"center",fontSize:10,color:C.purple,padding:"6px 4px",background:`${C.purple}11`,border:`1px dashed ${C.purple}55`,borderRadius:5,marginTop:5,fontWeight:700}}>✓ 베팅 완료 · 위 "마감" 버튼을 눌러 정산하세요</div>;
+                      }
+                      return <div style={{textAlign:"center",fontSize:10,color:C.dim,padding:"4px 0"}}>진행중 없음</div>;
+                    })()}
                   </div>
                 );
               })}
