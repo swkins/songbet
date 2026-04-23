@@ -1,28 +1,31 @@
 // ─────────────────────────────────────────────────────────────
-// BET TRACKER · App.tsx (rev.4 - 2026-04-23)
-// 변경사항:
-//  - 베팅 탭: API-Sports 직접 호출 + localStorage 15분 캐시로 전환
-//  - 6종목 지원 (축구/야구/농구/배구/하키/E스포츠)
-//  - 종목 메뉴 크게 · 국가 메뉴 크게 · 3컬럼 독립 스크롤
-//  - Supabase events 테이블 의존 제거 (베팅 탭 한정)
-//  ── rev.4 신규 ──
-//  1) 스포츠 탭 베팅 슬립에 "⚡ 라이브 베팅" 체크박스 추가
-//     - Bet에 isLive 플래그 저장
-//  2) 통계 탭에 "⚡ 실시간" 메뉴 추가
-//     - 라이브 체크된 베팅만 필터링
-//     - 종목별 수익/ROI/승률/승패/진행중 카드 표시
-//  3) 대시보드 2×2 그리드 원복:
-//     - 좌상: 입금/포인트 인라인 폼 (10만원/$100 기본)
-//     - 우상: 사이트별 진행률 세로
-//     - 좌하: 오늘 할 일
-//     - 우하: 포인트 교환 (구 "포인트 사이트")
-//  4) 베팅 내역 탭 라이브 스코어 패널 폭 축소 (450 → 260)
-//     - 카드 폰트/여백 대폭 축소 + 경기 취소 ⛔ 버튼
-//  5) 베팅 진행률 카드: 4열 → 5열
-//  6) 사이트 카드별 "오늘 완료 보기" 토글 버튼 추가
-//     - 그날의 완료 베팅만 표시 (다음날 자동으로 안 보임)
-//     - 통계와 DB 데이터는 그대로 보존
-//  7) 하단의 전체 "오늘 완료" 섹션 제거 (사이트별 토글로 대체)
+// BET TRACKER · App.tsx (rev.5 - 2026-04-24)
+// ─────────────────────────────────────────────────────────────
+// 🔒 골든 룰 (반드시 지킬 것) - 이 앱은 다중 PC/모바일 사용을 전제로 함
+// ─────────────────────────────────────────────────────────────
+//  1) 사용자 데이터는 전부 Supabase (lib/db.ts) 경유로 저장한다.
+//     localStorage / sessionStorage에 사용자 데이터 저장 금지.
+//  2) 유일한 예외: 외부 API 단기 캐시 (API-Sports 15분 캐시)
+//  3) 새 상태 추가 시: useState 초기값=빈 값 → useEffect에서 db.load*()
+//     → save* 함수에서 setState + db.upsert*() 병행
+//  4) 단순 key-value 설정은 app_settings 테이블에 얹을 것
+//     (별도 테이블 신설은 구조화된 데이터일 때만)
+//  5) 자세한 규칙은 프로젝트 루트 DATA_RULES.md 참조
+// ─────────────────────────────────────────────────────────────
+// rev.5 변경사항 (2026-04-24):
+//  - 모든 localStorage 사용자 데이터를 Supabase로 이관
+//    · bt_manual_games → manual_games 테이블
+//    · bt_m_sports/countries/leagues → m_meta 테이블
+//    · bt_point_sites → point_sites 테이블 (신규)
+//    · bt_daily_quests → daily_quests 테이블 (신규)
+//    · bt_code_memos → code_memos 테이블 (신규)
+//    · bt_team_names → team_names 테이블 (신규)
+//    · bt_krw_sites/usd_sites/pext_* /code_memo_draft → app_settings 테이블 (신규)
+//  - 에러 처리: 로드 실패 시 빈 값 폴백 + 상단 배너 표시
+//  - 기존 전체 초기화 버튼은 제거 (Supabase에 데이터가 있으므로 위험)
+// ─────────────────────────────────────────────────────────────
+// rev.4 (이전): 라이브 베팅 체크박스, 실시간 통계, 대시보드 2×2
+// rev.3 (이전): API-Sports 직접 호출, 6종목 지원
 // ─────────────────────────────────────────────────────────────
 import React, { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, LineChart, Line, CartesianGrid } from "recharts";
@@ -258,8 +261,8 @@ function translateTeamName(name: string, userMap: Record<string,string>): string
 }
 
 type TeamNameMap = Record<string,string>;
-const loadTeamNames = (): TeamNameMap => { try { const v=localStorage.getItem("bt_team_names"); return v?JSON.parse(v):{}; } catch { return {}; } };
-const saveTeamNames = (m:TeamNameMap) => { try { localStorage.setItem("bt_team_names",JSON.stringify(m)); } catch {} };
+// 팀명 매핑은 DB(team_names 테이블)에 저장됩니다. App 컴포넌트 내부에서
+// useEffect로 db.loadTeamNames()를 호출해 teamNameMap state를 채웁니다.
 
 function isLive(s:string){ return !["NS","FT","AET","FT_PEN","CANC","PST","ABD","AWD","WO","TBD","AOT","AP"].includes(s); }
 function isFinished(s:string){ return ["FT","AET","FT_PEN","AOT","AP"].includes(s); }
@@ -425,6 +428,7 @@ class ErrorBoundary extends React.Component<{children:React.ReactNode},{err:Erro
 {"\n\n"}
 {String(this.state.err?.stack || "")}
           </pre>
+          {/* 사용자 데이터는 Supabase에 있으므로 localStorage(API 캐시)만 비움. */}
           <button onClick={()=>{try{sessionStorage.clear();localStorage.clear();}catch{};location.reload();}}
             style={{marginTop:16,padding:"10px 20px",background:"#5ddb8a22",border:"1px solid #5ddb8a",color:"#5ddb8a",borderRadius:8,cursor:"pointer",fontWeight:700}}>
             🔄 세션 초기화 후 다시 시작
@@ -472,13 +476,16 @@ function AppMain() {
   const [esportsStratLeague,setEsportsStratLeague]=useState("LCK");
 
   // ── 사이트 목록 ────────────────────────────────────────────
-  const [krwSites,setKrwSites]=useState<string[]>(()=>{try{const v=localStorage.getItem("bt_krw_sites");return v?JSON.parse(v):DEFAULT_KRW_SITES;}catch{return DEFAULT_KRW_SITES;}});
-  const [usdSites,setUsdSites]=useState<string[]>(()=>{try{const v=localStorage.getItem("bt_usd_sites");return v?JSON.parse(v):DEFAULT_USD_SITES;}catch{return DEFAULT_USD_SITES;}});
+  // 🔒 DB(app_settings 테이블의 krw_sites/usd_sites 키)에 저장됨.
+  //    초기값은 DEFAULT 리스트 (DB 로드 전까지 임시 사용),
+  //    useEffect에서 DB 로드 후 덮어씌움.
+  const [krwSites,setKrwSites]=useState<string[]>(DEFAULT_KRW_SITES);
+  const [usdSites,setUsdSites]=useState<string[]>(DEFAULT_USD_SITES);
   const ALL_SITES = useMemo(()=>[...krwSites,...usdSites],[krwSites,usdSites]);
   const isUSD = useCallback((s:string)=>usdSites.includes(s),[usdSites]);
 
-  const saveKrwSites=(sites:string[])=>{setKrwSites(sites);try{localStorage.setItem("bt_krw_sites",JSON.stringify(sites));}catch{}};
-  const saveUsdSites=(sites:string[])=>{setUsdSites(sites);try{localStorage.setItem("bt_usd_sites",JSON.stringify(sites));}catch{}};
+  const saveKrwSites=(sites:string[])=>{setKrwSites(sites);db.saveAppSetting("krw_sites",sites);};
+  const saveUsdSites=(sites:string[])=>{setUsdSites(sites);db.saveAppSetting("usd_sites",sites);};
 
   const [siteManageModal,setSiteManageModal]=useState(false);
   const [newSiteName,setNewSiteName]=useState("");
@@ -498,18 +505,23 @@ function AppMain() {
   };
 
   // ── 팀명 한글 매핑 ───────────────────────────────────────────
-  const [teamNameMap,setTeamNameMap] = useState<Record<string,string>>(loadTeamNames);
+  // 🔒 DB(team_names 테이블)에 저장됨. 초기값은 빈 객체, useEffect에서 로드.
+  const [teamNameMap,setTeamNameMap] = useState<Record<string,string>>({});
   const [teamNameModal,setTeamNameModal] = useState(false);
   const [tnSearch,setTnSearch] = useState("");
   const [tnNewEng,setTnNewEng] = useState("");
   const [tnNewKor,setTnNewKor] = useState("");
   const saveTeamNameEntry = (eng:string,kor:string) => {
-    const m = {...teamNameMap,[eng.trim()]:kor.trim()};
-    setTeamNameMap(m); saveTeamNames(m);
+    const e = eng.trim(), k = kor.trim();
+    if (!e || !k) return;
+    const m = {...teamNameMap,[e]:k};
+    setTeamNameMap(m);
+    db.upsertTeamName(e, k);
   };
   const deleteTeamNameEntry = (eng:string) => {
     const m = {...teamNameMap}; delete m[eng];
-    setTeamNameMap(m); saveTeamNames(m);
+    setTeamNameMap(m);
+    db.deleteTeamName(eng);
   };
   const t = (name:string) => translateTeamName(name, teamNameMap);
 
@@ -637,20 +649,44 @@ function AppMain() {
     awayScore?: number;   // 라이브 스코어 - 원정
     finished?: boolean;   // 경기 종료 여부 (도장)
   }
-  const [manualGames,setManualGames]=useState<ManualGame[]>(()=>{
-    try{const v=localStorage.getItem("bt_manual_games");return v?JSON.parse(v):[];}catch{return [];}
-  });
+  // 🔒 DB(manual_games 테이블)에 저장됨. 빈 배열로 시작, useEffect에서 로드.
+  const [manualGames,setManualGames]=useState<ManualGame[]>([]);
+  // 배열 전체를 받아서 diff → DB에 반영. 기존 호출부 그대로 사용 가능.
   const saveManualGames=(gs:ManualGame[])=>{
-    setManualGames(gs);
-    try{localStorage.setItem("bt_manual_games",JSON.stringify(gs));}catch{}
+    setManualGames(prev=>{
+      const prevMap=new Map(prev.map(g=>[g.id,g]));
+      const nextMap=new Map(gs.map(g=>[g.id,g]));
+      // 삭제
+      for(const id of prevMap.keys()) if(!nextMap.has(id)) db.deleteManualGame(id);
+      // 추가/변경 (얕은 비교로 충분 - 필드 숫자/불린/문자열만)
+      for(const g of gs){
+        const p=prevMap.get(g.id);
+        if(!p||p.homeScore!==g.homeScore||p.awayScore!==g.awayScore||p.finished!==g.finished||
+           p.country!==g.country||p.league!==g.league||p.sportCat!==g.sportCat||
+           p.homeTeam!==g.homeTeam||p.awayTeam!==g.awayTeam){
+          db.upsertManualGame({
+            id:g.id,sportCat:g.sportCat,country:g.country,league:g.league,
+            homeTeam:g.homeTeam,awayTeam:g.awayTeam,createdAt:g.createdAt,
+            homeScore:g.homeScore,awayScore:g.awayScore,finished:g.finished,
+          });
+        }
+      }
+      return gs;
+    });
   };
 
   // 커스텀 종목/국가/리그 목록 (경기 없어도 유지)
+  // 🔒 DB(m_meta 테이블)에 저장됨. 빈 값으로 시작, useEffect에서 로드.
   const DEFAULT_SPORTS = ["축구","야구","농구","배구","하키","E스포츠"];
-  const [customSports,setCustomSports]=useState<string[]>(()=>{
-    try{const v=localStorage.getItem("bt_m_sports");return v?JSON.parse(v):[];}catch{return [];}
-  });
-  const saveCustomSports=(l:string[])=>{setCustomSports(l);try{localStorage.setItem("bt_m_sports",JSON.stringify(l));}catch{}};
+  const [customSports,setCustomSports]=useState<string[]>([]);
+  const saveCustomSports=(l:string[])=>{
+    setCustomSports(prev=>{
+      const prevSet=new Set(prev), nextSet=new Set(l);
+      for(const s of prev) if(!nextSet.has(s)) db.deleteMMeta(db.mMetaId("sport",s,"",s));
+      for(const s of l) if(!prevSet.has(s)) db.upsertMMeta({id:db.mMetaId("sport",s,"",s),type:"sport",sport:s,country:"",name:s});
+      return l;
+    });
+  };
   const allSportsList = useMemo(()=>{
     const base=[...DEFAULT_SPORTS];
     for(const c of customSports) if(!base.includes(c)) base.push(c);
@@ -658,16 +694,39 @@ function AppMain() {
   },[customSports]);
 
   // { sport: { country: [leagues...] } }
-  const [mCountries,setMCountries]=useState<Record<string,string[]>>(()=>{
-    try{const v=localStorage.getItem("bt_m_countries");return v?JSON.parse(v):{};}catch{return {};}
-  });
-  const saveMCountries=(m:Record<string,string[]>)=>{setMCountries(m);try{localStorage.setItem("bt_m_countries",JSON.stringify(m));}catch{}};
+  // 🔒 DB(m_meta 테이블, type='country')에 저장됨.
+  const [mCountries,setMCountries]=useState<Record<string,string[]>>({});
+  const saveMCountries=(m:Record<string,string[]>)=>{
+    setMCountries(prev=>{
+      // 각 sport별 diff 계산
+      const allSports=new Set([...Object.keys(prev),...Object.keys(m)]);
+      for(const sport of allSports){
+        const before=new Set(prev[sport]||[]);
+        const after=new Set(m[sport]||[]);
+        for(const c of before) if(!after.has(c)) db.deleteMMeta(db.mMetaId("country",sport,"",c));
+        for(const c of after) if(!before.has(c)) db.upsertMMeta({id:db.mMetaId("country",sport,"",c),type:"country",sport,country:"",name:c});
+      }
+      return m;
+    });
+  };
 
-  const [mLeagues,setMLeagues]=useState<Record<string,string[]>>(()=>{
-    // key: `${sport}__${country}`, value: leagues
-    try{const v=localStorage.getItem("bt_m_leagues");return v?JSON.parse(v):{};}catch{return {};}
-  });
-  const saveMLeaguesStore=(m:Record<string,string[]>)=>{setMLeagues(m);try{localStorage.setItem("bt_m_leagues",JSON.stringify(m));}catch{}};
+  // 🔒 DB(m_meta 테이블, type='league')에 저장됨.
+  // key: `${sport}__${country}`, value: leagues
+  const [mLeagues,setMLeagues]=useState<Record<string,string[]>>({});
+  const saveMLeaguesStore=(m:Record<string,string[]>)=>{
+    setMLeagues(prev=>{
+      const allKeys=new Set([...Object.keys(prev),...Object.keys(m)]);
+      for(const key of allKeys){
+        const [sport,country]=key.split("__");
+        if(!sport||country===undefined) continue;
+        const before=new Set(prev[key]||[]);
+        const after=new Set(m[key]||[]);
+        for(const l of before) if(!after.has(l)) db.deleteMMeta(db.mMetaId("league",sport,country,l));
+        for(const l of after) if(!before.has(l)) db.upsertMMeta({id:db.mMetaId("league",sport,country,l),type:"league",sport,country,name:l});
+      }
+      return m;
+    });
+  };
 
   // 경기에서 자동 추론한 것 + 수동 추가한 것을 합친 뷰
   const allCountriesForSport = useCallback((sport:string):string[]=>{
@@ -1083,16 +1142,27 @@ function AppMain() {
   // 스코어 입력 (저장만). NaN이면 필드 삭제.
   const handleScoreChange = (gameId:string, field:"homeScore"|"awayScore", value:number) => {
     setManualGames(prev=>{
+      let changed: ManualGame | null = null;
       const updated = prev.map(g => {
         if (g.id!==gameId) return g;
         if (Number.isNaN(value)) {
           const ng = {...g};
           delete ng[field];
+          changed = ng;
           return ng;
         }
-        return {...g, [field]:value};
+        const ng = {...g, [field]:value};
+        changed = ng;
+        return ng;
       });
-      try{localStorage.setItem("bt_manual_games",JSON.stringify(updated));}catch{}
+      if (changed) {
+        const c = changed as ManualGame;
+        db.upsertManualGame({
+          id:c.id,sportCat:c.sportCat,country:c.country,league:c.league,
+          homeTeam:c.homeTeam,awayTeam:c.awayTeam,createdAt:c.createdAt,
+          homeScore:c.homeScore,awayScore:c.awayScore,finished:c.finished,
+        });
+      }
       return updated;
     });
   };
@@ -1104,8 +1174,13 @@ function AppMain() {
     if (g.homeScore===undefined || g.awayScore===undefined) return;
     setManualGames(prev=>{
       const updated = prev.map(x => x.id===gameId ? {...x, finished:true} : x);
-      try{localStorage.setItem("bt_manual_games",JSON.stringify(updated));}catch{}
       return updated;
+    });
+    // DB 동기화
+    db.upsertManualGame({
+      id:g.id,sportCat:g.sportCat,country:g.country,league:g.league,
+      homeTeam:g.homeTeam,awayTeam:g.awayTeam,createdAt:g.createdAt,
+      homeScore:g.homeScore,awayScore:g.awayScore,finished:true,
     });
     addLog("🏁 경기 종료",`${g.homeTeam} ${g.homeScore}:${g.awayScore} ${g.awayTeam}`);
   };
@@ -1171,10 +1246,26 @@ function AppMain() {
   };
 
   // ── 포인트 탭 ─────────────────────────────────────────────
-  const [pointSites,setPointSites]=useState<PointSite[]>(()=>{
-    try{const v=localStorage.getItem("bt_point_sites");return v?JSON.parse(v):[];}catch{return [];}
-  });
-  const savePointSites=(sites:PointSite[])=>{setPointSites(sites);try{localStorage.setItem("bt_point_sites",JSON.stringify(sites));}catch{}};
+  // 🔒 DB(point_sites 테이블)에 저장됨. 빈 배열로 시작, useEffect에서 로드.
+  const [pointSites,setPointSites]=useState<PointSite[]>([]);
+  const savePointSites=(sites:PointSite[])=>{
+    setPointSites(prev=>{
+      const prevMap=new Map(prev.map(p=>[p.id,p]));
+      const nextMap=new Map(sites.map(p=>[p.id,p]));
+      for(const id of prevMap.keys()) if(!nextMap.has(id)) db.deletePointSite(id);
+      for(const p of sites){
+        const before=prevMap.get(p.id);
+        if(!before || JSON.stringify(before)!==JSON.stringify(p)){
+          db.upsertPointSite({
+            id:p.id, name:p.name, exchangeName:p.exchangeName, exchangeDate:p.exchangeDate,
+            targetAmount:p.targetAmount, targetSiteName:p.targetSiteName,
+            targetCycleDays:p.targetCycleDays||14, sessions:p.sessions||[],
+          });
+        }
+      }
+      return sites;
+    });
+  };
 
   const [addPointSiteModal,setAddPointSiteModal]=useState(false);
   const [newPointSite,setNewPointSite]=useState<{name:string,exchangeName:string,exchangeDate:string,targetAmount:number,targetSiteName:string,targetCycleDays:number}>({name:"올인구조대",exchangeName:"포인트교환",exchangeDate:"2025-05-04",targetAmount:2000000,targetSiteName:"",targetCycleDays:14});
@@ -1189,10 +1280,23 @@ function AppMain() {
   };
 
   // ── 일일 퀘스트 ────────────────────────────────────────────
-  const [dailyQuests,setDailyQuestsRaw]=useState<DailyQuest[]>(()=>{
-    try{const v=localStorage.getItem("bt_daily_quests");return v?JSON.parse(v):[];}catch{return [];}
-  });
-  const saveDailyQuests=(qs:DailyQuest[])=>{setDailyQuestsRaw(qs);try{localStorage.setItem("bt_daily_quests",JSON.stringify(qs));}catch{}};
+  // 🔒 DB(daily_quests 테이블)에 저장됨. 빈 배열로 시작, useEffect에서 로드.
+  const [dailyQuests,setDailyQuestsRaw]=useState<DailyQuest[]>([]);
+  const saveDailyQuests=(qs:DailyQuest[])=>{
+    setDailyQuestsRaw(prev=>{
+      const prevMap=new Map(prev.map(q=>[q.id,q]));
+      const nextMap=new Map(qs.map(q=>[q.id,q]));
+      for(const id of prevMap.keys()) if(!nextMap.has(id)) db.deleteDailyQuest(id);
+      for(const q of qs){
+        const before=prevMap.get(q.id);
+        if(!before || before.name!==q.name || before.createdAt!==q.createdAt
+           || JSON.stringify(before.history)!==JSON.stringify(q.history)){
+          db.upsertDailyQuest({id:q.id,name:q.name,createdAt:q.createdAt,history:q.history||[]});
+        }
+      }
+      return qs;
+    });
+  };
 
   // 오늘 완료 여부 (history에 today 있는지)
   const isQuestDoneToday = (q:DailyQuest) => q.history.includes(today);
@@ -1232,16 +1336,27 @@ function AppMain() {
   };
 
   // ── 코드 수정 메모 ─────────────────────────────────────────
-  const [codeMemos,setCodeMemosRaw]=useState<CodeMemo[]>(()=>{
-    try{const v=localStorage.getItem("bt_code_memos");return v?JSON.parse(v):[];}catch{return [];}
-  });
-  const saveCodeMemos=(ms:CodeMemo[])=>{setCodeMemosRaw(ms);try{localStorage.setItem("bt_code_memos",JSON.stringify(ms));}catch{}};
+  // 🔒 DB(code_memos 테이블)에 저장됨. 빈 배열로 시작, useEffect에서 로드.
+  const [codeMemos,setCodeMemosRaw]=useState<CodeMemo[]>([]);
+  const saveCodeMemos=(ms:CodeMemo[])=>{
+    setCodeMemosRaw(prev=>{
+      const prevMap=new Map(prev.map(m=>[m.id,m]));
+      const nextMap=new Map(ms.map(m=>[m.id,m]));
+      for(const id of prevMap.keys()) if(!nextMap.has(id)) db.deleteCodeMemo(id);
+      for(const m of ms){
+        const before=prevMap.get(m.id);
+        if(!before || JSON.stringify(before)!==JSON.stringify(m)){
+          db.upsertCodeMemo(m as any);
+        }
+      }
+      return ms;
+    });
+  };
   const [codeMemoOpen,setCodeMemoOpen]=useState(false);
-  // 작성중 텍스트는 localStorage에 자동 보존 → 창 닫혀도 유지
-  const [newMemoText,setNewMemoTextRaw]=useState<string>(()=>{
-    try{return localStorage.getItem("bt_code_memo_draft")||"1. ";}catch{return "1. ";}
-  });
-  const setNewMemoText=(v:string)=>{setNewMemoTextRaw(v);try{localStorage.setItem("bt_code_memo_draft",v);}catch{}};
+  // 🔒 메모 초안도 DB(app_settings[code_memo_draft])에 저장됨.
+  //    초기값은 "1. ", useEffect에서 로드 덮어씀.
+  const [newMemoText,setNewMemoTextRaw]=useState<string>("1. ");
+  const setNewMemoText=(v:string)=>{setNewMemoTextRaw(v);db.saveAppSetting("code_memo_draft",v);};
   // 인라인 편집 중인 메모 ID + 임시 텍스트
   const [editingMemoId,setEditingMemoId]=useState<string|null>(null);
   const [editingMemoText,setEditingMemoText]=useState<string>("");
@@ -1265,11 +1380,11 @@ function AppMain() {
     }
   },[codeMemoOpen]);
 
-  // 💾 작업 중 메모 저장 (localStorage) + 창 자동 닫기
+  // 💾 작업 중 메모 저장 (DB: app_settings.code_memo_draft) + 창 자동 닫기
   const handleSaveDraft = () => {
     const t = newMemoText.trim();
     if(!t || t==="1." || t==="1") return;
-    try{localStorage.setItem("bt_code_memo_draft", newMemoText);}catch{}
+    db.saveAppSetting("code_memo_draft", newMemoText);
     setDraftSavedAt(Date.now());
     // 저장 후 자동으로 창 닫기
     setCodeMemoOpen(false);
@@ -1418,33 +1533,132 @@ function AppMain() {
   const [profitExtras,setProfitExtrasRaw]=useState<(ProfitExtra & {subSubCategory?:string})[]>([]);
   const [logs,setLogs]=useState<Log[]>([]);
 
-  const [pextSiteList,setPextSiteList]=useState<string[]>(()=>{try{const v=localStorage.getItem("bt_pext_sites");return v?JSON.parse(v):[];}catch{return [];}});
-  const [pextCatList,setPextCatList]=useState<string[]>(()=>{try{const v=localStorage.getItem("bt_pext_cats");return v?JSON.parse(v):[];}catch{return [];}});
-  const [pextSubCatList,setPextSubCatList]=useState<string[]>(()=>{try{const v=localStorage.getItem("bt_pext_subcats");return v?JSON.parse(v):[];}catch{return [];}});
+  // 🔒 DB(app_settings 테이블의 pext_sites/pext_cats/pext_subcats 키)에 저장됨.
+  //    빈 배열로 시작, useEffect에서 로드.
+  const [pextSiteList,setPextSiteList]=useState<string[]>([]);
+  const [pextCatList,setPextCatList]=useState<string[]>([]);
+  const [pextSubCatList,setPextSubCatList]=useState<string[]>([]);
 
-  const savePextSiteList=(list:string[])=>{setPextSiteList(list);try{localStorage.setItem("bt_pext_sites",JSON.stringify(list));}catch{}};
-  const savePextCatList=(list:string[])=>{setPextCatList(list);try{localStorage.setItem("bt_pext_cats",JSON.stringify(list));}catch{}};
-  const savePextSubCatList=(list:string[])=>{setPextSubCatList(list);try{localStorage.setItem("bt_pext_subcats",JSON.stringify(list));}catch{}};
+  const savePextSiteList=(list:string[])=>{setPextSiteList(list);db.saveAppSetting("pext_sites",list);};
+  const savePextCatList=(list:string[])=>{setPextCatList(list);db.saveAppSetting("pext_cats",list);};
+  const savePextSubCatList=(list:string[])=>{setPextSubCatList(list);db.saveAppSetting("pext_subcats",list);};
+
+  // 데이터 로드 실패 기록용 (상단 배너에서 사용)
+  const [dataLoadErrors,setDataLoadErrors]=useState<string[]>([]);
+  const [dbReloadNonce,setDbReloadNonce]=useState(0); // 재시도 트리거
 
   useEffect(()=>{
+    let cancelled=false;
     (async()=>{
-      const [b,dep,wth,ss,cl,er,pe] = await Promise.all([
-        db.loadBets(),db.loadDeposits(),db.loadWithdrawals(),
-        db.loadSiteStates(ALL_SITES, isUSD),
-        db.loadCustomLeagues(),db.loadEsportsRecords(),db.loadProfitExtras(),
+      const errors:string[]=[];
+      const safe=async<T,>(label:string,fn:()=>Promise<T>,fallback:T):Promise<T>=>{
+        try{return await fn();}catch(e){console.error(`[load] ${label}`,e);errors.push(label);return fallback;}
+      };
+
+      // ─── 1단계: 사이트 리스트 먼저 로드 (site_states 로드가 이 값을 필요로 함) ───
+      const settings = await safe("app_settings",()=>db.loadAppSettingsBundle(),{
+        krw_sites:null,usd_sites:null,pext_sites:[],pext_cats:[],pext_subcats:[],code_memo_draft:"1. ",
+      });
+      if(cancelled)return;
+      const krw = settings.krw_sites ?? DEFAULT_KRW_SITES;
+      const usd = settings.usd_sites ?? DEFAULT_USD_SITES;
+      setKrwSites(krw);
+      setUsdSites(usd);
+      // krw_sites/usd_sites가 DB에 없던 경우(최초 실행) - 기본값을 DB에도 저장
+      if(!settings.krw_sites) db.saveAppSetting("krw_sites",DEFAULT_KRW_SITES);
+      if(!settings.usd_sites) db.saveAppSetting("usd_sites",DEFAULT_USD_SITES);
+      // pext 목록
+      setPextSiteList(settings.pext_sites);
+      setPextCatList(settings.pext_cats);
+      setPextSubCatList(settings.pext_subcats);
+      // 코드 메모 draft
+      setNewMemoTextRaw(settings.code_memo_draft);
+
+      // ─── 2단계: 나머지 모두 병렬 로드 ───
+      const allSitesNow=[...krw,...usd];
+      const isUSDNow=(s:string)=>usd.includes(s);
+      const [b,dep,wth,ss,cl,er,pe, mg, mm, ps, dq, cm, tn] = await Promise.all([
+        safe("bets",            ()=>db.loadBets(),           [] as Bet[]),
+        safe("deposits",        ()=>db.loadDeposits(),       [] as Deposit[]),
+        safe("withdrawals",     ()=>db.loadWithdrawals(),    [] as Withdrawal[]),
+        safe("site_states",     ()=>db.loadSiteStates(allSitesNow,isUSDNow), {} as Record<string,SiteState>),
+        safe("custom_leagues",  ()=>db.loadCustomLeagues(),  {} as Record<string,string[]>),
+        safe("esports_records", ()=>db.loadEsportsRecords(), [] as EsportsRecord[]),
+        safe("profit_extras",   ()=>db.loadProfitExtras(),   [] as ProfitExtra[]),
+        safe("manual_games",    ()=>db.loadManualGames(),    [] as db.ManualGameRow[]),
+        safe("m_meta",          ()=>db.loadMMeta(),          [] as db.MMetaRow[]),
+        safe("point_sites",     ()=>db.loadPointSites(),     [] as db.PointSiteRow[]),
+        safe("daily_quests",    ()=>db.loadDailyQuests(),    [] as db.DailyQuestRow[]),
+        safe("code_memos",      ()=>db.loadCodeMemos<CodeMemo>(), [] as CodeMemo[]),
+        safe("team_names",      ()=>db.loadTeamNames(),      {} as Record<string,string>),
       ]);
+      if(cancelled)return;
+
+      // 기존 상태들
       setBetsRaw(b);setDepositsRaw(dep);setWithdrawalsRaw(wth);
       setSiteStatesRaw(ss);setCustomLeaguesRaw(cl);setEsportsRecordsRaw(er);setProfitExtrasRaw(pe);
-      const sites=new Set(pe.map((x:ProfitExtra)=>x.category));
-      const cats=new Set(pe.map((x:ProfitExtra)=>x.subCategory).filter(Boolean));
-      const subcats=new Set(pe.map((x:any)=>x.subSubCategory).filter(Boolean));
-      if(sites.size>0)savePextSiteList([...new Set([...pextSiteList,...Array.from(sites)])]);
-      if(cats.size>0)savePextCatList([...new Set([...pextCatList,...Array.from(cats)])]);
-      if(subcats.size>0)savePextSubCatList([...new Set([...pextSubCatList,...Array.from(subcats) as string[]])]);
+
+      // profit_extras에서 사이트/카테고리 목록 자동 보강 (기존 동작 유지, DB에도 저장)
+      const extraSites=new Set(pe.map((x:ProfitExtra)=>x.category));
+      const extraCats=new Set(pe.map((x:ProfitExtra)=>x.subCategory).filter(Boolean));
+      const extraSubcats=new Set(pe.map((x:any)=>x.subSubCategory).filter(Boolean));
+      if(extraSites.size>0){
+        const merged=[...new Set([...settings.pext_sites,...Array.from(extraSites)])];
+        setPextSiteList(merged); db.saveAppSetting("pext_sites",merged);
+      }
+      if(extraCats.size>0){
+        const merged=[...new Set([...settings.pext_cats,...Array.from(extraCats)])];
+        setPextCatList(merged); db.saveAppSetting("pext_cats",merged);
+      }
+      if(extraSubcats.size>0){
+        const merged=[...new Set([...settings.pext_subcats,...Array.from(extraSubcats) as string[]])];
+        setPextSubCatList(merged); db.saveAppSetting("pext_subcats",merged);
+      }
+
+      // 수동 경기: DB Row → ManualGame 타입
+      setManualGames(mg.map(r=>({
+        id:r.id, country:r.country, league:r.league,
+        homeTeam:r.homeTeam, awayTeam:r.awayTeam,
+        sportCat:r.sportCat, createdAt:r.createdAt,
+        homeScore:r.homeScore, awayScore:r.awayScore, finished:r.finished,
+      })));
+
+      // m_meta: type별로 분류 → customSports / mCountries / mLeagues 재구성
+      const _customSports:string[]=[];
+      const _mCountries:Record<string,string[]>={};
+      const _mLeagues:Record<string,string[]>={};
+      for(const row of mm){
+        if(row.type==="sport"){
+          if(!_customSports.includes(row.name)) _customSports.push(row.name);
+        } else if(row.type==="country"){
+          if(!_mCountries[row.sport]) _mCountries[row.sport]=[];
+          if(!_mCountries[row.sport].includes(row.name)) _mCountries[row.sport].push(row.name);
+        } else if(row.type==="league"){
+          const key=`${row.sport}__${row.country}`;
+          if(!_mLeagues[key]) _mLeagues[key]=[];
+          if(!_mLeagues[key].includes(row.name)) _mLeagues[key].push(row.name);
+        }
+      }
+      setCustomSports(_customSports);
+      setMCountries(_mCountries);
+      setMLeagues(_mLeagues);
+
+      // 포인트 사이트 / 일일 퀘스트 / 코드 메모 / 팀명 매핑
+      setPointSites(ps.map(p=>({
+        id:p.id,name:p.name,exchangeName:p.exchangeName,exchangeDate:p.exchangeDate,
+        targetAmount:p.targetAmount,targetSiteName:p.targetSiteName,
+        targetCycleDays:p.targetCycleDays,sessions:p.sessions as any,
+      })) as PointSite[]);
+      setDailyQuestsRaw(dq.map(q=>({id:q.id,name:q.name,createdAt:q.createdAt,history:q.history})) as DailyQuest[]);
+      setCodeMemosRaw(cm);
+      setTeamNameMap(tn);
+
+      setDataLoadErrors(errors);
       setDbReady(true);
     })();
+    return ()=>{cancelled=true;};
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[]);
+  },[dbReloadNonce]);
 
   const addLog=(type:string,desc:string)=>setLogs(p=>[{id:String(Date.now()),ts:new Date().toLocaleString("ko-KR"),type,desc},...p].slice(0,200));
 
@@ -1571,10 +1785,10 @@ function AppMain() {
       if (editMetaModal) { setEditMetaModal(null); setEditMetaNewName(""); return; }
       if (closeModal) { setCloseModal(null); return; }
       if (deleteModal) { setDeleteModal(null); return; }
-      // 코드 메모 패널 닫기 - 작성중 텍스트를 명시적으로 localStorage에 저장
+      // 코드 메모 패널 닫기 - 작성중 텍스트를 DB에 저장
       if (codeMemoOpen) {
         // 인라인 편집 중이라면 textarea 자체에서 처리되므로 여기 안 옴
-        try{localStorage.setItem("bt_code_memo_draft", newMemoText);}catch{}
+        db.saveAppSetting("code_memo_draft", newMemoText);
         setDraftSavedAt(Date.now());
         setCodeMemoOpen(false);
         return;
@@ -2279,6 +2493,23 @@ function AppMain() {
   return (
     <div style={{minHeight:"100vh",background:C.bg,color:C.text,fontFamily:"'Segoe UI',system-ui,sans-serif",display:"flex",flexDirection:"column"}}>
 
+      {/* ── 데이터 로드 실패 배너 ── */}
+      {dataLoadErrors.length>0 && (
+        <div style={{background:`${C.red}22`,border:`1px solid ${C.red}`,color:C.red,padding:"10px 14px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,fontSize:13}}>
+          <div style={{flex:1}}>
+            <b>⚠ 데이터 로드 실패</b> · 일부 데이터를 불러오지 못했습니다.
+            <span style={{opacity:0.7,marginLeft:8}}>({dataLoadErrors.join(", ")})</span>
+          </div>
+          <button onClick={()=>{setDataLoadErrors([]);setDbReloadNonce(n=>n+1);}}
+            style={{padding:"5px 12px",borderRadius:5,border:`1px solid ${C.red}`,background:"transparent",color:C.red,cursor:"pointer",fontWeight:700,fontSize:12,whiteSpace:"nowrap"}}>
+            🔄 다시 시도
+          </button>
+          <button onClick={()=>setDataLoadErrors([])}
+            style={{padding:"5px 10px",borderRadius:5,border:`1px solid ${C.red}66`,background:"transparent",color:C.red,cursor:"pointer",fontSize:12}}>
+            ✕
+          </button>
+        </div>
+      )}
       {/* ── 모달들 ── */}
       {siteManageModal&&(
         <div style={{position:"fixed",inset:0,background:"#000b",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center"}}>
