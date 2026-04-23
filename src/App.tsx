@@ -1135,14 +1135,16 @@ function AppMain() {
   );
   const [customLeagues,setCustomLeaguesRaw]=useState<Record<string,string[]>>({});
   const [esportsRecords,setEsportsRecordsRaw]=useState<EsportsRecord[]>([]);
-  const [profitExtras,setProfitExtrasRaw]=useState<ProfitExtra[]>([]);
+  const [profitExtras,setProfitExtrasRaw]=useState<(ProfitExtra & {subSubCategory?:string})[]>([]);
   const [logs,setLogs]=useState<Log[]>([]);
 
   const [pextSiteList,setPextSiteList]=useState<string[]>(()=>{try{const v=localStorage.getItem("bt_pext_sites");return v?JSON.parse(v):[];}catch{return [];}});
   const [pextCatList,setPextCatList]=useState<string[]>(()=>{try{const v=localStorage.getItem("bt_pext_cats");return v?JSON.parse(v):[];}catch{return [];}});
+  const [pextSubCatList,setPextSubCatList]=useState<string[]>(()=>{try{const v=localStorage.getItem("bt_pext_subcats");return v?JSON.parse(v):[];}catch{return [];}});
 
   const savePextSiteList=(list:string[])=>{setPextSiteList(list);try{localStorage.setItem("bt_pext_sites",JSON.stringify(list));}catch{}};
   const savePextCatList=(list:string[])=>{setPextCatList(list);try{localStorage.setItem("bt_pext_cats",JSON.stringify(list));}catch{}};
+  const savePextSubCatList=(list:string[])=>{setPextSubCatList(list);try{localStorage.setItem("bt_pext_subcats",JSON.stringify(list));}catch{}};
 
   useEffect(()=>{
     (async()=>{
@@ -1155,8 +1157,10 @@ function AppMain() {
       setSiteStatesRaw(ss);setCustomLeaguesRaw(cl);setEsportsRecordsRaw(er);setProfitExtrasRaw(pe);
       const sites=new Set(pe.map((x:ProfitExtra)=>x.category));
       const cats=new Set(pe.map((x:ProfitExtra)=>x.subCategory).filter(Boolean));
+      const subcats=new Set(pe.map((x:any)=>x.subSubCategory).filter(Boolean));
       if(sites.size>0)savePextSiteList([...new Set([...pextSiteList,...Array.from(sites)])]);
       if(cats.size>0)savePextCatList([...new Set([...pextCatList,...Array.from(cats)])]);
+      if(subcats.size>0)savePextSubCatList([...new Set([...pextSubCatList,...Array.from(subcats) as string[]])]);
       setDbReady(true);
     })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1309,7 +1313,14 @@ function AppMain() {
   const [esRec,setEsRec]=useState({league:"LCK",date:today,teamA:"",teamB:"",scoreA:0,scoreB:0});
 
   // ── 수익률 기타 ──────────────────────────────────────────
-  const [pextForm,setPextForm]=useState({category:"",subCategory:"",amount:0,note:"",isIncome:true});
+  const [pextForm,setPextForm]=useState({category:"",subCategory:"",subSubCategory:"",amount:0,note:"",isIncome:true});
+  // 기타수익 카테고리 추가 모달
+  const [pextAddMenu,setPextAddMenu]=useState<null|{type:"site"|"cat"|"subcat"}>(null);
+  const [pextAddName,setPextAddName]=useState("");
+  // 기타수익 펼침 상태
+  const [pextExpanded,setPextExpanded]=useState<Record<string,boolean>>({});
+  // 기타수익 입력 모드: 폼 펼침
+  const [pextFormOpen,setPextFormOpen]=useState(false);
   const [newPextSite,setNewPextSite]=useState("");
   const [newPextCat,setNewPextCat]=useState("");
 
@@ -1624,12 +1635,94 @@ function AppMain() {
   const activeTotalUsdBet=ALL_SITES.filter(s=>isUSD(s)).reduce((s,site)=>s+(siteStates[site]?.active?siteStates[site].betTotal:0),0);
 
   const extraRoiStats=useMemo(()=>{
-    const cats:Record<string,{income:number,expense:number,items:ProfitExtra[]}>={};
-    profitExtras.forEach(e=>{if(!cats[e.category])cats[e.category]={income:0,expense:0,items:[]};if(e.isIncome)cats[e.category].income+=e.amount;else cats[e.category].expense+=e.amount;cats[e.category].items.push(e);});
+    const cats:Record<string,{income:number,expense:number,items:any[],bySub:Record<string,{income:number,expense:number,items:any[],bySubSub:Record<string,{income:number,expense:number,items:any[]}>}>}>={};
+    profitExtras.forEach((e:any)=>{
+      if(!cats[e.category])cats[e.category]={income:0,expense:0,items:[],bySub:{}};
+      if(e.isIncome)cats[e.category].income+=e.amount;else cats[e.category].expense+=e.amount;
+      cats[e.category].items.push(e);
+      const sub = e.subCategory||"기타";
+      if(!cats[e.category].bySub[sub])cats[e.category].bySub[sub]={income:0,expense:0,items:[],bySubSub:{}};
+      if(e.isIncome)cats[e.category].bySub[sub].income+=e.amount;else cats[e.category].bySub[sub].expense+=e.amount;
+      cats[e.category].bySub[sub].items.push(e);
+      const subSub = e.subSubCategory||"-";
+      if(!cats[e.category].bySub[sub].bySubSub[subSub])cats[e.category].bySub[sub].bySubSub[subSub]={income:0,expense:0,items:[]};
+      if(e.isIncome)cats[e.category].bySub[sub].bySubSub[subSub].income+=e.amount;else cats[e.category].bySub[sub].bySubSub[subSub].expense+=e.amount;
+      cats[e.category].bySub[sub].bySubSub[subSub].items.push(e);
+    });
     return cats;
   },[profitExtras]);
 
   const totalRoiKRW=useMemo(()=>roiStats.reduce((s,r)=>s+r.netKRW,0)+profitExtras.reduce((s,e)=>s+(e.isIncome?e.amount:-e.amount),0),[roiStats,profitExtras]);
+
+  // ── 주간/월간/일별 수익률 통계 ─────────────────────────────
+  const dateRanges = useMemo(()=>{
+    const t = new Date(today+"T00:00:00");
+    const day = t.getDay(); // 0=일, 1=월
+    const monOff = day===0?-6:1-day;
+    const weekStart = new Date(t); weekStart.setDate(t.getDate()+monOff);
+    const monthStart = new Date(t.getFullYear(), t.getMonth(), 1);
+    const monthEnd = new Date(t.getFullYear(), t.getMonth()+1, 0);
+    const weekStartStr = weekStart.toISOString().slice(0,10);
+    const monthStartStr = monthStart.toISOString().slice(0,10);
+    const monthEndStr = monthEnd.toISOString().slice(0,10);
+    return {weekStartStr, monthStartStr, monthEndStr,
+      monthYear: t.getFullYear(), monthIdx: t.getMonth(),
+      monthDays: monthEnd.getDate(),
+      monthFirstDow: monthStart.getDay()};
+  },[today]);
+
+  // 환율 적용해서 KRW로 환산하는 헬퍼
+  const toKRW = useCallback((amt:number, dollar:boolean)=>dollar?amt*usdKrw:amt,[usdKrw]);
+
+  // 일별 종합 수익 (베팅 + 기타수익 - 기타지출)
+  // 입금/출금은 사이트별 마감 정산 후에만 수익 인정되므로 일별 그래프엔 베팅+기타만
+  const dailyAllRoi = useMemo(()=>{
+    const m:Record<string,{betProfit:number,extraIncome:number,extraExpense:number,deposit:number,withdraw:number,betCount:number}>={};
+    bets.filter(b=>b.result==="승"||b.result==="패").forEach(b=>{
+      if(!m[b.date]) m[b.date]={betProfit:0,extraIncome:0,extraExpense:0,deposit:0,withdraw:0,betCount:0};
+      m[b.date].betProfit += toKRW(b.profit??0, b.isDollar);
+      m[b.date].betCount++;
+    });
+    profitExtras.forEach(e=>{
+      if(!m[e.date]) m[e.date]={betProfit:0,extraIncome:0,extraExpense:0,deposit:0,withdraw:0,betCount:0};
+      if(e.isIncome) m[e.date].extraIncome += e.amount;
+      else m[e.date].extraExpense += e.amount;
+    });
+    deposits.forEach(d=>{
+      if(!m[d.date]) m[d.date]={betProfit:0,extraIncome:0,extraExpense:0,deposit:0,withdraw:0,betCount:0};
+      m[d.date].deposit += toKRW(d.amount, d.isDollar);
+    });
+    withdrawals.forEach(w=>{
+      if(!m[w.date]) m[w.date]={betProfit:0,extraIncome:0,extraExpense:0,deposit:0,withdraw:0,betCount:0};
+      m[w.date].withdraw += toKRW(w.amount, w.isDollar);
+    });
+    return Object.entries(m)
+      .map(([date,v])=>({date, ...v, total: v.betProfit + v.extraIncome - v.extraExpense}))
+      .sort((a,b)=>b.date.localeCompare(a.date)); // 최근 → 과거
+  },[bets, profitExtras, deposits, withdrawals, toKRW]);
+
+  // 이번 주 수익
+  const weekRoi = useMemo(()=>{
+    return dailyAllRoi.filter(d=>d.date>=dateRanges.weekStartStr && d.date<=today)
+      .reduce((s,d)=>s+d.total,0);
+  },[dailyAllRoi, dateRanges.weekStartStr, today]);
+
+  // 이번 달 수익
+  const monthRoi = useMemo(()=>{
+    return dailyAllRoi.filter(d=>d.date>=dateRanges.monthStartStr && d.date<=dateRanges.monthEndStr)
+      .reduce((s,d)=>s+d.total,0);
+  },[dailyAllRoi, dateRanges.monthStartStr, dateRanges.monthEndStr]);
+
+  // 이번 달 캘린더용 데이터 (날짜 → 일별 수익)
+  const monthCalendar = useMemo(()=>{
+    const map:Record<string,{betProfit:number,extraIncome:number,extraExpense:number,deposit:number,withdraw:number,total:number,betCount:number}>={};
+    dailyAllRoi.forEach(d=>{
+      if(d.date>=dateRanges.monthStartStr && d.date<=dateRanges.monthEndStr){
+        map[d.date] = d;
+      }
+    });
+    return map;
+  },[dailyAllRoi, dateRanges.monthStartStr, dateRanges.monthEndStr]);
 
   const esportsPrediction=useMemo(()=>{
     const teams:Record<string,{wins:number,losses:number,scored:number,conceded:number}>={};
@@ -4242,84 +4335,395 @@ function AppMain() {
 
       {/* ══ 수익률 탭 ══ */}
       {tab==="roi"&&(
-        <div style={{flex:1,overflowY:"auto",padding:20}}>
-          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}}>
-            <div style={{fontSize:16,fontWeight:800,color:C.green}}>💹 수익률 분석</div>
-            <div style={{background:C.bg3,border:`1px solid ${totalRoiKRW>=0?C.green:C.red}44`,borderRadius:10,padding:"8px 18px",textAlign:"center"}}>
-              <div style={{fontSize:9,color:C.muted,marginBottom:2}}>전체 순손익</div>
-              <div style={{fontSize:22,fontWeight:900,color:totalRoiKRW>=0?C.green:C.red}}>{fmtProfit(totalRoiKRW,false)}</div>
-            </div>
-          </div>
-          <div style={{background:C.bg3,border:`1px solid ${C.border2}`,borderRadius:10,padding:14,marginBottom:16}}>
-            <div style={{fontSize:12,fontWeight:700,color:C.amber,marginBottom:10}}>📊 현재 진행 중 (마감 전)</div>
-            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8}}>
-              <div style={{textAlign:"center"}}><div style={{fontSize:10,color:C.muted,marginBottom:3}}>원화 입금중</div><div style={{fontSize:16,fontWeight:800,color:C.green}}>₩{activeTotalKrwDep.toLocaleString()}</div></div>
-              <div style={{textAlign:"center"}}><div style={{fontSize:10,color:C.muted,marginBottom:3}}>원화 베팅중</div><div style={{fontSize:16,fontWeight:800,color:C.amber}}>₩{activeTotalKrwBet.toLocaleString()}</div></div>
-              <div style={{textAlign:"center"}}><div style={{fontSize:10,color:C.muted,marginBottom:3}}>달러 입금중</div><div style={{fontSize:16,fontWeight:800,color:C.green}}>${activeTotalUsdDep.toFixed(2)}</div></div>
-              <div style={{textAlign:"center"}}><div style={{fontSize:10,color:C.muted,marginBottom:3}}>달러 베팅중</div><div style={{fontSize:16,fontWeight:800,color:C.amber}}>${activeTotalUsdBet.toFixed(2)}</div></div>
-            </div>
-          </div>
-          <div style={{fontSize:13,fontWeight:700,color:C.teal,marginBottom:10}}>사이트별 마감 세션 수익</div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:20}}>
-            {roiStats.map(r=>(
-              <div key={r.site} style={{background:C.bg3,border:`1px solid ${r.netKRW>=0?C.green+"44":C.red+"44"}`,borderRadius:10,padding:14}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-                  <div style={{fontSize:13,fontWeight:800,color:C.text}}>{r.dollar?"$ ":"₩ "}{r.site}</div>
-                  <div style={{fontSize:15,fontWeight:900,color:r.netKRW>=0?C.green:C.red}}>{fmtProfit(r.netKRW,false)}</div>
-                </div>
+        <div style={{flex:1,display:"flex",overflow:"hidden",minWidth:0,minHeight:0}}>
+
+          {/* ─── 좌측: 기타 수익 / 지출 (380px) ─── */}
+          <div style={{width:380,flexShrink:0,background:C.bg2,borderRight:`1px solid ${C.border2}`,display:"flex",flexDirection:"column",overflow:"hidden",minHeight:0}}>
+            <div style={{padding:"12px 14px",borderBottom:`1px solid ${C.border2}`,flexShrink:0}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:7}}>
+                <div style={{fontSize:13,fontWeight:800,color:C.purple}}>💼 기타 수익 / 지출</div>
+                <button onClick={()=>setPextFormOpen(p=>!p)} style={{padding:"4px 10px",borderRadius:5,border:`1px solid ${C.purple}66`,background:`${C.purple}11`,color:C.purple,cursor:"pointer",fontSize:10,fontWeight:700}}>
+                  {pextFormOpen?"▼ 닫기":"➕ 추가"}
+                </button>
               </div>
-            ))}
+              {/* 종합 합계 */}
+              {(()=>{
+                const totIn = profitExtras.filter(e=>e.isIncome).reduce((s,e)=>s+e.amount,0);
+                const totOut = profitExtras.filter(e=>!e.isIncome).reduce((s,e)=>s+e.amount,0);
+                const net = totIn - totOut;
+                return (
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:5,fontSize:10}}>
+                    <div style={{background:C.bg3,padding:"5px 7px",borderRadius:5,textAlign:"center"}}><div style={{color:C.muted,fontSize:9}}>수입</div><div style={{color:C.green,fontWeight:800,fontSize:11}}>+{totIn.toLocaleString()}</div></div>
+                    <div style={{background:C.bg3,padding:"5px 7px",borderRadius:5,textAlign:"center"}}><div style={{color:C.muted,fontSize:9}}>지출</div><div style={{color:C.red,fontWeight:800,fontSize:11}}>-{totOut.toLocaleString()}</div></div>
+                    <div style={{background:C.bg3,padding:"5px 7px",borderRadius:5,textAlign:"center"}}><div style={{color:C.muted,fontSize:9}}>합계</div><div style={{color:net>=0?C.green:C.red,fontWeight:800,fontSize:11}}>{net>=0?"+":""}{net.toLocaleString()}</div></div>
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* 입력 폼 (펼침) */}
+            {pextFormOpen && (
+              <div style={{padding:"10px 12px",borderBottom:`1px solid ${C.border}`,background:C.bg3,flexShrink:0}}>
+                <div style={{marginBottom:6}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:3}}>
+                    <div style={{...L,marginBottom:0}}>사이트</div>
+                    <button onClick={()=>{setPextAddMenu({type:"site"});setPextAddName("");}} style={{fontSize:9,padding:"1px 6px",borderRadius:3,border:`1px solid ${C.teal}66`,background:`${C.teal}11`,color:C.teal,cursor:"pointer"}}>+ 새 사이트</button>
+                  </div>
+                  <select value={pextForm.category} onChange={e=>setPextForm(f=>({...f,category:e.target.value}))} style={{...S,boxSizing:"border-box",fontSize:11,padding:"5px 8px"}}>
+                    <option value="">선택...</option>
+                    {pextSiteList.map(s=><option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+                <div style={{marginBottom:6}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:3}}>
+                    <div style={{...L,marginBottom:0}}>분류</div>
+                    <button onClick={()=>{setPextAddMenu({type:"cat"});setPextAddName("");}} style={{fontSize:9,padding:"1px 6px",borderRadius:3,border:`1px solid ${C.amber}66`,background:`${C.amber}11`,color:C.amber,cursor:"pointer"}}>+ 새 분류</button>
+                  </div>
+                  <select value={pextForm.subCategory} onChange={e=>setPextForm(f=>({...f,subCategory:e.target.value}))} style={{...S,boxSizing:"border-box",fontSize:11,padding:"5px 8px"}}>
+                    <option value="">선택...</option>
+                    {pextCatList.map(s=><option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+                <div style={{marginBottom:6}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:3}}>
+                    <div style={{...L,marginBottom:0}}>하위 카테고리</div>
+                    <button onClick={()=>{setPextAddMenu({type:"subcat"});setPextAddName("");}} style={{fontSize:9,padding:"1px 6px",borderRadius:3,border:`1px solid ${C.green}66`,background:`${C.green}11`,color:C.green,cursor:"pointer"}}>+ 새 하위</button>
+                  </div>
+                  <select value={pextForm.subSubCategory} onChange={e=>setPextForm(f=>({...f,subSubCategory:e.target.value}))} style={{...S,boxSizing:"border-box",fontSize:11,padding:"5px 8px"}}>
+                    <option value="">(선택 안 함)</option>
+                    {pextSubCatList.map(s=><option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:6}}>
+                  <div><div style={L}>금액</div><input type="number" value={pextForm.amount||""} onChange={e=>setPextForm(f=>({...f,amount:parseFloat(e.target.value)||0}))} style={{...S,boxSizing:"border-box",fontSize:11,padding:"5px 8px",...noSpin}}/></div>
+                  <div style={{display:"flex",gap:4,alignItems:"end"}}>
+                    <button onClick={()=>setPextForm(f=>({...f,isIncome:true}))} style={{flex:1,padding:"6px 0",borderRadius:5,border:pextForm.isIncome?`1px solid ${C.green}`:`1px solid ${C.border}`,background:pextForm.isIncome?`${C.green}22`:C.bg2,color:pextForm.isIncome?C.green:C.muted,cursor:"pointer",fontSize:11,fontWeight:700}}>수입</button>
+                    <button onClick={()=>setPextForm(f=>({...f,isIncome:false}))} style={{flex:1,padding:"6px 0",borderRadius:5,border:!pextForm.isIncome?`1px solid ${C.red}`:`1px solid ${C.border}`,background:!pextForm.isIncome?`${C.red}22`:C.bg2,color:!pextForm.isIncome?C.red:C.muted,cursor:"pointer",fontSize:11,fontWeight:700}}>지출</button>
+                  </div>
+                </div>
+                <div style={{marginBottom:7}}><div style={L}>내용 / 메모</div><input value={pextForm.note} onChange={e=>setPextForm(f=>({...f,note:e.target.value}))} placeholder="자세한 내용을 적어주세요" style={{...S,boxSizing:"border-box",fontSize:11,padding:"5px 8px"}}/></div>
+                <button onClick={()=>{
+                  if(!pextForm.category)return alert("사이트를 선택해주세요");
+                  if(pextForm.amount<=0)return alert("금액을 입력해주세요");
+                  const newPe={id:String(Date.now()),...pextForm,date:today};
+                  setProfitExtrasRaw(p=>[...p,newPe as any]);
+                  db.insertProfitExtra(newPe as any);
+                  addLog(pextForm.isIncome?"💰 기타수입":"💸 기타지출",`${pextForm.category}/${pextForm.subCategory||"-"}/${pextForm.amount.toLocaleString()}`);
+                  setPextForm({category:"",subCategory:"",subSubCategory:"",amount:0,note:"",isIncome:true});
+                }} style={{width:"100%",background:`${C.purple}33`,border:`1px solid ${C.purple}`,color:C.purple,padding:"8px",borderRadius:6,cursor:"pointer",fontWeight:800,fontSize:12}}>✓ 추가</button>
+              </div>
+            )}
+
+            {/* 사이트별 트리 (계층 표시) */}
+            <div style={{flex:1,overflowY:"auto",padding:"10px 12px",minHeight:0}}>
+              {Object.keys(extraRoiStats).length===0 ? (
+                <div style={{textAlign:"center",color:C.dim,padding:"40px 0"}}>
+                  <div style={{fontSize:30,marginBottom:8}}>💼</div>
+                  <div style={{fontSize:12,color:C.muted}}>기타 수익/지출이 없습니다</div>
+                  <div style={{fontSize:10,marginTop:6,color:C.dim}}>위 [➕ 추가] 버튼으로 등록하세요</div>
+                </div>
+              ) : Object.entries(extraRoiStats).map(([cat,data])=>{
+                const net = data.income - data.expense;
+                const isOpen = pextExpanded[cat] !== false; // 기본 열림
+                return (
+                  <div key={cat} style={{background:C.bg3,border:`1px solid ${net>=0?C.green+"33":C.red+"33"}`,borderRadius:8,marginBottom:7,overflow:"hidden"}}>
+                    <div onClick={()=>setPextExpanded(p=>({...p,[cat]:!isOpen}))} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 11px",cursor:"pointer",background:isOpen?`${C.purple}11`:"transparent"}}>
+                      <div style={{display:"flex",alignItems:"center",gap:6}}>
+                        <span style={{fontSize:10,color:C.muted}}>{isOpen?"▼":"▶"}</span>
+                        <span style={{fontSize:12,fontWeight:800,color:C.text}}>{cat}</span>
+                        <span style={{fontSize:9,color:C.dim}}>({data.items.length})</span>
+                      </div>
+                      <div style={{fontSize:12,fontWeight:800,color:net>=0?C.green:C.red}}>{net>=0?"+":""}{net.toLocaleString()}</div>
+                    </div>
+                    {isOpen && Object.entries(data.bySub).map(([sub,subData])=>{
+                      const subNet = subData.income - subData.expense;
+                      const subKey = `${cat}__${sub}`;
+                      const subOpen = pextExpanded[subKey] !== false;
+                      return (
+                        <div key={sub} style={{borderTop:`1px solid ${C.border}`,background:C.bg2}}>
+                          <div onClick={()=>setPextExpanded(p=>({...p,[subKey]:!subOpen}))} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 11px 6px 22px",cursor:"pointer"}}>
+                            <div style={{display:"flex",alignItems:"center",gap:6}}>
+                              <span style={{fontSize:9,color:C.muted}}>{subOpen?"▼":"▶"}</span>
+                              <span style={{fontSize:11,color:C.amber,fontWeight:700}}>📁 {sub}</span>
+                              <span style={{fontSize:9,color:C.dim}}>({subData.items.length})</span>
+                            </div>
+                            <div style={{fontSize:11,fontWeight:700,color:subNet>=0?C.green:C.red}}>{subNet>=0?"+":""}{subNet.toLocaleString()}</div>
+                          </div>
+                          {subOpen && Object.entries(subData.bySubSub).map(([subSub,ssData])=>{
+                            const ssNet = ssData.income - ssData.expense;
+                            const ssKey = `${cat}__${sub}__${subSub}`;
+                            const ssOpen = pextExpanded[ssKey] === true; // 하위 카테고리는 기본 닫힘
+                            return (
+                              <div key={subSub}>
+                                <div onClick={()=>setPextExpanded(p=>({...p,[ssKey]:!ssOpen}))} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 11px 5px 38px",cursor:"pointer",background:C.bg}}>
+                                  <div style={{display:"flex",alignItems:"center",gap:5}}>
+                                    <span style={{fontSize:9,color:C.muted}}>{ssOpen?"▼":"▶"}</span>
+                                    <span style={{fontSize:10,color:C.teal}}>{subSub==="-"?"기타":`📋 ${subSub}`}</span>
+                                    <span style={{fontSize:9,color:C.dim}}>({ssData.items.length})</span>
+                                  </div>
+                                  <div style={{fontSize:10,fontWeight:700,color:ssNet>=0?C.green:C.red}}>{ssNet>=0?"+":""}{ssNet.toLocaleString()}</div>
+                                </div>
+                                {ssOpen && [...ssData.items].sort((a:any,b:any)=>b.date.localeCompare(a.date)).map((item:any)=>(
+                                  <div key={item.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:10,padding:"4px 11px 4px 50px",background:C.bg2,borderTop:`1px solid ${C.border}`}}>
+                                    <div style={{flex:1,minWidth:0}}>
+                                      <div style={{color:C.muted,fontSize:9}}>{item.date}</div>
+                                      <div style={{color:C.text,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{item.note||"(메모 없음)"}</div>
+                                    </div>
+                                    <div style={{display:"flex",gap:6,alignItems:"center",flexShrink:0,marginLeft:6}}>
+                                      <span style={{color:item.isIncome?C.green:C.red,fontWeight:700,fontSize:11}}>{item.isIncome?"+":"-"}{item.amount.toLocaleString()}</span>
+                                      <button onClick={(e)=>{e.stopPropagation();if(!window.confirm("삭제하시겠습니까?"))return;setProfitExtrasRaw(p=>p.filter(x=>x.id!==item.id));db.deleteProfitExtra(item.id);}} style={{background:"transparent",border:"none",color:C.muted,cursor:"pointer",fontSize:10}}>✕</button>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })}
+            </div>
           </div>
 
-          <div style={{fontSize:13,fontWeight:700,color:C.purple,marginBottom:10}}>기타 수익 / 지출</div>
-          <div style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:10,padding:14,marginBottom:12}}>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,alignItems:"end",marginBottom:8}}>
-              <div>
-                <div style={L}>사이트</div>
-                <select value={pextForm.category} onChange={e=>setPextForm(f=>({...f,category:e.target.value}))} style={{...S,boxSizing:"border-box"}}>
-                  <option value="">선택...</option>
-                  {pextSiteList.map(s=><option key={s} value={s}>{s}</option>)}
-                </select>
+          {/* ─── 우측: 분석 메인 ─── */}
+          <div style={{flex:1,overflowY:"auto",padding:18,minWidth:0}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
+              <div style={{fontSize:18,fontWeight:800,color:C.green}}>💹 수익률 분석</div>
+              <div style={{background:C.bg3,border:`1px solid ${totalRoiKRW>=0?C.green:C.red}66`,borderRadius:10,padding:"7px 18px",textAlign:"center"}}>
+                <div style={{fontSize:9,color:C.muted,marginBottom:1}}>전체 순손익</div>
+                <div style={{fontSize:20,fontWeight:900,color:totalRoiKRW>=0?C.green:C.red}}>{fmtProfit(totalRoiKRW,false)}</div>
               </div>
-              <div>
-                <div style={L}>분류</div>
-                <select value={pextForm.subCategory} onChange={e=>setPextForm(f=>({...f,subCategory:e.target.value}))} style={{...S,boxSizing:"border-box"}}>
-                  <option value="">선택...</option>
-                  {pextCatList.map(s=><option key={s} value={s}>{s}</option>)}
-                </select>
-              </div>
-              <div><div style={L}>금액</div><input type="number" value={pextForm.amount||""} onChange={e=>setPextForm(f=>({...f,amount:parseFloat(e.target.value)||0}))} style={{...S,boxSizing:"border-box",...noSpin}}/></div>
             </div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr auto auto",gap:6,alignItems:"end",marginBottom:8}}>
-              <div><div style={L}>메모</div><input value={pextForm.note} onChange={e=>setPextForm(f=>({...f,note:e.target.value}))} style={{...S,boxSizing:"border-box"}}/></div>
-              <button onClick={()=>setPextForm(f=>({...f,isIncome:true}))} style={{padding:"7px 14px",borderRadius:5,border:pextForm.isIncome?`1px solid ${C.green}`:`1px solid ${C.border}`,background:pextForm.isIncome?`${C.green}22`:C.bg2,color:pextForm.isIncome?C.green:C.muted,cursor:"pointer",fontSize:12,fontWeight:700}}>수입</button>
-              <button onClick={()=>setPextForm(f=>({...f,isIncome:false}))} style={{padding:"7px 14px",borderRadius:5,border:!pextForm.isIncome?`1px solid ${C.red}`:`1px solid ${C.border}`,background:!pextForm.isIncome?`${C.red}22`:C.bg2,color:!pextForm.isIncome?C.red:C.muted,cursor:"pointer",fontSize:12,fontWeight:700}}>지출</button>
-            </div>
-            <button onClick={()=>{
-              if(!pextForm.category)return alert("사이트 선택");
-              if(pextForm.amount<=0)return;
-              const newPe={id:String(Date.now()),...pextForm,date:today};
-              setProfitExtrasRaw(p=>[...p,newPe]);db.insertProfitExtra(newPe);
-              setPextForm({category:"",subCategory:"",amount:0,note:"",isIncome:true});
-            }} style={{width:"100%",background:`${C.purple}22`,border:`1px solid ${C.purple}`,color:C.purple,padding:"7px",borderRadius:6,cursor:"pointer",fontWeight:700}}>추가</button>
-          </div>
-          {Object.entries(extraRoiStats).map(([cat,{income,expense,items}])=>(
-            <div key={cat} style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:10,padding:14,marginBottom:10}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-                <div style={{fontSize:13,fontWeight:800,color:C.purple}}>{cat}</div>
-                <div style={{fontSize:13,fontWeight:800,color:(income-expense)>=0?C.green:C.red}}>{fmtProfit(income-expense,false)}</div>
+
+            {/* ── 이번주/이번달/오늘 카드 ── */}
+            {(()=>{
+              const todayRoi = (monthCalendar[today]?.total) || 0;
+              return (
+                <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:14}}>
+                  <div style={{background:`linear-gradient(135deg,${todayRoi>=0?C.green:C.red}15,${C.bg3})`,border:`1px solid ${todayRoi>=0?C.green:C.red}55`,borderRadius:10,padding:13}}>
+                    <div style={{fontSize:10,color:C.muted,marginBottom:3,fontWeight:700}}>📅 오늘 ({today})</div>
+                    <div style={{fontSize:22,fontWeight:900,color:todayRoi>=0?C.green:C.red,lineHeight:1.1}}>{fmtProfit(todayRoi,false)}</div>
+                    <div style={{fontSize:9,color:C.muted,marginTop:3}}>베팅 {monthCalendar[today]?.betCount||0}건</div>
+                  </div>
+                  <div style={{background:`linear-gradient(135deg,${weekRoi>=0?C.green:C.red}15,${C.bg3})`,border:`1px solid ${weekRoi>=0?C.green:C.red}55`,borderRadius:10,padding:13}}>
+                    <div style={{fontSize:10,color:C.muted,marginBottom:3,fontWeight:700}}>📆 이번 주</div>
+                    <div style={{fontSize:22,fontWeight:900,color:weekRoi>=0?C.green:C.red,lineHeight:1.1}}>{fmtProfit(weekRoi,false)}</div>
+                    <div style={{fontSize:9,color:C.muted,marginTop:3}}>{dateRanges.weekStartStr.slice(5)} ~ {today.slice(5)}</div>
+                  </div>
+                  <div style={{background:`linear-gradient(135deg,${monthRoi>=0?C.green:C.red}15,${C.bg3})`,border:`1px solid ${monthRoi>=0?C.green:C.red}55`,borderRadius:10,padding:13}}>
+                    <div style={{fontSize:10,color:C.muted,marginBottom:3,fontWeight:700}}>🗓️ 이번 달 ({dateRanges.monthYear}년 {dateRanges.monthIdx+1}월)</div>
+                    <div style={{fontSize:22,fontWeight:900,color:monthRoi>=0?C.green:C.red,lineHeight:1.1}}>{fmtProfit(monthRoi,false)}</div>
+                    <div style={{fontSize:9,color:C.muted,marginTop:3}}>{Object.keys(monthCalendar).length}일 활동</div>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* ── 진행 중 (마감 전) ── */}
+            <div style={{background:C.bg3,border:`1px solid ${C.border2}`,borderRadius:10,padding:12,marginBottom:14}}>
+              <div style={{fontSize:11,fontWeight:700,color:C.amber,marginBottom:8}}>📊 현재 진행 중 (마감 전)</div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8}}>
+                <div style={{textAlign:"center"}}><div style={{fontSize:10,color:C.muted,marginBottom:2}}>원화 입금중</div><div style={{fontSize:14,fontWeight:800,color:C.green}}>₩{activeTotalKrwDep.toLocaleString()}</div></div>
+                <div style={{textAlign:"center"}}><div style={{fontSize:10,color:C.muted,marginBottom:2}}>원화 베팅중</div><div style={{fontSize:14,fontWeight:800,color:C.amber}}>₩{activeTotalKrwBet.toLocaleString()}</div></div>
+                <div style={{textAlign:"center"}}><div style={{fontSize:10,color:C.muted,marginBottom:2}}>달러 입금중</div><div style={{fontSize:14,fontWeight:800,color:C.green}}>${activeTotalUsdDep.toFixed(2)}</div></div>
+                <div style={{textAlign:"center"}}><div style={{fontSize:10,color:C.muted,marginBottom:2}}>달러 베팅중</div><div style={{fontSize:14,fontWeight:800,color:C.amber}}>${activeTotalUsdBet.toFixed(2)}</div></div>
               </div>
-              {items.map(item=>(
-                <div key={item.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:11,padding:"4px 0",borderBottom:`1px solid ${C.border}`}}>
-                  <span style={{color:C.muted}}>{item.date}·{item.subCategory||"-"}·{item.note}</span>
-                  <div style={{display:"flex",gap:8,alignItems:"center"}}>
-                    <span style={{color:item.isIncome?C.green:C.red,fontWeight:700}}>{item.isIncome?"+":"-"}{item.amount.toLocaleString()}</span>
-                    <button onClick={()=>{setProfitExtrasRaw(p=>p.filter(x=>x.id!==item.id));db.deleteProfitExtra(item.id);}} style={{background:"transparent",border:"none",color:C.muted,cursor:"pointer",fontSize:11}}>✕</button>
+            </div>
+
+            {/* ── 이번 달 캘린더 ── */}
+            <div style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:10,padding:12,marginBottom:14}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:9}}>
+                <div style={{fontSize:13,fontWeight:800,color:C.teal}}>🗓️ {dateRanges.monthYear}년 {dateRanges.monthIdx+1}월 일별 손익</div>
+                <div style={{display:"flex",gap:10,fontSize:9,color:C.muted}}>
+                  <span>🟢 수익 <span style={{color:C.green,fontWeight:700}}>+</span></span>
+                  <span>🔴 손실 <span style={{color:C.red,fontWeight:700}}>-</span></span>
+                  <span>💵 입금 <span style={{color:C.teal,fontWeight:700}}>D</span></span>
+                  <span>💸 출금 <span style={{color:C.orange,fontWeight:700}}>W</span></span>
+                </div>
+              </div>
+              {/* 요일 헤더 */}
+              <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:3,marginBottom:3}}>
+                {["일","월","화","수","목","금","토"].map((d,i)=>(
+                  <div key={d} style={{textAlign:"center",fontSize:10,fontWeight:700,color:i===0?C.red:i===6?C.teal:C.muted,padding:"3px 0"}}>{d}</div>
+                ))}
+              </div>
+              {/* 날짜 셀 */}
+              <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:3}}>
+                {/* 빈 셀 (월 시작 이전) */}
+                {Array.from({length:dateRanges.monthFirstDow},(_,i)=>(
+                  <div key={`pre-${i}`} style={{aspectRatio:"1.4/1",background:"transparent"}}/>
+                ))}
+                {/* 실제 날짜 */}
+                {Array.from({length:dateRanges.monthDays},(_,i)=>{
+                  const dayNum = i+1;
+                  const dateStr = `${dateRanges.monthYear}-${String(dateRanges.monthIdx+1).padStart(2,"0")}-${String(dayNum).padStart(2,"0")}`;
+                  const data = monthCalendar[dateStr];
+                  const isToday = dateStr === today;
+                  const dow = (dateRanges.monthFirstDow + i) % 7;
+                  const hasData = !!data;
+                  const total = data?.total || 0;
+                  const hasDep = (data?.deposit||0) > 0;
+                  const hasWth = (data?.withdraw||0) > 0;
+                  return (
+                    <div key={dateStr} style={{
+                      aspectRatio:"1.4/1",
+                      background: isToday ? `${C.amber}22` : hasData ? (total>=0?`${C.green}11`:`${C.red}11`) : C.bg2,
+                      border: `1px solid ${isToday ? C.amber : hasData ? (total>=0?C.green+"44":C.red+"44") : C.border}`,
+                      borderRadius:5,
+                      padding:"4px 5px",
+                      display:"flex",
+                      flexDirection:"column",
+                      justifyContent:"space-between",
+                      overflow:"hidden",
+                      cursor: hasData ? "default" : "default",
+                      position:"relative",
+                    }} title={hasData?`${dateStr}\n수익: ${total.toLocaleString()}\n베팅: ${data.betCount}건${hasDep?`\n입금: +${data.deposit.toLocaleString()}`:""}${hasWth?`\n출금: -${data.withdraw.toLocaleString()}`:""}`:dateStr}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                        <span style={{fontSize:10,fontWeight:isToday?900:600,color:isToday?C.amber:dow===0?C.red:dow===6?C.teal:C.text}}>{dayNum}</span>
+                        <div style={{display:"flex",gap:1}}>
+                          {hasDep && <span style={{fontSize:7,color:C.teal,fontWeight:800,background:`${C.teal}22`,padding:"0 3px",borderRadius:2}}>D</span>}
+                          {hasWth && <span style={{fontSize:7,color:C.orange,fontWeight:800,background:`${C.orange}22`,padding:"0 3px",borderRadius:2}}>W</span>}
+                        </div>
+                      </div>
+                      {hasData && (
+                        <div style={{fontSize:10,fontWeight:800,color:total>=0?C.green:C.red,textAlign:"right",lineHeight:1}}>
+                          {total>=0?"+":""}{Math.abs(total)>=10000?`${(total/10000).toFixed(1)}만`:total.toLocaleString()}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* ── 사이트별 마감 세션 수익 ── */}
+            <div style={{fontSize:13,fontWeight:700,color:C.teal,marginBottom:9}}>🏢 사이트별 마감 세션 수익</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:18}}>
+              {roiStats.length===0 ? <div style={{gridColumn:"1/-1",textAlign:"center",color:C.dim,padding:"20px",fontSize:11}}>출금 기록이 있어야 표시됩니다</div> : roiStats.map(r=>(
+                <div key={r.site} style={{background:C.bg3,border:`1px solid ${r.netKRW>=0?C.green+"44":C.red+"44"}`,borderRadius:8,padding:11}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <div style={{fontSize:12,fontWeight:800,color:C.text}}>{r.dollar?"$ ":"₩ "}{r.site}</div>
+                    <div style={{fontSize:14,fontWeight:900,color:r.netKRW>=0?C.green:C.red}}>{fmtProfit(r.netKRW,false)}</div>
                   </div>
                 </div>
               ))}
             </div>
-          ))}
+
+            {/* ── 일자별 수익률 분석 (최근 → 과거) ── */}
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:9}}>
+              <div style={{fontSize:13,fontWeight:700,color:C.amber}}>📅 일자별 수익률 분석</div>
+              <span style={{fontSize:9,color:C.dim}}>최근 → 과거 · 베팅+기타 통합</span>
+            </div>
+            {dailyAllRoi.length===0 ? (
+              <div style={{textAlign:"center",color:C.dim,padding:"40px",fontSize:12}}>완료된 활동이 없습니다</div>
+            ) : (
+              <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                {dailyAllRoi.map(d=>{
+                  const dt = new Date(d.date+"T00:00:00");
+                  const dow = ["일","월","화","수","목","금","토"][dt.getDay()];
+                  const hasAny = d.betCount>0 || d.extraIncome>0 || d.extraExpense>0 || d.deposit>0 || d.withdraw>0;
+                  if(!hasAny) return null;
+                  return (
+                    <div key={d.date} style={{background:C.bg3,border:`1px solid ${d.total>=0?C.green+"33":C.red+"33"}`,borderRadius:8,padding:"10px 13px"}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5}}>
+                        <div style={{display:"flex",alignItems:"center",gap:7}}>
+                          <span style={{fontSize:13,fontWeight:800,color:C.text}}>{d.date}</span>
+                          <span style={{fontSize:10,color:dt.getDay()===0?C.red:dt.getDay()===6?C.teal:C.muted,padding:"1px 5px",background:C.bg2,borderRadius:3}}>{dow}요일</span>
+                          {d.date===today && <span style={{fontSize:9,color:C.amber,fontWeight:800,padding:"1px 5px",background:`${C.amber}22`,borderRadius:3}}>오늘</span>}
+                        </div>
+                        <div style={{fontSize:15,fontWeight:900,color:d.total>=0?C.green:C.red}}>{d.total>=0?"+":""}{d.total.toLocaleString()}</div>
+                      </div>
+                      <div style={{display:"flex",gap:10,fontSize:10,flexWrap:"wrap",color:C.muted}}>
+                        {d.betCount>0 && <span>🎯 베팅 <b style={{color:d.betProfit>=0?C.green:C.red,marginLeft:3}}>{d.betProfit>=0?"+":""}{d.betProfit.toLocaleString()}</b> ({d.betCount}건)</span>}
+                        {d.extraIncome>0 && <span>💰 기타수입 <b style={{color:C.green,marginLeft:3}}>+{d.extraIncome.toLocaleString()}</b></span>}
+                        {d.extraExpense>0 && <span>💸 기타지출 <b style={{color:C.red,marginLeft:3}}>-{d.extraExpense.toLocaleString()}</b></span>}
+                        {d.deposit>0 && <span>💵 입금 <b style={{color:C.teal,marginLeft:3}}>+{d.deposit.toLocaleString()}</b></span>}
+                        {d.withdraw>0 && <span>🏦 출금 <b style={{color:C.orange,marginLeft:3}}>-{d.withdraw.toLocaleString()}</b></span>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* 카테고리/사이트/하위카테고리 추가 모달 */}
+          {pextAddMenu && (
+            <div onClick={()=>setPextAddMenu(null)} style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,0.6)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000}}>
+              <div onClick={e=>e.stopPropagation()} style={{background:C.bg2,border:`1px solid ${C.border2}`,borderRadius:11,padding:18,minWidth:340}}>
+                <div style={{fontSize:14,fontWeight:800,color:C.purple,marginBottom:12}}>
+                  ➕ 새 {pextAddMenu.type==="site"?"사이트":pextAddMenu.type==="cat"?"분류":"하위 카테고리"} 추가
+                </div>
+                <input value={pextAddName} onChange={e=>setPextAddName(e.target.value)} placeholder={pextAddMenu.type==="site"?"예: 토스, 우리은행":pextAddMenu.type==="cat"?"예: 환전, 수수료, 기타":"예: 만원권, 5만원권"} autoFocus
+                  onKeyDown={e=>{if(e.key==="Enter"){
+                    const n = pextAddName.trim();
+                    if(!n) return;
+                    if(pextAddMenu.type==="site"){
+                      if(pextSiteList.includes(n))return alert("이미 존재하는 사이트입니다");
+                      savePextSiteList([...pextSiteList,n].sort());
+                      setPextForm(f=>({...f,category:n}));
+                    }else if(pextAddMenu.type==="cat"){
+                      if(pextCatList.includes(n))return alert("이미 존재하는 분류입니다");
+                      savePextCatList([...pextCatList,n].sort());
+                      setPextForm(f=>({...f,subCategory:n}));
+                    }else{
+                      if(pextSubCatList.includes(n))return alert("이미 존재하는 하위 카테고리입니다");
+                      savePextSubCatList([...pextSubCatList,n].sort());
+                      setPextForm(f=>({...f,subSubCategory:n}));
+                    }
+                    setPextAddMenu(null);setPextAddName("");
+                  }}}
+                  style={{...S,boxSizing:"border-box",fontSize:13,marginBottom:14}}/>
+                <div style={{display:"flex",gap:6}}>
+                  <button onClick={()=>{
+                    const n = pextAddName.trim();
+                    if(!n) return alert("이름을 입력해주세요");
+                    if(pextAddMenu.type==="site"){
+                      if(pextSiteList.includes(n))return alert("이미 존재하는 사이트입니다");
+                      savePextSiteList([...pextSiteList,n].sort());
+                      setPextForm(f=>({...f,category:n}));
+                    }else if(pextAddMenu.type==="cat"){
+                      if(pextCatList.includes(n))return alert("이미 존재하는 분류입니다");
+                      savePextCatList([...pextCatList,n].sort());
+                      setPextForm(f=>({...f,subCategory:n}));
+                    }else{
+                      if(pextSubCatList.includes(n))return alert("이미 존재하는 하위 카테고리입니다");
+                      savePextSubCatList([...pextSubCatList,n].sort());
+                      setPextForm(f=>({...f,subSubCategory:n}));
+                    }
+                    setPextAddMenu(null);setPextAddName("");
+                  }} style={{flex:1,padding:"8px",borderRadius:6,border:`1px solid ${C.purple}`,background:`${C.purple}33`,color:C.purple,cursor:"pointer",fontWeight:800,fontSize:12}}>✓ 추가</button>
+                  <button onClick={()=>{setPextAddMenu(null);setPextAddName("");}} style={{flex:1,padding:"8px",borderRadius:6,border:`1px solid ${C.border}`,background:C.bg,color:C.muted,cursor:"pointer",fontSize:12}}>취소</button>
+                </div>
+                {/* 기존 항목 관리 */}
+                {(()=>{
+                  const list = pextAddMenu.type==="site"?pextSiteList:pextAddMenu.type==="cat"?pextCatList:pextSubCatList;
+                  if(list.length===0) return null;
+                  return (
+                    <div style={{marginTop:14,paddingTop:12,borderTop:`1px solid ${C.border}`}}>
+                      <div style={{fontSize:10,color:C.muted,marginBottom:6}}>기존 {pextAddMenu.type==="site"?"사이트":pextAddMenu.type==="cat"?"분류":"하위"} 목록 ({list.length})</div>
+                      <div style={{display:"flex",flexWrap:"wrap",gap:4,maxHeight:120,overflowY:"auto"}}>
+                        {list.map(it=>(
+                          <div key={it} style={{display:"flex",alignItems:"center",gap:3,background:C.bg3,border:`1px solid ${C.border}`,borderRadius:4,padding:"3px 5px 3px 8px",fontSize:10}}>
+                            <span style={{color:C.text}}>{it}</span>
+                            <button onClick={()=>{
+                              if(!window.confirm(`"${it}" 삭제? (기존 데이터의 이 ${pextAddMenu.type==="site"?"사이트":pextAddMenu.type==="cat"?"분류":"하위 카테고리"}는 유지됩니다)`))return;
+                              if(pextAddMenu.type==="site")savePextSiteList(list.filter(x=>x!==it));
+                              else if(pextAddMenu.type==="cat")savePextCatList(list.filter(x=>x!==it));
+                              else savePextSubCatList(list.filter(x=>x!==it));
+                            }} style={{background:"transparent",border:"none",color:C.dim,cursor:"pointer",fontSize:10,padding:0}}>✕</button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            </div>
+          )}
+
         </div>
       )}
 
