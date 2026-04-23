@@ -5,12 +5,19 @@
 //  - 6종목 지원 (축구/야구/농구/배구/하키/E스포츠)
 //  - 종목 메뉴 크게 · 국가 메뉴 크게 · 3컬럼 독립 스크롤
 //  - Supabase events 테이블 의존 제거 (베팅 탭 한정)
-//  - 포인트 사이트: 목표 기간(targetPeriod) + 목표 주기(targetCycle) 추가
-//    → 합산 기간을 목표 기간 기반으로 [목표날짜 - period일] ~ [목표날짜 - 1일] 으로 계산
-//    → 카드에 목표 날짜·기간·주기 모두 표시
-//    → 완료 시 "이어서 진행" 다이얼로그 → 같은 설정으로 다음 사이클 자동 설정
-//  - 코드 수정 메모 → "코드 수정" 으로 명칭 변경
-//    → "반영된 항목 일괄 삭제" 버튼 강조
+//  ── rev.4 신규 ──
+//  - 다중기기 동기화: PC에서 추가한 종목/국가/리그/경기 메타데이터를
+//    customLeagues 테이블에 인코딩하여 모바일에 자동 반영 (스코어/finished는 기기별)
+//    인코딩 키:
+//      __m_sport__               : 사용자 정의 종목
+//      __m_country__SPORT        : 종목별 국가 목록
+//      __m_league__SPORT__COUNTRY: 국가별 리그 목록
+//      __m_game__                : 수동 경기 메타 (JSON, 스코어 제외)
+//    삭제는 "__del__" 톰스톤으로 표시 (앱 로드 시 필터)
+//  - 베팅 슬립: 프리매치/실시간 토글 추가 (기본 프리매치)
+//    라이브 경기 선택 시 자동으로 실시간 모드로 전환
+//    Bet 객체에 matchType 필드 추가 (Bet 타입은 cast로 확장)
+//    API-Sports 슬립 + 수동 슬립 양쪽 모두 적용
 // ─────────────────────────────────────────────────────────────
 import React, { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, LineChart, Line, CartesianGrid } from "recharts";
@@ -274,8 +281,6 @@ interface PointSite {
   exchangeDate: string;
   targetAmount: number;
   targetSiteName?: string;  // 누적입금 기준 사이트 (없으면 전체)
-  targetPeriod?: number;    // 목표 기간 (일 단위) - 입금 합산 기간 (예: 3, 7, 14, 30)
-  targetCycle?: number;     // 목표 주기 (일 단위) - 다음 목표 자동 설정 주기 (예: 7, 14, 30)
   sessions: PointSession[];
 }
 interface PointSession {
@@ -559,6 +564,8 @@ function AppMain() {
   const [slipSite,setSlipSite]=useState<string>("");
   const [slipAmount,setSlipAmount]=useState<number>(10000);
   const [slipInclude,setSlipInclude]=useState<boolean>(true);
+  // 프리매치/실시간 모드 (기본 프리매치, 라이브 경기 선택 시 자동 실시간으로 전환)
+  const [slipMatchType,setSlipMatchType]=useState<"prematch"|"live">("prematch");
 
   const slipGameIds = useMemo(()=>new Set(slip.map(s=>s.id)), [slip]);
 
@@ -571,6 +578,10 @@ function AppMain() {
       const filtered = prev.filter(s => s.game.id !== game.id);
       return [...filtered, { id, game, optLabel, odds: 0 }];
     });
+    // ── 라이브 경기 선택 시 자동으로 실시간 모드로 전환 ──
+    if (isLive(game.status_short)) {
+      setSlipMatchType("live");
+    }
   },[]);
 
   const handleSlipAdd=()=>{
@@ -594,14 +605,16 @@ function AppMain() {
         betOption:item.optLabel,homeTeam:homeKr,awayTeam:awayKr,teamName,
         amount:slipAmount,odds:item.odds,profit:null,result:"진행중",
         includeStats:slipInclude,isDollar:dollar,
-        ...({country: ktr(item.game.country)} as any),
+        ...({country: ktr(item.game.country), matchType: slipMatchType} as any),
       };
       setBetsRaw(b=>[...b,bet]);db.upsertBet(bet);
       const newSS={...siteStates,[slipSite]:{...siteStates[slipSite],betTotal:parseFloat((siteStates[slipSite].betTotal+slipAmount).toFixed(2))}};
       setSiteStatesRaw(newSS);db.upsertSiteState(slipSite,newSS[slipSite]);
-      addLog("➕ 베팅",`${homeKr} vs ${awayKr}/${item.optLabel}/${fmtDisp(slipAmount,dollar)}`);
+      addLog("➕ 베팅",`${homeKr} vs ${awayKr}/${item.optLabel}/${fmtDisp(slipAmount,dollar)}/${slipMatchType==="live"?"실시간":"프리매치"}`);
     });
     setSlip([]);
+    // 다음 베팅을 위해 프리매치로 리셋
+    setSlipMatchType("prematch");
   };
 
   // 모의 베팅 (사용 안 하지만 타입 호환)
@@ -632,6 +645,27 @@ function AppMain() {
   };
 
   // 커스텀 종목/국가/리그 목록 (경기 없어도 유지)
+  // ── 다중기기 동기화 안내 ──
+  // PC/모바일 간 동기화: localStorage 1차 저장 + customLeagues(Supabase) 미러링.
+  // 인코딩: customLeagues["__m_sport__"]      = 사용자 정의 종목 목록
+  //         customLeagues["__m_country__SPORT"] = SPORT 의 국가 목록
+  //         customLeagues["__m_league__SPORT__COUNTRY"] = SPORT/COUNTRY 의 리그 목록
+  //         customLeagues["__m_game__"]      = 수동 경기 (JSON 문자열) - 메타만 동기화 (스코어는 기기별)
+  // 삭제는 "__del__" 프리픽스 톰스톤으로 표시 (db.updateCustomLeague 사용).
+  const M_SPORT_KEY = "__m_sport__";
+  const M_COUNTRY_PREFIX = "__m_country__";
+  const M_LEAGUE_PREFIX = "__m_league__";
+  const M_GAME_KEY = "__m_game__";
+  const M_TOMBSTONE = "__del__";
+  const filterAlive = (arr:string[]|undefined) => (arr||[]).filter(n=>!n.startsWith(M_TOMBSTONE));
+  // 경기를 동기화용 문자열로 직렬화 (메타만; 스코어/finished 는 기기별 보존)
+  const serializeGameMeta = (g:{id:string;sportCat:string;country:string;league:string;homeTeam:string;awayTeam:string;createdAt:number}) =>
+    JSON.stringify({i:g.id,s:g.sportCat,c:g.country,l:g.league,h:g.homeTeam,a:g.awayTeam,t:g.createdAt});
+  const deserializeGameMeta = (s:string):{id:string;sportCat:string;country:string;league:string;homeTeam:string;awayTeam:string;createdAt:number}|null => {
+    try { const o=JSON.parse(s); return {id:o.i,sportCat:o.s,country:o.c,league:o.l,homeTeam:o.h,awayTeam:o.a,createdAt:o.t}; }
+    catch { return null; }
+  };
+
   const DEFAULT_SPORTS = ["축구","야구","농구","배구","하키","E스포츠"];
   const [customSports,setCustomSports]=useState<string[]>(()=>{
     try{const v=localStorage.getItem("bt_m_sports");return v?JSON.parse(v):[];}catch{return [];}
@@ -708,6 +742,12 @@ function AppMain() {
       sportCat:mSport,createdAt:Date.now(),
     };
     saveManualGames([g,...manualGames]);
+    // ── 다중기기 동기화: 경기 추가 ──
+    try {
+      const s = serializeGameMeta(g);
+      db.insertCustomLeague(M_GAME_KEY, s);
+      setCustomLeaguesRaw(p=>({...p, [M_GAME_KEY]: [...(p[M_GAME_KEY]||[]), s]}));
+    } catch(e) { console.warn("[m-sync] add game failed:", e); }
     setNewGame({homeTeam:"",awayTeam:""});
     addLog("➕ 경기 추가",`${mCountry}/${mLeague}/${h} vs ${a}`);
     if (continueAdd) {
@@ -724,6 +764,11 @@ function AppMain() {
     const n=newSportName.trim();if(!n)return;
     if(allSportsList.includes(n))return alert(`이미 존재하는 종목입니다: "${n}"`);
     saveCustomSports([...customSports,n]);
+    // ── 다중기기 동기화 ──
+    try {
+      db.insertCustomLeague(M_SPORT_KEY, n);
+      setCustomLeaguesRaw(p=>({...p, [M_SPORT_KEY]: [...(p[M_SPORT_KEY]||[]), n]}));
+    } catch(e) { console.warn("[m-sync] add sport failed:", e); }
     setAddSportModal(false);setNewSportName("");
     setMExpandedSports(p=>({...p,[n]:true}));
   };
@@ -741,6 +786,12 @@ function AppMain() {
       return;
     }
     saveMCountries({...mCountries,[sport]:[...list,n]});
+    // ── 다중기기 동기화 ──
+    try {
+      const cKey = M_COUNTRY_PREFIX + sport;
+      db.insertCustomLeague(cKey, n);
+      setCustomLeaguesRaw(p=>({...p, [cKey]: [...(p[cKey]||[]), n]}));
+    } catch(e) { console.warn("[m-sync] add country failed:", e); }
     setMExpandedCountries(p=>({...p,[`${sport}__${n}`]:true}));
     setAddCountryModal(null);setNewCountryName("");
     if (continueToLeague) {
@@ -757,6 +808,12 @@ function AppMain() {
     const list=mLeagues[key]||[];
     if(list.includes(n)||allLeaguesForCountry(sport,country).includes(n))return alert(`이미 존재하는 리그입니다: "${sport} / ${country} / ${n}"`);
     saveMLeaguesStore({...mLeagues,[key]:[...list,n]});
+    // ── 다중기기 동기화 ──
+    try {
+      const lKey = M_LEAGUE_PREFIX + key;
+      db.insertCustomLeague(lKey, n);
+      setCustomLeaguesRaw(p=>({...p, [lKey]: [...(p[lKey]||[]), n]}));
+    } catch(e) { console.warn("[m-sync] add league failed:", e); }
     // 추가된 리그 자동 선택
     setMSport(sport);
     setMCountry(country);
@@ -783,6 +840,16 @@ function AppMain() {
       if(idx>=0){
         const newList=[...customSports]; newList[idx]=newName;
         saveCustomSports(newList);
+        // ── 다중기기 동기화: 종목 이름 변경 ──
+        try {
+          db.updateCustomLeague(M_SPORT_KEY, oldName, newName);
+          setCustomLeaguesRaw(p=>{
+            const arr=[...(p[M_SPORT_KEY]||[])];
+            const i=arr.indexOf(oldName);
+            if(i>=0)arr[i]=newName; else arr.push(newName);
+            return {...p,[M_SPORT_KEY]:arr};
+          });
+        } catch(e) { console.warn("[m-sync] rename sport failed:", e); }
       } else {
         // 기본 종목을 수정할 때는 customSports에 새 이름 추가 (원본 숨김)
         // 그런데 DEFAULT_SPORTS는 하드코딩이라 무시되므로 customSports에 추가
@@ -797,6 +864,37 @@ function AppMain() {
         if(k.startsWith(oldName+"__")){const newKey=newName+k.substring(oldName.length);newLeagues[newKey]=newLeagues[k];delete newLeagues[k];}
       });
       saveMLeaguesStore(newLeagues);
+      // ── 다중기기 동기화: 종목 키 마이그레이션 (국가/리그 키 변경) ──
+      try {
+        const oldCKey = M_COUNTRY_PREFIX + oldName;
+        const newCKey = M_COUNTRY_PREFIX + newName;
+        const oldCountriesArr = (newCountries[newName]||[]); // 이전에 oldName 이었음
+        if (oldCountriesArr.length > 0) {
+          // 모든 국가를 새 키로 다시 insert (이전 키는 삭제 불가, 톰스톤 처리)
+          for (const c of oldCountriesArr) db.insertCustomLeague(newCKey, c);
+          for (const c of oldCountriesArr) {
+            try { db.updateCustomLeague(oldCKey, c, M_TOMBSTONE + c); } catch {}
+          }
+          setCustomLeaguesRaw(p=>{
+            const next = {...p};
+            next[newCKey] = Array.from(new Set([...(next[newCKey]||[]), ...oldCountriesArr]));
+            next[oldCKey] = (next[oldCKey]||[]).map((n:string)=>oldCountriesArr.includes(n)?M_TOMBSTONE+n:n);
+            return next;
+          });
+        }
+        // 리그 키도 마이그레이션
+        for (const oldK of Object.keys(mLeagues)) {
+          if (oldK.startsWith(oldName+"__")) {
+            const country = oldK.substring(oldName.length+2);
+            const oldLKey = M_LEAGUE_PREFIX + oldK;
+            const newLKey = M_LEAGUE_PREFIX + newName + "__" + country;
+            for (const l of mLeagues[oldK]) {
+              db.insertCustomLeague(newLKey, l);
+              try { db.updateCustomLeague(oldLKey, l, M_TOMBSTONE + l); } catch {}
+            }
+          }
+        }
+      } catch(e) { console.warn("[m-sync] rename sport key migration failed:", e); }
       if(mSport===oldName)setMSport(newName);
       addLog("✏️ 종목 수정",`${oldName} → ${newName}`);
     }
@@ -812,6 +910,27 @@ function AppMain() {
       } else {
         saveMCountries({...mCountries,[sport]:[...list,newName]});
       }
+      // ── 다중기기 동기화: 국가 이름 변경 ──
+      try {
+        const cKey = M_COUNTRY_PREFIX + sport;
+        db.updateCustomLeague(cKey, oldName, newName);
+        setCustomLeaguesRaw(p=>{
+          const arr=[...(p[cKey]||[])];
+          const i=arr.indexOf(oldName);
+          if(i>=0)arr[i]=newName; else arr.push(newName);
+          return {...p,[cKey]:arr};
+        });
+        // 해당 국가의 리그 키도 마이그레이션
+        const oldKey=`${sport}__${oldName}`;const newKey=`${sport}__${newName}`;
+        const oldLKey = M_LEAGUE_PREFIX + oldKey;
+        const newLKey = M_LEAGUE_PREFIX + newKey;
+        if (mLeagues[oldKey]) {
+          for (const l of mLeagues[oldKey]) {
+            db.insertCustomLeague(newLKey, l);
+            try { db.updateCustomLeague(oldLKey, l, M_TOMBSTONE + l); } catch {}
+          }
+        }
+      } catch(e) { console.warn("[m-sync] rename country failed:", e); }
       // 경기 데이터 업데이트
       saveManualGames(manualGames.map(g=>g.sportCat===sport&&g.country===oldName?{...g,country:newName}:g));
       // mLeagues 키 변경
@@ -835,6 +954,17 @@ function AppMain() {
       } else {
         saveMLeaguesStore({...mLeagues,[key]:[...list,newName]});
       }
+      // ── 다중기기 동기화: 리그 이름 변경 ──
+      try {
+        const lKey = M_LEAGUE_PREFIX + key;
+        db.updateCustomLeague(lKey, oldName, newName);
+        setCustomLeaguesRaw(p=>{
+          const arr=[...(p[lKey]||[])];
+          const i=arr.indexOf(oldName);
+          if(i>=0)arr[i]=newName; else arr.push(newName);
+          return {...p,[lKey]:arr};
+        });
+      } catch(e) { console.warn("[m-sync] rename league failed:", e); }
       saveManualGames(manualGames.map(g=>g.sportCat===sport&&g.country===country&&g.league===oldName?{...g,league:newName}:g));
       if(mLeague===oldName)setMLeague(newName);
       addLog("✏️ 리그 수정",`${sport}/${country}/${oldName} → ${newName}`);
@@ -852,6 +982,32 @@ function AppMain() {
       if(!window.confirm(`종목 "${oldName}" 을(를) 삭제하시겠습니까?\n이 종목의 경기 ${relatedGames}개와 모든 국가/리그가 함께 삭제됩니다.\n\n(진행중 베팅은 유지되지만 카테고리 링크가 끊어집니다.)`)) return;
       // customSports에서 제거
       saveCustomSports(customSports.filter(s=>s!==oldName));
+      // ── 다중기기 동기화: 종목 톰스톤 ──
+      try {
+        db.updateCustomLeague(M_SPORT_KEY, oldName, M_TOMBSTONE + oldName);
+        setCustomLeaguesRaw(p=>({
+          ...p,
+          [M_SPORT_KEY]: (p[M_SPORT_KEY]||[]).map((n:string)=>n===oldName?M_TOMBSTONE+n:n)
+        }));
+        // 종목의 모든 국가/리그도 톰스톤
+        const cKey = M_COUNTRY_PREFIX + oldName;
+        for (const c of (mCountries[oldName]||[])) {
+          try { db.updateCustomLeague(cKey, c, M_TOMBSTONE + c); } catch {}
+        }
+        for (const k of Object.keys(mLeagues)) {
+          if (k.startsWith(oldName+"__")) {
+            const lKey = M_LEAGUE_PREFIX + k;
+            for (const l of mLeagues[k]) {
+              try { db.updateCustomLeague(lKey, l, M_TOMBSTONE + l); } catch {}
+            }
+          }
+        }
+        // 종목의 모든 경기도 톰스톤
+        for (const g of manualGames.filter(g=>g.sportCat===oldName)) {
+          const s = serializeGameMeta(g);
+          try { db.updateCustomLeague(M_GAME_KEY, s, M_TOMBSTONE + s); } catch {}
+        }
+      } catch(e) { console.warn("[m-sync] delete sport failed:", e); }
       // 관련 경기 삭제
       saveManualGames(manualGames.filter(g=>g.sportCat!==oldName));
       // 관련 국가/리그 삭제
@@ -867,6 +1023,26 @@ function AppMain() {
       if(!window.confirm(`국가 "${oldName}" 을(를) 삭제하시겠습니까?\n이 국가의 경기 ${relatedGames}개와 모든 리그가 함께 삭제됩니다.`)) return;
       // mCountries에서 제거
       saveMCountries({...mCountries,[sport]:(mCountries[sport]||[]).filter(c=>c!==oldName)});
+      // ── 다중기기 동기화: 국가 톰스톤 ──
+      try {
+        const cKey = M_COUNTRY_PREFIX + sport;
+        db.updateCustomLeague(cKey, oldName, M_TOMBSTONE + oldName);
+        setCustomLeaguesRaw(p=>({
+          ...p,
+          [cKey]: (p[cKey]||[]).map((n:string)=>n===oldName?M_TOMBSTONE+n:n)
+        }));
+        // 해당 국가의 리그도 톰스톤
+        const oldKey=`${sport}__${oldName}`;
+        const lKey = M_LEAGUE_PREFIX + oldKey;
+        for (const l of (mLeagues[oldKey]||[])) {
+          try { db.updateCustomLeague(lKey, l, M_TOMBSTONE + l); } catch {}
+        }
+        // 해당 국가의 경기도 톰스톤
+        for (const g of manualGames.filter(g=>g.sportCat===sport&&g.country===oldName)) {
+          const s = serializeGameMeta(g);
+          try { db.updateCustomLeague(M_GAME_KEY, s, M_TOMBSTONE + s); } catch {}
+        }
+      } catch(e) { console.warn("[m-sync] delete country failed:", e); }
       // 관련 경기 삭제
       saveManualGames(manualGames.filter(g=>!(g.sportCat===sport&&g.country===oldName)));
       // 관련 리그 삭제
@@ -880,6 +1056,20 @@ function AppMain() {
       if(!window.confirm(`리그 "${oldName}" 을(를) 삭제하시겠습니까?\n이 리그의 경기 ${relatedGames}개가 함께 삭제됩니다.`)) return;
       const key=`${sport}__${country}`;
       saveMLeaguesStore({...mLeagues,[key]:(mLeagues[key]||[]).filter(l=>l!==oldName)});
+      // ── 다중기기 동기화: 리그 톰스톤 ──
+      try {
+        const lKey = M_LEAGUE_PREFIX + key;
+        db.updateCustomLeague(lKey, oldName, M_TOMBSTONE + oldName);
+        setCustomLeaguesRaw(p=>({
+          ...p,
+          [lKey]: (p[lKey]||[]).map((n:string)=>n===oldName?M_TOMBSTONE+n:n)
+        }));
+        // 해당 리그의 경기도 톰스톤
+        for (const g of manualGames.filter(g=>g.sportCat===sport&&g.country===country&&g.league===oldName)) {
+          const s = serializeGameMeta(g);
+          try { db.updateCustomLeague(M_GAME_KEY, s, M_TOMBSTONE + s); } catch {}
+        }
+      } catch(e) { console.warn("[m-sync] delete league failed:", e); }
       saveManualGames(manualGames.filter(g=>!(g.sportCat===sport&&g.country===country&&g.league===oldName)));
       if(mLeague===oldName)setMLeague("");
       addLog("🗑 리그 삭제",`${sport}/${country}/${oldName}`);
@@ -889,8 +1079,20 @@ function AppMain() {
 
   const handleDeleteManualGame=(id:string)=>{
     if(!window.confirm("이 경기를 삭제하시겠습니까?"))return;
+    const target = manualGames.find(g=>g.id===id);
     saveManualGames(manualGames.filter(g=>g.id!==id));
     setManualSlip(p=>p.filter(s=>s.game.id!==id));
+    // ── 다중기기 동기화: 경기 톰스톤 ──
+    if (target) {
+      try {
+        const s = serializeGameMeta(target);
+        db.updateCustomLeague(M_GAME_KEY, s, M_TOMBSTONE + s);
+        setCustomLeaguesRaw(p=>({
+          ...p,
+          [M_GAME_KEY]: (p[M_GAME_KEY]||[]).map((n:string)=>n===s?M_TOMBSTONE+n:n)
+        }));
+      } catch(e) { console.warn("[m-sync] delete game failed:", e); }
+    }
   };
 
   // 수동 경기 슬립
@@ -904,6 +1106,8 @@ function AppMain() {
   const [manualSlipSite,setManualSlipSite]=useState<string>("");
   const [manualSlipAmount,setManualSlipAmount]=useState<number>(10000);
   const [manualSlipInclude,setManualSlipInclude]=useState<boolean>(true);
+  // 프리매치/실시간 모드 (수동 슬립용; 기본 프리매치)
+  const [manualSlipMatchType,setManualSlipMatchType]=useState<"prematch"|"live">("prematch");
   const [manualExpandedId,setManualExpandedId]=useState<string|null>(null);
   // 빠른 입금/포인트 모달 (홈 대시보드에서 호출)
   const [quickActionMode,setQuickActionMode]=useState<"deposit"|"point"|null>(null);
@@ -927,6 +1131,11 @@ function AppMain() {
       // 폴더베팅 없이 단일베팅만: 완전히 덮어씌움
       return [{id, game, optLabel, odds:0}];
     });
+    // ── 라이브(스코어 기록 시작 + 미종료) 경기 선택 시 자동 실시간 모드 ──
+    const hasScore = (game.homeScore!=null && game.awayScore!=null);
+    if (hasScore && !game.finished) {
+      setManualSlipMatchType("live");
+    }
   };
 
   const handleManualSlipAdd=()=>{
@@ -1000,18 +1209,20 @@ function AppMain() {
         result:"진행중",
         includeStats:manualSlipInclude,
         isDollar:dollar,
-        ...({country: item.game.country} as any),
+        ...({country: item.game.country, matchType: manualSlipMatchType} as any),
       };
       setBetsRaw(b=>[...b,bet]);
       db.upsertBet(bet);
       const newSS={...siteStates,[manualSlipSite]:{...siteStates[manualSlipSite],betTotal:parseFloat((siteStates[manualSlipSite].betTotal+manualSlipAmount).toFixed(2))}};
       setSiteStatesRaw(newSS);
       db.upsertSiteState(manualSlipSite,newSS[manualSlipSite]);
-      addLog("➕ 베팅",`${item.game.homeTeam} vs ${item.game.awayTeam}/${displayOpt}/${fmtDisp(manualSlipAmount,dollar)}`);
+      addLog("➕ 베팅",`${item.game.homeTeam} vs ${item.game.awayTeam}/${displayOpt}/${fmtDisp(manualSlipAmount,dollar)}/${manualSlipMatchType==="live"?"실시간":"프리매치"}`);
     });
     setManualSlip([]);
     setManualSlipSite("");
     setManualSlipAmount(0);
+    // 다음 베팅을 위해 프리매치로 리셋
+    setManualSlipMatchType("prematch");
   };
 
   // ══════════════════════════════════════════════════════════
@@ -1120,14 +1331,14 @@ function AppMain() {
   const savePointSites=(sites:PointSite[])=>{setPointSites(sites);try{localStorage.setItem("bt_point_sites",JSON.stringify(sites));}catch{}};
 
   const [addPointSiteModal,setAddPointSiteModal]=useState(false);
-  const [newPointSite,setNewPointSite]=useState<{name:string,exchangeName:string,exchangeDate:string,targetAmount:number,targetSiteName:string,targetPeriod:number,targetCycle:number}>({name:"올인구조대",exchangeName:"포인트교환",exchangeDate:"2025-05-04",targetAmount:2000000,targetSiteName:"",targetPeriod:14,targetCycle:14});
+  const [newPointSite,setNewPointSite]=useState<{name:string,exchangeName:string,exchangeDate:string,targetAmount:number,targetSiteName:string}>({name:"올인구조대",exchangeName:"포인트교환",exchangeDate:"2025-05-04",targetAmount:2000000,targetSiteName:""});
 
   const handleAddPointSite=()=>{
-    const site:PointSite={id:String(Date.now()),name:newPointSite.name,exchangeName:newPointSite.exchangeName,exchangeDate:newPointSite.exchangeDate,targetAmount:newPointSite.targetAmount,targetSiteName:newPointSite.targetSiteName||undefined,targetPeriod:newPointSite.targetPeriod||14,targetCycle:newPointSite.targetCycle||14,sessions:[]};
+    const site:PointSite={id:String(Date.now()),name:newPointSite.name,exchangeName:newPointSite.exchangeName,exchangeDate:newPointSite.exchangeDate,targetAmount:newPointSite.targetAmount,targetSiteName:newPointSite.targetSiteName||undefined,sessions:[]};
     const updated=[...pointSites,site];
     savePointSites(updated);
     setAddPointSiteModal(false);
-    setNewPointSite({name:"올인구조대",exchangeName:"포인트교환",exchangeDate:"2025-05-04",targetAmount:2000000,targetSiteName:"",targetPeriod:14,targetCycle:14});
+    setNewPointSite({name:"올인구조대",exchangeName:"포인트교환",exchangeDate:"2025-05-04",targetAmount:2000000,targetSiteName:""});
   };
 
   // ── 일일 퀘스트 ────────────────────────────────────────────
@@ -1282,38 +1493,21 @@ function AppMain() {
   };
 
 
-  const getNextTargetDate=(fromDate:string, cycleDays:number=14)=>{
+  const getNextTargetDate=(fromDate:string)=>{
     const d=new Date(fromDate);
-    d.setDate(d.getDate()+cycleDays);
+    d.setDate(d.getDate()+14);
     return d.toISOString().slice(0,10);
   };
 
   const handlePointExchangeComplete=(siteId:string)=>{
-    const site=pointSites.find(s=>s.id===siteId);
-    if(!site)return;
-    const cycle=site.targetCycle||14;
-    const period=site.targetPeriod||14;
-    // 이어서 진행 여부 확인
-    const cont=window.confirm(`"${site.name}" 완료 처리되었습니다.\n\n이어서 진행하시겠습니까?\n(같은 설정으로 다음 주기 자동 설정: ${cycle}일 주기 · ${period}일 합산)`);
     const now=new Date().toISOString().slice(0,10);
-    if(cont){
-      // 완료한 날짜로부터 cycle 일수 후가 다음 목표 날짜
-      const nextTarget=getNextTargetDate(now, cycle);
-      const session:PointSession={id:String(Date.now()),completedAt:now,nextTargetDate:nextTarget};
-      const updated=pointSites.map(s=>{
-        if(s.id!==siteId)return s;
-        return{...s,sessions:[...s.sessions,session]};
-      });
-      savePointSites(updated);
-    }else{
-      // 이어서 진행 안함 → 완료만 기록 (nextTargetDate를 빈 문자열 or 오늘로)
-      const session:PointSession={id:String(Date.now()),completedAt:now,nextTargetDate:""};
-      const updated=pointSites.map(s=>{
-        if(s.id!==siteId)return s;
-        return{...s,sessions:[...s.sessions,session]};
-      });
-      savePointSites(updated);
-    }
+    const nextTarget=getNextTargetDate(now);
+    const session:PointSession={id:String(Date.now()),completedAt:now,nextTargetDate:nextTarget};
+    const updated=pointSites.map(s=>{
+      if(s.id!==siteId)return s;
+      return{...s,sessions:[...s.sessions,session]};
+    });
+    savePointSites(updated);
   };
 
   // 실시간 환율
@@ -1350,6 +1544,73 @@ function AppMain() {
       ]);
       setBetsRaw(b);setDepositsRaw(dep);setWithdrawalsRaw(wth);
       setSiteStatesRaw(ss);setCustomLeaguesRaw(cl);setEsportsRecordsRaw(er);setProfitExtrasRaw(pe);
+
+      // ── 다른 기기에서 추가한 M-측 종목/국가/리그/경기를 customLeagues에서 추출하여 머지 ──
+      try {
+        const remoteSports = filterAlive(cl[M_SPORT_KEY]);
+        const remoteCountries: Record<string,string[]> = {};
+        const remoteLeagues: Record<string,string[]> = {};
+        const remoteGameStrs = filterAlive(cl[M_GAME_KEY]);
+        for (const k of Object.keys(cl)) {
+          if (k.startsWith(M_COUNTRY_PREFIX)) {
+            const sport = k.slice(M_COUNTRY_PREFIX.length);
+            remoteCountries[sport] = filterAlive(cl[k]);
+          } else if (k.startsWith(M_LEAGUE_PREFIX)) {
+            const sportCountry = k.slice(M_LEAGUE_PREFIX.length); // "SPORT__COUNTRY"
+            remoteLeagues[sportCountry] = filterAlive(cl[k]);
+          }
+        }
+        // 종목 머지
+        if (remoteSports.length > 0) {
+          setCustomSports(prev => {
+            const merged = Array.from(new Set([...prev, ...remoteSports]));
+            try { localStorage.setItem("bt_m_sports", JSON.stringify(merged)); } catch {}
+            return merged;
+          });
+        }
+        // 국가 머지
+        if (Object.keys(remoteCountries).length > 0) {
+          setMCountries(prev => {
+            const merged: Record<string,string[]> = { ...prev };
+            for (const sport of Object.keys(remoteCountries)) {
+              const cur = new Set(merged[sport] || []);
+              for (const c of remoteCountries[sport]) cur.add(c);
+              merged[sport] = Array.from(cur);
+            }
+            try { localStorage.setItem("bt_m_countries", JSON.stringify(merged)); } catch {}
+            return merged;
+          });
+        }
+        // 리그 머지
+        if (Object.keys(remoteLeagues).length > 0) {
+          setMLeagues(prev => {
+            const merged: Record<string,string[]> = { ...prev };
+            for (const key of Object.keys(remoteLeagues)) {
+              const cur = new Set(merged[key] || []);
+              for (const l of remoteLeagues[key]) cur.add(l);
+              merged[key] = Array.from(cur);
+            }
+            try { localStorage.setItem("bt_m_leagues", JSON.stringify(merged)); } catch {}
+            return merged;
+          });
+        }
+        // 경기 머지 (id 기준 중복 제거; 로컬 우선 유지로 스코어/finished 보존)
+        if (remoteGameStrs.length > 0) {
+          setManualGames(prev => {
+            const byId = new Map<string, ManualGame>();
+            for (const g of prev) byId.set(g.id, g);
+            for (const s of remoteGameStrs) {
+              const m = deserializeGameMeta(s);
+              if (!m) continue;
+              if (!byId.has(m.id)) byId.set(m.id, m as ManualGame);
+            }
+            const merged = Array.from(byId.values()).sort((x,y)=>(y.createdAt||0)-(x.createdAt||0));
+            try { localStorage.setItem("bt_manual_games", JSON.stringify(merged)); } catch {}
+            return merged;
+          });
+        }
+      } catch (e) { console.warn("[m-sync] merge failed:", e); }
+
       const sites=new Set(pe.map((x:ProfitExtra)=>x.category));
       const cats=new Set(pe.map((x:ProfitExtra)=>x.subCategory).filter(Boolean));
       const subcats=new Set(pe.map((x:any)=>x.subSubCategory).filter(Boolean));
@@ -2225,36 +2486,12 @@ function AppMain() {
 
       {addPointSiteModal&&(
         <div style={{position:"fixed",inset:0,background:"#000b",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center"}}>
-          <div style={{background:C.bg3,border:`1px solid ${C.teal}`,borderRadius:14,padding:24,width:420,maxHeight:"90vh",overflowY:"auto"}}>
+          <div style={{background:C.bg3,border:`1px solid ${C.teal}`,borderRadius:14,padding:24,width:380}}>
             <div style={{fontSize:14,fontWeight:700,color:C.teal,marginBottom:16}}>🎁 포인트 사이트 추가</div>
             <div style={{marginBottom:8}}><div style={L}>사이트명</div><input value={newPointSite.name} onChange={e=>setNewPointSite(p=>({...p,name:e.target.value}))} style={{...S,boxSizing:"border-box"}}/></div>
             <div style={{marginBottom:8}}><div style={L}>교환 이름</div><input value={newPointSite.exchangeName} onChange={e=>setNewPointSite(p=>({...p,exchangeName:e.target.value}))} style={{...S,boxSizing:"border-box"}}/></div>
             <div style={{marginBottom:8}}><div style={L}>교환 목표 날짜</div><input type="date" value={newPointSite.exchangeDate} onChange={e=>setNewPointSite(p=>({...p,exchangeDate:e.target.value}))} style={{...S,boxSizing:"border-box"}}/></div>
             <div style={{marginBottom:8}}><div style={L}>목표 금액 (원화)</div><input type="number" value={newPointSite.targetAmount} onChange={e=>setNewPointSite(p=>({...p,targetAmount:parseInt(e.target.value)||0}))} style={{...S,boxSizing:"border-box",...noSpin}}/></div>
-            {/* 목표 기간 - 입금 합산 기간 */}
-            <div style={{marginBottom:8}}>
-              <div style={L}>📅 목표 기간 (입금 합산 기간)</div>
-              <div style={{display:"flex",gap:4,marginBottom:4,flexWrap:"wrap"}}>
-                {[{l:"3일",v:3},{l:"1주",v:7},{l:"2주",v:14},{l:"한달",v:30}].map(opt=>(
-                  <button key={opt.v} onClick={()=>setNewPointSite(p=>({...p,targetPeriod:opt.v}))}
-                    style={{flex:1,minWidth:60,padding:"5px 8px",borderRadius:4,border:`1px solid ${newPointSite.targetPeriod===opt.v?C.teal:C.border}`,background:newPointSite.targetPeriod===opt.v?`${C.teal}33`:C.bg2,color:newPointSite.targetPeriod===opt.v?C.teal:C.muted,cursor:"pointer",fontSize:11,fontWeight:700}}>{opt.l}</button>
-                ))}
-              </div>
-              <input type="number" min={1} value={newPointSite.targetPeriod} onChange={e=>setNewPointSite(p=>({...p,targetPeriod:parseInt(e.target.value)||1}))} style={{...S,boxSizing:"border-box",...noSpin}} placeholder="직접 입력 (일)"/>
-              <div style={{fontSize:9,color:C.dim,marginTop:3}}>목표 날짜 기준으로 직전 N일간의 입금을 합산 (목표 날짜 하루 전까지)</div>
-            </div>
-            {/* 목표 주기 - 다음 목표 자동 설정 주기 */}
-            <div style={{marginBottom:8}}>
-              <div style={L}>🔄 목표 주기 (반복 주기)</div>
-              <div style={{display:"flex",gap:4,marginBottom:4,flexWrap:"wrap"}}>
-                {[{l:"1주",v:7},{l:"2주",v:14},{l:"한달",v:30}].map(opt=>(
-                  <button key={opt.v} onClick={()=>setNewPointSite(p=>({...p,targetCycle:opt.v}))}
-                    style={{flex:1,minWidth:60,padding:"5px 8px",borderRadius:4,border:`1px solid ${newPointSite.targetCycle===opt.v?C.purple:C.border}`,background:newPointSite.targetCycle===opt.v?`${C.purple}33`:C.bg2,color:newPointSite.targetCycle===opt.v?C.purple:C.muted,cursor:"pointer",fontSize:11,fontWeight:700}}>{opt.l}</button>
-                ))}
-              </div>
-              <input type="number" min={1} value={newPointSite.targetCycle} onChange={e=>setNewPointSite(p=>({...p,targetCycle:parseInt(e.target.value)||1}))} style={{...S,boxSizing:"border-box",...noSpin}} placeholder="직접 입력 (일)"/>
-              <div style={{fontSize:9,color:C.dim,marginTop:3}}>완료 후 이어서 진행 시, 완료 날짜로부터 N일 후가 다음 목표 날짜</div>
-            </div>
             {/* 기준 사이트 선택 - 누적입금 계산할 사이트 */}
             <div style={{marginBottom:16}}>
               <div style={L}>📍 누적입금 기준 사이트</div>
@@ -2641,12 +2878,12 @@ function AppMain() {
         </div>
       )}
 
-      {/* ── 코드 수정 사이드 패널 (사이트와 함께 볼 수 있도록 fixed 우측) ── */}
+      {/* ── 코드 수정 메모 사이드 패널 (사이트와 함께 볼 수 있도록 fixed 우측) ── */}
       {codeMemoOpen && (
         <div style={{position:"fixed",top:0,right:0,bottom:0,width:420,background:C.bg2,borderLeft:`2px solid ${C.amber}`,boxShadow:"-4px 0 16px rgba(0,0,0,0.4)",zIndex:150,display:"flex",flexDirection:"column"}}>
           <div style={{padding:"12px 14px",borderBottom:`1px solid ${C.border2}`,display:"flex",justifyContent:"space-between",alignItems:"center",flexShrink:0,background:`${C.amber}11`}}>
             <div>
-              <div style={{fontSize:14,fontWeight:800,color:C.amber}}>📝 코드 수정</div>
+              <div style={{fontSize:14,fontWeight:800,color:C.amber}}>📝 코드 수정 메모</div>
               <div style={{fontSize:9,color:C.muted,marginTop:2}}>총 {codeMemos.length}개 · 미반영 {codeMemos.filter(m=>!m.applied).length}개 · <span style={{color:C.dim}}>ESC 닫기 · Ctrl+S 저장</span></div>
             </div>
             <button onClick={()=>setCodeMemoOpen(false)} title="닫기 (ESC) · 작성 중인 글은 유지됩니다" style={{background:"transparent",border:`1px solid ${C.border}`,color:C.muted,cursor:"pointer",fontSize:14,padding:"4px 9px",borderRadius:5}}>✕</button>
@@ -2722,17 +2959,15 @@ function AppMain() {
           </div>
           {/* 하단 액션 */}
           {codeMemos.length>0 && (
-            <div style={{padding:"8px 12px",borderTop:`1px solid ${C.border}`,background:C.bg3,flexShrink:0,display:"flex",gap:6,justifyContent:"space-between",flexWrap:"wrap"}}>
+            <div style={{padding:"8px 12px",borderTop:`1px solid ${C.border}`,background:C.bg3,flexShrink:0,display:"flex",gap:6,justifyContent:"space-between"}}>
               <button onClick={()=>{
-                const appliedCount=codeMemos.filter(m=>m.applied).length;
-                if(appliedCount===0){alert("반영 완료된 메모가 없습니다.");return;}
-                if(!window.confirm(`반영 완료된 메모 ${appliedCount}개를 모두 삭제하시겠습니까?`))return;
+                if(!window.confirm("반영 완료된 메모를 모두 삭제하시겠습니까?"))return;
                 saveCodeMemos(codeMemos.filter(m=>!m.applied));
-              }} style={{flex:1,padding:"6px 10px",borderRadius:4,border:`1px solid ${C.green}66`,background:`${C.green}22`,color:C.green,cursor:"pointer",fontSize:10,fontWeight:700}}>🗑 반영된 항목 일괄 삭제 ({codeMemos.filter(m=>m.applied).length})</button>
+              }} style={{padding:"5px 10px",borderRadius:4,border:`1px solid ${C.green}44`,background:`${C.green}11`,color:C.green,cursor:"pointer",fontSize:10}}>완료된 항목 정리 ({codeMemos.filter(m=>m.applied).length})</button>
               <button onClick={()=>{
                 if(!window.confirm("모든 메모를 삭제하시겠습니까?"))return;
                 saveCodeMemos([]);
-              }} style={{padding:"6px 10px",borderRadius:4,border:`1px solid ${C.red}44`,background:`${C.red}11`,color:C.red,cursor:"pointer",fontSize:10}}>전체 삭제</button>
+              }} style={{padding:"5px 10px",borderRadius:4,border:`1px solid ${C.red}44`,background:`${C.red}11`,color:C.red,cursor:"pointer",fontSize:10}}>전체 삭제</button>
             </div>
           )}
         </div>
@@ -2856,7 +3091,7 @@ function AppMain() {
             <div style={{textAlign:"center"}}><div style={{color:C.muted,fontSize:9}}>승률</div><div style={{color:C.teal,fontWeight:800,fontSize:13}}>{winRate}%</div></div>
             <div style={{textAlign:"center"}}><div style={{color:C.muted,fontSize:9}}>진행중</div><div style={{color:C.amber,fontWeight:800,fontSize:13}}>{pending.length}건</div></div>
             <div style={{display:"flex",gap:4}}>
-              <button onClick={()=>setCodeMemoOpen(true)} style={{fontSize:11,padding:"5px 11px",borderRadius:5,border:`1px solid ${C.amber}66`,background:`${C.amber}11`,color:C.amber,cursor:"pointer",fontWeight:700}} title="코드 수정">📝 코드 수정 {codeMemos.filter(m=>!m.applied).length>0&&<span style={{marginLeft:4,padding:"0 5px",borderRadius:99,background:C.amber,color:"#000",fontSize:9,fontWeight:900}}>{codeMemos.filter(m=>!m.applied).length}</span>}</button>
+              <button onClick={()=>setCodeMemoOpen(true)} style={{fontSize:11,padding:"5px 11px",borderRadius:5,border:`1px solid ${C.amber}66`,background:`${C.amber}11`,color:C.amber,cursor:"pointer",fontWeight:700}} title="코드 수정 메모">📝 코드 수정 {codeMemos.filter(m=>!m.applied).length>0&&<span style={{marginLeft:4,padding:"0 5px",borderRadius:99,background:C.amber,color:"#000",fontSize:9,fontWeight:900}}>{codeMemos.filter(m=>!m.applied).length}</span>}</button>
               <button onClick={logout} style={{fontSize:11,padding:"5px 11px",borderRadius:5,border:`1px solid ${C.red}44`,background:`${C.red}11`,color:C.red,cursor:"pointer",fontWeight:700}} title="로그아웃">🔒</button>
             </div>
           </div>
@@ -3320,13 +3555,28 @@ function AppMain() {
                       </div>
                     );
                   })()}
+                  {/* ── 프리매치 / 실시간 토글 ── */}
+                  <div style={{marginBottom:10}}>
+                    <div style={{...L,fontSize:11}}>베팅 시점</div>
+                    <div style={{display:"flex",gap:5}}>
+                      <button onClick={()=>setManualSlipMatchType("prematch")}
+                        style={{flex:1,padding:"7px 0",borderRadius:5,border:`1px solid ${manualSlipMatchType==="prematch"?C.teal:C.border}`,background:manualSlipMatchType==="prematch"?`${C.teal}33`:C.bg,color:manualSlipMatchType==="prematch"?C.teal:C.muted,cursor:"pointer",fontWeight:700,fontSize:12}}>
+                        🕒 프리매치
+                      </button>
+                      <button onClick={()=>setManualSlipMatchType("live")}
+                        style={{flex:1,padding:"7px 0",borderRadius:5,border:`1px solid ${manualSlipMatchType==="live"?C.red:C.border}`,background:manualSlipMatchType==="live"?`${C.red}33`:C.bg,color:manualSlipMatchType==="live"?C.red:C.muted,cursor:"pointer",fontWeight:700,fontSize:12}}>
+                        ● 실시간
+                      </button>
+                    </div>
+                  </div>
+
                   <div style={{display:"flex",alignItems:"center",gap:7,marginBottom:11}}>
                     <input type="checkbox" id="cbStatInc2" checked={manualSlipInclude} onChange={e=>setManualSlipInclude(e.target.checked)} style={{width:15,height:15,accentColor:C.purple}}/>
                     <label htmlFor="cbStatInc2" style={{fontSize:12,color:C.muted,cursor:"pointer"}}>통계 포함</label>
                   </div>
                   <button onClick={handleManualSlipAdd} disabled={manualSlip.length===0||!manualSlipSite}
                     style={{width:"100%",background:manualSlip.length>0&&manualSlipSite?`linear-gradient(135deg,${C.orange}55,${C.green}33)`:C.border,border:`2px solid ${manualSlip.length>0&&manualSlipSite?C.orange:C.border}`,color:manualSlip.length>0&&manualSlipSite?C.orange:C.dim,padding:"14px",borderRadius:9,cursor:manualSlip.length>0&&manualSlipSite?"pointer":"default",fontWeight:900,fontSize:15}}>
-                    ✅ 베팅
+                    ✅ 베팅 <span style={{fontSize:10,opacity:0.85,marginLeft:4}}>· {manualSlipMatchType==="live"?"실시간":"프리매치"}</span>
                   </button>
                 </div>
               )}
@@ -4244,6 +4494,21 @@ function AppMain() {
                     );
                   })()}
 
+                  {/* ── 프리매치 / 실시간 토글 ── */}
+                  <div style={{marginBottom:10}}>
+                    <div style={L}>베팅 시점</div>
+                    <div style={{display:"flex",gap:4}}>
+                      <button onClick={()=>setSlipMatchType("prematch")}
+                        style={{flex:1,padding:"7px 0",borderRadius:5,border:`1px solid ${slipMatchType==="prematch"?C.teal:C.border}`,background:slipMatchType==="prematch"?`${C.teal}33`:C.bg,color:slipMatchType==="prematch"?C.teal:C.muted,cursor:"pointer",fontWeight:700,fontSize:11}}>
+                        🕒 프리매치
+                      </button>
+                      <button onClick={()=>setSlipMatchType("live")}
+                        style={{flex:1,padding:"7px 0",borderRadius:5,border:`1px solid ${slipMatchType==="live"?C.red:C.border}`,background:slipMatchType==="live"?`${C.red}33`:C.bg,color:slipMatchType==="live"?C.red:C.muted,cursor:"pointer",fontWeight:700,fontSize:11}}>
+                        ● 실시간
+                      </button>
+                    </div>
+                  </div>
+
                   <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:10}}>
                     <input type="checkbox" id="slipStats" checked={slipInclude} onChange={e=>setSlipInclude(e.target.checked)} style={{width:13,height:13,accentColor:C.purple}}/>
                     <label htmlFor="slipStats" style={{fontSize:11,color:C.muted,cursor:"pointer"}}>통계에 포함</label>
@@ -4258,7 +4523,7 @@ function AppMain() {
                       padding:"14px",borderRadius:10,cursor:slip.length>0&&slipSite?"pointer":"default",
                       fontWeight:900,fontSize:14,
                     }}>
-                    ✅ 베팅 추가 ({slip.length}건)
+                    ✅ 베팅 추가 ({slip.length}건) <span style={{fontSize:10,opacity:0.85,marginLeft:4}}>· {slipMatchType==="live"?"실시간":"프리매치"}</span>
                   </button>
                 </>
               )}
@@ -5268,6 +5533,8 @@ function AppMain() {
         const topSites = [...roiStats].sort((a,b)=>b.netKRW-a.netKRW).slice(0,3);
         // 최근 완료 베팅 5건
         const recentDone = [...done].sort((a,b)=>parseFloat(b.id)-parseFloat(a.id)).slice(0,5);
+        // 포인트 헬퍼
+        const oneMonthAgoStr=(baseDate:string)=>{const d=new Date(baseDate);d.setMonth(d.getMonth()-1);return d.toISOString().slice(0,10);};
 
         return (
         <div style={{flex:1,overflowY:"auto",padding:18}}>
@@ -5395,47 +5662,28 @@ function AppMain() {
                   <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",gap:9}}>
                     {pointSites.map(ps=>{
                       const lastSession=ps.sessions[ps.sessions.length-1];
-                      // 마지막 세션이 있고 nextTargetDate가 비어있으면(이어서 진행 안함) → 완전히 끝난 상태
-                      const isFinished = !!lastSession && !lastSession.nextTargetDate;
-                      const isCompleted=!!lastSession && !!lastSession.nextTargetDate;
+                      const isCompleted=!!lastSession;
                       const baseDate=isCompleted?lastSession.nextTargetDate:ps.exchangeDate;
-                      // 목표 기간 (일수) - 기본 14일
-                      const periodDays = ps.targetPeriod || 14;
-                      // 합산 범위: [목표날짜 - periodDays + 1] ~ [목표날짜 - 1]
-                      // (목표 날짜 하루 전까지, periodDays일간)
-                      const endDate=new Date(baseDate);endDate.setDate(endDate.getDate()-1);
-                      const endStr=endDate.toISOString().slice(0,10);
-                      const startDate=new Date(baseDate);startDate.setDate(startDate.getDate()-periodDays);
-                      const fromStr=startDate.toISOString().slice(0,10);
-                      const periodDeps=deposits.filter(d=>d.date>=fromStr&&d.date<=endStr&&(!ps.targetSiteName||d.site===ps.targetSiteName));
+                      const startDate=new Date(baseDate);startDate.setDate(startDate.getDate()-1);
+                      const startStr=startDate.toISOString().slice(0,10);
+                      const fromStr=oneMonthAgoStr(startStr);
+                      const periodDeps=deposits.filter(d=>d.date>=fromStr&&d.date<=startStr&&(!ps.targetSiteName||d.site===ps.targetSiteName));
                       const totalKrw=periodDeps.reduce((s,d)=>s+(isUSD(d.site)?d.amount*usdKrw:d.amount),0);
                       const achieved=totalKrw>=ps.targetAmount;
                       const pct = Math.min(100,Math.round(totalKrw/ps.targetAmount*100));
                       const daysLeft = Math.ceil((new Date(baseDate).getTime() - new Date(today).getTime())/(1000*60*60*24));
                       const dayColor = daysLeft<0?C.red:daysLeft<=3?C.red:daysLeft<=7?C.amber:C.teal;
-                      // 목표 기간 라벨
-                      const periodLabel = periodDays===3?"3일":periodDays===7?"1주":periodDays===14?"2주":periodDays===30?"한달":`${periodDays}일`;
-                      const cycleDays = ps.targetCycle || 14;
-                      const cycleLabel = cycleDays===7?"1주":cycleDays===14?"2주":cycleDays===30?"한달":`${cycleDays}일`;
                       return(
-                        <div key={ps.id} style={{background:C.bg2,border:`1.5px solid ${isFinished?C.dim:achieved?C.green:C.border2}`,borderRadius:9,padding:10,position:"relative",overflow:"hidden",display:"flex",flexDirection:"column",gap:5,opacity:isFinished?0.6:1}}>
-                          {achieved && !isFinished && (
+                        <div key={ps.id} style={{background:C.bg2,border:`1.5px solid ${achieved?C.green:C.border2}`,borderRadius:9,padding:10,position:"relative",overflow:"hidden",display:"flex",flexDirection:"column",gap:5}}>
+                          {achieved && (
                             <div style={{position:"absolute",top:5,right:5,fontSize:8,fontWeight:900,color:C.green,border:`1.5px solid ${C.green}`,borderRadius:3,padding:"1px 5px",transform:"rotate(-8deg)",letterSpacing:0.5,opacity:0.8,pointerEvents:"none"}}>✓ 가능</div>
                           )}
-                          {isFinished && (
-                            <div style={{position:"absolute",top:5,right:5,fontSize:8,fontWeight:900,color:C.muted,border:`1.5px solid ${C.muted}`,borderRadius:3,padding:"1px 5px",letterSpacing:0.5,opacity:0.8,pointerEvents:"none"}}>완료됨</div>
-                          )}
                           <div>
-                            <div style={{fontSize:12,fontWeight:900,color:C.text,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",paddingRight:achieved||isFinished?44:0}}>{ps.name}</div>
+                            <div style={{fontSize:12,fontWeight:900,color:C.text,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",paddingRight:achieved?44:0}}>{ps.name}</div>
                             <div style={{fontSize:9,color:C.teal,fontWeight:700,marginTop:1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{ps.exchangeName}</div>
                           </div>
-                          {/* 진행중 표시: 목표 날짜 + 목표 기간 */}
-                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:9,color:C.muted,gap:4,flexWrap:"wrap"}}>
-                            <span style={{display:"flex",gap:4,alignItems:"center",flexWrap:"wrap"}}>
-                              <span style={{color:C.text,fontWeight:700}}>🎯 {baseDate.slice(5).replace("-","월 ")}일</span>
-                              <span style={{padding:"1px 5px",borderRadius:3,background:`${C.teal}22`,color:C.teal,fontSize:8,fontWeight:800}}>{periodLabel}</span>
-                              <span style={{padding:"1px 5px",borderRadius:3,background:`${C.purple}22`,color:C.purple,fontSize:8,fontWeight:800}} title="목표 주기">↻{cycleLabel}</span>
-                            </span>
+                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:9,color:C.muted}}>
+                            <span>{baseDate.slice(5).replace("-","월 ")}일</span>
                             <span style={{color:dayColor,fontWeight:800}}>{daysLeft<0?`${Math.abs(daysLeft)}일↑`:daysLeft===0?"오늘":`D-${daysLeft}`}</span>
                           </div>
                           <div>
@@ -5448,12 +5696,10 @@ function AppMain() {
                               <div style={{width:`${pct}%`,height:"100%",background:achieved?C.green:C.amber,transition:"width 0.3s"}}/>
                             </div>
                           </div>
-                          <div style={{fontSize:8,color:C.dim}}>합산 기간: {fromStr.slice(5)} ~ {endStr.slice(5)} ({periodDays}일)</div>
+                          <div style={{fontSize:8,color:C.dim}}>기준: {fromStr.slice(5)} ~ {startStr.slice(5)}</div>
                           <div style={{display:"flex",gap:4,marginTop:"auto"}}>
-                            {!isFinished && (
-                              <button onClick={()=>handlePointExchangeComplete(ps.id)} style={{flex:1,padding:"4px 0",borderRadius:4,border:`1px solid ${C.orange}66`,background:`${C.orange}22`,color:C.orange,cursor:"pointer",fontWeight:800,fontSize:10}}>완료</button>
-                            )}
-                            {(isCompleted||isFinished) && (
+                            <button onClick={()=>{if(!window.confirm(`"${ps.name}" 현금교환 완료 처리?`))return;handlePointExchangeComplete(ps.id);}} style={{flex:1,padding:"4px 0",borderRadius:4,border:`1px solid ${C.orange}66`,background:`${C.orange}22`,color:C.orange,cursor:"pointer",fontWeight:800,fontSize:10}}>완료</button>
+                            {isCompleted && (
                               <button onClick={()=>{if(!window.confirm(`"${ps.name}" 영구 삭제? (완료 ${ps.sessions.length}건도 삭제됩니다)`))return;savePointSites(pointSites.filter(x=>x.id!==ps.id));}} style={{padding:"4px 7px",borderRadius:4,border:`1px solid ${C.red}44`,background:`${C.red}11`,color:C.red,cursor:"pointer",fontSize:10}}>🗑</button>
                             )}
                           </div>
