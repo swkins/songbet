@@ -4464,14 +4464,18 @@ function AppMain() {
                 if (!sp) continue;
                 const dollar = isUSD(site);
                 sessionProfitKRW += dollar ? sp.profit * usdKrw : sp.profit;
-                sessionBetAmtKRW += dollar ? sp.betAmount * usdKrw : sp.betAmount;
                 sessionPendingCnt += sp.pendingCount || 0;
-                // 승/패 카운트 - pending 탭의 현재 세션 확정 베팅
-                const sPending = pending.filter(b=>b.site===site);
-                const sDone = bets.filter(b=>b.site===site && b.result!=="진행중" && siteStates[site].active);
-                // 현재 세션의 확정 베팅만 세야 함 (마감 전까지)
+                // 세션 시작일 이후의 확정 베팅들로 승/패/베팅액 계산
+                const sessionStart = sp.sessionStartDate;
+                const sDone = bets.filter(b =>
+                  b.site===site &&
+                  (b.result==="승" || b.result==="패") &&
+                  (sessionStart==="0000-00-00" || sessionStart==="" || b.date > sessionStart)
+                );
                 sessionWinCnt += sDone.filter(b=>b.result==="승").length;
                 sessionLoseCnt += sDone.filter(b=>b.result==="패").length;
+                const siteBetAmt = sDone.reduce((s,b)=>s+b.amount,0);
+                sessionBetAmtKRW += dollar ? siteBetAmt * usdKrw : siteBetAmt;
               }
               const sessionRoi = sessionBetAmtKRW>0 ? (sessionProfitKRW/sessionBetAmtKRW*100) : 0;
               const sessionTotalBets = sessionWinCnt + sessionLoseCnt + sessionPendingCnt;
