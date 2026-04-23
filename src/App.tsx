@@ -1742,6 +1742,53 @@ function AppMain() {
   const krwRemaining=activeSiteNames.filter(s=>!isUSD(s)).reduce((sum,site)=>{const st=siteStates[site]||{deposited:0,betTotal:0};return sum+Math.max(0,st.deposited-st.betTotal);},0);
   const usdRemaining=activeSiteNames.filter(s=>isUSD(s)).reduce((sum,site)=>{const st=siteStates[site]||{deposited:0,betTotal:0};return sum+Math.max(0,st.deposited-st.betTotal);},0);
 
+  // ── 현재 세션(마감 전) 사이트별 실시간 수익 ──
+  // 마지막 마감(=출금) 이후의 베팅들 중 결과가 확정된 것만 합산
+  // 진행중 베팅은 제외, 포인트는 입금/수익 계산에 미포함
+  const currentSessionProfits = useMemo(()=>{
+    const result:Record<string,{
+      profit:number,        // 결과 확정된 베팅 순수익
+      betCount:number,      // 결과 확정된 베팅 수
+      pendingCount:number,  // 진행중 베팅 수
+      sessionDep:number,    // 이번 세션 입금액 (포인트 미포함)
+      roi:number,           // 수익률 % (입금 기준)
+      sessionStartDate:string, // 세션 시작 날짜 (직전 마감 다음날)
+    }> = {};
+    ALL_SITES.forEach(site=>{
+      // 마지막 출금(마감) 날짜 찾기
+      const siteWths = withdrawals.filter(w=>w.site===site).sort((a,b)=>a.date.localeCompare(b.date));
+      const prevWthDate = siteWths.length>0 ? siteWths[siteWths.length-1].date : "0000-00-00";
+      // 직전 마감 이후 입금
+      const sessionDeps = deposits.filter(d=>d.site===site && d.date>prevWthDate);
+      const sessionDep = sessionDeps.reduce((s,d)=>s+d.amount,0);
+      // 직전 마감 이후 베팅
+      const sessionBets = bets.filter(b=>b.site===site && b.date>prevWthDate);
+      const doneBets = sessionBets.filter(b=>b.result==="승"||b.result==="패");
+      const profit = doneBets.reduce((s,b)=>s+(b.profit??0),0);
+      const pendingCount = sessionBets.filter(b=>b.result==="진행중").length;
+      const totalBetAmt = doneBets.reduce((s,b)=>s+b.amount,0);
+      const roi = totalBetAmt>0 ? (profit/totalBetAmt)*100 : 0;
+      result[site] = {
+        profit,
+        betCount: doneBets.length,
+        pendingCount,
+        sessionDep,
+        roi,
+        sessionStartDate: prevWthDate==="0000-00-00" ? (sessionDeps[0]?.date || "") : prevWthDate,
+      };
+    });
+    return result;
+  },[bets, deposits, withdrawals, ALL_SITES]);
+
+  // 활성 사이트 전체 세션 수익 합계 (KRW 환산)
+  const activeSessionProfitKRW = useMemo(()=>{
+    return activeSiteNames.reduce((sum,site)=>{
+      const sp = currentSessionProfits[site];
+      if(!sp) return sum;
+      return sum + (isUSD(site) ? sp.profit*usdKrw : sp.profit);
+    },0);
+  },[activeSiteNames, currentSessionProfits, usdKrw, isUSD]);
+
   // ── 서브 컴포넌트 ─────────────────────────────────────────
   const StatCard=({label,value,color,sub}:{label:string,value:string|number,color?:string,sub?:string})=>(
     <div style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:10,padding:"11px 12px",minWidth:0}}>
@@ -3061,9 +3108,22 @@ function AppMain() {
                           <span>잔여 <span style={{color:C.teal,fontWeight:700,fontSize:11}}>{fmtDisp(remaining,dollar)}</span></span>
                           {sitePendingCount>0 && <span style={{color:C.amber,fontWeight:700}}>{sitePendingCount}건 진행중</span>}
                         </div>
-                        <div style={{height:5,background:C.bg2,borderRadius:3,overflow:"hidden"}}>
+                        <div style={{height:5,background:C.bg2,borderRadius:3,overflow:"hidden",marginBottom:5}}>
                           <div style={{width:`${pct}%`,height:"100%",background:barColor,transition:"width 0.3s"}}/>
                         </div>
+                        {/* ★ 세션 수익 (콤팩트) */}
+                        {(()=>{
+                          const sp = currentSessionProfits[site];
+                          if(!sp || sp.betCount===0) return null;
+                          const profitColor = sp.profit>0?C.green:sp.profit<0?C.red:C.muted;
+                          return (
+                            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:10,padding:"4px 7px",background:`${profitColor}11`,border:`1px solid ${profitColor}33`,borderRadius:4}}>
+                              <span style={{color:C.muted,fontSize:9}}>💹 세션</span>
+                              <span style={{color:profitColor,fontWeight:800,fontSize:11}}>{sp.profit>=0?"+":""}{fmtDisp(sp.profit,dollar)}</span>
+                              <span style={{color:profitColor,fontSize:9,fontWeight:700}}>{sp.roi>=0?"+":""}{sp.roi.toFixed(1)}%</span>
+                            </div>
+                          );
+                        })()}
                       </div>
                     );
                   })}
@@ -4086,7 +4146,16 @@ function AppMain() {
         <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden",minWidth:0}}>
           <div style={{padding:"12px 18px",borderBottom:`1px solid ${C.border2}`,flexShrink:0}}>
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
-              <div style={{fontSize:17,fontWeight:800,color:C.amber}}>⏳ 베팅 진행률</div>
+              <div style={{display:"flex",alignItems:"center",gap:12}}>
+                <div style={{fontSize:17,fontWeight:800,color:C.amber}}>⏳ 베팅 진행률</div>
+                {/* 활성 사이트 세션 수익 합계 */}
+                {activeSiteNames.length>0 && (
+                  <div style={{display:"flex",alignItems:"center",gap:6,padding:"3px 10px",background:`${activeSessionProfitKRW>=0?C.green:C.red}11`,border:`1px solid ${activeSessionProfitKRW>=0?C.green:C.red}55`,borderRadius:6}}>
+                    <span style={{fontSize:9,color:C.muted,fontWeight:700}}>💹 진행중 세션 합계</span>
+                    <span style={{fontSize:13,fontWeight:900,color:activeSessionProfitKRW>=0?C.green:C.red}}>{activeSessionProfitKRW>=0?"+":""}{fmtProfit(activeSessionProfitKRW,false)}</span>
+                  </div>
+                )}
+              </div>
               <div style={{display:"flex",gap:14,fontSize:11}}>
                 <span style={{color:C.muted}}>잔여 <span style={{color:C.green,fontWeight:800}}>₩{krwRemaining.toLocaleString()}</span></span>
                 <span style={{color:C.muted}}>잔여 <span style={{color:C.amber,fontWeight:800}}>${usdRemaining.toFixed(2)}</span></span>
@@ -4149,6 +4218,24 @@ function AppMain() {
                     </div>
                     <div style={{display:"flex",justifyContent:"space-between",fontSize:10,marginBottom:3}}><span style={{color:C.muted}}>진행률</span><span style={{color:barColor,fontWeight:700}}>{pctRaw}%</span></div>
                     <div style={{height:5,background:C.bg,borderRadius:3,overflow:"hidden",marginBottom:8}}><div style={{width:`${pct}%`,height:"100%",background:barColor,borderRadius:3}}/></div>
+                    {/* ★ 현재 세션 수익 표시 */}
+                    {(()=>{
+                      const sp = currentSessionProfits[site];
+                      if(!sp || (sp.betCount===0 && sp.pendingCount===0)) return null;
+                      const profitColor = sp.profit>0?C.green:sp.profit<0?C.red:C.muted;
+                      return (
+                        <div style={{background:`${profitColor}11`,border:`1px solid ${profitColor}44`,borderRadius:6,padding:"6px 9px",marginBottom:7}}>
+                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:2}}>
+                            <span style={{fontSize:9,color:C.muted,fontWeight:700}}>💹 세션 수익</span>
+                            <span style={{fontSize:13,fontWeight:900,color:profitColor}}>{sp.profit>=0?"+":""}{fmtDisp(sp.profit,dollar)}</span>
+                          </div>
+                          <div style={{display:"flex",justifyContent:"space-between",fontSize:9,color:C.muted}}>
+                            <span>{sp.betCount}건 확정{sp.pendingCount>0&&` · ${sp.pendingCount}건 진행중`}</span>
+                            <span>ROI <b style={{color:profitColor}}>{sp.roi>=0?"+":""}{sp.roi.toFixed(1)}%</b></span>
+                          </div>
+                        </div>
+                      );
+                    })()}
                     {sitePending.length>0&&(
                       <div style={{borderTop:`1px solid ${C.border}`,paddingTop:7}}>
                         <div style={{fontSize:10,color:C.amber,fontWeight:700,marginBottom:5}}>⏳ {sitePending.length}건</div>
@@ -5004,9 +5091,22 @@ function AppMain() {
                         <span>잔 <b style={{color:C.teal,fontSize:10}}>{fmtDisp(remaining,dollar)}</b></span>
                         {sitePending>0 && <span style={{color:C.amber,fontWeight:700}}>{sitePending}건</span>}
                       </div>
-                      <div style={{height:4,background:C.bg,borderRadius:2,overflow:"hidden"}}>
+                      <div style={{height:4,background:C.bg,borderRadius:2,overflow:"hidden",marginBottom:4}}>
                         <div style={{width:`${pct}%`,height:"100%",background:barColor,transition:"width 0.3s"}}/>
                       </div>
+                      {/* ★ 세션 수익 (초소형) */}
+                      {(()=>{
+                        const sp = currentSessionProfits[site];
+                        if(!sp || sp.betCount===0) return null;
+                        const profitColor = sp.profit>0?C.green:sp.profit<0?C.red:C.muted;
+                        return (
+                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:9,marginTop:3,paddingTop:3,borderTop:`1px dashed ${C.border}`}}>
+                            <span style={{color:C.muted}}>💹</span>
+                            <span style={{color:profitColor,fontWeight:800,fontSize:10}}>{sp.profit>=0?"+":""}{fmtDisp(sp.profit,dollar)}</span>
+                            <span style={{color:profitColor,fontSize:9,fontWeight:700}}>{sp.roi>=0?"+":""}{sp.roi.toFixed(0)}%</span>
+                          </div>
+                        );
+                      })()}
                     </div>
                   );
                 })}
