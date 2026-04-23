@@ -6,18 +6,14 @@
 //  - 종목 메뉴 크게 · 국가 메뉴 크게 · 3컬럼 독립 스크롤
 //  - Supabase events 테이블 의존 제거 (베팅 탭 한정)
 //  ── rev.4 신규 ──
-//  - 다중기기 동기화: PC에서 추가한 종목/국가/리그/경기 메타데이터를
-//    customLeagues 테이블에 인코딩하여 모바일에 자동 반영 (스코어/finished는 기기별)
-//    인코딩 키:
-//      __m_sport__               : 사용자 정의 종목
-//      __m_country__SPORT        : 종목별 국가 목록
-//      __m_league__SPORT__COUNTRY: 국가별 리그 목록
-//      __m_game__                : 수동 경기 메타 (JSON, 스코어 제외)
-//    삭제는 "__del__" 톰스톤으로 표시 (앱 로드 시 필터)
-//  - 베팅 슬립: 프리매치/실시간 토글 추가 (기본 프리매치)
-//    라이브 경기 선택 시 자동으로 실시간 모드로 전환
-//    Bet 객체에 matchType 필드 추가 (Bet 타입은 cast로 확장)
-//    API-Sports 슬립 + 수동 슬립 양쪽 모두 적용
+//  1) PC ↔ 모바일 동기화 (Supabase manual_games + m_meta 테이블)
+//     - 수동 경기 추가/삭제/스코어/종료 → 모두 즉시 동기화
+//     - 종목/국가/리그 추가/이름변경/삭제 → 모두 즉시 동기화
+//     - 앱 로드 시 Supabase가 source of truth (localStorage는 오프라인 캐시)
+//  2) 라이브 스코어 - 경기 취소 버튼 ⛔ 추가
+//     - 클릭 시 경기 + 관련 진행중 베팅 모두 취소
+//     - 베팅금이 사이트 잔여로 자동 복구
+//  3) 라이브 스코어 - 확인/취소 버튼을 작은 아이콘(✓ ⛔)으로 축소
 // ─────────────────────────────────────────────────────────────
 import React, { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, LineChart, Line, CartesianGrid } from "recharts";
@@ -564,8 +560,6 @@ function AppMain() {
   const [slipSite,setSlipSite]=useState<string>("");
   const [slipAmount,setSlipAmount]=useState<number>(10000);
   const [slipInclude,setSlipInclude]=useState<boolean>(true);
-  // 프리매치/실시간 모드 (기본 프리매치, 라이브 경기 선택 시 자동 실시간으로 전환)
-  const [slipMatchType,setSlipMatchType]=useState<"prematch"|"live">("prematch");
 
   const slipGameIds = useMemo(()=>new Set(slip.map(s=>s.id)), [slip]);
 
@@ -578,10 +572,6 @@ function AppMain() {
       const filtered = prev.filter(s => s.game.id !== game.id);
       return [...filtered, { id, game, optLabel, odds: 0 }];
     });
-    // ── 라이브 경기 선택 시 자동으로 실시간 모드로 전환 ──
-    if (isLive(game.status_short)) {
-      setSlipMatchType("live");
-    }
   },[]);
 
   const handleSlipAdd=()=>{
@@ -605,16 +595,14 @@ function AppMain() {
         betOption:item.optLabel,homeTeam:homeKr,awayTeam:awayKr,teamName,
         amount:slipAmount,odds:item.odds,profit:null,result:"진행중",
         includeStats:slipInclude,isDollar:dollar,
-        ...({country: ktr(item.game.country), matchType: slipMatchType} as any),
+        ...({country: ktr(item.game.country)} as any),
       };
       setBetsRaw(b=>[...b,bet]);db.upsertBet(bet);
       const newSS={...siteStates,[slipSite]:{...siteStates[slipSite],betTotal:parseFloat((siteStates[slipSite].betTotal+slipAmount).toFixed(2))}};
       setSiteStatesRaw(newSS);db.upsertSiteState(slipSite,newSS[slipSite]);
-      addLog("➕ 베팅",`${homeKr} vs ${awayKr}/${item.optLabel}/${fmtDisp(slipAmount,dollar)}/${slipMatchType==="live"?"실시간":"프리매치"}`);
+      addLog("➕ 베팅",`${homeKr} vs ${awayKr}/${item.optLabel}/${fmtDisp(slipAmount,dollar)}`);
     });
     setSlip([]);
-    // 다음 베팅을 위해 프리매치로 리셋
-    setSlipMatchType("prematch");
   };
 
   // 모의 베팅 (사용 안 하지만 타입 호환)
@@ -645,27 +633,6 @@ function AppMain() {
   };
 
   // 커스텀 종목/국가/리그 목록 (경기 없어도 유지)
-  // ── 다중기기 동기화 안내 ──
-  // PC/모바일 간 동기화: localStorage 1차 저장 + customLeagues(Supabase) 미러링.
-  // 인코딩: customLeagues["__m_sport__"]      = 사용자 정의 종목 목록
-  //         customLeagues["__m_country__SPORT"] = SPORT 의 국가 목록
-  //         customLeagues["__m_league__SPORT__COUNTRY"] = SPORT/COUNTRY 의 리그 목록
-  //         customLeagues["__m_game__"]      = 수동 경기 (JSON 문자열) - 메타만 동기화 (스코어는 기기별)
-  // 삭제는 "__del__" 프리픽스 톰스톤으로 표시 (db.updateCustomLeague 사용).
-  const M_SPORT_KEY = "__m_sport__";
-  const M_COUNTRY_PREFIX = "__m_country__";
-  const M_LEAGUE_PREFIX = "__m_league__";
-  const M_GAME_KEY = "__m_game__";
-  const M_TOMBSTONE = "__del__";
-  const filterAlive = (arr:string[]|undefined) => (arr||[]).filter(n=>!n.startsWith(M_TOMBSTONE));
-  // 경기를 동기화용 문자열로 직렬화 (메타만; 스코어/finished 는 기기별 보존)
-  const serializeGameMeta = (g:{id:string;sportCat:string;country:string;league:string;homeTeam:string;awayTeam:string;createdAt:number}) =>
-    JSON.stringify({i:g.id,s:g.sportCat,c:g.country,l:g.league,h:g.homeTeam,a:g.awayTeam,t:g.createdAt});
-  const deserializeGameMeta = (s:string):{id:string;sportCat:string;country:string;league:string;homeTeam:string;awayTeam:string;createdAt:number}|null => {
-    try { const o=JSON.parse(s); return {id:o.i,sportCat:o.s,country:o.c,league:o.l,homeTeam:o.h,awayTeam:o.a,createdAt:o.t}; }
-    catch { return null; }
-  };
-
   const DEFAULT_SPORTS = ["축구","야구","농구","배구","하키","E스포츠"];
   const [customSports,setCustomSports]=useState<string[]>(()=>{
     try{const v=localStorage.getItem("bt_m_sports");return v?JSON.parse(v):[];}catch{return [];}
@@ -742,12 +709,8 @@ function AppMain() {
       sportCat:mSport,createdAt:Date.now(),
     };
     saveManualGames([g,...manualGames]);
-    // ── 다중기기 동기화: 경기 추가 ──
-    try {
-      const s = serializeGameMeta(g);
-      db.insertCustomLeague(M_GAME_KEY, s);
-      setCustomLeaguesRaw(p=>({...p, [M_GAME_KEY]: [...(p[M_GAME_KEY]||[]), s]}));
-    } catch(e) { console.warn("[m-sync] add game failed:", e); }
+    // ── DB 동기화 ──
+    db.upsertManualGame(g).catch(e => console.warn("[sync] add game:", e));
     setNewGame({homeTeam:"",awayTeam:""});
     addLog("➕ 경기 추가",`${mCountry}/${mLeague}/${h} vs ${a}`);
     if (continueAdd) {
@@ -764,11 +727,9 @@ function AppMain() {
     const n=newSportName.trim();if(!n)return;
     if(allSportsList.includes(n))return alert(`이미 존재하는 종목입니다: "${n}"`);
     saveCustomSports([...customSports,n]);
-    // ── 다중기기 동기화 ──
-    try {
-      db.insertCustomLeague(M_SPORT_KEY, n);
-      setCustomLeaguesRaw(p=>({...p, [M_SPORT_KEY]: [...(p[M_SPORT_KEY]||[]), n]}));
-    } catch(e) { console.warn("[m-sync] add sport failed:", e); }
+    // ── DB 동기화 ──
+    db.upsertMMeta({id:db.mMetaId('sport',n,'',n), type:'sport', sport:n, country:'', name:n})
+      .catch(e => console.warn("[sync] add sport:", e));
     setAddSportModal(false);setNewSportName("");
     setMExpandedSports(p=>({...p,[n]:true}));
   };
@@ -786,12 +747,9 @@ function AppMain() {
       return;
     }
     saveMCountries({...mCountries,[sport]:[...list,n]});
-    // ── 다중기기 동기화 ──
-    try {
-      const cKey = M_COUNTRY_PREFIX + sport;
-      db.insertCustomLeague(cKey, n);
-      setCustomLeaguesRaw(p=>({...p, [cKey]: [...(p[cKey]||[]), n]}));
-    } catch(e) { console.warn("[m-sync] add country failed:", e); }
+    // ── DB 동기화 ──
+    db.upsertMMeta({id:db.mMetaId('country',sport,'',n), type:'country', sport, country:'', name:n})
+      .catch(e => console.warn("[sync] add country:", e));
     setMExpandedCountries(p=>({...p,[`${sport}__${n}`]:true}));
     setAddCountryModal(null);setNewCountryName("");
     if (continueToLeague) {
@@ -808,12 +766,9 @@ function AppMain() {
     const list=mLeagues[key]||[];
     if(list.includes(n)||allLeaguesForCountry(sport,country).includes(n))return alert(`이미 존재하는 리그입니다: "${sport} / ${country} / ${n}"`);
     saveMLeaguesStore({...mLeagues,[key]:[...list,n]});
-    // ── 다중기기 동기화 ──
-    try {
-      const lKey = M_LEAGUE_PREFIX + key;
-      db.insertCustomLeague(lKey, n);
-      setCustomLeaguesRaw(p=>({...p, [lKey]: [...(p[lKey]||[]), n]}));
-    } catch(e) { console.warn("[m-sync] add league failed:", e); }
+    // ── DB 동기화 ──
+    db.upsertMMeta({id:db.mMetaId('league',sport,country,n), type:'league', sport, country, name:n})
+      .catch(e => console.warn("[sync] add league:", e));
     // 추가된 리그 자동 선택
     setMSport(sport);
     setMCountry(country);
@@ -840,23 +795,14 @@ function AppMain() {
       if(idx>=0){
         const newList=[...customSports]; newList[idx]=newName;
         saveCustomSports(newList);
-        // ── 다중기기 동기화: 종목 이름 변경 ──
-        try {
-          db.updateCustomLeague(M_SPORT_KEY, oldName, newName);
-          setCustomLeaguesRaw(p=>{
-            const arr=[...(p[M_SPORT_KEY]||[])];
-            const i=arr.indexOf(oldName);
-            if(i>=0)arr[i]=newName; else arr.push(newName);
-            return {...p,[M_SPORT_KEY]:arr};
-          });
-        } catch(e) { console.warn("[m-sync] rename sport failed:", e); }
       } else {
         // 기본 종목을 수정할 때는 customSports에 새 이름 추가 (원본 숨김)
         // 그런데 DEFAULT_SPORTS는 하드코딩이라 무시되므로 customSports에 추가
         if(!allSportsList.includes(newName)) saveCustomSports([...customSports,newName]);
       }
       // 관련 데이터 마이그레이션
-      saveManualGames(manualGames.map(g=>g.sportCat===oldName?{...g,sportCat:newName}:g));
+      const updatedGames = manualGames.map(g=>g.sportCat===oldName?{...g,sportCat:newName}:g);
+      saveManualGames(updatedGames);
       const newCountries={...mCountries};
       if(newCountries[oldName]){newCountries[newName]=newCountries[oldName];delete newCountries[oldName];saveMCountries(newCountries);}
       const newLeagues={...mLeagues};
@@ -864,37 +810,32 @@ function AppMain() {
         if(k.startsWith(oldName+"__")){const newKey=newName+k.substring(oldName.length);newLeagues[newKey]=newLeagues[k];delete newLeagues[k];}
       });
       saveMLeaguesStore(newLeagues);
-      // ── 다중기기 동기화: 종목 키 마이그레이션 (국가/리그 키 변경) ──
-      try {
-        const oldCKey = M_COUNTRY_PREFIX + oldName;
-        const newCKey = M_COUNTRY_PREFIX + newName;
-        const oldCountriesArr = (newCountries[newName]||[]); // 이전에 oldName 이었음
-        if (oldCountriesArr.length > 0) {
-          // 모든 국가를 새 키로 다시 insert (이전 키는 삭제 불가, 톰스톤 처리)
-          for (const c of oldCountriesArr) db.insertCustomLeague(newCKey, c);
-          for (const c of oldCountriesArr) {
-            try { db.updateCustomLeague(oldCKey, c, M_TOMBSTONE + c); } catch {}
+      // ── DB 동기화: 종목 이름 변경 ──
+      (async () => {
+        try {
+          // 1. m_meta: 옛 종목 row 삭제 (sport 자체)
+          if (idx >= 0) {
+            await db.deleteMMeta(db.mMetaId('sport', oldName, '', oldName));
           }
-          setCustomLeaguesRaw(p=>{
-            const next = {...p};
-            next[newCKey] = Array.from(new Set([...(next[newCKey]||[]), ...oldCountriesArr]));
-            next[oldCKey] = (next[oldCKey]||[]).map((n:string)=>oldCountriesArr.includes(n)?M_TOMBSTONE+n:n);
-            return next;
-          });
-        }
-        // 리그 키도 마이그레이션
-        for (const oldK of Object.keys(mLeagues)) {
-          if (oldK.startsWith(oldName+"__")) {
-            const country = oldK.substring(oldName.length+2);
-            const oldLKey = M_LEAGUE_PREFIX + oldK;
-            const newLKey = M_LEAGUE_PREFIX + newName + "__" + country;
-            for (const l of mLeagues[oldK]) {
-              db.insertCustomLeague(newLKey, l);
-              try { db.updateCustomLeague(oldLKey, l, M_TOMBSTONE + l); } catch {}
+          // 2. m_meta: 새 종목 row 추가
+          await db.upsertMMeta({id:db.mMetaId('sport',newName,'',newName), type:'sport', sport:newName, country:'', name:newName});
+          // 3. 종목의 모든 country/league row 옛것 삭제 + 새것 추가
+          await db.deleteMMetaBySport(oldName);
+          for (const c of (mCountries[oldName] || [])) {
+            await db.upsertMMeta({id:db.mMetaId('country',newName,'',c), type:'country', sport:newName, country:'', name:c});
+          }
+          for (const k of Object.keys(mLeagues)) {
+            if (k.startsWith(oldName+"__")) {
+              const country = k.substring(oldName.length+2);
+              for (const l of mLeagues[k]) {
+                await db.upsertMMeta({id:db.mMetaId('league',newName,country,l), type:'league', sport:newName, country, name:l});
+              }
             }
           }
-        }
-      } catch(e) { console.warn("[m-sync] rename sport key migration failed:", e); }
+          // 4. manual_games 의 sport_cat 컬럼 일괄 업데이트
+          await db.renameManualGameSport(oldName, newName);
+        } catch(e) { console.warn("[sync] rename sport:", e); }
+      })();
       if(mSport===oldName)setMSport(newName);
       addLog("✏️ 종목 수정",`${oldName} → ${newName}`);
     }
@@ -910,35 +851,30 @@ function AppMain() {
       } else {
         saveMCountries({...mCountries,[sport]:[...list,newName]});
       }
-      // ── 다중기기 동기화: 국가 이름 변경 ──
-      try {
-        const cKey = M_COUNTRY_PREFIX + sport;
-        db.updateCustomLeague(cKey, oldName, newName);
-        setCustomLeaguesRaw(p=>{
-          const arr=[...(p[cKey]||[])];
-          const i=arr.indexOf(oldName);
-          if(i>=0)arr[i]=newName; else arr.push(newName);
-          return {...p,[cKey]:arr};
-        });
-        // 해당 국가의 리그 키도 마이그레이션
-        const oldKey=`${sport}__${oldName}`;const newKey=`${sport}__${newName}`;
-        const oldLKey = M_LEAGUE_PREFIX + oldKey;
-        const newLKey = M_LEAGUE_PREFIX + newKey;
-        if (mLeagues[oldKey]) {
-          for (const l of mLeagues[oldKey]) {
-            db.insertCustomLeague(newLKey, l);
-            try { db.updateCustomLeague(oldLKey, l, M_TOMBSTONE + l); } catch {}
-          }
-        }
-      } catch(e) { console.warn("[m-sync] rename country failed:", e); }
       // 경기 데이터 업데이트
-      saveManualGames(manualGames.map(g=>g.sportCat===sport&&g.country===oldName?{...g,country:newName}:g));
+      const updatedGames = manualGames.map(g=>g.sportCat===sport&&g.country===oldName?{...g,country:newName}:g);
+      saveManualGames(updatedGames);
       // mLeagues 키 변경
       const oldKey=`${sport}__${oldName}`;const newKey=`${sport}__${newName}`;
       if(mLeagues[oldKey]){
         const newMap={...mLeagues};newMap[newKey]=newMap[oldKey];delete newMap[oldKey];
         saveMLeaguesStore(newMap);
       }
+      // ── DB 동기화: 국가 이름 변경 ──
+      (async () => {
+        try {
+          // 1. m_meta: 옛 country row 삭제 + 새것 추가
+          await db.deleteMMeta(db.mMetaId('country', sport, '', oldName));
+          await db.upsertMMeta({id:db.mMetaId('country',sport,'',newName), type:'country', sport, country:'', name:newName});
+          // 2. 해당 국가의 league row 옛것 삭제 + 새것 추가
+          await db.deleteMMetaBySportCountry(sport, oldName);
+          for (const l of (mLeagues[oldKey] || [])) {
+            await db.upsertMMeta({id:db.mMetaId('league',sport,newName,l), type:'league', sport, country:newName, name:l});
+          }
+          // 3. manual_games 의 country 컬럼 일괄 업데이트
+          await db.renameManualGameCountry(sport, oldName, newName);
+        } catch(e) { console.warn("[sync] rename country:", e); }
+      })();
       if(mCountry===oldName)setMCountry(newName);
       addLog("✏️ 국가 수정",`${sport}/${oldName} → ${newName}`);
     }
@@ -954,18 +890,15 @@ function AppMain() {
       } else {
         saveMLeaguesStore({...mLeagues,[key]:[...list,newName]});
       }
-      // ── 다중기기 동기화: 리그 이름 변경 ──
-      try {
-        const lKey = M_LEAGUE_PREFIX + key;
-        db.updateCustomLeague(lKey, oldName, newName);
-        setCustomLeaguesRaw(p=>{
-          const arr=[...(p[lKey]||[])];
-          const i=arr.indexOf(oldName);
-          if(i>=0)arr[i]=newName; else arr.push(newName);
-          return {...p,[lKey]:arr};
-        });
-      } catch(e) { console.warn("[m-sync] rename league failed:", e); }
       saveManualGames(manualGames.map(g=>g.sportCat===sport&&g.country===country&&g.league===oldName?{...g,league:newName}:g));
+      // ── DB 동기화: 리그 이름 변경 ──
+      (async () => {
+        try {
+          await db.deleteMMeta(db.mMetaId('league', sport, country, oldName));
+          await db.upsertMMeta({id:db.mMetaId('league',sport,country,newName), type:'league', sport, country, name:newName});
+          await db.renameManualGameLeague(sport, country, oldName, newName);
+        } catch(e) { console.warn("[sync] rename league:", e); }
+      })();
       if(mLeague===oldName)setMLeague(newName);
       addLog("✏️ 리그 수정",`${sport}/${country}/${oldName} → ${newName}`);
     }
@@ -982,32 +915,6 @@ function AppMain() {
       if(!window.confirm(`종목 "${oldName}" 을(를) 삭제하시겠습니까?\n이 종목의 경기 ${relatedGames}개와 모든 국가/리그가 함께 삭제됩니다.\n\n(진행중 베팅은 유지되지만 카테고리 링크가 끊어집니다.)`)) return;
       // customSports에서 제거
       saveCustomSports(customSports.filter(s=>s!==oldName));
-      // ── 다중기기 동기화: 종목 톰스톤 ──
-      try {
-        db.updateCustomLeague(M_SPORT_KEY, oldName, M_TOMBSTONE + oldName);
-        setCustomLeaguesRaw(p=>({
-          ...p,
-          [M_SPORT_KEY]: (p[M_SPORT_KEY]||[]).map((n:string)=>n===oldName?M_TOMBSTONE+n:n)
-        }));
-        // 종목의 모든 국가/리그도 톰스톤
-        const cKey = M_COUNTRY_PREFIX + oldName;
-        for (const c of (mCountries[oldName]||[])) {
-          try { db.updateCustomLeague(cKey, c, M_TOMBSTONE + c); } catch {}
-        }
-        for (const k of Object.keys(mLeagues)) {
-          if (k.startsWith(oldName+"__")) {
-            const lKey = M_LEAGUE_PREFIX + k;
-            for (const l of mLeagues[k]) {
-              try { db.updateCustomLeague(lKey, l, M_TOMBSTONE + l); } catch {}
-            }
-          }
-        }
-        // 종목의 모든 경기도 톰스톤
-        for (const g of manualGames.filter(g=>g.sportCat===oldName)) {
-          const s = serializeGameMeta(g);
-          try { db.updateCustomLeague(M_GAME_KEY, s, M_TOMBSTONE + s); } catch {}
-        }
-      } catch(e) { console.warn("[m-sync] delete sport failed:", e); }
       // 관련 경기 삭제
       saveManualGames(manualGames.filter(g=>g.sportCat!==oldName));
       // 관련 국가/리그 삭제
@@ -1015,6 +922,14 @@ function AppMain() {
       const newLeagues={...mLeagues};
       Object.keys(newLeagues).forEach(k=>{if(k.startsWith(oldName+"__"))delete newLeagues[k];});
       saveMLeaguesStore(newLeagues);
+      // ── DB 동기화: 종목 + 하위 모든 항목 삭제 ──
+      (async () => {
+        try {
+          await db.deleteMMeta(db.mMetaId('sport', oldName, '', oldName));
+          await db.deleteMMetaBySport(oldName);
+          await db.deleteManualGamesBySport(oldName);
+        } catch(e) { console.warn("[sync] delete sport:", e); }
+      })();
       if(mSport===oldName){setMSport("");setMCountry("");setMLeague("");}
       addLog("🗑 종목 삭제",oldName);
     }
@@ -1023,31 +938,19 @@ function AppMain() {
       if(!window.confirm(`국가 "${oldName}" 을(를) 삭제하시겠습니까?\n이 국가의 경기 ${relatedGames}개와 모든 리그가 함께 삭제됩니다.`)) return;
       // mCountries에서 제거
       saveMCountries({...mCountries,[sport]:(mCountries[sport]||[]).filter(c=>c!==oldName)});
-      // ── 다중기기 동기화: 국가 톰스톤 ──
-      try {
-        const cKey = M_COUNTRY_PREFIX + sport;
-        db.updateCustomLeague(cKey, oldName, M_TOMBSTONE + oldName);
-        setCustomLeaguesRaw(p=>({
-          ...p,
-          [cKey]: (p[cKey]||[]).map((n:string)=>n===oldName?M_TOMBSTONE+n:n)
-        }));
-        // 해당 국가의 리그도 톰스톤
-        const oldKey=`${sport}__${oldName}`;
-        const lKey = M_LEAGUE_PREFIX + oldKey;
-        for (const l of (mLeagues[oldKey]||[])) {
-          try { db.updateCustomLeague(lKey, l, M_TOMBSTONE + l); } catch {}
-        }
-        // 해당 국가의 경기도 톰스톤
-        for (const g of manualGames.filter(g=>g.sportCat===sport&&g.country===oldName)) {
-          const s = serializeGameMeta(g);
-          try { db.updateCustomLeague(M_GAME_KEY, s, M_TOMBSTONE + s); } catch {}
-        }
-      } catch(e) { console.warn("[m-sync] delete country failed:", e); }
       // 관련 경기 삭제
       saveManualGames(manualGames.filter(g=>!(g.sportCat===sport&&g.country===oldName)));
       // 관련 리그 삭제
       const oldKey=`${sport}__${oldName}`;
       const newLeagues={...mLeagues};delete newLeagues[oldKey];saveMLeaguesStore(newLeagues);
+      // ── DB 동기화: 국가 + 하위 리그/경기 삭제 ──
+      (async () => {
+        try {
+          await db.deleteMMeta(db.mMetaId('country', sport, '', oldName));
+          await db.deleteMMetaBySportCountry(sport, oldName);
+          await db.deleteManualGamesBySportCountry(sport, oldName);
+        } catch(e) { console.warn("[sync] delete country:", e); }
+      })();
       if(mCountry===oldName){setMCountry("");setMLeague("");}
       addLog("🗑 국가 삭제",`${sport}/${oldName}`);
     }
@@ -1056,21 +959,14 @@ function AppMain() {
       if(!window.confirm(`리그 "${oldName}" 을(를) 삭제하시겠습니까?\n이 리그의 경기 ${relatedGames}개가 함께 삭제됩니다.`)) return;
       const key=`${sport}__${country}`;
       saveMLeaguesStore({...mLeagues,[key]:(mLeagues[key]||[]).filter(l=>l!==oldName)});
-      // ── 다중기기 동기화: 리그 톰스톤 ──
-      try {
-        const lKey = M_LEAGUE_PREFIX + key;
-        db.updateCustomLeague(lKey, oldName, M_TOMBSTONE + oldName);
-        setCustomLeaguesRaw(p=>({
-          ...p,
-          [lKey]: (p[lKey]||[]).map((n:string)=>n===oldName?M_TOMBSTONE+n:n)
-        }));
-        // 해당 리그의 경기도 톰스톤
-        for (const g of manualGames.filter(g=>g.sportCat===sport&&g.country===country&&g.league===oldName)) {
-          const s = serializeGameMeta(g);
-          try { db.updateCustomLeague(M_GAME_KEY, s, M_TOMBSTONE + s); } catch {}
-        }
-      } catch(e) { console.warn("[m-sync] delete league failed:", e); }
       saveManualGames(manualGames.filter(g=>!(g.sportCat===sport&&g.country===country&&g.league===oldName)));
+      // ── DB 동기화: 리그 + 경기 삭제 ──
+      (async () => {
+        try {
+          await db.deleteMMeta(db.mMetaId('league', sport, country, oldName));
+          await db.deleteManualGamesBySportCountryLeague(sport, country, oldName);
+        } catch(e) { console.warn("[sync] delete league:", e); }
+      })();
       if(mLeague===oldName)setMLeague("");
       addLog("🗑 리그 삭제",`${sport}/${country}/${oldName}`);
     }
@@ -1079,20 +975,10 @@ function AppMain() {
 
   const handleDeleteManualGame=(id:string)=>{
     if(!window.confirm("이 경기를 삭제하시겠습니까?"))return;
-    const target = manualGames.find(g=>g.id===id);
     saveManualGames(manualGames.filter(g=>g.id!==id));
     setManualSlip(p=>p.filter(s=>s.game.id!==id));
-    // ── 다중기기 동기화: 경기 톰스톤 ──
-    if (target) {
-      try {
-        const s = serializeGameMeta(target);
-        db.updateCustomLeague(M_GAME_KEY, s, M_TOMBSTONE + s);
-        setCustomLeaguesRaw(p=>({
-          ...p,
-          [M_GAME_KEY]: (p[M_GAME_KEY]||[]).map((n:string)=>n===s?M_TOMBSTONE+n:n)
-        }));
-      } catch(e) { console.warn("[m-sync] delete game failed:", e); }
-    }
+    // ── DB 동기화 ──
+    db.deleteManualGame(id).catch(e => console.warn("[sync] delete game:", e));
   };
 
   // 수동 경기 슬립
@@ -1106,8 +992,6 @@ function AppMain() {
   const [manualSlipSite,setManualSlipSite]=useState<string>("");
   const [manualSlipAmount,setManualSlipAmount]=useState<number>(10000);
   const [manualSlipInclude,setManualSlipInclude]=useState<boolean>(true);
-  // 프리매치/실시간 모드 (수동 슬립용; 기본 프리매치)
-  const [manualSlipMatchType,setManualSlipMatchType]=useState<"prematch"|"live">("prematch");
   const [manualExpandedId,setManualExpandedId]=useState<string|null>(null);
   // 빠른 입금/포인트 모달 (홈 대시보드에서 호출)
   const [quickActionMode,setQuickActionMode]=useState<"deposit"|"point"|null>(null);
@@ -1131,11 +1015,6 @@ function AppMain() {
       // 폴더베팅 없이 단일베팅만: 완전히 덮어씌움
       return [{id, game, optLabel, odds:0}];
     });
-    // ── 라이브(스코어 기록 시작 + 미종료) 경기 선택 시 자동 실시간 모드 ──
-    const hasScore = (game.homeScore!=null && game.awayScore!=null);
-    if (hasScore && !game.finished) {
-      setManualSlipMatchType("live");
-    }
   };
 
   const handleManualSlipAdd=()=>{
@@ -1209,20 +1088,18 @@ function AppMain() {
         result:"진행중",
         includeStats:manualSlipInclude,
         isDollar:dollar,
-        ...({country: item.game.country, matchType: manualSlipMatchType} as any),
+        ...({country: item.game.country} as any),
       };
       setBetsRaw(b=>[...b,bet]);
       db.upsertBet(bet);
       const newSS={...siteStates,[manualSlipSite]:{...siteStates[manualSlipSite],betTotal:parseFloat((siteStates[manualSlipSite].betTotal+manualSlipAmount).toFixed(2))}};
       setSiteStatesRaw(newSS);
       db.upsertSiteState(manualSlipSite,newSS[manualSlipSite]);
-      addLog("➕ 베팅",`${item.game.homeTeam} vs ${item.game.awayTeam}/${displayOpt}/${fmtDisp(manualSlipAmount,dollar)}/${manualSlipMatchType==="live"?"실시간":"프리매치"}`);
+      addLog("➕ 베팅",`${item.game.homeTeam} vs ${item.game.awayTeam}/${displayOpt}/${fmtDisp(manualSlipAmount,dollar)}`);
     });
     setManualSlip([]);
     setManualSlipSite("");
     setManualSlipAmount(0);
-    // 다음 베팅을 위해 프리매치로 리셋
-    setManualSlipMatchType("prematch");
   };
 
   // ══════════════════════════════════════════════════════════
@@ -1287,6 +1164,9 @@ function AppMain() {
         return {...g, [field]:value};
       });
       try{localStorage.setItem("bt_manual_games",JSON.stringify(updated));}catch{}
+      // ── DB 동기화: 스코어 변경된 경기 1개만 upsert ──
+      const changed = updated.find(x=>x.id===gameId);
+      if (changed) db.upsertManualGame(changed).catch(e => console.warn("[sync] score change:", e));
       return updated;
     });
   };
@@ -1299,6 +1179,9 @@ function AppMain() {
     setManualGames(prev=>{
       const updated = prev.map(x => x.id===gameId ? {...x, finished:true} : x);
       try{localStorage.setItem("bt_manual_games",JSON.stringify(updated));}catch{}
+      // ── DB 동기화 ──
+      const changed = updated.find(x=>x.id===gameId);
+      if (changed) db.upsertManualGame(changed).catch(e => console.warn("[sync] finish:", e));
       return updated;
     });
     addLog("🏁 경기 종료",`${g.homeTeam} ${g.homeScore}:${g.awayScore} ${g.awayTeam}`);
@@ -1311,12 +1194,70 @@ function AppMain() {
     if (!window.confirm(`${liveScoreSport} 종료된 경기 ${sportFinished.length}건을 라이브 스코어에서 제거합니다.\n(베팅 데이터는 유지됩니다.)`)) return;
     // 종료된 경기는 manualGames에서 완전 삭제 (카테고리에서도 사라짐)
     saveManualGames(manualGames.filter(g => !(g.sportCat===liveScoreSport && g.finished)));
+    // ── DB 동기화: 종료된 경기들 모두 삭제 ──
+    sportFinished.forEach(g => {
+      db.deleteManualGame(g.id).catch(e => console.warn("[sync] clear finished:", e));
+    });
     addLog("🗑 일괄 제거",`${liveScoreSport} ${sportFinished.length}건`);
   };
 
-  // 경기 종료 토글 (수동 - 양쪽 스코어 다 비웠을 때 등 예외 케이스용, 더 이상 UI 없음)
+  // 경기 종료 토글 (수동 - 양쪽 스코어 다 비웠을 때 등 예외 케이스용)
   const handleUnfinishGame = (gameId:string) => {
-    saveManualGames(manualGames.map(g => g.id===gameId ? {...g, finished:false} : g));
+    setManualGames(prev=>{
+      const updated = prev.map(g => g.id===gameId ? {...g, finished:false} : g);
+      try{localStorage.setItem("bt_manual_games",JSON.stringify(updated));}catch{}
+      const changed = updated.find(x=>x.id===gameId);
+      if (changed) db.upsertManualGame(changed).catch(e => console.warn("[sync] unfinish:", e));
+      return updated;
+    });
+  };
+
+  // ★ NEW ★ 경기 취소 - 관련된 모든 진행중 베팅을 취소 + 사이트 잔액 복구
+  const handleCancelGame = (gameId:string) => {
+    const g = manualGames.find(x=>x.id===gameId);
+    if (!g) return;
+    // 이 경기와 매칭되는 진행중 베팅들 찾기
+    const relatedBets = bets.filter(b =>
+      b.result === "진행중" &&
+      b.homeTeam === g.homeTeam && b.awayTeam === g.awayTeam &&
+      b.league === g.league && b.category === g.sportCat
+    );
+    const cnt = relatedBets.length;
+    const msg = cnt > 0
+      ? `"${g.homeTeam} vs ${g.awayTeam}" 경기를 취소하시겠습니까?\n\n관련 진행중 베팅 ${cnt}건이 모두 취소되고, 베팅금이 잔여 잔액으로 복구됩니다.`
+      : `"${g.homeTeam} vs ${g.awayTeam}" 경기를 취소하시겠습니까?`;
+    if (!window.confirm(msg)) return;
+
+    // 1. 관련 베팅들 취소: bets에서 제거 + 사이트 betTotal 차감
+    if (cnt > 0) {
+      // 사이트별 차감액 합산
+      const reductionBySite: Record<string, number> = {};
+      for (const b of relatedBets) {
+        reductionBySite[b.site] = (reductionBySite[b.site] || 0) + b.amount;
+      }
+      // bets state 업데이트
+      const remainingBets = bets.filter(b => !relatedBets.find(rb => rb.id === b.id));
+      setBetsRaw(remainingBets);
+      // DB에서도 삭제
+      relatedBets.forEach(b => db.deleteBet(b.id).catch(e => console.warn("[sync] cancel bet:", e)));
+      // 사이트별 betTotal 차감
+      const newSiteStates = {...siteStates};
+      for (const [site, reduction] of Object.entries(reductionBySite)) {
+        if (newSiteStates[site]) {
+          const newBetTotal = parseFloat(Math.max(0, newSiteStates[site].betTotal - reduction).toFixed(2));
+          newSiteStates[site] = {...newSiteStates[site], betTotal: newBetTotal};
+          db.upsertSiteState(site, newSiteStates[site]).catch(e => console.warn("[sync] site state:", e));
+        }
+      }
+      setSiteStatesRaw(newSiteStates);
+    }
+
+    // 2. 경기 자체 삭제
+    saveManualGames(manualGames.filter(x => x.id !== gameId));
+    setManualSlip(p => p.filter(s => s.game.id !== gameId));
+    db.deleteManualGame(gameId).catch(e => console.warn("[sync] cancel game:", e));
+
+    addLog("⛔ 경기 취소", `${g.homeTeam} vs ${g.awayTeam}${cnt>0?` (베팅 ${cnt}건 취소)`:""}`);
   };
 
   // 베팅 결과 확인 (적중/실패 도장 후 사용자가 확인 → updateResult 호출)
@@ -1537,79 +1478,52 @@ function AppMain() {
 
   useEffect(()=>{
     (async()=>{
-      const [b,dep,wth,ss,cl,er,pe] = await Promise.all([
+      const [b,dep,wth,ss,cl,er,pe,mg,mm] = await Promise.all([
         db.loadBets(),db.loadDeposits(),db.loadWithdrawals(),
         db.loadSiteStates(ALL_SITES, isUSD),
         db.loadCustomLeagues(),db.loadEsportsRecords(),db.loadProfitExtras(),
+        db.loadManualGames(),db.loadMMeta(),
       ]);
       setBetsRaw(b);setDepositsRaw(dep);setWithdrawalsRaw(wth);
       setSiteStatesRaw(ss);setCustomLeaguesRaw(cl);setEsportsRecordsRaw(er);setProfitExtrasRaw(pe);
 
-      // ── 다른 기기에서 추가한 M-측 종목/국가/리그/경기를 customLeagues에서 추출하여 머지 ──
+      // ── PC↔모바일 동기화: 수동 경기 (Supabase가 source of truth) ──
       try {
-        const remoteSports = filterAlive(cl[M_SPORT_KEY]);
-        const remoteCountries: Record<string,string[]> = {};
-        const remoteLeagues: Record<string,string[]> = {};
-        const remoteGameStrs = filterAlive(cl[M_GAME_KEY]);
-        for (const k of Object.keys(cl)) {
-          if (k.startsWith(M_COUNTRY_PREFIX)) {
-            const sport = k.slice(M_COUNTRY_PREFIX.length);
-            remoteCountries[sport] = filterAlive(cl[k]);
-          } else if (k.startsWith(M_LEAGUE_PREFIX)) {
-            const sportCountry = k.slice(M_LEAGUE_PREFIX.length); // "SPORT__COUNTRY"
-            remoteLeagues[sportCountry] = filterAlive(cl[k]);
+        const games: ManualGame[] = mg.map(r => ({
+          id: r.id, sportCat: r.sportCat, country: r.country, league: r.league,
+          homeTeam: r.homeTeam, awayTeam: r.awayTeam, createdAt: r.createdAt,
+          homeScore: r.homeScore, awayScore: r.awayScore, finished: r.finished,
+        }));
+        setManualGames(games);
+        try { localStorage.setItem("bt_manual_games", JSON.stringify(games)); } catch {}
+      } catch(e) { console.warn("[sync] manual_games load failed:", e); }
+
+      // ── PC↔모바일 동기화: 수동 종목/국가/리그 메타 ──
+      try {
+        const sportNames: string[] = [];
+        const countries: Record<string,string[]> = {};
+        const leagues: Record<string,string[]> = {};
+        for (const row of mm) {
+          if (row.type === 'sport') {
+            sportNames.push(row.name);
+          } else if (row.type === 'country') {
+            if (!countries[row.sport]) countries[row.sport] = [];
+            countries[row.sport].push(row.name);
+          } else if (row.type === 'league') {
+            const k = `${row.sport}__${row.country}`;
+            if (!leagues[k]) leagues[k] = [];
+            leagues[k].push(row.name);
           }
         }
-        // 종목 머지
-        if (remoteSports.length > 0) {
-          setCustomSports(prev => {
-            const merged = Array.from(new Set([...prev, ...remoteSports]));
-            try { localStorage.setItem("bt_m_sports", JSON.stringify(merged)); } catch {}
-            return merged;
-          });
-        }
-        // 국가 머지
-        if (Object.keys(remoteCountries).length > 0) {
-          setMCountries(prev => {
-            const merged: Record<string,string[]> = { ...prev };
-            for (const sport of Object.keys(remoteCountries)) {
-              const cur = new Set(merged[sport] || []);
-              for (const c of remoteCountries[sport]) cur.add(c);
-              merged[sport] = Array.from(cur);
-            }
-            try { localStorage.setItem("bt_m_countries", JSON.stringify(merged)); } catch {}
-            return merged;
-          });
-        }
-        // 리그 머지
-        if (Object.keys(remoteLeagues).length > 0) {
-          setMLeagues(prev => {
-            const merged: Record<string,string[]> = { ...prev };
-            for (const key of Object.keys(remoteLeagues)) {
-              const cur = new Set(merged[key] || []);
-              for (const l of remoteLeagues[key]) cur.add(l);
-              merged[key] = Array.from(cur);
-            }
-            try { localStorage.setItem("bt_m_leagues", JSON.stringify(merged)); } catch {}
-            return merged;
-          });
-        }
-        // 경기 머지 (id 기준 중복 제거; 로컬 우선 유지로 스코어/finished 보존)
-        if (remoteGameStrs.length > 0) {
-          setManualGames(prev => {
-            const byId = new Map<string, ManualGame>();
-            for (const g of prev) byId.set(g.id, g);
-            for (const s of remoteGameStrs) {
-              const m = deserializeGameMeta(s);
-              if (!m) continue;
-              if (!byId.has(m.id)) byId.set(m.id, m as ManualGame);
-            }
-            const merged = Array.from(byId.values()).sort((x,y)=>(y.createdAt||0)-(x.createdAt||0));
-            try { localStorage.setItem("bt_manual_games", JSON.stringify(merged)); } catch {}
-            return merged;
-          });
-        }
-      } catch (e) { console.warn("[m-sync] merge failed:", e); }
+        setCustomSports(sportNames);
+        setMCountries(countries);
+        setMLeagues(leagues);
+        try {
+          localStorage.setItem("bt_m_sports", JSON.stringify(sportNames));
+          localStorage.setItem("bt_m_countries", JSON.stringify(countries));
+          localStorage.setItem("bt_m_leagues", JSON.stringify(leagues));
+        } catch {}
+      } catch(e) { console.warn("[sync] m_meta load failed:", e); }
 
       const sites=new Set(pe.map((x:ProfitExtra)=>x.category));
       const cats=new Set(pe.map((x:ProfitExtra)=>x.subCategory).filter(Boolean));
@@ -3555,28 +3469,13 @@ function AppMain() {
                       </div>
                     );
                   })()}
-                  {/* ── 프리매치 / 실시간 토글 ── */}
-                  <div style={{marginBottom:10}}>
-                    <div style={{...L,fontSize:11}}>베팅 시점</div>
-                    <div style={{display:"flex",gap:5}}>
-                      <button onClick={()=>setManualSlipMatchType("prematch")}
-                        style={{flex:1,padding:"7px 0",borderRadius:5,border:`1px solid ${manualSlipMatchType==="prematch"?C.teal:C.border}`,background:manualSlipMatchType==="prematch"?`${C.teal}33`:C.bg,color:manualSlipMatchType==="prematch"?C.teal:C.muted,cursor:"pointer",fontWeight:700,fontSize:12}}>
-                        🕒 프리매치
-                      </button>
-                      <button onClick={()=>setManualSlipMatchType("live")}
-                        style={{flex:1,padding:"7px 0",borderRadius:5,border:`1px solid ${manualSlipMatchType==="live"?C.red:C.border}`,background:manualSlipMatchType==="live"?`${C.red}33`:C.bg,color:manualSlipMatchType==="live"?C.red:C.muted,cursor:"pointer",fontWeight:700,fontSize:12}}>
-                        ● 실시간
-                      </button>
-                    </div>
-                  </div>
-
                   <div style={{display:"flex",alignItems:"center",gap:7,marginBottom:11}}>
                     <input type="checkbox" id="cbStatInc2" checked={manualSlipInclude} onChange={e=>setManualSlipInclude(e.target.checked)} style={{width:15,height:15,accentColor:C.purple}}/>
                     <label htmlFor="cbStatInc2" style={{fontSize:12,color:C.muted,cursor:"pointer"}}>통계 포함</label>
                   </div>
                   <button onClick={handleManualSlipAdd} disabled={manualSlip.length===0||!manualSlipSite}
                     style={{width:"100%",background:manualSlip.length>0&&manualSlipSite?`linear-gradient(135deg,${C.orange}55,${C.green}33)`:C.border,border:`2px solid ${manualSlip.length>0&&manualSlipSite?C.orange:C.border}`,color:manualSlip.length>0&&manualSlipSite?C.orange:C.dim,padding:"14px",borderRadius:9,cursor:manualSlip.length>0&&manualSlipSite?"pointer":"default",fontWeight:900,fontSize:15}}>
-                    ✅ 베팅 <span style={{fontSize:10,opacity:0.85,marginLeft:4}}>· {manualSlipMatchType==="live"?"실시간":"프리매치"}</span>
+                    ✅ 베팅
                   </button>
                 </div>
               )}
@@ -4494,21 +4393,6 @@ function AppMain() {
                     );
                   })()}
 
-                  {/* ── 프리매치 / 실시간 토글 ── */}
-                  <div style={{marginBottom:10}}>
-                    <div style={L}>베팅 시점</div>
-                    <div style={{display:"flex",gap:4}}>
-                      <button onClick={()=>setSlipMatchType("prematch")}
-                        style={{flex:1,padding:"7px 0",borderRadius:5,border:`1px solid ${slipMatchType==="prematch"?C.teal:C.border}`,background:slipMatchType==="prematch"?`${C.teal}33`:C.bg,color:slipMatchType==="prematch"?C.teal:C.muted,cursor:"pointer",fontWeight:700,fontSize:11}}>
-                        🕒 프리매치
-                      </button>
-                      <button onClick={()=>setSlipMatchType("live")}
-                        style={{flex:1,padding:"7px 0",borderRadius:5,border:`1px solid ${slipMatchType==="live"?C.red:C.border}`,background:slipMatchType==="live"?`${C.red}33`:C.bg,color:slipMatchType==="live"?C.red:C.muted,cursor:"pointer",fontWeight:700,fontSize:11}}>
-                        ● 실시간
-                      </button>
-                    </div>
-                  </div>
-
                   <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:10}}>
                     <input type="checkbox" id="slipStats" checked={slipInclude} onChange={e=>setSlipInclude(e.target.checked)} style={{width:13,height:13,accentColor:C.purple}}/>
                     <label htmlFor="slipStats" style={{fontSize:11,color:C.muted,cursor:"pointer"}}>통계에 포함</label>
@@ -4523,7 +4407,7 @@ function AppMain() {
                       padding:"14px",borderRadius:10,cursor:slip.length>0&&slipSite?"pointer":"default",
                       fontWeight:900,fontSize:14,
                     }}>
-                    ✅ 베팅 추가 ({slip.length}건) <span style={{fontSize:10,opacity:0.85,marginLeft:4}}>· {slipMatchType==="live"?"실시간":"프리매치"}</span>
+                    ✅ 베팅 추가 ({slip.length}건)
                   </button>
                 </>
               )}
@@ -4642,35 +4526,44 @@ function AppMain() {
                           style={{...S,boxSizing:"border-box",fontSize:18,padding:"6px",textAlign:"center" as const,fontWeight:900,color:C.teal,opacity:g.finished?0.6:1}}/>
                         <div style={{fontSize:13,fontWeight:800,color:C.text,textAlign:"left"}}>{g.awayTeam}</div>
                       </div>
-                      {/* 확인 버튼 / 종료 취소 버튼 */}
-                      {!g.finished ? (
-                        <div style={{display:"flex",justifyContent:"flex-end"}}>
-                          <button id={`score-confirm-${g.id}`}
-                            onClick={()=>{
-                              if (!bothEntered) return alert("양쪽 스코어를 모두 입력해주세요.");
-                              finishGameIfReady(g.id);
-                              focusNextGame();
-                            }}
-                            onKeyDown={e=>{
-                              if (e.key==="Enter" || e.key===" ") {
-                                e.preventDefault();
+                      {/* 액션 버튼들 (작은 아이콘) - 우측 정렬 */}
+                      <div style={{display:"flex",justifyContent:"flex-end",gap:5,position:"relative",zIndex:3}}>
+                        {!g.finished ? (
+                          <>
+                            {/* 경기 종료 확인 (작은 아이콘) */}
+                            <button id={`score-confirm-${g.id}`}
+                              onClick={()=>{
                                 if (!bothEntered) return alert("양쪽 스코어를 모두 입력해주세요.");
                                 finishGameIfReady(g.id);
                                 focusNextGame();
-                              }
-                            }}
-                            style={{padding:"6px 16px",borderRadius:5,border:`1px solid ${bothEntered?C.amber:C.border}`,background:bothEntered?`${C.amber}22`:C.bg2,color:bothEntered?C.amber:C.dim,cursor:bothEntered?"pointer":"default",fontWeight:800,fontSize:12}}>
-                            ✓ 확인 (경기 종료)
-                          </button>
-                        </div>
-                      ) : (
-                        <div style={{display:"flex",justifyContent:"flex-end",position:"relative",zIndex:3}}>
+                              }}
+                              onKeyDown={e=>{
+                                if (e.key==="Enter" || e.key===" ") {
+                                  e.preventDefault();
+                                  if (!bothEntered) return alert("양쪽 스코어를 모두 입력해주세요.");
+                                  finishGameIfReady(g.id);
+                                  focusNextGame();
+                                }
+                              }}
+                              title={bothEntered?"경기 종료 확인":"양쪽 스코어를 모두 입력해주세요"}
+                              style={{width:28,height:24,padding:0,borderRadius:4,border:`1px solid ${bothEntered?C.amber:C.border}`,background:bothEntered?`${C.amber}22`:C.bg2,color:bothEntered?C.amber:C.dim,cursor:bothEntered?"pointer":"default",fontWeight:800,fontSize:12,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                              ✓
+                            </button>
+                            {/* 경기 취소 (작은 아이콘) */}
+                            <button onClick={()=>handleCancelGame(g.id)}
+                              title="경기 취소 (관련 진행중 베팅도 모두 취소)"
+                              style={{width:28,height:24,padding:0,borderRadius:4,border:`1px solid ${C.red}66`,background:`${C.red}11`,color:C.red,cursor:"pointer",fontWeight:800,fontSize:12,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                              ⛔
+                            </button>
+                          </>
+                        ) : (
                           <button onClick={()=>handleUnfinishGame(g.id)}
-                            style={{padding:"4px 12px",borderRadius:5,border:`1px solid ${C.muted}66`,background:C.bg,color:C.muted,cursor:"pointer",fontWeight:700,fontSize:10}}>
-                            ↩ 종료 취소
+                            title="종료 취소"
+                            style={{padding:"3px 9px",borderRadius:4,border:`1px solid ${C.muted}66`,background:C.bg,color:C.muted,cursor:"pointer",fontWeight:700,fontSize:10}}>
+                            ↩ 종료취소
                           </button>
-                        </div>
-                      )}
+                        )}
+                      </div>
                     </div>
                   );
                 });
