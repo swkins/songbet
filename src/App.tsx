@@ -267,12 +267,30 @@ interface PointSite {
   exchangeName: string;
   exchangeDate: string;
   targetAmount: number;
+  targetSiteName?: string;  // 누적입금 기준 사이트 (없으면 전체)
   sessions: PointSession[];
 }
 interface PointSession {
   id: string;
   completedAt: string;
   nextTargetDate: string;
+}
+
+// 일일 퀘스트
+interface DailyQuest {
+  id: string;
+  name: string;
+  createdAt: string;     // 생성 날짜 (출석체크 시작일 계산용)
+  history: string[];     // 완료한 날짜 목록 (YYYY-MM-DD)
+}
+
+// 코드 수정 메모
+interface CodeMemo {
+  id: string;
+  text: string;
+  createdAt: string;     // ISO datetime
+  applied: boolean;      // 반영 완료 여부
+  appliedAt?: string;
 }
 
 const fmtDisp = (n:number,dollar:boolean) => dollar?`$${n%1===0?n:n.toFixed(2)}`:n.toLocaleString();
@@ -1094,15 +1112,80 @@ function AppMain() {
   const savePointSites=(sites:PointSite[])=>{setPointSites(sites);try{localStorage.setItem("bt_point_sites",JSON.stringify(sites));}catch{}};
 
   const [addPointSiteModal,setAddPointSiteModal]=useState(false);
-  const [newPointSite,setNewPointSite]=useState({name:"올인구조대",exchangeName:"포인트교환",exchangeDate:"2025-05-04",targetAmount:2000000});
+  const [newPointSite,setNewPointSite]=useState<{name:string,exchangeName:string,exchangeDate:string,targetAmount:number,targetSiteName:string}>({name:"올인구조대",exchangeName:"포인트교환",exchangeDate:"2025-05-04",targetAmount:2000000,targetSiteName:""});
 
   const handleAddPointSite=()=>{
-    const site:PointSite={id:String(Date.now()),name:newPointSite.name,exchangeName:newPointSite.exchangeName,exchangeDate:newPointSite.exchangeDate,targetAmount:newPointSite.targetAmount,sessions:[]};
+    const site:PointSite={id:String(Date.now()),name:newPointSite.name,exchangeName:newPointSite.exchangeName,exchangeDate:newPointSite.exchangeDate,targetAmount:newPointSite.targetAmount,targetSiteName:newPointSite.targetSiteName||undefined,sessions:[]};
     const updated=[...pointSites,site];
     savePointSites(updated);
     setAddPointSiteModal(false);
-    setNewPointSite({name:"올인구조대",exchangeName:"포인트교환",exchangeDate:"2025-05-04",targetAmount:2000000});
+    setNewPointSite({name:"올인구조대",exchangeName:"포인트교환",exchangeDate:"2025-05-04",targetAmount:2000000,targetSiteName:""});
   };
+
+  // ── 일일 퀘스트 ────────────────────────────────────────────
+  const [dailyQuests,setDailyQuestsRaw]=useState<DailyQuest[]>(()=>{
+    try{const v=localStorage.getItem("bt_daily_quests");return v?JSON.parse(v):[];}catch{return [];}
+  });
+  const saveDailyQuests=(qs:DailyQuest[])=>{setDailyQuestsRaw(qs);try{localStorage.setItem("bt_daily_quests",JSON.stringify(qs));}catch{}};
+
+  // 오늘 완료 여부 (history에 today 있는지)
+  const isQuestDoneToday = (q:DailyQuest) => q.history.includes(today);
+
+  // 토글: 오늘 체크 ↔ 해제
+  const toggleQuestToday = (id:string) => {
+    saveDailyQuests(dailyQuests.map(q=>{
+      if(q.id!==id) return q;
+      const has = q.history.includes(today);
+      return {...q, history: has ? q.history.filter(d=>d!==today) : [...q.history, today].sort()};
+    }));
+  };
+
+  const [newQuestName,setNewQuestName]=useState("");
+  const handleAddQuest = () => {
+    const n = newQuestName.trim();
+    if(!n) return;
+    if(dailyQuests.some(q=>q.name===n)) return alert("이미 존재하는 퀘스트입니다");
+    const newQuest:DailyQuest = {id:String(Date.now()),name:n,createdAt:today,history:[]};
+    saveDailyQuests([...dailyQuests, newQuest]);
+    setNewQuestName("");
+  };
+  const handleDeleteQuest = (id:string) => {
+    const q = dailyQuests.find(x=>x.id===id);
+    if(!q) return;
+    if(!window.confirm(`"${q.name}" 퀘스트를 삭제하시겠습니까?\n(출석 기록도 함께 삭제됩니다)`))return;
+    saveDailyQuests(dailyQuests.filter(x=>x.id!==id));
+  };
+
+  // 출석 일수 (createdAt부터 today까지의 달력일수)
+  const questAttendanceDay = (q:DailyQuest) => {
+    const start = new Date(q.createdAt);
+    const now = new Date(today);
+    const diff = Math.floor((now.getTime()-start.getTime())/(1000*60*60*24)) + 1;
+    return Math.max(1, diff);
+  };
+
+  // ── 코드 수정 메모 ─────────────────────────────────────────
+  const [codeMemos,setCodeMemosRaw]=useState<CodeMemo[]>(()=>{
+    try{const v=localStorage.getItem("bt_code_memos");return v?JSON.parse(v):[];}catch{return [];}
+  });
+  const saveCodeMemos=(ms:CodeMemo[])=>{setCodeMemosRaw(ms);try{localStorage.setItem("bt_code_memos",JSON.stringify(ms));}catch{}};
+  const [codeMemoOpen,setCodeMemoOpen]=useState(false);
+  const [newMemoText,setNewMemoText]=useState("");
+  const handleAddMemo = () => {
+    const t = newMemoText.trim();
+    if(!t) return;
+    const m:CodeMemo = {id:String(Date.now()),text:t,createdAt:new Date().toISOString(),applied:false};
+    saveCodeMemos([m, ...codeMemos]);
+    setNewMemoText("");
+  };
+  const handleApplyMemo = (id:string) => {
+    saveCodeMemos(codeMemos.map(m=>m.id===id?{...m,applied:!m.applied,appliedAt:!m.applied?new Date().toISOString():undefined}:m));
+  };
+  const handleDeleteMemo = (id:string) => {
+    if(!window.confirm("이 메모를 삭제하시겠습니까?"))return;
+    saveCodeMemos(codeMemos.filter(m=>m.id!==id));
+  };
+
 
   const getNextTargetDate=(fromDate:string)=>{
     const d=new Date(fromDate);
@@ -1982,72 +2065,205 @@ function AppMain() {
     const oneMonthAgo=(baseDate:string)=>{
       const d=new Date(baseDate);d.setMonth(d.getMonth()-1);return d.toISOString().slice(0,10);
     };
+    // 이번 달 캘린더 정보 (출석체크용)
+    const t = new Date(today+"T00:00:00");
+    const monYear = t.getFullYear();
+    const monIdx = t.getMonth();
+    const monStart = new Date(monYear, monIdx, 1);
+    const monEnd = new Date(monYear, monIdx+1, 0);
+    const monthDays = monEnd.getDate();
+    const monthFirstDow = monStart.getDay();
+
     return(
-      <div style={{flex:1,overflowY:"auto",padding:20}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
-          <div style={{fontSize:16,fontWeight:800,color:C.teal}}>🎁 포인트 관리</div>
-          <button onClick={()=>setAddPointSiteModal(true)} style={{padding:"6px 14px",borderRadius:7,border:`1px solid ${C.teal}`,background:`${C.teal}22`,color:C.teal,cursor:"pointer",fontWeight:700,fontSize:12}}>+ 포인트 사이트 추가</button>
-        </div>
-        {pointSites.length===0&&(
-          <div style={{textAlign:"center",color:C.dim,padding:"60px 0"}}>
-            <div style={{fontSize:24,marginBottom:8}}>🎁</div>
-            <div>포인트 사이트를 추가해주세요</div>
-          </div>
-        )}
-        {pointSites.map(ps=>{
-          const lastSession=ps.sessions[ps.sessions.length-1];
-          const isCompleted=!!lastSession;
-          const baseDate=isCompleted?lastSession.nextTargetDate:ps.exchangeDate;
-          const startDate=new Date(baseDate);startDate.setDate(startDate.getDate()-1);
-          const startStr=startDate.toISOString().slice(0,10);
-          const fromStr=oneMonthAgo(startStr);
-          const periodDeps=deposits.filter(d=>d.date>=fromStr&&d.date<=startStr);
-          const totalKrw=periodDeps.reduce((s,d)=>s+(isUSD(d.site)?d.amount*usdKrw:d.amount),0);
-          const achieved=totalKrw>=ps.targetAmount;
-          const bysite:Record<string,number>={};
-          periodDeps.forEach(d=>{
-            const amt=isUSD(d.site)?d.amount*usdKrw:d.amount;
-            bysite[d.site]=(bysite[d.site]||0)+amt;
-          });
-          return(
-            <div key={ps.id} style={{background:C.bg3,border:`1px solid ${achieved?C.green+"66":C.border2}`,borderRadius:14,padding:18,marginBottom:16}}>
-              <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",marginBottom:12}}>
-                <div>
-                  <div style={{display:"flex",alignItems:"center",gap:10}}>
-                    <span style={{fontSize:16,fontWeight:900,color:C.text}}>{ps.name}</span>
-                    <span style={{fontSize:13,color:C.teal,fontWeight:700}}>{ps.exchangeName}</span>
-                    <span style={{fontSize:12,color:C.amber,fontWeight:600}}>{baseDate.slice(5).replace("-","월 ")}일</span>
-                    {achieved&&(
-                      <span style={{fontSize:13,fontWeight:900,color:C.green,border:`2px solid ${C.green}`,borderRadius:6,padding:"2px 8px",transform:"rotate(-5deg)",display:"inline-block",background:`${C.green}11`,letterSpacing:1}}>✅ 포인트전환 가능</span>
-                    )}
-                  </div>
-                  <div style={{fontSize:11,color:C.muted,marginTop:4}}>
-                    기준기간: {fromStr} ~ {startStr} (최근 1개월)
-                  </div>
-                </div>
-                <button onClick={()=>{if(!window.confirm("현금교환 완료 처리?"))return;handlePointExchangeComplete(ps.id);}} style={{padding:"7px 14px",borderRadius:7,border:`1px solid ${C.orange}`,background:`${C.orange}22`,color:C.orange,cursor:"pointer",fontWeight:700,fontSize:12,flexShrink:0}}>현금교환 완료</button>
-              </div>
-              <div style={{marginBottom:12}}>
-                <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:4}}>
-                  <span style={{color:C.muted}}>누적 입금</span>
-                  <span style={{color:achieved?C.green:C.amber,fontWeight:800}}>{totalKrw.toLocaleString()}원 / {ps.targetAmount.toLocaleString()}원</span>
-                </div>
-                <div style={{height:8,background:C.bg,borderRadius:4,overflow:"hidden"}}>
-                  <div style={{width:`${Math.min(100,Math.round(totalKrw/ps.targetAmount*100))}%`,height:"100%",background:achieved?C.green:C.amber,borderRadius:4}}/>
-                </div>
-              </div>
-              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(130px,1fr))",gap:6}}>
-                {Object.entries(bysite).filter(([,v])=>v>0).map(([site,amt])=>(
-                  <div key={site} style={{background:C.bg2,border:`1px solid ${C.border}`,borderRadius:8,padding:"8px 10px"}}>
-                    <div style={{fontSize:10,color:C.muted,marginBottom:2}}>{site}</div>
-                    <div style={{fontSize:13,fontWeight:800,color:C.green}}>₩{Math.round(amt).toLocaleString()}</div>
-                  </div>
-                ))}
-              </div>
-              <button onClick={()=>{if(!window.confirm(`"${ps.name}" 삭제?`))return;savePointSites(pointSites.filter(x=>x.id!==ps.id));}} style={{marginTop:10,fontSize:10,padding:"3px 10px",borderRadius:4,border:`1px solid ${C.red}44`,background:C.bg2,color:C.red,cursor:"pointer"}}>삭제</button>
+      <div style={{flex:1,display:"flex",overflow:"hidden",minWidth:0,minHeight:0}}>
+        {/* ─── 좌측: 일일 퀘스트 (380px) ─── */}
+        <div style={{width:380,flexShrink:0,background:C.bg2,borderRight:`1px solid ${C.border2}`,display:"flex",flexDirection:"column",overflow:"hidden",minHeight:0}}>
+          <div style={{padding:"12px 14px",borderBottom:`1px solid ${C.border2}`,flexShrink:0}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+              <div style={{fontSize:14,fontWeight:800,color:C.green}}>✅ 오늘 할 일</div>
+              <div style={{fontSize:9,color:C.muted}}>{today}</div>
             </div>
-          );
-        })}
+            {/* 진행률 표시 */}
+            {dailyQuests.length>0 && (()=>{
+              const doneCnt = dailyQuests.filter(q=>isQuestDoneToday(q)).length;
+              const pct = Math.round(doneCnt/dailyQuests.length*100);
+              return (
+                <div>
+                  <div style={{display:"flex",justifyContent:"space-between",fontSize:10,marginBottom:3}}>
+                    <span style={{color:C.muted}}>오늘 진행률</span>
+                    <span style={{color:pct===100?C.green:C.amber,fontWeight:800}}>{doneCnt} / {dailyQuests.length} ({pct}%)</span>
+                  </div>
+                  <div style={{height:5,background:C.bg,borderRadius:3,overflow:"hidden"}}>
+                    <div style={{width:`${pct}%`,height:"100%",background:pct===100?C.green:C.amber,transition:"width 0.3s"}}/>
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+          {/* 새 퀘스트 추가 */}
+          <div style={{padding:"10px 12px",borderBottom:`1px solid ${C.border}`,background:C.bg3,flexShrink:0}}>
+            <div style={{display:"flex",gap:5}}>
+              <input value={newQuestName} onChange={e=>setNewQuestName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleAddQuest()} placeholder="새 할 일 입력 (예: 출석체크)" style={{...S,flex:1,boxSizing:"border-box",fontSize:12,padding:"6px 9px"}}/>
+              <button onClick={handleAddQuest} disabled={!newQuestName.trim()} style={{padding:"6px 12px",borderRadius:5,border:`1px solid ${newQuestName.trim()?C.green:C.border}`,background:newQuestName.trim()?`${C.green}22`:C.bg,color:newQuestName.trim()?C.green:C.dim,cursor:newQuestName.trim()?"pointer":"default",fontWeight:700,fontSize:12,whiteSpace:"nowrap"}}>+ 추가</button>
+            </div>
+          </div>
+          {/* 퀘스트 목록 */}
+          <div style={{flex:1,overflowY:"auto",padding:"10px 12px 14px",minHeight:0}}>
+            {dailyQuests.length===0 ? (
+              <div style={{textAlign:"center",color:C.dim,padding:"40px 0"}}>
+                <div style={{fontSize:30,marginBottom:8}}>📋</div>
+                <div style={{fontSize:11,color:C.muted}}>등록된 할 일이 없습니다</div>
+                <div style={{fontSize:9,marginTop:6,color:C.dim}}>위에 입력하고 추가하세요</div>
+              </div>
+            ) : (
+              <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                {dailyQuests.map(q=>{
+                  const done = isQuestDoneToday(q);
+                  const dayNum = questAttendanceDay(q);
+                  const monthHistory = q.history.filter(d=>d.startsWith(`${monYear}-${String(monIdx+1).padStart(2,"0")}`));
+                  const totalAttend = q.history.length;
+                  return (
+                    <div key={q.id} style={{background:done?`${C.green}11`:C.bg3,border:`1.5px solid ${done?C.green:C.border}`,borderRadius:9,padding:"10px 12px",position:"relative",overflow:"hidden"}}>
+                      {/* 완료 도장 */}
+                      {done && (
+                        <div style={{position:"absolute",top:"50%",right:8,transform:"translateY(-50%) rotate(-12deg)",fontSize:10,fontWeight:900,color:C.green,border:`2px solid ${C.green}`,borderRadius:5,padding:"2px 7px",letterSpacing:1,opacity:0.55,pointerEvents:"none"}}>✓ 완료</div>
+                      )}
+                      {/* 헤더 */}
+                      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:7}}>
+                        <input type="checkbox" checked={done} onChange={()=>toggleQuestToday(q.id)} style={{width:18,height:18,accentColor:C.green,cursor:"pointer",flexShrink:0}}/>
+                        <span onClick={()=>toggleQuestToday(q.id)} style={{flex:1,fontSize:13,fontWeight:700,color:done?C.muted:C.text,textDecoration:done?"line-through":"none",cursor:"pointer",wordBreak:"break-word"}}>{q.name}</span>
+                        <button onClick={()=>handleDeleteQuest(q.id)} style={{background:"transparent",border:`1px solid ${C.border}`,color:C.dim,cursor:"pointer",fontSize:10,padding:"2px 6px",borderRadius:3,flexShrink:0,zIndex:1}}>🗑</button>
+                      </div>
+                      {/* 출석 정보 */}
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:9,color:C.muted,marginBottom:7,paddingTop:5,borderTop:`1px dashed ${C.border}`}}>
+                        <span>📅 출석 <b style={{color:C.amber}}>{dayNum}일차</b> (시작 {q.createdAt.slice(5)})</span>
+                        <span>이번달 <b style={{color:C.teal}}>{monthHistory.length}회</b> · 총 <b style={{color:C.purple}}>{totalAttend}회</b></span>
+                      </div>
+                      {/* 출석 캘린더 (이번 달) */}
+                      <div style={{background:C.bg2,borderRadius:5,padding:"5px 6px"}}>
+                        <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:1,marginBottom:1}}>
+                          {["일","월","화","수","목","금","토"].map((d,i)=>(
+                            <div key={d} style={{textAlign:"center",fontSize:7,color:i===0?C.red:i===6?C.teal:C.dim}}>{d}</div>
+                          ))}
+                        </div>
+                        <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:1}}>
+                          {Array.from({length:monthFirstDow},(_,i)=><div key={`p-${i}`}/>)}
+                          {Array.from({length:monthDays},(_,i)=>{
+                            const dayN = i+1;
+                            const dateStr = `${monYear}-${String(monIdx+1).padStart(2,"0")}-${String(dayN).padStart(2,"0")}`;
+                            const isAttended = q.history.includes(dateStr);
+                            const isToday = dateStr===today;
+                            const isPast = dateStr<today;
+                            const beforeStart = dateStr<q.createdAt;
+                            return (
+                              <div key={dateStr} title={dateStr+(isAttended?" ✓":"")}
+                                style={{
+                                  aspectRatio:"1/1",
+                                  background: isAttended ? C.green :
+                                              beforeStart ? "transparent" :
+                                              isToday ? `${C.amber}33` :
+                                              isPast ? `${C.red}11` : C.bg,
+                                  borderRadius:2,
+                                  display:"flex",
+                                  alignItems:"center",
+                                  justifyContent:"center",
+                                  fontSize:8,
+                                  fontWeight: isToday?900:600,
+                                  color: isAttended?"#fff":beforeStart?C.dim:isToday?C.amber:isPast?C.red:C.muted,
+                                  border: isToday?`1px solid ${C.amber}`:"none",
+                                }}>
+                                {dayN}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* ─── 우측: 포인트 사이트 ─── */}
+        <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden",minWidth:0}}>
+          <div style={{padding:"12px 14px",borderBottom:`1px solid ${C.border2}`,flexShrink:0,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <div style={{fontSize:16,fontWeight:800,color:C.teal}}>🎁 포인트 사이트</div>
+            <button onClick={()=>setAddPointSiteModal(true)} style={{padding:"6px 14px",borderRadius:7,border:`1px solid ${C.teal}`,background:`${C.teal}22`,color:C.teal,cursor:"pointer",fontWeight:700,fontSize:12}}>+ 포인트 사이트 추가</button>
+          </div>
+          <div style={{flex:1,overflowY:"auto",padding:14,minHeight:0}}>
+            {pointSites.length===0&&(
+              <div style={{textAlign:"center",color:C.dim,padding:"60px 0"}}>
+                <div style={{fontSize:34,marginBottom:8}}>🎁</div>
+                <div style={{fontSize:13,color:C.muted}}>포인트 사이트를 추가해주세요</div>
+              </div>
+            )}
+            {pointSites.length>0 && (
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(180px,1fr))",gap:10}}>
+                {pointSites.map(ps=>{
+                  const lastSession=ps.sessions[ps.sessions.length-1];
+                  const isCompleted=!!lastSession;
+                  const baseDate=isCompleted?lastSession.nextTargetDate:ps.exchangeDate;
+                  const startDate=new Date(baseDate);startDate.setDate(startDate.getDate()-1);
+                  const startStr=startDate.toISOString().slice(0,10);
+                  const fromStr=oneMonthAgo(startStr);
+                  // 사이트 필터: targetSiteName 있으면 해당 사이트만
+                  const periodDeps=deposits.filter(d=>d.date>=fromStr&&d.date<=startStr&&(!ps.targetSiteName||d.site===ps.targetSiteName));
+                  const totalKrw=periodDeps.reduce((s,d)=>s+(isUSD(d.site)?d.amount*usdKrw:d.amount),0);
+                  const achieved=totalKrw>=ps.targetAmount;
+                  const pct = Math.min(100,Math.round(totalKrw/ps.targetAmount*100));
+                  // D-day
+                  const daysLeft = Math.ceil((new Date(baseDate).getTime() - new Date(today).getTime())/(1000*60*60*24));
+                  return(
+                    <div key={ps.id} style={{background:C.bg3,border:`1.5px solid ${achieved?C.green:C.border2}`,borderRadius:10,padding:11,display:"flex",flexDirection:"column",gap:6,position:"relative",overflow:"hidden"}}>
+                      {achieved&&(
+                        <div style={{position:"absolute",top:6,right:6,fontSize:8,fontWeight:900,color:C.green,border:`2px solid ${C.green}`,borderRadius:4,padding:"1px 5px",transform:"rotate(-8deg)",letterSpacing:1,opacity:0.7}}>✓ 가능</div>
+                      )}
+                      {/* 헤더 */}
+                      <div>
+                        <div style={{fontSize:13,fontWeight:900,color:C.text,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",paddingRight:achieved?44:0}}>{ps.name}</div>
+                        <div style={{fontSize:9,color:C.teal,fontWeight:700,marginTop:1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{ps.exchangeName}</div>
+                      </div>
+                      {/* D-day & 날짜 */}
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:9,color:C.muted}}>
+                        <span>{baseDate.slice(5).replace("-","월 ")}일</span>
+                        <span style={{color:daysLeft<0?C.red:daysLeft<=3?C.red:daysLeft<=7?C.amber:C.teal,fontWeight:800}}>
+                          {daysLeft<0?`${Math.abs(daysLeft)}일 지남`:daysLeft===0?"오늘":`D-${daysLeft}`}
+                        </span>
+                      </div>
+                      {/* 누적 입금 진행률 */}
+                      <div>
+                        <div style={{display:"flex",justifyContent:"space-between",fontSize:9,marginBottom:2}}>
+                          <span style={{color:C.muted}}>{ps.targetSiteName?`${ps.targetSiteName} 입금`:"전체 입금"}</span>
+                          <span style={{color:achieved?C.green:C.amber,fontWeight:700}}>{pct}%</span>
+                        </div>
+                        <div style={{fontSize:10,fontWeight:800,color:achieved?C.green:C.amber,marginBottom:3}}>
+                          {Math.round(totalKrw).toLocaleString()} / {ps.targetAmount.toLocaleString()}
+                        </div>
+                        <div style={{height:5,background:C.bg,borderRadius:3,overflow:"hidden"}}>
+                          <div style={{width:`${pct}%`,height:"100%",background:achieved?C.green:C.amber,transition:"width 0.3s"}}/>
+                        </div>
+                      </div>
+                      {/* 기준 기간 (콤팩트) */}
+                      <div style={{fontSize:8,color:C.dim}}>
+                        기준: {fromStr.slice(5)} ~ {startStr.slice(5)}
+                      </div>
+                      {/* 액션 버튼 */}
+                      <div style={{display:"flex",gap:4,marginTop:"auto"}}>
+                        <button onClick={()=>{if(!window.confirm(`"${ps.name}" 현금교환 완료 처리?`))return;handlePointExchangeComplete(ps.id);}} style={{flex:1,padding:"5px 0",borderRadius:5,border:`1px solid ${C.orange}`,background:`${C.orange}22`,color:C.orange,cursor:"pointer",fontWeight:800,fontSize:10}}>완료</button>
+                        {/* 삭제는 완료 처리(세션 1회 이상) 후에만 노출 - 자동 삭제 방지 */}
+                        {isCompleted && (
+                          <button onClick={()=>{if(!window.confirm(`"${ps.name}" 영구 삭제?\n(완료 기록 ${ps.sessions.length}건도 함께 삭제됩니다)`))return;savePointSites(pointSites.filter(x=>x.id!==ps.id));}} style={{padding:"5px 8px",borderRadius:5,border:`1px solid ${C.red}44`,background:`${C.red}11`,color:C.red,cursor:"pointer",fontSize:10}}>🗑</button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
       </div>
     );
   };
@@ -2099,12 +2315,21 @@ function AppMain() {
 
       {addPointSiteModal&&(
         <div style={{position:"fixed",inset:0,background:"#000b",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center"}}>
-          <div style={{background:C.bg3,border:`1px solid ${C.teal}`,borderRadius:14,padding:24,width:340}}>
+          <div style={{background:C.bg3,border:`1px solid ${C.teal}`,borderRadius:14,padding:24,width:380}}>
             <div style={{fontSize:14,fontWeight:700,color:C.teal,marginBottom:16}}>🎁 포인트 사이트 추가</div>
             <div style={{marginBottom:8}}><div style={L}>사이트명</div><input value={newPointSite.name} onChange={e=>setNewPointSite(p=>({...p,name:e.target.value}))} style={{...S,boxSizing:"border-box"}}/></div>
             <div style={{marginBottom:8}}><div style={L}>교환 이름</div><input value={newPointSite.exchangeName} onChange={e=>setNewPointSite(p=>({...p,exchangeName:e.target.value}))} style={{...S,boxSizing:"border-box"}}/></div>
             <div style={{marginBottom:8}}><div style={L}>교환 목표 날짜</div><input type="date" value={newPointSite.exchangeDate} onChange={e=>setNewPointSite(p=>({...p,exchangeDate:e.target.value}))} style={{...S,boxSizing:"border-box"}}/></div>
-            <div style={{marginBottom:16}}><div style={L}>목표 금액 (원화)</div><input type="number" value={newPointSite.targetAmount} onChange={e=>setNewPointSite(p=>({...p,targetAmount:parseInt(e.target.value)||0}))} style={{...S,boxSizing:"border-box",...noSpin}}/></div>
+            <div style={{marginBottom:8}}><div style={L}>목표 금액 (원화)</div><input type="number" value={newPointSite.targetAmount} onChange={e=>setNewPointSite(p=>({...p,targetAmount:parseInt(e.target.value)||0}))} style={{...S,boxSizing:"border-box",...noSpin}}/></div>
+            {/* 기준 사이트 선택 - 누적입금 계산할 사이트 */}
+            <div style={{marginBottom:16}}>
+              <div style={L}>📍 누적입금 기준 사이트</div>
+              <select value={newPointSite.targetSiteName} onChange={e=>setNewPointSite(p=>({...p,targetSiteName:e.target.value}))} style={{...S,boxSizing:"border-box"}}>
+                <option value="">전체 사이트 합산</option>
+                {ALL_SITES.map(s=><option key={s} value={s}>{isUSD(s)?"$":"₩"} {s}</option>)}
+              </select>
+              <div style={{fontSize:9,color:C.dim,marginTop:3}}>특정 사이트의 입금만 카운트하려면 선택, 전체면 비워두세요</div>
+            </div>
             <div style={{display:"flex",gap:8}}><button onClick={handleAddPointSite} style={{flex:1,background:`${C.teal}22`,border:`1px solid ${C.teal}`,color:C.teal,padding:"8px",borderRadius:6,cursor:"pointer",fontWeight:700}}>추가</button><button onClick={()=>setAddPointSiteModal(false)} style={{flex:1,background:C.bg2,border:`1px solid ${C.border}`,color:C.muted,padding:"8px",borderRadius:6,cursor:"pointer"}}>취소</button></div>
           </div>
         </div>
@@ -2481,6 +2706,74 @@ function AppMain() {
           </div>
         </div>
       )}
+
+      {/* ── 코드 수정 메모 사이드 패널 (사이트와 함께 볼 수 있도록 fixed 우측) ── */}
+      {codeMemoOpen && (
+        <div style={{position:"fixed",top:0,right:0,bottom:0,width:380,background:C.bg2,borderLeft:`2px solid ${C.amber}`,boxShadow:"-4px 0 16px rgba(0,0,0,0.4)",zIndex:150,display:"flex",flexDirection:"column"}}>
+          <div style={{padding:"12px 14px",borderBottom:`1px solid ${C.border2}`,display:"flex",justifyContent:"space-between",alignItems:"center",flexShrink:0,background:`${C.amber}11`}}>
+            <div>
+              <div style={{fontSize:14,fontWeight:800,color:C.amber}}>📝 코드 수정 메모</div>
+              <div style={{fontSize:9,color:C.muted,marginTop:2}}>총 {codeMemos.length}개 · 미반영 {codeMemos.filter(m=>!m.applied).length}개</div>
+            </div>
+            <button onClick={()=>setCodeMemoOpen(false)} style={{background:"transparent",border:`1px solid ${C.border}`,color:C.muted,cursor:"pointer",fontSize:14,padding:"4px 9px",borderRadius:5}}>✕</button>
+          </div>
+          {/* 입력 영역 */}
+          <div style={{padding:"10px 12px",borderBottom:`1px solid ${C.border}`,background:C.bg3,flexShrink:0}}>
+            <textarea
+              value={newMemoText}
+              onChange={e=>setNewMemoText(e.target.value)}
+              onKeyDown={e=>{if(e.key==="Enter"&&(e.ctrlKey||e.metaKey)){e.preventDefault();handleAddMemo();}}}
+              placeholder="수정할 내용을 메모하세요...&#10;예) 통계 탭에 차트 색상 변경&#10;Ctrl+Enter 로 저장"
+              rows={4}
+              style={{...S,boxSizing:"border-box",fontSize:12,resize:"vertical",minHeight:70,fontFamily:"inherit",marginBottom:7}}/>
+            <div style={{display:"flex",gap:6}}>
+              <button onClick={handleAddMemo} disabled={!newMemoText.trim()} style={{flex:1,background:newMemoText.trim()?`${C.amber}33`:C.bg,border:`1px solid ${newMemoText.trim()?C.amber:C.border}`,color:newMemoText.trim()?C.amber:C.dim,padding:"7px",borderRadius:5,cursor:newMemoText.trim()?"pointer":"default",fontWeight:800,fontSize:12}}>💾 저장</button>
+              <button onClick={()=>setNewMemoText("")} style={{padding:"7px 10px",background:C.bg,border:`1px solid ${C.border}`,color:C.muted,borderRadius:5,cursor:"pointer",fontSize:11}}>초기화</button>
+            </div>
+          </div>
+          {/* 메모 리스트 */}
+          <div style={{flex:1,overflowY:"auto",padding:"10px 12px",minHeight:0}}>
+            {codeMemos.length===0 ? (
+              <div style={{textAlign:"center",color:C.dim,padding:"40px 0"}}>
+                <div style={{fontSize:30,marginBottom:8}}>📝</div>
+                <div style={{fontSize:11,color:C.muted}}>저장된 메모가 없습니다</div>
+                <div style={{fontSize:9,marginTop:6,color:C.dim}}>위에 적고 저장 버튼을 누르세요</div>
+              </div>
+            ) : (
+              <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                {codeMemos.map(m=>(
+                  <div key={m.id} style={{background:m.applied?C.bg3:C.bg,border:`1px solid ${m.applied?C.green+"55":C.border}`,borderRadius:7,padding:"9px 11px",position:"relative",overflow:"hidden"}}>
+                    {m.applied && (
+                      <div style={{position:"absolute",top:5,right:7,fontSize:8,fontWeight:900,color:C.green,border:`1.5px solid ${C.green}`,borderRadius:3,padding:"1px 5px",letterSpacing:1,opacity:0.7,transform:"rotate(-8deg)"}}>✓ 반영완료</div>
+                    )}
+                    <div style={{fontSize:11,color:m.applied?C.muted:C.text,whiteSpace:"pre-wrap",wordBreak:"break-word",marginBottom:6,paddingRight:m.applied?60:0,textDecoration:m.applied?"line-through":"none"}}>{m.text}</div>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:9,color:C.dim,marginTop:5,paddingTop:5,borderTop:`1px dashed ${C.border}`}}>
+                      <span>{new Date(m.createdAt).toLocaleString("ko-KR",{month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"})}{m.applied&&m.appliedAt&&` · 반영 ${new Date(m.appliedAt).toLocaleString("ko-KR",{month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"})}`}</span>
+                      <div style={{display:"flex",gap:4}}>
+                        <button onClick={()=>handleApplyMemo(m.id)} style={{padding:"3px 8px",borderRadius:4,border:`1px solid ${m.applied?C.muted:C.green}66`,background:m.applied?C.bg2:`${C.green}22`,color:m.applied?C.muted:C.green,cursor:"pointer",fontSize:9,fontWeight:700}}>{m.applied?"↩ 취소":"✓ 반영"}</button>
+                        <button onClick={()=>handleDeleteMemo(m.id)} style={{padding:"3px 6px",borderRadius:4,border:`1px solid ${C.red}44`,background:`${C.red}11`,color:C.red,cursor:"pointer",fontSize:9}}>🗑</button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          {/* 하단 액션 */}
+          {codeMemos.length>0 && (
+            <div style={{padding:"8px 12px",borderTop:`1px solid ${C.border}`,background:C.bg3,flexShrink:0,display:"flex",gap:6,justifyContent:"space-between"}}>
+              <button onClick={()=>{
+                if(!window.confirm("반영 완료된 메모를 모두 삭제하시겠습니까?"))return;
+                saveCodeMemos(codeMemos.filter(m=>!m.applied));
+              }} style={{padding:"5px 10px",borderRadius:4,border:`1px solid ${C.green}44`,background:`${C.green}11`,color:C.green,cursor:"pointer",fontSize:10}}>완료된 항목 정리 ({codeMemos.filter(m=>m.applied).length})</button>
+              <button onClick={()=>{
+                if(!window.confirm("모든 메모를 삭제하시겠습니까?"))return;
+                saveCodeMemos([]);
+              }} style={{padding:"5px 10px",borderRadius:4,border:`1px solid ${C.red}44`,background:`${C.red}11`,color:C.red,cursor:"pointer",fontSize:10}}>전체 삭제</button>
+            </div>
+          )}
+        </div>
+      )}
       {closeModal&&(()=>{
         const site = closeModal.site;
         const dollar = isUSD(site);
@@ -2600,9 +2893,7 @@ function AppMain() {
             <div style={{textAlign:"center"}}><div style={{color:C.muted,fontSize:9}}>승률</div><div style={{color:C.teal,fontWeight:800,fontSize:13}}>{winRate}%</div></div>
             <div style={{textAlign:"center"}}><div style={{color:C.muted,fontSize:9}}>진행중</div><div style={{color:C.amber,fontWeight:800,fontSize:13}}>{pending.length}건</div></div>
             <div style={{display:"flex",gap:4}}>
-              <button onClick={exportData} style={{fontSize:11,padding:"5px 11px",borderRadius:5,border:`1px solid ${C.teal}44`,background:`${C.teal}11`,color:C.teal,cursor:"pointer"}} title="백업">📤</button>
-              <button onClick={()=>fileRef.current?.click()} style={{fontSize:11,padding:"5px 11px",borderRadius:5,border:`1px solid ${C.purple}44`,background:`${C.purple}11`,color:C.purple,cursor:"pointer"}} title="복구">📥</button>
-              <input ref={fileRef} type="file" accept=".json" onChange={importData} style={{display:"none"}}/>
+              <button onClick={()=>setCodeMemoOpen(true)} style={{fontSize:11,padding:"5px 11px",borderRadius:5,border:`1px solid ${C.amber}66`,background:`${C.amber}11`,color:C.amber,cursor:"pointer",fontWeight:700}} title="코드 수정 메모">📝 코드 수정 {codeMemos.filter(m=>!m.applied).length>0&&<span style={{marginLeft:4,padding:"0 5px",borderRadius:99,background:C.amber,color:"#000",fontSize:9,fontWeight:900}}>{codeMemos.filter(m=>!m.applied).length}</span>}</button>
               <button onClick={logout} style={{fontSize:11,padding:"5px 11px",borderRadius:5,border:`1px solid ${C.red}44`,background:`${C.red}11`,color:C.red,cursor:"pointer",fontWeight:700}} title="로그아웃">🔒</button>
             </div>
           </div>
