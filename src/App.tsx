@@ -1241,14 +1241,25 @@ function AppMain() {
   // 인라인 편집 중인 메모 ID + 임시 텍스트
   const [editingMemoId,setEditingMemoId]=useState<string|null>(null);
   const [editingMemoText,setEditingMemoText]=useState<string>("");
+  // 💾 저장 버튼 클릭 시각 (저장됨 표시용)
+  const [draftSavedAt,setDraftSavedAt]=useState<number|null>(null);
 
+  // 💾 작업 중 메모 단순 저장 (localStorage 저장은 이미 onChange에서 자동, 여기는 알림 용도)
+  const handleSaveDraft = () => {
+    const t = newMemoText.trim();
+    if(!t || t==="1." || t==="1") return;
+    try{localStorage.setItem("bt_code_memo_draft", newMemoText);}catch{}
+    // 시각적 피드백 (간단)
+    setDraftSavedAt(Date.now());
+  };
+  // ✓ 반영 = 현재 작업 중 메모를 "반영 완료" 목록으로 이동 + 입력창 비우기
   const handleAddMemo = () => {
     const t = newMemoText.trim();
-    // 자동 번호 "1." 만 있는 경우는 빈 메모로 간주
     if(!t || t==="1." || t==="1") return;
-    const m:CodeMemo = {id:String(Date.now()),text:t,createdAt:new Date().toISOString(),applied:false};
+    if(!window.confirm("이 메모를 반영 완료 목록으로 옮길까요?\n(작업 중 입력창은 비워집니다)")) return;
+    const m:CodeMemo = {id:String(Date.now()),text:t,createdAt:new Date().toISOString(),applied:true,appliedAt:new Date().toISOString()};
     saveCodeMemos([m, ...codeMemos]);
-    setNewMemoText("1. "); // 초기 번호로 리셋
+    setNewMemoText("1. ");
   };
   const handleApplyMemo = (id:string) => {
     saveCodeMemos(codeMemos.map(m=>m.id===id?{...m,applied:!m.applied,appliedAt:!m.applied?new Date().toISOString():undefined}:m));
@@ -1285,11 +1296,11 @@ function AppMain() {
     const value = target.value;
     const cursor = target.selectionStart;
 
-    // Ctrl+S 또는 Cmd+S → 저장 (편집중이면 편집저장, 새 입력이면 추가)
+    // Ctrl+S 또는 Cmd+S → 저장 (편집중이면 편집저장, 새 입력이면 임시저장만 - 반영은 버튼)
     if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==="s"){
       e.preventDefault();
       if(isEditing) saveEditMemo();
-      else handleAddMemo();
+      else handleSaveDraft();
       return;
     }
     // ESC: 편집 중이면 편집 취소만, 입력 중이면 부모에서 처리 (창 닫기)
@@ -2663,45 +2674,57 @@ function AppMain() {
           <div style={{padding:"12px 14px",borderBottom:`1px solid ${C.border2}`,display:"flex",justifyContent:"space-between",alignItems:"center",flexShrink:0,background:`${C.amber}11`}}>
             <div>
               <div style={{fontSize:14,fontWeight:800,color:C.amber}}>📝 코드 수정 메모</div>
-              <div style={{fontSize:9,color:C.muted,marginTop:2}}>총 {codeMemos.length}개 · 미반영 {codeMemos.filter(m=>!m.applied).length}개 · <span style={{color:C.dim}}>ESC 닫기 · Ctrl+S 저장</span></div>
+              <div style={{fontSize:9,color:C.muted,marginTop:2}}>반영 완료 {codeMemos.length}개 · <span style={{color:C.dim}}>ESC 닫기 · Ctrl+S 저장</span></div>
             </div>
             <button onClick={()=>setCodeMemoOpen(false)} title="닫기 (ESC) · 작성 중인 글은 유지됩니다" style={{background:"transparent",border:`1px solid ${C.border}`,color:C.muted,cursor:"pointer",fontSize:14,padding:"4px 9px",borderRadius:5}}>✕</button>
           </div>
-          {/* 입력 영역 */}
+          {/* 입력 영역 (항상 상단 고정 작업 중) */}
           <div style={{padding:"10px 12px",borderBottom:`1px solid ${C.border}`,background:C.bg3,flexShrink:0}}>
-            <div style={{fontSize:9,color:C.muted,marginBottom:4,display:"flex",justifyContent:"space-between"}}>
-              <span>✍️ 새 메모 (Enter 누르면 다음 번호 자동 추가)</span>
-              {newMemoText && newMemoText!=="1. " && <span style={{color:C.green,fontSize:8}}>● 자동 저장됨</span>}
+            <div style={{fontSize:10,color:C.muted,marginBottom:4,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <span style={{fontWeight:700,color:C.amber}}>✍️ 작업 중 (저장 = 임시 저장 / 반영 = 아래 완료 목록으로 이동)</span>
+              {newMemoText && newMemoText!=="1. " && (
+                <span style={{color:draftSavedAt&&Date.now()-draftSavedAt<2000?C.green:C.dim,fontSize:9,fontWeight:700}}>
+                  {draftSavedAt&&Date.now()-draftSavedAt<2000 ? "💾 저장됨" : "● 자동 저장"}
+                </span>
+              )}
             </div>
             <textarea
               value={newMemoText}
               onChange={e=>setNewMemoText(e.target.value)}
               onKeyDown={e=>handleMemoKeyDown(e,false)}
               placeholder="1. 첫 번째 항목&#10;2. 두 번째 항목 ..."
-              rows={6}
-              style={{...S,boxSizing:"border-box",fontSize:12,resize:"vertical",minHeight:100,fontFamily:"inherit",marginBottom:7,lineHeight:1.5}}/>
+              rows={8}
+              style={{...S,boxSizing:"border-box",fontSize:12,resize:"vertical",minHeight:140,fontFamily:"inherit",marginBottom:7,lineHeight:1.5,border:`1.5px solid ${C.amber}44`}}/>
             <div style={{display:"flex",gap:6}}>
-              <button onClick={handleAddMemo} disabled={!newMemoText.trim()||newMemoText.trim()==="1."} style={{flex:1,background:newMemoText.trim()&&newMemoText.trim()!=="1."?`${C.amber}33`:C.bg,border:`1px solid ${newMemoText.trim()&&newMemoText.trim()!=="1."?C.amber:C.border}`,color:newMemoText.trim()&&newMemoText.trim()!=="1."?C.amber:C.dim,padding:"7px",borderRadius:5,cursor:newMemoText.trim()&&newMemoText.trim()!=="1."?"pointer":"default",fontWeight:800,fontSize:12}}>💾 저장 (Ctrl+S)</button>
-              <button onClick={()=>{if(window.confirm("작성 중인 내용을 모두 지우시겠습니까?"))setNewMemoText("1. ");}} style={{padding:"7px 10px",background:C.bg,border:`1px solid ${C.border}`,color:C.muted,borderRadius:5,cursor:"pointer",fontSize:11}}>초기화</button>
+              <button onClick={handleSaveDraft} disabled={!newMemoText.trim()||newMemoText.trim()==="1."} style={{flex:1,background:newMemoText.trim()&&newMemoText.trim()!=="1."?`${C.teal}22`:C.bg,border:`1px solid ${newMemoText.trim()&&newMemoText.trim()!=="1."?C.teal:C.border}`,color:newMemoText.trim()&&newMemoText.trim()!=="1."?C.teal:C.dim,padding:"8px",borderRadius:5,cursor:newMemoText.trim()&&newMemoText.trim()!=="1."?"pointer":"default",fontWeight:800,fontSize:12}}>💾 저장</button>
+              <button onClick={handleAddMemo} disabled={!newMemoText.trim()||newMemoText.trim()==="1."} style={{flex:1,background:newMemoText.trim()&&newMemoText.trim()!=="1."?`${C.green}33`:C.bg,border:`1px solid ${newMemoText.trim()&&newMemoText.trim()!=="1."?C.green:C.border}`,color:newMemoText.trim()&&newMemoText.trim()!=="1."?C.green:C.dim,padding:"8px",borderRadius:5,cursor:newMemoText.trim()&&newMemoText.trim()!=="1."?"pointer":"default",fontWeight:800,fontSize:12}}>✓ 반영 (완료 목록으로)</button>
+              <button onClick={()=>{if(window.confirm("작성 중인 내용을 모두 지우시겠습니까?"))setNewMemoText("1. ");}} style={{padding:"8px 10px",background:C.bg,border:`1px solid ${C.border}`,color:C.muted,borderRadius:5,cursor:"pointer",fontSize:11}}>초기화</button>
             </div>
           </div>
-          {/* 메모 리스트 */}
-          <div style={{flex:1,overflowY:"auto",padding:"10px 12px",minHeight:0}}>
+          {/* 반영 완료 목록 헤더 */}
+          <div style={{padding:"8px 12px 4px",flexShrink:0,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <span style={{fontSize:11,fontWeight:800,color:C.green}}>✓ 반영 완료 목록 ({codeMemos.length})</span>
+            {codeMemos.length>0 && (
+              <button onClick={()=>{
+                if(!window.confirm(`반영 완료된 메모 ${codeMemos.length}개를 모두 삭제하시겠습니까?`))return;
+                saveCodeMemos([]);
+              }} style={{padding:"3px 8px",borderRadius:4,border:`1px solid ${C.red}44`,background:`${C.red}11`,color:C.red,cursor:"pointer",fontSize:9,fontWeight:700}}>🗑 일괄 삭제</button>
+            )}
+          </div>
+          {/* 메모 리스트 (반영 완료된 항목들 - 글씨 가리지 않음) */}
+          <div style={{flex:1,overflowY:"auto",padding:"4px 12px 10px",minHeight:0}}>
             {codeMemos.length===0 ? (
-              <div style={{textAlign:"center",color:C.dim,padding:"40px 0"}}>
+              <div style={{textAlign:"center",color:C.dim,padding:"30px 0"}}>
                 <div style={{fontSize:30,marginBottom:8}}>📝</div>
-                <div style={{fontSize:11,color:C.muted}}>저장된 메모가 없습니다</div>
-                <div style={{fontSize:9,marginTop:6,color:C.dim}}>위에 적고 저장 버튼을 누르세요</div>
+                <div style={{fontSize:11,color:C.muted}}>반영 완료된 메모가 없습니다</div>
+                <div style={{fontSize:9,marginTop:6,color:C.dim}}>위에 작성하고 "✓ 반영" 버튼을 누르세요</div>
               </div>
             ) : (
               <div style={{display:"flex",flexDirection:"column",gap:6}}>
                 {codeMemos.map(m=>{
                   const isEditing = editingMemoId===m.id;
                   return (
-                    <div key={m.id} style={{background:m.applied?C.bg3:C.bg,border:`1px solid ${isEditing?C.teal:m.applied?C.green+"55":C.border}`,borderRadius:7,padding:"9px 11px",position:"relative",overflow:"hidden"}}>
-                      {m.applied && !isEditing && (
-                        <div style={{position:"absolute",top:5,right:7,fontSize:8,fontWeight:900,color:C.green,border:`1.5px solid ${C.green}`,borderRadius:3,padding:"1px 5px",letterSpacing:1,opacity:0.7,transform:"rotate(-8deg)",pointerEvents:"none"}}>✓ 반영완료</div>
-                      )}
+                    <div key={m.id} style={{background:C.bg3,border:`1px solid ${isEditing?C.teal:C.green+"55"}`,borderRadius:7,padding:"9px 11px"}}>
                       {isEditing ? (
                         <>
                           <textarea
@@ -2719,12 +2742,16 @@ function AppMain() {
                         </>
                       ) : (
                         <>
-                          <div onClick={()=>!m.applied&&startEditMemo(m.id)} title={m.applied?"":"클릭하여 수정"} style={{fontSize:11,color:m.applied?C.muted:C.text,whiteSpace:"pre-wrap",wordBreak:"break-word",marginBottom:6,paddingRight:m.applied?60:0,textDecoration:m.applied?"line-through":"none",lineHeight:1.5,cursor:m.applied?"default":"text",padding:"2px",borderRadius:3}}>{m.text}</div>
+                          {/* 글씨 가리지 않게 도장은 위로 작은 배지 */}
+                          <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:5}}>
+                            <span style={{fontSize:9,fontWeight:900,color:C.green,background:`${C.green}22`,border:`1px solid ${C.green}`,borderRadius:3,padding:"2px 6px",letterSpacing:0.5,flexShrink:0}}>✓ 반영완료</span>
+                            <span style={{fontSize:9,color:C.dim,marginLeft:"auto"}}>{m.appliedAt && new Date(m.appliedAt).toLocaleString("ko-KR",{month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"})}</span>
+                          </div>
+                          <div onClick={()=>startEditMemo(m.id)} title="클릭하여 수정" style={{fontSize:12,color:C.text,whiteSpace:"pre-wrap",wordBreak:"break-word",marginBottom:6,lineHeight:1.55,cursor:"text",padding:"4px 2px",borderRadius:3}}>{m.text}</div>
                           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:9,color:C.dim,marginTop:5,paddingTop:5,borderTop:`1px dashed ${C.border}`}}>
-                            <span>{new Date(m.createdAt).toLocaleString("ko-KR",{month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"})}{m.applied&&m.appliedAt&&` · 반영 ${new Date(m.appliedAt).toLocaleString("ko-KR",{month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"})}`}</span>
+                            <span>작성 {new Date(m.createdAt).toLocaleString("ko-KR",{month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"})}</span>
                             <div style={{display:"flex",gap:4}}>
-                              {!m.applied && <button onClick={()=>startEditMemo(m.id)} style={{padding:"3px 8px",borderRadius:4,border:`1px solid ${C.teal}66`,background:`${C.teal}11`,color:C.teal,cursor:"pointer",fontSize:9,fontWeight:700}}>✏ 수정</button>}
-                              <button onClick={()=>handleApplyMemo(m.id)} style={{padding:"3px 8px",borderRadius:4,border:`1px solid ${m.applied?C.muted:C.green}66`,background:m.applied?C.bg2:`${C.green}22`,color:m.applied?C.muted:C.green,cursor:"pointer",fontSize:9,fontWeight:700}}>{m.applied?"↩ 취소":"✓ 반영"}</button>
+                              <button onClick={()=>startEditMemo(m.id)} style={{padding:"3px 8px",borderRadius:4,border:`1px solid ${C.teal}66`,background:`${C.teal}11`,color:C.teal,cursor:"pointer",fontSize:9,fontWeight:700}}>✏ 수정</button>
                               <button onClick={()=>handleDeleteMemo(m.id)} style={{padding:"3px 6px",borderRadius:4,border:`1px solid ${C.red}44`,background:`${C.red}11`,color:C.red,cursor:"pointer",fontSize:9}}>🗑</button>
                             </div>
                           </div>
@@ -2736,19 +2763,6 @@ function AppMain() {
               </div>
             )}
           </div>
-          {/* 하단 액션 */}
-          {codeMemos.length>0 && (
-            <div style={{padding:"8px 12px",borderTop:`1px solid ${C.border}`,background:C.bg3,flexShrink:0,display:"flex",gap:6,justifyContent:"space-between"}}>
-              <button onClick={()=>{
-                if(!window.confirm("반영 완료된 메모를 모두 삭제하시겠습니까?"))return;
-                saveCodeMemos(codeMemos.filter(m=>!m.applied));
-              }} style={{padding:"5px 10px",borderRadius:4,border:`1px solid ${C.green}44`,background:`${C.green}11`,color:C.green,cursor:"pointer",fontSize:10}}>완료된 항목 정리 ({codeMemos.filter(m=>m.applied).length})</button>
-              <button onClick={()=>{
-                if(!window.confirm("모든 메모를 삭제하시겠습니까?"))return;
-                saveCodeMemos([]);
-              }} style={{padding:"5px 10px",borderRadius:4,border:`1px solid ${C.red}44`,background:`${C.red}11`,color:C.red,cursor:"pointer",fontSize:10}}>전체 삭제</button>
-            </div>
-          )}
         </div>
       )}
       {closeModal&&(()=>{
@@ -2870,7 +2884,7 @@ function AppMain() {
             <div style={{textAlign:"center"}}><div style={{color:C.muted,fontSize:9}}>승률</div><div style={{color:C.teal,fontWeight:800,fontSize:13}}>{winRate}%</div></div>
             <div style={{textAlign:"center"}}><div style={{color:C.muted,fontSize:9}}>진행중</div><div style={{color:C.amber,fontWeight:800,fontSize:13}}>{pending.length}건</div></div>
             <div style={{display:"flex",gap:4}}>
-              <button onClick={()=>setCodeMemoOpen(true)} style={{fontSize:11,padding:"5px 11px",borderRadius:5,border:`1px solid ${C.amber}66`,background:`${C.amber}11`,color:C.amber,cursor:"pointer",fontWeight:700}} title="코드 수정 메모">📝 코드 수정 {codeMemos.filter(m=>!m.applied).length>0&&<span style={{marginLeft:4,padding:"0 5px",borderRadius:99,background:C.amber,color:"#000",fontSize:9,fontWeight:900}}>{codeMemos.filter(m=>!m.applied).length}</span>}</button>
+              <button onClick={()=>setCodeMemoOpen(true)} style={{fontSize:11,padding:"5px 11px",borderRadius:5,border:`1px solid ${C.amber}66`,background:`${C.amber}11`,color:C.amber,cursor:"pointer",fontWeight:700}} title="코드 수정 메모">📝 코드 수정 {newMemoText.trim()&&newMemoText.trim()!=="1."&&<span style={{marginLeft:4,padding:"0 5px",borderRadius:99,background:C.amber,color:"#000",fontSize:9,fontWeight:900}}>●</span>}</button>
               <button onClick={logout} style={{fontSize:11,padding:"5px 11px",borderRadius:5,border:`1px solid ${C.red}44`,background:`${C.red}11`,color:C.red,cursor:"pointer",fontWeight:700}} title="로그아웃">🔒</button>
             </div>
           </div>
@@ -5388,16 +5402,16 @@ function AppMain() {
             <span style={{fontSize:10,color:C.dim,fontWeight:400,marginLeft:"auto"}}>$1 = ₩{usdKrw.toLocaleString()} · {today}</span>
           </div>
 
-          {/* 2×2 그리드 (비대칭, 두 행 분리):
-               1행: [좌 입금/포인트(좁음, ~25%)] [우 오늘 할 일(넓음 ~75%, 가로 4열)]
-               2행: [좌 사이트별 진행률(넓음 ~75%, 가로 4열)] [우 포인트 교환(좁음, ~25%)] */}
+          {/* 새 레이아웃 (두 행):
+               1행: [사이트 활성화 단독, 좌측 좁게]
+               2행: [오늘 할 일][사이트별 진행률][포인트 교환] - 가로 3등분, 각 카드 안 항목은 세로 정렬 */}
           <div style={{display:"flex",flexDirection:"column",gap:12}}>
-          <div style={{display:"grid",gridTemplateColumns:"minmax(280px, 1fr) 3fr",gap:12}}>
+          <div style={{display:"grid",gridTemplateColumns:"minmax(320px, 35%) 1fr",gap:12,alignItems:"start"}}>
 
             {/* [좌상] 입금/포인트 인라인 폼 */}
             <div style={{background:C.bg3,border:`1px solid ${C.green}44`,borderRadius:12,padding:13}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-                <div style={{fontSize:14,fontWeight:800,color:C.green}}>💵 입금 / 포인트 추가</div>
+                <div style={{fontSize:14,fontWeight:800,color:C.green}}>💵 사이트 활성화</div>
                 <button onClick={()=>setSiteManageModal(true)} style={{padding:"4px 10px",borderRadius:5,border:`1px solid ${C.teal}44`,background:`${C.teal}11`,color:C.teal,cursor:"pointer",fontWeight:700,fontSize:11}}>🏢 사이트</button>
               </div>
               <div style={{marginBottom:10}}>
@@ -5417,9 +5431,15 @@ function AppMain() {
                 <div style={{fontSize:11,color:C.muted,marginBottom:5,fontWeight:700}}>금액</div>
                 <div style={{display:"flex",gap:4,alignItems:"center"}}>
                   <button onClick={()=>setDashAmt(a=>Math.max(0,a-(isUSD(dashSite)?10:10000)))} style={{background:C.bg2,border:`1px solid ${C.border}`,color:C.red,width:36,height:40,borderRadius:5,cursor:"pointer",fontSize:16,fontWeight:700}}>−</button>
-                  <input type="number" value={dashAmt||""} onChange={e=>setDashAmt(parseFloat(e.target.value)||0)}
+                  <input type="text" inputMode="numeric"
+                    value={dashAmt? dashAmt.toLocaleString("en-US"):""}
+                    onChange={e=>{
+                      const cleaned = e.target.value.replace(/[^0-9.]/g,"");
+                      const v = parseFloat(cleaned);
+                      setDashAmt(isNaN(v)?0:v);
+                    }}
                     placeholder={isUSD(dashSite)?"$ 금액":"₩ 금액"}
-                    style={{...S,boxSizing:"border-box",fontSize:15,padding:"10px",fontWeight:800,textAlign:"center" as const,color:isUSD(dashSite)?C.amber:C.green,flex:1,...noSpin}}/>
+                    style={{...S,boxSizing:"border-box",fontSize:15,padding:"10px",fontWeight:800,textAlign:"center" as const,color:isUSD(dashSite)?C.amber:C.green,flex:1}}/>
                   <button onClick={()=>setDashAmt(a=>a+(isUSD(dashSite)?10:10000))} style={{background:C.bg2,border:`1px solid ${C.border}`,color:C.green,width:36,height:40,borderRadius:5,cursor:"pointer",fontSize:16,fontWeight:700}}>+</button>
                 </div>
               </div>
@@ -5447,7 +5467,11 @@ function AppMain() {
               </div>
             </div>
 
-            {/* [우상] 오늘 할 일 (가로 4열 그리드) */}
+
+            {/* [하단-2] 사이트별 진행률 (세로 정렬) */}
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12,alignItems:"start"}}>
+            {/* [하단-1] 오늘 할 일 (세로 정렬) */}
             <div style={{background:C.bg3,border:`1px solid ${C.green}44`,borderRadius:12,padding:13}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:9}}>
                 <div style={{fontSize:14,fontWeight:800,color:C.green}}>✅ 오늘 할 일</div>
@@ -5475,7 +5499,7 @@ function AppMain() {
                   <div style={{fontSize:11,color:C.muted}}>등록된 할 일 없음</div>
                 </div>
               ) : (
-                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(180px,1fr))",gap:7}}>
+                <div style={{display:"flex",flexDirection:"column",gap:6}}>
                   {dailyQuests.map(q=>{
                     const done = isQuestDoneToday(q);
                     const dayNum = questAttendanceDay(q);
@@ -5491,15 +5515,15 @@ function AppMain() {
                     const monthHistory = q.history.filter(d=>d.startsWith(`${monYear2}-${String(monIdx2+1).padStart(2,"0")}`));
                     return (
                       <div key={q.id} style={{background:done?`${C.green}11`:C.bg2,border:`1px solid ${done?C.green:C.border}`,borderRadius:6,padding:"7px 10px",position:"relative",overflow:"hidden"}}>
-                        {done && (
-                          <div style={{position:"absolute",top:"50%",right:6,transform:"translateY(-50%) rotate(-12deg)",fontSize:9,fontWeight:900,color:C.green,border:`1.5px solid ${C.green}`,borderRadius:3,padding:"1px 5px",letterSpacing:0.5,opacity:0.55,pointerEvents:"none"}}>✓ 완료</div>
-                        )}
                         <div style={{display:"flex",alignItems:"center",gap:6}}>
                           <input type="checkbox" checked={done} onChange={()=>toggleQuestToday(q.id)} style={{width:16,height:16,accentColor:C.green,cursor:"pointer",flexShrink:0}}/>
                           <div style={{flex:1,minWidth:0}}>
-                            <div onClick={()=>toggleQuestToday(q.id)} style={{fontSize:12,fontWeight:700,color:done?C.muted:C.text,textDecoration:done?"line-through":"none",cursor:"pointer",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",paddingRight:done?52:0}}>{q.name}</div>
+                            <div onClick={()=>toggleQuestToday(q.id)} style={{fontSize:12,fontWeight:700,color:done?C.green:C.text,cursor:"pointer",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{q.name}</div>
                             <div style={{fontSize:10,color:C.muted,marginTop:2}}>📅 <b style={{color:C.amber}}>{dayNum}일차</b> · 이번달 <b style={{color:C.teal}}>{monthHistory.length}회</b> · 총 <b style={{color:C.purple}}>{totalAttend}회</b></div>
                           </div>
+                          {done && (
+                            <span style={{fontSize:9,fontWeight:900,color:C.green,background:`${C.green}22`,border:`1px solid ${C.green}`,borderRadius:3,padding:"2px 5px",letterSpacing:0.3,flexShrink:0}}>✓</span>
+                          )}
                           <div style={{display:"flex",gap:3,flexShrink:0,zIndex:1}}>
                             <button onClick={()=>setQuestCalendarExpanded(p=>({...p,[q.id]:!calOpen}))} title="출석 보기" style={{background:calOpen?`${C.teal}22`:"transparent",border:`1px solid ${calOpen?C.teal:C.border}`,color:calOpen?C.teal:C.dim,cursor:"pointer",fontSize:10,padding:"3px 6px",borderRadius:3,whiteSpace:"nowrap"}}>📅</button>
                             <button onClick={()=>handleDeleteQuest(q.id)} title="삭제" style={{background:"transparent",border:`1px solid ${C.border}`,color:C.dim,cursor:"pointer",fontSize:10,padding:"3px 6px",borderRadius:3}}>🗑</button>
@@ -5540,10 +5564,6 @@ function AppMain() {
                 </div>
               )}
             </div>
-
-            {/* [좌하] 사이트별 진행률 (가로 4열 그리드, 비활성 사이트 포함) */}
-          </div>
-          <div style={{display:"grid",gridTemplateColumns:"3fr minmax(280px, 1fr)",gap:12}}>
             <div style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:12,padding:13}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
                 <div style={{fontSize:14,fontWeight:800,color:C.text}}>💳 사이트별 진행률</div>
@@ -5557,7 +5577,7 @@ function AppMain() {
                     {activeSiteNames.length===0 ? (
                       <div style={{textAlign:"center",color:C.dim,padding:"20px 0",fontSize:11}}>활성 사이트가 없습니다 · 입금하면 자동 활성화됩니다</div>
                     ) : (
-                      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(190px,1fr))",gap:8}}>
+                      <div style={{display:"flex",flexDirection:"column",gap:7}}>
                         {activeSiteNames.map(site=>{
                           const st=siteStates[site]||{deposited:0,betTotal:0,active:false,isDollar:false};
                           const dollar=isUSD(site);
@@ -5600,7 +5620,7 @@ function AppMain() {
                     {inactiveSiteNames.length>0 && (
                       <div style={{marginTop:12,paddingTop:10,borderTop:`1px dashed ${C.border}`}}>
                         <div style={{fontSize:10,color:C.dim,marginBottom:6,fontWeight:700}}>⚪ 활성화 되지 않음 ({inactiveSiteNames.length}개)</div>
-                        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(190px,1fr))",gap:6}}>
+                        <div style={{display:"flex",flexDirection:"column",gap:5}}>
                           {inactiveSiteNames.map(site=>{
                             const dollar=isUSD(site);
                             return (
