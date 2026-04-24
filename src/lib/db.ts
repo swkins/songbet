@@ -342,7 +342,15 @@ export async function deleteMMetaBySportCountry(sport: string, country: string) 
 // POINT SITES (포인트 교환 사이트) ★ 신규 ★
 // ═════════════════════════════════════════════════════════════
 // 기존 localStorage "bt_point_sites" 대체
-export interface PointSiteSession { nextTargetDate: string; completedAt: string; amount: number }
+// App.tsx의 PointSession과 호환: id/completedAt/nextTargetDate 필수,
+// amount는 선택(기존 데이터 호환). 추가 필드도 허용하기 위해 느슨하게 정의.
+export interface PointSiteSession {
+  id?: string
+  completedAt: string
+  nextTargetDate: string
+  amount?: number
+  [k: string]: any
+}
 export interface PointSiteRow {
   id: string
   name: string
