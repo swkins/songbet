@@ -89,6 +89,7 @@
 import React, { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, LineChart, Line, CartesianGrid } from "recharts";
 import * as db from "./lib/db";
+import { supabase } from "./lib/supabase";
 import type { Bet, Deposit, Withdrawal, SiteState as SiteStateBase, Log, EsportsRecord, ProfitExtra } from "./types";
 
 type SiteState = SiteStateBase & { pointTotal?: number };
@@ -134,20 +135,17 @@ interface LiveFixture {
 
 // ── Supabase fixtures 테이블에서 경기 조회 ──────────────────
 async function fetchFixtures(sport: Sport): Promise<LiveFixture[]> {
-  const SUPA_URL = (import.meta as any)?.env?.VITE_SUPABASE_URL ?? "";
-  const SUPA_KEY = (import.meta as any)?.env?.VITE_SUPABASE_ANON_KEY ?? "";
-  if (!SUPA_URL || !SUPA_KEY) throw new Error("VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY 환경변수 없음");
-
   const from = new Date(Date.now() - 3  * 3_600_000).toISOString();
   const to   = new Date(Date.now() + 30 * 3_600_000).toISOString();
-  const url  = `${SUPA_URL}/rest/v1/fixtures?sport=eq.${sport}&start_time=gte.${encodeURIComponent(from)}&start_time=lte.${encodeURIComponent(to)}&order=start_time.asc`;
-
-  const r = await fetch(url, {
-    headers: { "apikey": SUPA_KEY, "Authorization": `Bearer ${SUPA_KEY}`, "Content-Type": "application/json" },
-  });
-  if (!r.ok) throw new Error(`fixtures 조회 실패: HTTP ${r.status}`);
-  const rows: any[] = await r.json();
-  return rows.map(row => ({
+  const { data, error } = await supabase
+    .from("fixtures")
+    .select("*")
+    .eq("sport", sport)
+    .gte("start_time", from)
+    .lte("start_time", to)
+    .order("start_time", { ascending: true });
+  if (error) throw new Error(`fixtures 조회 실패: ${error.message}`);
+  return (data ?? []).map((row: any) => ({
     id: row.fixture_id, sport: row.sport,
     league_id: row.league_id, league_name: row.league_name,
     country: row.country, home_team: row.home_team, away_team: row.away_team,
@@ -159,28 +157,22 @@ async function fetchFixtures(sport: Sport): Promise<LiveFixture[]> {
 // api_fetch_log 조회 (API 관리 탭)
 async function loadApiFetchLog(limit = 20): Promise<any[]> {
   try {
-    const SUPA_URL = (import.meta as any)?.env?.VITE_SUPABASE_URL ?? "";
-    const SUPA_KEY = (import.meta as any)?.env?.VITE_SUPABASE_ANON_KEY ?? "";
-    const r = await fetch(`${SUPA_URL}/rest/v1/api_fetch_log?order=fetched_at.desc&limit=${limit}`, {
-      headers: { "apikey": SUPA_KEY, "Authorization": `Bearer ${SUPA_KEY}` },
-    });
-    if (!r.ok) return [];
-    return await r.json();
+    const { data, error } = await supabase
+      .from("api_fetch_log")
+      .select("*")
+      .order("fetched_at", { ascending: false })
+      .limit(limit);
+    if (error) return [];
+    return data ?? [];
   } catch { return []; }
 }
 
 // Edge Function 수동 트리거
 async function triggerFetchNow(): Promise<{ ok: boolean; message: string }> {
   try {
-    const SUPA_URL = (import.meta as any)?.env?.VITE_SUPABASE_URL ?? "";
-    const SUPA_KEY = (import.meta as any)?.env?.VITE_SUPABASE_ANON_KEY ?? "";
-    const r = await fetch(`${SUPA_URL}/functions/v1/fetch-fixtures`, {
-      method: "POST",
-      headers: { "Authorization": `Bearer ${SUPA_KEY}`, "Content-Type": "application/json" },
-      body: "{}",
-    });
-    const json = await r.json();
-    return { ok: r.ok, message: JSON.stringify(json, null, 2) };
+    const { data, error } = await supabase.functions.invoke("fetch-fixtures");
+    if (error) throw error;
+    return { ok: true, message: JSON.stringify(data, null, 2) };
   } catch (e: any) { return { ok: false, message: String(e?.message ?? e) }; }
 }
 // ── 종목 메타 ────────────────────────────────────────────────
