@@ -483,7 +483,7 @@ const EXTRA:Record<string,string[]> = {
 
 const getOptGroups = (cat:string) => {
   if(cat==="축구") return [{g:"홈",opts:["홈 0.5","홈 1.5","홈 2.5"]},{g:"원정",opts:["원정 0.5","원정 1.5","원정 2.5"]}];
-  if(cat==="야구") return [{g:"승패",opts:["정배","역배"]},{g:"오버",opts:Array.from({length:14},(_,i)=>`${4.5+i} 오버`)},{g:"언더",opts:Array.from({length:14},(_,i)=>`${4.5+i} 언더`)}];
+  if(cat==="야구") return [{g:"승패",opts:["정배","역배"]},{g:"오버",opts:Array.from({length:9},(_,i)=>`${4.5+i} 오버`)},{g:"언더",opts:Array.from({length:9},(_,i)=>`${4.5+i} 언더`)}];
   if(cat==="농구") return [{g:"플핸",opts:Array.from({length:25},(_,i)=>`${5.5+i} 플핸`)},{g:"마핸",opts:Array.from({length:54},(_,i)=>`${(2.5+i).toFixed(1)} 마핸`)}];
   if(cat==="배구") return [{g:"승패",opts:["홈 승","원정 승"]},{g:"오버/언더",opts:["오버","언더"]}];
   return [];
@@ -813,10 +813,9 @@ function AppMain() {
     const id = `${game.id}_${optLabel}`;
     setSlip(prev => {
       // 이미 같은 조합이면 제거 (토글)
-      if (prev.some(s => s.id === id)) return prev.filter(s => s.id !== id);
-      // 같은 경기의 다른 옵션이 있으면 제거하고 새것 추가
-      const filtered = prev.filter(s => s.game.id !== game.id);
-      return [...filtered, { id, game, optLabel, odds: 0 }];
+      if (prev.some(s => s.id === id)) return [];
+      // 무조건 단폴 — 기존 항목 모두 교체
+      return [{ id, game, optLabel, odds: 0 }];
     });
   },[]);
 
@@ -858,7 +857,6 @@ function AppMain() {
       addLog("➕ 베팅",`${homeKr} vs ${awayKr}/${item.optLabel}/${fmtDisp(slipAmount,dollar)}`);
     });
     setSlip([]);
-    setSlipSite("");  // 베팅 완료 후 사이트 선택 초기화
   };
 
   // 모의 베팅 (사용 안 하지만 타입 호환)
@@ -3873,10 +3871,7 @@ function AppMain() {
                 away_score: g.awayScore ?? null,
               } as LiveFixture))
           : [];
-        // 이미 시작된 경기(라이브/종료/연기 등 NS 아닌 것) 제외 — 베팅 불가
-        const isNotStarted = (s: string) => s === "NS" || s === "TBD";
         const selectedFixtures = [...apiFixtures, ...manualFixtures]
-          .filter(f => isNotStarted(f.status_short))
           .sort((a,b)=>new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
         const todayGames = selectedFixtures.filter(f=>kstDateOf(f.start_time)===kstToday);
         const tomorrowGames = selectedFixtures.filter(f=>kstDateOf(f.start_time)===kstTomorrow);
@@ -3911,7 +3906,7 @@ function AppMain() {
           <div style={{display:"flex",flex:1,overflow:"hidden",minWidth:0,minHeight:0}}>
 
             {/* ─── 1. 카테고리 (종목/국가/리그) ─── */}
-            <div style={{width:300,flexShrink:0,background:C.bg2,borderRight:`1px solid ${C.border2}`,display:"flex",flexDirection:"column",overflow:"hidden",minHeight:0}}>
+            <div style={{width:320,flexShrink:0,background:C.bg2,borderRight:`1px solid ${C.border2}`,display:"flex",flexDirection:"column",overflow:"hidden",minHeight:0}}>
               <div style={{padding:"10px 12px",borderBottom:`1px solid ${C.border}`,flexShrink:0,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                 <div>
                   <div style={{fontSize:12,fontWeight:800,color:C.text}}>📂 카테고리</div>
@@ -4027,7 +4022,7 @@ function AppMain() {
             </div>
 
             {/* ─── 2. 경기 리스트 (오늘/내일 분리) ─── */}
-            <div style={{width:340,flexShrink:0,background:C.bg2,borderRight:`1px solid ${C.border2}`,display:"flex",flexDirection:"column",overflow:"hidden",minHeight:0}}>
+            <div style={{width:320,flexShrink:0,background:C.bg2,borderRight:`1px solid ${C.border2}`,display:"flex",flexDirection:"column",overflow:"hidden",minHeight:0}}>
               <div style={{padding:"10px 12px",borderBottom:`1px solid ${C.border}`,flexShrink:0,display:"flex",justifyContent:"space-between",alignItems:"center",gap:6}}>
                 <div style={{fontSize:12,fontWeight:800,color:C.teal,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>
                   {stSelSport&&stSelCountry&&stSelLeague
@@ -4204,16 +4199,10 @@ function AppMain() {
                           <span style={{color:C.dim}}>경기 시간</span>
                           <span style={{color:C.text,fontWeight:700}}>{fmtKstTime(g.start_time)}</span>
                           <span style={{color:C.dim}}>상태</span>
-                          <span style={{color:
-                            g.status_short==="PST"?C.purple:
-                            g.status_short==="CANC"||g.status_short==="ABD"?C.red:
-                            live?C.red:finished?C.muted:C.amber,fontWeight:700}}>
-                            {g.status_short==="PST"?"🔄 연기됨":
-                             g.status_short==="CANC"?"❌ 취소됨":
-                             g.status_short==="ABD"?"⛔ 중단됨":
-                             live?"🔴 진행중":finished?"⏹ 종료":"⏰ 예정"}
-                            {g.status_long && g.status_short!=="PST" && g.status_short!=="CANC" && g.status_short!=="ABD" && <span style={{marginLeft:6,fontSize:11,color:C.dim}}>({g.status_long})</span>}
-                            {g.elapsed && live && <span style={{marginLeft:6,color:C.red}}>{g.elapsed}'</span>}
+                          <span style={{color:live?C.red:finished?C.muted:C.amber,fontWeight:700}}>
+                            {live?"🔴 진행중":finished?"⏹ 종료":"⏰ 예정"}
+                            {g.status_long && <span style={{marginLeft:6,fontSize:11,color:C.dim}}>({g.status_long})</span>}
+                            {g.elapsed && <span style={{marginLeft:6,color:C.red}}>{g.elapsed}'</span>}
                           </span>
                           {(g.home_score!==null && g.away_score!==null) && (
                             <>
@@ -4240,7 +4229,7 @@ function AppMain() {
                         const isBasketball = sport==="basketball";
                         const isVolleyball = sport==="volleyball";
                         const ouLinesSoccer = [1.5,2.5,3.5];
-                        const ouLinesBaseball = [4.5,5.5,6.5,7.5,8.5,9.5,10.5,11.5,12.5,13.5,14.5,15.5,16.5,17.5];
+                        const ouLinesBaseball = [4.5,5.5,6.5,7.5,8.5,9.5,10.5,11.5,12.5];
                         const ouLinesBasketball = [155.5,160.5,165.5,170.5,175.5,180.5,185.5,190.5,195.5,200.5,205.5,210.5,215.5,220.5];
                         const handiLinesSoccer = [0.5,1.5,2.5];
 
@@ -4342,10 +4331,10 @@ function AppMain() {
                                           const opt=`${label} (${ln})`;
                                           const added=inSlip(opt);
                                           return <button key={opt} onClick={()=>handleSlipPick(g,opt)}
-                                            style={{padding:"7px 8px",borderRadius:5,cursor:"pointer",
+                                            style={{padding:"7px 6px",borderRadius:5,cursor:"pointer",
                                               border:added?`2px solid ${color}`:`1px solid ${C.border}`,
                                               background:added?`${color}33`:C.bg2,color:added?color:C.text,
-                                              fontWeight:added?800:600,fontSize:11,textAlign:"left" as const}}>
+                                              fontWeight:added?800:600,fontSize:11}}>
                                             {label} <b>({ln})</b>
                                           </button>;
                                         })}
@@ -4419,7 +4408,7 @@ function AppMain() {
             </div>
 
             {/* ─── 4. 베팅 슬립 (기존 스포츠 탭과 동일) ─── */}
-            <div style={{width:300,flexShrink:0,display:"flex",flexDirection:"column",overflow:"hidden",background:C.bg2,borderLeft:`1px solid ${C.border2}`,minHeight:0}}>
+            <div style={{width:260,flexShrink:0,display:"flex",flexDirection:"column",overflow:"hidden",background:C.bg2,borderLeft:`1px solid ${C.border2}`,minHeight:0}}>
               <div style={{padding:"10px 12px",borderBottom:`1px solid ${C.border}`,flexShrink:0,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                 <div style={{fontSize:13,fontWeight:800,color:C.orange}}>
                   📋 베팅 슬립
@@ -4542,7 +4531,7 @@ function AppMain() {
             </div>
 
             {/* ─── 5. 사이트 진행률 + 진행중 베팅 (기존 스포츠 탭과 동일) ─── */}
-            <div style={{width:300,flexShrink:0,display:"flex",flexDirection:"column",overflow:"hidden",background:C.bg2,borderLeft:`1px solid ${C.border2}`,minHeight:0}}>
+            <div style={{width:320,flexShrink:0,display:"flex",flexDirection:"column",overflow:"hidden",background:C.bg2,borderLeft:`1px solid ${C.border2}`,minHeight:0}}>
 
               {/* 상: 사이트 진행률 */}
               <div style={{flexShrink:0,padding:"10px 12px",borderBottom:`1px solid ${C.border2}`,background:C.bg3}}>
@@ -4690,6 +4679,19 @@ function AppMain() {
                         <button onClick={()=>handleClose(site)} style={{fontSize:10,padding:"3px 6px",borderRadius:3,border:`1px solid ${C.red}44`,background:`${C.red}11`,color:C.red,cursor:"pointer"}}>마감</button>
                       </div>
                     </div>
+                    {/* 입금/포인트/베팅/잔여 + 진행률 바 영역 — 잔여 0 이면 도장 */}
+                    <div style={{position:"relative"}}>
+                      {remaining===0 && totalBase>0 && (
+                        <div style={{
+                          position:"absolute",top:"50%",left:"50%",
+                          transform:"translate(-50%,-50%) rotate(-12deg)",
+                          fontSize:22,fontWeight:900,color:C.purple,
+                          border:`3px solid ${C.purple}`,borderRadius:7,
+                          padding:"4px 14px",letterSpacing:3,
+                          opacity:0.45,pointerEvents:"none",whiteSpace:"nowrap",zIndex:10,
+                          background:`${C.purple}11`,
+                        }}>마감</div>
+                      )}
                     <div style={{display:"flex",gap:4,alignItems:"flex-end",marginBottom:7}}>
                       <div style={{flex:1,textAlign:"center",fontSize:14}}>
                         <div style={{fontSize:11,color:C.muted,marginBottom:2,fontWeight:700}}>입금</div>
@@ -4717,6 +4719,7 @@ function AppMain() {
                     <div style={{height:18,background:C.bg,borderRadius:5,overflow:"hidden",marginBottom:7,position:"relative"}}>
                       <div style={{width:`${pct}%`,height:"100%",background:barColor,borderRadius:5,transition:"width 0.3s"}}/>
                     </div>
+                    </div>{/* end 도장 wrapper */}
                     {/* ★ 활성화 이후 수익률 표시 (마지막 마감 이후 세션 기준) */}
                     {(()=>{
                       const sp = currentSessionProfits[site];
