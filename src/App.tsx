@@ -1650,7 +1650,7 @@ function AppMain() {
 
       // ─── 1단계: 사이트 리스트 먼저 로드 (site_states 로드가 이 값을 필요로 함) ───
       const settings = await safe("app_settings",()=>db.loadAppSettingsBundle(),{
-        krw_sites:null,usd_sites:null,pext_sites:[],pext_cats:[],pext_subcats:[],code_memo_draft:"1. ",league_api_map:{},
+        krw_sites:null,usd_sites:null,pext_sites:[],pext_cats:[],pext_subcats:[],code_memo_draft:"1. ",league_api_map:{},sports_test_league_map:{},
       });
       if(cancelled)return;
       const krw = settings.krw_sites ?? DEFAULT_KRW_SITES;
@@ -1759,6 +1759,7 @@ function AppMain() {
         setLeagueNameMap(leagues);
       }
       if(settings.league_api_map) setLeagueApiMap(settings.league_api_map as Record<string,string>);
+      if(settings.sports_test_league_map) setStLeagueMap(settings.sports_test_league_map as Record<string,string>);
 
       setDataLoadErrors(errors);
       setDbReady(true);
@@ -1965,6 +1966,19 @@ function AppMain() {
   // 리그 API 매핑 모달
   const [leagueApiModal, setLeagueApiModal] = useState<{league:string; sport:string; country:string}|null>(null);
   const [leagueApiTab, setLeagueApiTab] = useState<"recommend"|"all">("recommend");
+
+  // ── [스포츠 테스트] 사용자 리그 ↔ API 리그 매핑 ──────────────
+  // 키: 사용자 리그 식별자 "{sport_kr}__{country}__{league}"
+  // 값: API league_id (number를 string으로)
+  // app_settings 테이블에 "sports_test_league_map" 키로 저장
+  const [stLeagueMap, setStLeagueMap] = useState<Record<string,string>>({});
+  const saveStLeagueMap = (m: Record<string,string>) => {
+    setStLeagueMap(m);
+    db.saveAppSetting("sports_test_league_map", m);
+  };
+  // 매핑 선택 모달 (리그 클릭 시 열림)
+  const [stMappingModal, setStMappingModal] = useState<{sport:Sport; sportKr:string; country:string; league:string}|null>(null);
+  const [stMappingSelectedId, setStMappingSelectedId] = useState<string>("");
 
   // ── 수익률 기타 ──────────────────────────────────────────
   const [pextForm,setPextForm]=useState({category:"",subCategory:"",subSubCategory:"",amount:0,note:"",isIncome:true});
@@ -5751,42 +5765,65 @@ function AppMain() {
           - 팀명 한글 자동 변환 (translateTeamName)
           ══════════════════════════════════════════════════════════ */}
       {tab==="sportsTest" && (()=>{
-        // KST 기준 오늘 YYYY-MM-DD
+        // KST 기준 오늘/내일 YYYY-MM-DD
         const kstToday = new Date(Date.now() + 9*3600_000).toISOString().slice(0,10);
         const kstTomorrow = new Date(Date.now() + (9+24)*3600_000).toISOString().slice(0,10);
-
-        // 한 경기가 KST 기준 어느 날인지
         const kstDateOf = (iso:string)=>{
           try { return new Date(new Date(iso).getTime() + 9*3600_000).toISOString().slice(0,10); }
           catch { return ""; }
         };
 
-        // 종목 → 국가 → 리그 트리 자동 구성 (현재 데이터 기반)
-        // tree[sport] = { [country]: { [league]: count } }
-        const tree: Record<string, Record<string, Record<string, number>>> = {};
-        for (const f of stFixtures) {
-          if (!tree[f.sport]) tree[f.sport] = {};
-          if (!tree[f.sport][f.country]) tree[f.sport][f.country] = {};
-          tree[f.sport][f.country][f.league_name] = (tree[f.sport][f.country][f.league_name] || 0) + 1;
-        }
-        // 표시 순서: SPORT_ORDER 기준
-        const sportsList: Sport[] = SPORT_ORDER.filter(s=>s!=="esports" && tree[s]) as Sport[];
-
-        // 선택된 리그의 경기 (오늘/내일 분리)
-        const selectedFixtures = (stSelSport && stSelCountry && stSelLeague)
-          ? stFixtures.filter(f =>
-              f.sport===stSelSport && f.country===stSelCountry && f.league_name===stSelLeague
-            ).sort((a,b)=>new Date(a.start_time).getTime() - new Date(b.start_time).getTime())
-          : [];
-        const todayGames = selectedFixtures.filter(f=>kstDateOf(f.start_time)===kstToday);
-        const tomorrowGames = selectedFixtures.filter(f=>kstDateOf(f.start_time)===kstTomorrow);
-
-        const selGame = stExpandedGameId ? selectedFixtures.find(g=>g.id===stExpandedGameId) : null;
-
-        // 한글 표시 헬퍼 (사용자 매핑이 최우선, 그다음 하드코딩 사전, 마지막은 원문)
+        // 한글 표시 헬퍼
         const krCountry = (c:string)=>countryNameMap[c] || COUNTRY_KR[c] || c || "기타";
         const krLeague = (l:string)=>leagueNameMap[l] || l;
         const krTeam = (t:string)=>teamNameMap[t] || translateTeamName(t, {}) || t;
+
+        // 사용자 리그 매핑 키 생성
+        const mapKey = (sportKr:string, country:string, league:string) => `${sportKr}__${country}__${league}`;
+
+        // sport 영문 키 ↔ 한글 키 변환 (m_meta는 한글로 저장됨)
+        const sportToKr = (s:Sport):string => SPORT_META[s].kr;
+
+        // 매핑된 API league_id 집합
+        const mappedApiIds = new Set(Object.values(stLeagueMap));
+
+        // 선택된 사용자 리그의 경기 = 매핑된 API league_id의 fixtures
+        const selSportKr = stSelSport ? sportToKr(stSelSport) : "";
+        const selMapKey = (stSelSport && stSelCountry && stSelLeague)
+          ? mapKey(selSportKr, stSelCountry, stSelLeague) : "";
+        const selApiId = selMapKey ? stLeagueMap[selMapKey] : "";
+        const selectedFixtures = (selApiId && stSelSport)
+          ? stFixtures.filter(f => f.sport===stSelSport && String(f.league_id)===selApiId)
+              .sort((a,b)=>new Date(a.start_time).getTime() - new Date(b.start_time).getTime())
+          : [];
+        const todayGames = selectedFixtures.filter(f=>kstDateOf(f.start_time)===kstToday);
+        const tomorrowGames = selectedFixtures.filter(f=>kstDateOf(f.start_time)===kstTomorrow);
+        const selGame = stExpandedGameId ? selectedFixtures.find(g=>g.id===stExpandedGameId) : null;
+
+        // 종목별 경기 수 (트리에 표시용) — 매핑된 사용자 리그 기준
+        const sportsList: Sport[] = ["football","baseball","basketball","volleyball","hockey"] as Sport[];
+
+        // 트리에 표시될 항목 (사용자가 만든 국가/리그)
+        const buildSportTree = (sport:Sport) => {
+          const sKr = sportToKr(sport);
+          const countries = allCountriesForSport(sKr);
+          let totalGames = 0;
+          const items = countries.map(country => {
+            const leagues = allLeaguesForCountry(sKr, country);
+            const lgItems = leagues.map(lg => {
+              const k = mapKey(sKr, country, lg);
+              const apiId = stLeagueMap[k];
+              const games = apiId
+                ? stFixtures.filter(f=>f.sport===sport && String(f.league_id)===apiId).length
+                : 0;
+              totalGames += games;
+              return { league: lg, apiId, games };
+            });
+            const cGames = lgItems.reduce((a,b)=>a+b.games,0);
+            return { country, leagues: lgItems, games: cGames };
+          });
+          return { countries: items, totalGames };
+        };
 
         return (
           <div style={{display:"flex",flex:1,overflow:"hidden",minWidth:0,minHeight:0}}>
@@ -5795,82 +5832,89 @@ function AppMain() {
             <div style={{width:380,flexShrink:0,background:C.bg2,borderRight:`1px solid ${C.border2}`,display:"flex",flexDirection:"column",overflow:"hidden",minHeight:0}}>
               <div style={{padding:"10px 12px",borderBottom:`1px solid ${C.border}`,flexShrink:0,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                 <div>
-                  <div style={{fontSize:12,fontWeight:800,color:C.text}}>🧪 API 카테고리</div>
+                  <div style={{fontSize:12,fontWeight:800,color:C.text}}>🧪 카테고리 (사용자 정의)</div>
                   <div style={{fontSize:9,color:C.dim}}>
-                    종목 {sportsList.length} · 경기 {stFixtures.length}
+                    종목 {sportsList.length} · API경기 {stFixtures.length}
                     {stFetchedAt && <span style={{marginLeft:6}}>· {new Date(stFetchedAt).toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit"})}</span>}
                   </div>
                 </div>
                 <button onClick={()=>loadSportsTestData()} disabled={stLoading}
                   style={{padding:"4px 10px",borderRadius:5,border:`1px solid ${C.teal}`,background:`${C.teal}22`,color:C.teal,cursor:stLoading?"not-allowed":"pointer",fontWeight:700,fontSize:10,opacity:stLoading?0.5:1}}>
-                  {stLoading?"⏳ 로딩":"🔄 새로고침"}
+                  {stLoading?"⏳":"🔄 새로고침"}
                 </button>
               </div>
               <div style={{flex:1,overflowY:"auto",padding:"6px",minHeight:0}}>
-                {stLoading && stFixtures.length===0 ? (
-                  <div style={{textAlign:"center",color:C.muted,padding:"40px 10px",fontSize:11}}>
-                    <div style={{fontSize:28,marginBottom:8}}>⏳</div>
-                    API에서 경기 데이터 로딩중...
+                {stLoading && stFixtures.length===0 && (
+                  <div style={{textAlign:"center",color:C.muted,padding:"30px 10px",fontSize:11}}>
+                    <div style={{fontSize:24,marginBottom:8}}>⏳</div>
+                    API 데이터 로딩중...
                   </div>
-                ) : stError && stFixtures.length===0 ? (
-                  <div style={{textAlign:"center",color:C.red,padding:"40px 10px",fontSize:11}}>
-                    <div style={{fontSize:24,marginBottom:8}}>⚠️</div>
-                    {stError}
-                  </div>
-                ) : sportsList.length===0 ? (
-                  <div style={{textAlign:"center",color:C.dim,padding:"40px 10px",fontSize:11}}>
-                    <div style={{fontSize:24,marginBottom:8}}>📋</div>
-                    데이터 없음
-                  </div>
-                ) : sportsList.map(sport=>{
+                )}
+                {sportsList.map(sport=>{
                   const sportOpen = stExpandedSports[sport];
-                  const countriesObj = tree[sport] || {};
-                  const countriesList = Object.keys(countriesObj).sort((a,b)=>krCountry(a).localeCompare(krCountry(b),"ko"));
-                  const sportGameCount = Object.values(countriesObj).reduce((acc,lgs)=>acc+Object.values(lgs).reduce((a,c)=>a+c,0),0);
+                  const sKr = sportToKr(sport);
+                  const tree = buildSportTree(sport);
                   const isSportSel = stSelSport===sport;
                   const meta = SPORT_META[sport];
                   return (
                     <div key={sport} style={{marginBottom:3}}>
-                      <button onClick={()=>{setStExpandedSports(p=>({...p,[sport]:!p[sport]}));setStSelSport(sport);}}
-                        style={{width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",padding:"11px 12px",textAlign:"left",borderRadius:6,cursor:"pointer",border:isSportSel?`1px solid ${C.teal}`:`1px solid ${C.border}`,background:isSportSel?`${C.teal}22`:C.bg3,color:isSportSel?C.teal:C.text,fontSize:14,fontWeight:800,marginBottom:1}}>
-                        <span>{meta.icon} {meta.kr} <span style={{fontSize:11,color:C.dim,fontWeight:400}}>({sportGameCount})</span></span>
-                        <span style={{fontSize:11,color:C.dim}}>{sportOpen?"▼":"▶"}</span>
-                      </button>
+                      <div style={{display:"flex",gap:2,alignItems:"stretch",marginBottom:1}}>
+                        <button onClick={()=>{setStExpandedSports(p=>({...p,[sport]:!p[sport]}));setStSelSport(sport);}}
+                          style={{flex:1,display:"flex",justifyContent:"space-between",alignItems:"center",padding:"11px 12px",textAlign:"left",borderRadius:6,cursor:"pointer",border:isSportSel?`1px solid ${C.teal}`:`1px solid ${C.border}`,background:isSportSel?`${C.teal}22`:C.bg3,color:isSportSel?C.teal:C.text,fontSize:14,fontWeight:800}}>
+                          <span>{meta.icon} {meta.kr} <span style={{fontSize:11,color:C.dim,fontWeight:400}}>({tree.totalGames})</span></span>
+                          <span style={{fontSize:11,color:C.dim}}>{sportOpen?"▼":"▶"}</span>
+                        </button>
+                        <button onClick={()=>setAddCountryModal({sport:sKr})} title={`${meta.kr}에 국가 추가`}
+                          style={{padding:"0 14px",borderRadius:5,border:`2px solid ${C.teal}88`,background:`${C.teal}22`,color:C.teal,cursor:"pointer",fontSize:18,fontWeight:900}}>+</button>
+                      </div>
                       {sportOpen && (
                         <div style={{marginLeft:6,paddingLeft:6,borderLeft:`1px solid ${C.border}`}}>
-                          {countriesList.map(country=>{
+                          {tree.countries.length===0 ? (
+                            <div style={{fontSize:10,color:C.dim,padding:"6px 6px"}}>
+                              국가 없음 · <span style={{color:C.teal,cursor:"pointer",textDecoration:"underline"}} onClick={()=>setAddCountryModal({sport:sKr})}>추가</span>
+                            </div>
+                          ) : tree.countries.map(({country,leagues,games:cGames})=>{
                             const key=`${sport}__${country}`;
                             const cOpen = stExpandedCountries[key];
-                            const leaguesObj = countriesObj[country] || {};
-                            const leaguesList = Object.keys(leaguesObj).sort();
-                            const countryGameCount = Object.values(leaguesObj).reduce((a,c)=>a+c,0);
                             const isCountrySel = stSelSport===sport && stSelCountry===country;
                             return (
                               <div key={country} style={{marginBottom:2}}>
                                 <div style={{display:"flex",gap:2,alignItems:"stretch"}}>
                                   <button onClick={()=>{setStExpandedCountries(p=>({...p,[key]:!p[key]}));setStSelSport(sport);setStSelCountry(country);}}
                                     style={{flex:1,display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 10px",textAlign:"left",borderRadius:5,cursor:"pointer",border:isCountrySel?`1px solid ${C.teal}`:"1px solid transparent",background:isCountrySel?`${C.teal}22`:"transparent",color:isCountrySel?C.teal:C.muted,fontSize:13,fontWeight:isCountrySel?700:500,minWidth:0}}>
-                                    <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{cOpen?"▼":"▶"} {krCountry(country)} <span style={{fontSize:10,color:C.dim,fontWeight:400}}>({countryGameCount})</span></span>
+                                    <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{cOpen?"▼":"▶"} {krCountry(country)} <span style={{fontSize:10,color:C.dim,fontWeight:400}}>({cGames})</span></span>
                                   </button>
-                                  <button onClick={(e)=>{e.stopPropagation();setEditNameModal({type:"country",original:country,current:countryNameMap[country]||COUNTRY_KR[country]||""});setEditNameInput(countryNameMap[country]||COUNTRY_KR[country]||"");}}
-                                    title={`국가명 수정: ${country}`}
-                                    style={{padding:"0 7px",borderRadius:3,border:`1px solid ${countryNameMap[country]?C.teal+"66":C.border}`,background:countryNameMap[country]?`${C.teal}11`:C.bg,color:countryNameMap[country]?C.teal:C.dim,cursor:"pointer",fontSize:10,flexShrink:0}}>✏️</button>
+                                  <button onClick={()=>setAddLeagueModalM({sport:sKr,country})} title="리그 추가"
+                                    style={{padding:"0 12px",borderRadius:4,border:`2px solid ${C.amber}88`,background:`${C.amber}22`,color:C.amber,cursor:"pointer",fontSize:16,fontWeight:900}}>+</button>
+                                  <button onClick={()=>{setEditMetaModal({type:"country",sport:sKr,oldName:country});setEditMetaNewName(country);}} title="국가 이름 수정"
+                                    style={{padding:"0 6px",borderRadius:3,border:`1px solid ${C.purple}44`,background:`${C.purple}11`,color:C.purple,cursor:"pointer",fontSize:9}}>✏️</button>
                                 </div>
                                 {cOpen && (
                                   <div style={{marginLeft:6,paddingLeft:5,marginTop:1,borderLeft:`1px solid ${C.border}`}}>
-                                    {leaguesList.map(lg=>{
-                                      const lgGameCount = leaguesObj[lg];
+                                    {leagues.length===0 ? (
+                                      <div style={{fontSize:10,color:C.dim,padding:"5px 6px"}}>
+                                        리그 없음 · <span style={{color:C.amber,cursor:"pointer",textDecoration:"underline"}} onClick={()=>setAddLeagueModalM({sport:sKr,country})}>추가</span>
+                                      </div>
+                                    ) : leagues.map(({league:lg,apiId,games:lgGames})=>{
                                       const isLgSel = stSelSport===sport && stSelCountry===country && stSelLeague===lg;
+                                      const mapped = !!apiId;
                                       return (
                                         <div key={lg} style={{display:"flex",gap:1,alignItems:"stretch",marginBottom:1}}>
                                           <button onClick={()=>{setStSelSport(sport);setStSelCountry(country);setStSelLeague(lg);setStExpandedGameId(null);}}
                                             style={{flex:1,display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 10px",textAlign:"left",borderRadius:4,cursor:"pointer",border:isLgSel?`1px solid ${C.amber}`:"1px solid transparent",background:isLgSel?`${C.amber}22`:"transparent",color:isLgSel?C.amber:C.muted,fontSize:12,fontWeight:isLgSel?700:400,minWidth:0}}>
-                                            <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>⚡ {krLeague(lg)}</span>
-                                            <span style={{fontSize:10,color:C.dim,marginLeft:4,flexShrink:0}}>({lgGameCount})</span>
+                                            <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>{mapped?"⚡":"○"} {krLeague(lg)}</span>
+                                            <span style={{fontSize:10,color:C.dim,marginLeft:4,flexShrink:0}}>({lgGames})</span>
                                           </button>
-                                          <button onClick={(e)=>{e.stopPropagation();setEditNameModal({type:"league",original:lg,current:leagueNameMap[lg]||""});setEditNameInput(leagueNameMap[lg]||"");}}
-                                            title={`리그명 수정: ${lg}`}
-                                            style={{padding:"0 6px",borderRadius:3,border:`1px solid ${leagueNameMap[lg]?C.teal+"66":C.border}`,background:leagueNameMap[lg]?`${C.teal}11`:C.bg,color:leagueNameMap[lg]?C.teal:C.dim,cursor:"pointer",fontSize:9,flexShrink:0}}>✏️</button>
+                                          <button onClick={()=>{
+                                              setStMappingModal({sport,sportKr:sKr,country,league:lg});
+                                              setStMappingSelectedId(stLeagueMap[mapKey(sKr,country,lg)] || "");
+                                            }}
+                                            title={mapped?`API 매핑됨 (ID: ${apiId})`:"API 리그 매핑"}
+                                            style={{padding:"0 7px",borderRadius:3,border:`1px solid ${mapped?C.teal+"88":C.border}`,background:mapped?`${C.teal}22`:C.bg,color:mapped?C.teal:C.dim,cursor:"pointer",fontSize:9,fontWeight:700,flexShrink:0}}>
+                                            {mapped?"🔗":"API"}
+                                          </button>
+                                          <button onClick={()=>{setEditMetaModal({type:"league",sport:sKr,country,oldName:lg});setEditMetaNewName(lg);}} title="리그 이름 수정"
+                                            style={{padding:"0 5px",borderRadius:3,border:`1px solid ${C.purple}44`,background:`${C.purple}11`,color:C.purple,cursor:"pointer",fontSize:8}}>✏️</button>
                                         </div>
                                       );
                                     })}
@@ -5905,14 +5949,29 @@ function AppMain() {
                     <div style={{fontSize:28,marginBottom:8}}>🎯</div>
                     <div style={{fontSize:11,color:C.muted}}>국가 → 리그 선택</div>
                   </div>
+                ) : !selApiId ? (
+                  <div style={{textAlign:"center",color:C.dim,padding:"40px 10px"}}>
+                    <div style={{fontSize:28,marginBottom:8}}>🔗</div>
+                    <div style={{fontSize:12,color:C.amber,marginBottom:6,fontWeight:700}}>API 매핑이 필요해요</div>
+                    <div style={{fontSize:10,color:C.muted,marginBottom:12,lineHeight:1.5}}>
+                      이 리그가 어떤 API 리그와 연결될지<br/>아직 정해지지 않았어요
+                    </div>
+                    <button onClick={()=>{
+                        setStMappingModal({sport:stSelSport!,sportKr:selSportKr,country:stSelCountry,league:stSelLeague});
+                        setStMappingSelectedId("");
+                      }}
+                      style={{padding:"8px 16px",borderRadius:6,border:`1px solid ${C.teal}`,background:`${C.teal}22`,color:C.teal,cursor:"pointer",fontWeight:800,fontSize:11}}>
+                      🔗 API 리그 선택
+                    </button>
+                  </div>
                 ) : selectedFixtures.length===0 ? (
                   <div style={{textAlign:"center",color:C.dim,padding:"40px 10px"}}>
                     <div style={{fontSize:24,marginBottom:6}}>📋</div>
                     <div style={{fontSize:11}}>오늘/내일 경기 없음</div>
+                    <div style={{fontSize:9,marginTop:6,color:C.dim}}>매핑된 API ID: {selApiId}</div>
                   </div>
                 ) : (
                   <>
-                    {/* ─── 오늘 경기 ─── */}
                     {todayGames.length > 0 && (
                       <>
                         <div style={{display:"flex",alignItems:"center",gap:8,margin:"4px 2px 8px",padding:"4px 8px",background:`${C.green}11`,borderRadius:5,border:`1px solid ${C.green}33`}}>
@@ -5946,7 +6005,6 @@ function AppMain() {
                       </>
                     )}
 
-                    {/* ─── 오늘/내일 구분선 (둘 다 있을 때만) ─── */}
                     {todayGames.length > 0 && tomorrowGames.length > 0 && (
                       <div style={{margin:"14px 2px 12px",padding:"6px 10px",background:`linear-gradient(90deg,transparent,${C.amber}22,transparent)`,borderRadius:6,display:"flex",alignItems:"center",gap:8,position:"relative"}}>
                         <span style={{flex:1,height:2,background:`linear-gradient(90deg,transparent,${C.amber}66)`}}/>
@@ -5955,7 +6013,6 @@ function AppMain() {
                       </div>
                     )}
 
-                    {/* ─── 내일 경기 ─── */}
                     {tomorrowGames.length > 0 && (
                       <>
                         <div style={{display:"flex",alignItems:"center",gap:8,margin:"4px 2px 8px",padding:"4px 8px",background:`${C.amber}11`,borderRadius:5,border:`1px solid ${C.amber}33`}}>
@@ -6019,7 +6076,6 @@ function AppMain() {
                     </div>
                     <div style={{flex:1,overflowY:"auto",padding:"16px 18px 22px",minHeight:0}}>
 
-                      {/* 경기 정보 카드 */}
                       <div style={{marginBottom:16,padding:"14px 16px",background:C.bg2,borderRadius:8,border:`1px solid ${C.border}`}}>
                         <div style={{fontSize:11,fontWeight:800,color:C.teal,marginBottom:10,paddingBottom:7,borderBottom:`1px solid ${C.border}`,letterSpacing:1}}>📋 경기 정보</div>
                         <div style={{display:"grid",gridTemplateColumns:"100px 1fr",gap:"8px 14px",fontSize:12}}>
@@ -6041,22 +6097,20 @@ function AppMain() {
                               <span style={{color:C.text,fontWeight:900,fontSize:14}}>{g.home_score} : {g.away_score}</span>
                             </>
                           )}
-                          <span style={{color:C.dim}}>리그</span>
-                          <span style={{color:C.text}}>{krLeague(g.league_name)} <span style={{color:C.dim,fontSize:10}}>{leagueNameMap[g.league_name]?`(원문: ${g.league_name}, ID: ${g.league_id})`:`(ID: ${g.league_id})`}</span></span>
-                          <span style={{color:C.dim}}>국가</span>
-                          <span style={{color:C.text}}>{krCountry(g.country)} <span style={{color:C.dim,fontSize:10}}>({g.country})</span></span>
+                          <span style={{color:C.dim}}>API 리그</span>
+                          <span style={{color:C.text}}>{g.league_name} <span style={{color:C.dim,fontSize:10}}>(ID: {g.league_id})</span></span>
+                          <span style={{color:C.dim}}>API 국가</span>
+                          <span style={{color:C.text}}>{krCountry(g.country)} <span style={{color:C.dim,fontSize:10}}>({g.country||"-"})</span></span>
                           <span style={{color:C.dim}}>경기 ID</span>
                           <span style={{color:C.dim,fontSize:11}}>{g.id}</span>
                         </div>
                       </div>
 
-                      {/* 안내: 베팅 옵션 (테스트용) */}
                       <div style={{padding:"14px 16px",background:C.bg2,borderRadius:8,border:`1px dashed ${C.border2}`}}>
                         <div style={{fontSize:11,fontWeight:800,color:C.purple,marginBottom:8,letterSpacing:1}}>🚧 다음 단계</div>
                         <div style={{fontSize:11,color:C.muted,lineHeight:1.7}}>
                           이 화면은 API 데이터를 그대로 보여주는 <b style={{color:C.text}}>테스트 화면</b>입니다.<br/>
-                          여기서 정상 동작이 확인되면 다음 단계로 베팅 옵션(승무패/오버언더/핸디캡)과<br/>
-                          슬립 추가 버튼을 기존 스포츠 탭과 동일하게 붙입니다.
+                          베팅 옵션과 슬립 추가 버튼은 다음 단계에서 추가됩니다.
                         </div>
                       </div>
                     </div>
@@ -6161,6 +6215,161 @@ function AppMain() {
                   style={{padding:"9px 18px",borderRadius:6,border:`1px solid ${typeColor}`,background:`${typeColor}33`,color:typeColor,cursor:"pointer",fontWeight:800,fontSize:12}}>
                   💾 저장
                 </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+
+      {/* ══════════════════════════════════════════════════════════
+          🧪 스포츠(테스트) 탭 - API 리그 매핑 모달
+          사용자 리그 1개를 API 리그 1개에 연결 (1:1, 변경 가능)
+          ══════════════════════════════════════════════════════════ */}
+      {stMappingModal && (()=>{
+        const m = stMappingModal;
+        const k = `${m.sportKr}__${m.country}__${m.league}`;
+        const currentMapping = stLeagueMap[k] || "";
+
+        // 후보: 같은 종목의 API 리그들 (중복 제거, 경기 수 포함)
+        const apiLeagues = new Map<string, {name:string; country:string; count:number}>();
+        for (const f of stFixtures) {
+          if (f.sport !== m.sport) continue;
+          const id = String(f.league_id);
+          if (!apiLeagues.has(id)) {
+            apiLeagues.set(id, {name:f.league_name, country:f.country||"", count:0});
+          }
+          apiLeagues.get(id)!.count++;
+        }
+        // 다른 사용자 리그가 이미 매핑한 API ID는 표시하되 비활성화
+        const otherMappings: Record<string,string> = {}; // apiId → "다른 사용자 리그 표시명"
+        for (const otherKey of Object.keys(stLeagueMap)) {
+          if (otherKey === k) continue;
+          otherMappings[stLeagueMap[otherKey]] = otherKey;
+        }
+        const apiList = Array.from(apiLeagues.entries())
+          .map(([id, info]) => ({id, ...info}))
+          .sort((a,b) => a.name.localeCompare(b.name));
+
+        const handleSave = () => {
+          const next = {...stLeagueMap};
+          if (stMappingSelectedId) next[k] = stMappingSelectedId;
+          else delete next[k];
+          saveStLeagueMap(next);
+          setStMappingModal(null);
+          setStMappingSelectedId("");
+        };
+        const handleClear = () => {
+          const next = {...stLeagueMap};
+          delete next[k];
+          saveStLeagueMap(next);
+          setStMappingModal(null);
+          setStMappingSelectedId("");
+        };
+
+        return (
+          <div onClick={()=>setStMappingModal(null)}
+            style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+            <div onClick={e=>e.stopPropagation()}
+              style={{background:C.bg2,border:`1px solid ${C.teal}`,borderRadius:10,padding:"20px 24px",minWidth:520,maxWidth:640,width:"90%",maxHeight:"85vh",display:"flex",flexDirection:"column",boxShadow:`0 10px 40px ${C.teal}33`}}>
+
+              {/* 헤더 */}
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14,flexShrink:0}}>
+                <div>
+                  <div style={{fontSize:11,color:C.teal,fontWeight:800,letterSpacing:1,marginBottom:4}}>🔗 API 리그 매핑</div>
+                  <div style={{fontSize:14,color:C.text,fontWeight:800}}>
+                    {SPORT_META[m.sport].icon} {m.sportKr} · {countryNameMap[m.country]||COUNTRY_KR[m.country]||m.country} · <span style={{color:C.amber}}>{leagueNameMap[m.league]||m.league}</span>
+                  </div>
+                  <div style={{fontSize:10,color:C.dim,marginTop:4}}>이 사용자 리그에 연결할 API 리그를 선택하세요 (1:1)</div>
+                </div>
+                <button onClick={()=>setStMappingModal(null)}
+                  style={{background:"transparent",border:`1px solid ${C.border}`,color:C.muted,padding:"4px 10px",borderRadius:5,cursor:"pointer",fontSize:12,flexShrink:0}}>✕</button>
+              </div>
+
+              {/* 현재 매핑 상태 */}
+              {currentMapping && (
+                <div style={{padding:"10px 12px",background:`${C.teal}11`,border:`1px solid ${C.teal}44`,borderRadius:6,marginBottom:12,fontSize:11,color:C.teal,flexShrink:0}}>
+                  ✅ 현재 매핑됨: API ID <b>{currentMapping}</b>
+                  {(()=>{
+                    const cur = apiLeagues.get(currentMapping);
+                    return cur ? <span style={{marginLeft:6,color:C.muted}}>({cur.name})</span> : null;
+                  })()}
+                </div>
+              )}
+
+              {/* 검색 (간단히) */}
+              {apiList.length > 8 && (
+                <input
+                  placeholder={`🔍 ${apiList.length}개의 ${m.sportKr} API 리그 검색...`}
+                  value={tnSearch}
+                  onChange={e=>setTnSearch(e.target.value)}
+                  style={{width:"100%",padding:"8px 12px",borderRadius:6,border:`1px solid ${C.border2}`,background:C.bg,color:C.text,fontSize:12,marginBottom:10,boxSizing:"border-box",flexShrink:0,outline:"none"}}
+                />
+              )}
+
+              {/* API 리그 리스트 (라디오) */}
+              <div style={{flex:1,overflowY:"auto",padding:"4px",border:`1px solid ${C.border}`,borderRadius:6,background:C.bg}}>
+                {apiList.length === 0 ? (
+                  <div style={{textAlign:"center",padding:"30px 10px",color:C.muted,fontSize:11}}>
+                    <div style={{fontSize:24,marginBottom:8}}>📭</div>
+                    {m.sportKr}에 해당하는 API 데이터가 없어요.<br/>
+                    <span style={{fontSize:10,color:C.dim}}>fixtures 테이블에 데이터가 들어와야 표시됩니다.</span>
+                  </div>
+                ) : (
+                  apiList
+                    .filter(it => !tnSearch || it.name.toLowerCase().includes(tnSearch.toLowerCase()) || it.country.toLowerCase().includes(tnSearch.toLowerCase()))
+                    .map(it => {
+                      const takenBy = otherMappings[it.id]; // 다른 사용자 리그가 이미 매핑한 경우
+                      const isSelected = stMappingSelectedId === it.id;
+                      const isCurrent = currentMapping === it.id;
+                      const disabled = !!takenBy;
+                      return (
+                        <label key={it.id}
+                          style={{display:"flex",alignItems:"center",gap:10,padding:"9px 12px",borderRadius:5,cursor:disabled?"not-allowed":"pointer",opacity:disabled?0.45:1,background:isSelected?`${C.teal}22`:"transparent",border:isSelected?`1px solid ${C.teal}66`:`1px solid transparent`,marginBottom:2}}>
+                          <input type="radio"
+                            name="apiLeagueChoice"
+                            checked={isSelected}
+                            disabled={disabled}
+                            onChange={()=>!disabled && setStMappingSelectedId(it.id)}
+                            style={{cursor:disabled?"not-allowed":"pointer",accentColor:C.teal}}
+                          />
+                          <div style={{flex:1,minWidth:0}}>
+                            <div style={{fontSize:12,fontWeight:isSelected?800:600,color:disabled?C.dim:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                              {it.name}
+                              {isCurrent && <span style={{marginLeft:6,fontSize:9,padding:"1px 6px",borderRadius:99,background:`${C.teal}33`,color:C.teal,fontWeight:700}}>현재</span>}
+                            </div>
+                            <div style={{fontSize:10,color:C.dim,marginTop:2}}>
+                              {it.country ? `${COUNTRY_KR[it.country]||it.country} · ` : ""}
+                              ID: {it.id} · {it.count}경기
+                              {takenBy && <span style={{marginLeft:6,color:C.amber}}>· "{takenBy.split("__").slice(-1)[0]}"에 이미 매핑됨</span>}
+                            </div>
+                          </div>
+                        </label>
+                      );
+                    })
+                )}
+              </div>
+
+              {/* 액션 버튼 */}
+              <div style={{display:"flex",gap:8,justifyContent:"space-between",marginTop:14,flexShrink:0}}>
+                <div>
+                  {currentMapping && (
+                    <button onClick={handleClear}
+                      style={{padding:"9px 14px",borderRadius:6,border:`1px solid ${C.red}66`,background:`${C.red}11`,color:C.red,cursor:"pointer",fontWeight:700,fontSize:12}}>
+                      🗑 매핑 해제
+                    </button>
+                  )}
+                </div>
+                <div style={{display:"flex",gap:8}}>
+                  <button onClick={()=>setStMappingModal(null)}
+                    style={{padding:"9px 16px",borderRadius:6,border:`1px solid ${C.border2}`,background:C.bg3,color:C.muted,cursor:"pointer",fontWeight:700,fontSize:12}}>
+                    취소
+                  </button>
+                  <button onClick={handleSave} disabled={!stMappingSelectedId || stMappingSelectedId === currentMapping}
+                    style={{padding:"9px 18px",borderRadius:6,border:`1px solid ${C.teal}`,background:(!stMappingSelectedId || stMappingSelectedId === currentMapping)?`${C.teal}11`:`${C.teal}33`,color:C.teal,cursor:(!stMappingSelectedId || stMappingSelectedId === currentMapping)?"not-allowed":"pointer",fontWeight:800,fontSize:12,opacity:(!stMappingSelectedId || stMappingSelectedId === currentMapping)?0.5:1}}>
+                    💾 매핑 저장
+                  </button>
+                </div>
               </div>
             </div>
           </div>
