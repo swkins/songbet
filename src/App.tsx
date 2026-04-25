@@ -1788,7 +1788,7 @@ function AppMain() {
 
       // ─── 1단계: 사이트 리스트 먼저 로드 (site_states 로드가 이 값을 필요로 함) ───
       const settings = await safe("app_settings",()=>db.loadAppSettingsBundle(),{
-        krw_sites:null,usd_sites:null,pext_sites:[],pext_cats:[],pext_subcats:[],code_memo_draft:"1. ",league_api_map:{},sports_test_league_map:{},
+        krw_sites:null,usd_sites:null,pext_sites:[],pext_cats:[],pext_subcats:[],code_memo_draft:"1. ",league_api_map:{},sports_test_league_map:{},fixtures_cache_meta:{...db.EMPTY_FIXTURES_CACHE_META},
       });
       if(cancelled)return;
       const krw = settings.krw_sites ?? DEFAULT_KRW_SITES;
