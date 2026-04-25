@@ -2083,8 +2083,9 @@ function AppMain() {
   };
 
   const autoSettle = useCallback(async () => {
-    // 진행중 베팅 중 fixtureId 있는 것 (수동 경기 제외)
-    const targets = bets.filter(b =>
+    // DB에서 최신 bets를 직접 로드 (stale closure 완전 방지 + camelCase 보장)
+    const freshBets = await db.loadBets();
+    const targets = freshBets.filter(b =>
       b.result === "진행중" &&
       (b as any).fixtureId != null &&
       !(b as any).isManual
@@ -2092,21 +2093,23 @@ function AppMain() {
     if (targets.length === 0) return;
 
     // fixtures 테이블에서 해당 경기들 조회
-    const fixtureIds = [...new Set(targets.map(b => (b as any).fixtureId as number))];
+    const fixtureIds = [...new Set(targets.map(b => Number((b as any).fixtureId)))].filter(n => !isNaN(n) && n > 0);
+    if (fixtureIds.length === 0) return;
+
     const { data: rows, error } = await supabase
       .from('fixtures')
       .select('fixture_id,sport,status_short,home_score,away_score')
       .in('fixture_id', fixtureIds);
     if (error || !rows) return;
 
-    // fixture_id → row 맵
+    // fixture_id → row 맵 (number 키로 통일)
     const fixtureMap = new Map<number, any>();
-    for (const r of rows) fixtureMap.set(r.fixture_id, r);
+    for (const r of rows) fixtureMap.set(Number(r.fixture_id), r);
 
     const updatedBets: Bet[] = [];
 
     for (const bet of targets) {
-      const fid = (bet as any).fixtureId as number;
+      const fid = Number((bet as any).fixtureId);
       const row = fixtureMap.get(fid);
       if (!row) continue;
 
@@ -2155,11 +2158,10 @@ function AppMain() {
       // 그 외 (NS, 1H, HT, 2H 등 진행중) → 스킵
 
       if (newResult && newResult !== bet.result) {
-        // 승이면 profit 계산, 패면 -amount
         const profit = newResult === "승"
           ? parseFloat((bet.amount * bet.odds - bet.amount).toFixed(2))
           : newResult === "패" ? -bet.amount
-          : null; // 취소/연기/중단은 profit null (확인 시 처리)
+          : null;
         const updated = { ...bet, result: newResult, profit } as Bet;
         updatedBets.push(updated);
         db.upsertBet(updated);
@@ -2173,7 +2175,7 @@ function AppMain() {
       }));
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bets]);
+  }, []);
 
 
   // ── 새로고침 메인 함수 ───────────────────────────────────────
@@ -4348,62 +4350,32 @@ function AppMain() {
 
                             {/* 농구: 오버/언더 */}
                             {isBasketball && (
-                              <>
-                                {/* 핸디캡 */}
-                                <div style={{marginBottom:14}}>
-                                  <div style={{fontSize:10,fontWeight:800,color:C.amber,marginBottom:6,letterSpacing:1}}>핸디캡</div>
-                                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                                    {[
-                                      {team:krTeam(g.home_team),color:C.green},
-                                      {team:krTeam(g.away_team),color:C.teal},
-                                    ].map(({team,color})=>(
-                                      <div key={team}>
-                                        <div style={{fontSize:10,color,marginBottom:5,fontWeight:800,textAlign:"center",background:`${color}22`,borderRadius:4,padding:"2px 0"}}>{team}</div>
-                                        <div style={{display:"flex",flexDirection:"column",gap:3}}>
-                                          {Array.from({length:25},(_,i)=>5.5+i).map(ln=>{
-                                            const opt=`${team} 핸디 (${ln})`;
-                                            const added=inSlip(opt);
-                                            return <button key={opt} onClick={()=>handleSlipPick(g,opt)}
-                                              style={{padding:"7px 8px",borderRadius:5,cursor:"pointer",
-                                                border:added?`2px solid ${color}`:`1px solid ${C.border}`,
-                                                background:added?`${color}33`:C.bg2,color:added?color:C.text,
-                                                fontWeight:added?800:600,fontSize:11,textAlign:"left" as const}}>
-                                              {team} <b>({ln})</b>
-                                            </button>;
-                                          })}
-                                        </div>
+                              <div style={{marginBottom:14}}>
+                                <div style={{fontSize:10,fontWeight:800,color:"#e05a9a",marginBottom:6,letterSpacing:1}}>오버/언더</div>
+                                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                                  {[
+                                    {label:"오버",color:"#e05a9a"},
+                                    {label:"언더",color:"#7ac4ff"},
+                                  ].map(({label,color})=>(
+                                    <div key={label}>
+                                      <div style={{fontSize:10,color,marginBottom:5,fontWeight:800,textAlign:"center",background:`${color}22`,borderRadius:4,padding:"2px 0"}}>{label}</div>
+                                      <div style={{display:"flex",flexDirection:"column",gap:3}}>
+                                        {ouLinesBasketball.map(ln=>{
+                                          const opt=`${label} (${ln})`;
+                                          const added=inSlip(opt);
+                                          return <button key={opt} onClick={()=>handleSlipPick(g,opt)}
+                                            style={{padding:"7px 6px",borderRadius:5,cursor:"pointer",
+                                              border:added?`2px solid ${color}`:`1px solid ${C.border}`,
+                                              background:added?`${color}33`:C.bg2,color:added?color:C.text,
+                                              fontWeight:added?800:600,fontSize:11}}>
+                                            {label} <b>({ln})</b>
+                                          </button>;
+                                        })}
                                       </div>
-                                    ))}
-                                  </div>
+                                    </div>
+                                  ))}
                                 </div>
-                                {/* 오버/언더 */}
-                                <div style={{marginBottom:14}}>
-                                  <div style={{fontSize:10,fontWeight:800,color:"#e05a9a",marginBottom:6,letterSpacing:1}}>오버/언더</div>
-                                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                                    {[
-                                      {label:"오버",color:"#e05a9a"},
-                                      {label:"언더",color:"#7ac4ff"},
-                                    ].map(({label,color})=>(
-                                      <div key={label}>
-                                        <div style={{fontSize:10,color,marginBottom:5,fontWeight:800,textAlign:"center",background:`${color}22`,borderRadius:4,padding:"2px 0"}}>{label}</div>
-                                        <div style={{display:"flex",flexDirection:"column",gap:3}}>
-                                          {ouLinesBasketball.map(ln=>{
-                                            const opt=`${label} (${ln})`;
-                                            const added=inSlip(opt);
-                                            return <button key={opt} onClick={()=>handleSlipPick(g,opt)}
-                                              style={{padding:"7px 6px",borderRadius:5,cursor:"pointer",
-                                                border:added?`2px solid ${color}`:`1px solid ${C.border}`,
-                                                background:added?`${color}33`:C.bg2,color:added?color:C.text,
-                                                fontWeight:added?800:600,fontSize:11}}>
-                                              {label} <b>({ln})</b>
-                                            </button>;
-                                          })}
-                                        </div>
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
-                              </>
+                              </div>
                             )}
 
                             {/* 배구: 승패만 (세트 기반) */}
