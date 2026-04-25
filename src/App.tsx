@@ -2093,7 +2093,6 @@ function AppMain() {
     );
     if (targets.length === 0) return;
 
-    // fixtures 테이블에서 해당 경기들 조회
     const fixtureIds = [...new Set(targets.map(b => Number((b as any).fixtureId)))].filter(n => !isNaN(n) && n > 0);
     if (fixtureIds.length === 0) return;
 
@@ -2117,53 +2116,31 @@ function AppMain() {
       const status = row.status_short as string;
       const hs = row.home_score as number | null;
       const as_ = row.away_score as number | null;
-
-      // 종료 상태별 판정
       let newResult: string | null = null;
 
       if (status === 'FT' || status === 'AET' || status === 'PEN') {
         if (hs === null || as_ === null) continue;
         const opt = bet.betOption;
         const total = hs + as_;
-
-        if (opt === "홈승") {
-          newResult = hs > as_ ? "승" : "패";
-        } else if (opt === "원정승") {
-          newResult = as_ > hs ? "승" : "패";
-        } else if (opt === "무승부") {
-          newResult = hs === as_ ? "승" : "패";
-        } else if (opt.startsWith("오버")) {
-          const line = parseFloat(opt.replace(/[^0-9.]/g, ""));
-          if (!isNaN(line)) newResult = total > line ? "승" : "패";
-        } else if (opt.startsWith("언더")) {
-          const line = parseFloat(opt.replace(/[^0-9.]/g, ""));
-          if (!isNaN(line)) newResult = total < line ? "승" : "패";
-        } else if (opt.includes("(")) {
-          const lineMatch = opt.match(/\(([+-]?[\d.]+)\)/);
-          if (lineMatch) {
-            const line = parseFloat(lineMatch[1]);
-            const isHome = opt.includes(bet.homeTeam ?? "홈");
-            const diff = isHome ? (hs - as_) : (as_ - hs);
-            newResult = diff > line ? "승" : "패";
-          }
+        if (opt === "홈승") newResult = hs > as_ ? "승" : "패";
+        else if (opt === "원정승") newResult = as_ > hs ? "승" : "패";
+        else if (opt === "무승부") newResult = hs === as_ ? "승" : "패";
+        else if (opt.startsWith("오버")) { const line=parseFloat(opt.replace(/[^0-9.]/g,"")); if(!isNaN(line)) newResult=total>line?"승":"패"; }
+        else if (opt.startsWith("언더")) { const line=parseFloat(opt.replace(/[^0-9.]/g,"")); if(!isNaN(line)) newResult=total<line?"승":"패"; }
+        else if (opt.includes("(")) {
+          const m=opt.match(/\(([+-]?[\d.]+)\)/);
+          if(m){ const line=parseFloat(m[1]); const isHome=opt.includes(bet.homeTeam??"홈"); const diff=isHome?(hs-as_):(as_-hs); newResult=diff>line?"승":"패"; }
         }
-      } else if (status === 'CANC') {
-        newResult = "취소";
-      } else if (status === 'PST') {
-        newResult = "연기";
-      } else if (status === 'ABD') {
-        newResult = "중단";
-      }
-      // 그 외 (NS, 1H, HT, 2H 등 진행중) → 스킵
+      } else if (status==='CANC') newResult="취소";
+      else if (status==='PST') newResult="연기";
+      else if (status==='ABD') newResult="중단";
 
       if (newResult) {
-        // 바로 확정하지 않고 "대기_*" 상태로 저장 → 사용자가 확인 버튼 눌러야 확정
+        // 바로 확정하지 않고 "대기_*" 상태 → 사용자가 확인 버튼 눌러야 확정
         const pendingResult =
-          newResult === "승" ? "대기_승" :
-          newResult === "패" ? "대기_패" :
-          newResult === "취소" ? "대기_취소" :
-          newResult === "연기" ? "대기_연기" : "대기_중단";
-        const updated = { ...bet, result: pendingResult, profit: null } as Bet;
+          newResult==="승"?"대기_승":newResult==="패"?"대기_패":
+          newResult==="취소"?"대기_취소":newResult==="연기"?"대기_연기":"대기_중단";
+        const updated = {...bet, result: pendingResult, profit: null} as Bet;
         updatedBets.push(updated);
         db.upsertBet(updated);
       }
@@ -2510,24 +2487,22 @@ function AppMain() {
     });
   };
 
-  // 확인 버튼 — 대기_* 상태를 최종 확정 (승/패/취소)
+  // 확인 버튼 — 대기_* 상태를 최종 확정
   const confirmResult=(id:string)=>{
     const bet=bets.find(b=>b.id===id);if(!bet)return;
     const actualResult =
-      bet.result==="대기_승" ? "승" :
-      bet.result==="대기_패" ? "패" :
-      bet.result==="대기_취소"||bet.result==="대기_연기"||bet.result==="대기_중단" ? "취소" : bet.result;
-    const needRefund = actualResult === "취소";
+      bet.result==="대기_승"?"승":
+      bet.result==="대기_패"?"패":
+      (bet.result==="대기_취소"||bet.result==="대기_연기"||bet.result==="대기_중단")?"취소":bet.result;
+    const needRefund = actualResult==="취소";
     const finalProfit = actualResult==="승"
       ? parseFloat((bet.amount*bet.odds-bet.amount).toFixed(2))
-      : actualResult==="패" ? -bet.amount : 0;
-    const confirmed = {...bet, result: actualResult, profit: finalProfit} as Bet;
+      : actualResult==="패"?-bet.amount:0;
+    const confirmed={...bet,result:actualResult,profit:finalProfit} as Bet;
     setBetsRaw(b=>b.map(x=>x.id===id?confirmed:x));
     db.upsertBet(confirmed);
-    addLog(
-      needRefund ? "↩ 환원" : actualResult==="승" ? "✅ 확인" : "❌ 확인",
-      `${bet.homeTeam||bet.teamName||""} ${needRefund?`(${bet.result}→환원)`:""}`
-    );
+    addLog(needRefund?"↩ 환원":actualResult==="승"?"✅ 확인":"❌ 확인",
+      `${bet.homeTeam||bet.teamName||""} ${needRefund?`(${bet.result}→환원)`:""}`);
     if(needRefund){
       const curSS=siteStates[bet.site]||{deposited:0,betTotal:0,active:false,isDollar:isUSD(bet.site)};
       const refundedSS={...curSS,betTotal:parseFloat(Math.max(0,curSS.betTotal-bet.amount).toFixed(2))};
@@ -2553,6 +2528,8 @@ function AppMain() {
     setSiteStatesRaw(p=>({...p,[bet.site]:revertedSS}));
     db.upsertSiteState(bet.site,revertedSS);
     addLog("↩ 처리 취소",`${bet.site}/${bet.homeTeam||bet.teamName||id}`);
+    // 진행중 복귀 후 즉시 재판정
+    setTimeout(()=>autoSettle(), 300);
   };
   const deleteFromStats=(id:string)=>{
     setBetsRaw(b=>b.map(bet=>{if(bet.id!==id)return bet;const u={...bet,includeStats:false};db.upsertBet(u);return u;}));
@@ -2574,9 +2551,9 @@ function AppMain() {
     const isManual=(b as any).isManual===true;
     const hasFixtureId=!isManual&&(b as any).fixtureId!=null;
 
-    // 자동 판정 결과 여부 (대기_* 상태)
+    // 대기_* 상태 = 자동 판정 완료, 확인 대기 중
     const autoResult = b.result.startsWith("대기_");
-    const actualResult = b.result === "대기_승" ? "승" : b.result === "대기_패" ? "패" : b.result === "대기_취소" ? "취소" : b.result === "대기_연기" ? "연기" : b.result === "대기_중단" ? "중단" : b.result;
+    const actualResult = b.result==="대기_승"?"승":b.result==="대기_패"?"패":b.result==="대기_취소"?"취소":b.result==="대기_연기"?"연기":b.result==="대기_중단"?"중단":b.result;
     const stampColor = actualResult==="승"?C.green:actualResult==="패"?C.red:C.amber;
     const stampText = actualResult==="승"?"적중":actualResult==="패"?"실패":actualResult==="취소"?"취소":actualResult==="연기"?"연기":"중단";
 
@@ -2605,7 +2582,6 @@ function AppMain() {
             }}>{stampText}</div>
           </div>
         )}
-
         {/* 카드 내용 */}
         <div style={{position:"relative",zIndex:2,opacity:autoResult?0.5:1}}>
           <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:5,flexWrap:"wrap"}}>
@@ -2627,28 +2603,25 @@ function AppMain() {
             </div>
             {!autoResult && (
               <div style={{display:"flex",gap:3,flexShrink:0}}>
-                {isManual || !hasFixtureId ? (
+                {isManual||!hasFixtureId ? (
                   <>
                     <button onClick={()=>updateResult(b.id,"승")} style={{background:`${C.green}22`,border:`1px solid ${C.green}`,color:C.green,padding:"4px 10px",borderRadius:4,cursor:"pointer",fontWeight:800,fontSize:11}}>적중</button>
                     <button onClick={()=>updateResult(b.id,"패")} style={{background:`${C.red}22`,border:`1px solid ${C.red}`,color:C.red,padding:"4px 10px",borderRadius:4,cursor:"pointer",fontWeight:800,fontSize:11}}>실패</button>
                   </>
-                ) : null}
+                ):null}
                 <button onClick={()=>cancelBet(b.id)} style={{background:C.bg,border:`1px solid ${C.border2}`,color:C.muted,padding:"4px 10px",borderRadius:4,cursor:"pointer",fontSize:11}}>취소</button>
               </div>
             )}
           </div>
         </div>
-
-        {/* 확인 버튼 — 항상 표시, 카드 하단 */}
+        {/* 확인 버튼 — 항상 표시 */}
         {autoResult && (
-          <div style={{position:"relative",zIndex:3,marginTop:8,display:"flex",justifyContent:"flex-end",gap:6}}>
+          <div style={{position:"relative",zIndex:3,marginTop:8,display:"flex",justifyContent:"flex-end"}}>
             <button onClick={()=>confirmResult(b.id)}
-              style={{
-                padding:"6px 20px",borderRadius:6,fontWeight:900,fontSize:13,
+              style={{padding:"6px 20px",borderRadius:6,fontWeight:900,fontSize:13,
                 cursor:"pointer",letterSpacing:1,
                 background:stampColor,border:`2px solid ${stampColor}`,color:C.bg,
-                boxShadow:`0 2px 10px ${stampColor}66`,
-              }}>
+                boxShadow:`0 2px 10px ${stampColor}66`}}>
               {actualResult==="승"?"✅ 적중 확인":actualResult==="패"?"❌ 실패 확인":"✔ 확인"}
             </button>
           </div>
@@ -2671,8 +2644,8 @@ function AppMain() {
     return tb-ta;
   });
   // ⚡ 라이브 베팅(isLive=true)은 별도 "실시간" 통계에서만 집계되도록 done에서 제외
-  const done=bets.filter(b=>b.result!=="진행중"&&b.includeStats!==false&&(b as any).isLive!==true);
-  const doneFull=bets.filter(b=>b.result!=="진행중"&&(b as any).isLive!==true);
+  const done=bets.filter(b=>!b.result.startsWith("대기_")&&b.result!=="진행중"&&b.includeStats!==false&&(b as any).isLive!==true);
+  const doneFull=bets.filter(b=>!b.result.startsWith("대기_")&&b.result!=="진행중"&&(b as any).isLive!==true);
   const doneTodayFull=doneFull.filter(b=>b.date===today);
   const doneOldFull=doneFull.filter(b=>b.date!==today);
   const krwProfit=done.filter(b=>!b.isDollar).reduce((s,b)=>s+(b.profit??0),0);
