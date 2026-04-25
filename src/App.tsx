@@ -59,6 +59,20 @@
 //  로드 실패 시 빈 값 폴백 (throw 금지)
 //  에러는 dataLoadErrors 배너로 사용자에게 표시
 //
+// ── 규칙 6. Claude에게 (파일 요청 기준) ─────────────────────
+//  아래 작업은 App.tsx만으로 가능:
+//    · UI 수정, 탭 추가/제거, 기존 기능 변경
+//    · 이미 있는 테이블/app_settings 키 사용
+//
+//  아래 작업은 반드시 db.ts도 함께 요청할 것:
+//    · 새로운 데이터를 Supabase에 저장해야 할 때
+//    · app_settings에 새 키를 추가할 때
+//    · AppSettingsBundle 타입 변경이 필요할 때
+//    · 새 테이블용 load/upsert/delete 함수가 필요할 때
+//
+//  ⚠️ db.ts 없이 새 데이터를 추가하면 TypeScript 타입 오류 발생!
+//  새 데이터 추가 시 Claude가 스스로 "db.ts도 주세요" 라고 요청할 것
+//
 // ─────────────────────────────────────────────────────────────
 // rev.6 변경사항 (2026-04-25):
 //  - API-Sports 직접 호출 → Supabase Edge Function으로 이관
@@ -1539,7 +1553,7 @@ function AppMain() {
 
       // ─── 1단계: 사이트 리스트 먼저 로드 (site_states 로드가 이 값을 필요로 함) ───
       const settings = await safe("app_settings",()=>db.loadAppSettingsBundle(),{
-        krw_sites:null,usd_sites:null,pext_sites:[],pext_cats:[],pext_subcats:[],code_memo_draft:"1. ",
+        krw_sites:null,usd_sites:null,pext_sites:[],pext_cats:[],pext_subcats:[],code_memo_draft:"1. ",league_api_map:{},
       });
       if(cancelled)return;
       const krw = settings.krw_sites ?? DEFAULT_KRW_SITES;
