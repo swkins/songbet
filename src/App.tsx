@@ -2085,11 +2085,11 @@ function AppMain() {
   const autoSettle = useCallback(async () => {
     const freshBets = await db.loadBets();
     const targets = freshBets.filter(b=>b.result==="진행중"&&(b as any).fixtureId!=null&&!(b as any).isManual);
-    if (targets.length===0) return;
+    if(targets.length===0) return;
     const fixtureIds=[...new Set(targets.map(b=>Number((b as any).fixtureId)))].filter(n=>!isNaN(n)&&n>0);
-    if (fixtureIds.length===0) return;
+    if(fixtureIds.length===0) return;
     const {data:rows,error}=await supabase.from('fixtures').select('fixture_id,sport,status_short,home_score,away_score').in('fixture_id',fixtureIds);
-    if (error||!rows) return;
+    if(error||!rows) return;
     const fixtureMap=new Map<number,any>();
     for(const r of rows) fixtureMap.set(Number(r.fixture_id),r);
     const updatedBets:Bet[]=[];
@@ -2113,10 +2113,11 @@ function AppMain() {
           const m=opt.match(/\(([+-]?[\d.]+)\)/);
           if(m){
             const line=parseFloat(m[1]);
-            const isHome=opt.includes(bet.homeTeam??"홈");
+            const isHome=!!(bet.homeTeam&&opt.includes(bet.homeTeam));
             const myScore=isHome?hs:as_, oppScore=isHome?as_:hs;
             const handi=myScore+line-oppScore;
-            newResult=handi>0?"승":handi<0?"패":null;
+            if(handi>0) newResult="승";
+            else if(handi<0) newResult="패";
           }
         }
       } else if(status==='CANC') newResult="취소";
@@ -2394,14 +2395,13 @@ function AppMain() {
     setDepSite("");setDepAmt(0);setDepPoint(0);
   };
 
-  // 포인트 전용 추가 (입금 통계엔 기록 X, pointTotal만 증가)
+  // 포인트 전용 추가 — pointTotal만 증가, deposited/betTotal 절대 건드리지 않음
   const handleAddPoint=(site:string, amount:number)=>{
     if(!site) return alert("사이트를 선택해주세요.");
     if(!amount||amount<=0) return alert("포인트 금액을 입력해주세요.");
     const dollar=isUSD(site);
-    const curSS = siteStates[site] || {deposited:0,betTotal:0,active:false,isDollar:dollar,pointTotal:0};
-    const prevPoint = parseFloat(String(curSS.pointTotal||0));
-    const updated = {...curSS,active:true,isDollar:dollar,pointTotal:parseFloat((prevPoint+amount).toFixed(2))};
+    const curSS=siteStates[site]||{deposited:0,betTotal:0,active:false,isDollar:dollar,pointTotal:0};
+    const updated={...curSS,active:true,isDollar:dollar,pointTotal:parseFloat(((curSS.pointTotal||0)+amount).toFixed(2))};
     setSiteStatesRaw(p=>({...p,[site]:updated}));
     db.upsertSiteState(site,updated);
     addLog("🎁 포인트",`${site}/${fmtDisp(amount,dollar)}`);
@@ -2456,7 +2456,7 @@ function AppMain() {
     });
   };
 
-  // 확인 버튼 — 대기_* 상태를 최종 확정 (siteStates 절대 건드리지 않음)
+  // 확인 버튼 — 대기_* 최종 확정. siteStates 절대 건드리지 않음
   const confirmResult=(id:string)=>{
     const bet=bets.find(b=>b.id===id);if(!bet)return;
     const actualResult=bet.result==="대기_승"?"승":bet.result==="대기_패"?"패":(bet.result==="대기_취소"||bet.result==="대기_연기"||bet.result==="대기_중단")?"취소":["취소","연기","중단"].includes(bet.result)?"취소":bet.result;
@@ -2468,6 +2468,7 @@ function AppMain() {
   };
   const revertToPending=(id:string)=>{
     const bet=bets.find(b=>b.id===id);if(!bet)return;
+    // result/profit만 되돌림 — siteStates(입금/베팅/잔여) 절대 건드리지 않음
     const reverted={...bet,result:"진행중",profit:null};
     setBetsRaw(b=>b.map(x=>x.id===id?reverted:x));
     db.upsertBet(reverted);
@@ -2549,7 +2550,13 @@ function AppMain() {
   },[deposits,ALL_SITES]);
 
   const pending=bets.filter(b=>b.result==="진행중"||b.result.startsWith("대기_"));
-  const pendingSorted=[...pending].sort((a,b)=>{const ta=parseFloat(a.id)||0;const tb=parseFloat(b.id)||0;return tb-ta;});
+  // 진행중 최신순 정렬 — bettingCombo + sportsTest 탭 공용
+  const pendingSorted=[...pending].sort((a,b)=>{
+    const ta=parseFloat(a.id)||0;
+    const tb=parseFloat(b.id)||0;
+    return tb-ta;
+  });
+  // ⚡ 라이브 베팅(isLive=true)은 별도 "실시간" 통계에서만 집계되도록 done에서 제외
   const done=bets.filter(b=>!b.result.startsWith("대기_")&&b.result!=="진행중"&&b.includeStats!==false&&(b as any).isLive!==true);
   const doneFull=bets.filter(b=>!b.result.startsWith("대기_")&&b.result!=="진행중"&&(b as any).isLive!==true);
   const doneTodayFull=doneFull.filter(b=>b.date===today);
@@ -4555,7 +4562,7 @@ function AppMain() {
                     <div style={{display:"flex",gap:4,alignItems:"flex-end",marginBottom:7}}>
                       <div style={{flex:1,textAlign:"center",fontSize:14}}>
                         <div style={{fontSize:11,color:C.muted,marginBottom:2,fontWeight:700}}>입금</div>
-                        <EditableCell value={st.deposited} dollar={dollar} color={C.muted} onSave={v=>{const u={...siteStates[site],deposited:v};setSiteStatesRaw(p=>({...p,[site]:u}));db.upsertSiteState(site,u);}}/>
+                        <div style={{fontSize:14,fontWeight:800,color:C.muted}}>{fmtDisp(st.deposited,dollar)}</div>
                       </div>
                       {pointAmt>0&&<>
                         <div style={{width:1,height:28,background:C.border}}/>
@@ -4567,7 +4574,7 @@ function AppMain() {
                       <div style={{width:1,height:28,background:C.border}}/>
                       <div style={{flex:1,textAlign:"center",fontSize:14}}>
                         <div style={{fontSize:11,color:C.muted,marginBottom:2,fontWeight:700}}>베팅</div>
-                        <EditableCell value={st.betTotal} dollar={dollar} color={barColor} onSave={v=>{const u={...siteStates[site],betTotal:v};setSiteStatesRaw(p=>({...p,[site]:u}));db.upsertSiteState(site,u);}}/>
+                        <div style={{fontSize:14,fontWeight:800,color:barColor}}>{fmtDisp(st.betTotal,dollar)}</div>
                       </div>
                       <div style={{width:1,height:28,background:C.border}}/>
                       <div style={{flex:1.3,textAlign:"center"}}>
@@ -4647,19 +4654,6 @@ function AppMain() {
               {([["overview","📈 총괄"],["daily","📅 날짜별"],["live","⚡ 실시간"],["baseball","⚾ 야구"],["football","⚽ 축구"],["basketball","🏀 농구"],["adv","🔬 심화"]] as [string,string][]).map(([k,l])=><button key={k} onClick={()=>setStatTab(k as any)} style={tabBtn(statTab===k,C.purple)}>{l}</button>)}
             </div>
             <div style={{display:"flex",gap:6}}>
-              <button onClick={async()=>{
-                if(!window.confirm("입금액을 deposits 기록 기준으로 재계산합니다.\n잘못 변경된 입금액을 복구할 때 사용하세요. 계속하시겠습니까?"))return;
-                const newSS={...siteStates};
-                for(const site of ALL_SITES){
-                  const siteDeposits=deposits.filter(d=>d.site===site).reduce((s,d)=>s+d.amount,0);
-                  if(newSS[site]){
-                    newSS[site]={...newSS[site],deposited:siteDeposits};
-                    await db.upsertSiteState(site,newSS[site]);
-                  }
-                }
-                setSiteStatesRaw(newSS);
-                alert("입금액 복구 완료!");
-              }} style={{fontSize:10,padding:"4px 10px",borderRadius:5,border:`1px solid ${C.teal}44`,background:`${C.teal}11`,color:C.teal,cursor:"pointer"}}>🔧 입금액 복구</button>
               <button onClick={async()=>{if(!window.confirm("통계 초기화?"))return;const cleared=bets.map(x=>({...x,includeStats:false}));setBetsRaw(cleared);for(const b of cleared) await db.upsertBet(b);}} style={{fontSize:10,padding:"4px 10px",borderRadius:5,border:`1px solid ${C.amber}44`,background:`${C.amber}11`,color:C.amber,cursor:"pointer"}}>통계 초기화</button>
               <button onClick={async()=>{if(!window.confirm("전체 영구 삭제?"))return;for(const b of bets) await db.deleteBet(b.id);setBetsRaw([]);}} style={{fontSize:10,padding:"4px 10px",borderRadius:5,border:`1px solid ${C.red}44`,background:`${C.red}11`,color:C.red,cursor:"pointer"}}>전체 삭제</button>
             </div>
