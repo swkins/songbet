@@ -437,6 +437,7 @@ interface PointSite {
   exchangeDate: string;
   targetAmount: number;
   targetSiteName?: string;  // 누적입금 기준 사이트 (없으면 전체)
+  targetPeriodDays?: number; // 목표 기간 (일수) — 이 기간 안에 목표 금액 달성해야 함
   targetCycleDays?: number; // 목표 주기 (일수), 기본 14일(2주). 완료 후 다음 목표일까지의 기간
   sessions: PointSession[];
 }
@@ -1498,15 +1499,15 @@ function AppMain() {
   };
 
   const [addPointSiteModal,setAddPointSiteModal]=useState(false);
-  const [newPointSite,setNewPointSite]=useState<{name:string,exchangeName:string,exchangeDate:string,targetAmount:number,targetSiteName:string,targetCycleDays:number}>({name:"올인구조대",exchangeName:"포인트교환",exchangeDate:"2025-05-04",targetAmount:2000000,targetSiteName:"",targetCycleDays:14});
+  const [newPointSite,setNewPointSite]=useState<{name:string,exchangeName:string,exchangeDate:string,targetAmount:number,targetSiteName:string,targetPeriodDays:number,targetCycleDays:number}>({name:"올인구조대",exchangeName:"포인트교환",exchangeDate:"2025-05-04",targetAmount:2000000,targetSiteName:"",targetPeriodDays:14,targetCycleDays:14});
 
   const handleAddPointSite=()=>{
-    const site:PointSite={id:String(Date.now()),name:newPointSite.name,exchangeName:newPointSite.exchangeName,exchangeDate:newPointSite.exchangeDate,targetAmount:newPointSite.targetAmount,targetSiteName:newPointSite.targetSiteName||undefined,targetCycleDays:newPointSite.targetCycleDays||14,sessions:[]};
+    const site:PointSite={id:String(Date.now()),name:newPointSite.name,exchangeName:newPointSite.exchangeName,exchangeDate:newPointSite.exchangeDate,targetAmount:newPointSite.targetAmount,targetSiteName:newPointSite.targetSiteName||undefined,targetPeriodDays:newPointSite.targetPeriodDays||14,targetCycleDays:newPointSite.targetCycleDays||14,sessions:[]};
     const updated=[...pointSites,site];
     savePointSites(updated);
     setAddPointSiteModal(false);
     const resetDate=new Date();resetDate.setDate(resetDate.getDate()+14);
-    setNewPointSite({name:"올인구조대",exchangeName:"포인트교환",exchangeDate:resetDate.toISOString().slice(0,10),targetAmount:2000000,targetSiteName:"",targetCycleDays:14});
+    setNewPointSite({name:"올인구조대",exchangeName:"포인트교환",exchangeDate:resetDate.toISOString().slice(0,10),targetAmount:2000000,targetSiteName:"",targetPeriodDays:14,targetCycleDays:14});
   };
 
   // ── 일일 퀘스트 ────────────────────────────────────────────
@@ -2083,55 +2084,97 @@ function AppMain() {
   };
 
   const autoSettle = useCallback(async () => {
-    const freshBets = await db.loadBets();
-    const targets = freshBets.filter(b=>b.result==="진행중"&&(b as any).fixtureId!=null&&!(b as any).isManual);
-    if(targets.length===0) return;
-    const fixtureIds=[...new Set(targets.map(b=>Number((b as any).fixtureId)))].filter(n=>!isNaN(n)&&n>0);
-    if(fixtureIds.length===0) return;
-    const {data:rows,error}=await supabase.from('fixtures').select('fixture_id,sport,status_short,home_score,away_score').in('fixture_id',fixtureIds);
-    if(error||!rows) return;
-    const fixtureMap=new Map<number,any>();
-    for(const r of rows) fixtureMap.set(Number(r.fixture_id),r);
-    const updatedBets:Bet[]=[];
-    for(const bet of targets){
-      const fid=Number((bet as any).fixtureId);
-      const row=fixtureMap.get(fid);
-      if(!row) continue;
-      const status=row.status_short as string;
-      const hs=row.home_score as number|null;
-      const as_=row.away_score as number|null;
-      let newResult:string|null=null;
-      if(status==='FT'||status==='AET'||status==='PEN'){
-        if(hs===null||as_===null) continue;
-        const opt=bet.betOption, total=hs+as_;
-        if(opt==="홈승") newResult=hs>as_?"승":"패";
-        else if(opt==="원정승") newResult=as_>hs?"승":"패";
-        else if(opt==="무승부") newResult=hs===as_?"승":"패";
-        else if(opt.startsWith("오버")){const l=parseFloat(opt.replace(/[^0-9.]/g,""));if(!isNaN(l))newResult=total>l?"승":"패";}
-        else if(opt.startsWith("언더")){const l=parseFloat(opt.replace(/[^0-9.]/g,""));if(!isNaN(l))newResult=total<l?"승":"패";}
-        else if(opt.includes("(")){
-          const m=opt.match(/\(([+-]?[\d.]+)\)/);
-          if(m){
-            const line=parseFloat(m[1]);
-            const isHome=!!(bet.homeTeam&&opt.includes(bet.homeTeam));
-            const myScore=isHome?hs:as_, oppScore=isHome?as_:hs;
-            const handi=myScore+line-oppScore;
-            if(handi>0) newResult="승";
-            else if(handi<0) newResult="패";
+    // 진행중 베팅 중 fixtureId 있는 것 (수동 경기 제외)
+    const targets = bets.filter(b =>
+      b.result === "진행중" &&
+      (b as any).fixtureId != null &&
+      !(b as any).isManual
+    );
+    if (targets.length === 0) return;
+
+    // fixtures 테이블에서 해당 경기들 조회
+    const fixtureIds = [...new Set(targets.map(b => (b as any).fixtureId as number))];
+    const { data: rows, error } = await supabase
+      .from('fixtures')
+      .select('fixture_id,sport,status_short,home_score,away_score')
+      .in('fixture_id', fixtureIds);
+    if (error || !rows) return;
+
+    // fixture_id → row 맵
+    const fixtureMap = new Map<number, any>();
+    for (const r of rows) fixtureMap.set(r.fixture_id, r);
+
+    const updatedBets: Bet[] = [];
+
+    for (const bet of targets) {
+      const fid = (bet as any).fixtureId as number;
+      const row = fixtureMap.get(fid);
+      if (!row) continue;
+
+      const status = row.status_short as string;
+      const hs = row.home_score as number | null;
+      const as_ = row.away_score as number | null;
+
+      // 종료 상태별 판정
+      let newResult: string | null = null;
+
+      if (status === 'FT' || status === 'AET' || status === 'PEN') {
+        // 경기 종료 — 베팅 옵션별 판정
+        if (hs === null || as_ === null) continue; // 점수 없으면 스킵
+        const opt = bet.betOption;
+        const total = hs + as_;
+
+        if (opt === "홈승") {
+          newResult = hs > as_ ? "승" : "패";
+        } else if (opt === "원정승") {
+          newResult = as_ > hs ? "승" : "패";
+        } else if (opt === "무승부") {
+          newResult = hs === as_ ? "승" : "패";
+        } else if (opt.startsWith("오버")) {
+          const line = parseFloat(opt.replace(/[^0-9.]/g, ""));
+          if (!isNaN(line)) newResult = total > line ? "승" : "패";
+        } else if (opt.startsWith("언더")) {
+          const line = parseFloat(opt.replace(/[^0-9.]/g, ""));
+          if (!isNaN(line)) newResult = total < line ? "승" : "패";
+        } else if (opt.includes("(")) {
+          // 핸디캡: "팀명 (1.5)" 형식
+          const lineMatch = opt.match(/\(([+-]?[\d.]+)\)/);
+          if (lineMatch) {
+            const line = parseFloat(lineMatch[1]);
+            const isHome = opt.includes(bet.homeTeam ?? "홈");
+            const diff = isHome ? (hs - as_) : (as_ - hs);
+            newResult = diff > line ? "승" : "패";
           }
         }
-      } else if(status==='CANC') newResult="취소";
-      else if(status==='PST') newResult="연기";
-      else if(status==='ABD') newResult="중단";
-      if(newResult){
-        const pr=newResult==="승"?"대기_승":newResult==="패"?"대기_패":newResult==="취소"?"대기_취소":newResult==="연기"?"대기_연기":"대기_중단";
-        const updated={...bet,result:pr,profit:null} as Bet;
-        updatedBets.push(updated); db.upsertBet(updated);
+      } else if (status === 'CANC') {
+        newResult = "취소";
+      } else if (status === 'PST') {
+        newResult = "연기";
+      } else if (status === 'ABD') {
+        newResult = "중단";
+      }
+      // 그 외 (NS, 1H, HT, 2H 등 진행중) → 스킵
+
+      if (newResult && newResult !== bet.result) {
+        // 승이면 profit 계산, 패면 -amount
+        const profit = newResult === "승"
+          ? parseFloat((bet.amount * bet.odds - bet.amount).toFixed(2))
+          : newResult === "패" ? -bet.amount
+          : null; // 취소/연기/중단은 profit null (확인 시 처리)
+        const updated = { ...bet, result: newResult, profit } as Bet;
+        updatedBets.push(updated);
+        db.upsertBet(updated);
       }
     }
-    if(updatedBets.length>0) setBetsRaw(prev=>prev.map(b=>{const u=updatedBets.find(u=>u.id===b.id);return u??b;}));
+
+    if (updatedBets.length > 0) {
+      setBetsRaw(prev => prev.map(b => {
+        const u = updatedBets.find(u => u.id === b.id);
+        return u ?? b;
+      }));
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [bets]);
 
 
   // ── 새로고침 메인 함수 ───────────────────────────────────────
@@ -2395,16 +2438,25 @@ function AppMain() {
     setDepSite("");setDepAmt(0);setDepPoint(0);
   };
 
-  // 포인트 전용 추가 — pointTotal만 증가, deposited/betTotal 절대 건드리지 않음
+  // 포인트 전용 추가 (입금 통계엔 기록 X, 사이트 잔여금만 증가)
   const handleAddPoint=(site:string, amount:number)=>{
     if(!site) return alert("사이트를 선택해주세요.");
     if(!amount||amount<=0) return alert("포인트 금액을 입력해주세요.");
     const dollar=isUSD(site);
-    const curSS=siteStates[site]||{deposited:0,betTotal:0,active:false,isDollar:dollar,pointTotal:0};
-    const updated={...curSS,active:true,isDollar:dollar,pointTotal:parseFloat(((curSS.pointTotal||0)+amount).toFixed(2))};
+    const curSS = siteStates[site] || {deposited:0,betTotal:0,active:false,isDollar:dollar,pointTotal:0};
+    const prevPoint = parseFloat(String(curSS.pointTotal||0));
+    const updated = {
+      ...curSS,
+      active: true,
+      isDollar: dollar,
+      // deposited에 +하여 잔여금(=deposited-betTotal) 증가 → 베팅 가능 금액 증가
+      deposited: parseFloat((curSS.deposited + amount).toFixed(2)),
+      pointTotal: parseFloat((prevPoint + amount).toFixed(2)),
+    };
     setSiteStatesRaw(p=>({...p,[site]:updated}));
     db.upsertSiteState(site,updated);
     addLog("🎁 포인트",`${site}/${fmtDisp(amount,dollar)}`);
+    // deposits 배열(입금 통계)엔 추가하지 않음 - 수익률 계산에서 제외
   };
 
   const handleClose=(site:string)=>{setCloseWithdrawAmt(0);setCloseModal({site});};
@@ -2456,24 +2508,50 @@ function AppMain() {
     });
   };
 
-  // 확인 버튼 — 대기_* 최종 확정. siteStates 절대 건드리지 않음
+  // 확인 버튼 — 자동 판정된 결과(승/패/취소/연기/중단)를 최종 확정
+  // 취소/연기/중단이면 베팅금액 환원 (betTotal 감소)
   const confirmResult=(id:string)=>{
     const bet=bets.find(b=>b.id===id);if(!bet)return;
-    const actualResult=bet.result==="대기_승"?"승":bet.result==="대기_패"?"패":(bet.result==="대기_취소"||bet.result==="대기_연기"||bet.result==="대기_중단")?"취소":["취소","연기","중단"].includes(bet.result)?"취소":bet.result;
-    const finalProfit=actualResult==="승"?parseFloat((bet.amount*bet.odds-bet.amount).toFixed(2)):actualResult==="패"?-bet.amount:0;
-    const confirmed={...bet,result:actualResult,profit:finalProfit} as Bet;
+    const needRefund = ["취소","연기","중단"].includes(bet.result);
+    // 최종 확정: 승→승, 패→패, 취소/연기/중단→취소(profit=0)
+    const finalResult = needRefund ? "취소" : bet.result;
+    const finalProfit = needRefund ? 0 : bet.profit;
+    const confirmed = {...bet, result: finalResult, profit: finalProfit} as Bet;
     setBetsRaw(b=>b.map(x=>x.id===id?confirmed:x));
     db.upsertBet(confirmed);
-    addLog(actualResult==="취소"?"↩ 환원":actualResult==="승"?"✅ 확인":"❌ 확인",`${bet.homeTeam||bet.teamName||""}`);
+    addLog(
+      needRefund ? "↩ 환원" : bet.result==="승" ? "✅ 확인" : "❌ 확인",
+      `${bet.homeTeam||bet.teamName||""} ${needRefund?`(${bet.result}→환원)`:""}`
+    );
+    // 환원: betTotal에서 베팅금액 빼기
+    if(needRefund){
+      const curSS=siteStates[bet.site]||{deposited:0,betTotal:0,active:false,isDollar:isUSD(bet.site)};
+      const refundedSS={
+        ...curSS,
+        betTotal:parseFloat(Math.max(0,curSS.betTotal-bet.amount).toFixed(2)),
+      };
+      setSiteStatesRaw(p=>({...p,[bet.site]:refundedSS}));
+      db.upsertSiteState(bet.site,refundedSS);
+    }
   };
   const revertToPending=(id:string)=>{
     const bet=bets.find(b=>b.id===id);if(!bet)return;
-    // result/profit만 되돌림 — siteStates(입금/베팅/잔여) 절대 건드리지 않음
     const reverted={...bet,result:"진행중",profit:null};
-    setBetsRaw(b=>b.map(x=>x.id===id?reverted:x));
-    db.upsertBet(reverted);
+    setBetsRaw(b=>b.map(x=>x.id===id?reverted:x));db.upsertBet(reverted);
+    // 사이트 상태 복구: deposited 재계산 + active 복구 + betTotal 더하기
+    const siteDeposits = deposits.filter(d=>d.site===bet.site).reduce((s,d)=>s+d.amount,0);
+    const sitePoints = (siteStates[bet.site]?.pointTotal)||0;
+    const curSS = siteStates[bet.site] || {deposited:0,betTotal:0,active:false,isDollar:isUSD(bet.site),pointTotal:0};
+    const revertedSS = {
+      ...curSS,
+      deposited: siteDeposits,  // 입금 기록 기반 재계산
+      betTotal: parseFloat((curSS.betTotal + bet.amount).toFixed(2)),
+      pointTotal: sitePoints,
+      active: true,
+    };
+    setSiteStatesRaw(p=>({...p,[bet.site]:revertedSS}));
+    db.upsertSiteState(bet.site,revertedSS);
     addLog("↩ 처리 취소",`${bet.site}/${bet.homeTeam||bet.teamName||id}`);
-    setTimeout(()=>autoSettle(),300);
   };
   const deleteFromStats=(id:string)=>{
     setBetsRaw(b=>b.map(bet=>{if(bet.id!==id)return bet;const u={...bet,includeStats:false};db.upsertBet(u);return u;}));
@@ -2496,25 +2574,70 @@ function AppMain() {
     const hasFixtureId=!isManual&&(b as any).fixtureId!=null;
 
     // 자동 판정 결과 여부
-    const autoResult = b.result.startsWith("대기_");
-    const actualResult = b.result==="대기_승"?"승":b.result==="대기_패"?"패":b.result==="대기_취소"?"취소":b.result==="대기_연기"?"연기":b.result==="대기_중단"?"중단":b.result;
-    const stampColor = actualResult==="승"?C.green:actualResult==="패"?C.red:C.amber;
-    const stampText = actualResult==="승"?"적중":actualResult==="패"?"실패":actualResult==="취소"?"취소":actualResult==="연기"?"연기":"중단";
+    const autoResult=["승","패","취소","연기","중단"].includes(b.result)&&b.result!=="진행중";
+    const stampColor=b.result==="승"?C.green:b.result==="패"?C.red:C.amber;
+    const stampText=b.result==="승"?"적중":b.result==="패"?"실패":b.result==="취소"?"취소":b.result==="연기"?"연기":"중단";
 
     return (
-      <div key={b.id} style={{position:"relative",background:autoResult?`${stampColor}0d`:C.bg3,border:`1px solid ${autoResult?stampColor+"99":C.amber+"44"}`,borderRadius:7,padding:"9px 11px",marginBottom:6,overflow:"hidden"}}>
+      <div key={b.id} style={{
+        position:"relative",
+        background:C.bg3,
+        border:`1px solid ${autoResult?stampColor+"66":C.amber+"44"}`,
+        borderRadius:7,padding:"9px 11px",marginBottom:6,
+        overflow:"hidden",
+      }}>
+        {/* 도장 오버레이 */}
         {autoResult && (
-          <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",pointerEvents:"none",zIndex:1}}>
-            <div style={{border:`5px solid ${stampColor}`,borderRadius:10,padding:"8px 22px",transform:"rotate(-12deg)",fontSize:26,fontWeight:900,color:stampColor,letterSpacing:6,opacity:0.7,textShadow:`0 0 12px ${stampColor}`,background:`${stampColor}18`}}>{stampText}</div>
+          <div className="stamp-overlay" style={{
+            position:"absolute",inset:0,
+            display:"flex",alignItems:"center",justifyContent:"center",
+            pointerEvents:"none",zIndex:1,
+          }}>
+            <div style={{
+              border:`4px solid ${stampColor}`,borderRadius:8,
+              padding:"6px 18px",transform:"rotate(-15deg)",
+              fontSize:22,fontWeight:900,color:stampColor,
+              letterSpacing:4,opacity:0.35,
+              textShadow:`0 0 8px ${stampColor}`,
+              background:`${stampColor}11`,
+            }}>{stampText}</div>
           </div>
         )}
-        <div style={{position:"relative",zIndex:2,opacity:autoResult?0.5:1}}>
+
+        {/* 확인 버튼 (도장 위에, hover 시 보임) */}
+        {autoResult && (
+          <div style={{
+            position:"absolute",inset:0,
+            display:"flex",alignItems:"center",justifyContent:"center",
+            zIndex:2,opacity:0,transition:"opacity 0.15s",
+          }}
+          onMouseEnter={e=>(e.currentTarget.style.opacity="1")}
+          onMouseLeave={e=>(e.currentTarget.style.opacity="0")}
+          >
+            <button onClick={()=>confirmResult(b.id)}
+              style={{
+                padding:"10px 24px",borderRadius:8,fontWeight:900,fontSize:14,
+                cursor:"pointer",letterSpacing:1,
+                background:stampColor,border:"none",color:C.bg,
+                boxShadow:`0 4px 16px ${stampColor}88`,
+              }}>
+              ✅ 확인
+            </button>
+          </div>
+        )}
+
+        {/* 카드 내용 */}
+        <div style={{position:"relative",zIndex:0,opacity:autoResult?0.6:1}}>
           <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:5,flexWrap:"wrap"}}>
             <span style={{fontSize:13,flexShrink:0}}>{SPORT_ICON[b.category]||"🎯"}</span>
-            <span style={{fontSize:9,color:dollar?C.amber:C.green,background:`${dollar?C.amber:C.green}22`,border:`1px solid ${dollar?C.amber:C.green}44`,padding:"1px 5px",borderRadius:3,fontWeight:700}}>{dollar?"$":"₩"} {b.site}</span>
+            <span style={{fontSize:9,color:dollar?C.amber:C.green,background:`${dollar?C.amber:C.green}22`,border:`1px solid ${dollar?C.amber:C.green}44`,padding:"1px 5px",borderRadius:3,fontWeight:700}}>
+              {dollar?"$":"₩"} {b.site}
+            </span>
             {(b as any).country && <span style={{fontSize:9,color:C.teal,background:`${C.teal}11`,border:`1px solid ${C.teal}33`,padding:"1px 5px",borderRadius:3,fontWeight:700}}>{(b as any).country}</span>}
             {b.league && <span style={{fontSize:9,color:C.muted,background:C.bg,padding:"1px 5px",borderRadius:3}}>{b.league}</span>}
+            {/* 수동 뱃지 */}
             {isManual && <span style={{fontSize:9,color:C.purple,background:`${C.purple}22`,border:`1px solid ${C.purple}44`,padding:"1px 5px",borderRadius:3,fontWeight:700}}>수동</span>}
+            {/* 자동 판정 가능 표시 */}
             {hasFixtureId && !autoResult && <span style={{fontSize:9,color:C.teal,opacity:0.6}}>🤖</span>}
             <span style={{fontSize:11,color:C.orange,fontWeight:800,marginLeft:"auto"}}>{displayBetOption}</span>
           </div>
@@ -2524,21 +2647,20 @@ function AppMain() {
               <span style={{fontSize:10,color:C.muted}}>배당 <span style={{color:C.teal,fontWeight:800,fontSize:11}}>{b.odds}</span></span>
               <span style={{fontSize:11,color:C.amber,fontWeight:800}}>{fmtDisp(b.amount,b.isDollar)}</span>
             </div>
+            {/* 수동 처리 버튼 (자동 판정 안 된 베팅 or 수동 경기) */}
             {!autoResult && (
               <div style={{display:"flex",gap:3,flexShrink:0}}>
-                {isManual||!hasFixtureId?(<><button onClick={()=>updateResult(b.id,"승")} style={{background:`${C.green}22`,border:`1px solid ${C.green}`,color:C.green,padding:"4px 10px",borderRadius:4,cursor:"pointer",fontWeight:800,fontSize:11}}>적중</button><button onClick={()=>updateResult(b.id,"패")} style={{background:`${C.red}22`,border:`1px solid ${C.red}`,color:C.red,padding:"4px 10px",borderRadius:4,cursor:"pointer",fontWeight:800,fontSize:11}}>실패</button></>):null}
+                {isManual || !hasFixtureId ? (
+                  <>
+                    <button onClick={()=>updateResult(b.id,"승")} style={{background:`${C.green}22`,border:`1px solid ${C.green}`,color:C.green,padding:"4px 10px",borderRadius:4,cursor:"pointer",fontWeight:800,fontSize:11}}>적중</button>
+                    <button onClick={()=>updateResult(b.id,"패")} style={{background:`${C.red}22`,border:`1px solid ${C.red}`,color:C.red,padding:"4px 10px",borderRadius:4,cursor:"pointer",fontWeight:800,fontSize:11}}>실패</button>
+                  </>
+                ) : null}
                 <button onClick={()=>cancelBet(b.id)} style={{background:C.bg,border:`1px solid ${C.border2}`,color:C.muted,padding:"4px 10px",borderRadius:4,cursor:"pointer",fontSize:11}}>취소</button>
               </div>
             )}
           </div>
         </div>
-        {autoResult && (
-          <div style={{position:"relative",zIndex:3,marginTop:8,display:"flex",justifyContent:"flex-end"}}>
-            <button onClick={()=>confirmResult(b.id)} style={{padding:"6px 20px",borderRadius:6,fontWeight:900,fontSize:13,cursor:"pointer",letterSpacing:1,background:stampColor,border:`2px solid ${stampColor}`,color:C.bg,boxShadow:`0 2px 10px ${stampColor}66`}}>
-              {actualResult==="승"?"✅ 적중 확인":actualResult==="패"?"❌ 실패 확인":"✔ 확인"}
-            </button>
-          </div>
-        )}
       </div>
     );
   };
@@ -2549,7 +2671,7 @@ function AppMain() {
     deposits.filter(d=>d.date>=wm).forEach(d=>{m[d.site]+=d.amount;});return m;
   },[deposits,ALL_SITES]);
 
-  const pending=bets.filter(b=>b.result==="진행중"||b.result.startsWith("대기_"));
+  const pending=bets.filter(b=>b.result==="진행중");
   // 진행중 최신순 정렬 — bettingCombo + sportsTest 탭 공용
   const pendingSorted=[...pending].sort((a,b)=>{
     const ta=parseFloat(a.id)||0;
@@ -2557,8 +2679,8 @@ function AppMain() {
     return tb-ta;
   });
   // ⚡ 라이브 베팅(isLive=true)은 별도 "실시간" 통계에서만 집계되도록 done에서 제외
-  const done=bets.filter(b=>!b.result.startsWith("대기_")&&b.result!=="진행중"&&b.includeStats!==false&&(b as any).isLive!==true);
-  const doneFull=bets.filter(b=>!b.result.startsWith("대기_")&&b.result!=="진행중"&&(b as any).isLive!==true);
+  const done=bets.filter(b=>b.result!=="진행중"&&b.includeStats!==false&&(b as any).isLive!==true);
+  const doneFull=bets.filter(b=>b.result!=="진행중"&&(b as any).isLive!==true);
   const doneTodayFull=doneFull.filter(b=>b.date===today);
   const doneOldFull=doneFull.filter(b=>b.date!==today);
   const krwProfit=done.filter(b=>!b.isDollar).reduce((s,b)=>s+(b.profit??0),0);
@@ -2819,8 +2941,8 @@ function AppMain() {
     });return teams;
   },[esportsRecords,esportsStratLeague]);
 
-  const krwRemaining=activeSiteNames.filter(s=>!isUSD(s)).reduce((sum,site)=>{const st=siteStates[site]||{deposited:0,betTotal:0,pointTotal:0};return sum+Math.max(0,(st.deposited+(st.pointTotal||0))-st.betTotal);},0);
-  const usdRemaining=activeSiteNames.filter(s=>isUSD(s)).reduce((sum,site)=>{const st=siteStates[site]||{deposited:0,betTotal:0,pointTotal:0};return sum+Math.max(0,(st.deposited+(st.pointTotal||0))-st.betTotal);},0);
+  const krwRemaining=activeSiteNames.filter(s=>!isUSD(s)).reduce((sum,site)=>{const st=siteStates[site]||{deposited:0,betTotal:0};return sum+Math.max(0,st.deposited-st.betTotal);},0);
+  const usdRemaining=activeSiteNames.filter(s=>isUSD(s)).reduce((sum,site)=>{const st=siteStates[site]||{deposited:0,betTotal:0};return sum+Math.max(0,st.deposited-st.betTotal);},0);
 
   // ── 현재 세션(마감 전) 사이트별 실시간 수익 ──
   // 마지막 마감(=출금) 이후의 베팅들 중 결과가 확정된 것만 합산
@@ -3043,7 +3165,27 @@ function AppMain() {
                 style={{...S,boxSizing:"border-box"}}/>
             </div>
             <div style={{marginBottom:8}}>
-              <div style={L}>🔁 목표 주기 (완료 후 다음 교환일까지의 기간)</div>
+              <div style={L}>🎯 목표 기간 · <span style={{color:C.dim}}>이 기간 안에 목표 금액을 달성해야 함</span></div>
+              <div style={{display:"flex",gap:4,marginBottom:4}}>
+                {[
+                  {d:7,l:"1주"},{d:14,l:"2주"},{d:21,l:"3주"},{d:28,l:"4주"},
+                ].map(opt=>(
+                  <button key={opt.d} onClick={()=>setNewPointSite(p=>({...p,targetPeriodDays:opt.d}))}
+                    style={{flex:1,padding:"6px 0",borderRadius:5,cursor:"pointer",border:newPointSite.targetPeriodDays===opt.d?`2px solid ${C.amber}`:`1px solid ${C.border}`,background:newPointSite.targetPeriodDays===opt.d?`${C.amber}22`:C.bg2,color:newPointSite.targetPeriodDays===opt.d?C.amber:C.muted,fontWeight:newPointSite.targetPeriodDays===opt.d?800:600,fontSize:11}}>
+                    {opt.l} ({opt.d}일)
+                  </button>
+                ))}
+              </div>
+              <input type="number"
+                value={newPointSite.targetPeriodDays||14}
+                onChange={e=>setNewPointSite(p=>({...p,targetPeriodDays:parseInt(e.target.value)||14}))}
+                min={1} max={365}
+                style={{...S,boxSizing:"border-box",...noSpin}}
+                placeholder="직접 입력 (일수)"/>
+              <div style={{fontSize:9,color:C.dim,marginTop:3}}>예: 14일 → 14일 안에 목표 금액 달성 필요</div>
+            </div>
+            <div style={{marginBottom:8}}>
+              <div style={L}>🔁 목표 주기 · <span style={{color:C.dim}}>이 퀘스트를 얼마에 한 번씩 이어서 진행할지</span></div>
               <div style={{display:"flex",gap:4,marginBottom:4}}>
                 {[
                   {d:7,l:"1주"},{d:14,l:"2주"},{d:21,l:"3주"},{d:28,l:"4주"},
@@ -3060,7 +3202,7 @@ function AppMain() {
                 min={1} max={365}
                 style={{...S,boxSizing:"border-box",...noSpin}}
                 placeholder="직접 입력 (일수)"/>
-              <div style={{fontSize:9,color:C.dim,marginTop:3}}>완료 시 같은 목표/주기로 자동 다음 사이클 시작 (목표일 + 주기일)</div>
+              <div style={{fontSize:9,color:C.dim,marginTop:3}}>예: 2주 → 완료 후 2주 뒤에 다시 이 퀘스트 시작</div>
             </div>
             {/* 기준 사이트 선택 - 누적입금 계산할 사이트 */}
             <div style={{marginBottom:16}}>
@@ -4432,11 +4574,11 @@ function AppMain() {
                     {activeSiteNames.map(site=>{
                       const st=siteStates[site]||{deposited:0,betTotal:0,active:false,isDollar:false};
                       const dollar=isUSD(site);
-                      const remaining=Math.max(0,parseFloat(((st.deposited+(st.pointTotal||0))-st.betTotal).toFixed(2)));
+                      const remaining=Math.max(0,parseFloat((st.deposited-st.betTotal).toFixed(2)));
                       const totalBase=parseFloat((st.deposited+(st.pointTotal||0)).toFixed(2));
-                      const pctRaw=totalBase>0?parseFloat((st.betTotal/totalBase*100).toFixed(1)):0;
+                      const pctRaw=totalBase>0?Math.round(st.betTotal/totalBase*100):0;
                       const pct=Math.min(100,pctRaw);
-                      const isComplete=remaining===0&&totalBase>0;
+                      const isComplete=pctRaw>=100;
                       const barColor=isComplete?C.purple:pctRaw>=90?C.red:pctRaw>=70?C.amber:C.green;
                       const sitePendingCount=pending.filter(b=>b.site===site).length;
                       return(
@@ -4534,22 +4676,17 @@ function AppMain() {
               {activeSiteNames.map(site=>{
                 const st=siteStates[site]||{deposited:0,betTotal:0,active:false,isDollar:false};
                 const dollar=isUSD(site);
-                const remaining=Math.max(0,parseFloat(((st.deposited+(st.pointTotal||0))-st.betTotal).toFixed(2)));
+                const remaining=Math.max(0,parseFloat((st.deposited-st.betTotal).toFixed(2)));
                 const totalBase=parseFloat((st.deposited+(st.pointTotal||0)).toFixed(2));
-                const pctRaw=totalBase>0?parseFloat((st.betTotal/totalBase*100).toFixed(1)):0;
+                const pctRaw=totalBase>0?Math.round(st.betTotal/totalBase*100):0;
                 const pct=Math.min(100,pctRaw);
-                const is100=remaining===0&&totalBase>0;
+                const is100=pctRaw>=100;
                 const isOver=pctRaw>100;
                 const barColor=is100?C.purple:pctRaw>=90?C.red:pctRaw>=70?C.amber:C.green;
                 const sitePending=pending.filter(b=>b.site===site);
                 const pointAmt=st.pointTotal||0;
                 return(
                   <div key={site} style={{background:C.bg3,border:`1px solid ${barColor}33`,borderRadius:10,padding:11,position:"relative",overflow:"hidden"}}>
-                    {is100 && (
-                      <div style={{position:"absolute",top:"50%",left:"50%",transform:"translate(-50%,-50%) rotate(-15deg)",fontSize:34,fontWeight:900,color:C.purple,border:`5px solid ${C.purple}`,borderRadius:10,padding:"8px 24px",letterSpacing:4,opacity:0.28,pointerEvents:"none",whiteSpace:"nowrap",zIndex:5}}>
-                        ✓ 완료
-                      </div>
-                    )}
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
                       <div style={{display:"flex",alignItems:"center",gap:5}}>
                         <span style={{fontSize:14,fontWeight:800,color:C.text}}>{dollar?"$":"₩"} {site}</span>
@@ -4562,7 +4699,7 @@ function AppMain() {
                     <div style={{display:"flex",gap:4,alignItems:"flex-end",marginBottom:7}}>
                       <div style={{flex:1,textAlign:"center",fontSize:14}}>
                         <div style={{fontSize:11,color:C.muted,marginBottom:2,fontWeight:700}}>입금</div>
-                        <div style={{fontSize:14,fontWeight:800,color:C.muted}}>{fmtDisp(st.deposited,dollar)}</div>
+                        <EditableCell value={st.deposited} dollar={dollar} color={C.muted} onSave={v=>{const u={...siteStates[site],deposited:v};setSiteStatesRaw(p=>({...p,[site]:u}));db.upsertSiteState(site,u);}}/>
                       </div>
                       {pointAmt>0&&<>
                         <div style={{width:1,height:28,background:C.border}}/>
@@ -4574,7 +4711,7 @@ function AppMain() {
                       <div style={{width:1,height:28,background:C.border}}/>
                       <div style={{flex:1,textAlign:"center",fontSize:14}}>
                         <div style={{fontSize:11,color:C.muted,marginBottom:2,fontWeight:700}}>베팅</div>
-                        <div style={{fontSize:14,fontWeight:800,color:barColor}}>{fmtDisp(st.betTotal,dollar)}</div>
+                        <EditableCell value={st.betTotal} dollar={dollar} color={barColor} onSave={v=>{const u={...siteStates[site],betTotal:v};setSiteStatesRaw(p=>({...p,[site]:u}));db.upsertSiteState(site,u);}}/>
                       </div>
                       <div style={{width:1,height:28,background:C.border}}/>
                       <div style={{flex:1.3,textAlign:"center"}}>
@@ -4582,9 +4719,20 @@ function AppMain() {
                         <div style={{fontSize:15,fontWeight:800,color:C.teal}}>{fmtDisp(remaining,dollar)}</div>
                       </div>
                     </div>
-                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:13,marginBottom:4}}><span style={{color:C.muted,fontWeight:700}}>진행률</span><span style={{color:barColor,fontWeight:900,fontSize:16}}>{pctRaw}%</span></div>
-                    <div style={{height:18,background:C.bg,borderRadius:5,overflow:"hidden",marginBottom:7,position:"relative"}}>
-                      <div style={{width:`${pct}%`,height:"100%",background:barColor,borderRadius:5,transition:"width 0.3s"}}/>
+                    {/* 진행률 + 마감 도장 */}
+                    <div style={{position:"relative"}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:13,marginBottom:4}}>
+                        <span style={{color:C.muted,fontWeight:700}}>진행률</span>
+                        <div style={{display:"flex",alignItems:"center",gap:6}}>
+                          {is100 && (
+                            <span style={{fontSize:11,fontWeight:900,color:C.purple,border:`2px solid ${C.purple}`,borderRadius:5,padding:"1px 8px",letterSpacing:2,opacity:0.85}}>✓ 완료</span>
+                          )}
+                          <span style={{color:barColor,fontWeight:900,fontSize:16}}>{pctRaw}%</span>
+                        </div>
+                      </div>
+                      <div style={{height:18,background:C.bg,borderRadius:5,overflow:"hidden",marginBottom:7,position:"relative"}}>
+                        <div style={{width:`${pct}%`,height:"100%",background:barColor,borderRadius:5,transition:"width 0.3s"}}/>
+                      </div>
                     </div>
                     {/* ★ 활성화 이후 수익률 표시 (마지막 마감 이후 세션 기준) */}
                     {(()=>{
@@ -5660,10 +5808,21 @@ function AppMain() {
                                   const isAttended = q.history.includes(dateStr);
                                   const isToday = dateStr===today;
                                   const isPast = dateStr<today;
+                                  const isFuture = dateStr>today;
                                   const beforeStart = dateStr<q.createdAt;
+                                  const dayIndex = beforeStart ? null : Math.floor((new Date(dateStr).getTime()-new Date(q.createdAt).getTime())/(1000*60*60*24))+1;
+                                  const canToggle = !beforeStart && !isFuture;
                                   return (
-                                    <div key={dateStr} title={dateStr+(isAttended?" ✓":"")}
-                                      style={{height:22,background: isAttended ? C.green : beforeStart ? "transparent" : isToday ? `${C.amber}33` : isPast ? `${C.red}11` : C.bg2, borderRadius:2, display:"flex", alignItems:"center", justifyContent:"center", fontSize:9, fontWeight: isToday?900:600, color: isAttended?"#fff":beforeStart?C.dim:isToday?C.amber:isPast?C.red:C.muted, border: isToday?`1px solid ${C.amber}`:"none"}}>
+                                    <div key={dateStr}
+                                      title={dateStr+(isAttended?` ✓ (${dayIndex}일차)`:dayIndex?` (${dayIndex}일차)`:"")}
+                                      onClick={canToggle?()=>{
+                                        saveDailyQuests(dailyQuests.map(dq=>{
+                                          if(dq.id!==q.id) return dq;
+                                          const has=dq.history.includes(dateStr);
+                                          return {...dq,history:has?dq.history.filter(d=>d!==dateStr):[...dq.history,dateStr].sort()};
+                                        }));
+                                      }:undefined}
+                                      style={{height:22,background:isAttended?C.green:beforeStart?"transparent":isToday?`${C.amber}33`:isPast?`${C.red}11`:C.bg2,borderRadius:2,display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,fontWeight:isToday?900:600,color:isAttended?"#fff":beforeStart?C.dim:isToday?C.amber:isPast?C.red:C.muted,border:isToday?`1px solid ${C.amber}`:"none",cursor:canToggle?"pointer":"default"}}>
                                       {dayN}
                                     </div>
                                   );
@@ -5695,11 +5854,11 @@ function AppMain() {
                         {activeSiteNames.map(site=>{
                           const st=siteStates[site]||{deposited:0,betTotal:0,active:false,isDollar:false};
                           const dollar=isUSD(site);
-                          const remaining=Math.max(0,parseFloat(((st.deposited+(st.pointTotal||0))-st.betTotal).toFixed(2)));
-                          const totalBase=parseFloat((st.deposited+(st.pointTotal||0)).toFixed(2));
-                          const pctRaw=totalBase>0?parseFloat((st.betTotal/totalBase*100).toFixed(1)):0;
+                          const remaining=Math.max(0,parseFloat((st.deposited-st.betTotal).toFixed(2)));
+                          const totalBase=parseFloat(st.deposited.toFixed(2));
+                          const pctRaw=totalBase>0?Math.round(st.betTotal/totalBase*100):0;
                           const pct=Math.min(100,pctRaw);
-                          const isComplete=remaining===0&&totalBase>0;
+                          const isComplete=pctRaw>=100;
                           const barColor=isComplete?C.purple:pctRaw>=90?C.red:pctRaw>=70?C.amber:C.green;
                           const sitePending=pending.filter(b=>b.site===site).length;
                           const sp = currentSessionProfits[site];
