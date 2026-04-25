@@ -366,7 +366,7 @@ const COUNTRY_KR: Record<string,string> = {
   "International":"국제","United States":"미국","Republic of Ireland":"아일랜드",
   "Wales":"웨일즈","Northern Ireland":"북아일랜드","Taiwan":"대만","Chinese Taipei":"대만",
 };
-const ktr = (c:string) => COUNTRY_KR[c] || c || "기타";
+const ktr = (c:string) => COUNTRY_KR[c] || c || "";
 
 // MLB 팀명
 const MLB_TEAMS: Record<string,string> = {
@@ -844,7 +844,7 @@ function AppMain() {
         amount:slipAmount,odds:item.odds,profit:null,result:"진행중",
         includeStats:slipInclude,isDollar:dollar,
         ...({
-          country: ktr(item.game.country),
+          country: ktr(item.game.country) || stSelCountry || "",
           isLive: slipIsLive,
           // rev.8: 자동 결제용
           fixtureId: isManual ? null : item.game.id,
