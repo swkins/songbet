@@ -6403,13 +6403,169 @@ function AppMain() {
                         </div>
                       </div>
 
-                      <div style={{padding:"14px 16px",background:C.bg2,borderRadius:8,border:`1px dashed ${C.border2}`}}>
-                        <div style={{fontSize:11,fontWeight:800,color:C.purple,marginBottom:8,letterSpacing:1}}>🚧 다음 단계</div>
-                        <div style={{fontSize:11,color:C.muted,lineHeight:1.7}}>
-                          이 화면은 API 데이터를 그대로 보여주는 <b style={{color:C.text}}>테스트 화면</b>입니다.<br/>
-                          베팅 옵션과 슬립 추가 버튼은 다음 단계에서 추가됩니다.
-                        </div>
-                      </div>
+                      {/* ── 베팅 옵션 ── */}
+                      {(()=>{
+                        const sport = g.sport;
+                        const gameKey = (opt:string)=>`${g.id}_${opt}`;
+                        const inSlip = (opt:string)=>slipGameIds.has(gameKey(opt));
+                        const showDraw = sport==="football";
+                        const isBaseball = sport==="baseball";
+                        const isBasketball = sport==="basketball";
+                        const isVolleyball = sport==="volleyball";
+                        const ouLinesSoccer = [1.5,2.5,3.5];
+                        const ouLinesBaseball = [4.5,5.5,6.5,7.5,8.5,9.5,10.5,11.5,12.5];
+                        const ouLinesBasketball = [155.5,160.5,165.5,170.5,175.5,180.5,185.5,190.5,195.5,200.5,205.5,210.5,215.5,220.5];
+                        const handiLinesSoccer = [0.5,1.5,2.5];
+
+                        return (
+                          <div style={{marginTop:14}}>
+                            <div style={{fontSize:11,fontWeight:800,color:C.teal,marginBottom:10,letterSpacing:1,borderBottom:`1px solid ${C.border}`,paddingBottom:6}}>🎯 베팅 옵션</div>
+
+                            {/* 승패/승무패 */}
+                            <div style={{marginBottom:14}}>
+                              <div style={{fontSize:10,fontWeight:800,color:C.green,marginBottom:6,letterSpacing:1}}>{showDraw?"승무패":"승패"}</div>
+                              <div style={{display:"grid",gridTemplateColumns:showDraw?"1fr 1fr 1fr":"1fr 1fr",gap:6}}>
+                                {[
+                                  {opt:"홈승",label:krTeam(g.home_team),sub:"홈",color:C.green},
+                                  ...(showDraw?[{opt:"무승부",label:"무승부",sub:"",color:C.amber}]:[]),
+                                  {opt:"원정승",label:krTeam(g.away_team),sub:"원정",color:C.teal},
+                                ].map(b=>{
+                                  const added=inSlip(b.opt);
+                                  return <button key={b.opt} onClick={()=>handleSlipPick(g,b.opt)}
+                                    style={{padding:"12px 6px",borderRadius:7,cursor:"pointer",
+                                      border:added?`2px solid ${b.color}`:`1px solid ${C.border}`,
+                                      background:added?`${b.color}33`:C.bg2,
+                                      color:added?b.color:C.text,fontWeight:added?800:600,
+                                      display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
+                                    {b.sub && <span style={{fontSize:9,color:added?b.color:C.muted}}>{b.sub}</span>}
+                                    <span style={{fontSize:12,textAlign:"center",wordBreak:"break-all" as const}}>{b.label}</span>
+                                    {added && <span style={{fontSize:9,color:b.color,fontWeight:800}}>✓ 슬립</span>}
+                                  </button>;
+                                })}
+                              </div>
+                            </div>
+
+                            {/* 축구: 핸디캡 + 오버/언더 */}
+                            {sport==="football" && (
+                              <>
+                                <div style={{marginBottom:14}}>
+                                  <div style={{fontSize:10,fontWeight:800,color:C.amber,marginBottom:6,letterSpacing:1}}>핸디캡</div>
+                                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                                    {[
+                                      {team:krTeam(g.home_team),color:C.green},
+                                      {team:krTeam(g.away_team),color:C.teal},
+                                    ].map(({team,color})=>(
+                                      <div key={team}>
+                                        <div style={{fontSize:10,color,marginBottom:5,fontWeight:800,textAlign:"center",background:`${color}22`,borderRadius:4,padding:"2px 0"}}>{team}</div>
+                                        {handiLinesSoccer.map(ln=>{
+                                          const opt=`${team} (${ln})`;
+                                          const added=inSlip(opt);
+                                          return <button key={opt} onClick={()=>handleSlipPick(g,opt)}
+                                            style={{width:"100%",marginBottom:4,padding:"8px 6px",borderRadius:5,cursor:"pointer",
+                                              border:added?`2px solid ${color}`:`1px solid ${C.border}`,
+                                              background:added?`${color}33`:C.bg2,color:added?color:C.text,
+                                              fontWeight:added?800:600,fontSize:11,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                                            <span>{team} <b>({ln})</b></span>
+                                          </button>;
+                                        })}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                                <div style={{marginBottom:14}}>
+                                  <div style={{fontSize:10,fontWeight:800,color:"#e05a9a",marginBottom:6,letterSpacing:1}}>오버/언더</div>
+                                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                                    {[
+                                      {label:"오버",color:"#e05a9a"},
+                                      {label:"언더",color:"#7ac4ff"},
+                                    ].map(({label,color})=>(
+                                      <div key={label}>
+                                        <div style={{fontSize:10,color,marginBottom:5,fontWeight:800,textAlign:"center",background:`${color}22`,borderRadius:4,padding:"2px 0"}}>{label}</div>
+                                        {ouLinesSoccer.map(ln=>{
+                                          const opt=`${label} (${ln})`;
+                                          const added=inSlip(opt);
+                                          return <button key={opt} onClick={()=>handleSlipPick(g,opt)}
+                                            style={{width:"100%",marginBottom:4,padding:"8px 6px",borderRadius:5,cursor:"pointer",
+                                              border:added?`2px solid ${color}`:`1px solid ${C.border}`,
+                                              background:added?`${color}33`:C.bg2,color:added?color:C.text,
+                                              fontWeight:added?800:600,fontSize:11,display:"flex",justifyContent:"space-between"}}>
+                                            <span>{label} <b>({ln})</b></span>
+                                          </button>;
+                                        })}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              </>
+                            )}
+
+                            {/* 야구: 오버/언더 */}
+                            {isBaseball && (
+                              <div style={{marginBottom:14}}>
+                                <div style={{fontSize:10,fontWeight:800,color:"#e05a9a",marginBottom:6,letterSpacing:1}}>오버/언더</div>
+                                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                                  {[
+                                    {label:"오버",color:"#e05a9a"},
+                                    {label:"언더",color:"#7ac4ff"},
+                                  ].map(({label,color})=>(
+                                    <div key={label}>
+                                      <div style={{fontSize:10,color,marginBottom:5,fontWeight:800,textAlign:"center",background:`${color}22`,borderRadius:4,padding:"2px 0"}}>{label}</div>
+                                      <div style={{display:"flex",flexDirection:"column",gap:3}}>
+                                        {ouLinesBaseball.map(ln=>{
+                                          const opt=`${label} (${ln})`;
+                                          const added=inSlip(opt);
+                                          return <button key={opt} onClick={()=>handleSlipPick(g,opt)}
+                                            style={{padding:"7px 6px",borderRadius:5,cursor:"pointer",
+                                              border:added?`2px solid ${color}`:`1px solid ${C.border}`,
+                                              background:added?`${color}33`:C.bg2,color:added?color:C.text,
+                                              fontWeight:added?800:600,fontSize:11}}>
+                                            {label} <b>({ln})</b>
+                                          </button>;
+                                        })}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* 농구: 오버/언더 */}
+                            {isBasketball && (
+                              <div style={{marginBottom:14}}>
+                                <div style={{fontSize:10,fontWeight:800,color:"#e05a9a",marginBottom:6,letterSpacing:1}}>오버/언더</div>
+                                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                                  {[
+                                    {label:"오버",color:"#e05a9a"},
+                                    {label:"언더",color:"#7ac4ff"},
+                                  ].map(({label,color})=>(
+                                    <div key={label}>
+                                      <div style={{fontSize:10,color,marginBottom:5,fontWeight:800,textAlign:"center",background:`${color}22`,borderRadius:4,padding:"2px 0"}}>{label}</div>
+                                      <div style={{display:"flex",flexDirection:"column",gap:3}}>
+                                        {ouLinesBasketball.map(ln=>{
+                                          const opt=`${label} (${ln})`;
+                                          const added=inSlip(opt);
+                                          return <button key={opt} onClick={()=>handleSlipPick(g,opt)}
+                                            style={{padding:"7px 6px",borderRadius:5,cursor:"pointer",
+                                              border:added?`2px solid ${color}`:`1px solid ${C.border}`,
+                                              background:added?`${color}33`:C.bg2,color:added?color:C.text,
+                                              fontWeight:added?800:600,fontSize:11}}>
+                                            {label} <b>({ln})</b>
+                                          </button>;
+                                        })}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* 배구: 승패만 (세트 기반) */}
+                            {isVolleyball && (
+                              <div style={{fontSize:10,color:C.muted,marginTop:4}}>배구는 승패만 지원합니다.</div>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </div>
                   </>
                 );
@@ -6422,6 +6578,75 @@ function AppMain() {
                   </div>
                 </div>
               )}
+            </div>
+
+            {/* ─── 4. 베팅 슬립 ─── */}
+            <div style={{width:320,flexShrink:0,display:"flex",flexDirection:"column",overflow:"hidden",background:C.bg2,borderLeft:`1px solid ${C.border2}`,minHeight:0}}>
+              <div style={{padding:"10px 12px",borderBottom:`1px solid ${C.border}`,flexShrink:0,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <div style={{fontSize:13,fontWeight:800,color:C.orange}}>
+                  📋 베팅 슬립
+                  {slip.length>0 && <span style={{marginLeft:6,fontSize:11,background:C.orange,color:C.bg,borderRadius:10,padding:"1px 7px"}}>{slip.length}</span>}
+                </div>
+                {slip.length>0 && <button onClick={()=>setSlip([])} style={{fontSize:9,padding:"2px 8px",borderRadius:4,border:`1px solid ${C.red}44`,background:`${C.red}11`,color:C.red,cursor:"pointer"}}>초기화</button>}
+              </div>
+              <div style={{flex:1,overflowY:"auto",padding:"10px 12px 14px",minHeight:0}}>
+                {slip.length===0 ? (
+                  <div style={{textAlign:"center",color:C.dim,padding:"30px 10px",fontSize:11}}>
+                    경기 옵션을 클릭하면<br/>여기에 추가됩니다
+                  </div>
+                ) : (
+                  <>
+                    {slip.map(item=>{
+                      const homeKr=translateTeamName(item.game.home_team, teamNameMap);
+                      const awayKr=translateTeamName(item.game.away_team, teamNameMap);
+                      return (
+                        <div key={item.id} style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:8,padding:"10px 12px",marginBottom:8}}>
+                          <div style={{fontSize:10,color:C.muted,marginBottom:4}}>{item.game.league_name}</div>
+                          <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:3}}>{homeKr} vs {awayKr}</div>
+                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                            <span style={{fontSize:11,color:C.teal,fontWeight:700}}>{item.optLabel}</span>
+                            <button onClick={()=>handleSlipPick(item.game,item.optLabel)}
+                              style={{fontSize:9,padding:"2px 7px",borderRadius:4,border:`1px solid ${C.red}44`,background:`${C.red}11`,color:C.red,cursor:"pointer"}}>✕</button>
+                          </div>
+                          <div style={{display:"flex",alignItems:"center",gap:6}}>
+                            <span style={{fontSize:10,color:C.muted}}>배당</span>
+                            <input type="number" step="0.01" min="1" placeholder="1.00"
+                              value={item.odds||""}
+                              onChange={e=>{
+                                const v=parseFloat(e.target.value)||0;
+                                setSlip(prev=>prev.map(s=>s.id===item.id?{...s,odds:v}:s));
+                              }}
+                              style={{flex:1,background:C.bg,border:`1px solid ${C.border2}`,borderRadius:5,padding:"5px 8px",color:C.text,fontSize:12,outline:"none"}}/>
+                          </div>
+                        </div>
+                      );
+                    })}
+
+                    {/* 사이트 + 금액 + 확정 */}
+                    <div style={{marginTop:10,display:"flex",flexDirection:"column",gap:8}}>
+                      <select value={slipSite} onChange={e=>setSlipSite(e.target.value)}
+                        style={{background:C.bg,border:`1px solid ${C.border2}`,borderRadius:6,padding:"8px 10px",color:slipSite?C.text:C.dim,fontSize:12,outline:"none"}}>
+                        <option value="">사이트 선택</option>
+                        {activeSiteNames.map(s=><option key={s} value={s}>{s}</option>)}
+                      </select>
+                      <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                        <span style={{fontSize:10,color:C.muted,flexShrink:0}}>금액</span>
+                        <input type="number" min="0" value={slipAmount}
+                          onChange={e=>setSlipAmount(parseFloat(e.target.value)||0)}
+                          style={{flex:1,background:C.bg,border:`1px solid ${C.border2}`,borderRadius:5,padding:"7px 8px",color:C.text,fontSize:12,outline:"none"}}/>
+                      </div>
+                      <label style={{display:"flex",alignItems:"center",gap:6,fontSize:11,color:C.muted,cursor:"pointer"}}>
+                        <input type="checkbox" checked={slipInclude} onChange={e=>setSlipInclude(e.target.checked)}/>
+                        통계 포함
+                      </label>
+                      <button onClick={handleSlipAdd}
+                        style={{padding:"11px",borderRadius:8,border:"none",background:C.orange,color:C.bg,fontWeight:900,fontSize:13,cursor:"pointer",letterSpacing:1}}>
+                        ✅ 베팅 확정
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
 
           </div>
