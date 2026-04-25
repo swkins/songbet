@@ -707,6 +707,7 @@ export async function loadFixturesByRange(
       .gte('start_time', fromIso)
       .lte('start_time', toIso)
       .order('start_time', { ascending: true })
+      .limit(10000)
     if (sport) q = q.eq('sport', sport)
     const { data, error } = await q
     if (error) throw error
