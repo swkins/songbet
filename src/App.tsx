@@ -175,7 +175,7 @@ const ACTIVE_SPORTS: Sport[] = ["football", "baseball", "basketball"];
 
 // ── 캐시 정책 ──────────────────────────────────────────────────
 const CACHE_FRESH_MIN = 15;   // 15분 이내면 신선 → API 호출 안 함
-const FETCH_DAYS = 2;         // KST 오늘+내일 2일치
+const FETCH_DAYS = 3;         // KST 어제+오늘+내일 3일치 (KST 새벽 경기는 UTC 전날이므로 어제도 포함)
 
 // ── 모바일 감지 ────────────────────────────────────────────────
 // User-Agent 기반. 100% 정확하진 않지만 핸드폰 통신사 IP 차단 목적엔 충분.
@@ -268,6 +268,12 @@ async function fetchSportFromApiSports(
             });
           } else {
             const l = item.league, t = item.teams, s = item.scores;
+            // [DEBUG] MLB 경기 상태/스코어 확인용 로그
+            const statusShort = item.status?.short || "NS";
+            if (statusShort !== "NS" && statusShort !== "TBD") {
+              // eslint-disable-next-line no-console
+              console.log(`[${sport}] id=${item.id} status=${statusShort} scores=`, JSON.stringify(s));
+            }
             rows.push({
               fixture_id:   item.id,
               sport,
@@ -277,11 +283,11 @@ async function fetchSportFromApiSports(
               home_team:    t?.home?.name || "",
               away_team:    t?.away?.name || "",
               start_time:   item.date,
-              status_short: item.status?.short || "NS",
+              status_short: statusShort,
               status_long:  item.status?.long  || "",
               elapsed:      item.status?.timer ?? null,
-              home_score:   safeScore(s?.home),
-              away_score:   safeScore(s?.away),
+              home_score:   safeScore(s?.home?.total ?? s?.home),
+              away_score:   safeScore(s?.away?.total ?? s?.away),
               fetched_at,
             });
           }
@@ -301,7 +307,7 @@ async function fetchSportFromApiSports(
 
 async function fetchFixturesFromCache(sport: Sport): Promise<LiveFixture[]> {
   // 베팅 탭은 라이브 경기도 봐야 하므로 -3시간 ~ +30시간 범위로 조회 (rev.6 동작 유지)
-  const from = new Date(Date.now() - 3  * 3_600_000).toISOString();
+  const from = new Date(Date.now() - 27 * 3_600_000).toISOString(); // 어제(-27h) 포함
   const to   = new Date(Date.now() + 30 * 3_600_000).toISOString();
   const rows = await db.loadFixturesByRange(from, to, sport);
   return rows.map(row => ({
@@ -437,7 +443,6 @@ interface PointSite {
   exchangeDate: string;
   targetAmount: number;
   targetSiteName?: string;  // 누적입금 기준 사이트 (없으면 전체)
-  targetPeriodDays?: number; // 목표 기간 (일수) — 이 기간 안에 목표 금액 달성해야 함
   targetCycleDays?: number; // 목표 주기 (일수), 기본 14일(2주). 완료 후 다음 목표일까지의 기간
   sessions: PointSession[];
 }
@@ -1499,15 +1504,15 @@ function AppMain() {
   };
 
   const [addPointSiteModal,setAddPointSiteModal]=useState(false);
-  const [newPointSite,setNewPointSite]=useState<{name:string,exchangeName:string,exchangeDate:string,targetAmount:number,targetSiteName:string,targetPeriodDays:number,targetCycleDays:number}>({name:"올인구조대",exchangeName:"포인트교환",exchangeDate:"2025-05-04",targetAmount:2000000,targetSiteName:"",targetPeriodDays:14,targetCycleDays:14});
+  const [newPointSite,setNewPointSite]=useState<{name:string,exchangeName:string,exchangeDate:string,targetAmount:number,targetSiteName:string,targetCycleDays:number}>({name:"올인구조대",exchangeName:"포인트교환",exchangeDate:"2025-05-04",targetAmount:2000000,targetSiteName:"",targetCycleDays:14});
 
   const handleAddPointSite=()=>{
-    const site:PointSite={id:String(Date.now()),name:newPointSite.name,exchangeName:newPointSite.exchangeName,exchangeDate:newPointSite.exchangeDate,targetAmount:newPointSite.targetAmount,targetSiteName:newPointSite.targetSiteName||undefined,targetPeriodDays:newPointSite.targetPeriodDays||14,targetCycleDays:newPointSite.targetCycleDays||14,sessions:[]};
+    const site:PointSite={id:String(Date.now()),name:newPointSite.name,exchangeName:newPointSite.exchangeName,exchangeDate:newPointSite.exchangeDate,targetAmount:newPointSite.targetAmount,targetSiteName:newPointSite.targetSiteName||undefined,targetCycleDays:newPointSite.targetCycleDays||14,sessions:[]};
     const updated=[...pointSites,site];
     savePointSites(updated);
     setAddPointSiteModal(false);
     const resetDate=new Date();resetDate.setDate(resetDate.getDate()+14);
-    setNewPointSite({name:"올인구조대",exchangeName:"포인트교환",exchangeDate:resetDate.toISOString().slice(0,10),targetAmount:2000000,targetSiteName:"",targetPeriodDays:14,targetCycleDays:14});
+    setNewPointSite({name:"올인구조대",exchangeName:"포인트교환",exchangeDate:resetDate.toISOString().slice(0,10),targetAmount:2000000,targetSiteName:"",targetCycleDays:14});
   };
 
   // ── 일일 퀘스트 ────────────────────────────────────────────
@@ -2226,15 +2231,15 @@ function AppMain() {
 
       // 4) 그저께 이전 데이터 자동 삭제 (KST 기준 2일 전 00:00 이전)
       try {
-        const kstYesterday = new Date(Date.now() + 9*3600_000);
-        kstYesterday.setUTCHours(0,0,0,0);
-        kstYesterday.setUTCDate(kstYesterday.getUTCDate() - 1);
-        const deleteBeforeUtc = new Date(kstYesterday.getTime() - 9*3600_000).toISOString();
+        const kst2DaysAgo = new Date(Date.now() + 9*3600_000);
+        kst2DaysAgo.setUTCHours(0,0,0,0);
+        kst2DaysAgo.setUTCDate(kst2DaysAgo.getUTCDate() - 2);
+        const deleteBeforeUtc = new Date(kst2DaysAgo.getTime() - 9*3600_000).toISOString();
         await supabase.from('fixtures').delete().lt('start_time', deleteBeforeUtc);
       } catch(e) { console.warn('[refreshFixtures] 오래된 데이터 삭제 실패:', e); }
 
-      // 5) 활성 종목 × 날짜 호출
-      const dates = Array.from({length: FETCH_DAYS}, (_, i) => kstDateStr(i));
+      // 5) 활성 종목 × 날짜 호출 (어제~내일: KST 새벽 MLB 경기는 UTC 전날이므로 어제 포함)
+      const dates = Array.from({length: FETCH_DAYS}, (_, i) => kstDateStr(i - 1));
       const lastCallsBySport: Record<string, number> = {};
       const lastResultBySport: Record<string, { fetched: number; upserted: number; error?: string }> = {};
       let totalCalls = 0;
@@ -3165,27 +3170,7 @@ function AppMain() {
                 style={{...S,boxSizing:"border-box"}}/>
             </div>
             <div style={{marginBottom:8}}>
-              <div style={L}>🎯 목표 기간 · <span style={{color:C.dim}}>이 기간 안에 목표 금액을 달성해야 함</span></div>
-              <div style={{display:"flex",gap:4,marginBottom:4}}>
-                {[
-                  {d:7,l:"1주"},{d:14,l:"2주"},{d:21,l:"3주"},{d:28,l:"4주"},
-                ].map(opt=>(
-                  <button key={opt.d} onClick={()=>setNewPointSite(p=>({...p,targetPeriodDays:opt.d}))}
-                    style={{flex:1,padding:"6px 0",borderRadius:5,cursor:"pointer",border:newPointSite.targetPeriodDays===opt.d?`2px solid ${C.amber}`:`1px solid ${C.border}`,background:newPointSite.targetPeriodDays===opt.d?`${C.amber}22`:C.bg2,color:newPointSite.targetPeriodDays===opt.d?C.amber:C.muted,fontWeight:newPointSite.targetPeriodDays===opt.d?800:600,fontSize:11}}>
-                    {opt.l} ({opt.d}일)
-                  </button>
-                ))}
-              </div>
-              <input type="number"
-                value={newPointSite.targetPeriodDays||14}
-                onChange={e=>setNewPointSite(p=>({...p,targetPeriodDays:parseInt(e.target.value)||14}))}
-                min={1} max={365}
-                style={{...S,boxSizing:"border-box",...noSpin}}
-                placeholder="직접 입력 (일수)"/>
-              <div style={{fontSize:9,color:C.dim,marginTop:3}}>예: 14일 → 14일 안에 목표 금액 달성 필요</div>
-            </div>
-            <div style={{marginBottom:8}}>
-              <div style={L}>🔁 목표 주기 · <span style={{color:C.dim}}>이 퀘스트를 얼마에 한 번씩 이어서 진행할지</span></div>
+              <div style={L}>🔁 목표 주기 (완료 후 다음 교환일까지의 기간)</div>
               <div style={{display:"flex",gap:4,marginBottom:4}}>
                 {[
                   {d:7,l:"1주"},{d:14,l:"2주"},{d:21,l:"3주"},{d:28,l:"4주"},
@@ -3202,7 +3187,7 @@ function AppMain() {
                 min={1} max={365}
                 style={{...S,boxSizing:"border-box",...noSpin}}
                 placeholder="직접 입력 (일수)"/>
-              <div style={{fontSize:9,color:C.dim,marginTop:3}}>예: 2주 → 완료 후 2주 뒤에 다시 이 퀘스트 시작</div>
+              <div style={{fontSize:9,color:C.dim,marginTop:3}}>완료 시 같은 목표/주기로 자동 다음 사이클 시작 (목표일 + 주기일)</div>
             </div>
             {/* 기준 사이트 선택 - 누적입금 계산할 사이트 */}
             <div style={{marginBottom:16}}>
@@ -4687,6 +4672,11 @@ function AppMain() {
                 const pointAmt=st.pointTotal||0;
                 return(
                   <div key={site} style={{background:C.bg3,border:`1px solid ${barColor}33`,borderRadius:10,padding:11,position:"relative",overflow:"hidden"}}>
+                    {is100 && (
+                      <div style={{position:"absolute",top:"50%",left:"50%",transform:"translate(-50%,-50%) rotate(-15deg)",fontSize:34,fontWeight:900,color:C.purple,border:`5px solid ${C.purple}`,borderRadius:10,padding:"8px 24px",letterSpacing:4,opacity:0.28,pointerEvents:"none",whiteSpace:"nowrap",zIndex:5}}>
+                        ✓ 완료
+                      </div>
+                    )}
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
                       <div style={{display:"flex",alignItems:"center",gap:5}}>
                         <span style={{fontSize:14,fontWeight:800,color:C.text}}>{dollar?"$":"₩"} {site}</span>
@@ -4719,20 +4709,9 @@ function AppMain() {
                         <div style={{fontSize:15,fontWeight:800,color:C.teal}}>{fmtDisp(remaining,dollar)}</div>
                       </div>
                     </div>
-                    {/* 진행률 + 마감 도장 */}
-                    <div style={{position:"relative"}}>
-                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:13,marginBottom:4}}>
-                        <span style={{color:C.muted,fontWeight:700}}>진행률</span>
-                        <div style={{display:"flex",alignItems:"center",gap:6}}>
-                          {is100 && (
-                            <span style={{fontSize:11,fontWeight:900,color:C.purple,border:`2px solid ${C.purple}`,borderRadius:5,padding:"1px 8px",letterSpacing:2,opacity:0.85}}>✓ 완료</span>
-                          )}
-                          <span style={{color:barColor,fontWeight:900,fontSize:16}}>{pctRaw}%</span>
-                        </div>
-                      </div>
-                      <div style={{height:18,background:C.bg,borderRadius:5,overflow:"hidden",marginBottom:7,position:"relative"}}>
-                        <div style={{width:`${pct}%`,height:"100%",background:barColor,borderRadius:5,transition:"width 0.3s"}}/>
-                      </div>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:13,marginBottom:4}}><span style={{color:C.muted,fontWeight:700}}>진행률</span><span style={{color:barColor,fontWeight:900,fontSize:16}}>{pctRaw}%</span></div>
+                    <div style={{height:18,background:C.bg,borderRadius:5,overflow:"hidden",marginBottom:7,position:"relative"}}>
+                      <div style={{width:`${pct}%`,height:"100%",background:barColor,borderRadius:5,transition:"width 0.3s"}}/>
                     </div>
                     {/* ★ 활성화 이후 수익률 표시 (마지막 마감 이후 세션 기준) */}
                     {(()=>{
@@ -5808,21 +5787,10 @@ function AppMain() {
                                   const isAttended = q.history.includes(dateStr);
                                   const isToday = dateStr===today;
                                   const isPast = dateStr<today;
-                                  const isFuture = dateStr>today;
                                   const beforeStart = dateStr<q.createdAt;
-                                  const dayIndex = beforeStart ? null : Math.floor((new Date(dateStr).getTime()-new Date(q.createdAt).getTime())/(1000*60*60*24))+1;
-                                  const canToggle = !beforeStart && !isFuture;
                                   return (
-                                    <div key={dateStr}
-                                      title={dateStr+(isAttended?` ✓ (${dayIndex}일차)`:dayIndex?` (${dayIndex}일차)`:"")}
-                                      onClick={canToggle?()=>{
-                                        saveDailyQuests(dailyQuests.map(dq=>{
-                                          if(dq.id!==q.id) return dq;
-                                          const has=dq.history.includes(dateStr);
-                                          return {...dq,history:has?dq.history.filter(d=>d!==dateStr):[...dq.history,dateStr].sort()};
-                                        }));
-                                      }:undefined}
-                                      style={{height:22,background:isAttended?C.green:beforeStart?"transparent":isToday?`${C.amber}33`:isPast?`${C.red}11`:C.bg2,borderRadius:2,display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,fontWeight:isToday?900:600,color:isAttended?"#fff":beforeStart?C.dim:isToday?C.amber:isPast?C.red:C.muted,border:isToday?`1px solid ${C.amber}`:"none",cursor:canToggle?"pointer":"default"}}>
+                                    <div key={dateStr} title={dateStr+(isAttended?" ✓":"")}
+                                      style={{height:22,background: isAttended ? C.green : beforeStart ? "transparent" : isToday ? `${C.amber}33` : isPast ? `${C.red}11` : C.bg2, borderRadius:2, display:"flex", alignItems:"center", justifyContent:"center", fontSize:9, fontWeight: isToday?900:600, color: isAttended?"#fff":beforeStart?C.dim:isToday?C.amber:isPast?C.red:C.muted, border: isToday?`1px solid ${C.amber}`:"none"}}>
                                       {dayN}
                                     </div>
                                   );
