@@ -2083,8 +2083,10 @@ function AppMain() {
   };
 
   const autoSettle = useCallback(async () => {
-    // 진행중 베팅 중 fixtureId 있는 것 (수동 경기 제외)
-    const targets = bets.filter(b =>
+    // DB에서 최신 bets 직접 로드 (stale closure 방지 + camelCase 보장)
+    const freshBets = await db.loadBets();
+    // 진행중만 대상 (대기_* 는 이미 확인 대기 중이므로 제외)
+    const targets = freshBets.filter(b =>
       b.result === "진행중" &&
       (b as any).fixtureId != null &&
       !(b as any).isManual
@@ -2092,21 +2094,23 @@ function AppMain() {
     if (targets.length === 0) return;
 
     // fixtures 테이블에서 해당 경기들 조회
-    const fixtureIds = [...new Set(targets.map(b => (b as any).fixtureId as number))];
+    const fixtureIds = [...new Set(targets.map(b => Number((b as any).fixtureId)))].filter(n => !isNaN(n) && n > 0);
+    if (fixtureIds.length === 0) return;
+
     const { data: rows, error } = await supabase
       .from('fixtures')
       .select('fixture_id,sport,status_short,home_score,away_score')
       .in('fixture_id', fixtureIds);
     if (error || !rows) return;
 
-    // fixture_id → row 맵
+    // fixture_id → row 맵 (number 키로 통일)
     const fixtureMap = new Map<number, any>();
-    for (const r of rows) fixtureMap.set(r.fixture_id, r);
+    for (const r of rows) fixtureMap.set(Number(r.fixture_id), r);
 
     const updatedBets: Bet[] = [];
 
     for (const bet of targets) {
-      const fid = (bet as any).fixtureId as number;
+      const fid = Number((bet as any).fixtureId);
       const row = fixtureMap.get(fid);
       if (!row) continue;
 
@@ -2118,8 +2122,7 @@ function AppMain() {
       let newResult: string | null = null;
 
       if (status === 'FT' || status === 'AET' || status === 'PEN') {
-        // 경기 종료 — 베팅 옵션별 판정
-        if (hs === null || as_ === null) continue; // 점수 없으면 스킵
+        if (hs === null || as_ === null) continue;
         const opt = bet.betOption;
         const total = hs + as_;
 
@@ -2136,7 +2139,6 @@ function AppMain() {
           const line = parseFloat(opt.replace(/[^0-9.]/g, ""));
           if (!isNaN(line)) newResult = total < line ? "승" : "패";
         } else if (opt.includes("(")) {
-          // 핸디캡: "팀명 (1.5)" 형식
           const lineMatch = opt.match(/\(([+-]?[\d.]+)\)/);
           if (lineMatch) {
             const line = parseFloat(lineMatch[1]);
@@ -2154,13 +2156,14 @@ function AppMain() {
       }
       // 그 외 (NS, 1H, HT, 2H 등 진행중) → 스킵
 
-      if (newResult && newResult !== bet.result) {
-        // 승이면 profit 계산, 패면 -amount
-        const profit = newResult === "승"
-          ? parseFloat((bet.amount * bet.odds - bet.amount).toFixed(2))
-          : newResult === "패" ? -bet.amount
-          : null; // 취소/연기/중단은 profit null (확인 시 처리)
-        const updated = { ...bet, result: newResult, profit } as Bet;
+      if (newResult) {
+        // 바로 확정하지 않고 "대기_*" 상태로 저장 → 사용자가 확인 버튼 눌러야 확정
+        const pendingResult =
+          newResult === "승" ? "대기_승" :
+          newResult === "패" ? "대기_패" :
+          newResult === "취소" ? "대기_취소" :
+          newResult === "연기" ? "대기_연기" : "대기_중단";
+        const updated = { ...bet, result: pendingResult, profit: null } as Bet;
         updatedBets.push(updated);
         db.upsertBet(updated);
       }
@@ -2173,7 +2176,7 @@ function AppMain() {
       }));
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bets]);
+  }, []);
 
 
   // ── 새로고침 메인 함수 ───────────────────────────────────────
@@ -2507,28 +2510,27 @@ function AppMain() {
     });
   };
 
-  // 확인 버튼 — 자동 판정된 결과(승/패/취소/연기/중단)를 최종 확정
-  // 취소/연기/중단이면 베팅금액 환원 (betTotal 감소)
+  // 확인 버튼 — 대기_* 상태를 최종 확정 (승/패/취소)
   const confirmResult=(id:string)=>{
     const bet=bets.find(b=>b.id===id);if(!bet)return;
-    const needRefund = ["취소","연기","중단"].includes(bet.result);
-    // 최종 확정: 승→승, 패→패, 취소/연기/중단→취소(profit=0)
-    const finalResult = needRefund ? "취소" : bet.result;
-    const finalProfit = needRefund ? 0 : bet.profit;
-    const confirmed = {...bet, result: finalResult, profit: finalProfit} as Bet;
+    const actualResult =
+      bet.result==="대기_승" ? "승" :
+      bet.result==="대기_패" ? "패" :
+      bet.result==="대기_취소"||bet.result==="대기_연기"||bet.result==="대기_중단" ? "취소" : bet.result;
+    const needRefund = actualResult === "취소";
+    const finalProfit = actualResult==="승"
+      ? parseFloat((bet.amount*bet.odds-bet.amount).toFixed(2))
+      : actualResult==="패" ? -bet.amount : 0;
+    const confirmed = {...bet, result: actualResult, profit: finalProfit} as Bet;
     setBetsRaw(b=>b.map(x=>x.id===id?confirmed:x));
     db.upsertBet(confirmed);
     addLog(
-      needRefund ? "↩ 환원" : bet.result==="승" ? "✅ 확인" : "❌ 확인",
+      needRefund ? "↩ 환원" : actualResult==="승" ? "✅ 확인" : "❌ 확인",
       `${bet.homeTeam||bet.teamName||""} ${needRefund?`(${bet.result}→환원)`:""}`
     );
-    // 환원: betTotal에서 베팅금액 빼기
     if(needRefund){
       const curSS=siteStates[bet.site]||{deposited:0,betTotal:0,active:false,isDollar:isUSD(bet.site)};
-      const refundedSS={
-        ...curSS,
-        betTotal:parseFloat(Math.max(0,curSS.betTotal-bet.amount).toFixed(2)),
-      };
+      const refundedSS={...curSS,betTotal:parseFloat(Math.max(0,curSS.betTotal-bet.amount).toFixed(2))};
       setSiteStatesRaw(p=>({...p,[bet.site]:refundedSS}));
       db.upsertSiteState(bet.site,refundedSS);
     }
@@ -2572,10 +2574,11 @@ function AppMain() {
     const isManual=(b as any).isManual===true;
     const hasFixtureId=!isManual&&(b as any).fixtureId!=null;
 
-    // 자동 판정 결과 여부
-    const autoResult=["승","패","취소","연기","중단"].includes(b.result)&&b.result!=="진행중";
-    const stampColor=b.result==="승"?C.green:b.result==="패"?C.red:C.amber;
-    const stampText=b.result==="승"?"적중":b.result==="패"?"실패":b.result==="취소"?"취소":b.result==="연기"?"연기":"중단";
+    // 자동 판정 결과 여부 (대기_* 상태)
+    const autoResult = b.result.startsWith("대기_");
+    const actualResult = b.result === "대기_승" ? "승" : b.result === "대기_패" ? "패" : b.result === "대기_취소" ? "취소" : b.result === "대기_연기" ? "연기" : b.result === "대기_중단" ? "중단" : b.result;
+    const stampColor = actualResult==="승"?C.green:actualResult==="패"?C.red:C.amber;
+    const stampText = actualResult==="승"?"적중":actualResult==="패"?"실패":actualResult==="취소"?"취소":actualResult==="연기"?"연기":"중단";
 
     return (
       <div key={b.id} style={{
@@ -2585,7 +2588,7 @@ function AppMain() {
         borderRadius:7,padding:"9px 11px",marginBottom:6,
         overflow:"hidden",
       }}>
-        {/* 도장 오버레이 — 명확하게 가운데 */}
+        {/* 도장 — 명확하게 가운데 */}
         {autoResult && (
           <div style={{
             position:"absolute",inset:0,
@@ -2599,13 +2602,12 @@ function AppMain() {
               letterSpacing:6,opacity:0.7,
               textShadow:`0 0 12px ${stampColor}`,
               background:`${stampColor}18`,
-              boxShadow:`0 0 20px ${stampColor}44 inset`,
             }}>{stampText}</div>
           </div>
         )}
 
         {/* 카드 내용 */}
-        <div style={{position:"relative",zIndex:0,opacity:autoResult?0.5:1}}>
+        <div style={{position:"relative",zIndex:2,opacity:autoResult?0.5:1}}>
           <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:5,flexWrap:"wrap"}}>
             <span style={{fontSize:13,flexShrink:0}}>{SPORT_ICON[b.category]||"🎯"}</span>
             <span style={{fontSize:9,color:dollar?C.amber:C.green,background:`${dollar?C.amber:C.green}22`,border:`1px solid ${dollar?C.amber:C.green}44`,padding:"1px 5px",borderRadius:3,fontWeight:700}}>
@@ -2637,7 +2639,7 @@ function AppMain() {
           </div>
         </div>
 
-        {/* 확인 버튼 — autoResult 시 항상 표시, 카드 하단 */}
+        {/* 확인 버튼 — 항상 표시, 카드 하단 */}
         {autoResult && (
           <div style={{position:"relative",zIndex:3,marginTop:8,display:"flex",justifyContent:"flex-end",gap:6}}>
             <button onClick={()=>confirmResult(b.id)}
@@ -2647,7 +2649,7 @@ function AppMain() {
                 background:stampColor,border:`2px solid ${stampColor}`,color:C.bg,
                 boxShadow:`0 2px 10px ${stampColor}66`,
               }}>
-              {b.result==="승"?"✅ 적중 확인":b.result==="패"?"❌ 실패 확인":"✔ 확인"}
+              {actualResult==="승"?"✅ 적중 확인":actualResult==="패"?"❌ 실패 확인":"✔ 확인"}
             </button>
           </div>
         )}
@@ -2661,7 +2663,7 @@ function AppMain() {
     deposits.filter(d=>d.date>=wm).forEach(d=>{m[d.site]+=d.amount;});return m;
   },[deposits,ALL_SITES]);
 
-  const pending=bets.filter(b=>b.result==="진행중");
+  const pending=bets.filter(b=>b.result==="진행중"||b.result.startsWith("대기_"));
   // 진행중 최신순 정렬 — bettingCombo + sportsTest 탭 공용
   const pendingSorted=[...pending].sort((a,b)=>{
     const ta=parseFloat(a.id)||0;
