@@ -483,7 +483,7 @@ const EXTRA:Record<string,string[]> = {
 
 const getOptGroups = (cat:string) => {
   if(cat==="축구") return [{g:"홈",opts:["홈 0.5","홈 1.5","홈 2.5"]},{g:"원정",opts:["원정 0.5","원정 1.5","원정 2.5"]}];
-  if(cat==="야구") return [{g:"승패",opts:["정배","역배"]},{g:"오버",opts:Array.from({length:9},(_,i)=>`${4.5+i} 오버`)},{g:"언더",opts:Array.from({length:9},(_,i)=>`${4.5+i} 언더`)}];
+  if(cat==="야구") return [{g:"승패",opts:["정배","역배"]},{g:"오버",opts:Array.from({length:14},(_,i)=>`${4.5+i} 오버`)},{g:"언더",opts:Array.from({length:14},(_,i)=>`${4.5+i} 언더`)}];
   if(cat==="농구") return [{g:"플핸",opts:Array.from({length:25},(_,i)=>`${5.5+i} 플핸`)},{g:"마핸",opts:Array.from({length:54},(_,i)=>`${(2.5+i).toFixed(1)} 마핸`)}];
   if(cat==="배구") return [{g:"승패",opts:["홈 승","원정 승"]},{g:"오버/언더",opts:["오버","언더"]}];
   return [];
@@ -858,6 +858,7 @@ function AppMain() {
       addLog("➕ 베팅",`${homeKr} vs ${awayKr}/${item.optLabel}/${fmtDisp(slipAmount,dollar)}`);
     });
     setSlip([]);
+    setSlipSite("");  // 베팅 완료 후 사이트 선택 초기화
   };
 
   // 모의 베팅 (사용 안 하지만 타입 호환)
@@ -3872,7 +3873,10 @@ function AppMain() {
                 away_score: g.awayScore ?? null,
               } as LiveFixture))
           : [];
+        // 이미 시작된 경기(라이브/종료/연기 등 NS 아닌 것) 제외 — 베팅 불가
+        const isNotStarted = (s: string) => s === "NS" || s === "TBD";
         const selectedFixtures = [...apiFixtures, ...manualFixtures]
+          .filter(f => isNotStarted(f.status_short))
           .sort((a,b)=>new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
         const todayGames = selectedFixtures.filter(f=>kstDateOf(f.start_time)===kstToday);
         const tomorrowGames = selectedFixtures.filter(f=>kstDateOf(f.start_time)===kstTomorrow);
@@ -4200,10 +4204,16 @@ function AppMain() {
                           <span style={{color:C.dim}}>경기 시간</span>
                           <span style={{color:C.text,fontWeight:700}}>{fmtKstTime(g.start_time)}</span>
                           <span style={{color:C.dim}}>상태</span>
-                          <span style={{color:live?C.red:finished?C.muted:C.amber,fontWeight:700}}>
-                            {live?"🔴 진행중":finished?"⏹ 종료":"⏰ 예정"}
-                            {g.status_long && <span style={{marginLeft:6,fontSize:11,color:C.dim}}>({g.status_long})</span>}
-                            {g.elapsed && <span style={{marginLeft:6,color:C.red}}>{g.elapsed}'</span>}
+                          <span style={{color:
+                            g.status_short==="PST"?C.purple:
+                            g.status_short==="CANC"||g.status_short==="ABD"?C.red:
+                            live?C.red:finished?C.muted:C.amber,fontWeight:700}}>
+                            {g.status_short==="PST"?"🔄 연기됨":
+                             g.status_short==="CANC"?"❌ 취소됨":
+                             g.status_short==="ABD"?"⛔ 중단됨":
+                             live?"🔴 진행중":finished?"⏹ 종료":"⏰ 예정"}
+                            {g.status_long && g.status_short!=="PST" && g.status_short!=="CANC" && g.status_short!=="ABD" && <span style={{marginLeft:6,fontSize:11,color:C.dim}}>({g.status_long})</span>}
+                            {g.elapsed && live && <span style={{marginLeft:6,color:C.red}}>{g.elapsed}'</span>}
                           </span>
                           {(g.home_score!==null && g.away_score!==null) && (
                             <>
@@ -4230,7 +4240,7 @@ function AppMain() {
                         const isBasketball = sport==="basketball";
                         const isVolleyball = sport==="volleyball";
                         const ouLinesSoccer = [1.5,2.5,3.5];
-                        const ouLinesBaseball = [4.5,5.5,6.5,7.5,8.5,9.5,10.5,11.5,12.5];
+                        const ouLinesBaseball = [4.5,5.5,6.5,7.5,8.5,9.5,10.5,11.5,12.5,13.5,14.5,15.5,16.5,17.5];
                         const ouLinesBasketball = [155.5,160.5,165.5,170.5,175.5,180.5,185.5,190.5,195.5,200.5,205.5,210.5,215.5,220.5];
                         const handiLinesSoccer = [0.5,1.5,2.5];
 
@@ -4332,10 +4342,10 @@ function AppMain() {
                                           const opt=`${label} (${ln})`;
                                           const added=inSlip(opt);
                                           return <button key={opt} onClick={()=>handleSlipPick(g,opt)}
-                                            style={{padding:"7px 6px",borderRadius:5,cursor:"pointer",
+                                            style={{padding:"7px 8px",borderRadius:5,cursor:"pointer",
                                               border:added?`2px solid ${color}`:`1px solid ${C.border}`,
                                               background:added?`${color}33`:C.bg2,color:added?color:C.text,
-                                              fontWeight:added?800:600,fontSize:11}}>
+                                              fontWeight:added?800:600,fontSize:11,textAlign:"left" as const}}>
                                             {label} <b>({ln})</b>
                                           </button>;
                                         })}
