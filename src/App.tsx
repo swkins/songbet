@@ -175,7 +175,7 @@ const ACTIVE_SPORTS: Sport[] = ["football", "baseball", "basketball"];
 
 // ── 캐시 정책 ──────────────────────────────────────────────────
 const CACHE_FRESH_MIN = 15;   // 15분 이내면 신선 → API 호출 안 함
-const FETCH_DAYS = 2;         // KST 오늘+내일 2일치
+const FETCH_DAYS = 3;         // KST 어제+오늘+내일 3일치 (KST 새벽 경기는 UTC 전날이므로 어제도 포함)
 
 // ── 모바일 감지 ────────────────────────────────────────────────
 // User-Agent 기반. 100% 정확하진 않지만 핸드폰 통신사 IP 차단 목적엔 충분.
@@ -300,8 +300,8 @@ async function fetchSportFromApiSports(
 }
 
 async function fetchFixturesFromCache(sport: Sport): Promise<LiveFixture[]> {
-  // 베팅 탭은 라이브 경기도 봐야 하므로 -3시간 ~ +30시간 범위로 조회 (rev.6 동작 유지)
-  const from = new Date(Date.now() - 3  * 3_600_000).toISOString();
+  // 어제(-27h)~내일(+30h): KST 새벽 경기(UTC 전날)도 커버
+  const from = new Date(Date.now() - 27 * 3_600_000).toISOString();
   const to   = new Date(Date.now() + 30 * 3_600_000).toISOString();
   const rows = await db.loadFixturesByRange(from, to, sport);
   return rows.map(row => ({
@@ -2083,9 +2083,8 @@ function AppMain() {
   };
 
   const autoSettle = useCallback(async () => {
-    // DB에서 최신 bets를 직접 로드 (stale closure 완전 방지 + camelCase 보장)
-    const freshBets = await db.loadBets();
-    const targets = freshBets.filter(b =>
+    // 진행중 베팅 중 fixtureId 있는 것 (수동 경기 제외)
+    const targets = bets.filter(b =>
       b.result === "진행중" &&
       (b as any).fixtureId != null &&
       !(b as any).isManual
@@ -2093,23 +2092,21 @@ function AppMain() {
     if (targets.length === 0) return;
 
     // fixtures 테이블에서 해당 경기들 조회
-    const fixtureIds = [...new Set(targets.map(b => Number((b as any).fixtureId)))].filter(n => !isNaN(n) && n > 0);
-    if (fixtureIds.length === 0) return;
-
+    const fixtureIds = [...new Set(targets.map(b => (b as any).fixtureId as number))];
     const { data: rows, error } = await supabase
       .from('fixtures')
       .select('fixture_id,sport,status_short,home_score,away_score')
       .in('fixture_id', fixtureIds);
     if (error || !rows) return;
 
-    // fixture_id → row 맵 (number 키로 통일)
+    // fixture_id → row 맵
     const fixtureMap = new Map<number, any>();
-    for (const r of rows) fixtureMap.set(Number(r.fixture_id), r);
+    for (const r of rows) fixtureMap.set(r.fixture_id, r);
 
     const updatedBets: Bet[] = [];
 
     for (const bet of targets) {
-      const fid = Number((bet as any).fixtureId);
+      const fid = (bet as any).fixtureId as number;
       const row = fixtureMap.get(fid);
       if (!row) continue;
 
@@ -2158,10 +2155,11 @@ function AppMain() {
       // 그 외 (NS, 1H, HT, 2H 등 진행중) → 스킵
 
       if (newResult && newResult !== bet.result) {
+        // 승이면 profit 계산, 패면 -amount
         const profit = newResult === "승"
           ? parseFloat((bet.amount * bet.odds - bet.amount).toFixed(2))
           : newResult === "패" ? -bet.amount
-          : null;
+          : null; // 취소/연기/중단은 profit null (확인 시 처리)
         const updated = { ...bet, result: newResult, profit } as Bet;
         updatedBets.push(updated);
         db.upsertBet(updated);
@@ -2175,7 +2173,7 @@ function AppMain() {
       }));
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [bets]);
 
 
   // ── 새로고침 메인 함수 ───────────────────────────────────────
@@ -2225,17 +2223,17 @@ function AppMain() {
         }
       }
 
-      // 4) 그저께 이전 데이터 자동 삭제 (KST 기준 2일 전 00:00 이전)
+      // 4) 2일 전 이전 데이터 자동 삭제 (어제 데이터는 KST 새벽 경기 커버용으로 보존)
       try {
-        const kstYesterday = new Date(Date.now() + 9*3600_000);
-        kstYesterday.setUTCHours(0,0,0,0);
-        kstYesterday.setUTCDate(kstYesterday.getUTCDate() - 1);
-        const deleteBeforeUtc = new Date(kstYesterday.getTime() - 9*3600_000).toISOString();
+        const kst2DaysAgo = new Date(Date.now() + 9*3600_000);
+        kst2DaysAgo.setUTCHours(0,0,0,0);
+        kst2DaysAgo.setUTCDate(kst2DaysAgo.getUTCDate() - 2);
+        const deleteBeforeUtc = new Date(kst2DaysAgo.getTime() - 9*3600_000).toISOString();
         await supabase.from('fixtures').delete().lt('start_time', deleteBeforeUtc);
       } catch(e) { console.warn('[refreshFixtures] 오래된 데이터 삭제 실패:', e); }
 
-      // 5) 활성 종목 × 날짜 호출
-      const dates = Array.from({length: FETCH_DAYS}, (_, i) => kstDateStr(i));
+      // 5) 활성 종목 × 날짜 호출 (어제 -1 ~ 내일 +1: KST 새벽 경기 UTC 전날 커버)
+      const dates = Array.from({length: FETCH_DAYS}, (_, i) => kstDateStr(i - 1));
       const lastCallsBySport: Record<string, number> = {};
       const lastResultBySport: Record<string, { fetched: number; upserted: number; error?: string }> = {};
       let totalCalls = 0;
