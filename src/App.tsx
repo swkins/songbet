@@ -5449,10 +5449,7 @@ function AppMain() {
                 setTriggerLoading(true);
                 const {ok,message}=await triggerFetchNow();
                 setTriggerLoading(false);
-                alert(ok?"✅ 호출 성공!
-
-"+message:"❌ 호출 실패
-"+message);
+                alert(ok?"✅ 호출 성공!\n\n"+message:"❌ 호출 실패\n"+message);
                 setApiLogLoading(true);
                 loadApiFetchLog(20).then(logs=>{setApiFetchLog(logs);setApiLogLoading(false);});
               }} disabled={triggerLoading}
