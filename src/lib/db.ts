@@ -1,5 +1,5 @@
 // ═════════════════════════════════════════════════════════════════════
-// BET TRACKER · db.ts (rev.5 - 2026-04-24)
+// BET TRACKER · db.ts (rev.6 - 2026-04-25)
 // ═════════════════════════════════════════════════════════════════════
 //
 // 🔒 골든 룰 (반드시 지킬 것)
@@ -17,6 +17,16 @@
 //    새 테이블을 만들 필요가 있는지 먼저 판단하라.
 // 4) 로드 실패 시 빈 값으로 폴백(throw 금지, 에러는 console.error). UI는
 //    App.tsx의 dataLoadErrors 배너로 안내.
+//
+// rev.6 변경사항 (2026-04-25):
+//  - Edge Function 폐기 → 클라이언트 직접 호출 + DB 캐시 모델로 전환
+//  - fixtures 테이블 관련 함수 추가:
+//      · clearAllFixtures()       : 마이그레이션용 초기화
+//      · upsertFixtureRows(rows)  : API 응답 저장 (sport+fixture_id 기준 upsert)
+//      · loadFixturesByRange()    : 시작시간 범위로 조회 (캐시 읽기)
+//  - app_settings에 'fixtures_cache_meta' 키 추가:
+//      마지막 fetch 시각, 종목별 콜 수 등을 기록 (api_fetch_log 대체)
+//  - api_fetch_log 테이블은 그대로 두지만 본 앱에서는 더 이상 쓰지 않음
 //
 // 이 주석을 보는 모든 Claude / 개발자는 위 규칙을 따를 것.
 // ═════════════════════════════════════════════════════════════════════
@@ -551,6 +561,29 @@ export async function saveAppSetting(key: string, value: any) {
 }
 
 // 여러 설정을 한 번에 로드 (초기 로딩 시 사용)
+export interface FixturesCacheMeta {
+  // 마지막 API 호출 시각 (ISO). 캐시 신선도 판정에 사용.
+  lastFetchedAt: string | null
+  // 마지막 호출에서 종목별로 사용된 콜 수
+  lastCallsBySport: Record<string, number>
+  // 마지막 호출의 총 API 콜 수
+  lastTotalCalls: number
+  // 마지막 호출에서 종목별로 가져온/저장한 경기 수
+  lastResultBySport: Record<string, { fetched: number; upserted: number; error?: string }>
+  // 오늘(KST) 누적 콜 수 (자정에 자동 리셋되도록 날짜와 함께 저장)
+  todayDateKst: string  // YYYY-MM-DD
+  todayTotalCalls: number
+}
+
+export const EMPTY_FIXTURES_CACHE_META: FixturesCacheMeta = {
+  lastFetchedAt: null,
+  lastCallsBySport: {},
+  lastTotalCalls: 0,
+  lastResultBySport: {},
+  todayDateKst: '',
+  todayTotalCalls: 0,
+}
+
 export interface AppSettingsBundle {
   krw_sites: string[] | null
   usd_sites: string[] | null
@@ -560,6 +593,7 @@ export interface AppSettingsBundle {
   code_memo_draft: string
   league_api_map: Record<string, string>
   sports_test_league_map: Record<string, string>
+  fixtures_cache_meta: FixturesCacheMeta
 }
 export async function loadAppSettingsBundle(): Promise<AppSettingsBundle> {
   try {
@@ -567,6 +601,18 @@ export async function loadAppSettingsBundle(): Promise<AppSettingsBundle> {
     if (error) throw error
     const map: Record<string, any> = {}
     for (const r of data ?? []) map[r.key] = r.value
+    const cacheMetaRaw = map.fixtures_cache_meta
+    const cacheMeta: FixturesCacheMeta =
+      cacheMetaRaw && typeof cacheMetaRaw === 'object'
+        ? {
+            lastFetchedAt: typeof cacheMetaRaw.lastFetchedAt === 'string' ? cacheMetaRaw.lastFetchedAt : null,
+            lastCallsBySport: typeof cacheMetaRaw.lastCallsBySport === 'object' && cacheMetaRaw.lastCallsBySport !== null ? cacheMetaRaw.lastCallsBySport : {},
+            lastTotalCalls: typeof cacheMetaRaw.lastTotalCalls === 'number' ? cacheMetaRaw.lastTotalCalls : 0,
+            lastResultBySport: typeof cacheMetaRaw.lastResultBySport === 'object' && cacheMetaRaw.lastResultBySport !== null ? cacheMetaRaw.lastResultBySport : {},
+            todayDateKst: typeof cacheMetaRaw.todayDateKst === 'string' ? cacheMetaRaw.todayDateKst : '',
+            todayTotalCalls: typeof cacheMetaRaw.todayTotalCalls === 'number' ? cacheMetaRaw.todayTotalCalls : 0,
+          }
+        : { ...EMPTY_FIXTURES_CACHE_META }
     return {
       krw_sites: Array.isArray(map.krw_sites) ? map.krw_sites : null,
       usd_sites: Array.isArray(map.usd_sites) ? map.usd_sites : null,
@@ -576,6 +622,7 @@ export async function loadAppSettingsBundle(): Promise<AppSettingsBundle> {
       code_memo_draft: typeof map.code_memo_draft === 'string' ? map.code_memo_draft : '1. ',
       league_api_map: typeof map.league_api_map === 'object' && map.league_api_map !== null ? map.league_api_map : {},
       sports_test_league_map: typeof map.sports_test_league_map === 'object' && map.sports_test_league_map !== null ? map.sports_test_league_map : {},
+      fixtures_cache_meta: cacheMeta,
     }
   } catch (e) {
     logLoadError('app_settings', e)
@@ -585,6 +632,96 @@ export async function loadAppSettingsBundle(): Promise<AppSettingsBundle> {
       code_memo_draft: '1. ',
       league_api_map: {},
       sports_test_league_map: {},
+      fixtures_cache_meta: { ...EMPTY_FIXTURES_CACHE_META },
     }
   }
+}
+
+// ═════════════════════════════════════════════════════════════
+// FIXTURES (API-Sports 경기 캐시) ★ rev.6 신규 ★
+// ═════════════════════════════════════════════════════════════
+// rev.6부터 클라이언트가 직접 API-Sports 호출 → 결과를 이 테이블에 캐시.
+// 다른 기기/탭은 이 테이블에서 읽기만. 모바일은 절대 쓰기 금지(App.tsx 책임).
+//
+// onConflict: (sport, fixture_id) — 같은 경기는 매번 갱신.
+// 테이블 스키마는 기존 Edge Function이 만들어 둔 것을 그대로 재사용.
+export interface FixtureRow {
+  fixture_id:   number
+  sport:        string  // 'football' | 'baseball' | 'basketball' | 'volleyball' | 'hockey'
+  league_id:    number
+  league_name:  string
+  country:      string
+  home_team:    string
+  away_team:    string
+  start_time:   string  // ISO
+  status_short: string
+  status_long:  string
+  elapsed:      number | null
+  home_score:   number | null
+  away_score:   number | null
+  fetched_at:   string  // ISO
+}
+
+// 마이그레이션용: 기존 Edge Function이 넣어둔 데이터를 한 번 비우고 시작.
+// rev.6 첫 실행 시 사용자가 명시적으로 호출.
+export async function clearAllFixtures(): Promise<{ ok: boolean; error?: string }> {
+  try {
+    // delete with no filter requires a where clause in supabase-js;
+    // fixture_id >= 0 효과적으로 "전체"를 의미.
+    const { error } = await supabase.from('fixtures').delete().gte('fixture_id', 0)
+    if (error) throw error
+    return { ok: true }
+  } catch (e: any) {
+    logSaveError('fixtures(clear)', e)
+    return { ok: false, error: String(e?.message ?? e) }
+  }
+}
+
+// API-Sports 응답을 fixtures 테이블에 upsert.
+// 빈 배열이 들어오면 아무 것도 하지 않음.
+export async function upsertFixtureRows(rows: FixtureRow[]): Promise<{ ok: boolean; error?: string }> {
+  if (rows.length === 0) return { ok: true }
+  try {
+    const { error } = await supabase
+      .from('fixtures')
+      .upsert(rows, { onConflict: 'fixture_id,sport' })
+    if (error) throw error
+    return { ok: true }
+  } catch (e: any) {
+    logSaveError('fixtures(upsert)', e)
+    return { ok: false, error: String(e?.message ?? e) }
+  }
+}
+
+// 시간 범위로 fixtures 조회 (캐시 읽기 전용).
+// sport를 지정하면 해당 종목만, 빈 문자열이면 전체.
+export async function loadFixturesByRange(
+  fromIso: string,
+  toIso: string,
+  sport?: string
+): Promise<FixtureRow[]> {
+  try {
+    let q = supabase
+      .from('fixtures')
+      .select('*')
+      .gte('start_time', fromIso)
+      .lte('start_time', toIso)
+      .order('start_time', { ascending: true })
+    if (sport) q = q.eq('sport', sport)
+    const { data, error } = await q
+    if (error) throw error
+    return (data ?? []) as FixtureRow[]
+  } catch (e) {
+    logLoadError('fixtures(range)', e)
+    return []
+  }
+}
+
+// 캐시 메타 저장/조회 헬퍼 (app_settings의 fixtures_cache_meta 키 래퍼)
+export async function loadFixturesCacheMeta(): Promise<FixturesCacheMeta> {
+  return loadAppSetting<FixturesCacheMeta>('fixtures_cache_meta', { ...EMPTY_FIXTURES_CACHE_META })
+}
+
+export async function saveFixturesCacheMeta(meta: FixturesCacheMeta): Promise<void> {
+  await saveAppSetting('fixtures_cache_meta', meta)
 }

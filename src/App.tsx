@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────
-// BET TRACKER · App.tsx (rev.6 - 2026-04-25)
+// BET TRACKER · App.tsx (rev.7 - 2026-04-25)
 // ─────────────────────────────────────────────────────────────
 //
 // ╔═══════════════════════════════════════════════════════════╗
@@ -37,23 +37,38 @@
 //  daily_quests    → 일일 퀘스트
 //  code_memos      → 코드 수정 메모
 //  team_names      → 팀명 한글 매핑
-//  fixtures        → API-Sports 경기 데이터 (Edge Function 자동 갱신)
-//  api_fetch_log   → Edge Function 호출 로그
+//  fixtures        → API-Sports 경기 캐시 (클라이언트가 직접 채움)
+//  api_fetch_log   → (rev.7부터 미사용 — 호환을 위해 테이블만 유지)
 //  app_settings    → 기타 설정 key-value
 //                    현재 키 목록:
-//                    · krw_sites      : 원화 사이트 목록
-//                    · usd_sites      : 달러 사이트 목록
-//                    · pext_sites     : 기타수익 사이트
-//                    · pext_cats      : 기타수익 카테고리
-//                    · pext_subcats   : 기타수익 서브카테고리
-//                    · code_memo_draft: 코드 메모 임시저장
-//                    · league_api_map : 리그-API 매핑
+//                    · krw_sites           : 원화 사이트 목록
+//                    · usd_sites           : 달러 사이트 목록
+//                    · pext_sites          : 기타수익 사이트
+//                    · pext_cats           : 기타수익 카테고리
+//                    · pext_subcats        : 기타수익 서브카테고리
+//                    · code_memo_draft     : 코드 메모 임시저장
+//                    · league_api_map      : 리그-API 매핑
+//                    · sports_test_league_map: 사용자리그 ↔ API리그 매핑
+//                    · fixtures_cache_meta : 캐시 메타 (마지막 호출/콜수)
 //
-// ── 규칙 4. API-Sports 경기 데이터 ──────────────────────────
-//  브라우저에서 API-Sports 직접 호출 금지.
-//  Supabase Edge Function (fetch-fixtures) 이 30분마다 자동 호출.
-//  프론트엔드는 fixtures 테이블에서 SELECT만 할 것.
-//  함수: fetchFixtures(sport) → Supabase REST API 조회
+// ── 규칙 4. API-Sports 경기 데이터 (rev.7 변경됨) ──────────
+//  rev.7부터: 클라이언트에서 fetch로 직접 API-Sports 호출.
+//  Edge Function (fetch-fixtures)은 폐기 (Supabase에서 삭제 예정).
+//  Supabase Cron도 삭제됨. 자동 호출은 일체 없음.
+//
+//  호출 정책:
+//   · 사용자가 새로고침 버튼을 눌렀을 때만 호출.
+//   · 캐시 신선(15분 이내)하면 API 호출 없이 fixtures 테이블만 다시 읽음.
+//   · 강제 새로고침(⚡)은 캐시 무시하고 무조건 호출.
+//   · 모바일 기기에서는 API 호출 자체를 막음 (IP 변동 위험).
+//   · 활성 종목: ACTIVE_SPORTS 상수에 정의된 것만 호출 (현재 축구·야구·농구).
+//   · 가져오는 날짜: KST 오늘+내일 2일치.
+//
+//  핵심 함수 (App 컴포넌트 내부):
+//   · isMobileDevice()         : 모바일 감지
+//   · refreshFixtures(force?)  : 새로고침 메인 (캐시 체크 + API 호출)
+//   · fetchFromApiSports(...)  : 실제 API-Sports 호출
+//   · fetchFixturesFromCache() : DB에서 읽기만
 //
 // ── 규칙 5. 에러 처리 ───────────────────────────────────────
 //  로드 실패 시 빈 값 폴백 (throw 금지)
@@ -73,16 +88,21 @@
 //  ⚠️ db.ts 없이 새 데이터를 추가하면 TypeScript 타입 오류 발생!
 //  새 데이터 추가 시 Claude가 스스로 "db.ts도 주세요" 라고 요청할 것
 //
+// ── 환경변수 (Vercel) ────────────────────────────────────
+//  VITE_API_SPORTS_KEY : API-Sports 키
+//  키 미설정 시 새로고침 버튼은 안내 메시지를 띄우고 호출하지 않음.
+//
 // ─────────────────────────────────────────────────────────────
-// rev.6 변경사항 (2026-04-25):
-//  - API-Sports 직접 호출 → Supabase Edge Function으로 이관
-//    · Edge Function: fetch-fixtures (30분마다 자동 실행)
-//    · fixtures 테이블에서 SELECT만 함
-//  - 베팅(환경변수), 베팅(테스트) 탭 제거
-//  - API 관리 탭 추가 (종목별 현황, 호출 로그, 수동 트리거)
-//  - 스포츠 탭 리그에 API 매핑 기능 추가
-//  - localStorage 캐시 완전 제거 (DB 직접 읽기)
-// rev.5 (2026-04-24): 모든 사용자 데이터 Supabase 이관
+// rev.7 변경사항 (2026-04-25):
+//  - Edge Function 폐기, 클라이언트 직접 호출로 회귀
+//    (다만 결과는 Supabase fixtures에 그대로 저장 — 캐시 모델)
+//  - Cron 제거, 자동 호출 useEffect 모두 제거
+//  - 모바일 차단 로직 (IP 변동 위험 회피)
+//  - 활성 종목 3종목으로 축소 (축구·야구·농구). 5종목 정의는 보존.
+//  - 캐시 신선도 15분, 강제 새로고침 버튼 별도
+//  - api_fetch_log 의존성 제거 → app_settings.fixtures_cache_meta 사용
+// rev.6 (이전): Edge Function 자동 호출 시도 (계정 정지로 폐기)
+// rev.5 (이전): 모든 사용자 데이터 Supabase 이관
 // rev.4 (이전): 라이브 베팅 체크박스, 실시간 통계
 // rev.3 (이전): API-Sports 직접 호출, 6종목 지원
 // ─────────────────────────────────────────────────────────────
@@ -113,7 +133,12 @@ const C = {
 };
 
 // ══════════════════════════════════════════════════════════════
-// Supabase fixtures 테이블 읽기 (Edge Function이 30분마다 갱신)
+// rev.7: API-Sports 직접 호출 + DB 캐시 모델
+// ══════════════════════════════════════════════════════════════
+//   - Edge Function 폐기. 클라이언트가 직접 API-Sports에 fetch.
+//   - 응답을 Supabase fixtures 테이블에 upsert (캐시).
+//   - 다른 기기는 fixtures 테이블만 SELECT (읽기 전용).
+//   - 모바일은 호출 자체 차단 (App 내부에서 isMobileDevice로 처리).
 // ══════════════════════════════════════════════════════════════
 type Sport = "football" | "baseball" | "basketball" | "volleyball" | "hockey";
 
@@ -133,20 +158,155 @@ interface LiveFixture {
   away_score: number | null;
 }
 
-// ── Supabase fixtures 테이블에서 경기 조회 ──────────────────
-async function fetchFixtures(sport: Sport): Promise<LiveFixture[]> {
+// ── API-Sports 종목별 메타 (모듈 레벨 — 컴포넌트 외부에서도 사용) ──
+// 5종목 정의는 보존. 실제 호출은 ACTIVE_SPORTS에 들어 있는 종목만.
+// 새 종목을 활성화하려면 ACTIVE_SPORTS에 종목 id만 추가하면 끝.
+const API_SPORTS_INFO = [
+  { id:"football",   sport:"football"   as Sport, name:"⚽ 축구",  host:"v3.football.api-sports.io",   path:"fixtures", dailyLimit:100 },
+  { id:"baseball",   sport:"baseball"   as Sport, name:"⚾ 야구",  host:"v1.baseball.api-sports.io",   path:"games",    dailyLimit:100 },
+  { id:"basketball", sport:"basketball" as Sport, name:"🏀 농구",  host:"v1.basketball.api-sports.io", path:"games",    dailyLimit:100 },
+  { id:"volleyball", sport:"volleyball" as Sport, name:"🏐 배구",  host:"v1.volleyball.api-sports.io", path:"games",    dailyLimit:100 },
+  { id:"hockey",     sport:"hockey"     as Sport, name:"🏒 하키",  host:"v1.hockey.api-sports.io",     path:"games",    dailyLimit:100 },
+] as const;
+
+// ★ 활성 종목 — 여기에 추가하면 새로고침 시 호출됨. 나머지는 메타만 유지.
+//   현재: 축구 + 야구 + 농구 (3종목). 새 API 키 안정화 후 배구/하키 추가 검토.
+const ACTIVE_SPORTS: Sport[] = ["football", "baseball", "basketball"];
+
+// ── 캐시 정책 ──────────────────────────────────────────────────
+const CACHE_FRESH_MIN = 15;   // 15분 이내면 신선 → API 호출 안 함
+const FETCH_DAYS = 2;         // KST 오늘+내일 2일치
+
+// ── 모바일 감지 ────────────────────────────────────────────────
+// User-Agent 기반. 100% 정확하진 않지만 핸드폰 통신사 IP 차단 목적엔 충분.
+function isMobileDevice(): boolean {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent || "";
+  return /Mobi|Android|iPhone|iPad|iPod|Mobile|Phone/i.test(ua);
+}
+
+// ── KST 날짜 헬퍼 ──────────────────────────────────────────────
+function kstDateStr(offsetDays = 0): string {
+  // KST = UTC + 9
+  return new Date(Date.now() + (9 + offsetDays * 24) * 3_600_000)
+    .toISOString().slice(0, 10);
+}
+
+// 점수 안전 변환 (API-Sports 응답 형태가 종목별로 다름)
+function safeScore(val: any): number | null {
+  if (val === null || val === undefined) return null;
+  if (typeof val === "number") return val;
+  if (typeof val === "object") {
+    if (typeof val.total === "number") return val.total;
+    if (typeof val.total === "string") {
+      const n = parseInt(val.total);
+      return isNaN(n) ? null : n;
+    }
+  }
+  if (typeof val === "string") {
+    const n = parseInt(val);
+    return isNaN(n) ? null : n;
+  }
+  return null;
+}
+
+// ── API-Sports 직접 호출 (한 종목 × 여러 날짜) ──────────────────
+async function fetchSportFromApiSports(
+  sport: Sport,
+  dates: string[],
+  apiKey: string
+): Promise<{ rows: db.FixtureRow[]; calls: number; error?: string }> {
+  if (!apiKey) return { rows: [], calls: 0, error: "API_SPORTS_KEY 미설정" };
+
+  const info = API_SPORTS_INFO.find(a => a.sport === sport);
+  if (!info) return { rows: [], calls: 0, error: `unknown sport: ${sport}` };
+
+  const rows: db.FixtureRow[] = [];
+  let calls = 0;
+  let firstError: string | undefined;
+
+  for (const date of dates) {
+    const url = `https://${info.host}/${info.path}?date=${date}`;
+    try {
+      const r = await fetch(url, {
+        headers: {
+          "x-rapidapi-key":  apiKey,
+          "x-rapidapi-host": info.host,
+        },
+      });
+      calls++;
+      if (!r.ok) {
+        const msg = `HTTP ${r.status}`;
+        if (!firstError) firstError = msg;
+        // eslint-disable-next-line no-console
+        console.warn(`[${sport}] ${date} ${msg}`);
+        continue;
+      }
+      const j = await r.json();
+      const arr: any[] = j?.response ?? [];
+      const fetched_at = new Date().toISOString();
+
+      for (const item of arr) {
+        try {
+          if (sport === "football") {
+            const f = item.fixture, l = item.league, t = item.teams, g = item.goals;
+            rows.push({
+              fixture_id:   f.id,
+              sport,
+              league_id:    l.id        ?? 0,
+              league_name:  l.name      ?? "",
+              country:      l.country   || "",
+              home_team:    t.home?.name || "",
+              away_team:    t.away?.name || "",
+              start_time:   f.date,
+              status_short: f.status?.short   || "NS",
+              status_long:  f.status?.long    || "",
+              elapsed:      f.status?.elapsed ?? null,
+              home_score:   safeScore(g?.home),
+              away_score:   safeScore(g?.away),
+              fetched_at,
+            });
+          } else {
+            const l = item.league, t = item.teams, s = item.scores;
+            rows.push({
+              fixture_id:   item.id,
+              sport,
+              league_id:    l?.id        ?? 0,
+              league_name:  l?.name      ?? "",
+              country:      l?.country?.name || "",
+              home_team:    t?.home?.name || "",
+              away_team:    t?.away?.name || "",
+              start_time:   item.date,
+              status_short: item.status?.short || "NS",
+              status_long:  item.status?.long  || "",
+              elapsed:      item.status?.timer ?? null,
+              home_score:   safeScore(s?.home),
+              away_score:   safeScore(s?.away),
+              fetched_at,
+            });
+          }
+        } catch { /* 스킵 */ }
+      }
+    } catch (e: any) {
+      calls++;
+      const msg = String(e?.message ?? e);
+      if (!firstError) firstError = msg;
+      // eslint-disable-next-line no-console
+      console.error(`[${sport}] ${date} fetch 실패:`, e);
+    }
+  }
+
+  return { rows, calls, ...(firstError ? { error: firstError } : {}) };
+}
+
+// ── DB 캐시: 한 종목, 시작시간 기준 (베팅 탭에서 사용) ─────────
+async function fetchFixturesFromCache(sport: Sport): Promise<LiveFixture[]> {
+  // 베팅 탭은 라이브 경기도 봐야 하므로 -3시간 ~ +30시간 범위로 조회 (rev.6 동작 유지)
   const from = new Date(Date.now() - 3  * 3_600_000).toISOString();
   const to   = new Date(Date.now() + 30 * 3_600_000).toISOString();
-  const { data, error } = await supabase
-    .from("fixtures")
-    .select("*")
-    .eq("sport", sport)
-    .gte("start_time", from)
-    .lte("start_time", to)
-    .order("start_time", { ascending: true });
-  if (error) throw new Error(`fixtures 조회 실패: ${error.message}`);
-  return (data ?? []).map((row: any) => ({
-    id: row.fixture_id, sport: row.sport,
+  const rows = await db.loadFixturesByRange(from, to, sport);
+  return rows.map(row => ({
+    id: row.fixture_id, sport: row.sport as Sport,
     league_id: row.league_id, league_name: row.league_name,
     country: row.country, home_team: row.home_team, away_team: row.away_team,
     start_time: row.start_time, status_short: row.status_short, status_long: row.status_long,
@@ -154,8 +314,7 @@ async function fetchFixtures(sport: Sport): Promise<LiveFixture[]> {
   }));
 }
 
-// ── [스포츠 테스트] 모든 종목 fixtures를 오늘+내일(KST) 범위로 조회 ─
-// KST 기준으로 오늘 00:00 ~ 내일 23:59까지의 모든 종목 경기 가져옴
+// ── DB 캐시: 모든 종목, KST 오늘+내일 (스포츠 테스트 탭에서 사용) ──
 async function fetchAllFixturesUntilTomorrowKst(): Promise<LiveFixture[]> {
   // KST 오늘 00:00의 UTC ISO
   const nowKst = new Date(Date.now() + 9*3600_000);
@@ -166,42 +325,14 @@ async function fetchAllFixturesUntilTomorrowKst(): Promise<LiveFixture[]> {
   const fromUtc = new Date(Date.UTC(yyyy, mm, dd, 0, 0, 0) - 9*3600_000);
   // KST 모레 00:00 → UTC -9시간 (= 내일 23:59:59까지 포함)
   const toUtc = new Date(Date.UTC(yyyy, mm, dd+2, 0, 0, 0) - 9*3600_000);
-  const { data, error } = await supabase
-    .from("fixtures")
-    .select("*")
-    .gte("start_time", fromUtc.toISOString())
-    .lt("start_time", toUtc.toISOString())
-    .order("start_time", { ascending: true });
-  if (error) throw new Error(`fixtures 조회 실패: ${error.message}`);
-  return (data ?? []).map((row: any) => ({
-    id: row.fixture_id, sport: row.sport,
+  const rows = await db.loadFixturesByRange(fromUtc.toISOString(), toUtc.toISOString());
+  return rows.map(row => ({
+    id: row.fixture_id, sport: row.sport as Sport,
     league_id: row.league_id, league_name: row.league_name,
     country: row.country, home_team: row.home_team, away_team: row.away_team,
     start_time: row.start_time, status_short: row.status_short, status_long: row.status_long,
     elapsed: row.elapsed, home_score: row.home_score, away_score: row.away_score,
   }));
-}
-
-// api_fetch_log 조회 (API 관리 탭)
-async function loadApiFetchLog(limit = 20): Promise<any[]> {
-  try {
-    const { data, error } = await supabase
-      .from("api_fetch_log")
-      .select("*")
-      .order("fetched_at", { ascending: false })
-      .limit(limit);
-    if (error) return [];
-    return data ?? [];
-  } catch { return []; }
-}
-
-// Edge Function 수동 트리거
-async function triggerFetchNow(): Promise<{ ok: boolean; message: string }> {
-  try {
-    const { data, error } = await supabase.functions.invoke("fetch-fixtures");
-    if (error) throw error;
-    return { ok: true, message: JSON.stringify(data, null, 2) };
-  } catch (e: any) { return { ok: false, message: String(e?.message ?? e) }; }
 }
 // ── 종목 메타 ────────────────────────────────────────────────
 const SPORT_META: Record<Sport|"esports", {icon:string; label:string; color:string; kr:string}> = {
@@ -581,7 +712,16 @@ function AppMain() {
   const t = (name:string) => translateTeamName(name, teamNameMap);
 
   // ══════════════════════════════════════════════════════════
-  // 베팅 탭 상태 (API-Sports 직접 호출 + 15분 캐시)
+  // rev.7: fixtures 재로드 nonce
+  //   refreshFixtures()가 이 nonce들을 증가시키면 sportsTest/bettingCombo
+  //   탭의 useEffect가 watch하다가 DB에서 다시 읽음.
+  //   ※ useState 호이스팅 없음 — 사용 위치보다 위에 선언해야 함.
+  // ══════════════════════════════════════════════════════════
+  const [sportsTestReloadNonce, setSportsTestReloadNonce] = useState(0);
+  const [bettingFixturesReloadNonce, setBettingFixturesReloadNonce] = useState(0);
+
+  // ══════════════════════════════════════════════════════════
+  // 베팅 탭 상태 (rev.7: DB 캐시만 읽음. API 호출은 refreshFixtures가 담당)
   // ══════════════════════════════════════════════════════════
   const [bettingSport,setBettingSport]=useState<Sport|"esports">("football");
   const [bettingFixtures,setBettingFixtures]=useState<LiveFixture[]>([]);
@@ -594,14 +734,16 @@ function AppMain() {
   const [bettingLeague,setBettingLeague]=useState<string>("");
   const [bettingExpandedGameId,setBettingExpandedGameId]=useState<number|null>(null);
 
-  const loadBettingData = useCallback(async(force = false)=>{
+  const loadBettingData = useCallback(async(_force = false)=>{
+    // _force는 호환을 위해 시그니처에 남겨두지만 본 함수는 항상 DB 캐시만 읽음.
+    // 진짜 API 호출은 refreshFixtures(force) — 새로고침 버튼에서만.
     if (bettingSport === "esports") { setBettingFixtures([]); return; }
     setBettingLoading(true); setBettingError("");
     try {
-      const data = await fetchFixtures(bettingSport);
+      const data = await fetchFixturesFromCache(bettingSport);
       setBettingFixtures(data);
       setBettingCacheInfo({fetchedAt: Date.now(), expiresAt: null});
-      if (data.length === 0) setBettingError("경기 데이터가 없습니다");
+      if (data.length === 0) setBettingError("경기 데이터가 없습니다 (PC에서 새로고침 후 표시됩니다)");
     } catch(e:any) {
       setBettingError(e?.message || "불러오기 실패");
     } finally { setBettingLoading(false); }
@@ -613,20 +755,17 @@ function AppMain() {
     return ()=>clearInterval(id);
   },[]);
 
-  // 종목 바뀌면 자동 로드 (캐시 우선)
+  // 종목 바뀌면 자동 로드 (DB 캐시만 읽음, API 호출 X)
+  // refreshFixtures(force) 호출 후 bettingFixturesReloadNonce 가 올라가서
+  // 이 effect 가 다시 돌아 새 데이터를 화면에 반영함.
   useEffect(()=>{
     setBettingCountry(""); setBettingLeague(""); setBettingExpandedGameId(null);
     if (tab==="bettingCombo") loadBettingData(false);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[bettingSport,tab]);
+  },[bettingSport,tab,bettingFixturesReloadNonce]);
 
-  // 15분마다 자동 갱신 시도 (캐시 만료 시에만 실제 API 호출)
-  useEffect(()=>{
-    // betting 탭 제거됨
-    const id = setInterval(()=>loadBettingData(false), 15*60_000);
-    return ()=>clearInterval(id);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[tab,bettingSport]);
+  // ※ rev.7: 15분 자동 갱신 useEffect 제거.
+  //   API 호출은 사용자가 새로고침 버튼을 눌렀을 때만 (refreshFixtures).
 
   // ══════════════════════════════════════════════════════════
   // [스포츠 테스트] 탭 상태
@@ -656,15 +795,14 @@ function AppMain() {
     } finally { setStLoading(false); }
   },[]);
 
-  // sportsTest 탭 진입 시 자동 로드 + 5분마다 갱신
+  // sportsTest 탭 진입 시 또는 새로고침(nonce 증가) 시 DB 캐시에서 로드.
+  // ※ rev.7: 5분 자동 갱신 제거. API 호출은 사용자 트리거(refreshFixtures)만.
   useEffect(()=>{
     if (tab === "sportsTest") {
       loadSportsTestData();
-      const id = setInterval(()=>loadSportsTestData(), 5*60_000);
-      return ()=>clearInterval(id);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[tab]);
+  },[tab, sportsTestReloadNonce]);
 
   // ── 베팅 슬립 ──────────────────────────────────────────────
   interface SlipItem {
@@ -1922,27 +2060,17 @@ function AppMain() {
   // ── E스포츠 기록 ─────────────────────────────────────────
   const [esRec,setEsRec]=useState({league:"LCK",date:today,teamA:"",teamB:"",scoreA:0,scoreB:0});
 
-  // ── API 관리 탭 state ────────────────────────────────────────
-  // 종목별 API-Sports 정보 (하드코딩 - 실제 사용중인 5종목)
-  const API_SPORTS_INFO = [
-    { id:"football",   sport:"football",   name:"⚽ 축구",   host:"v3.football.api-sports.io",   path:"fixtures", dailyLimit:100, intervalMin:30 },
-    { id:"baseball",   sport:"baseball",   name:"⚾ 야구",   host:"v1.baseball.api-sports.io",   path:"games",    dailyLimit:100, intervalMin:30 },
-    { id:"basketball", sport:"basketball", name:"🏀 농구",   host:"v1.basketball.api-sports.io", path:"games",    dailyLimit:100, intervalMin:30 },
-    { id:"volleyball", sport:"volleyball", name:"🏐 배구",   host:"v1.volleyball.api-sports.io", path:"games",    dailyLimit:100, intervalMin:30 },
-    { id:"hockey",     sport:"hockey",     name:"🏒 하키",   host:"v1.hockey.api-sports.io",     path:"games",    dailyLimit:100, intervalMin:30 },
-  ] as const;
-
-  const [apiFetchLog, setApiFetchLog] = useState<any[]>([]);
-  const [apiLogLoading, setApiLogLoading] = useState(false);
-  const [triggerLoading, setTriggerLoading] = useState(false);
-
-  // API 관리 탭 진입 시 로그 로드
-  useEffect(()=>{
-    if (tab !== "apiManager") return;
-    setApiLogLoading(true);
-    loadApiFetchLog(20).then(logs => { setApiFetchLog(logs); setApiLogLoading(false); });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[tab]);
+  // ── API 관리 탭 state (rev.7 — Edge Function 폐기, 클라이언트 직접 호출) ─
+  // API_SPORTS_INFO / ACTIVE_SPORTS / CACHE_FRESH_MIN 은 모듈 레벨에 정의됨.
+  // sportsTestReloadNonce / bettingFixturesReloadNonce 는 베팅 탭 state 위쪽에서 선언됨.
+  // 캐시 메타 (마지막 호출 시각, 콜 수 등)를 fixtures_cache_meta 키에서 로드.
+  const [cacheMeta, setCacheMeta] = useState<db.FixturesCacheMeta>({ ...db.EMPTY_FIXTURES_CACHE_META });
+  // 새로고침 진행 중 표시
+  const [refreshLoading, setRefreshLoading] = useState(false);
+  // 새로고침 결과 메시지 (UI 배너용)
+  const [refreshNote, setRefreshNote] = useState<{kind:"info"|"success"|"warn"|"error"; text:string}|null>(null);
+  // 모바일 여부 (한 번만 계산)
+  const isMobile = useMemo(() => isMobileDevice(), []);
 
   const fmtRelTime = (iso: string | null) => {
     if (!iso) return "없음";
@@ -1954,6 +2082,130 @@ function AppMain() {
     if (hrs < 24) return hrs + "시간 전";
     return Math.floor(hrs/24) + "일 전";
   };
+
+  // ── 새로고침 메인 함수 ───────────────────────────────────────
+  // force=false: 캐시(15분) 신선하면 API 호출 안 하고 DB만 다시 읽음.
+  // force=true:  캐시 무시하고 무조건 호출 (⚡ 강제 새로고침).
+  // 모바일이면 항상 호출 차단 후 안내.
+  // 호출 후엔 sportsTest/bettingCombo 탭의 표시 데이터도 다시 로드되도록
+  //   onAfterRefresh 콜백에서 재로딩 트리거.
+  const refreshFixtures = useCallback(async (opts: { force?: boolean } = {}): Promise<void> => {
+    const force = !!opts.force;
+
+    // 1) 모바일 차단
+    if (isMobile) {
+      setRefreshNote({
+        kind: "warn",
+        text: "📱 모바일에서는 API 호출이 차단됩니다. 데이터는 PC에서 새로고침해주세요. (지금 보이는 건 마지막 PC 호출 결과)",
+      });
+      return;
+    }
+
+    // 2) API 키 확인 (Vercel 환경변수)
+    const apiKey = (import.meta as any).env?.VITE_API_SPORTS_KEY as string | undefined;
+    if (!apiKey) {
+      setRefreshNote({
+        kind: "error",
+        text: "❌ VITE_API_SPORTS_KEY 환경변수가 설정되지 않았습니다. Vercel 프로젝트 설정 → Environment Variables 에서 추가하세요.",
+      });
+      return;
+    }
+
+    setRefreshLoading(true);
+    try {
+      // 3) 캐시 신선도 체크 (force=false일 때만)
+      const meta = await db.loadFixturesCacheMeta();
+      if (!force && meta.lastFetchedAt) {
+        const ageMin = (Date.now() - new Date(meta.lastFetchedAt).getTime()) / 60_000;
+        if (ageMin < CACHE_FRESH_MIN) {
+          setCacheMeta(meta);
+          setRefreshNote({
+            kind: "info",
+            text: `🟢 캐시 사용 (${Math.floor(ageMin)}분 전 데이터, ${CACHE_FRESH_MIN}분 이내라 호출 생략). 강제로 받으려면 ⚡ 버튼을 누르세요.`,
+          });
+          // 화면에 표시되는 데이터는 외부에서 재로딩하므로 nonce만 올림
+          setSportsTestReloadNonce(n => n + 1);
+          setBettingFixturesReloadNonce(n => n + 1);
+          return;
+        }
+      }
+
+      // 4) 활성 종목 × 날짜 호출
+      const dates = Array.from({length: FETCH_DAYS}, (_, i) => kstDateStr(i));
+      const lastCallsBySport: Record<string, number> = {};
+      const lastResultBySport: Record<string, { fetched: number; upserted: number; error?: string }> = {};
+      let totalCalls = 0;
+      const errorMsgs: string[] = [];
+
+      for (const sport of ACTIVE_SPORTS) {
+        const { rows, calls, error } = await fetchSportFromApiSports(sport, dates, apiKey);
+        totalCalls += calls;
+        lastCallsBySport[sport] = calls;
+
+        let upserted = 0;
+        if (rows.length > 0) {
+          const res = await db.upsertFixtureRows(rows);
+          if (res.ok) upserted = rows.length;
+          else if (res.error) errorMsgs.push(`${sport}: ${res.error}`);
+        }
+        lastResultBySport[sport] = {
+          fetched: rows.length,
+          upserted,
+          ...(error ? { error } : {}),
+        };
+        if (error) errorMsgs.push(`${sport}: ${error}`);
+      }
+
+      // 5) 캐시 메타 갱신 (오늘 누적도 함께)
+      const todayKst = kstDateStr(0);
+      const carryToday = meta.todayDateKst === todayKst ? (meta.todayTotalCalls || 0) : 0;
+      const nextMeta: db.FixturesCacheMeta = {
+        lastFetchedAt: new Date().toISOString(),
+        lastCallsBySport,
+        lastTotalCalls: totalCalls,
+        lastResultBySport,
+        todayDateKst: todayKst,
+        todayTotalCalls: carryToday + totalCalls,
+      };
+      await db.saveFixturesCacheMeta(nextMeta);
+      setCacheMeta(nextMeta);
+
+      // 6) 결과 안내
+      if (errorMsgs.length === 0) {
+        const summary = ACTIVE_SPORTS.map(sp => {
+          const r = lastResultBySport[sp];
+          return `${sp}: ${r?.upserted ?? 0}건`;
+        }).join(", ");
+        setRefreshNote({
+          kind: "success",
+          text: `✅ 새로고침 완료 — 총 ${totalCalls}콜 (${summary})`,
+        });
+      } else {
+        setRefreshNote({
+          kind: "error",
+          text: `⚠ 일부 오류 — ${errorMsgs.slice(0, 2).join(" · ")}${errorMsgs.length > 2 ? " 외" : ""}`,
+        });
+      }
+
+      // 7) 다른 탭(스포츠 테스트, 베팅 탭)이 새 데이터를 다시 읽도록 nonce 증가
+      setSportsTestReloadNonce(n => n + 1);
+      setBettingFixturesReloadNonce(n => n + 1);
+
+    } catch (e: any) {
+      setRefreshNote({
+        kind: "error",
+        text: `❌ 새로고침 실패: ${String(e?.message ?? e)}`,
+      });
+    } finally {
+      setRefreshLoading(false);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isMobile]);
+
+  // ── 캐시 메타 초기 로드 ──────────────────────────────────────
+  useEffect(() => {
+    db.loadFixturesCacheMeta().then(setCacheMeta).catch(()=>{});
+  }, []);
 
   // ── 리그-API 매핑 state ──────────────────────────────────────
   // 리그별로 어떤 API를 사용하는지 매핑 { "리그명": "sport_id" }
@@ -5513,7 +5765,9 @@ function AppMain() {
                       </div>
                       <div style={{fontSize:11,color:C.muted,textAlign:"right" as const}}>
                         <div>{api.dailyLimit}콜/일</div>
-                        <div>{api.intervalMin}분 간격</div>
+                        <div style={{color: ACTIVE_SPORTS.includes(api.sport) ? C.green : C.dim}}>
+                          {ACTIVE_SPORTS.includes(api.sport) ? "활성" : "비활성"}
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -5530,7 +5784,9 @@ function AppMain() {
                       </div>
                       <div style={{fontSize:11,color:C.muted,textAlign:"right" as const}}>
                         <div>{api.dailyLimit}콜/일</div>
-                        <div>{api.intervalMin}분 간격</div>
+                        <div style={{color: ACTIVE_SPORTS.includes(api.sport) ? C.green : C.dim}}>
+                          {ACTIVE_SPORTS.includes(api.sport) ? "활성" : "비활성"}
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -5554,55 +5810,127 @@ function AppMain() {
         );
       })()}
 
-      {/* ══ API 관리 탭 ══ */}
+      {/* ══ API 관리 탭 (rev.7 — 클라이언트 직접 호출 + DB 캐시) ══ */}
       {tab==="apiManager" && (()=>{
-        // 로그에서 종목별 최근 결과 추출
-        const latestLog = apiFetchLog[0] || null;
-        const prevLog   = apiFetchLog[1] || null;
+        // 캐시 메타에서 정보 추출
+        const lastFetchedAt = cacheMeta.lastFetchedAt;
+        const lastTotalCalls = cacheMeta.lastTotalCalls || 0;
+        const lastResults = cacheMeta.lastResultBySport || {};
+        const lastCalls = cacheMeta.lastCallsBySport || {};
 
-        // 전체 통계 집계
-        const totalCalls   = apiFetchLog.reduce((s,l)=>s+(l.total_api_calls||0),0);
-        const totalSuccess = apiFetchLog.filter(l=>l.success).length;
-        const totalFail    = apiFetchLog.filter(l=>!l.success).length;
-        const successRate  = apiFetchLog.length>0 ? Math.round(totalSuccess/apiFetchLog.length*100) : 100;
+        // 오늘(KST) 누적 콜 — 자정에 자동 리셋되도록 todayDateKst 비교
+        const todayKst = kstDateStr(0);
+        const todayTotalCalls = (cacheMeta.todayDateKst === todayKst)
+          ? (cacheMeta.todayTotalCalls || 0)
+          : 0;
+
+        // 캐시 신선도 (분)
+        const ageMin = lastFetchedAt
+          ? Math.max(0, Math.floor((Date.now() - new Date(lastFetchedAt).getTime()) / 60_000))
+          : null;
+        const isFresh = ageMin !== null && ageMin < CACHE_FRESH_MIN;
+
+        // 호출 결과의 에러 여부
+        const hasAnyError = Object.values(lastResults).some((r: any) => !!r?.error);
+
+        // 활성 종목 일일 한도 합 (3종목 × 100 = 300, 5종목이면 500)
+        const totalDailyLimit = ACTIVE_SPORTS.reduce((s, sp) => {
+          const info = API_SPORTS_INFO.find(a => a.sport === sp);
+          return s + (info?.dailyLimit || 0);
+        }, 0);
+        const todayUsagePct = totalDailyLimit > 0
+          ? Math.min(100, Math.round(todayTotalCalls / totalDailyLimit * 100))
+          : 0;
+        const usageColor = todayUsagePct >= 90 ? C.red : todayUsagePct >= 70 ? C.amber : C.green;
 
         return (
           <div style={{flex:1,overflowY:"auto",padding:20,minHeight:0}}>
 
             {/* ── 헤더 ── */}
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:18}}>
-              <div>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14,gap:12,flexWrap:"wrap" as const}}>
+              <div style={{flex:1,minWidth:260}}>
                 <div style={{fontSize:18,fontWeight:900,color:C.purple}}>🔑 API 관리</div>
-                <div style={{fontSize:11,color:C.muted,marginTop:3}}>
-                  Supabase Edge Function 자동 실행 · 매 정각/30분 · 5종목 · 오늘+내일
+                <div style={{fontSize:11,color:C.muted,marginTop:3,lineHeight:1.5}}>
+                  클라이언트 직접 호출 · 사용자 트리거 전용 · 활성 {ACTIVE_SPORTS.length}종목 · KST 오늘+내일 ({FETCH_DAYS}일치) · 캐시 {CACHE_FRESH_MIN}분
                 </div>
-                {latestLog && (
-                  <div style={{fontSize:11,color:C.teal,marginTop:4}}>
-                    최근 업데이트: <b>{new Date(latestLog.fetched_at).toLocaleString("ko-KR")}</b>
-                    <span style={{color:C.dim,marginLeft:6}}>({fmtRelTime(latestLog.fetched_at)})</span>
+                {lastFetchedAt && (
+                  <div style={{fontSize:11,color:isFresh?C.green:C.muted,marginTop:4}}>
+                    마지막 호출: <b>{new Date(lastFetchedAt).toLocaleString("ko-KR")}</b>
+                    <span style={{marginLeft:6}}>({fmtRelTime(lastFetchedAt)})</span>
+                    <span style={{marginLeft:8,padding:"1px 7px",borderRadius:9,fontSize:10,fontWeight:800,
+                      background:isFresh?`${C.green}22`:`${C.amber}22`,
+                      border:`1px solid ${isFresh?C.green:C.amber}55`,
+                      color:isFresh?C.green:C.amber}}>
+                      {isFresh ? `🟢 신선 (${ageMin}분)` : `🟡 만료 (${ageMin}분 ≥ ${CACHE_FRESH_MIN})`}
+                    </span>
+                  </div>
+                )}
+                {!lastFetchedAt && (
+                  <div style={{fontSize:11,color:C.amber,marginTop:4}}>
+                    ⚠ 아직 호출된 적 없음 — 새로고침 버튼을 눌러 첫 호출을 실행하세요
                   </div>
                 )}
               </div>
-              <button onClick={async()=>{
-                setTriggerLoading(true);
-                const {ok,message}=await triggerFetchNow();
-                setTriggerLoading(false);
-                alert(ok?"✅ 호출 성공!\n\n"+message:"❌ 호출 실패\n"+message);
-                setApiLogLoading(true);
-                loadApiFetchLog(20).then(logs=>{setApiFetchLog(logs);setApiLogLoading(false);});
-              }} disabled={triggerLoading}
-                style={{padding:"9px 16px",borderRadius:7,border:`1px solid ${C.teal}`,background:`${C.teal}22`,color:C.teal,cursor:triggerLoading?"not-allowed":"pointer",fontWeight:800,fontSize:12,opacity:triggerLoading?0.6:1}}>
-                {triggerLoading?"⏳ 실행 중…":"⚡ 지금 새로고침"}
-              </button>
+
+              <div style={{display:"flex",gap:8,flexWrap:"wrap" as const}}>
+                <button onClick={()=>refreshFixtures({force:false})} disabled={refreshLoading||isMobile}
+                  title={isMobile ? "모바일에서는 차단됩니다" : `캐시 ${CACHE_FRESH_MIN}분 이내면 호출 생략`}
+                  style={{padding:"9px 14px",borderRadius:7,border:`1px solid ${C.teal}`,background:`${C.teal}22`,color:C.teal,cursor:(refreshLoading||isMobile)?"not-allowed":"pointer",fontWeight:800,fontSize:12,opacity:(refreshLoading||isMobile)?0.5:1}}>
+                  {refreshLoading?"⏳ 진행중…":"🔄 새로고침"}
+                </button>
+                <button onClick={()=>{
+                    if (isMobile) return;
+                    if (!confirm(`⚡ 강제 새로고침\n\n캐시(${CACHE_FRESH_MIN}분)를 무시하고 무조건 API를 호출합니다.\n계속하시겠습니까?`)) return;
+                    refreshFixtures({force:true});
+                  }} disabled={refreshLoading||isMobile}
+                  title={isMobile ? "모바일에서는 차단됩니다" : "캐시 무시하고 무조건 호출"}
+                  style={{padding:"9px 14px",borderRadius:7,border:`1px solid ${C.amber}`,background:`${C.amber}22`,color:C.amber,cursor:(refreshLoading||isMobile)?"not-allowed":"pointer",fontWeight:800,fontSize:12,opacity:(refreshLoading||isMobile)?0.5:1}}>
+                  {refreshLoading?"⏳":"⚡ 강제"}
+                </button>
+              </div>
             </div>
 
+            {/* ── 모바일 안내 배너 ── */}
+            {isMobile && (
+              <div style={{padding:"10px 14px",borderRadius:8,background:`${C.amber}11`,border:`1px solid ${C.amber}44`,marginBottom:14,fontSize:12,color:C.amber,lineHeight:1.5}}>
+                📱 <b>모바일 감지됨</b> — 이 기기에서는 API 호출이 차단됩니다.
+                <div style={{fontSize:10,color:C.muted,marginTop:3}}>
+                  모바일 통신사 IP는 매번 바뀌어서 API-Sports에 키 공유로 오인될 수 있습니다.
+                  데이터는 PC에서 새로고침해 주세요. 이 기기에서는 마지막 PC 호출 결과를 그대로 봅니다.
+                </div>
+              </div>
+            )}
+
+            {/* ── 새로고침 결과 배너 ── */}
+            {refreshNote && (
+              <div style={{padding:"10px 14px",borderRadius:8,marginBottom:14,fontSize:12,lineHeight:1.5,
+                background: refreshNote.kind==="error" ? `${C.red}11`
+                          : refreshNote.kind==="warn"  ? `${C.amber}11`
+                          : refreshNote.kind==="success" ? `${C.green}11`
+                          : `${C.teal}11`,
+                border: `1px solid ${
+                  refreshNote.kind==="error" ? C.red+"55"
+                : refreshNote.kind==="warn"  ? C.amber+"55"
+                : refreshNote.kind==="success" ? C.green+"55"
+                : C.teal+"55"}`,
+                color: refreshNote.kind==="error" ? C.red
+                     : refreshNote.kind==="warn"  ? C.amber
+                     : refreshNote.kind==="success" ? C.green
+                     : C.teal,
+                display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
+                <span style={{flex:1}}>{refreshNote.text}</span>
+                <button onClick={()=>setRefreshNote(null)}
+                  style={{background:"transparent",border:"none",color:"inherit",cursor:"pointer",fontSize:14,lineHeight:1,opacity:0.7}}>×</button>
+              </div>
+            )}
+
             {/* ── 요약 카드 ── */}
-            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:20}}>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:10,marginBottom:20}}>
               {[
-                {label:"등록 종목",value:"5종목",color:C.purple},
-                {label:"총 API 콜 (최근 20회)",value:totalCalls+"회",color:C.teal},
-                {label:"성공",value:totalSuccess+"회",sub:`${successRate}%`,color:C.green},
-                {label:"실패",value:totalFail+"회",color:totalFail>0?C.red:C.dim},
+                {label:"활성 종목",value:`${ACTIVE_SPORTS.length}종목`,sub:`정의 ${API_SPORTS_INFO.length}종목`,color:C.purple},
+                {label:"마지막 호출 콜 수",value:`${lastTotalCalls}콜`,sub:lastFetchedAt?fmtRelTime(lastFetchedAt):"-",color:C.teal},
+                {label:`오늘 누적 (KST)`,value:`${todayTotalCalls}콜`,sub:`한도 ${totalDailyLimit}콜 (${todayUsagePct}%)`,color:usageColor},
+                {label:"마지막 호출 상태",value:hasAnyError?"❌ 오류":(lastFetchedAt?"✅ 정상":"-"),color:hasAnyError?C.red:(lastFetchedAt?C.green:C.dim)},
               ].map(sc=>(
                 <div key={sc.label} style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:10,padding:"12px 14px"}}>
                   <div style={{fontSize:10,color:C.muted,marginBottom:4}}>{sc.label}</div>
@@ -5612,29 +5940,47 @@ function AppMain() {
               ))}
             </div>
 
+            {/* ── 오늘 누적 사용량 바 ── */}
+            <div style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:10,padding:"10px 14px",marginBottom:20}}>
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:5}}>
+                <span style={{color:C.muted}}>오늘(KST) 누적 사용량 — 활성 종목 합산</span>
+                <span style={{color:usageColor,fontWeight:800}}>{todayTotalCalls} / {totalDailyLimit}콜 ({todayUsagePct}%)</span>
+              </div>
+              <div style={{height:8,background:C.bg,borderRadius:4,overflow:"hidden"}}>
+                <div style={{width:`${todayUsagePct}%`,height:"100%",background:usageColor,borderRadius:4,transition:"width 0.3s"}}/>
+              </div>
+              <div style={{fontSize:9,color:C.dim,marginTop:5}}>
+                ※ 한 번 새로고침하면 활성 {ACTIVE_SPORTS.length}종목 × {FETCH_DAYS}일 = 최대 {ACTIVE_SPORTS.length * FETCH_DAYS}콜 사용
+              </div>
+            </div>
+
             {/* ── 종목별 카드 ── */}
-            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(320px,1fr))",gap:14,marginBottom:24}}>
+            <div style={{fontSize:12,color:C.muted,marginBottom:8,fontWeight:700}}>📊 종목별 현황</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:12,marginBottom:24}}>
               {API_SPORTS_INFO.map(api=>{
-                const latestResult = latestLog?.results?.[api.sport];
-                const prevResult   = prevLog?.results?.[api.sport];
-                const hasError     = !!latestResult?.error;
-                const statusColor  = !latestResult ? C.dim : hasError ? C.red : C.green;
-                const todayCalls   = apiFetchLog.filter(l=>
-                  new Date(l.fetched_at).toDateString()===new Date().toDateString()
-                ).reduce((s,l)=>s+(l.results?.[api.sport]?.calls||0),0);
-                const usagePct     = Math.min(100, Math.round(todayCalls/api.dailyLimit*100));
-                const usageColor   = usagePct>=90?C.red:usagePct>=70?C.amber:C.green;
+                const isActive = ACTIVE_SPORTS.includes(api.sport);
+                const result   = lastResults[api.sport];
+                const calls    = lastCalls[api.sport] ?? 0;
+                const hasError = !!result?.error;
+                const statusColor = !isActive ? C.dim
+                                  : !result   ? C.muted
+                                  : hasError  ? C.red
+                                  : C.green;
 
                 return (
-                  <div key={api.id} style={{background:C.bg2,border:`1.5px solid ${statusColor}44`,borderRadius:12,padding:15,display:"flex",flexDirection:"column",gap:9}}>
+                  <div key={api.id} style={{background:C.bg2,border:`1.5px solid ${statusColor}44`,borderRadius:12,padding:14,display:"flex",flexDirection:"column",gap:8,opacity:isActive?1:0.55}}>
                     {/* 헤더 */}
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                       <div style={{display:"flex",alignItems:"center",gap:8}}>
-                        <div style={{width:9,height:9,borderRadius:"50%",background:statusColor,boxShadow:`0 0 6px ${statusColor}`}}/>
-                        <span style={{fontSize:15,fontWeight:900,color:C.text}}>{api.name}</span>
+                        <div style={{width:9,height:9,borderRadius:"50%",background:statusColor,boxShadow:isActive?`0 0 6px ${statusColor}`:"none"}}/>
+                        <span style={{fontSize:14,fontWeight:900,color:C.text}}>{api.name}</span>
                       </div>
-                      <span style={{fontSize:10,padding:"2px 8px",borderRadius:4,background:`${statusColor}22`,border:`1px solid ${statusColor}44`,color:statusColor,fontWeight:700}}>
-                        {!latestResult?"대기중":hasError?"❌ 오류":"✅ 정상"}
+                      <span style={{fontSize:9,padding:"2px 7px",borderRadius:4,
+                        background: isActive ? `${C.purple}22` : `${C.dim}22`,
+                        border:`1px solid ${isActive?C.purple+"55":C.dim+"55"}`,
+                        color: isActive ? C.purple : C.dim,
+                        fontWeight:700}}>
+                        {isActive ? "활성" : "비활성"}
                       </span>
                     </div>
 
@@ -5643,48 +5989,34 @@ function AppMain() {
                       🌐 {api.host}/{api.path}
                     </div>
 
-                    {/* 오늘 사용량 */}
-                    <div>
-                      <div style={{display:"flex",justifyContent:"space-between",fontSize:10,marginBottom:3}}>
-                        <span style={{color:C.muted}}>오늘 사용량</span>
-                        <span style={{color:usageColor,fontWeight:800}}>{todayCalls} / {api.dailyLimit}콜 ({usagePct}%)</span>
-                      </div>
-                      <div style={{height:7,background:C.bg,borderRadius:3,overflow:"hidden"}}>
-                        <div style={{width:`${usagePct}%`,height:"100%",background:usageColor,borderRadius:3,transition:"width 0.3s"}}/>
-                      </div>
-                    </div>
-
-                    {/* 통계 3칸 */}
-                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:5}}>
-                      {[
-                        {l:"가져온 경기",v:latestResult?.fetched??"-",c:C.teal},
-                        {l:"저장된 경기",v:latestResult?.upserted??"-",c:C.green},
-                        {l:"API 콜",v:latestResult?.calls??"-",c:C.amber},
-                      ].map(st=>(
-                        <div key={st.l} style={{background:C.bg3,borderRadius:5,padding:"6px 8px",textAlign:"center" as const}}>
-                          <div style={{fontSize:9,color:C.muted,marginBottom:2}}>{st.l}</div>
-                          <div style={{fontSize:14,fontWeight:800,color:st.c}}>{st.v}</div>
+                    {/* 활성 종목만: 통계 */}
+                    {isActive ? (
+                      <>
+                        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:5}}>
+                          {[
+                            {l:"가져온 경기", v: result?.fetched ?? "-",  c: C.teal},
+                            {l:"저장된 경기", v: result?.upserted ?? "-", c: C.green},
+                            {l:"API 콜",      v: calls || "-",            c: C.amber},
+                          ].map(st=>(
+                            <div key={st.l} style={{background:C.bg3,borderRadius:5,padding:"6px 8px",textAlign:"center" as const}}>
+                              <div style={{fontSize:9,color:C.muted,marginBottom:2}}>{st.l}</div>
+                              <div style={{fontSize:14,fontWeight:800,color:st.c}}>{st.v}</div>
+                            </div>
+                          ))}
                         </div>
-                      ))}
-                    </div>
-
-                    {/* 오류 메시지 */}
-                    {hasError && (
-                      <div style={{fontSize:10,color:C.red,padding:"5px 8px",background:`${C.red}11`,border:`1px solid ${C.red}44`,borderRadius:5,wordBreak:"break-all" as const}}>
-                        ⚠ {latestResult.error?.slice(0,100)}...
-                      </div>
-                    )}
-
-                    {/* 갱신 정보 */}
-                    <div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:C.muted,padding:"5px 8px",background:C.bg3,borderRadius:5}}>
-                      <span>🔄 갱신 주기: <b style={{color:C.teal}}>{api.intervalMin}분</b></span>
-                      <span>⏱ 최근: <b style={{color:C.amber}}>{fmtRelTime(latestLog?.fetched_at||null)}</b></span>
-                    </div>
-
-                    {/* 이전 대비 변화 */}
-                    {prevResult && latestResult && !hasError && (
-                      <div style={{fontSize:10,color:C.dim,padding:"4px 8px",background:C.bg,borderRadius:4}}>
-                        이전 대비: 경기 {(latestResult.fetched||0)-(prevResult.fetched||0)>=0?"+":""}{(latestResult.fetched||0)-(prevResult.fetched||0)}건
+                        {hasError && (
+                          <div style={{fontSize:10,color:C.red,padding:"5px 8px",background:`${C.red}11`,border:`1px solid ${C.red}44`,borderRadius:5,wordBreak:"break-all" as const}}>
+                            ⚠ {String(result.error).slice(0,120)}
+                          </div>
+                        )}
+                        <div style={{fontSize:9,color:C.muted}}>
+                          한도 {api.dailyLimit}콜/일 · 마지막 호출당 최대 {FETCH_DAYS}콜 사용
+                        </div>
+                      </>
+                    ) : (
+                      <div style={{fontSize:10,color:C.dim,padding:"6px 8px",background:C.bg3,borderRadius:5,lineHeight:1.5}}>
+                        비활성 종목 — 새로고침 시 호출되지 않습니다.<br/>
+                        <span style={{color:C.muted}}>활성화하려면 코드의 ACTIVE_SPORTS 배열에 "{api.sport}" 추가</span>
                       </div>
                     )}
                   </div>
@@ -5692,65 +6024,18 @@ function AppMain() {
               })}
             </div>
 
-            {/* ── 호출 로그 ── */}
-            <div style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:12,padding:16}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
-                <div style={{fontSize:14,fontWeight:800,color:C.teal}}>📋 Edge Function 호출 로그</div>
-                <div style={{display:"flex",gap:8,alignItems:"center"}}>
-                  <span style={{fontSize:10,color:C.dim}}>최근 20건</span>
-                  <button onClick={()=>{setApiLogLoading(true);loadApiFetchLog(20).then(logs=>{setApiFetchLog(logs);setApiLogLoading(false);});}}
-                    style={{padding:"4px 10px",borderRadius:5,border:`1px solid ${C.border}`,background:C.bg2,color:C.muted,cursor:"pointer",fontSize:10}}>
-                    🔄 새로고침
-                  </button>
-                </div>
+            {/* ── 안내 박스 ── */}
+            <div style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:10,padding:14,fontSize:11,color:C.muted,lineHeight:1.7}}>
+              <div style={{fontSize:13,fontWeight:800,color:C.teal,marginBottom:8}}>ℹ️ 호출 정책 (rev.7)</div>
+              <div>· <b>자동 호출 없음</b> — 새로고침 버튼을 눌렀을 때만 API에 요청합니다.</div>
+              <div>· <b>캐시 {CACHE_FRESH_MIN}분</b> — 일반 새로고침은 캐시가 신선하면 호출 생략, DB만 다시 읽습니다.</div>
+              <div>· <b>⚡ 강제 새로고침</b> — 캐시 무시하고 무조건 호출 (라이브 점수 즉시 확인용).</div>
+              <div>· <b>활성 종목만 호출</b> — 현재 {ACTIVE_SPORTS.map(s=>{const i=API_SPORTS_INFO.find(a=>a.sport===s);return i?.name||s;}).join(", ")}.</div>
+              <div>· <b>모바일 차단</b> — 통신사 IP가 자주 바뀌어 API 정지 위험이 큽니다. PC에서만 호출.</div>
+              <div>· <b>저장 위치</b> — Supabase fixtures 테이블 (다른 기기는 이걸 읽기만).</div>
+              <div style={{marginTop:8,padding:"8px 10px",background:C.bg,borderRadius:6,fontSize:10}}>
+                <b style={{color:C.amber}}>⚠ 첫 사용 시</b>: Vercel 환경변수에 <code style={{color:C.text,background:C.bg2,padding:"1px 5px",borderRadius:3}}>VITE_API_SPORTS_KEY</code>가 설정되어 있어야 합니다.
               </div>
-
-              {apiLogLoading ? (
-                <div style={{textAlign:"center",padding:"20px 0",color:C.muted,fontSize:12}}>로딩 중…</div>
-              ) : apiFetchLog.length===0 ? (
-                <div style={{textAlign:"center",padding:"24px 0",color:C.dim,fontSize:12}}>
-                  로그 없음 · ⚡ 지금 새로고침 버튼을 눌러 첫 호출을 실행하세요
-                </div>
-              ) : (
-                <div style={{display:"flex",flexDirection:"column",gap:5}}>
-                  {apiFetchLog.map((log,i)=>{
-                    const res = log.results || {};
-                    const sports = Object.keys(res);
-                    const isExpanded = i===0;
-                    return (
-                      <div key={log.id||i} style={{background:C.bg2,border:`1px solid ${log.success?C.border:C.red+"44"}`,borderRadius:7,padding:"8px 12px"}}>
-                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:isExpanded?6:0}}>
-                          <div style={{display:"flex",alignItems:"center",gap:8}}>
-                            <span style={{fontSize:12,fontWeight:800,color:log.success?C.green:C.red}}>{log.success?"✅":"❌"}</span>
-                            <span style={{fontSize:12,color:C.text,fontWeight:700}}>
-                              {new Date(log.fetched_at).toLocaleString("ko-KR",{month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"})}
-                            </span>
-                            <span style={{fontSize:10,color:C.muted}}>총 {log.total_api_calls}콜</span>
-                          </div>
-                          <span style={{fontSize:9,color:C.dim}}>{fmtRelTime(log.fetched_at)}</span>
-                        </div>
-                        {isExpanded && sports.length>0 && (
-                          <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
-                            {sports.map(sp=>{
-                              const r=res[sp];
-                              const hasErr=!!r.error;
-                              const icon=sp==="football"?"⚽":sp==="baseball"?"⚾":sp==="basketball"?"🏀":sp==="volleyball"?"🏐":"🏒";
-                              return (
-                                <span key={sp} style={{fontSize:10,padding:"2px 8px",borderRadius:3,
-                                  background:hasErr?`${C.red}22`:`${C.green}11`,
-                                  border:`1px solid ${hasErr?C.red+"44":C.green+"33"}`,
-                                  color:hasErr?C.red:C.green}}>
-                                  {icon} {r.upserted??0}건{hasErr?" ⚠":""}
-                                </span>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
             </div>
 
           </div>
@@ -5838,10 +6123,22 @@ function AppMain() {
                     {stFetchedAt && <span style={{marginLeft:6}}>· {new Date(stFetchedAt).toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit"})}</span>}
                   </div>
                 </div>
-                <button onClick={()=>loadSportsTestData()} disabled={stLoading}
-                  style={{padding:"4px 10px",borderRadius:5,border:`1px solid ${C.teal}`,background:`${C.teal}22`,color:C.teal,cursor:stLoading?"not-allowed":"pointer",fontWeight:700,fontSize:10,opacity:stLoading?0.5:1}}>
-                  {stLoading?"⏳":"🔄 새로고침"}
-                </button>
+                <div style={{display:"flex",gap:5}}>
+                  <button onClick={()=>refreshFixtures({force:false})} disabled={refreshLoading||isMobile}
+                    title={isMobile ? "모바일에서는 차단됩니다 (PC에서 호출)" : `${CACHE_FRESH_MIN}분 캐시 적용`}
+                    style={{padding:"4px 10px",borderRadius:5,border:`1px solid ${C.teal}`,background:`${C.teal}22`,color:C.teal,cursor:(refreshLoading||isMobile)?"not-allowed":"pointer",fontWeight:700,fontSize:10,opacity:(refreshLoading||isMobile)?0.5:1}}>
+                    {refreshLoading?"⏳":"🔄"}
+                  </button>
+                  <button onClick={()=>{
+                      if (isMobile || refreshLoading) return;
+                      if (!confirm(`⚡ 강제 새로고침\n\n캐시(${CACHE_FRESH_MIN}분)를 무시하고 무조건 API를 호출합니다.\n계속하시겠습니까?`)) return;
+                      refreshFixtures({force:true});
+                    }} disabled={refreshLoading||isMobile}
+                    title={isMobile ? "모바일에서는 차단됩니다" : "캐시 무시"}
+                    style={{padding:"4px 8px",borderRadius:5,border:`1px solid ${C.amber}`,background:`${C.amber}22`,color:C.amber,cursor:(refreshLoading||isMobile)?"not-allowed":"pointer",fontWeight:700,fontSize:10,opacity:(refreshLoading||isMobile)?0.5:1}}>
+                    ⚡
+                  </button>
+                </div>
               </div>
               <div style={{flex:1,overflowY:"auto",padding:"6px",minHeight:0}}>
                 {stLoading && stFixtures.length===0 && (
