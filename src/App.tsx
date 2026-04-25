@@ -175,7 +175,7 @@ const ACTIVE_SPORTS: Sport[] = ["football", "baseball", "basketball"];
 
 // ── 캐시 정책 ──────────────────────────────────────────────────
 const CACHE_FRESH_MIN = 15;   // 15분 이내면 신선 → API 호출 안 함
-const FETCH_DAYS = 3;         // KST 어제+오늘+내일 3일치 (KST 새벽 경기는 UTC 전날이므로 어제도 포함)
+const FETCH_DAYS = 2;         // KST 오늘+내일 2일치
 
 // ── 모바일 감지 ────────────────────────────────────────────────
 // User-Agent 기반. 100% 정확하진 않지만 핸드폰 통신사 IP 차단 목적엔 충분.
@@ -300,8 +300,8 @@ async function fetchSportFromApiSports(
 }
 
 async function fetchFixturesFromCache(sport: Sport): Promise<LiveFixture[]> {
-  // 어제(-27h)~내일(+30h): KST 새벽 경기(UTC 전날)도 커버
-  const from = new Date(Date.now() - 27 * 3_600_000).toISOString();
+  // 베팅 탭은 라이브 경기도 봐야 하므로 -3시간 ~ +30시간 범위로 조회 (rev.6 동작 유지)
+  const from = new Date(Date.now() - 3  * 3_600_000).toISOString();
   const to   = new Date(Date.now() + 30 * 3_600_000).toISOString();
   const rows = await db.loadFixturesByRange(from, to, sport);
   return rows.map(row => ({
@@ -2223,17 +2223,17 @@ function AppMain() {
         }
       }
 
-      // 4) 2일 전 이전 데이터 자동 삭제 (어제 데이터는 KST 새벽 경기 커버용으로 보존)
+      // 4) 그저께 이전 데이터 자동 삭제 (KST 기준 2일 전 00:00 이전)
       try {
-        const kst2DaysAgo = new Date(Date.now() + 9*3600_000);
-        kst2DaysAgo.setUTCHours(0,0,0,0);
-        kst2DaysAgo.setUTCDate(kst2DaysAgo.getUTCDate() - 2);
-        const deleteBeforeUtc = new Date(kst2DaysAgo.getTime() - 9*3600_000).toISOString();
+        const kstYesterday = new Date(Date.now() + 9*3600_000);
+        kstYesterday.setUTCHours(0,0,0,0);
+        kstYesterday.setUTCDate(kstYesterday.getUTCDate() - 1);
+        const deleteBeforeUtc = new Date(kstYesterday.getTime() - 9*3600_000).toISOString();
         await supabase.from('fixtures').delete().lt('start_time', deleteBeforeUtc);
       } catch(e) { console.warn('[refreshFixtures] 오래된 데이터 삭제 실패:', e); }
 
-      // 5) 활성 종목 × 날짜 호출 (어제 -1 ~ 내일 +1: KST 새벽 경기 UTC 전날 커버)
-      const dates = Array.from({length: FETCH_DAYS}, (_, i) => kstDateStr(i - 1));
+      // 5) 활성 종목 × 날짜 호출
+      const dates = Array.from({length: FETCH_DAYS}, (_, i) => kstDateStr(i));
       const lastCallsBySport: Record<string, number> = {};
       const lastResultBySport: Record<string, { fetched: number; upserted: number; error?: string }> = {};
       let totalCalls = 0;
@@ -2580,53 +2580,32 @@ function AppMain() {
     return (
       <div key={b.id} style={{
         position:"relative",
-        background:C.bg3,
-        border:`1px solid ${autoResult?stampColor+"66":C.amber+"44"}`,
+        background:autoResult?`${stampColor}0d`:C.bg3,
+        border:`1px solid ${autoResult?stampColor+"99":C.amber+"44"}`,
         borderRadius:7,padding:"9px 11px",marginBottom:6,
         overflow:"hidden",
       }}>
-        {/* 도장 오버레이 */}
+        {/* 도장 오버레이 — 명확하게 가운데 */}
         {autoResult && (
-          <div className="stamp-overlay" style={{
+          <div style={{
             position:"absolute",inset:0,
             display:"flex",alignItems:"center",justifyContent:"center",
             pointerEvents:"none",zIndex:1,
           }}>
             <div style={{
-              border:`4px solid ${stampColor}`,borderRadius:8,
-              padding:"6px 18px",transform:"rotate(-15deg)",
-              fontSize:22,fontWeight:900,color:stampColor,
-              letterSpacing:4,opacity:0.35,
-              textShadow:`0 0 8px ${stampColor}`,
-              background:`${stampColor}11`,
+              border:`5px solid ${stampColor}`,borderRadius:10,
+              padding:"8px 22px",transform:"rotate(-12deg)",
+              fontSize:26,fontWeight:900,color:stampColor,
+              letterSpacing:6,opacity:0.7,
+              textShadow:`0 0 12px ${stampColor}`,
+              background:`${stampColor}18`,
+              boxShadow:`0 0 20px ${stampColor}44 inset`,
             }}>{stampText}</div>
           </div>
         )}
 
-        {/* 확인 버튼 (도장 위에, hover 시 보임) */}
-        {autoResult && (
-          <div style={{
-            position:"absolute",inset:0,
-            display:"flex",alignItems:"center",justifyContent:"center",
-            zIndex:2,opacity:0,transition:"opacity 0.15s",
-          }}
-          onMouseEnter={e=>(e.currentTarget.style.opacity="1")}
-          onMouseLeave={e=>(e.currentTarget.style.opacity="0")}
-          >
-            <button onClick={()=>confirmResult(b.id)}
-              style={{
-                padding:"10px 24px",borderRadius:8,fontWeight:900,fontSize:14,
-                cursor:"pointer",letterSpacing:1,
-                background:stampColor,border:"none",color:C.bg,
-                boxShadow:`0 4px 16px ${stampColor}88`,
-              }}>
-              ✅ 확인
-            </button>
-          </div>
-        )}
-
         {/* 카드 내용 */}
-        <div style={{position:"relative",zIndex:0,opacity:autoResult?0.6:1}}>
+        <div style={{position:"relative",zIndex:0,opacity:autoResult?0.5:1}}>
           <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:5,flexWrap:"wrap"}}>
             <span style={{fontSize:13,flexShrink:0}}>{SPORT_ICON[b.category]||"🎯"}</span>
             <span style={{fontSize:9,color:dollar?C.amber:C.green,background:`${dollar?C.amber:C.green}22`,border:`1px solid ${dollar?C.amber:C.green}44`,padding:"1px 5px",borderRadius:3,fontWeight:700}}>
@@ -2634,9 +2613,7 @@ function AppMain() {
             </span>
             {(b as any).country && <span style={{fontSize:9,color:C.teal,background:`${C.teal}11`,border:`1px solid ${C.teal}33`,padding:"1px 5px",borderRadius:3,fontWeight:700}}>{(b as any).country}</span>}
             {b.league && <span style={{fontSize:9,color:C.muted,background:C.bg,padding:"1px 5px",borderRadius:3}}>{b.league}</span>}
-            {/* 수동 뱃지 */}
             {isManual && <span style={{fontSize:9,color:C.purple,background:`${C.purple}22`,border:`1px solid ${C.purple}44`,padding:"1px 5px",borderRadius:3,fontWeight:700}}>수동</span>}
-            {/* 자동 판정 가능 표시 */}
             {hasFixtureId && !autoResult && <span style={{fontSize:9,color:C.teal,opacity:0.6}}>🤖</span>}
             <span style={{fontSize:11,color:C.orange,fontWeight:800,marginLeft:"auto"}}>{displayBetOption}</span>
           </div>
@@ -2646,7 +2623,6 @@ function AppMain() {
               <span style={{fontSize:10,color:C.muted}}>배당 <span style={{color:C.teal,fontWeight:800,fontSize:11}}>{b.odds}</span></span>
               <span style={{fontSize:11,color:C.amber,fontWeight:800}}>{fmtDisp(b.amount,b.isDollar)}</span>
             </div>
-            {/* 수동 처리 버튼 (자동 판정 안 된 베팅 or 수동 경기) */}
             {!autoResult && (
               <div style={{display:"flex",gap:3,flexShrink:0}}>
                 {isManual || !hasFixtureId ? (
@@ -2660,6 +2636,21 @@ function AppMain() {
             )}
           </div>
         </div>
+
+        {/* 확인 버튼 — autoResult 시 항상 표시, 카드 하단 */}
+        {autoResult && (
+          <div style={{position:"relative",zIndex:3,marginTop:8,display:"flex",justifyContent:"flex-end",gap:6}}>
+            <button onClick={()=>confirmResult(b.id)}
+              style={{
+                padding:"6px 20px",borderRadius:6,fontWeight:900,fontSize:13,
+                cursor:"pointer",letterSpacing:1,
+                background:stampColor,border:`2px solid ${stampColor}`,color:C.bg,
+                boxShadow:`0 2px 10px ${stampColor}66`,
+              }}>
+              {b.result==="승"?"✅ 적중 확인":b.result==="패"?"❌ 실패 확인":"✔ 확인"}
+            </button>
+          </div>
+        )}
       </div>
     );
   };
