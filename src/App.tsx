@@ -526,7 +526,12 @@ function PasswordScreen({onAuth}:{onAuth:()=>void}) {
         <div style={{fontSize:12,color:C.muted,marginBottom:10,textAlign:"center"}}>🔒 비밀번호 입력</div>
         <input
           autoFocus type="password" value={pw}
-          onChange={e=>{setPw(e.target.value);setErr(false);}}
+          onChange={e=>{
+            const v=e.target.value;
+            setPw(v);setErr(false);
+            // 입력 즉시 맞으면 바로 입장
+            if(v==="03144"){onAuth();}
+          }}
           onKeyDown={e=>e.key==="Enter"&&handleSubmit()}
           placeholder="비밀번호"
           style={{...S,boxSizing:"border-box",textAlign:"center",fontSize:18,letterSpacing:6,marginBottom:12}}
@@ -613,7 +618,11 @@ function AppMain() {
   const today = useTodayStr();
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const [tab,setTab]=useState<"home"|"bettingCombo"|"stats"|"roi"|"strategy"|"log"|"pending"|"apiManager">("home");
+  const [tab,setTab]=useState<"home"|"bettingCombo"|"stats"|"roi"|"strategy"|"log"|"pending"|"apiManager"|"dataManager">("home");
+  // ── 데이터 탭 state ────────────────────────────────────────
+  const [dataTableStats,setDataTableStats]=useState<Record<string,{rows:number,size:string,sizeBytes:number}>>({});
+  const [dataStatsLoading,setDataStatsLoading]=useState(false);
+  const [dataTotalSize,setDataTotalSize]=useState("");
   const [statTab,setStatTab]=useState<"overview"|"daily"|"live"|"baseball"|"football"|"basketball"|"adv">("overview");
   const [bbSub,setBbSub]=useState<"league"|"option">("league");
   const [advCat,setAdvCat]=useState("축구");
@@ -2304,6 +2313,43 @@ function AppMain() {
     db.loadFixturesCacheMeta().then(setCacheMeta).catch(()=>{});
   }, []);
 
+  // ── 데이터 탭: 테이블 용량 조회 ─────────────────────────────
+  const loadDataStats = useCallback(async()=>{
+    setDataStatsLoading(true);
+    try {
+      // get_table_sizes RPC 시도
+      const { data } = await (supabase.rpc as any)("get_table_sizes").catch(()=>({data:null}));
+      if (data && Array.isArray(data)) {
+        const m: Record<string,{rows:number,size:string,sizeBytes:number}> = {};
+        let totalBytes = 0;
+        for (const row of data) {
+          m[row.table_name] = { rows: Number(row.row_count), size: row.size_pretty, sizeBytes: Number(row.size_bytes)||0 };
+          totalBytes += Number(row.size_bytes)||0;
+        }
+        setDataTableStats(m);
+        setDataTotalSize(totalBytes>0 ? (totalBytes/1024/1024).toFixed(2)+" MB" : "");
+      } else {
+        // fallback: count만 조회
+        const tableKeys = ["bets","fixtures","deposits","withdrawals","manual_games","team_names","app_settings","logs","custom_leagues","m_meta","site_states"];
+        const m: Record<string,{rows:number,size:string,sizeBytes:number}> = {};
+        await Promise.all(tableKeys.map(async k=>{
+          const { count } = await supabase.from(k as any).select("*",{count:"exact",head:true});
+          m[k] = { rows: count||0, size:"-", sizeBytes:0 };
+        }));
+        setDataTableStats(m);
+        setDataTotalSize("");
+      }
+    } catch(e) { console.error(e); }
+    finally { setDataStatsLoading(false); }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[]);
+
+  // 데이터 탭 진입 시 자동 조회
+  useEffect(()=>{
+    if(tab==="dataManager") loadDataStats();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[tab]);
+
   // ── 자동 결제 함수 ───────────────────────────────────────────
   // refreshFixtures() 호출 후 실행.
   // 진행중 베팅 중 fixtureId 있는 것만 대상.
@@ -3328,17 +3374,16 @@ function AppMain() {
 
         return (
         <div style={{position:"fixed",inset:0,background:"#000b",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center"}}>
-          <div style={{background:C.bg3,border:`1px solid ${C.green}`,borderRadius:14,padding:36,width:720}}>
-            <div style={{fontSize:22,fontWeight:800,color:C.green,marginBottom:12}}>⚽ 경기 추가</div>
-            <div style={{fontSize:13,color:C.muted,marginBottom:22,background:C.bg2,padding:"12px 16px",borderRadius:8}}>
+          <div style={{background:C.bg3,border:`1px solid ${C.green}`,borderRadius:12,padding:20,width:480}}>
+            <div style={{fontSize:16,fontWeight:800,color:C.green,marginBottom:8}}>⚽ 경기 추가</div>
+            <div style={{fontSize:11,color:C.muted,marginBottom:14,background:C.bg2,padding:"8px 12px",borderRadius:6}}>
               {SPORT_ICON[mSport]||"🏅"} <b style={{color:C.orange}}>{mSport}</b> · <b style={{color:C.teal}}>{mCountry}</b> · <b style={{color:C.amber}}>{mLeague}</b>
-              <span style={{marginLeft:10,color:C.dim}}>· 저장된 {mSport} 팀 {sportTeams.length}개</span>
             </div>
 
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:22}}>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
               {/* 홈팀 */}
               <div style={{position:"relative"}}>
-                <div style={{...L,fontSize:13}}>홈팀 <span style={{color:C.red}}>*</span></div>
+                <div style={{...L,fontSize:12}}>홈팀 <span style={{color:C.red}}>*</span></div>
                 <input id="add-game-home" value={newGame.homeTeam}
                   onChange={e=>setNewGame(p=>({...p,homeTeam:e.target.value}))}
                   onKeyDown={e=>{
@@ -3348,14 +3393,14 @@ function AppMain() {
                       setTimeout(()=>{const el=document.getElementById("add-game-away")as HTMLInputElement|null;if(el)el.focus();},10);
                     }
                   }}
-                  placeholder="홈팀 이름 (1글자 입력시 추천)" autoFocus autoComplete="off"
-                  style={{...S,boxSizing:"border-box",fontSize:16,padding:"14px 16px"}}/>
+                  placeholder="홈팀 이름" autoFocus autoComplete="off"
+                  style={{...S,boxSizing:"border-box",fontSize:13,padding:"8px 10px"}}/>
                 {homeSuggestions.length>0 && (
-                  <div style={{position:"absolute",top:"100%",left:0,right:0,background:C.bg,border:`1px solid ${C.green}66`,borderRadius:6,marginTop:2,maxHeight:200,overflowY:"auto",zIndex:10}}>
+                  <div style={{position:"absolute",top:"100%",left:0,right:0,background:C.bg,border:`1px solid ${C.green}66`,borderRadius:6,marginTop:2,maxHeight:160,overflowY:"auto",zIndex:10}}>
                     {homeSuggestions.map((t,i)=>(
                       <div key={t} onClick={()=>setNewGame(p=>({...p,homeTeam:t}))}
-                        style={{padding:"8px 12px",cursor:"pointer",fontSize:14,color:C.text,borderBottom:i<homeSuggestions.length-1?`1px solid ${C.border}`:"none",background:i===0?`${C.green}11`:"transparent"}}>
-                        {i===0 && <span style={{fontSize:10,color:C.green,marginRight:6,fontWeight:700}}>TAB</span>}
+                        style={{padding:"6px 10px",cursor:"pointer",fontSize:12,color:C.text,borderBottom:i<homeSuggestions.length-1?`1px solid ${C.border}`:"none",background:i===0?`${C.green}11`:"transparent"}}>
+                        {i===0 && <span style={{fontSize:9,color:C.green,marginRight:4,fontWeight:700}}>TAB</span>}
                         {t}
                       </div>
                     ))}
@@ -3364,7 +3409,7 @@ function AppMain() {
               </div>
               {/* 원정팀 */}
               <div style={{position:"relative"}}>
-                <div style={{...L,fontSize:13}}>원정팀 <span style={{color:C.red}}>*</span></div>
+                <div style={{...L,fontSize:12}}>원정팀 <span style={{color:C.red}}>*</span></div>
                 <input id="add-game-away" value={newGame.awayTeam}
                   onChange={e=>setNewGame(p=>({...p,awayTeam:e.target.value}))}
                   onKeyDown={e=>{
@@ -3382,14 +3427,14 @@ function AppMain() {
                       handleAddManualGame(false);
                     }
                   }}
-                  placeholder="원정팀 이름 (1글자 입력시 추천)" autoComplete="off"
-                  style={{...S,boxSizing:"border-box",fontSize:16,padding:"14px 16px"}}/>
+                  placeholder="원정팀 이름" autoComplete="off"
+                  style={{...S,boxSizing:"border-box",fontSize:13,padding:"8px 10px"}}/>
                 {awaySuggestions.length>0 && (
-                  <div style={{position:"absolute",top:"100%",left:0,right:0,background:C.bg,border:`1px solid ${C.teal}66`,borderRadius:6,marginTop:2,maxHeight:200,overflowY:"auto",zIndex:10}}>
+                  <div style={{position:"absolute",top:"100%",left:0,right:0,background:C.bg,border:`1px solid ${C.teal}66`,borderRadius:6,marginTop:2,maxHeight:160,overflowY:"auto",zIndex:10}}>
                     {awaySuggestions.map((t,i)=>(
                       <div key={t} onClick={()=>setNewGame(p=>({...p,awayTeam:t}))}
-                        style={{padding:"8px 12px",cursor:"pointer",fontSize:14,color:C.text,borderBottom:i<awaySuggestions.length-1?`1px solid ${C.border}`:"none",background:i===0?`${C.teal}11`:"transparent"}}>
-                        {i===0 && <span style={{fontSize:10,color:C.teal,marginRight:6,fontWeight:700}}>TAB</span>}
+                        style={{padding:"6px 10px",cursor:"pointer",fontSize:12,color:C.text,borderBottom:i<awaySuggestions.length-1?`1px solid ${C.border}`:"none",background:i===0?`${C.teal}11`:"transparent"}}>
+                        {i===0 && <span style={{fontSize:9,color:C.teal,marginRight:4,fontWeight:700}}>TAB</span>}
                         {t}
                       </div>
                     ))}
@@ -3398,14 +3443,14 @@ function AppMain() {
               </div>
             </div>
 
-            <div style={{fontSize:12,color:C.dim,marginBottom:16,padding:"10px 14px",background:C.bg2,borderRadius:6,lineHeight:1.6}}>
-              💡 <b style={{color:C.amber}}>Enter</b>: 한 경기 추가 후 닫기 · <b style={{color:C.teal}}>Tab</b>: 추가 후 계속 입력 (연속 추가)
+            <div style={{fontSize:10,color:C.dim,marginBottom:12,padding:"7px 10px",background:C.bg2,borderRadius:5}}>
+              💡 <b style={{color:C.amber}}>Enter</b>: 추가 후 닫기 · <b style={{color:C.teal}}>Tab</b>: 연속 추가
             </div>
 
-            <div style={{display:"flex",gap:12}}>
-              <button onClick={()=>handleAddManualGame(true)} style={{flex:1,background:`${C.teal}22`,border:`1px solid ${C.teal}`,color:C.teal,padding:"14px",borderRadius:8,cursor:"pointer",fontWeight:800,fontSize:14}}>➕ 추가 후 계속</button>
-              <button onClick={()=>handleAddManualGame(false)} style={{flex:1,background:`${C.green}22`,border:`1px solid ${C.green}`,color:C.green,padding:"14px",borderRadius:8,cursor:"pointer",fontWeight:800,fontSize:15}}>✅ 추가 후 닫기</button>
-              <button onClick={()=>{setAddGameModal(false);setNewGame({homeTeam:"",awayTeam:""});}} style={{flex:1,background:C.bg2,border:`1px solid ${C.border}`,color:C.muted,padding:"14px",borderRadius:8,cursor:"pointer",fontSize:14}}>취소</button>
+            <div style={{display:"flex",gap:8}}>
+              <button onClick={()=>handleAddManualGame(true)} style={{flex:1,background:`${C.teal}22`,border:`1px solid ${C.teal}`,color:C.teal,padding:"9px",borderRadius:7,cursor:"pointer",fontWeight:800,fontSize:12}}>➕ 추가 후 계속</button>
+              <button onClick={()=>handleAddManualGame(false)} style={{flex:1,background:`${C.green}22`,border:`1px solid ${C.green}`,color:C.green,padding:"9px",borderRadius:7,cursor:"pointer",fontWeight:800,fontSize:12}}>✅ 추가 후 닫기</button>
+              <button onClick={()=>{setAddGameModal(false);setNewGame({homeTeam:"",awayTeam:""});}} style={{flex:1,background:C.bg2,border:`1px solid ${C.border}`,color:C.muted,padding:"9px",borderRadius:7,cursor:"pointer",fontSize:12}}>취소</button>
             </div>
           </div>
         </div>
@@ -3415,15 +3460,15 @@ function AppMain() {
       {/* 종목 추가 모달 */}
       {addSportModal&&(
         <div style={{position:"fixed",inset:0,background:"#000b",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center"}}>
-          <div style={{background:C.bg3,border:`1px solid ${C.purple}`,borderRadius:14,padding:36,width:560}}>
-            <div style={{fontSize:22,fontWeight:800,color:C.purple,marginBottom:22}}>➕ 종목 추가</div>
+          <div style={{background:C.bg3,border:`1px solid ${C.purple}`,borderRadius:12,padding:20,width:320}}>
+            <div style={{fontSize:15,fontWeight:800,color:C.purple,marginBottom:14}}>➕ 종목 추가</div>
             <input autoFocus value={newSportName} onChange={e=>setNewSportName(e.target.value)}
               onKeyDown={e=>e.key==="Enter"&&handleAddSport()}
               placeholder="예: 미식축구, 크리켓, 골프"
-              style={{...S,boxSizing:"border-box",marginBottom:22,fontSize:16,padding:"14px 16px"}}/>
-            <div style={{display:"flex",gap:12}}>
-              <button onClick={handleAddSport} style={{flex:1,background:`${C.purple}22`,border:`1px solid ${C.purple}`,color:C.purple,padding:"14px",borderRadius:8,cursor:"pointer",fontWeight:700,fontSize:15}}>추가</button>
-              <button onClick={()=>{setAddSportModal(false);setNewSportName("");}} style={{flex:1,background:C.bg2,border:`1px solid ${C.border}`,color:C.muted,padding:"14px",borderRadius:8,cursor:"pointer",fontSize:14}}>취소</button>
+              style={{...S,boxSizing:"border-box",marginBottom:14,fontSize:13,padding:"8px 10px"}}/>
+            <div style={{display:"flex",gap:8}}>
+              <button onClick={handleAddSport} style={{flex:1,background:`${C.purple}22`,border:`1px solid ${C.purple}`,color:C.purple,padding:"9px",borderRadius:7,cursor:"pointer",fontWeight:700,fontSize:13}}>추가</button>
+              <button onClick={()=>{setAddSportModal(false);setNewSportName("");}} style={{flex:1,background:C.bg2,border:`1px solid ${C.border}`,color:C.muted,padding:"9px",borderRadius:7,cursor:"pointer",fontSize:12}}>취소</button>
             </div>
           </div>
         </div>
@@ -3746,9 +3791,9 @@ function AppMain() {
         </div>
         <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
           {([
-            ["home","🏠 대시보드"],["bettingCombo","🎯 스포츠"],["pending","⏳ 베팅 내역"],["stats","📊 통계"],["roi","💹 수익률"],["strategy","📋 전략"],["log","🗒 로그"],["apiManager","🔑 API 관리"],
+            ["home","🏠 대시보드"],["bettingCombo","🎯 스포츠"],["pending","⏳ 베팅 내역"],["stats","📊 통계"],["roi","💹 수익률"],["strategy","📋 전략"],["log","🗒 로그"],["apiManager","🔑 API 관리"],["dataManager","🗄 데이터"],
           ] as [string,string][]).map(([k,l])=>{
-            const ac = k==="pending"?C.amber:k==="home"?C.green:k==="apiManager"?C.purple:C.orange;
+            const ac = k==="pending"?C.amber:k==="home"?C.green:k==="apiManager"?C.purple:k==="dataManager"?C.red:C.orange;
             const active = tab===k;
             return (
               <button key={k} onClick={()=>setTab(k as any)}
@@ -3863,28 +3908,29 @@ function AppMain() {
           <div style={{display:"flex",flex:1,overflow:"hidden",minWidth:0,minHeight:0}}>
 
             {/* ─── 1. 카테고리 (종목/국가/리그) ─── */}
-            <div style={{width:380,flexShrink:0,background:C.bg2,borderRight:`1px solid ${C.border2}`,display:"flex",flexDirection:"column",overflow:"hidden",minHeight:0}}>
+            <div style={{width:300,flexShrink:0,background:C.bg2,borderRight:`1px solid ${C.border2}`,display:"flex",flexDirection:"column",overflow:"hidden",minHeight:0}}>
               <div style={{padding:"10px 12px",borderBottom:`1px solid ${C.border}`,flexShrink:0,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                 <div>
-                  <div style={{fontSize:12,fontWeight:800,color:C.text}}>📂 카테고리 (API 리그)</div>
+                  <div style={{fontSize:12,fontWeight:800,color:C.text}}>📂 카테고리</div>
                   <div style={{fontSize:9,color:C.dim}}>
-                    종목 {sportsList.length} · API경기 {stFixtures.length}
-                    {stFetchedAt && <span style={{marginLeft:6}}>· {new Date(stFetchedAt).toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit"})}</span>}
+                    종목 {sportsList.length} · {stFixtures.length}경기
+                    {stFetchedAt && <span style={{marginLeft:4}}>· {new Date(stFetchedAt).toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit"})}</span>}
                   </div>
                 </div>
-                <div style={{display:"flex",gap:5}}>
+                <div style={{display:"flex",gap:4,alignItems:"center"}}>
+                  <button onClick={()=>setAddSportModal(true)}
+                    style={{padding:"5px 10px",borderRadius:5,border:`2px solid ${C.purple}`,background:`${C.purple}22`,color:C.purple,cursor:"pointer",fontWeight:800,fontSize:12}}>+ 종목</button>
                   <button onClick={()=>refreshFixtures({force:false})} disabled={refreshLoading||isMobile}
-                    title={isMobile ? "모바일에서는 차단됩니다 (PC에서 호출)" : `${CACHE_FRESH_MIN}분 캐시 적용`}
-                    style={{padding:"4px 10px",borderRadius:5,border:`1px solid ${C.teal}`,background:`${C.teal}22`,color:C.teal,cursor:(refreshLoading||isMobile)?"not-allowed":"pointer",fontWeight:700,fontSize:10,opacity:(refreshLoading||isMobile)?0.5:1}}>
+                    title={isMobile?"모바일 차단":`${CACHE_FRESH_MIN}분 캐시`}
+                    style={{padding:"4px 8px",borderRadius:5,border:`1px solid ${C.teal}`,background:`${C.teal}22`,color:C.teal,cursor:(refreshLoading||isMobile)?"not-allowed":"pointer",fontWeight:700,fontSize:10,opacity:(refreshLoading||isMobile)?0.5:1}}>
                     {refreshLoading?"⏳":"🔄"}
                   </button>
                   <button onClick={()=>{
-                      if (isMobile || refreshLoading) return;
-                      if (!confirm(`⚡ 강제 새로고침\n\n캐시(${CACHE_FRESH_MIN}분)를 무시하고 무조건 API를 호출합니다.\n계속하시겠습니까?`)) return;
+                      if(isMobile||refreshLoading)return;
+                      if(!confirm(`⚡ 강제 새로고침\n캐시(${CACHE_FRESH_MIN}분) 무시하고 API 호출합니다.`))return;
                       refreshFixtures({force:true});
                     }} disabled={refreshLoading||isMobile}
-                    title={isMobile ? "모바일에서는 차단됩니다" : "캐시 무시"}
-                    style={{padding:"4px 8px",borderRadius:5,border:`1px solid ${C.amber}`,background:`${C.amber}22`,color:C.amber,cursor:(refreshLoading||isMobile)?"not-allowed":"pointer",fontWeight:700,fontSize:10,opacity:(refreshLoading||isMobile)?0.5:1}}>
+                    style={{padding:"4px 7px",borderRadius:5,border:`1px solid ${C.amber}`,background:`${C.amber}22`,color:C.amber,cursor:(refreshLoading||isMobile)?"not-allowed":"pointer",fontWeight:700,fontSize:10,opacity:(refreshLoading||isMobile)?0.5:1}}>
                     ⚡
                   </button>
                 </div>
@@ -3978,7 +4024,7 @@ function AppMain() {
             </div>
 
             {/* ─── 2. 경기 리스트 (오늘/내일 분리) ─── */}
-            <div style={{width:420,flexShrink:0,background:C.bg2,borderRight:`1px solid ${C.border2}`,display:"flex",flexDirection:"column",overflow:"hidden",minHeight:0}}>
+            <div style={{width:340,flexShrink:0,background:C.bg2,borderRight:`1px solid ${C.border2}`,display:"flex",flexDirection:"column",overflow:"hidden",minHeight:0}}>
               <div style={{padding:"10px 12px",borderBottom:`1px solid ${C.border}`,flexShrink:0,display:"flex",justifyContent:"space-between",alignItems:"center",gap:6}}>
                 <div style={{fontSize:12,fontWeight:800,color:C.teal,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>
                   {stSelSport&&stSelCountry&&stSelLeague
@@ -3995,8 +4041,8 @@ function AppMain() {
                     setMLeague(stSelLeague);
                     setAddGameModal(true);
                   }} title="수동으로 경기 추가"
-                    style={{padding:"3px 8px",borderRadius:4,border:`1px solid ${C.purple}`,background:`${C.purple}22`,color:C.purple,cursor:"pointer",fontWeight:700,fontSize:10,flexShrink:0}}>
-                    + 수동추가
+                    style={{padding:"5px 10px",borderRadius:5,border:`2px solid ${C.purple}`,background:`${C.purple}22`,color:C.purple,cursor:"pointer",fontWeight:800,fontSize:12,flexShrink:0}}>
+                    + 경기
                   </button>
                 )}
               </div>
@@ -4364,7 +4410,7 @@ function AppMain() {
             </div>
 
             {/* ─── 4. 베팅 슬립 (기존 스포츠 탭과 동일) ─── */}
-            <div style={{width:380,flexShrink:0,display:"flex",flexDirection:"column",overflow:"hidden",background:C.bg2,borderLeft:`1px solid ${C.border2}`,minHeight:0}}>
+            <div style={{width:300,flexShrink:0,display:"flex",flexDirection:"column",overflow:"hidden",background:C.bg2,borderLeft:`1px solid ${C.border2}`,minHeight:0}}>
               <div style={{padding:"10px 12px",borderBottom:`1px solid ${C.border}`,flexShrink:0,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                 <div style={{fontSize:13,fontWeight:800,color:C.orange}}>
                   📋 베팅 슬립
@@ -4443,9 +4489,12 @@ function AppMain() {
                       <div style={{...L,fontSize:12,marginBottom:5}}>3️⃣ 금액</div>
                       <div style={{display:"flex",gap:4,alignItems:"center",marginBottom:5}}>
                         <button onClick={()=>setSlipAmount(a=>Math.max(isUSD(slipSite)?1:1000,a-(isUSD(slipSite)?1:10000)))} style={{background:C.bg,border:`1px solid ${C.border}`,color:C.red,width:34,height:42,borderRadius:5,cursor:"pointer",fontSize:18,fontWeight:700}}>−</button>
-                        <input id="st-slip-amount-input" type="number" tabIndex={2} value={slipAmount} onChange={e=>setSlipAmount(parseFloat(e.target.value)||0)}
+                        <input id="st-slip-amount-input" type="text" inputMode="numeric" tabIndex={2}
+                          value={slipAmount===0?"":slipAmount.toLocaleString()}
+                          onChange={e=>{const raw=e.target.value.replace(/[^0-9]/g,"");setSlipAmount(raw?parseInt(raw,10):0);}}
+                          onFocus={e=>e.target.select()}
                           onKeyDown={e=>{if(e.key==="Enter")handleSlipAdd();}}
-                          style={{...S,textAlign:"center" as const,fontWeight:800,color:isUSD(slipSite)?C.amber:C.green,fontSize:16,padding:"10px",boxSizing:"border-box" as const,...noSpin}}/>
+                          style={{...S,textAlign:"center" as const,fontWeight:800,color:isUSD(slipSite)?C.amber:C.green,fontSize:16,padding:"10px",boxSizing:"border-box" as const}}/>
                         <button onClick={()=>setSlipAmount(a=>a+(isUSD(slipSite)?1:10000))} style={{background:C.bg,border:`1px solid ${C.border}`,color:C.green,width:34,height:42,borderRadius:5,cursor:"pointer",fontSize:18,fontWeight:700}}>+</button>
                       </div>
                       <div style={{display:"flex",gap:3}}>
@@ -4484,7 +4533,7 @@ function AppMain() {
             </div>
 
             {/* ─── 5. 사이트 진행률 + 진행중 베팅 (기존 스포츠 탭과 동일) ─── */}
-            <div style={{width:380,flexShrink:0,display:"flex",flexDirection:"column",overflow:"hidden",background:C.bg2,borderLeft:`1px solid ${C.border2}`,minHeight:0}}>
+            <div style={{width:300,flexShrink:0,display:"flex",flexDirection:"column",overflow:"hidden",background:C.bg2,borderLeft:`1px solid ${C.border2}`,minHeight:0}}>
 
               {/* 상: 사이트 진행률 */}
               <div style={{flexShrink:0,padding:"10px 12px",borderBottom:`1px solid ${C.border2}`,background:C.bg3}}>
@@ -6264,8 +6313,110 @@ function AppMain() {
 
 
 
-      {/* ══════════════════════════════════════════════════════════
-          🧪 스포츠(테스트) 탭 - 이름 편집 모달
+      {/* ══ 데이터 관리 탭 ══ */}
+      {tab==="dataManager" && (()=>{
+        const tables: {
+          key: string; label: string; desc: string;
+          deletable: boolean; onDelete?: ()=>void;
+        }[] = [
+          { key:"bets",          label:"베팅 기록",        desc:"모든 베팅 내역 (진행중/완료)",       deletable:true,  onDelete:async()=>{ if(!confirm("베팅 기록을 전체 삭제합니다. 계속?"))return; await supabase.from("bets").delete().neq("id","__none__"); setBetsRaw([]); addLog("🗑 데이터 삭제","bets 전체"); loadDataStats(); } },
+          { key:"fixtures",      label:"경기 데이터",      desc:"API 경기 캐시",                      deletable:true,  onDelete:async()=>{ if(!confirm("경기 캐시를 전체 삭제합니다. 계속?"))return; await supabase.from("fixtures").delete().neq("id",0); setStFixtures([]); addLog("🗑 데이터 삭제","fixtures 전체"); loadDataStats(); } },
+          { key:"deposits",      label:"입금 기록",        desc:"사이트별 입금 내역",                 deletable:false },
+          { key:"withdrawals",   label:"출금 기록",        desc:"사이트별 출금 내역",                 deletable:false },
+          { key:"manual_games",  label:"수동 경기",        desc:"수동으로 추가한 경기 목록",          deletable:true,  onDelete:async()=>{ if(!confirm("수동 경기를 전체 삭제합니다. 계속?"))return; await supabase.from("manual_games").delete().neq("id","__none__"); setManualGames([]); addLog("🗑 데이터 삭제","manual_games 전체"); loadDataStats(); } },
+          { key:"team_names",    label:"팀/국가/리그 이름", desc:"한글 이름 매핑 테이블",             deletable:true,  onDelete:async()=>{ if(!confirm("팀/국가/리그 한글 이름을 전체 삭제합니다. 계속?"))return; await supabase.from("team_names").delete().neq("original","__none__"); addLog("🗑 데이터 삭제","team_names 전체"); loadDataStats(); } },
+          { key:"app_settings",  label:"앱 설정",          desc:"리그 매핑, 사이트 설정 등",         deletable:false },
+          { key:"logs",          label:"로그",             desc:"앱 동작 로그",                      deletable:true,  onDelete:async()=>{ if(!confirm("로그를 전체 삭제합니다. 계속?"))return; await supabase.from("logs").delete().neq("id",0); addLog("🗑 데이터 삭제","logs 전체"); loadDataStats(); } },
+          { key:"custom_leagues",label:"커스텀 리그",      desc:"사용자 정의 리그 목록",             deletable:false },
+          { key:"m_meta",        label:"수동 메타",        desc:"수동 경기 종목/국가/리그 메타",     deletable:false },
+          { key:"site_states",   label:"사이트 상태",      desc:"입금액/진행률 (삭제 비추천)",       deletable:false },
+        ];
+        const usedMB = dataTotalSize ? parseFloat(dataTotalSize) : 0;
+        const limitMB = 500;
+        const pct = Math.min(100,(usedMB/limitMB)*100);
+        const barColor = pct>80?C.red:pct>50?C.amber:C.green;
+        return (
+          <div style={{flex:1,overflowY:"auto",padding:24}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+              <div>
+                <div style={{fontSize:18,fontWeight:900,color:C.red}}>🗄 데이터 관리</div>
+                <div style={{fontSize:11,color:C.muted,marginTop:3}}>
+                  Supabase 테이블별 데이터 현황 · 무료 한도: 500MB
+                  {dataTotalSize && <span style={{marginLeft:8,color:C.teal,fontWeight:700}}>사용중: {dataTotalSize}</span>}
+                </div>
+              </div>
+              <button onClick={loadDataStats} disabled={dataStatsLoading}
+                style={{padding:"7px 16px",borderRadius:7,border:`1px solid ${C.teal}`,background:`${C.teal}22`,color:C.teal,cursor:dataStatsLoading?"not-allowed":"pointer",fontWeight:700,fontSize:12,opacity:dataStatsLoading?0.6:1}}>
+                {dataStatsLoading?"⏳ 조회중...":"🔄 새로고침"}
+              </button>
+            </div>
+
+            {dataTotalSize && (
+              <div style={{marginBottom:20,background:C.bg2,borderRadius:10,padding:"14px 18px"}}>
+                <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
+                  <span style={{fontSize:12,fontWeight:700,color:C.text}}>전체 DB 사용량</span>
+                  <span style={{fontSize:13,fontWeight:800,color:barColor}}>{usedMB.toFixed(2)} MB / 500 MB ({pct.toFixed(1)}%)</span>
+                </div>
+                <div style={{height:10,background:C.bg,borderRadius:5,overflow:"hidden"}}>
+                  <div style={{width:`${pct}%`,height:"100%",background:barColor,transition:"width 0.5s",borderRadius:5}}/>
+                </div>
+              </div>
+            )}
+
+            <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:12}}>
+              {tables.map(t=>{
+                const stat = dataTableStats[t.key];
+                return (
+                  <div key={t.key} style={{background:C.bg2,border:`1px solid ${t.deletable?C.border2:C.border}`,borderRadius:10,padding:"14px 16px"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
+                      <div>
+                        <div style={{fontSize:13,fontWeight:800,color:C.text}}>{t.label}</div>
+                        <div style={{fontSize:10,color:C.muted,marginTop:2}}>{t.desc}</div>
+                      </div>
+                      {t.deletable && (
+                        <button onClick={t.onDelete}
+                          style={{padding:"4px 10px",borderRadius:5,border:`1px solid ${C.red}66`,background:`${C.red}11`,color:C.red,cursor:"pointer",fontWeight:700,fontSize:10,flexShrink:0,marginLeft:8}}>
+                          🗑 삭제
+                        </button>
+                      )}
+                    </div>
+                    <div style={{display:"flex",gap:16,alignItems:"center"}}>
+                      {stat ? (
+                        <>
+                          <span style={{fontSize:16,fontWeight:900,color:C.teal}}>{stat.rows.toLocaleString()}<span style={{fontSize:10,color:C.muted,fontWeight:400}}> 행</span></span>
+                          {stat.size!=="-" && <span style={{fontSize:12,fontWeight:700,color:C.amber}}>{stat.size}</span>}
+                        </>
+                      ) : dataStatsLoading ? (
+                        <span style={{fontSize:11,color:C.dim}}>조회중...</span>
+                      ) : (
+                        <span style={{fontSize:11,color:C.dim}}>— <span style={{fontSize:9}}>새로고침 클릭</span></span>
+                      )}
+                    </div>
+                    <div style={{fontSize:9,color:C.dim,marginTop:4,fontFamily:"monospace"}}>{t.key}</div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div style={{marginTop:16,padding:"12px 16px",background:`${C.amber}11`,border:`1px solid ${C.amber}44`,borderRadius:8}}>
+              <div style={{fontSize:11,color:C.amber,fontWeight:700,marginBottom:6}}>💡 정확한 용량 표시를 위한 Supabase 함수 (최초 1회 실행)</div>
+              <div style={{fontSize:9,color:C.teal,fontFamily:"monospace",lineHeight:1.8,background:C.bg,padding:"8px 12px",borderRadius:6,whiteSpace:"pre-wrap",wordBreak:"break-all"}}>
+{`CREATE OR REPLACE FUNCTION get_table_sizes()
+RETURNS TABLE(table_name text, row_count bigint, size_pretty text, size_bytes bigint)
+LANGUAGE sql SECURITY DEFINER AS $$
+  SELECT relname::text, n_live_tup,
+    pg_size_pretty(pg_total_relation_size(c.oid)),
+    pg_total_relation_size(c.oid)
+  FROM pg_class c
+  JOIN pg_stat_user_tables s ON c.relname=s.relname
+  WHERE c.relkind='r'
+  ORDER BY pg_total_relation_size(c.oid) DESC;
+$$;`}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
           국가/리그/팀 이름을 인라인으로 한글(또는 다른 이름)로 변경
           저장하면 DB에 보관되어 다음 로드 때 자동 적용됨
           ══════════════════════════════════════════════════════════ */}
