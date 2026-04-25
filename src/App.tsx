@@ -299,7 +299,6 @@ async function fetchSportFromApiSports(
   return { rows, calls, ...(firstError ? { error: firstError } : {}) };
 }
 
-// ── DB 캐시: 한 종목, 시작시간 기준 (베팅 탭에서 사용) ─────────
 async function fetchFixturesFromCache(sport: Sport): Promise<LiveFixture[]> {
   // 베팅 탭은 라이브 경기도 봐야 하므로 -3시간 ~ +30시간 범위로 조회 (rev.6 동작 유지)
   const from = new Date(Date.now() - 3  * 3_600_000).toISOString();
