@@ -826,6 +826,8 @@ function AppMain() {
         item.optLabel === "홈승" ? homeKr :
         item.optLabel === "원정승" ? awayKr :
         item.optLabel === "무승부" ? "무승부" : "";
+      // league_id < 0 이면 수동 경기 (manualFixtures에서 id=-1로 변환됨)
+      const isManual = item.game.league_id < 0;
       const bet:Bet={
         id:String(Date.now()+Math.random()),date:today,
         category:SPORT_META[item.game.sport]?.kr || item.game.sport,
@@ -833,7 +835,14 @@ function AppMain() {
         betOption:item.optLabel,homeTeam:homeKr,awayTeam:awayKr,teamName,
         amount:slipAmount,odds:item.odds,profit:null,result:"진행중",
         includeStats:slipInclude,isDollar:dollar,
-        ...({country: ktr(item.game.country), isLive: slipIsLive} as any),
+        ...({
+          country: ktr(item.game.country),
+          isLive: slipIsLive,
+          // rev.8: 자동 결제용
+          fixtureId: isManual ? null : item.game.id,
+          fixtureSport: isManual ? null : item.game.sport,
+          isManual,
+        } as any),
       };
       setBetsRaw(b=>[...b,bet]);db.upsertBet(bet);
       const newSS={...siteStates,[slipSite]:{...siteStates[slipSite],betTotal:parseFloat((siteStates[slipSite].betTotal+slipAmount).toFixed(2))}};
@@ -2065,6 +2074,100 @@ function AppMain() {
     return Math.floor(hrs/24) + "일 전";
   };
 
+  const autoSettle = useCallback(async () => {
+    // 진행중 베팅 중 fixtureId 있는 것 (수동 경기 제외)
+    const targets = bets.filter(b =>
+      b.result === "진행중" &&
+      (b as any).fixtureId != null &&
+      !(b as any).isManual
+    );
+    if (targets.length === 0) return;
+
+    // fixtures 테이블에서 해당 경기들 조회
+    const fixtureIds = [...new Set(targets.map(b => (b as any).fixtureId as number))];
+    const { data: rows, error } = await supabase
+      .from('fixtures')
+      .select('fixture_id,sport,status_short,home_score,away_score')
+      .in('fixture_id', fixtureIds);
+    if (error || !rows) return;
+
+    // fixture_id → row 맵
+    const fixtureMap = new Map<number, any>();
+    for (const r of rows) fixtureMap.set(r.fixture_id, r);
+
+    const updatedBets: Bet[] = [];
+
+    for (const bet of targets) {
+      const fid = (bet as any).fixtureId as number;
+      const row = fixtureMap.get(fid);
+      if (!row) continue;
+
+      const status = row.status_short as string;
+      const hs = row.home_score as number | null;
+      const as_ = row.away_score as number | null;
+
+      // 종료 상태별 판정
+      let newResult: string | null = null;
+
+      if (status === 'FT' || status === 'AET' || status === 'PEN') {
+        // 경기 종료 — 베팅 옵션별 판정
+        if (hs === null || as_ === null) continue; // 점수 없으면 스킵
+        const opt = bet.betOption;
+        const total = hs + as_;
+
+        if (opt === "홈승") {
+          newResult = hs > as_ ? "승" : "패";
+        } else if (opt === "원정승") {
+          newResult = as_ > hs ? "승" : "패";
+        } else if (opt === "무승부") {
+          newResult = hs === as_ ? "승" : "패";
+        } else if (opt.startsWith("오버")) {
+          const line = parseFloat(opt.replace(/[^0-9.]/g, ""));
+          if (!isNaN(line)) newResult = total > line ? "승" : "패";
+        } else if (opt.startsWith("언더")) {
+          const line = parseFloat(opt.replace(/[^0-9.]/g, ""));
+          if (!isNaN(line)) newResult = total < line ? "승" : "패";
+        } else if (opt.includes("(")) {
+          // 핸디캡: "팀명 (1.5)" 형식
+          const lineMatch = opt.match(/\(([+-]?[\d.]+)\)/);
+          if (lineMatch) {
+            const line = parseFloat(lineMatch[1]);
+            const isHome = opt.includes(bet.homeTeam ?? "홈");
+            const diff = isHome ? (hs - as_) : (as_ - hs);
+            newResult = diff > line ? "승" : "패";
+          }
+        }
+      } else if (status === 'CANC') {
+        newResult = "취소";
+      } else if (status === 'PST') {
+        newResult = "연기";
+      } else if (status === 'ABD') {
+        newResult = "중단";
+      }
+      // 그 외 (NS, 1H, HT, 2H 등 진행중) → 스킵
+
+      if (newResult && newResult !== bet.result) {
+        // 승이면 profit 계산, 패면 -amount
+        const profit = newResult === "승"
+          ? parseFloat((bet.amount * bet.odds - bet.amount).toFixed(2))
+          : newResult === "패" ? -bet.amount
+          : null; // 취소/연기/중단은 profit null (확인 시 처리)
+        const updated = { ...bet, result: newResult, profit } as Bet;
+        updatedBets.push(updated);
+        db.upsertBet(updated);
+      }
+    }
+
+    if (updatedBets.length > 0) {
+      setBetsRaw(prev => prev.map(b => {
+        const u = updatedBets.find(u => u.id === b.id);
+        return u ?? b;
+      }));
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bets]);
+
+
   // ── 새로고침 메인 함수 ───────────────────────────────────────
   // force=false: 캐시(15분) 신선하면 API 호출 안 하고 DB만 다시 읽음.
   // force=true:  캐시 무시하고 무조건 호출 (⚡ 강제 새로고침).
@@ -2182,6 +2285,9 @@ function AppMain() {
       setSportsTestReloadNonce(n => n + 1);
       setBettingFixturesReloadNonce(n => n + 1);
 
+      // 9) 자동 결제 — 진행중 베팅 × 최신 fixtures 대조
+      await autoSettle();
+
     } catch (e: any) {
       setRefreshNote({
         kind: "error",
@@ -2191,13 +2297,19 @@ function AppMain() {
       setRefreshLoading(false);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isMobile]);
+  }, [isMobile, autoSettle]);
 
   // ── 캐시 메타 초기 로드 ──────────────────────────────────────
   useEffect(() => {
     db.loadFixturesCacheMeta().then(setCacheMeta).catch(()=>{});
   }, []);
 
+  // ── 자동 결제 함수 ───────────────────────────────────────────
+  // refreshFixtures() 호출 후 실행.
+  // 진행중 베팅 중 fixtureId 있는 것만 대상.
+  // fixtures 테이블에서 결과 조회 → 승/패/취소/연기/중단 자동 판정.
+  // 판정 후 bets 테이블 업데이트 + 로컬 state 반영.
+  // 확인 버튼은 UI에서 처리 (여기선 판정만).
   // ── 리그-API 매핑 state ──────────────────────────────────────
   // 리그별로 어떤 API를 사용하는지 매핑 { "리그명": "sport_id" }
   // app_settings 테이블에 "league_api_map" 키로 저장
@@ -2346,10 +2458,35 @@ function AppMain() {
         addLog(result==="승"?"✅ 적중":"❌ 실패",bet.homeTeam||bet.teamName||"");
         return updated;
       });
-      // ★ 자동 사이트 초기화 제거 - 사용자가 직접 "마감" 버튼을 눌러야 초기화됨
-      // (베팅 결과 입력만으로는 사이트 상태 유지)
       return next;
     });
+  };
+
+  // 확인 버튼 — 자동 판정된 결과(승/패/취소/연기/중단)를 최종 확정
+  // 취소/연기/중단이면 베팅금액 환원 (betTotal 감소)
+  const confirmResult=(id:string)=>{
+    const bet=bets.find(b=>b.id===id);if(!bet)return;
+    const needRefund = ["취소","연기","중단"].includes(bet.result);
+    // 최종 확정: 승→승, 패→패, 취소/연기/중단→취소(profit=0)
+    const finalResult = needRefund ? "취소" : bet.result;
+    const finalProfit = needRefund ? 0 : bet.profit;
+    const confirmed = {...bet, result: finalResult, profit: finalProfit} as Bet;
+    setBetsRaw(b=>b.map(x=>x.id===id?confirmed:x));
+    db.upsertBet(confirmed);
+    addLog(
+      needRefund ? "↩ 환원" : bet.result==="승" ? "✅ 확인" : "❌ 확인",
+      `${bet.homeTeam||bet.teamName||""} ${needRefund?`(${bet.result}→환원)`:""}`
+    );
+    // 환원: betTotal에서 베팅금액 빼기
+    if(needRefund){
+      const curSS=siteStates[bet.site]||{deposited:0,betTotal:0,active:false,isDollar:isUSD(bet.site)};
+      const refundedSS={
+        ...curSS,
+        betTotal:parseFloat(Math.max(0,curSS.betTotal-bet.amount).toFixed(2)),
+      };
+      setSiteStatesRaw(p=>({...p,[bet.site]:refundedSS}));
+      db.upsertSiteState(bet.site,refundedSS);
+    }
   };
   const revertToPending=(id:string)=>{
     const bet=bets.find(b=>b.id===id);if(!bet)return;
@@ -2380,6 +2517,107 @@ function AppMain() {
   const handleDeleteChoice=(choice:"stats"|"forever")=>{if(!deleteModal)return;choice==="stats"?deleteFromStats(deleteModal.betId):deleteForever(deleteModal.betId);setDeleteModal(null);};
 
   const isOverUnder=(opt:string)=>opt.includes("오버")||opt.includes("언더");
+
+  // ── 진행중 베팅 카드 렌더링 헬퍼 (도장 UI) ────────────────────
+  // 스포츠 탭 / 베팅 내역 탭 공용
+  const renderPendingCard = (b: Bet) => {
+    const title=(b.homeTeam&&b.awayTeam)?`${b.homeTeam} vs ${b.awayTeam}`:(b.teamName||"-");
+    const displayBetOption=b.betOption==="홈승"&&b.homeTeam?`${b.homeTeam} 승`:b.betOption==="원정승"&&b.awayTeam?`${b.awayTeam} 승`:b.betOption;
+    const dollar=b.isDollar;
+    const isManual=(b as any).isManual===true;
+    const hasFixtureId=!isManual&&(b as any).fixtureId!=null;
+
+    // 자동 판정 결과 여부
+    const autoResult=["승","패","취소","연기","중단"].includes(b.result)&&b.result!=="진행중";
+    const stampColor=b.result==="승"?C.green:b.result==="패"?C.red:C.amber;
+    const stampText=b.result==="승"?"적중":b.result==="패"?"실패":b.result==="취소"?"취소":b.result==="연기"?"연기":"중단";
+
+    return (
+      <div key={b.id} style={{
+        position:"relative",
+        background:C.bg3,
+        border:`1px solid ${autoResult?stampColor+"66":C.amber+"44"}`,
+        borderRadius:7,padding:"9px 11px",marginBottom:6,
+        overflow:"hidden",
+      }}>
+        {/* 도장 오버레이 */}
+        {autoResult && (
+          <div className="stamp-overlay" style={{
+            position:"absolute",inset:0,
+            display:"flex",alignItems:"center",justifyContent:"center",
+            pointerEvents:"none",zIndex:1,
+          }}>
+            <div style={{
+              border:`4px solid ${stampColor}`,borderRadius:8,
+              padding:"6px 18px",transform:"rotate(-15deg)",
+              fontSize:22,fontWeight:900,color:stampColor,
+              letterSpacing:4,opacity:0.35,
+              textShadow:`0 0 8px ${stampColor}`,
+              background:`${stampColor}11`,
+            }}>{stampText}</div>
+          </div>
+        )}
+
+        {/* 확인 버튼 (도장 위에, hover 시 보임) */}
+        {autoResult && (
+          <div style={{
+            position:"absolute",inset:0,
+            display:"flex",alignItems:"center",justifyContent:"center",
+            zIndex:2,opacity:0,transition:"opacity 0.15s",
+          }}
+          onMouseEnter={e=>(e.currentTarget.style.opacity="1")}
+          onMouseLeave={e=>(e.currentTarget.style.opacity="0")}
+          >
+            <button onClick={()=>confirmResult(b.id)}
+              style={{
+                padding:"10px 24px",borderRadius:8,fontWeight:900,fontSize:14,
+                cursor:"pointer",letterSpacing:1,
+                background:stampColor,border:"none",color:C.bg,
+                boxShadow:`0 4px 16px ${stampColor}88`,
+              }}>
+              ✅ 확인
+            </button>
+          </div>
+        )}
+
+        {/* 카드 내용 */}
+        <div style={{position:"relative",zIndex:0,opacity:autoResult?0.6:1}}>
+          <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:5,flexWrap:"wrap"}}>
+            <span style={{fontSize:13,flexShrink:0}}>{SPORT_ICON[b.category]||"🎯"}</span>
+            <span style={{fontSize:9,color:dollar?C.amber:C.green,background:`${dollar?C.amber:C.green}22`,border:`1px solid ${dollar?C.amber:C.green}44`,padding:"1px 5px",borderRadius:3,fontWeight:700}}>
+              {dollar?"$":"₩"} {b.site}
+            </span>
+            {(b as any).country && <span style={{fontSize:9,color:C.teal,background:`${C.teal}11`,border:`1px solid ${C.teal}33`,padding:"1px 5px",borderRadius:3,fontWeight:700}}>{(b as any).country}</span>}
+            {b.league && <span style={{fontSize:9,color:C.muted,background:C.bg,padding:"1px 5px",borderRadius:3}}>{b.league}</span>}
+            {/* 수동 뱃지 */}
+            {isManual && <span style={{fontSize:9,color:C.purple,background:`${C.purple}22`,border:`1px solid ${C.purple}44`,padding:"1px 5px",borderRadius:3,fontWeight:700}}>수동</span>}
+            {/* 자동 판정 가능 표시 */}
+            {hasFixtureId && !autoResult && <span style={{fontSize:9,color:C.teal,opacity:0.6}}>🤖</span>}
+            <span style={{fontSize:11,color:C.orange,fontWeight:800,marginLeft:"auto"}}>{displayBetOption}</span>
+          </div>
+          <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:6,lineHeight:1.3,wordBreak:"break-word"}}>{title}</div>
+          <div style={{display:"flex",alignItems:"center",gap:7,flexWrap:"wrap"}}>
+            <div style={{display:"flex",gap:8,flex:1,minWidth:100}}>
+              <span style={{fontSize:10,color:C.muted}}>배당 <span style={{color:C.teal,fontWeight:800,fontSize:11}}>{b.odds}</span></span>
+              <span style={{fontSize:11,color:C.amber,fontWeight:800}}>{fmtDisp(b.amount,b.isDollar)}</span>
+            </div>
+            {/* 수동 처리 버튼 (자동 판정 안 된 베팅 or 수동 경기) */}
+            {!autoResult && (
+              <div style={{display:"flex",gap:3,flexShrink:0}}>
+                {isManual || !hasFixtureId ? (
+                  <>
+                    <button onClick={()=>updateResult(b.id,"승")} style={{background:`${C.green}22`,border:`1px solid ${C.green}`,color:C.green,padding:"4px 10px",borderRadius:4,cursor:"pointer",fontWeight:800,fontSize:11}}>적중</button>
+                    <button onClick={()=>updateResult(b.id,"패")} style={{background:`${C.red}22`,border:`1px solid ${C.red}`,color:C.red,padding:"4px 10px",borderRadius:4,cursor:"pointer",fontWeight:800,fontSize:11}}>실패</button>
+                  </>
+                ) : null}
+                <button onClick={()=>cancelBet(b.id)} style={{background:C.bg,border:`1px solid ${C.border2}`,color:C.muted,padding:"4px 10px",borderRadius:4,cursor:"pointer",fontSize:11}}>취소</button>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   // ── 통계 계산 ─────────────────────────────────────────────
   const weekDeposits=useMemo(()=>{
@@ -2729,103 +2967,7 @@ function AppMain() {
   const [editBetForm,setEditBetForm]=useState<Partial<Bet>>({});
   const [editBetOddsRaw,setEditBetOddsRaw]=useState<string>("");
 
-  const PendingCard=({b}:{b:Bet,key?:any})=>{
-    // 홈 vs 원정이 있으면 무조건 그 형식으로, 없으면 teamName 폴백 (구 데이터 호환)
-    const matchTitle = (b.homeTeam && b.awayTeam)
-      ? `${b.homeTeam} vs ${b.awayTeam}`
-      : (b.teamName || "-");
-    // 호환용 (아래 코드에서 title 사용)
-    const title = matchTitle;
-    // ★ 구 데이터 "홈승"/"원정승" → "팀명 승"으로 표시용 변환
-    const displayBetOption =
-      b.betOption==="홈승" && b.homeTeam ? `${b.homeTeam} 승` :
-      b.betOption==="원정승" && b.awayTeam ? `${b.awayTeam} 승` :
-      b.betOption;
-    // ★ 라이브 스코어와 매칭: 종료된 경기에 대한 베팅이면 자동 판정
-    const matchedGame = (b.homeTeam && b.awayTeam) ? manualGames.find(g =>
-      g.finished &&
-      g.homeTeam===b.homeTeam &&
-      g.awayTeam===b.awayTeam &&
-      g.league===b.league
-    ) : undefined;
-    const verdict = (matchedGame && matchedGame.homeScore!==undefined && matchedGame.awayScore!==undefined)
-      ? judgeBetResult(b, matchedGame.homeScore, matchedGame.awayScore)
-      : null;
-    const isEditing=editingBetId===b.id;
-    if(isEditing){
-      return(
-        <div style={{background:C.bg2,border:`1px solid ${C.teal}44`,borderRadius:6,padding:"9px 10px",marginBottom:5}}>
-          <div style={{fontSize:11,color:C.teal,fontWeight:700,marginBottom:6}}>✏️ 수정</div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:5,marginBottom:5}}>
-            <div><div style={L}>팀/홈팀</div><input value={editBetForm.homeTeam??editBetForm.teamName??""} onChange={e=>{if(isOverUnder(b.betOption))setEditBetForm(f=>({...f,homeTeam:e.target.value}));else setEditBetForm(f=>({...f,teamName:e.target.value}));}} style={{...S,boxSizing:"border-box",fontSize:11}}/></div>
-            {isOverUnder(b.betOption)&&<div><div style={L}>원정팀</div><input value={editBetForm.awayTeam??""} onChange={e=>setEditBetForm(f=>({...f,awayTeam:e.target.value}))} style={{...S,boxSizing:"border-box",fontSize:11}}/></div>}
-            <div><div style={L}>배당(3자리)</div><input value={editBetOddsRaw} onChange={e=>setEditBetOddsRaw(e.target.value.replace(/[^0-9]/g,""))} style={{...S,boxSizing:"border-box",fontSize:11}}/></div>
-            <div><div style={L}>금액</div><input type="number" value={editBetForm.amount??b.amount} onChange={e=>setEditBetForm(f=>({...f,amount:parseFloat(e.target.value)||0}))} style={{...S,boxSizing:"border-box",fontSize:11,...noSpin}}/></div>
-          </div>
-          <div style={{marginBottom:5}}><div style={L}>베팅 옵션</div><input value={editBetForm.betOption??b.betOption} onChange={e=>setEditBetForm(f=>({...f,betOption:e.target.value}))} style={{...S,boxSizing:"border-box",fontSize:11}}/></div>
-          <div style={{display:"flex",gap:4}}>
-            <button onClick={()=>{
-              const newOdds=editBetOddsRaw.length>=3?parseFloat((parseInt(editBetOddsRaw)/100).toFixed(2)):b.odds;
-              const updated:Bet={...b,...editBetForm,odds:newOdds};
-              setBetsRaw(prev=>prev.map(x=>x.id===b.id?updated:x));db.upsertBet(updated);
-              setEditingBetId(null);setEditBetForm({});setEditBetOddsRaw("");
-            }} style={{flex:1,background:`${C.teal}22`,border:`1px solid ${C.teal}`,color:C.teal,padding:"5px",borderRadius:4,cursor:"pointer",fontWeight:700,fontSize:11}}>저장</button>
-            <button onClick={()=>{setEditingBetId(null);setEditBetForm({});setEditBetOddsRaw("");}} style={{flex:1,background:C.bg,border:`1px solid ${C.border}`,color:C.muted,padding:"5px",borderRadius:4,cursor:"pointer",fontSize:11}}>취소</button>
-          </div>
-        </div>
-      );
-    }
-    return(
-      <div style={{background:C.bg2,border:`1px solid ${verdict==="승"?C.green:verdict==="패"?C.red:C.amber}44`,borderRadius:8,padding:"10px 12px",marginBottom:7,position:"relative",overflow:"hidden"}}>
-        {/* 적중/실패 도장 - 가운데 크게 반투명 */}
-        {verdict && (
-          <div style={{position:"absolute",top:"50%",left:"50%",transform:"translate(-50%,-50%) rotate(-15deg)",fontSize:17,fontWeight:900,color:verdict==="승"?C.green:C.red,border:`3px solid ${verdict==="승"?C.green:C.red}`,borderRadius:6,padding:"3px 11px",letterSpacing:2,opacity:0.32,pointerEvents:"none",whiteSpace:"nowrap",zIndex:2}}>
-            {verdict==="승"?"✅ 적중":"❌ 실패"}
-          </div>
-        )}
-        {/* 상단: 카테고리/국가/리그 + 옵션 */}
-        <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6,flexWrap:"wrap"}}>
-          <span style={{fontSize:14,flexShrink:0}}>{SPORT_ICON[b.category]||"🎯"}</span>
-          {(b as any).country && <span style={{fontSize:10,color:C.teal,background:`${C.teal}11`,border:`1px solid ${C.teal}33`,padding:"2px 6px",borderRadius:3,fontWeight:700}}>{(b as any).country}</span>}
-          <span style={{fontSize:10,color:C.muted,background:C.bg,padding:"2px 6px",borderRadius:3}}>{b.league}</span>
-          <span style={{fontSize:13,color:C.orange,fontWeight:800,marginLeft:"auto"}}>{displayBetOption}</span>
-        </div>
-        {/* 중단: 팀 이름 크게 */}
-        <div style={{fontSize:14,fontWeight:800,color:C.text,marginBottom:7,lineHeight:1.3,wordBreak:"break-word"}}>
-          {title || "-"}
-        </div>
-        {/* 종료된 경기면 스코어 표시 */}
-        {matchedGame && (
-          <div style={{fontSize:11,color:C.muted,marginBottom:7,padding:"4px 8px",background:C.bg,borderRadius:4,textAlign:"center"}}>
-            🏁 종료: <b style={{color:C.green}}>{matchedGame.homeScore}</b> : <b style={{color:C.teal}}>{matchedGame.awayScore}</b>
-          </div>
-        )}
-        {/* 하단: 배당 + 금액 + 버튼들 */}
-        <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-          <div style={{display:"flex",gap:10,flex:1,minWidth:120}}>
-            <span style={{fontSize:11,color:C.muted}}>배당 <span style={{color:C.teal,fontWeight:800,fontSize:13}}>{b.odds}</span></span>
-            <span style={{fontSize:13,color:C.amber,fontWeight:800}}>{fmtDisp(b.amount,b.isDollar)}</span>
-          </div>
-          <div style={{display:"flex",gap:4,flexShrink:0}}>
-            {verdict ? (
-              // 자동 판정 결과 있을 때: 확인 버튼만
-              <button onClick={()=>updateResult(b.id,verdict)}
-                style={{background:`${verdict==="승"?C.green:C.red}33`,border:`2px solid ${verdict==="승"?C.green:C.red}`,color:verdict==="승"?C.green:C.red,padding:"6px 16px",borderRadius:5,cursor:"pointer",fontWeight:900,fontSize:13}}>
-                ✓ 확인
-              </button>
-            ) : (
-              // 자동 판정 없을 때: 수동 적중/실패/취소
-              <>
-                <button onClick={()=>updateResult(b.id,"승")} style={{background:`${C.green}22`,border:`1px solid ${C.green}`,color:C.green,padding:"5px 12px",borderRadius:4,cursor:"pointer",fontWeight:800,fontSize:12}}>적중</button>
-                <button onClick={()=>updateResult(b.id,"패")} style={{background:`${C.red}22`,border:`1px solid ${C.red}`,color:C.red,padding:"5px 12px",borderRadius:4,cursor:"pointer",fontWeight:800,fontSize:12}}>실패</button>
-                <button onClick={()=>cancelBet(b.id)} style={{background:C.bg,border:`1px solid ${C.border2}`,color:C.muted,padding:"5px 12px",borderRadius:4,cursor:"pointer",fontSize:12}}>취소</button>
-              </>
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  };
+  const PendingCard=({b}:{b:Bet,key?:any})=>renderPendingCard(b) as React.ReactElement;
 
   const DoneCard=({b}:{b:Bet,key?:any})=>{
     const rc=b.result==="승"?C.green:b.result==="패"?C.red:C.amber;
@@ -4419,36 +4561,7 @@ function AppMain() {
                       <div style={{fontSize:22,marginBottom:6}}>💤</div>
                       <div style={{fontSize:10,color:C.muted}}>진행 중 베팅 없음</div>
                     </div>
-                  ) : pendingSorted.map(b=>{
-                    const title=(b.homeTeam&&b.awayTeam)?`${b.homeTeam} vs ${b.awayTeam}`:(b.teamName||"-");
-                    const displayBetOption=b.betOption==="홈승"&&b.homeTeam?`${b.homeTeam} 승`:b.betOption==="원정승"&&b.awayTeam?`${b.awayTeam} 승`:b.betOption;
-                    const dollar=b.isDollar;
-                    return (
-                      <div key={b.id} style={{background:C.bg3,border:`1px solid ${C.amber}44`,borderRadius:7,padding:"9px 11px",marginBottom:6}}>
-                        <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:5,flexWrap:"wrap"}}>
-                          <span style={{fontSize:13,flexShrink:0}}>{SPORT_ICON[b.category]||"🎯"}</span>
-                          <span style={{fontSize:9,color:dollar?C.amber:C.green,background:`${dollar?C.amber:C.green}22`,border:`1px solid ${dollar?C.amber:C.green}44`,padding:"1px 5px",borderRadius:3,fontWeight:700}}>
-                            {dollar?"$":"₩"} {b.site}
-                          </span>
-                          {(b as any).country && <span style={{fontSize:9,color:C.teal,background:`${C.teal}11`,border:`1px solid ${C.teal}33`,padding:"1px 5px",borderRadius:3,fontWeight:700}}>{(b as any).country}</span>}
-                          {b.league && <span style={{fontSize:9,color:C.muted,background:C.bg,padding:"1px 5px",borderRadius:3}}>{b.league}</span>}
-                          <span style={{fontSize:11,color:C.orange,fontWeight:800,marginLeft:"auto"}}>{displayBetOption}</span>
-                        </div>
-                        <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:6,lineHeight:1.3,wordBreak:"break-word"}}>{title}</div>
-                        <div style={{display:"flex",alignItems:"center",gap:7,flexWrap:"wrap"}}>
-                          <div style={{display:"flex",gap:8,flex:1,minWidth:100}}>
-                            <span style={{fontSize:10,color:C.muted}}>배당 <span style={{color:C.teal,fontWeight:800,fontSize:11}}>{b.odds}</span></span>
-                            <span style={{fontSize:11,color:C.amber,fontWeight:800}}>{fmtDisp(b.amount,b.isDollar)}</span>
-                          </div>
-                          <div style={{display:"flex",gap:3,flexShrink:0}}>
-                            <button onClick={()=>updateResult(b.id,"승")} style={{background:`${C.green}22`,border:`1px solid ${C.green}`,color:C.green,padding:"4px 10px",borderRadius:4,cursor:"pointer",fontWeight:800,fontSize:11}}>적중</button>
-                            <button onClick={()=>updateResult(b.id,"패")} style={{background:`${C.red}22`,border:`1px solid ${C.red}`,color:C.red,padding:"4px 10px",borderRadius:4,cursor:"pointer",fontWeight:800,fontSize:11}}>실패</button>
-                            <button onClick={()=>cancelBet(b.id)} style={{background:C.bg,border:`1px solid ${C.border2}`,color:C.muted,padding:"4px 10px",borderRadius:4,cursor:"pointer",fontSize:11}}>취소</button>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
+                  ) : pendingSorted.map(b=>renderPendingCard(b))}
                 </div>
               </div>
             </div>

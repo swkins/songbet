@@ -59,9 +59,13 @@ export async function loadBets(): Promise<Bet[]> {
       teamName: r.team_name ?? undefined, amount: Number(r.amount), odds: Number(r.odds),
       profit: r.profit != null ? Number(r.profit) : null,
       result: r.result, includeStats: r.include_stats, isDollar: r.is_dollar,
-      // 추가 필드 (기존 행에는 없을 수 있음)
+      // 추가 필드
       ...(r.country != null ? { country: r.country } : {}),
       ...(r.match_type != null ? { matchType: r.match_type } : {}),
+      // rev.8: 자동 결제용 필드
+      ...(r.fixture_id != null ? { fixtureId: Number(r.fixture_id) } : {}),
+      ...(r.fixture_sport != null ? { fixtureSport: r.fixture_sport } : {}),
+      ...(r.is_manual != null ? { isManual: r.is_manual } : {}),
     } as Bet))
   } catch (e) { logLoadError('bets', e); return [] }
 }
@@ -74,6 +78,10 @@ export async function upsertBet(b: Bet) {
       result: b.result, include_stats: b.includeStats, is_dollar: b.isDollar,
       country: (b as any).country ?? null,
       match_type: (b as any).matchType ?? null,
+      // rev.8: 자동 결제용 필드
+      fixture_id: (b as any).fixtureId ?? null,
+      fixture_sport: (b as any).fixtureSport ?? null,
+      is_manual: (b as any).isManual ?? false,
     })
   } catch (e) { logSaveError('bets', e) }
 }
