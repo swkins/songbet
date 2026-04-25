@@ -559,6 +559,7 @@ export interface AppSettingsBundle {
   pext_subcats: string[]
   code_memo_draft: string
   league_api_map: Record<string, string>
+  sports_test_league_map: Record<string, string>
 }
 export async function loadAppSettingsBundle(): Promise<AppSettingsBundle> {
   try {
@@ -574,6 +575,7 @@ export async function loadAppSettingsBundle(): Promise<AppSettingsBundle> {
       pext_subcats: Array.isArray(map.pext_subcats) ? map.pext_subcats : [],
       code_memo_draft: typeof map.code_memo_draft === 'string' ? map.code_memo_draft : '1. ',
       league_api_map: typeof map.league_api_map === 'object' && map.league_api_map !== null ? map.league_api_map : {},
+      sports_test_league_map: typeof map.sports_test_league_map === 'object' && map.sports_test_league_map !== null ? map.sports_test_league_map : {},
     }
   } catch (e) {
     logLoadError('app_settings', e)
@@ -582,6 +584,7 @@ export async function loadAppSettingsBundle(): Promise<AppSettingsBundle> {
       pext_sites: [], pext_cats: [], pext_subcats: [],
       code_memo_draft: '1. ',
       league_api_map: {},
+      sports_test_league_map: {},
     }
   }
 }
