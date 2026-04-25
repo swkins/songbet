@@ -2397,6 +2397,12 @@ function AppMain() {
   },[deposits,ALL_SITES]);
 
   const pending=bets.filter(b=>b.result==="진행중");
+  // 진행중 최신순 정렬 — bettingCombo + sportsTest 탭 공용
+  const pendingSorted=[...pending].sort((a,b)=>{
+    const ta=parseFloat(a.id)||0;
+    const tb=parseFloat(b.id)||0;
+    return tb-ta;
+  });
   // ⚡ 라이브 베팅(isLive=true)은 별도 "실시간" 통계에서만 집계되도록 done에서 제외
   const done=bets.filter(b=>b.result!=="진행중"&&b.includeStats!==false&&(b as any).isLive!==true);
   const doneFull=bets.filter(b=>b.result!=="진행중"&&(b as any).isLive!==true);
@@ -3638,12 +3644,7 @@ function AppMain() {
           ? manualGames.filter(g=>g.sportCat===mSport && g.country===mCountry && g.league===mLeague && !g.finished)
               .sort((a,b)=>a.createdAt-b.createdAt)
           : [];
-        // 진행중 정렬: 최신순
-        const pendingSorted = [...pending].sort((a,b)=>{
-          const ta=parseFloat(a.id)||0;
-          const tb=parseFloat(b.id)||0;
-          return tb-ta;
-        });
+        // pendingSorted는 컴포넌트 레벨에 선언됨 (sportsTest 탭과 공용)
 
         return (
         <div style={{display:"flex",flex:1,overflow:"hidden",minWidth:0,minHeight:0}}>
