@@ -1,68 +1,24 @@
 // ═════════════════════════════════════════════════════════════════════
-// BET TRACKER · db.ts (rev.6 - 2026-04-25)
+// BET TRACKER · db.ts (rev.5 - 2026-04-24)
 // ═════════════════════════════════════════════════════════════════════
 //
-// ╔═══════════════════════════════════════════════════════════════════╗
-// ║      🔒 골든 룰 — 이 파일을 수정하는 모든 Claude에게            ║
-// ╚═══════════════════════════════════════════════════════════════════╝
+// 🔒 골든 룰 (반드시 지킬 것)
+// ─────────────────────────────────────────────────────────────────────
+// 1) 이 앱의 모든 영속 데이터는 반드시 Supabase(이 파일)를 거친다.
+//    → localStorage / sessionStorage / IndexedDB 에 직접 저장 금지
+//    → 유일한 예외: 외부 API 임시 캐시(예: bt_apisports_*). 사용자가 입력한
+//      데이터는 절대 예외가 될 수 없다.
+// 2) 새 상태를 추가한다면:
+//    (a) 이 파일에 테이블용 load/upsert/delete 함수 세트를 먼저 만든다.
+//    (b) App.tsx에서 useState 초기값은 "빈 값"으로만 시작한다.
+//    (c) 초기 로딩 useEffect에서 load를 호출해 세팅한다.
+//    (d) save 함수는 state 변경과 동시에 이 파일의 upsert를 호출한다.
+// 3) 단순 문자열/배열 같은 1회성 설정은 app_settings (key-value)로 통합한다.
+//    새 테이블을 만들 필요가 있는지 먼저 판단하라.
+// 4) 로드 실패 시 빈 값으로 폴백(throw 금지, 에러는 console.error). UI는
+//    App.tsx의 dataLoadErrors 배너로 안내.
 //
-// 이 파일은 Supabase와 통신하는 유일한 창구다.
-// App.tsx에서 직접 supabase 클라이언트를 호출하지 말고
-// 반드시 이 파일의 함수를 경유할 것.
-//
-// ── 새 데이터 추가 시 필수 절차 ─────────────────────────────────────
-//
-//  STEP 1. Supabase Dashboard에서 테이블 생성 (또는 app_settings 활용)
-//          → 단순 key-value 설정은 app_settings 테이블 사용
-//          → 구조화된 배열/객체는 별도 테이블 신설
-//
-//  STEP 2. 이 파일(db.ts)에 함수 세트 추가:
-//
-//    // 예시: myData 테이블
-//    export async function loadMyData(): Promise<MyType[]> {
-//      try {
-//        const { data, error } = await supabase.from('my_table').select('*')
-//        if (error) throw error
-//        return (data ?? []).map(r => ({ ... }))
-//      } catch (e) { logLoadError('my_table', e); return [] }
-//    }
-//    export async function upsertMyData(item: MyType) {
-//      try { await supabase.from('my_table').upsert({ ... }) }
-//      catch (e) { logSaveError('my_table', e) }
-//    }
-//    export async function deleteMyData(id: string) {
-//      try { await supabase.from('my_table').delete().eq('id', id) }
-//      catch (e) { logSaveError('my_table', e) }
-//    }
-//
-//  STEP 3. App.tsx에서:
-//    (a) useState 초기값은 반드시 빈 값으로 시작
-//        const [myData, setMyData] = useState<MyType[]>([])
-//    (b) 초기 로딩 useEffect (dbReloadNonce)에서 load 호출
-//        const md = await db.loadMyData()
-//        setMyData(md)
-//    (c) save 함수는 setState + db.upsert 항상 같이 호출
-//        const saveMyData = (items: MyType[]) => {
-//          setMyData(items)
-//          items.forEach(i => db.upsertMyData(i))
-//        }
-//
-// ── app_settings 현재 키 목록 ────────────────────────────────────────
-//  krw_sites       : 원화 사이트 목록 (string[])
-//  usd_sites       : 달러 사이트 목록 (string[])
-//  pext_sites      : 기타수익 사이트 (string[])
-//  pext_cats       : 기타수익 카테고리 (string[])
-//  pext_subcats    : 기타수익 서브카테고리 (string[])
-//  code_memo_draft : 코드 메모 임시저장 (string)
-//  league_api_map  : 리그-API 매핑 (Record<string,string>)
-//  → 새 설정 추가 시 위 목록에 반드시 기재할 것
-//
-// ── 에러 처리 원칙 ───────────────────────────────────────────────────
-//  로드 실패 → 빈 값 반환 (throw 금지)
-//  저장 실패 → console.error만 (앱 중단 금지)
-//  UI 안내   → App.tsx의 dataLoadErrors 배너 활용
-//
-// 이 주석을 보는 모든 Claude / 개발자는 위 규칙을 반드시 따를 것.
+// 이 주석을 보는 모든 Claude / 개발자는 위 규칙을 따를 것.
 // ═════════════════════════════════════════════════════════════════════
 
 import { supabase } from './supabase'
@@ -602,6 +558,7 @@ export interface AppSettingsBundle {
   pext_cats: string[]
   pext_subcats: string[]
   code_memo_draft: string
+  league_api_map: Record<string, string>
 }
 export async function loadAppSettingsBundle(): Promise<AppSettingsBundle> {
   try {
@@ -616,6 +573,7 @@ export async function loadAppSettingsBundle(): Promise<AppSettingsBundle> {
       pext_cats: Array.isArray(map.pext_cats) ? map.pext_cats : [],
       pext_subcats: Array.isArray(map.pext_subcats) ? map.pext_subcats : [],
       code_memo_draft: typeof map.code_memo_draft === 'string' ? map.code_memo_draft : '1. ',
+      league_api_map: typeof map.league_api_map === 'object' && map.league_api_map !== null ? map.league_api_map : {},
     }
   } catch (e) {
     logLoadError('app_settings', e)
@@ -623,6 +581,7 @@ export async function loadAppSettingsBundle(): Promise<AppSettingsBundle> {
       krw_sites: null, usd_sites: null,
       pext_sites: [], pext_cats: [], pext_subcats: [],
       code_memo_draft: '1. ',
+      league_api_map: {},
     }
   }
 }
