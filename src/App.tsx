@@ -2981,7 +2981,178 @@ function AppMain() {
   const spColor = SPORT_META[bettingSport].color;
 
   return (
-    <div style={{minHeight:"100vh",background:C.bg,color:C.text,fontFamily:"'Segoe UI',system-ui,sans-serif",display:"flex",flexDirection:"column"}}>
+    <div className="bt-app-root" data-tab={tab} style={{minHeight:"100vh",background:C.bg,color:C.text,fontFamily:"'Segoe UI',system-ui,sans-serif",display:"flex",flexDirection:"column"}}>
+      {/* ═══════════════════════════════════════════════════════════
+          📱 모바일 전용 스타일 (768px 이하에서만 발동)
+          PC 화면에는 영향 없음. data-tab 속성으로 탭별 분기.
+          ═══════════════════════════════════════════════════════════ */}
+      <style>{`
+        @media (max-width: 768px) {
+          /* ───── 공통: 가로 스크롤 방지 ───── */
+          .bt-app-root {
+            overflow-x: hidden !important;
+          }
+          .bt-app-root * {
+            max-width: 100vw;
+          }
+
+          /* ───── 헤더 영역 (탭 네비게이션 위) ───── */
+          .bt-app-root > div[style*="padding: 12px 18px"],
+          .bt-app-root > div[style*="padding:12px 18px"] {
+            padding: 8px 10px !important;
+          }
+          /* 헤더 내부 폰트/간격 축소 */
+          .bt-app-root [style*="fontSize: 22"],
+          .bt-app-root [style*="fontSize:22"] {
+            font-size: 16px !important;
+          }
+          /* 탭 버튼: 가로 스크롤 가능하게 */
+          .bt-app-root > div > div[style*="flexWrap"][style*="wrap"] {
+            flex-wrap: nowrap !important;
+            overflow-x: auto !important;
+            -webkit-overflow-scrolling: touch;
+            padding-bottom: 4px;
+          }
+          .bt-app-root button[style*="padding: 10px 20px"],
+          .bt-app-root button[style*="padding:10px 20px"] {
+            padding: 7px 12px !important;
+            font-size: 12px !important;
+            white-space: nowrap !important;
+            flex-shrink: 0 !important;
+          }
+
+          /* ═══════════ 🏠 대시보드 탭 ═══════════ */
+          .bt-app-root[data-tab="home"] > div[style*="overflowY"][style*="auto"][style*="padding: 14"],
+          .bt-app-root[data-tab="home"] > div[style*="overflowY"][style*="auto"][style*="padding:14"] {
+            padding: 10px !important;
+          }
+          /* 2컬럼 그리드 → 1컬럼 세로 스택 */
+          .bt-app-root[data-tab="home"] div[style*="gridTemplateColumns: 360px 1fr"],
+          .bt-app-root[data-tab="home"] div[style*="gridTemplateColumns:360px 1fr"],
+          .bt-app-root[data-tab="home"] div[style*="grid-template-columns: 360px 1fr"] {
+            grid-template-columns: 1fr !important;
+            gap: 10px !important;
+          }
+          /* 사이트 활성화 4컬럼 → 3컬럼 */
+          .bt-app-root[data-tab="home"] div[style*="repeat(4, 1fr)"],
+          .bt-app-root[data-tab="home"] div[style*="repeat(4,1fr)"] {
+            grid-template-columns: repeat(3, 1fr) !important;
+          }
+          /* 카드 패딩 축소 */
+          .bt-app-root[data-tab="home"] div[style*="padding: 13"],
+          .bt-app-root[data-tab="home"] div[style*="padding:13"] {
+            padding: 11px !important;
+          }
+
+          /* ═══════════ 🎯 스포츠 탭 ═══════════ */
+          /* 3컬럼 가로 레이아웃 → 세로 스택, 사이드바 가로 스크롤 */
+          .bt-app-root[data-tab="bettingCombo"] > div[style*="flex"][style*="overflow"][style*="hidden"] {
+            flex-direction: column !important;
+          }
+          /* 사이드바(카테고리) 폭 줄이고 높이 제한 */
+          .bt-app-root[data-tab="bettingCombo"] > div > div[style*="width: 300"],
+          .bt-app-root[data-tab="bettingCombo"] > div > div[style*="width:300"] {
+            width: 100% !important;
+            max-height: 35vh !important;
+            border-right: none !important;
+            border-bottom: 1px solid #344534 !important;
+            flex-shrink: 0 !important;
+          }
+          /* 메인 영역 폭 보장 */
+          .bt-app-root[data-tab="bettingCombo"] > div > div:not([style*="width: 300"]):not([style*="width:300"]) {
+            width: 100% !important;
+            min-width: 0 !important;
+          }
+          /* 베팅 슬립 등 내부 그리드 단순화 */
+          .bt-app-root[data-tab="bettingCombo"] div[style*="repeat(3, 1fr)"],
+          .bt-app-root[data-tab="bettingCombo"] div[style*="repeat(3,1fr)"] {
+            grid-template-columns: 1fr 1fr !important;
+          }
+          .bt-app-root[data-tab="bettingCombo"] div[style*="repeat(4, 1fr)"],
+          .bt-app-root[data-tab="bettingCombo"] div[style*="repeat(4,1fr)"] {
+            grid-template-columns: repeat(2, 1fr) !important;
+          }
+
+          /* ═══════════ ⏳ 베팅 내역 탭 ═══════════ */
+          .bt-app-root[data-tab="pending"] div[style*="padding: 12px 18"],
+          .bt-app-root[data-tab="pending"] div[style*="padding:12px 18"] {
+            padding: 10px 12px !important;
+          }
+          .bt-app-root[data-tab="pending"] div[style*="padding: 16"],
+          .bt-app-root[data-tab="pending"] div[style*="padding:16"] {
+            padding: 10px !important;
+          }
+          /* 6컬럼 → 1컬럼 (사이트 카드) */
+          .bt-app-root[data-tab="pending"] div[style*="repeat(6, 1fr)"],
+          .bt-app-root[data-tab="pending"] div[style*="repeat(6,1fr)"] {
+            grid-template-columns: 1fr !important;
+            gap: 8px !important;
+          }
+          /* 잔여금 표시 줄바꿈 허용 */
+          .bt-app-root[data-tab="pending"] div[style*="fontSize: 14"][style*="display: flex"][style*="gap: 16"],
+          .bt-app-root[data-tab="pending"] div[style*="fontSize:14"][style*="display:flex"][style*="gap:16"] {
+            flex-wrap: wrap !important;
+            gap: 8px !important;
+            font-size: 12px !important;
+          }
+          /* 헤더 줄바꿈 허용 */
+          .bt-app-root[data-tab="pending"] div[style*="justifyContent: space-between"][style*="marginBottom: 6"] {
+            flex-wrap: wrap !important;
+            gap: 6px !important;
+          }
+
+          /* ═══════════ 📊 통계 탭 ═══════════ */
+          .bt-app-root[data-tab="stats"] > div[style*="padding: 20"],
+          .bt-app-root[data-tab="stats"] > div[style*="padding:20"] {
+            padding: 10px !important;
+          }
+          /* 5컬럼 → 2컬럼 (StatCard 그리드) */
+          .bt-app-root[data-tab="stats"] div[style*="repeat(5, 1fr)"],
+          .bt-app-root[data-tab="stats"] div[style*="repeat(5,1fr)"] {
+            grid-template-columns: repeat(2, 1fr) !important;
+            gap: 6px !important;
+          }
+          /* 4컬럼 → 2컬럼 */
+          .bt-app-root[data-tab="stats"] div[style*="repeat(4, 1fr)"],
+          .bt-app-root[data-tab="stats"] div[style*="repeat(4,1fr)"] {
+            grid-template-columns: repeat(2, 1fr) !important;
+          }
+          /* 3컬럼 → 1컬럼 (큰 차트 박스 등) */
+          .bt-app-root[data-tab="stats"] div[style*="repeat(3, 1fr)"],
+          .bt-app-root[data-tab="stats"] div[style*="repeat(3,1fr)"] {
+            grid-template-columns: 1fr !important;
+          }
+          /* 통계 탭 상단 탭 버튼 가로 스크롤 */
+          .bt-app-root[data-tab="stats"] > div > div:first-child > div[style*="flexWrap"] {
+            flex-wrap: nowrap !important;
+            overflow-x: auto !important;
+            -webkit-overflow-scrolling: touch;
+          }
+          /* 차트 높이 축소 */
+          .bt-app-root[data-tab="stats"] .recharts-responsive-container {
+            height: 140px !important;
+          }
+          /* 통계 카드 내부 폰트 축소 */
+          .bt-app-root[data-tab="stats"] div[style*="padding: 13"],
+          .bt-app-root[data-tab="stats"] div[style*="padding:13"],
+          .bt-app-root[data-tab="stats"] div[style*="padding: 16"],
+          .bt-app-root[data-tab="stats"] div[style*="padding:16"] {
+            padding: 10px !important;
+          }
+
+          /* ═══════════ 공통: 모달 가로 폭 보정 ═══════════ */
+          .bt-app-root div[style*="width: 380"],
+          .bt-app-root div[style*="width:380"],
+          .bt-app-root div[style*="width: 420"],
+          .bt-app-root div[style*="width:420"],
+          .bt-app-root div[style*="width: 480"],
+          .bt-app-root div[style*="width:480"] {
+            width: calc(100vw - 20px) !important;
+            max-width: 420px !important;
+          }
+        }
+      `}</style>
+
 
       {/* ── 데이터 로드 실패 배너 ── */}
       {dataLoadErrors.length>0 && (
