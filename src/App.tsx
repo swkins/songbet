@@ -835,11 +835,10 @@ function AppMain() {
   const handleSlipPick = useCallback((game: LiveFixture, optLabel: string) => {
     const id = `${game.id}_${optLabel}`;
     setSlip(prev => {
-      // 이미 같은 조합이면 제거 (토글)
+      // 같은 옵션을 다시 누르면 제거 (토글)
       if (prev.some(s => s.id === id)) return prev.filter(s => s.id !== id);
-      // 같은 경기의 다른 옵션이 있으면 제거하고 새것 추가
-      const filtered = prev.filter(s => s.game.id !== game.id);
-      return [...filtered, { id, game, optLabel, odds: 0 }];
+      // 폴더베팅 없이 단일베팅만: 완전히 덮어씌움 (마지막 클릭이 슬립을 차지)
+      return [{ id, game, optLabel, odds: 0 }];
     });
   },[]);
 
@@ -1547,6 +1546,54 @@ function AppMain() {
   const [addPointSiteModal,setAddPointSiteModal]=useState(false);
   const [newPointSite,setNewPointSite]=useState<{name:string,exchangeName:string,exchangeDate:string,targetAmount:number,targetSiteName:string,targetCycleDays:number}>({name:"올인구조대",exchangeName:"포인트교환",exchangeDate:"2025-05-04",targetAmount:2000000,targetSiteName:"",targetCycleDays:30});
 
+  // ── 다음 목표 예약 모달 ─────────────────────────────────────
+  // 사용자가 "📅 예약" 버튼 클릭 시 다음 목표일을 미리 잡아둠.
+  // 예약은 PointSession에 completedAt="" (빈 문자열) 형태로 저장:
+  //   { id, completedAt:"", nextTargetDate: 사용자가 지정한 날짜 }
+  // 완료 누를 때 빈 completedAt 세션이 있으면 "이어서 진행할지" 모달 표시.
+  const [reserveModal,setReserveModal]=useState<{siteId:string}|null>(null);
+  const [reserveDate,setReserveDate]=useState<string>("");
+
+  // 예약 세션 찾기 (completedAt이 빈 문자열인 세션)
+  const findReservedSession = (site:PointSite):PointSession|undefined =>
+    site.sessions.find(s=>!s.completedAt);
+
+  const handleReservePointDate=()=>{
+    if(!reserveModal) return;
+    if(!reserveDate) return alert("날짜를 선택해주세요.");
+    const site = pointSites.find(s=>s.id===reserveModal.siteId);
+    if(!site) return;
+    // 이미 예약이 있으면 덮어쓰기 (확인)
+    const existing = findReservedSession(site);
+    if(existing) {
+      if(!window.confirm(`이미 예약된 일정(${existing.nextTargetDate})이 있습니다. 새 날짜(${reserveDate})로 덮어쓰시겠습니까?`)) return;
+    }
+    // 예약 세션 추가 (또는 기존 예약 교체)
+    const reservedSession:PointSession={id:String(Date.now()),completedAt:"",nextTargetDate:reserveDate};
+    const updated=pointSites.map(s=>{
+      if(s.id!==reserveModal.siteId) return s;
+      // 기존 예약은 제거하고 새 예약만 유지
+      const filtered = s.sessions.filter(x=>x.completedAt);
+      return {...s,sessions:[...filtered,reservedSession]};
+    });
+    savePointSites(updated);
+    setReserveModal(null);
+    setReserveDate("");
+  };
+
+  const handleCancelReservation=(siteId:string)=>{
+    const site = pointSites.find(s=>s.id===siteId);
+    if(!site) return;
+    const reserved = findReservedSession(site);
+    if(!reserved) return;
+    if(!window.confirm(`예약된 일정(${reserved.nextTargetDate})을 취소하시겠습니까?`)) return;
+    const updated=pointSites.map(s=>{
+      if(s.id!==siteId) return s;
+      return {...s,sessions:s.sessions.filter(x=>x.completedAt)};
+    });
+    savePointSites(updated);
+  };
+
   const handleAddPointSite=()=>{
     const site:PointSite={id:String(Date.now()),name:newPointSite.name,exchangeName:newPointSite.exchangeName,exchangeDate:newPointSite.exchangeDate,targetAmount:newPointSite.targetAmount,targetSiteName:newPointSite.targetSiteName||undefined,targetCycleDays:newPointSite.targetCycleDays||30,sessions:[]};
     const updated=[...pointSites,site];
@@ -1789,17 +1836,45 @@ function AppMain() {
     const targetMsg = site.targetAmount>0
       ? `목표 ${site.targetAmount.toLocaleString()}원, 목표 기간 ${cycleLabel}`
       : `목표 없음 (입금만 추적), 목표 기간 ${cycleLabel}`;
-    if(!window.confirm(`"${site.name}" 현금교환 완료 처리?\n\n같은 조건(${targetMsg})으로 ${cycleLabel} 후를 다음 교환일로 잡고 이어서 진행하시겠습니까?`)) return;
+
     const now=new Date().toISOString().slice(0,10);
-    // 다음 교환일 = 이전 교환일 + cycleDays (사이클 길이만큼 뒤로)
-    const baseDate = site.sessions.length>0
-      ? site.sessions[site.sessions.length-1].nextTargetDate
-      : site.exchangeDate;
-    const nextTarget=getNextTargetDate(baseDate,cycle);
-    const session:PointSession={id:String(Date.now()),completedAt:now,nextTargetDate:nextTarget};
+    // 예약된 세션이 있는지 확인 (completedAt 빈 문자열)
+    const reserved = findReservedSession(site);
+
+    let nextTarget:string;
+    let updatedSessions:PointSession[];
+
+    if(reserved) {
+      // 예약된 일정이 있으면 → 사용자 확인 후 그 날짜로 이어가기
+      const ok = window.confirm(
+        `"${site.name}" 현금교환 완료 처리?\n\n` +
+        `📅 예약된 일정이 있습니다: ${reserved.nextTargetDate}\n\n` +
+        `예약된 날짜로 이어서 진행하시겠습니까?\n` +
+        `(같은 조건: ${targetMsg})\n` +
+        `→ 새 시작일 기준으로 ${cycleLabel}간 ${site.targetAmount>0?site.targetAmount.toLocaleString()+"원":""} 입금을 채우게 됩니다.`
+      );
+      if(!ok) return;
+      nextTarget = reserved.nextTargetDate;
+      // 예약 세션을 완료된 세션으로 변환 (completedAt 채움)
+      updatedSessions = site.sessions.map(s=>
+        s.id===reserved.id ? {...s,completedAt:now} : s
+      );
+    } else {
+      // 예약 없음 → 기존 동작 (cycleDays만큼 자동 더하기)
+      if(!window.confirm(`"${site.name}" 현금교환 완료 처리?\n\n같은 조건(${targetMsg})으로 ${cycleLabel} 후를 다음 교환일로 잡고 이어서 진행하시겠습니까?`)) return;
+      // 다음 교환일 = 이전 완료된 교환일 + cycleDays (사이클 길이만큼 뒤로)
+      const completedSessionsList = site.sessions.filter(s=>s.completedAt);
+      const baseDate = completedSessionsList.length>0
+        ? completedSessionsList[completedSessionsList.length-1].nextTargetDate
+        : site.exchangeDate;
+      nextTarget=getNextTargetDate(baseDate,cycle);
+      const session:PointSession={id:String(Date.now()),completedAt:now,nextTargetDate:nextTarget};
+      updatedSessions = [...site.sessions,session];
+    }
+
     const updated=pointSites.map(s=>{
       if(s.id!==siteId)return s;
-      return{...s,sessions:[...s.sessions,session]};
+      return{...s,sessions:updatedSessions};
     });
     savePointSites(updated);
   };
@@ -3317,6 +3392,40 @@ function AppMain() {
         </div>
       )}
 
+      {/* 다음 목표 예약 모달 */}
+      {reserveModal && (()=>{
+        const site = pointSites.find(s=>s.id===reserveModal.siteId);
+        if(!site) return null;
+        const cycle = site.targetCycleDays || 30;
+        const cycleLabel = cycle===7?"1주":cycle===14?"2주":cycle===30?"1달":cycle===60?"2달":cycle===90?"3달":`${cycle}일`;
+        return (
+          <div style={{position:"fixed",inset:0,background:"#000b",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center"}}>
+            <div style={{background:C.bg3,border:`1px solid ${C.purple}`,borderRadius:14,padding:24,width:380}}>
+              <div style={{fontSize:14,fontWeight:800,color:C.purple,marginBottom:6}}>📅 다음 목표 날짜 예약</div>
+              <div style={{fontSize:11,color:C.muted,marginBottom:14,background:C.bg2,padding:"8px 12px",borderRadius:6,lineHeight:1.5}}>
+                <b style={{color:C.text}}>{site.name}</b> · {site.exchangeName}<br/>
+                목표 {site.targetAmount>0?`${site.targetAmount.toLocaleString()}원`:"없음"} / 기간 {cycleLabel}
+              </div>
+              <div style={{marginBottom:14}}>
+                <div style={{...L,marginBottom:5}}>📅 다음 목표일</div>
+                <input type="date" value={reserveDate} onChange={e=>setReserveDate(e.target.value)}
+                  style={{...S,boxSizing:"border-box",fontSize:14,padding:"10px"}}/>
+                <div style={{fontSize:9,color:C.dim,marginTop:6,lineHeight:1.5}}>
+                  완료 버튼 누를 때 예약된 날짜로 이어서 진행할지 확인합니다.<br/>
+                  목표 금액·기간은 그대로 유지되고, <b>이 날짜 기준</b>으로 카운트가 다시 시작됩니다.
+                </div>
+              </div>
+              <div style={{display:"flex",gap:8}}>
+                <button onClick={handleReservePointDate}
+                  style={{flex:1,background:`${C.purple}22`,border:`1px solid ${C.purple}`,color:C.purple,padding:"10px",borderRadius:7,cursor:"pointer",fontWeight:800}}>✅ 예약</button>
+                <button onClick={()=>{setReserveModal(null);setReserveDate("");}}
+                  style={{flex:1,background:C.bg2,border:`1px solid ${C.border}`,color:C.muted,padding:"10px",borderRadius:7,cursor:"pointer"}}>취소</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* 빠른 입금/포인트 모달 (홈 대시보드에서 호출) */}
       {quickActionMode && (()=>{
         const isDep = quickActionMode==="deposit";
@@ -4666,6 +4775,66 @@ function AppMain() {
                             {isVolleyball && (
                               <div style={{fontSize:10,color:C.muted,marginTop:4}}>배구는 승패만 지원합니다.</div>
                             )}
+
+                            {/* LOL: 세트 핸디캡 + 세트 오버 */}
+                            {(sport as unknown as string) === "LOL" && (()=>{
+                              const homeKr = krTeam(g.home_team);
+                              const awayKr = krTeam(g.away_team);
+                              const setHandiLines = [1.5, 2.5];
+                              return (
+                                <>
+                                  {/* 세트 핸디캡 */}
+                                  <div style={{marginTop:14,marginBottom:14}}>
+                                    <div style={{fontSize:10,fontWeight:800,color:C.amber,marginBottom:6,letterSpacing:1}}>세트 핸디캡</div>
+                                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                                      {[
+                                        {team:homeKr,color:C.green},
+                                        {team:awayKr,color:C.teal},
+                                      ].map(({team,color})=>(
+                                        <div key={team}>
+                                          <div style={{fontSize:10,color,marginBottom:5,fontWeight:800,textAlign:"center",background:`${color}22`,borderRadius:4,padding:"2px 0"}}>{team}</div>
+                                          {setHandiLines.flatMap(ln => [
+                                            { sign: "-", val: ln },
+                                            { sign: "+", val: ln },
+                                          ]).map(({sign,val})=>{
+                                            const opt = `${team} (${sign}${val})`;
+                                            const added = inSlip(opt);
+                                            return <button key={opt} onClick={()=>handleSlipPick(g,opt)}
+                                              style={{width:"100%",marginBottom:4,padding:"8px 10px",borderRadius:5,cursor:"pointer",
+                                                border:added?`2px solid ${color}`:`1px solid ${C.border}`,
+                                                background:added?`${color}33`:C.bg2,color:added?color:C.text,
+                                                fontWeight:added?800:600,fontSize:11,display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,textAlign:"left"}}>
+                                              <span style={{flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{team} <b>({sign}{val})</b></span>
+                                              <span style={{color:added?color:C.dim,fontSize:11,fontWeight:700,minWidth:32,textAlign:"right",flexShrink:0}}>—</span>
+                                            </button>;
+                                          })}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+
+                                  {/* 세트 오버 (3.5) */}
+                                  <div style={{marginBottom:14}}>
+                                    <div style={{fontSize:10,fontWeight:800,color:"#e05a9a",marginBottom:6,letterSpacing:1}}>세트 오버</div>
+                                    <div style={{display:"grid",gridTemplateColumns:"1fr",gap:8}}>
+                                      {(()=>{
+                                        const opt = "세트 오버 (3.5)";
+                                        const added = inSlip(opt);
+                                        const color = "#e05a9a";
+                                        return <button key={opt} onClick={()=>handleSlipPick(g,opt)}
+                                          style={{padding:"10px 12px",borderRadius:6,cursor:"pointer",
+                                            border:added?`2px solid ${color}`:`1px solid ${C.border}`,
+                                            background:added?`${color}33`:C.bg2,color:added?color:C.text,
+                                            fontWeight:added?800:600,fontSize:12,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                                          <span>세트 오버 <b>(3.5)</b></span>
+                                          <span style={{color:added?color:C.dim,fontSize:11,fontWeight:700}}>—</span>
+                                        </button>;
+                                      })()}
+                                    </div>
+                                  </div>
+                                </>
+                              );
+                            })()}
                           </div>
                         );
                       })()}
@@ -4712,7 +4881,7 @@ function AppMain() {
                 ) : slip.map(item=>{
                   const homeKr=translateTeamName(item.game.home_team,teamNameMap);
                   const awayKr=translateTeamName(item.game.away_team,teamNameMap);
-                  const optColor = item.optLabel==="홈승"?C.green:item.optLabel==="원정승"?C.teal:item.optLabel==="무승부"?C.amber:item.optLabel.startsWith("오버")?"#e05a9a":"#7ac4ff";
+                  const optColor = item.optLabel==="홈승"?C.green:item.optLabel==="원정승"?C.teal:item.optLabel==="무승부"?C.amber:(item.optLabel.startsWith("오버")||item.optLabel.startsWith("세트 오버"))?"#e05a9a":"#7ac4ff";
                   const displayOpt = item.optLabel==="홈승"?`${homeKr} 승`:item.optLabel==="원정승"?`${awayKr} 승`:item.optLabel;
                   return (
                     <div key={item.id} style={{background:C.bg3,border:`1px solid ${optColor}66`,borderRadius:9,padding:"13px 14px",marginBottom:10,position:"relative"}}>
@@ -6192,15 +6361,31 @@ function AppMain() {
               ) : (
                 <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))",gap:10}}>
                   {pointSites.map(ps=>{
-                    const lastSession=ps.sessions[ps.sessions.length-1];
-                    const isCompleted=!!lastSession;
-                    const baseDate=isCompleted?lastSession.nextTargetDate:ps.exchangeDate;
+                    // ── 세션 분리: 완료된 세션과 예약된 세션(completedAt 빈 문자열) ──
+                    const completedSessions = ps.sessions.filter(s=>s.completedAt);
+                    const reservedSession = ps.sessions.find(s=>!s.completedAt);
+                    const lastCompleted = completedSessions[completedSessions.length-1];
+                    const isCompleted = !!lastCompleted;
+                    // baseDate: 다음 목표일 (D-DAY 계산용). 우선순위: 예약 > 마지막 완료 > 초기 교환일
+                    const baseDate = reservedSession
+                      ? reservedSession.nextTargetDate
+                      : isCompleted
+                        ? lastCompleted.nextTargetDate
+                        : ps.exchangeDate;
                     const startDate=new Date(baseDate);startDate.setDate(startDate.getDate()-1);
                     const startStr=startDate.toISOString().slice(0,10);
                     // ★ 목표 기간(targetCycleDays)만큼 과거로 이동하여 누적 계산 시작일 산출
                     const cycle = ps.targetCycleDays || 30;
                     const fromDate=new Date(startStr);fromDate.setDate(fromDate.getDate()-(cycle-1));
-                    const fromStr=fromDate.toISOString().slice(0,10);
+                    let fromStr=fromDate.toISOString().slice(0,10);
+                    // ★ 4번 규칙: "오늘 완료 누른 날의 입금은 모두 제외" — 다음날 0시부터 카운트
+                    //   마지막 완료 세션이 있으면, 그 completedAt 다음날을 카운트 시작일로 강제 (기본 fromStr보다 늦으면)
+                    if(lastCompleted && lastCompleted.completedAt) {
+                      const dayAfter = new Date(lastCompleted.completedAt+"T00:00:00Z");
+                      dayAfter.setUTCDate(dayAfter.getUTCDate()+1);
+                      const dayAfterStr = dayAfter.toISOString().slice(0,10);
+                      if(dayAfterStr > fromStr) fromStr = dayAfterStr;
+                    }
                     const periodDeps=deposits.filter(d=>d.date>=fromStr&&d.date<=startStr&&(!ps.targetSiteName||d.site===ps.targetSiteName));
                     const totalKrw=periodDeps.reduce((s,d)=>s+(isUSD(d.site)?d.amount*usdKrw:d.amount),0);
                     const hasTarget = ps.targetAmount>0;
@@ -6212,7 +6397,7 @@ function AppMain() {
                     // 기간 라벨 (1주/2주/1달/2달/3달, 그 외는 N일)
                     const cycleLabel = cycle===7?"1주":cycle===14?"2주":cycle===30?"1달":cycle===60?"2달":cycle===90?"3달":`${cycle}일`;
                     return(
-                      <div key={ps.id} style={{background:C.bg2,border:`1.5px solid ${achieved?C.green:C.border2}`,borderRadius:8,padding:12,position:"relative",overflow:"hidden",display:"flex",flexDirection:"column",gap:7}}>
+                      <div key={ps.id} style={{background:C.bg2,border:`1.5px solid ${achieved?C.green:reservedSession?`${C.purple}88`:C.border2}`,borderRadius:8,padding:12,position:"relative",overflow:"hidden",display:"flex",flexDirection:"column",gap:7}}>
                         {achieved && (
                           <div style={{position:"absolute",top:5,right:5,fontSize:10,fontWeight:900,color:C.green,border:`1.5px solid ${C.green}`,borderRadius:3,padding:"2px 6px",transform:"rotate(-8deg)",letterSpacing:0.5,opacity:0.85,pointerEvents:"none"}}>✓ 가능</div>
                         )}
@@ -6224,6 +6409,13 @@ function AppMain() {
                           <span style={{fontWeight:700}}>{baseDate.slice(5).replace("-","월 ")}일</span>
                           <span style={{color:dayColor,fontWeight:900,fontSize:13}}>{daysLeft<0?`${Math.abs(daysLeft)}일↑`:daysLeft===0?"오늘":`D-${daysLeft}`}</span>
                         </div>
+                        {/* 예약된 일정 표시 */}
+                        {reservedSession && (
+                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:10,padding:"4px 7px",background:`${C.purple}22`,border:`1px solid ${C.purple}66`,borderRadius:4}}>
+                            <span style={{color:C.purple,fontWeight:800}}>📅 예약됨</span>
+                            <span style={{color:C.purple,fontWeight:700}}>{reservedSession.nextTargetDate}</span>
+                          </div>
+                        )}
                         {hasTarget ? (
                           <div>
                             <div style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:3}}>
@@ -6243,8 +6435,21 @@ function AppMain() {
                         )}
                         <div style={{display:"flex",gap:5,marginTop:"auto"}}>
                           <button onClick={()=>handlePointExchangeComplete(ps.id)} style={{flex:1,padding:"6px 0",borderRadius:4,border:`1px solid ${C.orange}66`,background:`${C.orange}22`,color:C.orange,cursor:"pointer",fontWeight:800,fontSize:12}}>완료</button>
+                          {reservedSession ? (
+                            <button onClick={()=>handleCancelReservation(ps.id)} title="예약 취소"
+                              style={{padding:"6px 10px",borderRadius:4,border:`1px solid ${C.purple}66`,background:`${C.purple}22`,color:C.purple,cursor:"pointer",fontWeight:800,fontSize:11}}>📅 ✕</button>
+                          ) : (
+                            <button onClick={()=>{
+                              // 예약 모달 열기. 기본 날짜는 baseDate + cycleDays
+                              const def = new Date(baseDate+"T00:00:00Z");
+                              def.setUTCDate(def.getUTCDate()+cycle);
+                              setReserveDate(def.toISOString().slice(0,10));
+                              setReserveModal({siteId:ps.id});
+                            }} title="다음 목표일 예약"
+                              style={{padding:"6px 10px",borderRadius:4,border:`1px solid ${C.purple}44`,background:`${C.purple}11`,color:C.purple,cursor:"pointer",fontWeight:800,fontSize:11}}>📅</button>
+                          )}
                           {isCompleted && (
-                            <button onClick={()=>{if(!window.confirm(`"${ps.name}" 영구 삭제? (완료 ${ps.sessions.length}건도 삭제됩니다)`))return;savePointSites(pointSites.filter(x=>x.id!==ps.id));}} style={{padding:"6px 8px",borderRadius:4,border:`1px solid ${C.red}44`,background:`${C.red}11`,color:C.red,cursor:"pointer",fontSize:12}}>🗑</button>
+                            <button onClick={()=>{if(!window.confirm(`"${ps.name}" 영구 삭제? (완료 ${completedSessions.length}건도 삭제됩니다)`))return;savePointSites(pointSites.filter(x=>x.id!==ps.id));}} style={{padding:"6px 8px",borderRadius:4,border:`1px solid ${C.red}44`,background:`${C.red}11`,color:C.red,cursor:"pointer",fontSize:12}}>🗑</button>
                           )}
                         </div>
                       </div>
