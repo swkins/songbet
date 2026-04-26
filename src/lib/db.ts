@@ -592,6 +592,19 @@ export const EMPTY_FIXTURES_CACHE_META: FixturesCacheMeta = {
   todayTotalCalls: 0,
 }
 
+// 포인트 교환 프리셋 (사용자가 자주 쓰는 교환 조건을 저장)
+// app_settings 테이블의 'point_exchange_presets' 키에 배열로 저장됨.
+// 사용자가 새 포인트 교환을 추가할 때 프리셋을 선택하면
+// 모든 조건이 자동으로 채워지고 사용자는 날짜만 지정하면 됨.
+export interface PointExchangePreset {
+  id: string
+  exchangeName: string         // 교환 이름 (= 사이트명 + 교환종류 합친 것)
+  targetAmount: number         // 목표 금액 (원화)
+  targetCycleDays: number      // 목표 기간 (일수)
+  targetSiteName?: string      // 누적입금 기준 사이트 (없으면 전체)
+  createdAt: string            // 프리셋 생성 시각 (ISO)
+}
+
 export interface AppSettingsBundle {
   krw_sites: string[] | null
   usd_sites: string[] | null
@@ -602,6 +615,7 @@ export interface AppSettingsBundle {
   league_api_map: Record<string, string>
   sports_test_league_map: Record<string, string>
   fixtures_cache_meta: FixturesCacheMeta
+  point_exchange_presets: PointExchangePreset[]
 }
 export async function loadAppSettingsBundle(): Promise<AppSettingsBundle> {
   try {
@@ -631,6 +645,7 @@ export async function loadAppSettingsBundle(): Promise<AppSettingsBundle> {
       league_api_map: typeof map.league_api_map === 'object' && map.league_api_map !== null ? map.league_api_map : {},
       sports_test_league_map: typeof map.sports_test_league_map === 'object' && map.sports_test_league_map !== null ? map.sports_test_league_map : {},
       fixtures_cache_meta: cacheMeta,
+      point_exchange_presets: Array.isArray(map.point_exchange_presets) ? map.point_exchange_presets : [],
     }
   } catch (e) {
     logLoadError('app_settings', e)
@@ -641,6 +656,7 @@ export async function loadAppSettingsBundle(): Promise<AppSettingsBundle> {
       league_api_map: {},
       sports_test_league_map: {},
       fixtures_cache_meta: { ...EMPTY_FIXTURES_CACHE_META },
+      point_exchange_presets: [],
     }
   }
 }

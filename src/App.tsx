@@ -1544,63 +1544,75 @@ function AppMain() {
   };
 
   const [addPointSiteModal,setAddPointSiteModal]=useState(false);
-  const [newPointSite,setNewPointSite]=useState<{name:string,exchangeName:string,exchangeDate:string,targetAmount:number,targetSiteName:string,targetCycleDays:number}>({name:"올인구조대",exchangeName:"포인트교환",exchangeDate:"2025-05-04",targetAmount:2000000,targetSiteName:"",targetCycleDays:30});
+  // ── 포인트 교환 추가 모달 state ─────────────────────────────
+  // 사이트명/교환이름은 통합되어 exchangeName 하나로 관리됨 (name도 같은 값으로 저장).
+  const [newPointSite,setNewPointSite]=useState<{name:string,exchangeName:string,exchangeDate:string,targetAmount:number,targetSiteName:string,targetCycleDays:number}>({name:"",exchangeName:"",exchangeDate:"",targetAmount:2000000,targetSiteName:"",targetCycleDays:30});
 
-  // ── 다음 목표 예약 모달 ─────────────────────────────────────
-  // 사용자가 "📅 예약" 버튼 클릭 시 다음 목표일을 미리 잡아둠.
-  // 예약은 PointSession에 completedAt="" (빈 문자열) 형태로 저장:
-  //   { id, completedAt:"", nextTargetDate: 사용자가 지정한 날짜 }
-  // 완료 누를 때 빈 completedAt 세션이 있으면 "이어서 진행할지" 모달 표시.
-  const [reserveModal,setReserveModal]=useState<{siteId:string}|null>(null);
-  const [reserveDate,setReserveDate]=useState<string>("");
-
-  // 예약 세션 찾기 (completedAt이 빈 문자열인 세션)
-  const findReservedSession = (site:PointSite):PointSession|undefined =>
-    site.sessions.find(s=>!s.completedAt);
-
-  const handleReservePointDate=()=>{
-    if(!reserveModal) return;
-    if(!reserveDate) return alert("날짜를 선택해주세요.");
-    const site = pointSites.find(s=>s.id===reserveModal.siteId);
-    if(!site) return;
-    // 이미 예약이 있으면 덮어쓰기 (확인)
-    const existing = findReservedSession(site);
-    if(existing) {
-      if(!window.confirm(`이미 예약된 일정(${existing.nextTargetDate})이 있습니다. 새 날짜(${reserveDate})로 덮어쓰시겠습니까?`)) return;
-    }
-    // 예약 세션 추가 (또는 기존 예약 교체)
-    const reservedSession:PointSession={id:String(Date.now()),completedAt:"",nextTargetDate:reserveDate};
-    const updated=pointSites.map(s=>{
-      if(s.id!==reserveModal.siteId) return s;
-      // 기존 예약은 제거하고 새 예약만 유지
-      const filtered = s.sessions.filter(x=>x.completedAt);
-      return {...s,sessions:[...filtered,reservedSession]};
-    });
-    savePointSites(updated);
-    setReserveModal(null);
-    setReserveDate("");
+  // ── 포인트 교환 프리셋 (저장된 교환 조건) ─────────────────────
+  // 🔒 DB(app_settings.point_exchange_presets)에 저장됨. 빈 배열로 시작.
+  // 사용자가 자주 쓰는 조건(이름·금액·기간·기준사이트)을 저장해두고
+  // 새 포인트 교환 추가 시 클릭 한 번으로 모든 필드를 채울 수 있게 함.
+  const [pointPresets,setPointPresets]=useState<db.PointExchangePreset[]>([]);
+  const savePointPresets=(list:db.PointExchangePreset[])=>{
+    setPointPresets(list);
+    db.saveAppSetting("point_exchange_presets",list);
   };
 
-  const handleCancelReservation=(siteId:string)=>{
-    const site = pointSites.find(s=>s.id===siteId);
-    if(!site) return;
-    const reserved = findReservedSession(site);
-    if(!reserved) return;
-    if(!window.confirm(`예약된 일정(${reserved.nextTargetDate})을 취소하시겠습니까?`)) return;
-    const updated=pointSites.map(s=>{
-      if(s.id!==siteId) return s;
-      return {...s,sessions:s.sessions.filter(x=>x.completedAt)};
+  // 프리셋 저장 (현재 모달 입력값 → 프리셋으로)
+  const handleSavePointPreset=()=>{
+    const name = newPointSite.exchangeName.trim();
+    if(!name) return alert("교환 이름을 먼저 입력해주세요.");
+    if(pointPresets.some(p=>p.exchangeName===name)) {
+      if(!window.confirm(`"${name}" 프리셋이 이미 있습니다. 덮어쓰시겠습니까?`)) return;
+    }
+    const preset:db.PointExchangePreset = {
+      id: String(Date.now()),
+      exchangeName: name,
+      targetAmount: newPointSite.targetAmount,
+      targetCycleDays: newPointSite.targetCycleDays || 30,
+      targetSiteName: newPointSite.targetSiteName || undefined,
+      createdAt: new Date().toISOString(),
+    };
+    // 같은 이름은 교체, 아니면 추가
+    const filtered = pointPresets.filter(p=>p.exchangeName!==name);
+    savePointPresets([...filtered, preset]);
+    alert(`✅ "${name}" 프리셋 저장됨`);
+  };
+
+  // 프리셋 불러오기 (모달 필드를 프리셋 값으로 채움. 날짜는 비움)
+  const handleLoadPointPreset=(presetId:string)=>{
+    const preset = pointPresets.find(p=>p.id===presetId);
+    if(!preset) return;
+    setNewPointSite({
+      name: preset.exchangeName,
+      exchangeName: preset.exchangeName,
+      exchangeDate: "",  // 날짜는 사용자가 매번 새로 지정
+      targetAmount: preset.targetAmount,
+      targetSiteName: preset.targetSiteName || "",
+      targetCycleDays: preset.targetCycleDays,
     });
-    savePointSites(updated);
+  };
+
+  // 프리셋 삭제
+  const handleDeletePointPreset=(presetId:string)=>{
+    const preset = pointPresets.find(p=>p.id===presetId);
+    if(!preset) return;
+    if(!window.confirm(`"${preset.exchangeName}" 프리셋을 삭제하시겠습니까?`)) return;
+    savePointPresets(pointPresets.filter(p=>p.id!==presetId));
   };
 
   const handleAddPointSite=()=>{
-    const site:PointSite={id:String(Date.now()),name:newPointSite.name,exchangeName:newPointSite.exchangeName,exchangeDate:newPointSite.exchangeDate,targetAmount:newPointSite.targetAmount,targetSiteName:newPointSite.targetSiteName||undefined,targetCycleDays:newPointSite.targetCycleDays||30,sessions:[]};
+    // 입력 검증
+    const name = newPointSite.exchangeName.trim();
+    if(!name) { alert("교환 이름을 입력해주세요."); return; }
+    if(!newPointSite.exchangeDate) { alert("교환 목표 날짜를 선택해주세요."); return; }
+    // name과 exchangeName은 같은 값으로 통합 저장
+    const site:PointSite={id:String(Date.now()),name:name,exchangeName:name,exchangeDate:newPointSite.exchangeDate,targetAmount:newPointSite.targetAmount,targetSiteName:newPointSite.targetSiteName||undefined,targetCycleDays:newPointSite.targetCycleDays||30,sessions:[]};
     const updated=[...pointSites,site];
     savePointSites(updated);
     setAddPointSiteModal(false);
-    const resetDate=new Date();resetDate.setDate(resetDate.getDate()+30);
-    setNewPointSite({name:"올인구조대",exchangeName:"포인트교환",exchangeDate:resetDate.toISOString().slice(0,10),targetAmount:2000000,targetSiteName:"",targetCycleDays:30});
+    // 모달 초기화 — 다음에 열릴 때를 위해 빈 값으로
+    setNewPointSite({name:"",exchangeName:"",exchangeDate:"",targetAmount:2000000,targetSiteName:"",targetCycleDays:30});
   };
 
   // ── 일일 퀘스트 ────────────────────────────────────────────
@@ -1636,12 +1648,11 @@ function AppMain() {
 
   // 토글: 임의 날짜 체크 ↔ 해제 (캘린더에서 과거 날짜 직접 클릭용)
   // 미래 날짜는 토글 불가 (실수 방지)
+  // 과거 날짜는 createdAt 이전이어도 자유롭게 체크 가능
   const toggleQuestDate = (id:string, dateStr:string) => {
     if (dateStr > today) return; // 미래는 무시
     saveDailyQuests(dailyQuests.map(q=>{
       if(q.id!==id) return q;
-      // 퀘스트 생성일 이전은 무시 (의미상 출석할 수 없는 날)
-      if (dateStr < q.createdAt) return q;
       const has = q.history.includes(dateStr);
       return {...q, history: has ? q.history.filter(d=>d!==dateStr) : [...q.history, dateStr].sort()};
     }));
@@ -1649,6 +1660,8 @@ function AppMain() {
 
   const [newQuestName,setNewQuestName]=useState("");
   const [questCalendarExpanded,setQuestCalendarExpanded]=useState<Record<string,boolean>>({});
+  // 각 퀘스트가 달력에서 현재 보고 있는 월 (YYYY-MM 형식). 없으면 today 기준.
+  const [questCalendarMonth,setQuestCalendarMonth]=useState<Record<string,string>>({});
   const handleAddQuest = () => {
     const n = newQuestName.trim();
     if(!n) return;
@@ -1836,45 +1849,17 @@ function AppMain() {
     const targetMsg = site.targetAmount>0
       ? `목표 ${site.targetAmount.toLocaleString()}원, 목표 기간 ${cycleLabel}`
       : `목표 없음 (입금만 추적), 목표 기간 ${cycleLabel}`;
-
+    if(!window.confirm(`"${site.name}" 현금교환 완료 처리?\n\n같은 조건(${targetMsg})으로 ${cycleLabel} 후를 다음 교환일로 잡고 이어서 진행하시겠습니까?`)) return;
     const now=new Date().toISOString().slice(0,10);
-    // 예약된 세션이 있는지 확인 (completedAt 빈 문자열)
-    const reserved = findReservedSession(site);
-
-    let nextTarget:string;
-    let updatedSessions:PointSession[];
-
-    if(reserved) {
-      // 예약된 일정이 있으면 → 사용자 확인 후 그 날짜로 이어가기
-      const ok = window.confirm(
-        `"${site.name}" 현금교환 완료 처리?\n\n` +
-        `📅 예약된 일정이 있습니다: ${reserved.nextTargetDate}\n\n` +
-        `예약된 날짜로 이어서 진행하시겠습니까?\n` +
-        `(같은 조건: ${targetMsg})\n` +
-        `→ 새 시작일 기준으로 ${cycleLabel}간 ${site.targetAmount>0?site.targetAmount.toLocaleString()+"원":""} 입금을 채우게 됩니다.`
-      );
-      if(!ok) return;
-      nextTarget = reserved.nextTargetDate;
-      // 예약 세션을 완료된 세션으로 변환 (completedAt 채움)
-      updatedSessions = site.sessions.map(s=>
-        s.id===reserved.id ? {...s,completedAt:now} : s
-      );
-    } else {
-      // 예약 없음 → 기존 동작 (cycleDays만큼 자동 더하기)
-      if(!window.confirm(`"${site.name}" 현금교환 완료 처리?\n\n같은 조건(${targetMsg})으로 ${cycleLabel} 후를 다음 교환일로 잡고 이어서 진행하시겠습니까?`)) return;
-      // 다음 교환일 = 이전 완료된 교환일 + cycleDays (사이클 길이만큼 뒤로)
-      const completedSessionsList = site.sessions.filter(s=>s.completedAt);
-      const baseDate = completedSessionsList.length>0
-        ? completedSessionsList[completedSessionsList.length-1].nextTargetDate
-        : site.exchangeDate;
-      nextTarget=getNextTargetDate(baseDate,cycle);
-      const session:PointSession={id:String(Date.now()),completedAt:now,nextTargetDate:nextTarget};
-      updatedSessions = [...site.sessions,session];
-    }
-
+    // 다음 교환일 = 이전 교환일 + cycleDays (사이클 길이만큼 뒤로)
+    const baseDate = site.sessions.length>0
+      ? site.sessions[site.sessions.length-1].nextTargetDate
+      : site.exchangeDate;
+    const nextTarget=getNextTargetDate(baseDate,cycle);
+    const session:PointSession={id:String(Date.now()),completedAt:now,nextTargetDate:nextTarget};
     const updated=pointSites.map(s=>{
       if(s.id!==siteId)return s;
-      return{...s,sessions:updatedSessions};
+      return{...s,sessions:[...s.sessions,session]};
     });
     savePointSites(updated);
   };
@@ -1923,7 +1908,7 @@ function AppMain() {
 
       // ─── 1단계: 사이트 리스트 먼저 로드 (site_states 로드가 이 값을 필요로 함) ───
       const settings = await safe("app_settings",()=>db.loadAppSettingsBundle(),{
-        krw_sites:null,usd_sites:null,pext_sites:[],pext_cats:[],pext_subcats:[],code_memo_draft:"1. ",league_api_map:{},sports_test_league_map:{},fixtures_cache_meta:{...db.EMPTY_FIXTURES_CACHE_META},
+        krw_sites:null,usd_sites:null,pext_sites:[],pext_cats:[],pext_subcats:[],code_memo_draft:"1. ",league_api_map:{},sports_test_league_map:{},fixtures_cache_meta:{...db.EMPTY_FIXTURES_CACHE_META},point_exchange_presets:[],
       });
       if(cancelled)return;
       const krw = settings.krw_sites ?? DEFAULT_KRW_SITES;
@@ -1939,6 +1924,8 @@ function AppMain() {
       setPextSubCatList(settings.pext_subcats);
       // 코드 메모 draft
       setNewMemoTextRaw(settings.code_memo_draft);
+      // 포인트 교환 프리셋
+      setPointPresets(settings.point_exchange_presets);
 
       // ─── 2단계: 나머지 모두 병렬 로드 ───
       const allSitesNow=[...krw,...usd];
@@ -3341,11 +3328,55 @@ function AppMain() {
 
       {addPointSiteModal&&(
         <div style={{position:"fixed",inset:0,background:"#000b",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center"}}>
-          <div style={{background:C.bg3,border:`1px solid ${C.teal}`,borderRadius:14,padding:24,width:420,maxHeight:"90vh",overflowY:"auto"}}>
-            <div style={{fontSize:14,fontWeight:700,color:C.teal,marginBottom:16}}>🎁 포인트 사이트 추가</div>
-            <div style={{marginBottom:8}}><div style={L}>사이트명</div><input value={newPointSite.name} onChange={e=>setNewPointSite(p=>({...p,name:e.target.value}))} style={{...S,boxSizing:"border-box"}}/></div>
-            <div style={{marginBottom:8}}><div style={L}>교환 이름</div><input value={newPointSite.exchangeName} onChange={e=>setNewPointSite(p=>({...p,exchangeName:e.target.value}))} style={{...S,boxSizing:"border-box"}}/></div>
-            <div style={{marginBottom:8}}><div style={L}>교환 목표 날짜</div><input type="date" value={newPointSite.exchangeDate} onChange={e=>setNewPointSite(p=>({...p,exchangeDate:e.target.value}))} style={{...S,boxSizing:"border-box"}}/></div>
+          <div style={{background:C.bg3,border:`1px solid ${C.teal}`,borderRadius:14,padding:24,width:440,maxHeight:"90vh",overflowY:"auto"}}>
+            <div style={{fontSize:14,fontWeight:700,color:C.teal,marginBottom:14}}>🎁 포인트 교환 추가</div>
+
+            {/* 저장된 프리셋 — 있으면 표시. 클릭하면 모든 필드 자동 채움 (날짜만 비움) */}
+            {pointPresets.length>0 && (
+              <div style={{marginBottom:14,padding:"9px 11px",background:`${C.purple}11`,border:`1px solid ${C.purple}44`,borderRadius:7}}>
+                <div style={{fontSize:10,fontWeight:800,color:C.purple,marginBottom:6,letterSpacing:0.5}}>📚 저장된 프리셋 — 클릭해서 불러오기 (날짜만 새로 지정)</div>
+                <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
+                  {pointPresets.map(p=>{
+                    const cycleLbl = p.targetCycleDays===7?"1주":p.targetCycleDays===14?"2주":p.targetCycleDays===30?"1달":p.targetCycleDays===60?"2달":p.targetCycleDays===90?"3달":`${p.targetCycleDays}일`;
+                    const amtLbl = p.targetAmount>0 ? `${(p.targetAmount/10000).toFixed(0)}만` : "목표X";
+                    const isSelected = newPointSite.exchangeName === p.exchangeName
+                      && newPointSite.targetAmount === p.targetAmount
+                      && newPointSite.targetCycleDays === p.targetCycleDays
+                      && (newPointSite.targetSiteName||"") === (p.targetSiteName||"");
+                    return (
+                      <div key={p.id} style={{display:"flex",alignItems:"stretch",borderRadius:5,overflow:"hidden",border:isSelected?`1.5px solid ${C.purple}`:`1px solid ${C.purple}55`}}>
+                        <button onClick={()=>handleLoadPointPreset(p.id)} title="이 프리셋 불러오기"
+                          style={{padding:"5px 9px",background:isSelected?`${C.purple}33`:`${C.purple}11`,color:isSelected?C.purple:C.text,cursor:"pointer",border:"none",fontSize:11,fontWeight:isSelected?800:600,display:"flex",flexDirection:"column",alignItems:"flex-start",gap:1}}>
+                          <span>{p.exchangeName}</span>
+                          <span style={{fontSize:8,color:C.dim,fontWeight:600}}>{amtLbl} · {cycleLbl}{p.targetSiteName?` · ${p.targetSiteName}`:""}</span>
+                        </button>
+                        <button onClick={()=>handleDeletePointPreset(p.id)} title="프리셋 삭제"
+                          style={{padding:"0 7px",background:`${C.red}11`,border:"none",borderLeft:`1px solid ${C.purple}44`,color:C.red,cursor:"pointer",fontSize:10,fontWeight:700}}>✕</button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* 교환 이름 (사이트 + 교환 종류 통합) */}
+            <div style={{marginBottom:8}}>
+              <div style={L}>교환 이름 · <span style={{color:C.dim}}>예: "올인구조대 포인트교환", "벨라벳 기프티콘"</span></div>
+              <input value={newPointSite.exchangeName}
+                onChange={e=>setNewPointSite(p=>({...p,exchangeName:e.target.value,name:e.target.value}))}
+                placeholder="교환 이름을 입력하세요"
+                style={{...S,boxSizing:"border-box"}}/>
+            </div>
+
+            {/* 교환 목표 날짜 — 가장 중요한 필드. 강조 처리 */}
+            <div style={{marginBottom:8}}>
+              <div style={{...L,color:C.amber,fontWeight:800}}>📅 교환 목표 날짜 · <span style={{color:C.dim,fontWeight:400}}>이 날짜까지 입금을 채워야 함</span></div>
+              <input type="date" value={newPointSite.exchangeDate}
+                onChange={e=>setNewPointSite(p=>({...p,exchangeDate:e.target.value}))}
+                style={{...S,boxSizing:"border-box",border:`1.5px solid ${C.amber}66`,fontSize:14,fontWeight:700,color:C.amber,padding:"9px 9px"}}/>
+            </div>
+
+            {/* 목표 금액 */}
             <div style={{marginBottom:8}}>
               <div style={L}>목표 금액 (원화) · <span style={{color:C.dim}}>0이면 목표 없음 (입금 추적만)</span></div>
               <input type="text" inputMode="numeric"
@@ -3358,6 +3389,8 @@ function AppMain() {
                 placeholder="0 (목표 없음)"
                 style={{...S,boxSizing:"border-box"}}/>
             </div>
+
+            {/* 목표 기간 */}
             <div style={{marginBottom:8}}>
               <div style={L}>📅 목표 기간 (교환일 기준 과거 N일간 누적 입금을 목표와 비교)</div>
               <div style={{display:"flex",gap:4,marginBottom:4}}>
@@ -3378,8 +3411,9 @@ function AppMain() {
                 placeholder="직접 입력 (일수)"/>
               <div style={{fontSize:9,color:C.dim,marginTop:3}}>예: 목표 200만원 + 기간 30일 = 교환일 직전 30일간 200만원 입금이 목표</div>
             </div>
+
             {/* 기준 사이트 선택 - 누적입금 계산할 사이트 */}
-            <div style={{marginBottom:16}}>
+            <div style={{marginBottom:14}}>
               <div style={L}>📍 누적입금 기준 사이트</div>
               <select value={newPointSite.targetSiteName} onChange={e=>setNewPointSite(p=>({...p,targetSiteName:e.target.value}))} style={{...S,boxSizing:"border-box"}}>
                 <option value="">전체 사이트 합산</option>
@@ -3387,44 +3421,23 @@ function AppMain() {
               </select>
               <div style={{fontSize:9,color:C.dim,marginTop:3}}>특정 사이트의 입금만 카운트하려면 선택, 전체면 비워두세요</div>
             </div>
-            <div style={{display:"flex",gap:8}}><button onClick={handleAddPointSite} style={{flex:1,background:`${C.teal}22`,border:`1px solid ${C.teal}`,color:C.teal,padding:"8px",borderRadius:6,cursor:"pointer",fontWeight:700}}>추가</button><button onClick={()=>setAddPointSiteModal(false)} style={{flex:1,background:C.bg2,border:`1px solid ${C.border}`,color:C.muted,padding:"8px",borderRadius:6,cursor:"pointer"}}>취소</button></div>
+
+            {/* 프리셋 저장 버튼 */}
+            <button onClick={handleSavePointPreset}
+              style={{width:"100%",marginBottom:10,padding:"7px 0",borderRadius:6,border:`1px dashed ${C.purple}88`,background:`${C.purple}11`,color:C.purple,cursor:"pointer",fontWeight:700,fontSize:11}}
+              title="현재 입력한 조건(이름·금액·기간·기준사이트)을 프리셋으로 저장. 날짜는 저장되지 않음.">
+              💾 현재 조건을 프리셋으로 저장
+            </button>
+
+            <div style={{display:"flex",gap:8}}>
+              <button onClick={handleAddPointSite}
+                style={{flex:1,background:`${C.teal}22`,border:`1px solid ${C.teal}`,color:C.teal,padding:"10px",borderRadius:6,cursor:"pointer",fontWeight:800}}>✅ 추가</button>
+              <button onClick={()=>setAddPointSiteModal(false)}
+                style={{flex:1,background:C.bg2,border:`1px solid ${C.border}`,color:C.muted,padding:"10px",borderRadius:6,cursor:"pointer"}}>취소</button>
+            </div>
           </div>
         </div>
       )}
-
-      {/* 다음 목표 예약 모달 */}
-      {reserveModal && (()=>{
-        const site = pointSites.find(s=>s.id===reserveModal.siteId);
-        if(!site) return null;
-        const cycle = site.targetCycleDays || 30;
-        const cycleLabel = cycle===7?"1주":cycle===14?"2주":cycle===30?"1달":cycle===60?"2달":cycle===90?"3달":`${cycle}일`;
-        return (
-          <div style={{position:"fixed",inset:0,background:"#000b",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center"}}>
-            <div style={{background:C.bg3,border:`1px solid ${C.purple}`,borderRadius:14,padding:24,width:380}}>
-              <div style={{fontSize:14,fontWeight:800,color:C.purple,marginBottom:6}}>📅 다음 목표 날짜 예약</div>
-              <div style={{fontSize:11,color:C.muted,marginBottom:14,background:C.bg2,padding:"8px 12px",borderRadius:6,lineHeight:1.5}}>
-                <b style={{color:C.text}}>{site.name}</b> · {site.exchangeName}<br/>
-                목표 {site.targetAmount>0?`${site.targetAmount.toLocaleString()}원`:"없음"} / 기간 {cycleLabel}
-              </div>
-              <div style={{marginBottom:14}}>
-                <div style={{...L,marginBottom:5}}>📅 다음 목표일</div>
-                <input type="date" value={reserveDate} onChange={e=>setReserveDate(e.target.value)}
-                  style={{...S,boxSizing:"border-box",fontSize:14,padding:"10px"}}/>
-                <div style={{fontSize:9,color:C.dim,marginTop:6,lineHeight:1.5}}>
-                  완료 버튼 누를 때 예약된 날짜로 이어서 진행할지 확인합니다.<br/>
-                  목표 금액·기간은 그대로 유지되고, <b>이 날짜 기준</b>으로 카운트가 다시 시작됩니다.
-                </div>
-              </div>
-              <div style={{display:"flex",gap:8}}>
-                <button onClick={handleReservePointDate}
-                  style={{flex:1,background:`${C.purple}22`,border:`1px solid ${C.purple}`,color:C.purple,padding:"10px",borderRadius:7,cursor:"pointer",fontWeight:800}}>✅ 예약</button>
-                <button onClick={()=>{setReserveModal(null);setReserveDate("");}}
-                  style={{flex:1,background:C.bg2,border:`1px solid ${C.border}`,color:C.muted,padding:"10px",borderRadius:7,cursor:"pointer"}}>취소</button>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
 
       {/* 빠른 입금/포인트 모달 (홈 대시보드에서 호출) */}
       {quickActionMode && (()=>{
@@ -6199,14 +6212,26 @@ function AppMain() {
                     const dayNum = questAttendanceDay(q);
                     const totalAttend = q.history.length;
                     const calOpen = !!questCalendarExpanded[q.id];
-                    const t2 = new Date(today+"T00:00:00");
-                    const monYear2 = t2.getFullYear();
-                    const monIdx2 = t2.getMonth();
+                    // 달력에서 보고 있는 월 (없으면 오늘 기준)
+                    const todayDt = new Date(today+"T00:00:00");
+                    const viewedMonStr = questCalendarMonth[q.id] || `${todayDt.getFullYear()}-${String(todayDt.getMonth()+1).padStart(2,"0")}`;
+                    const [viewYearStr, viewMonStr] = viewedMonStr.split("-");
+                    const monYear2 = parseInt(viewYearStr);
+                    const monIdx2 = parseInt(viewMonStr) - 1;
                     const monStart2 = new Date(monYear2, monIdx2, 1);
                     const monEnd2 = new Date(monYear2, monIdx2+1, 0);
                     const monthDays2 = monEnd2.getDate();
                     const monthFirstDow2 = monStart2.getDay();
                     const monthHistory = q.history.filter(d=>d.startsWith(`${monYear2}-${String(monIdx2+1).padStart(2,"0")}`));
+                    // 이전/다음 달 이동 헬퍼
+                    const shiftMonth = (delta:number) => {
+                      const d = new Date(monYear2, monIdx2+delta, 1);
+                      const newKey = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+                      setQuestCalendarMonth(p=>({...p,[q.id]:newKey}));
+                    };
+                    // 미래 달 이동 차단 (오늘이 속한 달까지만)
+                    const todayMonStr = `${todayDt.getFullYear()}-${String(todayDt.getMonth()+1).padStart(2,"0")}`;
+                    const canGoNext = viewedMonStr < todayMonStr;
                     return (
                       <div key={q.id} style={{background:done?`${C.green}11`:C.bg2,border:`1px solid ${done?C.green:C.border}`,borderRadius:6,padding:"7px 10px",position:"relative",overflow:"hidden"}}>
                         <div style={{display:"flex",alignItems:"center",gap:6}}>
@@ -6225,7 +6250,15 @@ function AppMain() {
                         </div>
                         {calOpen && (
                           <div style={{marginTop:6,paddingTop:6,borderTop:`1px dashed ${C.border}`}}>
-                            <div style={{fontSize:9,color:C.dim,marginBottom:3}}>{monYear2}년 {monIdx2+1}월 · 시작 {q.createdAt.slice(5)}</div>
+                            {/* 월 이동 헤더 */}
+                            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:5,maxWidth:210}}>
+                              <button onClick={()=>shiftMonth(-1)} title="이전 달"
+                                style={{background:`${C.teal}11`,border:`1px solid ${C.teal}44`,color:C.teal,cursor:"pointer",fontSize:10,padding:"3px 8px",borderRadius:3,fontWeight:800}}>◀</button>
+                              <div style={{fontSize:10,color:C.text,fontWeight:700}}>{monYear2}년 {monIdx2+1}월</div>
+                              <button onClick={()=>canGoNext && shiftMonth(1)} title={canGoNext?"다음 달":"미래 달은 볼 수 없음"} disabled={!canGoNext}
+                                style={{background:canGoNext?`${C.teal}11`:"transparent",border:`1px solid ${canGoNext?C.teal+"44":C.border}`,color:canGoNext?C.teal:C.dim,cursor:canGoNext?"pointer":"not-allowed",fontSize:10,padding:"3px 8px",borderRadius:3,fontWeight:800}}>▶</button>
+                            </div>
+                            <div style={{fontSize:9,color:C.dim,marginBottom:3}}>이번 달 출석 <b style={{color:C.teal}}>{monthHistory.length}회</b> · 시작 {q.createdAt.slice(5)}</div>
                             <div style={{background:C.bg,borderRadius:4,padding:"4px 5px",maxWidth:210}}>
                               <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:1,marginBottom:1}}>
                                 {["일","월","화","수","목","금","토"].map((d,i)=>(
@@ -6241,13 +6274,12 @@ function AppMain() {
                                   const isToday = dateStr===today;
                                   const isPast = dateStr<today;
                                   const isFuture = dateStr>today;
-                                  const beforeStart = dateStr<q.createdAt;
-                                  // 클릭 가능 조건: 미래 X, 퀘스트 시작일 이전 X
-                                  const clickable = !isFuture && !beforeStart;
+                                  // 클릭 가능 조건: 미래만 X (createdAt 이전이어도 자유롭게 체크 가능)
+                                  const clickable = !isFuture;
                                   return (
-                                    <div key={dateStr} title={dateStr+(isAttended?" ✓ (클릭으로 해제)":clickable?" (클릭으로 출석)":beforeStart?" (시작 전)":" (미래)")}
+                                    <div key={dateStr} title={dateStr+(isAttended?" ✓ (클릭으로 해제)":clickable?" (클릭으로 출석)":" (미래)")}
                                       onClick={clickable ? ()=>toggleQuestDate(q.id, dateStr) : undefined}
-                                      style={{height:22,background: isAttended ? C.green : beforeStart ? "transparent" : isToday ? `${C.amber}33` : isPast ? `${C.red}11` : C.bg2, borderRadius:2, display:"flex", alignItems:"center", justifyContent:"center", fontSize:9, fontWeight: isToday?900:600, color: isAttended?"#fff":beforeStart?C.dim:isToday?C.amber:isPast?C.red:C.muted, border: isToday?`1px solid ${C.amber}`:"none", cursor: clickable?"pointer":"default", userSelect:"none", transition:"transform 0.1s"}}
+                                      style={{height:22,background: isAttended ? C.green : isToday ? `${C.amber}33` : isPast ? `${C.red}11` : C.bg2, borderRadius:2, display:"flex", alignItems:"center", justifyContent:"center", fontSize:9, fontWeight: isToday?900:600, color: isAttended?"#fff":isToday?C.amber:isPast?C.red:C.muted, border: isToday?`1px solid ${C.amber}`:"none", cursor: clickable?"pointer":"default", userSelect:"none", transition:"transform 0.1s"}}
                                       onMouseDown={clickable?(e)=>{(e.currentTarget as HTMLElement).style.transform="scale(0.9)";}:undefined}
                                       onMouseUp={clickable?(e)=>{(e.currentTarget as HTMLElement).style.transform="scale(1)";}:undefined}
                                       onMouseLeave={clickable?(e)=>{(e.currentTarget as HTMLElement).style.transform="scale(1)";}:undefined}>
@@ -6346,10 +6378,8 @@ function AppMain() {
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
                 <div style={{fontSize:14,fontWeight:800,color:C.teal}}>🎁 포인트 교환 ({pointSites.length})</div>
                 <button onClick={()=>{
-                  // 오늘 + 기본 기간(30일/1달) 날짜로 초기화
-                  const defaultDate = new Date();
-                  defaultDate.setDate(defaultDate.getDate()+30);
-                  setNewPointSite({name:"올인구조대",exchangeName:"포인트교환",exchangeDate:defaultDate.toISOString().slice(0,10),targetAmount:2000000,targetSiteName:"",targetCycleDays:30});
+                  // 모달 초기화: 모든 필드 빈 값으로 (프리셋 클릭 또는 직접 입력 둘 다 가능)
+                  setNewPointSite({name:"",exchangeName:"",exchangeDate:"",targetAmount:0,targetSiteName:"",targetCycleDays:30});
                   setAddPointSiteModal(true);
                 }} style={{padding:"5px 12px",borderRadius:5,border:`1px solid ${C.teal}`,background:`${C.teal}22`,color:C.teal,cursor:"pointer",fontWeight:700,fontSize:11}}>+ 추가</button>
               </div>
@@ -6361,31 +6391,15 @@ function AppMain() {
               ) : (
                 <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))",gap:10}}>
                   {pointSites.map(ps=>{
-                    // ── 세션 분리: 완료된 세션과 예약된 세션(completedAt 빈 문자열) ──
-                    const completedSessions = ps.sessions.filter(s=>s.completedAt);
-                    const reservedSession = ps.sessions.find(s=>!s.completedAt);
-                    const lastCompleted = completedSessions[completedSessions.length-1];
-                    const isCompleted = !!lastCompleted;
-                    // baseDate: 다음 목표일 (D-DAY 계산용). 우선순위: 예약 > 마지막 완료 > 초기 교환일
-                    const baseDate = reservedSession
-                      ? reservedSession.nextTargetDate
-                      : isCompleted
-                        ? lastCompleted.nextTargetDate
-                        : ps.exchangeDate;
+                    const lastSession=ps.sessions[ps.sessions.length-1];
+                    const isCompleted=!!lastSession;
+                    const baseDate=isCompleted?lastSession.nextTargetDate:ps.exchangeDate;
                     const startDate=new Date(baseDate);startDate.setDate(startDate.getDate()-1);
                     const startStr=startDate.toISOString().slice(0,10);
                     // ★ 목표 기간(targetCycleDays)만큼 과거로 이동하여 누적 계산 시작일 산출
                     const cycle = ps.targetCycleDays || 30;
                     const fromDate=new Date(startStr);fromDate.setDate(fromDate.getDate()-(cycle-1));
-                    let fromStr=fromDate.toISOString().slice(0,10);
-                    // ★ 4번 규칙: "오늘 완료 누른 날의 입금은 모두 제외" — 다음날 0시부터 카운트
-                    //   마지막 완료 세션이 있으면, 그 completedAt 다음날을 카운트 시작일로 강제 (기본 fromStr보다 늦으면)
-                    if(lastCompleted && lastCompleted.completedAt) {
-                      const dayAfter = new Date(lastCompleted.completedAt+"T00:00:00Z");
-                      dayAfter.setUTCDate(dayAfter.getUTCDate()+1);
-                      const dayAfterStr = dayAfter.toISOString().slice(0,10);
-                      if(dayAfterStr > fromStr) fromStr = dayAfterStr;
-                    }
+                    const fromStr=fromDate.toISOString().slice(0,10);
                     const periodDeps=deposits.filter(d=>d.date>=fromStr&&d.date<=startStr&&(!ps.targetSiteName||d.site===ps.targetSiteName));
                     const totalKrw=periodDeps.reduce((s,d)=>s+(isUSD(d.site)?d.amount*usdKrw:d.amount),0);
                     const hasTarget = ps.targetAmount>0;
@@ -6397,7 +6411,7 @@ function AppMain() {
                     // 기간 라벨 (1주/2주/1달/2달/3달, 그 외는 N일)
                     const cycleLabel = cycle===7?"1주":cycle===14?"2주":cycle===30?"1달":cycle===60?"2달":cycle===90?"3달":`${cycle}일`;
                     return(
-                      <div key={ps.id} style={{background:C.bg2,border:`1.5px solid ${achieved?C.green:reservedSession?`${C.purple}88`:C.border2}`,borderRadius:8,padding:12,position:"relative",overflow:"hidden",display:"flex",flexDirection:"column",gap:7}}>
+                      <div key={ps.id} style={{background:C.bg2,border:`1.5px solid ${achieved?C.green:C.border2}`,borderRadius:8,padding:12,position:"relative",overflow:"hidden",display:"flex",flexDirection:"column",gap:7}}>
                         {achieved && (
                           <div style={{position:"absolute",top:5,right:5,fontSize:10,fontWeight:900,color:C.green,border:`1.5px solid ${C.green}`,borderRadius:3,padding:"2px 6px",transform:"rotate(-8deg)",letterSpacing:0.5,opacity:0.85,pointerEvents:"none"}}>✓ 가능</div>
                         )}
@@ -6409,13 +6423,6 @@ function AppMain() {
                           <span style={{fontWeight:700}}>{baseDate.slice(5).replace("-","월 ")}일</span>
                           <span style={{color:dayColor,fontWeight:900,fontSize:13}}>{daysLeft<0?`${Math.abs(daysLeft)}일↑`:daysLeft===0?"오늘":`D-${daysLeft}`}</span>
                         </div>
-                        {/* 예약된 일정 표시 */}
-                        {reservedSession && (
-                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:10,padding:"4px 7px",background:`${C.purple}22`,border:`1px solid ${C.purple}66`,borderRadius:4}}>
-                            <span style={{color:C.purple,fontWeight:800}}>📅 예약됨</span>
-                            <span style={{color:C.purple,fontWeight:700}}>{reservedSession.nextTargetDate}</span>
-                          </div>
-                        )}
                         {hasTarget ? (
                           <div>
                             <div style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:3}}>
@@ -6435,21 +6442,8 @@ function AppMain() {
                         )}
                         <div style={{display:"flex",gap:5,marginTop:"auto"}}>
                           <button onClick={()=>handlePointExchangeComplete(ps.id)} style={{flex:1,padding:"6px 0",borderRadius:4,border:`1px solid ${C.orange}66`,background:`${C.orange}22`,color:C.orange,cursor:"pointer",fontWeight:800,fontSize:12}}>완료</button>
-                          {reservedSession ? (
-                            <button onClick={()=>handleCancelReservation(ps.id)} title="예약 취소"
-                              style={{padding:"6px 10px",borderRadius:4,border:`1px solid ${C.purple}66`,background:`${C.purple}22`,color:C.purple,cursor:"pointer",fontWeight:800,fontSize:11}}>📅 ✕</button>
-                          ) : (
-                            <button onClick={()=>{
-                              // 예약 모달 열기. 기본 날짜는 baseDate + cycleDays
-                              const def = new Date(baseDate+"T00:00:00Z");
-                              def.setUTCDate(def.getUTCDate()+cycle);
-                              setReserveDate(def.toISOString().slice(0,10));
-                              setReserveModal({siteId:ps.id});
-                            }} title="다음 목표일 예약"
-                              style={{padding:"6px 10px",borderRadius:4,border:`1px solid ${C.purple}44`,background:`${C.purple}11`,color:C.purple,cursor:"pointer",fontWeight:800,fontSize:11}}>📅</button>
-                          )}
                           {isCompleted && (
-                            <button onClick={()=>{if(!window.confirm(`"${ps.name}" 영구 삭제? (완료 ${completedSessions.length}건도 삭제됩니다)`))return;savePointSites(pointSites.filter(x=>x.id!==ps.id));}} style={{padding:"6px 8px",borderRadius:4,border:`1px solid ${C.red}44`,background:`${C.red}11`,color:C.red,cursor:"pointer",fontSize:12}}>🗑</button>
+                            <button onClick={()=>{if(!window.confirm(`"${ps.name}" 영구 삭제? (완료 ${ps.sessions.length}건도 삭제됩니다)`))return;savePointSites(pointSites.filter(x=>x.id!==ps.id));}} style={{padding:"6px 8px",borderRadius:4,border:`1px solid ${C.red}44`,background:`${C.red}11`,color:C.red,cursor:"pointer",fontSize:12}}>🗑</button>
                           )}
                         </div>
                       </div>
