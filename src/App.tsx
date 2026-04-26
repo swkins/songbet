@@ -803,6 +803,8 @@ function AppMain() {
   const [stSelCountry,setStSelCountry]=useState("");
   const [stSelLeague,setStSelLeague]=useState("");
   const [stExpandedGameId,setStExpandedGameId]=useState<number|null>(null);
+  // 오늘 경기 중 종료된 그룹 펼침 여부 (기본: 접힘)
+  const [stShowFinished,setStShowFinished]=useState<boolean>(false);
   const [stFetchedAt,setStFetchedAt]=useState<number|null>(null);
 
   const loadSportsTestData = useCallback(async()=>{
@@ -4260,7 +4262,7 @@ function AppMain() {
                                       const mapped = !!apiId;
                                       return (
                                         <div key={lg} style={{display:"flex",gap:1,alignItems:"stretch",marginBottom:1}}>
-                                          <button onClick={()=>{setStSelSport(sport);setStSelCountry(country);setStSelLeague(lg);setStExpandedGameId(null);}}
+                                          <button onClick={()=>{setStSelSport(sport);setStSelCountry(country);setStSelLeague(lg);setStExpandedGameId(null);setStShowFinished(false);}}
                                             style={{flex:1,display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 10px",textAlign:"left",borderRadius:4,cursor:"pointer",border:isLgSel?`1px solid ${C.amber}`:"1px solid transparent",background:isLgSel?`${C.amber}22`:"transparent",color:isLgSel?C.amber:C.muted,fontSize:12,fontWeight:isLgSel?700:400,minWidth:0}}>
                                             <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>{mapped?"⚡":"○"} {krLeague(lg)}</span>
                                             <span style={{fontSize:10,color:C.dim,marginLeft:4,flexShrink:0}}>({lgGames})</span>
@@ -4356,7 +4358,7 @@ function AppMain() {
                                       const isLgSel = stSelSport===sport && stSelCountry===country && stSelLeague===lg;
                                       return (
                                         <div key={lg} style={{display:"flex",gap:1,alignItems:"stretch",marginBottom:1}}>
-                                          <button onClick={()=>{setStSelSport(sport);setStSelCountry(country);setStSelLeague(lg);setStExpandedGameId(null);}}
+                                          <button onClick={()=>{setStSelSport(sport);setStSelCountry(country);setStSelLeague(lg);setStExpandedGameId(null);setStShowFinished(false);}}
                                             style={{flex:1,display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 10px",textAlign:"left",borderRadius:4,cursor:"pointer",border:isLgSel?`1px solid ${C.amber}`:"1px solid transparent",background:isLgSel?`${C.amber}22`:"transparent",color:isLgSel?C.amber:C.muted,fontSize:12,fontWeight:isLgSel?700:400,minWidth:0}}>
                                             <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>○ {krLeague(lg)}</span>
                                             <span style={{fontSize:10,color:C.dim,marginLeft:4,flexShrink:0}}>({lgGames})</span>
@@ -4443,50 +4445,73 @@ function AppMain() {
                   </div>
                 ) : (
                   <>
-                    {todayGames.length > 0 && (
-                      <>
-                        <div style={{display:"flex",alignItems:"center",gap:8,margin:"4px 2px 8px",padding:"4px 8px",background:`${C.green}11`,borderRadius:5,border:`1px solid ${C.green}33`}}>
-                          <span style={{fontSize:11,fontWeight:900,color:C.green,letterSpacing:1}}>📅 오늘 ({kstToday})</span>
-                          <span style={{flex:1,height:1,background:`${C.green}44`}}/>
-                          <span style={{fontSize:10,fontWeight:700,color:C.green}}>{todayGames.length}경기</span>
-                        </div>
-                        {todayGames.map(g=>{
-                          const selected = stExpandedGameId===g.id;
-                          const live = isLive(g.status_short);
-                          const finished = isFinished(g.status_short);
-                          const postponed = isPostponed(g.status_short);
-                          const upcoming = isUpcoming(g.status_short);
-                          // 상태별 색상: 라이브=red, 종료/연기/취소=dim, 예정=amber
-                          const statusColor = live?C.red : finished?C.dim : postponed?C.muted : C.amber;
-                          // 상태별 표시: 라이브=🔴 한글라벨 + elapsed, 종료/연기/취소=한글라벨, 예정=⏰ 시간
-                          const statusText = live
-                            ? `🔴 ${statusLabel(g.status_short)}${g.elapsed?` ${g.elapsed}'`:""}`
-                            : finished
-                            ? "⏹ 종료"
-                            : postponed
-                            ? `⚠ ${statusLabel(g.status_short)}`
-                            : `⏰ ${fmtKstTime(g.start_time)}`;
-                          return (
-                            <div key={g.id} onClick={()=>setStExpandedGameId(g.id)}
-                              style={{background:selected?`${C.teal}22`:C.bg3,border:`1px solid ${selected?C.teal:C.border}`,borderRadius:7,padding:"10px 12px",marginBottom:6,cursor:"pointer",position:"relative",opacity:(postponed||finished||live)?0.7:1}}>
-                              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5,fontSize:10}}>
-                                <span style={{color:statusColor,fontWeight:800}}>
-                                  {statusText}
-                                </span>
-                                {(g.home_score!==null && g.away_score!==null) && (
-                                  <span style={{color:C.text,fontWeight:900}}>{g.home_score} : {g.away_score}</span>
-                                )}
-                              </div>
-                              <div style={{display:"grid",gridTemplateColumns:"1fr auto 1fr",alignItems:"center",gap:6,minWidth:0}}>
-                                <div style={{fontSize:13,fontWeight:800,color:C.text,textAlign:"right",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{krTeam(g.home_team)}</div>
-                                <div style={{fontSize:10,color:C.teal,fontWeight:800}}>VS</div>
-                                <div style={{fontSize:13,fontWeight:800,color:C.text,textAlign:"left",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{krTeam(g.away_team)}</div>
-                              </div>
+                    {todayGames.length > 0 && (()=>{
+                      // 오늘 경기를 두 그룹으로 분리: 종료(finished) vs 그 외(라이브/예정/연기)
+                      // 종료된 경기는 기본적으로 접혀있고, 사용자가 헤더 클릭 시 펼쳐짐.
+                      const todayActive = todayGames.filter(g=>!isFinished(g.status_short));
+                      const todayFinished = todayGames.filter(g=>isFinished(g.status_short));
+                      // 카드 렌더링 헬퍼 (두 그룹에서 동일 UI)
+                      const renderGameCard = (g:LiveFixture)=>{
+                        const selected = stExpandedGameId===g.id;
+                        const live = isLive(g.status_short);
+                        const finished = isFinished(g.status_short);
+                        const postponed = isPostponed(g.status_short);
+                        // 상태별 색상: 라이브=red, 종료/연기/취소=dim, 예정=amber
+                        const statusColor = live?C.red : finished?C.dim : postponed?C.muted : C.amber;
+                        // 상태별 표시: 라이브=🔴 한글라벨 + elapsed, 종료/연기/취소=한글라벨, 예정=⏰ 시간
+                        const statusText = live
+                          ? `🔴 ${statusLabel(g.status_short)}${g.elapsed?` ${g.elapsed}'`:""}`
+                          : finished
+                          ? "⏹ 종료"
+                          : postponed
+                          ? `⚠ ${statusLabel(g.status_short)}`
+                          : `⏰ ${fmtKstTime(g.start_time)}`;
+                        return (
+                          <div key={g.id} onClick={()=>setStExpandedGameId(g.id)}
+                            style={{background:selected?`${C.teal}22`:C.bg3,border:`1px solid ${selected?C.teal:C.border}`,borderRadius:7,padding:"10px 12px",marginBottom:6,cursor:"pointer",position:"relative",opacity:(postponed||finished||live)?0.7:1}}>
+                            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5,fontSize:10}}>
+                              <span style={{color:statusColor,fontWeight:800}}>
+                                {statusText}
+                              </span>
+                              {(g.home_score!==null && g.away_score!==null) && (
+                                <span style={{color:C.text,fontWeight:900}}>{g.home_score} : {g.away_score}</span>
+                              )}
                             </div>
-                          );
-                        })}
-                      </>
-                    )}
+                            <div style={{display:"grid",gridTemplateColumns:"1fr auto 1fr",alignItems:"center",gap:6,minWidth:0}}>
+                              <div style={{fontSize:13,fontWeight:800,color:C.text,textAlign:"right",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{krTeam(g.home_team)}</div>
+                              <div style={{fontSize:10,color:C.teal,fontWeight:800}}>VS</div>
+                              <div style={{fontSize:13,fontWeight:800,color:C.text,textAlign:"left",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{krTeam(g.away_team)}</div>
+                            </div>
+                          </div>
+                        );
+                      };
+                      return (
+                        <>
+                          <div style={{display:"flex",alignItems:"center",gap:8,margin:"4px 2px 8px",padding:"4px 8px",background:`${C.green}11`,borderRadius:5,border:`1px solid ${C.green}33`}}>
+                            <span style={{fontSize:11,fontWeight:900,color:C.green,letterSpacing:1}}>📅 오늘 ({kstToday})</span>
+                            <span style={{flex:1,height:1,background:`${C.green}44`}}/>
+                            <span style={{fontSize:10,fontWeight:700,color:C.green}}>{todayGames.length}경기</span>
+                          </div>
+
+                          {/* 진행중/예정/연기 경기 */}
+                          {todayActive.map(renderGameCard)}
+
+                          {/* 종료된 경기 — 접힘/펼침 토글 헤더 */}
+                          {todayFinished.length > 0 && (
+                            <>
+                              <div onClick={()=>setStShowFinished(v=>!v)}
+                                title={stShowFinished?"종료된 경기 접기":"종료된 경기 펼치기"}
+                                style={{display:"flex",alignItems:"center",gap:8,margin:"8px 2px 6px",padding:"6px 10px",background:C.bg2,borderRadius:5,border:`1px dashed ${C.dim}`,cursor:"pointer",opacity:0.85,userSelect:"none"}}>
+                                <span style={{fontSize:11,fontWeight:800,color:C.muted}}>{stShowFinished?"▼":"▶"} ⏹ 종료된 경기</span>
+                                <span style={{flex:1,height:1,background:C.border}}/>
+                                <span style={{fontSize:10,fontWeight:700,color:C.dim}}>{todayFinished.length}경기</span>
+                              </div>
+                              {stShowFinished && todayFinished.map(renderGameCard)}
+                            </>
+                          )}
+                        </>
+                      );
+                    })()}
 
                     {todayGames.length > 0 && tomorrowGames.length > 0 && (
                       <div style={{margin:"14px 2px 12px",padding:"6px 10px",background:`linear-gradient(90deg,transparent,${C.amber}22,transparent)`,borderRadius:6,display:"flex",alignItems:"center",gap:8,position:"relative"}}>
@@ -6442,9 +6467,12 @@ function AppMain() {
                         )}
                         <div style={{display:"flex",gap:5,marginTop:"auto"}}>
                           <button onClick={()=>handlePointExchangeComplete(ps.id)} style={{flex:1,padding:"6px 0",borderRadius:4,border:`1px solid ${C.orange}66`,background:`${C.orange}22`,color:C.orange,cursor:"pointer",fontWeight:800,fontSize:12}}>완료</button>
-                          {isCompleted && (
-                            <button onClick={()=>{if(!window.confirm(`"${ps.name}" 영구 삭제? (완료 ${ps.sessions.length}건도 삭제됩니다)`))return;savePointSites(pointSites.filter(x=>x.id!==ps.id));}} style={{padding:"6px 8px",borderRadius:4,border:`1px solid ${C.red}44`,background:`${C.red}11`,color:C.red,cursor:"pointer",fontSize:12}}>🗑</button>
-                          )}
+                          <button onClick={()=>{
+                            const cnt = ps.sessions.length;
+                            const msg = cnt>0 ? `"${ps.name}" 영구 삭제? (완료 ${cnt}건도 함께 삭제됩니다)` : `"${ps.name}" 영구 삭제하시겠습니까?`;
+                            if(!window.confirm(msg))return;
+                            savePointSites(pointSites.filter(x=>x.id!==ps.id));
+                          }} title="영구 삭제" style={{padding:"6px 8px",borderRadius:4,border:`1px solid ${C.red}44`,background:`${C.red}11`,color:C.red,cursor:"pointer",fontSize:12}}>🗑</button>
                         </div>
                       </div>
                     );
