@@ -175,7 +175,7 @@ const ACTIVE_SPORTS: Sport[] = ["football", "baseball", "basketball"];
 
 // ── 캐시 정책 ──────────────────────────────────────────────────
 const CACHE_FRESH_MIN = 15;   // 15분 이내면 신선 → API 호출 안 함
-const FETCH_DAYS = 3;         // KST 어제+오늘+내일 3일치
+const FETCH_DAYS = 2;         // KST 오늘+내일 2일치
 
 // ── 모바일 감지 ────────────────────────────────────────────────
 // User-Agent 기반. 100% 정확하진 않지만 핸드폰 통신사 IP 차단 목적엔 충분.
@@ -2191,8 +2191,8 @@ function AppMain() {
         await supabase.from('fixtures').delete().lt('start_time', deleteBeforeUtc);
       } catch(e) { console.warn('[refreshFixtures] 오래된 데이터 삭제 실패:', e); }
 
-      // 5) 활성 종목 × 날짜 호출 (어제 + 오늘 + 내일)
-      const dates = Array.from({length: FETCH_DAYS}, (_, i) => kstDateStr(i - 1));
+      // 5) 활성 종목 × 날짜 호출
+      const dates = Array.from({length: FETCH_DAYS}, (_, i) => kstDateStr(i));
       const lastCallsBySport: Record<string, number> = {};
       const lastResultBySport: Record<string, { fetched: number; upserted: number; error?: string }> = {};
       let totalCalls = 0;
@@ -6000,7 +6000,7 @@ function AppMain() {
               <div style={{flex:1,minWidth:260}}>
                 <div style={{fontSize:18,fontWeight:900,color:C.purple}}>🔑 API 관리</div>
                 <div style={{fontSize:11,color:C.muted,marginTop:3,lineHeight:1.5}}>
-                  클라이언트 직접 호출 · 사용자 트리거 전용 · 활성 {ACTIVE_SPORTS.length}종목 · KST 어제+오늘+내일 ({FETCH_DAYS}일치) · 캐시 {CACHE_FRESH_MIN}분
+                  클라이언트 직접 호출 · 사용자 트리거 전용 · 활성 {ACTIVE_SPORTS.length}종목 · KST 오늘+내일 ({FETCH_DAYS}일치) · 캐시 {CACHE_FRESH_MIN}분
                 </div>
                 {lastFetchedAt && (
                   <div style={{fontSize:11,color:isFresh?C.green:C.muted,marginTop:4}}>
