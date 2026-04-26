@@ -410,8 +410,31 @@ type TeamNameMap = Record<string,string>;
 // 팀명 매핑은 DB(team_names 테이블)에 저장됩니다. App 컴포넌트 내부에서
 // useEffect로 db.loadTeamNames()를 호출해 teamNameMap state를 채웁니다.
 
+// ── 경기 상태 분류 ───────────────────────────────────────────
+// API-Sports의 status_short 코드를 의미별로 분류
+// NS=Not Started, FT=Full Time(종료), PST=Postponed(연기), CANC=Cancelled(취소)
+// ABD=Abandoned(중단), TBD=To Be Defined(미정), 그 외(1H, 2H, HT, LIVE 등)=라이브
+function isUpcoming(s:string){ return s==="NS" || s==="TBD"; }
 function isLive(s:string){ return !["NS","FT","AET","FT_PEN","CANC","PST","ABD","AWD","WO","TBD","AOT","AP"].includes(s); }
 function isFinished(s:string){ return ["FT","AET","FT_PEN","AOT","AP"].includes(s); }
+function isPostponed(s:string){ return ["PST","CANC","ABD","AWD","WO"].includes(s); }
+// 한글 라벨 (status_short 기반 - status_long의 영문 그대로 노출 방지)
+function statusLabel(s:string):string {
+  if (s==="NS"||s==="TBD") return "예정";
+  if (isFinished(s)) return "종료";
+  if (s==="PST") return "연기됨";
+  if (s==="CANC") return "취소됨";
+  if (s==="ABD") return "중단됨";
+  if (s==="AWD") return "기권승";
+  if (s==="WO") return "부전승";
+  if (s==="HT") return "하프타임";
+  if (s==="1H") return "전반";
+  if (s==="2H") return "후반";
+  if (s==="ET") return "연장";
+  if (s==="P"||s==="PEN") return "승부차기";
+  if (isLive(s)) return "진행중";
+  return s;
+}
 function fmtKstTime(iso:string){ try{return new Date(iso).toLocaleTimeString("ko-KR",{timeZone:"Asia/Seoul",hour:"2-digit",minute:"2-digit",hour12:false});}catch{return "";} }
 function fmtKstDate(iso:string){ try{return new Date(iso).toLocaleDateString("ko-KR",{timeZone:"Asia/Seoul",month:"2-digit",day:"2-digit"});}catch{return "";} }
 
@@ -437,7 +460,7 @@ interface PointSite {
   exchangeDate: string;
   targetAmount: number;
   targetSiteName?: string;  // 누적입금 기준 사이트 (없으면 전체)
-  targetCycleDays?: number; // 목표 주기 (일수), 기본 14일(2주). 완료 후 다음 목표일까지의 기간
+  targetCycleDays?: number; // 목표 기간 (일수). 교환일 기준 과거 N일간 누적 입금을 목표 금액과 비교. 기본 30일(1달).
   sessions: PointSession[];
 }
 interface PointSession {
@@ -483,7 +506,7 @@ const EXTRA:Record<string,string[]> = {
 
 const getOptGroups = (cat:string) => {
   if(cat==="축구") return [{g:"홈",opts:["홈 0.5","홈 1.5","홈 2.5"]},{g:"원정",opts:["원정 0.5","원정 1.5","원정 2.5"]}];
-  if(cat==="야구") return [{g:"승패",opts:["정배","역배"]},{g:"오버",opts:Array.from({length:9},(_,i)=>`${4.5+i} 오버`)},{g:"언더",opts:Array.from({length:9},(_,i)=>`${4.5+i} 언더`)}];
+  if(cat==="야구") return [{g:"승패",opts:["정배","역배"]},{g:"오버",opts:Array.from({length:14},(_,i)=>`${4.5+i} 오버`)},{g:"언더",opts:Array.from({length:14},(_,i)=>`${4.5+i} 언더`)}];
   if(cat==="농구") return [{g:"플핸",opts:Array.from({length:25},(_,i)=>`${5.5+i} 플핸`)},{g:"마핸",opts:Array.from({length:54},(_,i)=>`${(2.5+i).toFixed(1)} 마핸`)}];
   if(cat==="배구") return [{g:"승패",opts:["홈 승","원정 승"]},{g:"오버/언더",opts:["오버","언더"]}];
   return [];
@@ -826,6 +849,28 @@ function AppMain() {
     const missingOdds = slip.find(s => !s.odds || s.odds < 1);
     if(missingOdds) return alert(`${missingOdds.game.home_team} vs ${missingOdds.game.away_team} 의 배당률을 입력해주세요.`);
 
+    // ★ 시작된/종료된/연기된 경기는 베팅 차단 (수동 경기 제외)
+    //   라이브 베팅 체크박스가 켜진 경우엔 진행중 경기도 허용
+    const blockedGame = slip.find(s => {
+      const isManual = s.game.league_id < 0;
+      if (isManual) return false; // 수동 경기는 항상 허용
+      const st = s.game.status_short;
+      // 종료/연기/취소된 경기는 항상 차단
+      if (isFinished(st) || isPostponed(st)) return true;
+      // 라이브 경기는 라이브 베팅 체크 시에만 허용
+      if (isLive(st) && !slipIsLive) return true;
+      return false;
+    });
+    if (blockedGame) {
+      const st = blockedGame.game.status_short;
+      const homeKr = translateTeamName(blockedGame.game.home_team, teamNameMap);
+      const awayKr = translateTeamName(blockedGame.game.away_team, teamNameMap);
+      const reason = isFinished(st) ? "이미 종료된"
+        : isPostponed(st) ? `${statusLabel(st)} 처리된`
+        : "이미 시작된";
+      return alert(`${reason} 경기는 베팅할 수 없습니다.\n\n${homeKr} vs ${awayKr} (${statusLabel(st)})\n\n진행중인 경기에 베팅하려면 "⚡ 라이브 베팅" 체크박스를 켜주세요.`);
+    }
+
     const dollar=isUSD(slipSite);
     slip.forEach(item=>{
       const homeKr=translateTeamName(item.game.home_team, teamNameMap);
@@ -857,7 +902,9 @@ function AppMain() {
       setSiteStatesRaw(newSS);db.upsertSiteState(slipSite,newSS[slipSite]);
       addLog("➕ 베팅",`${homeKr} vs ${awayKr}/${item.optLabel}/${fmtDisp(slipAmount,dollar)}`);
     });
+    // ★ 베팅 완료 후 사이트 선택 해제 (실수 방지)
     setSlip([]);
+    setSlipSite("");
   };
 
   // 모의 베팅 (사용 안 하지만 타입 호환)
@@ -1498,15 +1545,15 @@ function AppMain() {
   };
 
   const [addPointSiteModal,setAddPointSiteModal]=useState(false);
-  const [newPointSite,setNewPointSite]=useState<{name:string,exchangeName:string,exchangeDate:string,targetAmount:number,targetSiteName:string,targetCycleDays:number}>({name:"올인구조대",exchangeName:"포인트교환",exchangeDate:"2025-05-04",targetAmount:2000000,targetSiteName:"",targetCycleDays:14});
+  const [newPointSite,setNewPointSite]=useState<{name:string,exchangeName:string,exchangeDate:string,targetAmount:number,targetSiteName:string,targetCycleDays:number}>({name:"올인구조대",exchangeName:"포인트교환",exchangeDate:"2025-05-04",targetAmount:2000000,targetSiteName:"",targetCycleDays:30});
 
   const handleAddPointSite=()=>{
-    const site:PointSite={id:String(Date.now()),name:newPointSite.name,exchangeName:newPointSite.exchangeName,exchangeDate:newPointSite.exchangeDate,targetAmount:newPointSite.targetAmount,targetSiteName:newPointSite.targetSiteName||undefined,targetCycleDays:newPointSite.targetCycleDays||14,sessions:[]};
+    const site:PointSite={id:String(Date.now()),name:newPointSite.name,exchangeName:newPointSite.exchangeName,exchangeDate:newPointSite.exchangeDate,targetAmount:newPointSite.targetAmount,targetSiteName:newPointSite.targetSiteName||undefined,targetCycleDays:newPointSite.targetCycleDays||30,sessions:[]};
     const updated=[...pointSites,site];
     savePointSites(updated);
     setAddPointSiteModal(false);
-    const resetDate=new Date();resetDate.setDate(resetDate.getDate()+14);
-    setNewPointSite({name:"올인구조대",exchangeName:"포인트교환",exchangeDate:resetDate.toISOString().slice(0,10),targetAmount:2000000,targetSiteName:"",targetCycleDays:14});
+    const resetDate=new Date();resetDate.setDate(resetDate.getDate()+30);
+    setNewPointSite({name:"올인구조대",exchangeName:"포인트교환",exchangeDate:resetDate.toISOString().slice(0,10),targetAmount:2000000,targetSiteName:"",targetCycleDays:30});
   };
 
   // ── 일일 퀘스트 ────────────────────────────────────────────
@@ -1537,6 +1584,19 @@ function AppMain() {
       if(q.id!==id) return q;
       const has = q.history.includes(today);
       return {...q, history: has ? q.history.filter(d=>d!==today) : [...q.history, today].sort()};
+    }));
+  };
+
+  // 토글: 임의 날짜 체크 ↔ 해제 (캘린더에서 과거 날짜 직접 클릭용)
+  // 미래 날짜는 토글 불가 (실수 방지)
+  const toggleQuestDate = (id:string, dateStr:string) => {
+    if (dateStr > today) return; // 미래는 무시
+    saveDailyQuests(dailyQuests.map(q=>{
+      if(q.id!==id) return q;
+      // 퀘스트 생성일 이전은 무시 (의미상 출석할 수 없는 날)
+      if (dateStr < q.createdAt) return q;
+      const has = q.history.includes(dateStr);
+      return {...q, history: has ? q.history.filter(d=>d!==dateStr) : [...q.history, dateStr].sort()};
     }));
   };
 
@@ -1723,14 +1783,15 @@ function AppMain() {
   const handlePointExchangeComplete=(siteId:string)=>{
     const site = pointSites.find(s=>s.id===siteId);
     if(!site) return;
-    const cycle = site.targetCycleDays || 14;
-    const cycleLabel = cycle===14?"2주":cycle===7?"1주":cycle===21?"3주":cycle===28?"4주":`${cycle}일`;
+    const cycle = site.targetCycleDays || 30;
+    // 기간 라벨 (1주/2주/1달/2달/3달, 그 외는 N일)
+    const cycleLabel = cycle===7?"1주":cycle===14?"2주":cycle===30?"1달":cycle===60?"2달":cycle===90?"3달":`${cycle}일`;
     const targetMsg = site.targetAmount>0
-      ? `목표 ${site.targetAmount.toLocaleString()}원, 목표 주기 ${cycleLabel}`
-      : `목표 없음 (입금만 추적), 목표 주기 ${cycleLabel}`;
-    if(!window.confirm(`"${site.name}" 현금교환 완료 처리?\n\n같은 목표(${targetMsg})로 ${cycleLabel} 더해서 다시 이어서 진행하시겠습니까?`)) return;
+      ? `목표 ${site.targetAmount.toLocaleString()}원, 목표 기간 ${cycleLabel}`
+      : `목표 없음 (입금만 추적), 목표 기간 ${cycleLabel}`;
+    if(!window.confirm(`"${site.name}" 현금교환 완료 처리?\n\n같은 조건(${targetMsg})으로 ${cycleLabel} 후를 다음 교환일로 잡고 이어서 진행하시겠습니까?`)) return;
     const now=new Date().toISOString().slice(0,10);
-    // 다음 주기는 이전 마감일 기준 + cycleDays (현재 진행 중인 baseDate 기준)
+    // 다음 교환일 = 이전 교환일 + cycleDays (사이클 길이만큼 뒤로)
     const baseDate = site.sessions.length>0
       ? site.sessions[site.sessions.length-1].nextTargetDate
       : site.exchangeDate;
@@ -3223,24 +3284,24 @@ function AppMain() {
                 style={{...S,boxSizing:"border-box"}}/>
             </div>
             <div style={{marginBottom:8}}>
-              <div style={L}>🔁 목표 주기 (완료 후 다음 교환일까지의 기간)</div>
+              <div style={L}>📅 목표 기간 (교환일 기준 과거 N일간 누적 입금을 목표와 비교)</div>
               <div style={{display:"flex",gap:4,marginBottom:4}}>
                 {[
-                  {d:7,l:"1주"},{d:14,l:"2주"},{d:21,l:"3주"},{d:28,l:"4주"},
+                  {d:7,l:"1주"},{d:14,l:"2주"},{d:30,l:"1달"},{d:60,l:"2달"},{d:90,l:"3달"},
                 ].map(opt=>(
                   <button key={opt.d} onClick={()=>setNewPointSite(p=>({...p,targetCycleDays:opt.d}))}
                     style={{flex:1,padding:"6px 0",borderRadius:5,cursor:"pointer",border:newPointSite.targetCycleDays===opt.d?`2px solid ${C.teal}`:`1px solid ${C.border}`,background:newPointSite.targetCycleDays===opt.d?`${C.teal}22`:C.bg2,color:newPointSite.targetCycleDays===opt.d?C.teal:C.muted,fontWeight:newPointSite.targetCycleDays===opt.d?800:600,fontSize:11}}>
-                    {opt.l} ({opt.d}일)
+                    {opt.l}
                   </button>
                 ))}
               </div>
               <input type="number"
-                value={newPointSite.targetCycleDays||14}
-                onChange={e=>setNewPointSite(p=>({...p,targetCycleDays:parseInt(e.target.value)||14}))}
+                value={newPointSite.targetCycleDays||30}
+                onChange={e=>setNewPointSite(p=>({...p,targetCycleDays:parseInt(e.target.value)||30}))}
                 min={1} max={365}
                 style={{...S,boxSizing:"border-box",...noSpin}}
                 placeholder="직접 입력 (일수)"/>
-              <div style={{fontSize:9,color:C.dim,marginTop:3}}>완료 시 같은 목표/주기로 자동 다음 사이클 시작 (목표일 + 주기일)</div>
+              <div style={{fontSize:9,color:C.dim,marginTop:3}}>예: 목표 200만원 + 기간 30일 = 교환일 직전 30일간 200만원 입금이 목표</div>
             </div>
             {/* 기준 사이트 선택 - 누적입금 계산할 사이트 */}
             <div style={{marginBottom:16}}>
@@ -3897,7 +3958,8 @@ function AppMain() {
         const mapKey = (sportKr:string, country:string, league:string) => `${sportKr}__${country}__${league}`;
 
         // sport 영문 키 ↔ 한글 키 변환 (m_meta는 한글로 저장됨)
-        const sportToKr = (s:Sport):string => SPORT_META[s].kr;
+        // 사용자 정의 종목(LOL 등)은 SPORT_META에 없으므로 그 값을 그대로 반환
+        const sportToKr = (s:Sport):string => SPORT_META[s]?.kr || (s as unknown as string);
 
         // 매핑된 API league_id 집합
         const mappedApiIds = new Set(Object.values(stLeagueMap));
@@ -3938,7 +4000,33 @@ function AppMain() {
         const selGame = stExpandedGameId ? selectedFixtures.find(g=>g.id===stExpandedGameId) : null;
 
         // 종목별 경기 수 (트리에 표시용) — 매핑된 사용자 리그 기준
-        const sportsList: Sport[] = ["football","baseball","basketball","volleyball","hockey"] as Sport[];
+        // API-Sports 지원 5종목 (실제 API 호출 가능)
+        const apiSportsList: Sport[] = ["football","baseball","basketball","volleyball","hockey"] as Sport[];
+
+        // 사용자가 + 종목 버튼으로 추가한 커스텀 종목 (API 미지원, 표시 + 수동 등록만)
+        // DEFAULT_SPORTS의 한글 이름과 중복되는 건 제외 (이미 위에서 영문으로 표시됨)
+        const defaultSportKrSet = new Set(apiSportsList.map(s => SPORT_META[s].kr));
+        // E스포츠는 SPORT_META에 있지만 sportsList에 없으므로 별도 추가 (한글 키)
+        defaultSportKrSet.add("E스포츠");
+        const customOnlySports = customSports.filter(s => !defaultSportKrSet.has(s));
+
+        // 커스텀 종목용 메타 fallback (SPORT_META에 없는 종목)
+        // 종목 이름별 아이콘 매핑 (LOL, 미식축구, 크리켓 등)
+        const customSportIcon = (name:string):string => {
+          const lower = name.toLowerCase();
+          if (lower.includes("lol") || lower.includes("리그오브") || lower === "롤") return "🎮";
+          if (lower.includes("미식")) return "🏈";
+          if (lower.includes("크리켓") || lower.includes("cricket")) return "🏏";
+          if (lower.includes("골프") || lower.includes("golf")) return "⛳";
+          if (lower.includes("테니스") || lower.includes("tennis")) return "🎾";
+          if (lower.includes("럭비") || lower.includes("rugby")) return "🏉";
+          if (lower.includes("ufc") || lower.includes("격투") || lower.includes("mma")) return "🥊";
+          if (lower.includes("e스포츠") || lower.includes("esport") || lower.includes("게임")) return "🎮";
+          return "🏅";
+        };
+
+        // 기존 코드 호환 (sportsList는 API 5종목만)
+        const sportsList: Sport[] = apiSportsList;
 
         // 트리에 표시될 항목 (사용자가 만든 국가/리그)
         const buildSportTree = (sport:Sport) => {
@@ -3971,7 +4059,7 @@ function AppMain() {
                 <div>
                   <div style={{fontSize:12,fontWeight:800,color:C.text}}>📂 카테고리</div>
                   <div style={{fontSize:9,color:C.dim}}>
-                    종목 {sportsList.length} · {stFixtures.length}경기
+                    종목 {sportsList.length + customOnlySports.length} · {stFixtures.length}경기
                     {stFetchedAt && <span style={{marginLeft:4}}>· {new Date(stFetchedAt).toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit"})}</span>}
                   </div>
                 </div>
@@ -4078,6 +4166,94 @@ function AppMain() {
                     </div>
                   );
                 })}
+
+                {/* ───── 사용자 정의 종목 (LOL 등 API-Sports 미지원) ─────
+                    API 호출/매핑 없이 카테고리 표시 + 수동 경기 등록만 가능 */}
+                {customOnlySports.map(sportName=>{
+                  const sport = sportName as unknown as Sport; // 타입 우회 (실제 값은 string)
+                  const sKr = sportName; // 사용자 정의 종목은 한글 이름 그대로 사용
+                  const sportOpen = stExpandedSports[sport];
+                  const isSportSel = stSelSport===sport;
+                  const icon = customSportIcon(sportName);
+
+                  // 트리 빌드 (buildSportTree와 동일하지만 sKr 직접 사용)
+                  const countries = allCountriesForSport(sKr);
+                  let totalGames = 0;
+                  const treeCountries = countries.map(country => {
+                    const leagues = allLeaguesForCountry(sKr, country);
+                    const lgItems = leagues.map(lg => {
+                      // 사용자 정의 종목은 API 매핑 없음 → manualGames만 카운트
+                      const games = manualGames.filter(g=>g.sportCat===sKr && g.country===country && g.league===lg && !g.finished).length;
+                      totalGames += games;
+                      return { league: lg, apiId: "", games };
+                    });
+                    const cGames = lgItems.reduce((a,b)=>a+b.games,0);
+                    return { country, leagues: lgItems, games: cGames };
+                  });
+
+                  return (
+                    <div key={`custom__${sportName}`} style={{marginBottom:3}}>
+                      <div style={{display:"flex",gap:2,alignItems:"stretch",marginBottom:1}}>
+                        <button onClick={()=>{setStExpandedSports(p=>({...p,[sport]:!p[sport]}));setStSelSport(sport);}}
+                          style={{flex:1,display:"flex",justifyContent:"space-between",alignItems:"center",padding:"11px 12px",textAlign:"left",borderRadius:6,cursor:"pointer",border:isSportSel?`1px solid ${C.purple}`:`1px solid ${C.border}`,background:isSportSel?`${C.purple}22`:C.bg3,color:isSportSel?C.purple:C.text,fontSize:14,fontWeight:800}}>
+                          <span>{icon} {sportName} <span style={{fontSize:11,color:C.dim,fontWeight:400}}>({totalGames})</span></span>
+                          <span style={{fontSize:11,color:C.dim}}>{sportOpen?"▼":"▶"}</span>
+                        </button>
+                        <button onClick={()=>setAddCountryModal({sport:sKr})} title={`${sportName}에 국가 추가`}
+                          style={{padding:"0 14px",borderRadius:5,border:`2px solid ${C.purple}88`,background:`${C.purple}22`,color:C.purple,cursor:"pointer",fontSize:18,fontWeight:900}}>+</button>
+                      </div>
+                      {sportOpen && (
+                        <div style={{marginLeft:6,paddingLeft:6,borderLeft:`1px solid ${C.border}`}}>
+                          {treeCountries.length===0 ? (
+                            <div style={{fontSize:10,color:C.dim,padding:"6px 6px"}}>
+                              국가 없음 · <span style={{color:C.purple,cursor:"pointer",textDecoration:"underline"}} onClick={()=>setAddCountryModal({sport:sKr})}>추가</span>
+                            </div>
+                          ) : treeCountries.map(({country,leagues,games:cGames})=>{
+                            const key=`${sport}__${country}`;
+                            const cOpen = stExpandedCountries[key];
+                            const isCountrySel = stSelSport===sport && stSelCountry===country;
+                            return (
+                              <div key={country} style={{marginBottom:2}}>
+                                <div style={{display:"flex",gap:2,alignItems:"stretch"}}>
+                                  <button onClick={()=>{setStExpandedCountries(p=>({...p,[key]:!p[key]}));setStSelSport(sport);setStSelCountry(country);}}
+                                    style={{flex:1,display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 10px",textAlign:"left",borderRadius:5,cursor:"pointer",border:isCountrySel?`1px solid ${C.purple}`:"1px solid transparent",background:isCountrySel?`${C.purple}22`:"transparent",color:isCountrySel?C.purple:C.muted,fontSize:13,fontWeight:isCountrySel?700:500,minWidth:0}}>
+                                    <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{cOpen?"▼":"▶"} {krCountry(country)} <span style={{fontSize:10,color:C.dim,fontWeight:400}}>({cGames})</span></span>
+                                  </button>
+                                  <button onClick={()=>setAddLeagueModalM({sport:sKr,country})} title="리그 추가"
+                                    style={{padding:"0 12px",borderRadius:4,border:`2px solid ${C.amber}88`,background:`${C.amber}22`,color:C.amber,cursor:"pointer",fontSize:16,fontWeight:900}}>+</button>
+                                  <button onClick={()=>{setEditMetaModal({type:"country",sport:sKr,oldName:country});setEditMetaNewName(country);}} title="국가 이름 수정"
+                                    style={{padding:"0 6px",borderRadius:3,border:`1px solid ${C.purple}44`,background:`${C.purple}11`,color:C.purple,cursor:"pointer",fontSize:9}}>✏️</button>
+                                </div>
+                                {cOpen && (
+                                  <div style={{marginLeft:6,paddingLeft:5,marginTop:1,borderLeft:`1px solid ${C.border}`}}>
+                                    {leagues.length===0 ? (
+                                      <div style={{fontSize:10,color:C.dim,padding:"5px 6px"}}>
+                                        리그 없음 · <span style={{color:C.amber,cursor:"pointer",textDecoration:"underline"}} onClick={()=>setAddLeagueModalM({sport:sKr,country})}>추가</span>
+                                      </div>
+                                    ) : leagues.map(({league:lg,games:lgGames})=>{
+                                      const isLgSel = stSelSport===sport && stSelCountry===country && stSelLeague===lg;
+                                      return (
+                                        <div key={lg} style={{display:"flex",gap:1,alignItems:"stretch",marginBottom:1}}>
+                                          <button onClick={()=>{setStSelSport(sport);setStSelCountry(country);setStSelLeague(lg);setStExpandedGameId(null);}}
+                                            style={{flex:1,display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 10px",textAlign:"left",borderRadius:4,cursor:"pointer",border:isLgSel?`1px solid ${C.amber}`:"1px solid transparent",background:isLgSel?`${C.amber}22`:"transparent",color:isLgSel?C.amber:C.muted,fontSize:12,fontWeight:isLgSel?700:400,minWidth:0}}>
+                                            <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>○ {krLeague(lg)}</span>
+                                            <span style={{fontSize:10,color:C.dim,marginLeft:4,flexShrink:0}}>({lgGames})</span>
+                                          </button>
+                                          <button onClick={()=>{setEditMetaModal({type:"league",sport:sKr,country,oldName:lg});setEditMetaNewName(lg);}} title="리그 이름 수정"
+                                            style={{padding:"0 5px",borderRadius:3,border:`1px solid ${C.purple}44`,background:`${C.purple}11`,color:C.purple,cursor:"pointer",fontSize:8}}>✏️</button>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
 
@@ -4086,7 +4262,7 @@ function AppMain() {
               <div style={{padding:"10px 12px",borderBottom:`1px solid ${C.border}`,flexShrink:0,display:"flex",justifyContent:"space-between",alignItems:"center",gap:6}}>
                 <div style={{fontSize:12,fontWeight:800,color:C.teal,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>
                   {stSelSport&&stSelCountry&&stSelLeague
-                    ? `${SPORT_META[stSelSport].icon} ${krLeague(stSelLeague)}`
+                    ? `${SPORT_META[stSelSport]?.icon || customSportIcon(stSelSport as unknown as string)} ${krLeague(stSelLeague)}`
                     : "← 좌측에서 리그 선택"}
                 </div>
                 <div style={{fontSize:10,color:C.dim,flexShrink:0}}>
@@ -4156,12 +4332,24 @@ function AppMain() {
                           const selected = stExpandedGameId===g.id;
                           const live = isLive(g.status_short);
                           const finished = isFinished(g.status_short);
+                          const postponed = isPostponed(g.status_short);
+                          const upcoming = isUpcoming(g.status_short);
+                          // 상태별 색상: 라이브=red, 종료/연기/취소=dim, 예정=amber
+                          const statusColor = live?C.red : finished?C.dim : postponed?C.muted : C.amber;
+                          // 상태별 표시: 라이브=🔴 한글라벨 + elapsed, 종료/연기/취소=한글라벨, 예정=⏰ 시간
+                          const statusText = live
+                            ? `🔴 ${statusLabel(g.status_short)}${g.elapsed?` ${g.elapsed}'`:""}`
+                            : finished
+                            ? "⏹ 종료"
+                            : postponed
+                            ? `⚠ ${statusLabel(g.status_short)}`
+                            : `⏰ ${fmtKstTime(g.start_time)}`;
                           return (
                             <div key={g.id} onClick={()=>setStExpandedGameId(g.id)}
-                              style={{background:selected?`${C.teal}22`:C.bg3,border:`1px solid ${selected?C.teal:C.border}`,borderRadius:7,padding:"10px 12px",marginBottom:6,cursor:"pointer",position:"relative"}}>
+                              style={{background:selected?`${C.teal}22`:C.bg3,border:`1px solid ${selected?C.teal:C.border}`,borderRadius:7,padding:"10px 12px",marginBottom:6,cursor:"pointer",position:"relative",opacity:(postponed||finished||live)?0.7:1}}>
                               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5,fontSize:10}}>
-                                <span style={{color:live?C.red:finished?C.dim:C.amber,fontWeight:800}}>
-                                  {live?`🔴 ${g.status_long}${g.elapsed?` ${g.elapsed}'`:""}`:finished?"⏹ 종료":`⏰ ${fmtKstTime(g.start_time)}`}
+                                <span style={{color:statusColor,fontWeight:800}}>
+                                  {statusText}
                                 </span>
                                 {(g.home_score!==null && g.away_score!==null) && (
                                   <span style={{color:C.text,fontWeight:900}}>{g.home_score} : {g.away_score}</span>
@@ -4259,9 +4447,8 @@ function AppMain() {
                           <span style={{color:C.dim}}>경기 시간</span>
                           <span style={{color:C.text,fontWeight:700}}>{fmtKstTime(g.start_time)}</span>
                           <span style={{color:C.dim}}>상태</span>
-                          <span style={{color:live?C.red:finished?C.muted:C.amber,fontWeight:700}}>
-                            {live?"🔴 진행중":finished?"⏹ 종료":"⏰ 예정"}
-                            {g.status_long && <span style={{marginLeft:6,fontSize:11,color:C.dim}}>({g.status_long})</span>}
+                          <span style={{color:live?C.red:finished?C.muted:isPostponed(g.status_short)?C.muted:C.amber,fontWeight:700}}>
+                            {live?`🔴 ${statusLabel(g.status_short)}`:finished?"⏹ 종료":isPostponed(g.status_short)?`⚠ ${statusLabel(g.status_short)}`:"⏰ 예정"}
                             {g.elapsed && <span style={{marginLeft:6,color:C.red}}>{g.elapsed}'</span>}
                           </span>
                           {(g.home_score!==null && g.away_score!==null) && (
@@ -4289,9 +4476,11 @@ function AppMain() {
                         const isBasketball = sport==="basketball";
                         const isVolleyball = sport==="volleyball";
                         const ouLinesSoccer = [1.5,2.5,3.5];
-                        const ouLinesBaseball = [4.5,5.5,6.5,7.5,8.5,9.5,10.5,11.5,12.5];
+                        const ouLinesBaseball = [4.5,5.5,6.5,7.5,8.5,9.5,10.5,11.5,12.5,13.5,14.5,15.5,16.5,17.5];
                         const ouLinesBasketball = [155.5,160.5,165.5,170.5,175.5,180.5,185.5,190.5,195.5,200.5,205.5,210.5,215.5,220.5];
                         const handiLinesSoccer = [0.5,1.5,2.5];
+                        // 농구 플핸 라인: 5.5 ~ 29.5 (1단위, 25개)
+                        const handiLinesBasketball = Array.from({length:25}, (_,i)=>5.5+i);
 
                         return (
                           <div style={{marginTop:14}}>
@@ -4337,11 +4526,12 @@ function AppMain() {
                                           const opt=`${team} (${ln})`;
                                           const added=inSlip(opt);
                                           return <button key={opt} onClick={()=>handleSlipPick(g,opt)}
-                                            style={{width:"100%",marginBottom:4,padding:"8px 6px",borderRadius:5,cursor:"pointer",
+                                            style={{width:"100%",marginBottom:4,padding:"8px 10px",borderRadius:5,cursor:"pointer",
                                               border:added?`2px solid ${color}`:`1px solid ${C.border}`,
                                               background:added?`${color}33`:C.bg2,color:added?color:C.text,
-                                              fontWeight:added?800:600,fontSize:11,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                                            <span>{team} <b>({ln})</b></span>
+                                              fontWeight:added?800:600,fontSize:11,display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,textAlign:"left"}}>
+                                            <span style={{flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{team} <b>({ln})</b></span>
+                                            <span style={{color:added?color:C.dim,fontSize:11,fontWeight:700,minWidth:32,textAlign:"right",flexShrink:0}}>—</span>
                                           </button>;
                                         })}
                                       </div>
@@ -4361,11 +4551,12 @@ function AppMain() {
                                           const opt=`${label} (${ln})`;
                                           const added=inSlip(opt);
                                           return <button key={opt} onClick={()=>handleSlipPick(g,opt)}
-                                            style={{width:"100%",marginBottom:4,padding:"8px 6px",borderRadius:5,cursor:"pointer",
+                                            style={{width:"100%",marginBottom:4,padding:"8px 10px",borderRadius:5,cursor:"pointer",
                                               border:added?`2px solid ${color}`:`1px solid ${C.border}`,
                                               background:added?`${color}33`:C.bg2,color:added?color:C.text,
-                                              fontWeight:added?800:600,fontSize:11,display:"flex",justifyContent:"space-between"}}>
-                                            <span>{label} <b>({ln})</b></span>
+                                              fontWeight:added?800:600,fontSize:11,display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,textAlign:"left"}}>
+                                            <span style={{flex:1,minWidth:0}}>{label} <b>({ln})</b></span>
+                                            <span style={{color:added?color:C.dim,fontSize:11,fontWeight:700,minWidth:32,textAlign:"right",flexShrink:0}}>—</span>
                                           </button>;
                                         })}
                                       </div>
@@ -4391,11 +4582,45 @@ function AppMain() {
                                           const opt=`${label} (${ln})`;
                                           const added=inSlip(opt);
                                           return <button key={opt} onClick={()=>handleSlipPick(g,opt)}
-                                            style={{padding:"7px 6px",borderRadius:5,cursor:"pointer",
+                                            style={{padding:"7px 10px",borderRadius:5,cursor:"pointer",
                                               border:added?`2px solid ${color}`:`1px solid ${C.border}`,
                                               background:added?`${color}33`:C.bg2,color:added?color:C.text,
-                                              fontWeight:added?800:600,fontSize:11}}>
-                                            {label} <b>({ln})</b>
+                                              fontWeight:added?800:600,fontSize:11,
+                                              display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,textAlign:"left"}}>
+                                            <span style={{flex:1,minWidth:0}}>{label} <b>({ln})</b></span>
+                                            <span style={{color:added?color:C.dim,fontSize:11,fontWeight:700,minWidth:32,textAlign:"right"}}>—</span>
+                                          </button>;
+                                        })}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* 농구: 플핸 (5.5 ~ 29.5, 1단위) */}
+                            {isBasketball && (
+                              <div style={{marginBottom:14}}>
+                                <div style={{fontSize:10,fontWeight:800,color:C.amber,marginBottom:6,letterSpacing:1}}>플핸</div>
+                                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                                  {[
+                                    {team:krTeam(g.home_team),color:C.green},
+                                    {team:krTeam(g.away_team),color:C.teal},
+                                  ].map(({team,color})=>(
+                                    <div key={team}>
+                                      <div style={{fontSize:10,color,marginBottom:5,fontWeight:800,textAlign:"center",background:`${color}22`,borderRadius:4,padding:"2px 0",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{team}</div>
+                                      <div style={{display:"flex",flexDirection:"column",gap:3}}>
+                                        {handiLinesBasketball.map(ln=>{
+                                          const opt=`${team} (+${ln})`;
+                                          const added=inSlip(opt);
+                                          return <button key={opt} onClick={()=>handleSlipPick(g,opt)}
+                                            style={{padding:"7px 10px",borderRadius:5,cursor:"pointer",
+                                              border:added?`2px solid ${color}`:`1px solid ${C.border}`,
+                                              background:added?`${color}33`:C.bg2,color:added?color:C.text,
+                                              fontWeight:added?800:600,fontSize:11,
+                                              display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,textAlign:"left"}}>
+                                            <span style={{flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{team} <b>(+{ln})</b></span>
+                                            <span style={{color:added?color:C.dim,fontSize:11,fontWeight:700,minWidth:32,textAlign:"right",flexShrink:0}}>—</span>
                                           </button>;
                                         })}
                                       </div>
@@ -4421,11 +4646,13 @@ function AppMain() {
                                           const opt=`${label} (${ln})`;
                                           const added=inSlip(opt);
                                           return <button key={opt} onClick={()=>handleSlipPick(g,opt)}
-                                            style={{padding:"7px 6px",borderRadius:5,cursor:"pointer",
+                                            style={{padding:"7px 10px",borderRadius:5,cursor:"pointer",
                                               border:added?`2px solid ${color}`:`1px solid ${C.border}`,
                                               background:added?`${color}33`:C.bg2,color:added?color:C.text,
-                                              fontWeight:added?800:600,fontSize:11}}>
-                                            {label} <b>({ln})</b>
+                                              fontWeight:added?800:600,fontSize:11,
+                                              display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,textAlign:"left"}}>
+                                            <span style={{flex:1,minWidth:0}}>{label} <b>({ln})</b></span>
+                                            <span style={{color:added?color:C.dim,fontSize:11,fontWeight:700,minWidth:32,textAlign:"right"}}>—</span>
                                           </button>;
                                         })}
                                       </div>
@@ -4468,7 +4695,7 @@ function AppMain() {
             </div>
 
             {/* ─── 4. 베팅 슬립 (기존 스포츠 탭과 동일) ─── */}
-            <div style={{width:300,flexShrink:0,display:"flex",flexDirection:"column",overflow:"hidden",background:C.bg2,borderLeft:`1px solid ${C.border2}`,minHeight:0}}>
+            <div style={{width:360,flexShrink:0,display:"flex",flexDirection:"column",overflow:"hidden",background:C.bg2,borderLeft:`1px solid ${C.border2}`,minHeight:0}}>
               <div style={{padding:"10px 12px",borderBottom:`1px solid ${C.border}`,flexShrink:0,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                 <div style={{fontSize:13,fontWeight:800,color:C.orange}}>
                   📋 베팅 슬립
@@ -4496,8 +4723,10 @@ function AppMain() {
                         <div style={{fontSize:11,color:C.orange,fontWeight:800}}>VS</div>
                         <div style={{fontSize:15,fontWeight:800,color:C.text,textAlign:"left",lineHeight:1.3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{awayKr}</div>
                       </div>
-                      <div style={{background:`${optColor}22`,border:`1px solid ${optColor}66`,borderRadius:6,padding:"6px 10px",textAlign:"center"}}>
-                        <span style={{fontSize:14,color:optColor,fontWeight:800}}>→ {displayOpt}</span>
+                      <div style={{background:`${optColor}22`,border:`1px solid ${optColor}66`,borderRadius:6,padding:"6px 10px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:8}}>
+                        <span style={{fontSize:14,color:optColor,fontWeight:800,textAlign:"left",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1,minWidth:0}}>→ {displayOpt}</span>
+                        {/* 우측은 추후 배당 표시 영역 (현재는 공간만 확보) */}
+                        <span style={{fontSize:13,color:`${optColor}99`,fontWeight:800,minWidth:48,textAlign:"right",flexShrink:0}}>{item.odds>0?item.odds.toFixed(2):"—"}</span>
                       </div>
                     </div>
                   );
@@ -4591,7 +4820,7 @@ function AppMain() {
             </div>
 
             {/* ─── 5. 사이트 진행률 + 진행중 베팅 (기존 스포츠 탭과 동일) ─── */}
-            <div style={{width:300,flexShrink:0,display:"flex",flexDirection:"column",overflow:"hidden",background:C.bg2,borderLeft:`1px solid ${C.border2}`,minHeight:0}}>
+            <div style={{width:360,flexShrink:0,display:"flex",flexDirection:"column",overflow:"hidden",background:C.bg2,borderLeft:`1px solid ${C.border2}`,minHeight:0}}>
 
               {/* 상: 사이트 진행률 */}
               <div style={{flexShrink:0,padding:"10px 12px",borderBottom:`1px solid ${C.border2}`,background:C.bg3}}>
@@ -4614,9 +4843,12 @@ function AppMain() {
                       const dollar=isUSD(site);
                       const remaining=Math.max(0,parseFloat((st.deposited-st.betTotal).toFixed(2)));
                       const totalBase=parseFloat((st.deposited+(st.pointTotal||0)).toFixed(2));
-                      const pctRaw=totalBase>0?Math.round(st.betTotal/totalBase*100):0;
+                      // 진행률: 소수점 1자리. 100%는 오직 잔여=0일 때만.
+                      const pctRawCalc = totalBase>0 ? (st.betTotal/totalBase*100) : 0;
+                      // 잔여가 0이 아니면 절대 100% 표시 안 함 (최대 99.9%로 캡)
+                      const pctRaw = remaining>0 && pctRawCalc>=100 ? 99.9 : Math.round(pctRawCalc*10)/10;
                       const pct=Math.min(100,pctRaw);
-                      const isComplete=pctRaw>=100;
+                      const isComplete = remaining<=0 && pctRaw>=100;
                       const barColor=isComplete?C.purple:pctRaw>=90?C.red:pctRaw>=70?C.amber:C.green;
                       const sitePendingCount=pending.filter(b=>b.site===site).length;
                       return(
@@ -4626,7 +4858,7 @@ function AppMain() {
                               <span style={{fontSize:12,fontWeight:800,color:C.text}}>{dollar?"$":"₩"} {site}</span>
                               {isComplete && <span style={{fontSize:9,fontWeight:900,color:C.purple,background:`${C.purple}22`,border:`1px solid ${C.purple}`,borderRadius:3,padding:"1px 5px",letterSpacing:1}}>✓ 완료</span>}
                             </div>
-                            <span style={{fontSize:11,color:barColor,fontWeight:800}}>{pctRaw}%</span>
+                            <span style={{fontSize:11,color:barColor,fontWeight:800}}>{pctRaw.toFixed(1)}%</span>
                           </div>
                           <div style={{fontSize:10,color:C.muted,marginBottom:5,display:"flex",justifyContent:"space-between"}}>
                             <span>잔여 <span style={{color:C.teal,fontWeight:700,fontSize:11}}>{fmtDisp(remaining,dollar)}</span></span>
@@ -4714,9 +4946,12 @@ function AppMain() {
                 const dollar=isUSD(site);
                 const remaining=Math.max(0,parseFloat((st.deposited-st.betTotal).toFixed(2)));
                 const totalBase=parseFloat((st.deposited+(st.pointTotal||0)).toFixed(2));
-                const pctRaw=totalBase>0?Math.round(st.betTotal/totalBase*100):0;
+                // 진행률: 소수점 1자리. 100%는 오직 잔여=0일 때만.
+                const pctRawCalc = totalBase>0 ? (st.betTotal/totalBase*100) : 0;
+                // 잔여가 0이 아니면 절대 100% 표시 안 함 (최대 99.9%로 캡)
+                const pctRaw = remaining>0 && pctRawCalc>=100 ? 99.9 : Math.round(pctRawCalc*10)/10;
                 const pct=Math.min(100,pctRaw);
-                const is100=pctRaw>=100;
+                const is100 = remaining<=0 && pctRaw>=100;
                 const isOver=pctRaw>100;
                 const barColor=is100?C.purple:pctRaw>=90?C.red:pctRaw>=70?C.amber:C.green;
                 const sitePending=pending.filter(b=>b.site===site);
@@ -4756,7 +4991,7 @@ function AppMain() {
                         <div style={{fontSize:15,fontWeight:800,color:C.teal}}>{fmtDisp(remaining,dollar)}</div>
                       </div>
                     </div>
-                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:13,marginBottom:4}}><span style={{color:C.muted,fontWeight:700}}>진행률</span><span style={{color:barColor,fontWeight:900,fontSize:16}}>{pctRaw}%</span></div>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:13,marginBottom:4}}><span style={{color:C.muted,fontWeight:700}}>진행률</span><span style={{color:barColor,fontWeight:900,fontSize:16}}>{pctRaw.toFixed(1)}%</span></div>
                     <div style={{height:18,background:C.bg,borderRadius:5,overflow:"hidden",marginBottom:7,position:"relative"}}>
                       <div style={{width:`${pct}%`,height:"100%",background:barColor,borderRadius:5,transition:"width 0.3s"}}/>
                     </div>
@@ -5614,6 +5849,8 @@ function AppMain() {
 
       {/* ══ 홈 탭 ══ */}
       {tab==="home"&&(()=>{
+        // (현재 미사용 — 이전 1달 고정 계산용. targetCycleDays 도입 후 유지만)
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
         const oneMonthAgoStr=(baseDate:string)=>{const d=new Date(baseDate);d.setMonth(d.getMonth()-1);return d.toISOString().slice(0,10);};
         return (
         <div style={{flex:1,overflowY:"auto",padding:14}}>
@@ -5834,10 +6071,17 @@ function AppMain() {
                                   const isAttended = q.history.includes(dateStr);
                                   const isToday = dateStr===today;
                                   const isPast = dateStr<today;
+                                  const isFuture = dateStr>today;
                                   const beforeStart = dateStr<q.createdAt;
+                                  // 클릭 가능 조건: 미래 X, 퀘스트 시작일 이전 X
+                                  const clickable = !isFuture && !beforeStart;
                                   return (
-                                    <div key={dateStr} title={dateStr+(isAttended?" ✓":"")}
-                                      style={{height:22,background: isAttended ? C.green : beforeStart ? "transparent" : isToday ? `${C.amber}33` : isPast ? `${C.red}11` : C.bg2, borderRadius:2, display:"flex", alignItems:"center", justifyContent:"center", fontSize:9, fontWeight: isToday?900:600, color: isAttended?"#fff":beforeStart?C.dim:isToday?C.amber:isPast?C.red:C.muted, border: isToday?`1px solid ${C.amber}`:"none"}}>
+                                    <div key={dateStr} title={dateStr+(isAttended?" ✓ (클릭으로 해제)":clickable?" (클릭으로 출석)":beforeStart?" (시작 전)":" (미래)")}
+                                      onClick={clickable ? ()=>toggleQuestDate(q.id, dateStr) : undefined}
+                                      style={{height:22,background: isAttended ? C.green : beforeStart ? "transparent" : isToday ? `${C.amber}33` : isPast ? `${C.red}11` : C.bg2, borderRadius:2, display:"flex", alignItems:"center", justifyContent:"center", fontSize:9, fontWeight: isToday?900:600, color: isAttended?"#fff":beforeStart?C.dim:isToday?C.amber:isPast?C.red:C.muted, border: isToday?`1px solid ${C.amber}`:"none", cursor: clickable?"pointer":"default", userSelect:"none", transition:"transform 0.1s"}}
+                                      onMouseDown={clickable?(e)=>{(e.currentTarget as HTMLElement).style.transform="scale(0.9)";}:undefined}
+                                      onMouseUp={clickable?(e)=>{(e.currentTarget as HTMLElement).style.transform="scale(1)";}:undefined}
+                                      onMouseLeave={clickable?(e)=>{(e.currentTarget as HTMLElement).style.transform="scale(1)";}:undefined}>
                                       {dayN}
                                     </div>
                                   );
@@ -5871,9 +6115,11 @@ function AppMain() {
                           const dollar=isUSD(site);
                           const remaining=Math.max(0,parseFloat((st.deposited-st.betTotal).toFixed(2)));
                           const totalBase=parseFloat(st.deposited.toFixed(2));
-                          const pctRaw=totalBase>0?Math.round(st.betTotal/totalBase*100):0;
+                          // 진행률: 소수점 1자리. 100%는 오직 잔여=0일 때만.
+                          const pctRawCalc = totalBase>0 ? (st.betTotal/totalBase*100) : 0;
+                          const pctRaw = remaining>0 && pctRawCalc>=100 ? 99.9 : Math.round(pctRawCalc*10)/10;
                           const pct=Math.min(100,pctRaw);
-                          const isComplete=pctRaw>=100;
+                          const isComplete = remaining<=0 && pctRaw>=100;
                           const barColor=isComplete?C.purple:pctRaw>=90?C.red:pctRaw>=70?C.amber:C.green;
                           const sitePending=pending.filter(b=>b.site===site).length;
                           const sp = currentSessionProfits[site];
@@ -5884,7 +6130,7 @@ function AppMain() {
                                   <span style={{fontSize:13,fontWeight:800,color:C.text}}>{dollar?"$":"₩"} {site}</span>
                                   {isComplete && <span style={{fontSize:9,fontWeight:900,color:C.purple,background:`${C.purple}22`,border:`1px solid ${C.purple}`,borderRadius:3,padding:"1px 5px",letterSpacing:1}}>✓ 완료</span>}
                                 </div>
-                                <span style={{fontSize:12,color:barColor,fontWeight:800}}>{pctRaw}%</span>
+                                <span style={{fontSize:12,color:barColor,fontWeight:800}}>{pctRaw.toFixed(1)}%</span>
                               </div>
                               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:10,color:C.muted,marginBottom:6}}>
                                 <span>잔 <b style={{color:C.teal,fontSize:11}}>{fmtDisp(remaining,dollar)}</b></span>
@@ -5931,10 +6177,10 @@ function AppMain() {
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
                 <div style={{fontSize:14,fontWeight:800,color:C.teal}}>🎁 포인트 교환 ({pointSites.length})</div>
                 <button onClick={()=>{
-                  // 오늘 + 기본 주기(14일) 날짜로 초기화
+                  // 오늘 + 기본 기간(30일/1달) 날짜로 초기화
                   const defaultDate = new Date();
-                  defaultDate.setDate(defaultDate.getDate()+14);
-                  setNewPointSite({name:"올인구조대",exchangeName:"포인트교환",exchangeDate:defaultDate.toISOString().slice(0,10),targetAmount:2000000,targetSiteName:"",targetCycleDays:14});
+                  defaultDate.setDate(defaultDate.getDate()+30);
+                  setNewPointSite({name:"올인구조대",exchangeName:"포인트교환",exchangeDate:defaultDate.toISOString().slice(0,10),targetAmount:2000000,targetSiteName:"",targetCycleDays:30});
                   setAddPointSiteModal(true);
                 }} style={{padding:"5px 12px",borderRadius:5,border:`1px solid ${C.teal}`,background:`${C.teal}22`,color:C.teal,cursor:"pointer",fontWeight:700,fontSize:11}}>+ 추가</button>
               </div>
@@ -5951,7 +6197,10 @@ function AppMain() {
                     const baseDate=isCompleted?lastSession.nextTargetDate:ps.exchangeDate;
                     const startDate=new Date(baseDate);startDate.setDate(startDate.getDate()-1);
                     const startStr=startDate.toISOString().slice(0,10);
-                    const fromStr=oneMonthAgoStr(startStr);
+                    // ★ 목표 기간(targetCycleDays)만큼 과거로 이동하여 누적 계산 시작일 산출
+                    const cycle = ps.targetCycleDays || 30;
+                    const fromDate=new Date(startStr);fromDate.setDate(fromDate.getDate()-(cycle-1));
+                    const fromStr=fromDate.toISOString().slice(0,10);
                     const periodDeps=deposits.filter(d=>d.date>=fromStr&&d.date<=startStr&&(!ps.targetSiteName||d.site===ps.targetSiteName));
                     const totalKrw=periodDeps.reduce((s,d)=>s+(isUSD(d.site)?d.amount*usdKrw:d.amount),0);
                     const hasTarget = ps.targetAmount>0;
@@ -5960,8 +6209,8 @@ function AppMain() {
                     // D-DAY: 순수 날짜 기준 차이 (시간 무시). baseDate와 today 모두 YYYY-MM-DD 문자열 → UTC 자정 Date 비교 → round
                     const daysLeft = Math.round((new Date(baseDate+"T00:00:00Z").getTime() - new Date(today+"T00:00:00Z").getTime())/(1000*60*60*24));
                     const dayColor = daysLeft<0?C.red:daysLeft<=3?C.red:daysLeft<=7?C.amber:C.teal;
-                    const cycle = ps.targetCycleDays || 14;
-                    const cycleLabel = cycle===14?"2주":cycle===7?"1주":cycle===21?"3주":cycle===28?"4주":`${cycle}일`;
+                    // 기간 라벨 (1주/2주/1달/2달/3달, 그 외는 N일)
+                    const cycleLabel = cycle===7?"1주":cycle===14?"2주":cycle===30?"1달":cycle===60?"2달":cycle===90?"3달":`${cycle}일`;
                     return(
                       <div key={ps.id} style={{background:C.bg2,border:`1.5px solid ${achieved?C.green:C.border2}`,borderRadius:8,padding:12,position:"relative",overflow:"hidden",display:"flex",flexDirection:"column",gap:7}}>
                         {achieved && (
@@ -5969,7 +6218,7 @@ function AppMain() {
                         )}
                         <div>
                           <div style={{fontSize:15,fontWeight:900,color:C.text,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",paddingRight:achieved?54:0}}>{ps.name}</div>
-                          <div style={{fontSize:12,color:C.teal,fontWeight:700,marginTop:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{ps.exchangeName} · 🔁 주기 {cycleLabel}</div>
+                          <div style={{fontSize:12,color:C.teal,fontWeight:700,marginTop:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{ps.exchangeName} · 📅 기간 {cycleLabel}</div>
                         </div>
                         <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:C.muted}}>
                           <span style={{fontWeight:700}}>{baseDate.slice(5).replace("-","월 ")}일</span>
@@ -6503,9 +6752,9 @@ $$;`}
                          : m.type==="country" ? !!countryNameMap[m.original]
                          : !!leagueNameMap[m.original];
         return (
-          <div onClick={()=>setEditNameModal(null)}
+          <div
             style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
-            <div onClick={e=>e.stopPropagation()}
+            <div
               style={{background:C.bg2,border:`1px solid ${typeColor}`,borderRadius:10,padding:"20px 24px",minWidth:380,maxWidth:480,boxShadow:`0 10px 40px ${typeColor}33`}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
                 <div>
@@ -6606,9 +6855,9 @@ $$;`}
         };
 
         return (
-          <div onClick={()=>setStMappingModal(null)}
+          <div
             style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
-            <div onClick={e=>e.stopPropagation()}
+            <div
               style={{background:C.bg2,border:`1px solid ${C.teal}`,borderRadius:10,padding:"20px 24px",minWidth:520,maxWidth:640,width:"90%",maxHeight:"85vh",display:"flex",flexDirection:"column",boxShadow:`0 10px 40px ${C.teal}33`}}>
 
               {/* 헤더 */}
@@ -6616,7 +6865,7 @@ $$;`}
                 <div>
                   <div style={{fontSize:11,color:C.teal,fontWeight:800,letterSpacing:1,marginBottom:4}}>🔗 API 리그 매핑</div>
                   <div style={{fontSize:14,color:C.text,fontWeight:800}}>
-                    {SPORT_META[m.sport].icon} {m.sportKr} · {countryNameMap[m.country]||COUNTRY_KR[m.country]||m.country} · <span style={{color:C.amber}}>{leagueNameMap[m.league]||m.league}</span>
+                    {(SPORT_META[m.sport]?.icon) || "🏅"} {m.sportKr} · {countryNameMap[m.country]||COUNTRY_KR[m.country]||m.country} · <span style={{color:C.amber}}>{leagueNameMap[m.league]||m.league}</span>
                   </div>
                   <div style={{fontSize:10,color:C.dim,marginTop:4}}>이 사용자 리그에 연결할 API 리그를 선택하세요 (1:1)</div>
                 </div>
