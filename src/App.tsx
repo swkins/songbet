@@ -2617,16 +2617,17 @@ function AppMain() {
     else savePextSubCatList(newList);
     // 2) 기존 profitExtras 데이터 마이그레이션 — 해당 필드를 새 이름으로 변경
     //    DB에 update API가 없어 delete + insert로 마이그레이션 (id는 새로 부여됨)
+    //    ※ UI 라벨과 ProfitExtra 필드 매핑:
+    //       UI "사이트" → ProfitExtra.category
+    //       UI "분류"   → ProfitExtra.subCategory
+    //       UI "하위"   → ProfitExtra.subSubCategory
     const affected: typeof profitExtras = [];
     const newExtras = profitExtras.map(e => {
       let changed = false;
       let next: any = e;
-      if (type==="site"   && e.site===oldName) { next = { ...next, site:newName }; changed = true; }
-      if (type==="cat"    && e.category===oldName) { next = { ...next, category:newName }; changed = true; }
-      if (type==="subcat") {
-        if ((e as any).subCategory===oldName)    { next = { ...next, subCategory:newName }; changed = true; }
-        if ((e as any).subSubCategory===oldName) { next = { ...next, subSubCategory:newName }; changed = true; }
-      }
+      if (type==="site"   && e.category===oldName)         { next = { ...next, category:newName };       changed = true; }
+      if (type==="cat"    && (e as any).subCategory===oldName) { next = { ...next, subCategory:newName };    changed = true; }
+      if (type==="subcat" && (e as any).subSubCategory===oldName) { next = { ...next, subSubCategory:newName }; changed = true; }
       if (changed) { affected.push(e); return next; }
       return e;
     });
