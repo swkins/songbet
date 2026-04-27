@@ -221,6 +221,199 @@ function safeScore(val: any): number | null {
   return null;
 }
 
+// ═══════════════════════════════════════════════════════════════
+// ── 배당(Odds) — API-Sports odds 엔드포인트 호출 + 캐싱 ──────────
+// ═══════════════════════════════════════════════════════════════
+//   football: GET https://v3.football.api-sports.io/odds?fixture={id}
+//   baseball/basketball/volleyball/hockey: /odds?game={id}
+//   응답 구조 (요약):
+//     response: [{
+//       fixture/game: { id, ... },
+//       bookmakers: [{
+//         id, name, bets: [{
+//           id, name: "Match Winner" | "Asian Handicap" | "Goals Over/Under" | ...,
+//           values: [{ value: "Home" | "Draw" | "Away" | "Over 2.5" | ..., odd: "1.85" }]
+//         }]
+//       }]
+//     }]
+//
+// 표준화된 OddsMap 구조:
+//   {
+//     home: number | null,      // 홈승 (Match Winner / Home Win)
+//     draw: number | null,      // 무승부
+//     away: number | null,      // 원정승
+//     handicap: { [line: string]: { home: number, away: number } },   // "0.5" → {home:1.85, away:2.05}
+//     total: { [line: string]: { over: number, under: number } },     // "2.5" → {over:1.95, under:1.85}
+//   }
+export type OddsMap = {
+  home: number | null;
+  draw: number | null;
+  away: number | null;
+  handicap: Record<string, { home?: number; away?: number }>;
+  total: Record<string, { over?: number; under?: number }>;
+  bookmaker?: string;   // 어느 북메이커에서 가져왔는지
+  fetched_at: string;   // ISO 시각
+};
+
+// 메모리 캐시 — { fixtureId: { data, ts } }
+const _oddsCache = new Map<number, { data: OddsMap; ts: number }>();
+const ODDS_CACHE_TTL_MS = 10 * 60 * 1000;  // 10분
+
+// 우선순위 북메이커 (있으면 우선 선택)
+const PREFERRED_BOOKMAKERS = ["Bet365", "Pinnacle", "1xBet", "William Hill", "Marathonbet"];
+
+// 한 마켓의 values 배열에서 home/draw/away 추출
+function _parseMatchWinner(values: any[]): { home: number | null; draw: number | null; away: number | null } {
+  let home: number | null = null, draw: number | null = null, away: number | null = null;
+  for (const v of (values || [])) {
+    const lbl = String(v?.value || "").toLowerCase().trim();
+    const od = parseFloat(v?.odd);
+    if (!isFinite(od) || od < 1) continue;
+    if (lbl === "home" || lbl === "1") home = od;
+    else if (lbl === "draw" || lbl === "x") draw = od;
+    else if (lbl === "away" || lbl === "2") away = od;
+  }
+  return { home, draw, away };
+}
+
+// 핸디캡 파싱: "Home -1.5", "Away +2.5", "Home (-0.5)", 등
+// 결과: { "1.5": { home: 1.85, away: 2.05 } } 형태로
+//   ("0.5 핸디"는 한 줄에 양팀 odd가 묶임. 줄 라벨은 양수 절댓값으로 통일.)
+function _parseHandicap(values: any[]): Record<string, { home?: number; away?: number }> {
+  const out: Record<string, { home?: number; away?: number }> = {};
+  for (const v of (values || [])) {
+    const raw = String(v?.value || "").trim();
+    const od = parseFloat(v?.odd);
+    if (!isFinite(od) || od < 1) continue;
+    // 형식: "Home -1.5" / "Away +1.5" / "Home (-1.5)" / "Home -1" 등
+    const m = raw.match(/^(home|away)\s*\(?\s*([+-]?\d+(?:\.\d+)?)/i);
+    if (!m) continue;
+    const side = m[1].toLowerCase() as "home" | "away";
+    const lineNum = Math.abs(parseFloat(m[2]));
+    if (!isFinite(lineNum)) continue;
+    const key = lineNum.toFixed(1).replace(/\.0$/, ".0"); // "1.5", "0.5"
+    if (!out[key]) out[key] = {};
+    out[key][side] = od;
+  }
+  return out;
+}
+
+// 오버언더 파싱: "Over 2.5", "Under 2.5"
+function _parseOverUnder(values: any[]): Record<string, { over?: number; under?: number }> {
+  const out: Record<string, { over?: number; under?: number }> = {};
+  for (const v of (values || [])) {
+    const raw = String(v?.value || "").trim();
+    const od = parseFloat(v?.odd);
+    if (!isFinite(od) || od < 1) continue;
+    const m = raw.match(/^(over|under)\s*(\d+(?:\.\d+)?)/i);
+    if (!m) continue;
+    const side = m[1].toLowerCase() as "over" | "under";
+    const lineNum = parseFloat(m[2]);
+    if (!isFinite(lineNum)) continue;
+    const key = lineNum.toString();
+    if (!out[key]) out[key] = {};
+    out[key][side] = od;
+  }
+  return out;
+}
+
+// API 응답 → OddsMap 변환
+function parseOddsResponse(arr: any[]): OddsMap {
+  const result: OddsMap = {
+    home: null, draw: null, away: null,
+    handicap: {}, total: {},
+    fetched_at: new Date().toISOString(),
+  };
+  if (!Array.isArray(arr) || arr.length === 0) return result;
+
+  // 응답에 여러 fixture가 올 수도 있지만 우리는 fixture/game ID로 필터링한 상태라 첫 번째만 사용
+  const item = arr[0];
+  const bookmakers: any[] = item?.bookmakers || [];
+  if (bookmakers.length === 0) return result;
+
+  // 우선순위 북메이커 선택
+  let chosen: any = null;
+  for (const pref of PREFERRED_BOOKMAKERS) {
+    const found = bookmakers.find(b => String(b?.name || "").toLowerCase().includes(pref.toLowerCase()));
+    if (found) { chosen = found; break; }
+  }
+  if (!chosen) chosen = bookmakers[0];
+  if (!chosen) return result;
+
+  result.bookmaker = chosen?.name || "";
+  const bets: any[] = chosen?.bets || [];
+
+  for (const bet of bets) {
+    const betName = String(bet?.name || "").toLowerCase();
+    const values = bet?.values || [];
+
+    // 승무패: "Match Winner" (football), "Home/Away" (baseball/basketball - 무승부 없음)
+    if (betName.includes("match winner") || betName === "home/away" || betName === "winner") {
+      const w = _parseMatchWinner(values);
+      if (w.home !== null) result.home = w.home;
+      if (w.draw !== null) result.draw = w.draw;
+      if (w.away !== null) result.away = w.away;
+    }
+    // 핸디캡: "Asian Handicap", "Handicap", "Asian Handicap (1st Half)" 등
+    else if (betName.includes("handicap") && !betName.includes("half")) {
+      const h = _parseHandicap(values);
+      Object.assign(result.handicap, h);
+    }
+    // 오버언더: "Goals Over/Under" (football), "Over/Under" (baseball/basketball)
+    else if (betName.includes("over/under") || betName.includes("total") || betName === "goals over/under") {
+      const t = _parseOverUnder(values);
+      Object.assign(result.total, t);
+    }
+  }
+
+  return result;
+}
+
+// 단일 경기 odds fetch (캐시 우선)
+async function fetchOddsForFixture(
+  sport: Sport,
+  fixtureId: number,
+  apiKey: string,
+  forceRefresh: boolean = false
+): Promise<{ data: OddsMap | null; cached: boolean; error?: string }> {
+  if (!apiKey) return { data: null, cached: false, error: "API_SPORTS_KEY 미설정" };
+  if (!fixtureId || fixtureId < 0) return { data: null, cached: false, error: "잘못된 fixture id" };
+
+  // 캐시 확인
+  if (!forceRefresh) {
+    const cached = _oddsCache.get(fixtureId);
+    if (cached && (Date.now() - cached.ts) < ODDS_CACHE_TTL_MS) {
+      return { data: cached.data, cached: true };
+    }
+  }
+
+  const info = API_SPORTS_INFO.find(a => a.sport === sport);
+  if (!info) return { data: null, cached: false, error: `unknown sport: ${sport}` };
+
+  // football은 fixture, 나머지는 game 파라미터
+  const param = sport === "football" ? "fixture" : "game";
+  const url = `https://${info.host}/odds?${param}=${fixtureId}`;
+
+  try {
+    const r = await fetch(url, {
+      headers: {
+        "x-rapidapi-key":  apiKey,
+        "x-rapidapi-host": info.host,
+      },
+    });
+    if (!r.ok) {
+      return { data: null, cached: false, error: `HTTP ${r.status}` };
+    }
+    const j = await r.json();
+    const arr = j?.response ?? [];
+    const data = parseOddsResponse(arr);
+    _oddsCache.set(fixtureId, { data, ts: Date.now() });
+    return { data, cached: false };
+  } catch (e: any) {
+    return { data: null, cached: false, error: e?.message || "fetch 실패" };
+  }
+}
+
 // ── API-Sports 직접 호출 (한 종목 × 여러 날짜) ──────────────────
 async function fetchSportFromApiSports(
   sport: Sport,
@@ -654,7 +847,7 @@ function AppMain() {
   const today = useTodayStr();
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const [tab,setTab]=useState<"home"|"bettingCombo"|"stats"|"roi"|"strategy"|"pending"|"apiManager"|"dataManager">("home");
+  const [tab,setTab]=useState<"home"|"bettingCombo"|"bettingComboTest"|"stats"|"roi"|"strategy"|"pending"|"apiManager"|"dataManager">("home");
   // ── 데이터 탭 state ────────────────────────────────────────
   const [dataTableStats,setDataTableStats]=useState<Record<string,{rows:number,size:string,sizeBytes:number}>>({});
   const [dataStatsLoading,setDataStatsLoading]=useState(false);
@@ -803,7 +996,7 @@ function AppMain() {
   // 스포츠 탭(bettingCombo) 진입 또는 새로고침(nonce) 시 DB에서 로드
   // bettingFixturesReloadNonce, sportsTestReloadNonce 둘 다 watch
   useEffect(()=>{
-    if (tab === "bettingCombo") loadSportsTestData();
+    if (tab === "bettingCombo" || tab === "bettingComboTest") loadSportsTestData();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[tab, sportsTestReloadNonce, bettingFixturesReloadNonce]);
 
@@ -845,6 +1038,68 @@ function AppMain() {
   const [slipAmount,setSlipAmount]=useState<number>(10000);
   const [slipInclude,setSlipInclude]=useState<boolean>(true);
   const [slipIsLive,setSlipIsLive]=useState<boolean>(false); // ⚡ 라이브(실시간) 베팅 여부
+
+  // ── [스포츠 테스트] 배당(Odds) 상태 ──────────────────────────────
+  //   fixtureId → OddsMap | "loading" | { error: string }
+  const [oddsByFixture, setOddsByFixture] = useState<Record<number, OddsMap | "loading" | { error: string }>>({});
+
+  // 단일 경기 odds 가져오기 (테스트 탭 전용)
+  const fetchOddsFor = useCallback(async (sport: Sport, fixtureId: number, force: boolean = false) => {
+    if (!fixtureId || fixtureId < 0) return;
+    const apiKey = (import.meta as any).env?.VITE_API_SPORTS_KEY as string | undefined;
+    if (!apiKey) {
+      setOddsByFixture(p => ({ ...p, [fixtureId]: { error: "API 키 미설정" } }));
+      return;
+    }
+    setOddsByFixture(p => ({ ...p, [fixtureId]: "loading" }));
+    const res = await fetchOddsForFixture(sport, fixtureId, apiKey, force);
+    if (res.data) {
+      setOddsByFixture(p => ({ ...p, [fixtureId]: res.data! }));
+    } else {
+      setOddsByFixture(p => ({ ...p, [fixtureId]: { error: res.error || "조회 실패" } }));
+    }
+  }, []);
+
+  // 옵션 라벨 → 배당 조회
+  // optLabel 예시:
+  //   - "홈승" / "원정승" / "무승부"
+  //   - "팀명 (1.5)" / "팀명 (-0.5)" → 핸디캡
+  //   - "오버 (2.5)" / "언더 (2.5)" → 오버언더
+  const getOddsForOption = useCallback((odds: OddsMap | undefined, optLabel: string, homeTeam: string, awayTeam: string): number | null => {
+    if (!odds) return null;
+    if (optLabel === "홈승") return odds.home ?? null;
+    if (optLabel === "원정승") return odds.away ?? null;
+    if (optLabel === "무승부") return odds.draw ?? null;
+
+    // 핸디캡: "팀명 (1.5)" or "팀명 (-0.5)"
+    const handiMatch = optLabel.match(/^(.+?)\s*\(\s*([+-]?\d+(?:\.\d+)?)\s*\)\s*$/);
+    if (handiMatch) {
+      const teamPart = handiMatch[1].trim();
+      const lineNum = Math.abs(parseFloat(handiMatch[2]));
+      const lineKey = lineNum.toFixed(1).replace(/\.0$/, ".0");
+      const handi = odds.handicap?.[lineKey];
+      if (!handi) return null;
+      // 팀명이 home인지 away인지 판별
+      // 한글 팀명일 수 있으므로 정확히 일치하는지로만 판별
+      const homeKr = (translateTeamName(homeTeam, teamNameMap) || homeTeam || "").trim();
+      const awayKr = (translateTeamName(awayTeam, teamNameMap) || awayTeam || "").trim();
+      if (teamPart === homeKr || teamPart === homeTeam) return handi.home ?? null;
+      if (teamPart === awayKr || teamPart === awayTeam) return handi.away ?? null;
+      return null;
+    }
+
+    // 오버언더: "오버 (2.5)" / "언더 (2.5)"
+    const ouMatch = optLabel.match(/^(오버|언더)\s*\(\s*(\d+(?:\.\d+)?)\s*\)\s*$/);
+    if (ouMatch) {
+      const side = ouMatch[1];
+      const lineKey = ouMatch[2];
+      const tot = odds.total?.[lineKey];
+      if (!tot) return null;
+      return side === "오버" ? (tot.over ?? null) : (tot.under ?? null);
+    }
+
+    return null;
+  }, [teamNameMap]);
 
   const slipGameIds = useMemo(()=>new Set(slip.map(s=>s.id)), [slip]);
 
@@ -4539,9 +4794,9 @@ function AppMain() {
         </div>
         <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
           {([
-            ["home","🏠 대시보드"],["bettingCombo","🎯 스포츠"],["pending","⏳ 베팅 내역"],["stats","📊 통계"],["roi","💹 수익률"],["strategy","📋 전략"],["apiManager","🔑 API 관리"],["dataManager","🗄 데이터"],
+            ["home","🏠 대시보드"],["bettingCombo","🎯 스포츠"],["pending","⏳ 베팅 내역"],["stats","📊 통계"],["roi","💹 수익률"],["strategy","📋 전략"],["apiManager","🔑 API 관리"],["dataManager","🗄 데이터"],["bettingComboTest","🧪 스포츠 (테스트)"],
           ] as [string,string][]).map(([k,l])=>{
-            const ac = k==="pending"?C.amber:k==="home"?C.green:k==="apiManager"?C.purple:k==="dataManager"?C.red:C.orange;
+            const ac = k==="pending"?C.amber:k==="home"?C.green:k==="apiManager"?C.purple:k==="dataManager"?C.red:k==="bettingComboTest"?C.teal:C.orange;
             const active = tab===k;
             return (
               <button key={k} onClick={()=>setTab(k as any)}
@@ -4568,8 +4823,17 @@ function AppMain() {
           - API(Supabase fixtures)에서 모든 종목/국가/리그 자동 추출
           - KST 기준 어제+오늘+내일 경기 표시 (어제는 결과 반영용)
           - 팀명 한글 자동 변환 (translateTeamName)
+          - 🧪 bettingComboTest 모드: 위와 동일 + 배당(Odds) 자동 조회 표시
           ══════════════════════════════════════════════════════════ */}
-      {tab==="bettingCombo" && (()=>{
+      {tab==="bettingComboTest" && (
+        <div style={{flexShrink:0,padding:"7px 16px",background:`${C.teal}11`,borderBottom:`1px solid ${C.teal}44`,display:"flex",alignItems:"center",gap:10,fontSize:11}}>
+          <span style={{fontSize:14}}>🧪</span>
+          <span style={{color:C.teal,fontWeight:800}}>스포츠 (테스트) 모드</span>
+          <span style={{color:C.muted}}>—</span>
+          <span style={{color:C.muted}}>경기 펼치기 후 [📥 배당 가져오기] 버튼을 누르면 옵션별 실시간 배당이 표시됩니다 (10분 캐시 · 무료 플랜 100req/일)</span>
+        </div>
+      )}
+      {(tab==="bettingCombo" || tab==="bettingComboTest") && (()=>{
         // KST 기준 오늘/내일 YYYY-MM-DD
         const kstToday = new Date(Date.now() + 9*3600_000).toISOString().slice(0,10);
         const kstTomorrow = new Date(Date.now() + (9+24)*3600_000).toISOString().slice(0,10);
@@ -5134,9 +5398,43 @@ function AppMain() {
                         // 농구 플핸 라인: 5.5 ~ 29.5 (1단위, 25개)
                         const handiLinesBasketball = Array.from({length:25}, (_,i)=>5.5+i);
 
+                        // [스포츠 테스트 탭 전용] 배당 자동 가져오기
+                        const isTestTab = tab === "bettingComboTest";
+                        const oddsState = isTestTab && g.id > 0 ? oddsByFixture[g.id] : undefined;
+                        const oddsData: OddsMap | undefined = oddsState && typeof oddsState === "object" && !("error" in oddsState) ? oddsState as OddsMap : undefined;
+                        const oddsLoading = oddsState === "loading";
+                        const oddsError = oddsState && typeof oddsState === "object" && "error" in oddsState ? (oddsState as any).error : null;
+                        // 배당 표시 헬퍼
+                        const oddsFor = (opt:string): string => {
+                          if (!isTestTab) return "—";
+                          if (oddsLoading) return "...";
+                          if (!oddsData) return "—";
+                          const v = getOddsForOption(oddsData, opt, g.home_team, g.away_team);
+                          return v !== null && v > 0 ? v.toFixed(2) : "—";
+                        };
+
                         return (
                           <div style={{marginTop:14}}>
-                            <div style={{fontSize:11,fontWeight:800,color:C.teal,marginBottom:10,letterSpacing:1,borderBottom:`1px solid ${C.border}`,paddingBottom:6}}>🎯 베팅 옵션</div>
+                            <div style={{fontSize:11,fontWeight:800,color:C.teal,marginBottom:10,letterSpacing:1,borderBottom:`1px solid ${C.border}`,paddingBottom:6,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                              <span>🎯 베팅 옵션</span>
+                              {isTestTab && g.id > 0 && (
+                                <span style={{display:"flex",alignItems:"center",gap:8}}>
+                                  {oddsLoading && <span style={{fontSize:10,color:C.amber,fontWeight:700}}>⏳ 배당 조회 중...</span>}
+                                  {oddsError && <span style={{fontSize:10,color:C.red,fontWeight:700}} title={oddsError}>⚠ {oddsError}</span>}
+                                  {oddsData && (
+                                    <span style={{fontSize:9,color:C.dim}}>
+                                      📊 {oddsData.bookmaker || "북메이커"}
+                                    </span>
+                                  )}
+                                  <button
+                                    onClick={()=>fetchOddsFor(sport, g.id, true)}
+                                    disabled={oddsLoading}
+                                    style={{fontSize:10,padding:"3px 9px",borderRadius:4,border:`1px solid ${C.teal}66`,background:`${C.teal}15`,color:C.teal,cursor:oddsLoading?"wait":"pointer",fontWeight:700,opacity:oddsLoading?0.5:1}}>
+                                    {oddsData ? "🔄 갱신" : "📥 배당 가져오기"}
+                                  </button>
+                                </span>
+                              )}
+                            </div>
 
                             {/* 승패/승무패 */}
                             <div style={{marginBottom:14}}>
@@ -5148,6 +5446,7 @@ function AppMain() {
                                   {opt:"원정승",label:krTeam(g.away_team),sub:"원정",color:C.teal},
                                 ].map(b=>{
                                   const added=inSlip(b.opt);
+                                  const oddVal = oddsFor(b.opt);
                                   return <button key={b.opt} onClick={()=>handleSlipPick(g,b.opt)}
                                     style={{padding:"12px 6px",borderRadius:7,cursor:"pointer",
                                       border:added?`2px solid ${b.color}`:`1px solid ${C.border}`,
@@ -5156,6 +5455,7 @@ function AppMain() {
                                       display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
                                     {b.sub && <span style={{fontSize:9,color:added?b.color:C.muted}}>{b.sub}</span>}
                                     <span style={{fontSize:12,textAlign:"center",wordBreak:"break-all" as const}}>{b.label}</span>
+                                    {isTestTab && oddVal !== "—" && <span style={{fontSize:11,fontWeight:900,color:added?b.color:C.amber}}>@{oddVal}</span>}
                                     {added && <span style={{fontSize:9,color:b.color,fontWeight:800}}>✓ 슬립</span>}
                                   </button>;
                                 })}
@@ -5183,7 +5483,7 @@ function AppMain() {
                                               background:added?`${color}33`:C.bg2,color:added?color:C.text,
                                               fontWeight:added?800:600,fontSize:11,display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,textAlign:"left"}}>
                                             <span style={{flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{team} <b>({ln})</b></span>
-                                            <span style={{color:added?color:C.dim,fontSize:11,fontWeight:700,minWidth:32,textAlign:"right",flexShrink:0}}>—</span>
+                                            <span style={{color:added?color:(isTestTab && oddsFor(opt)!=="—"?C.amber:C.dim),fontSize:11,fontWeight:isTestTab?800:700,minWidth:32,textAlign:"right",flexShrink:0}}>{oddsFor(opt)}</span>
                                           </button>;
                                         })}
                                       </div>
@@ -5208,7 +5508,7 @@ function AppMain() {
                                               background:added?`${color}33`:C.bg2,color:added?color:C.text,
                                               fontWeight:added?800:600,fontSize:11,display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,textAlign:"left"}}>
                                             <span style={{flex:1,minWidth:0}}>{label} <b>({ln})</b></span>
-                                            <span style={{color:added?color:C.dim,fontSize:11,fontWeight:700,minWidth:32,textAlign:"right",flexShrink:0}}>—</span>
+                                            <span style={{color:added?color:(isTestTab && oddsFor(opt)!=="—"?C.amber:C.dim),fontSize:11,fontWeight:isTestTab?800:700,minWidth:32,textAlign:"right",flexShrink:0}}>{oddsFor(opt)}</span>
                                           </button>;
                                         })}
                                       </div>
@@ -5240,7 +5540,7 @@ function AppMain() {
                                               fontWeight:added?800:600,fontSize:11,
                                               display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,textAlign:"left"}}>
                                             <span style={{flex:1,minWidth:0}}>{label} <b>({ln})</b></span>
-                                            <span style={{color:added?color:C.dim,fontSize:11,fontWeight:700,minWidth:32,textAlign:"right"}}>—</span>
+                                            <span style={{color:added?color:(isTestTab && oddsFor(opt)!=="—"?C.amber:C.dim),fontSize:11,fontWeight:isTestTab?800:700,minWidth:32,textAlign:"right",flexShrink:0}}>{oddsFor(opt)}</span>
                                           </button>;
                                         })}
                                       </div>
@@ -5272,7 +5572,7 @@ function AppMain() {
                                               fontWeight:added?800:600,fontSize:11,
                                               display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,textAlign:"left"}}>
                                             <span style={{flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{team} <b>(+{ln})</b></span>
-                                            <span style={{color:added?color:C.dim,fontSize:11,fontWeight:700,minWidth:32,textAlign:"right",flexShrink:0}}>—</span>
+                                            <span style={{color:added?color:(isTestTab && oddsFor(opt)!=="—"?C.amber:C.dim),fontSize:11,fontWeight:isTestTab?800:700,minWidth:32,textAlign:"right",flexShrink:0}}>{oddsFor(opt)}</span>
                                           </button>;
                                         })}
                                       </div>
@@ -5304,7 +5604,7 @@ function AppMain() {
                                               fontWeight:added?800:600,fontSize:11,
                                               display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,textAlign:"left"}}>
                                             <span style={{flex:1,minWidth:0}}>{label} <b>({ln})</b></span>
-                                            <span style={{color:added?color:C.dim,fontSize:11,fontWeight:700,minWidth:32,textAlign:"right"}}>—</span>
+                                            <span style={{color:added?color:(isTestTab && oddsFor(opt)!=="—"?C.amber:C.dim),fontSize:11,fontWeight:isTestTab?800:700,minWidth:32,textAlign:"right",flexShrink:0}}>{oddsFor(opt)}</span>
                                           </button>;
                                         })}
                                       </div>
@@ -5348,7 +5648,7 @@ function AppMain() {
                                                 background:added?`${color}33`:C.bg2,color:added?color:C.text,
                                                 fontWeight:added?800:600,fontSize:11,display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,textAlign:"left"}}>
                                               <span style={{flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{team} <b>({sign}{val})</b></span>
-                                              <span style={{color:added?color:C.dim,fontSize:11,fontWeight:700,minWidth:32,textAlign:"right",flexShrink:0}}>—</span>
+                                              <span style={{color:added?color:(isTestTab && oddsFor(opt)!=="—"?C.amber:C.dim),fontSize:11,fontWeight:isTestTab?800:700,minWidth:32,textAlign:"right",flexShrink:0}}>{oddsFor(opt)}</span>
                                             </button>;
                                           })}
                                         </div>
@@ -5437,8 +5737,21 @@ function AppMain() {
                       </div>
                       <div style={{background:`${optColor}22`,border:`1px solid ${optColor}66`,borderRadius:6,padding:"6px 10px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:8}}>
                         <span style={{fontSize:14,color:optColor,fontWeight:800,textAlign:"left",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1,minWidth:0}}>→ {displayOpt}</span>
-                        {/* 우측은 추후 배당 표시 영역 (현재는 공간만 확보) */}
-                        <span style={{fontSize:13,color:`${optColor}99`,fontWeight:800,minWidth:48,textAlign:"right",flexShrink:0}}>{item.odds>0?item.odds.toFixed(2):"—"}</span>
+                        {/* 배당 표시: item.odds(직접입력) 우선, 없으면 테스트 탭에서 자동 가져온 배당 시도 */}
+                        {(()=>{
+                          if (item.odds > 0) return <span style={{fontSize:13,color:`${optColor}99`,fontWeight:800,minWidth:48,textAlign:"right",flexShrink:0}}>{item.odds.toFixed(2)}</span>;
+                          // 테스트 탭이면 자동 가져온 배당 표시
+                          if (tab === "bettingComboTest" && item.game.id > 0) {
+                            const od = oddsByFixture[item.game.id];
+                            if (od && typeof od === "object" && !("error" in od)) {
+                              const v = getOddsForOption(od as OddsMap, item.optLabel, item.game.home_team, item.game.away_team);
+                              if (v !== null && v > 0) {
+                                return <span style={{fontSize:13,color:C.amber,fontWeight:800,minWidth:48,textAlign:"right",flexShrink:0}} title="API에서 자동 조회된 배당. 사이트 실제 배당과 다를 수 있음">📊{v.toFixed(2)}</span>;
+                              }
+                            }
+                          }
+                          return <span style={{fontSize:13,color:`${optColor}99`,fontWeight:800,minWidth:48,textAlign:"right",flexShrink:0}}>—</span>;
+                        })()}
                       </div>
                     </div>
                   );
