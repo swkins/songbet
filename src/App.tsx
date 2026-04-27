@@ -62,7 +62,7 @@
 //   · 강제 새로고침(⚡)은 캐시 무시하고 무조건 호출.
 //   · 모바일 기기에서는 API 호출 자체를 막음 (IP 변동 위험).
 //   · 활성 종목: ACTIVE_SPORTS 상수에 정의된 것만 호출 (현재 축구·야구·농구).
-//   · 가져오는 날짜: KST 오늘+내일 2일치.
+//   · 가져오는 날짜: KST 어제+오늘+내일 3일치 (어제는 종료된 경기 결과 반영용).
 //
 //  핵심 함수 (App 컴포넌트 내부):
 //   · isMobileDevice()         : 모바일 감지
@@ -175,7 +175,7 @@ const ACTIVE_SPORTS: Sport[] = ["football", "baseball", "basketball"];
 
 // ── 캐시 정책 ──────────────────────────────────────────────────
 const CACHE_FRESH_MIN = 15;   // 15분 이내면 신선 → API 호출 안 함
-const FETCH_DAYS = 2;         // KST 오늘+내일 2일치
+const FETCH_DAYS = 3;         // KST 어제+오늘+내일 3일치 (어제는 결과 반영용)
 
 // ── 모바일 감지 ────────────────────────────────────────────────
 // User-Agent 기반. 100% 정확하진 않지만 핸드폰 통신사 IP 차단 목적엔 충분.
@@ -313,15 +313,15 @@ async function fetchFixturesFromCache(sport: Sport): Promise<LiveFixture[]> {
   }));
 }
 
-// ── DB 캐시: 모든 종목, KST 오늘+내일 (스포츠 테스트 탭에서 사용) ──
+// ── DB 캐시: 모든 종목, KST 어제+오늘+내일 (스포츠 테스트 탭에서 사용) ──
 async function fetchAllFixturesUntilTomorrowKst(): Promise<LiveFixture[]> {
   // KST 오늘 00:00의 UTC ISO
   const nowKst = new Date(Date.now() + 9*3600_000);
   const yyyy = nowKst.getUTCFullYear();
   const mm = nowKst.getUTCMonth();
   const dd = nowKst.getUTCDate();
-  // KST 오늘 00:00 → UTC -9시간
-  const fromUtc = new Date(Date.UTC(yyyy, mm, dd, 0, 0, 0) - 9*3600_000);
+  // KST 어제 00:00 → UTC -9시간 (어제 데이터부터 포함하여 결과 반영용)
+  const fromUtc = new Date(Date.UTC(yyyy, mm, dd-1, 0, 0, 0) - 9*3600_000);
   // KST 모레 00:00 → UTC -9시간 (= 내일 23:59:59까지 포함)
   const toUtc = new Date(Date.UTC(yyyy, mm, dd+2, 0, 0, 0) - 9*3600_000);
   const rows = await db.loadFixturesByRange(fromUtc.toISOString(), toUtc.toISOString());
@@ -460,7 +460,10 @@ interface PointSite {
   exchangeDate: string;
   targetAmount: number;
   targetSiteName?: string;  // 누적입금 기준 사이트 (없으면 전체)
-  targetCycleDays?: number; // 목표 기간 (일수). 교환일 기준 과거 N일간 누적 입금을 목표 금액과 비교. 기본 30일(1달).
+  targetCycleDays?: number; // [구버전 호환] 목표 기간 (일수). targetStartDate/EndDate가 있으면 무시됨.
+  // ★ rev.8: 목표 기간을 날짜 범위로 직접 지정 (있으면 cycleDays보다 우선)
+  targetStartDate?: string; // 누적 입금 집계 시작일 (YYYY-MM-DD, 포함)
+  targetEndDate?: string;   // 누적 입금 집계 종료일 (YYYY-MM-DD, 포함). 보통 exchangeDate와 같거나 그 직전
   sessions: PointSession[];
 }
 interface PointSession {
@@ -797,7 +800,7 @@ function AppMain() {
   const [stFixtures,setStFixtures]=useState<LiveFixture[]>([]);
   const [stLoading,setStLoading]=useState(false);
   const [stError,setStError]=useState("");
-  const [stExpandedSports,setStExpandedSports]=useState<Record<string,boolean>>({football:true});
+  const [stExpandedSports,setStExpandedSports]=useState<Record<string,boolean>>({});
   const [stExpandedCountries,setStExpandedCountries]=useState<Record<string,boolean>>({});
   const [stSelSport,setStSelSport]=useState<Sport|"">("");
   const [stSelCountry,setStSelCountry]=useState("");
@@ -813,7 +816,7 @@ function AppMain() {
       const data = await fetchAllFixturesUntilTomorrowKst();
       setStFixtures(data);
       setStFetchedAt(Date.now());
-      if (data.length === 0) setStError("오늘+내일 경기 데이터가 없습니다");
+      if (data.length === 0) setStError("어제+오늘+내일 경기 데이터가 없습니다");
     } catch(e:any) {
       setStError(e?.message || "불러오기 실패");
     } finally { setStLoading(false); }
@@ -870,6 +873,41 @@ function AppMain() {
         : isPostponed(st) ? `${statusLabel(st)} 처리된`
         : "이미 시작된";
       return alert(`${reason} 경기는 베팅할 수 없습니다.\n\n${homeKr} vs ${awayKr} (${statusLabel(st)})\n\n진행중인 경기에 베팅하려면 "⚡ 라이브 베팅" 체크박스를 켜주세요.`);
+    }
+
+    // ★ 같은 경기 + 같은 카테고리(승패/오언/핸디캡)로 이미 진행중인 베팅이 있는지 검사
+    //   승패 ↔ 오언은 같은 경기에 다른 카테고리이므로 허용 (요구사항: 승패, 언오버는 같은거로 간주X)
+    const categorizeOpt = (opt:string): "승패"|"오언"|"핸디캡"|"기타" => {
+      if (opt==="홈승"||opt==="원정승"||opt==="무승부") return "승패";
+      if (opt.endsWith(" 승")) return "승패";
+      if (/^(오버|언더)/.test(opt)) return "오언";
+      if (/\([+-]?[\d.]+\)$/.test(opt)) return "핸디캡"; // "팀명 (1.5)" 형식
+      return "기타";
+    };
+    for (const item of slip) {
+      const homeKr = translateTeamName(item.game.home_team, teamNameMap);
+      const awayKr = translateTeamName(item.game.away_team, teamNameMap);
+      const newCat = categorizeOpt(item.optLabel);
+      const existing = pending.find(b => {
+        if (!b.homeTeam || !b.awayTeam) return false;
+        if (b.homeTeam !== homeKr || b.awayTeam !== awayKr) return false;
+        if (b.league !== item.game.league_name) return false;
+        return categorizeOpt(b.betOption) === newCat;
+      });
+      if (existing) {
+        const existingDisplay = existing.betOption==="홈승" && existing.homeTeam ? `${existing.homeTeam} 승` :
+                                existing.betOption==="원정승" && existing.awayTeam ? `${existing.awayTeam} 승` :
+                                existing.betOption;
+        const ok = window.confirm(
+          `⚠️ 이미 베팅한적이 있습니다\n\n` +
+          `${homeKr} vs ${awayKr} 경기에\n` +
+          `이미 "${newCat}" 카테고리로 베팅이 진행중입니다:\n\n` +
+          `  기존: ${existingDisplay} (${existing.site}, ${fmtDisp(existing.amount,existing.isDollar)})\n` +
+          `  신규: ${item.optLabel} (${slipSite})\n\n` +
+          `그래도 베팅하시겠습니까?`
+        );
+        if (!ok) return;
+      }
     }
 
     const dollar=isUSD(slipSite);
@@ -1537,8 +1575,12 @@ function AppMain() {
           db.upsertPointSite({
             id:p.id, name:p.name, exchangeName:p.exchangeName, exchangeDate:p.exchangeDate,
             targetAmount:p.targetAmount, targetSiteName:p.targetSiteName,
-            targetCycleDays:p.targetCycleDays||14, sessions:p.sessions||[],
-          });
+            targetCycleDays:p.targetCycleDays||14,
+            // ★ rev.8: 날짜 범위 필드 (DB 스키마에 컬럼이 추가되어야 영구 보존됨)
+            targetStartDate:p.targetStartDate,
+            targetEndDate:p.targetEndDate,
+            sessions:p.sessions||[],
+          } as any);
         }
       }
       return sites;
@@ -1546,9 +1588,16 @@ function AppMain() {
   };
 
   const [addPointSiteModal,setAddPointSiteModal]=useState(false);
+  // 포인트 교환 추가 모달 — 프리셋 패널 펼침 상태 (기본: 접힘)
+  const [pointPresetPanelOpen,setPointPresetPanelOpen]=useState(false);
   // ── 포인트 교환 추가 모달 state ─────────────────────────────
   // 사이트명/교환이름은 통합되어 exchangeName 하나로 관리됨 (name도 같은 값으로 저장).
-  const [newPointSite,setNewPointSite]=useState<{name:string,exchangeName:string,exchangeDate:string,targetAmount:number,targetSiteName:string,targetCycleDays:number}>({name:"",exchangeName:"",exchangeDate:"",targetAmount:2000000,targetSiteName:"",targetCycleDays:30});
+  // targetStartDate/targetEndDate: 목표 누적 입금 집계 기간 (직접 날짜 범위 지정)
+  const [newPointSite,setNewPointSite]=useState<{name:string,exchangeName:string,exchangeDate:string,targetAmount:number,targetSiteName:string,targetCycleDays:number,targetStartDate:string,targetEndDate:string}>({name:"",exchangeName:"",exchangeDate:"",targetAmount:2000000,targetSiteName:"",targetCycleDays:30,targetStartDate:"",targetEndDate:""});
+  // 인라인 달력 펼침 상태 + 표시 중인 월 + 클릭 단계 (1번째: 시작, 2번째: 종료)
+  const [pointDateCalOpen,setPointDateCalOpen]=useState(false);
+  const [pointDateCalMonth,setPointDateCalMonth]=useState<string>(""); // YYYY-MM
+  const [pointDateClickStep,setPointDateClickStep]=useState<"start"|"end">("start");
 
   // ── 포인트 교환 프리셋 (저장된 교환 조건) ─────────────────────
   // 🔒 DB(app_settings.point_exchange_presets)에 저장됨. 빈 배열로 시작.
@@ -1592,6 +1641,8 @@ function AppMain() {
       targetAmount: preset.targetAmount,
       targetSiteName: preset.targetSiteName || "",
       targetCycleDays: preset.targetCycleDays,
+      targetStartDate: "", // 매번 새로 달력에서 지정
+      targetEndDate: "",
     });
   };
 
@@ -1608,13 +1659,35 @@ function AppMain() {
     const name = newPointSite.exchangeName.trim();
     if(!name) { alert("교환 이름을 입력해주세요."); return; }
     if(!newPointSite.exchangeDate) { alert("교환 목표 날짜를 선택해주세요."); return; }
+    // 날짜 범위 검증 (둘 다 선택했어야 함)
+    if(!newPointSite.targetStartDate || !newPointSite.targetEndDate) {
+      alert("목표 기간(시작일~종료일)을 달력에서 선택해주세요.");
+      return;
+    }
+    if(newPointSite.targetStartDate > newPointSite.targetEndDate) {
+      alert("시작일이 종료일보다 늦습니다. 다시 선택해주세요.");
+      return;
+    }
     // name과 exchangeName은 같은 값으로 통합 저장
-    const site:PointSite={id:String(Date.now()),name:name,exchangeName:name,exchangeDate:newPointSite.exchangeDate,targetAmount:newPointSite.targetAmount,targetSiteName:newPointSite.targetSiteName||undefined,targetCycleDays:newPointSite.targetCycleDays||30,sessions:[]};
+    const site:PointSite={
+      id:String(Date.now()),
+      name:name,
+      exchangeName:name,
+      exchangeDate:newPointSite.exchangeDate,
+      targetAmount:newPointSite.targetAmount,
+      targetSiteName:newPointSite.targetSiteName||undefined,
+      targetCycleDays:newPointSite.targetCycleDays||30, // 호환용 — 새 필드 우선
+      targetStartDate:newPointSite.targetStartDate,
+      targetEndDate:newPointSite.targetEndDate,
+      sessions:[],
+    };
     const updated=[...pointSites,site];
     savePointSites(updated);
     setAddPointSiteModal(false);
     // 모달 초기화 — 다음에 열릴 때를 위해 빈 값으로
-    setNewPointSite({name:"",exchangeName:"",exchangeDate:"",targetAmount:2000000,targetSiteName:"",targetCycleDays:30});
+    setNewPointSite({name:"",exchangeName:"",exchangeDate:"",targetAmount:2000000,targetSiteName:"",targetCycleDays:30,targetStartDate:"",targetEndDate:""});
+    setPointDateCalOpen(false);
+    setPointDateClickStep("start");
   };
 
   // ── 일일 퀘스트 ────────────────────────────────────────────
@@ -1661,6 +1734,33 @@ function AppMain() {
   };
 
   const [newQuestName,setNewQuestName]=useState("");
+  // 퀘스트 이름 인라인 수정용 state (id → 임시 입력값)
+  const [editingQuestId,setEditingQuestId]=useState<string|null>(null);
+  const [editingQuestName,setEditingQuestName]=useState("");
+  // 퀘스트 이름 변경 저장
+  const handleRenameQuest = (id:string) => {
+    const newName = editingQuestName.trim();
+    if(!newName) {
+      setEditingQuestId(null);
+      setEditingQuestName("");
+      return;
+    }
+    // 같은 이름은 그냥 닫기
+    const cur = dailyQuests.find(q=>q.id===id);
+    if(cur && cur.name===newName) {
+      setEditingQuestId(null);
+      setEditingQuestName("");
+      return;
+    }
+    // 다른 퀘스트와 이름 중복 검사
+    if(dailyQuests.some(q=>q.id!==id && q.name===newName)) {
+      alert("이미 존재하는 퀘스트 이름입니다");
+      return;
+    }
+    saveDailyQuests(dailyQuests.map(q=>q.id===id ? {...q, name:newName} : q));
+    setEditingQuestId(null);
+    setEditingQuestName("");
+  };
   const [questCalendarExpanded,setQuestCalendarExpanded]=useState<Record<string,boolean>>({});
   // 각 퀘스트가 달력에서 현재 보고 있는 월 (YYYY-MM 형식). 없으면 today 기준.
   const [questCalendarMonth,setQuestCalendarMonth]=useState<Record<string,string>>({});
@@ -1845,13 +1945,22 @@ function AppMain() {
   const handlePointExchangeComplete=(siteId:string)=>{
     const site = pointSites.find(s=>s.id===siteId);
     if(!site) return;
-    const cycle = site.targetCycleDays || 30;
-    // 기간 라벨 (1주/2주/1달/2달/3달, 그 외는 N일)
-    const cycleLabel = cycle===7?"1주":cycle===14?"2주":cycle===30?"1달":cycle===60?"2달":cycle===90?"3달":`${cycle}일`;
+    // 사이클 길이 결정: 새 날짜 범위가 있으면 그 일수, 없으면 기존 cycleDays
+    const useDateRange = !!(site.targetStartDate && site.targetEndDate);
+    let cycle:number;
+    let periodLabel:string;
+    if (useDateRange) {
+      const ms = new Date(site.targetEndDate!+"T00:00:00Z").getTime() - new Date(site.targetStartDate!+"T00:00:00Z").getTime();
+      cycle = Math.round(ms/(1000*60*60*24)) + 1;
+      periodLabel = `${site.targetStartDate} ~ ${site.targetEndDate} (${cycle}일)`;
+    } else {
+      cycle = site.targetCycleDays || 30;
+      periodLabel = cycle===7?"1주":cycle===14?"2주":cycle===30?"1달":cycle===60?"2달":cycle===90?"3달":`${cycle}일`;
+    }
     const targetMsg = site.targetAmount>0
-      ? `목표 ${site.targetAmount.toLocaleString()}원, 목표 기간 ${cycleLabel}`
-      : `목표 없음 (입금만 추적), 목표 기간 ${cycleLabel}`;
-    if(!window.confirm(`"${site.name}" 현금교환 완료 처리?\n\n같은 조건(${targetMsg})으로 ${cycleLabel} 후를 다음 교환일로 잡고 이어서 진행하시겠습니까?`)) return;
+      ? `목표 ${site.targetAmount.toLocaleString()}원, 목표 기간 ${periodLabel}`
+      : `목표 없음 (입금만 추적), 목표 기간 ${periodLabel}`;
+    if(!window.confirm(`"${site.name}" 현금교환 완료 처리?\n\n같은 조건(${targetMsg})으로 ${cycle}일 후를 다음 교환일로 잡고 이어서 진행하시겠습니까?`)) return;
     const now=new Date().toISOString().slice(0,10);
     // 다음 교환일 = 이전 교환일 + cycleDays (사이클 길이만큼 뒤로)
     const baseDate = site.sessions.length>0
@@ -1861,6 +1970,12 @@ function AppMain() {
     const session:PointSession={id:String(Date.now()),completedAt:now,nextTargetDate:nextTarget};
     const updated=pointSites.map(s=>{
       if(s.id!==siteId)return s;
+      // 새 날짜 범위도 사이클만큼 뒤로 이동시켜 갱신 (있던 경우만)
+      if (useDateRange) {
+        const newStart = getNextTargetDate(s.targetStartDate!, cycle);
+        const newEnd = getNextTargetDate(s.targetEndDate!, cycle);
+        return {...s, sessions:[...s.sessions,session], targetStartDate:newStart, targetEndDate:newEnd};
+      }
       return{...s,sessions:[...s.sessions,session]};
     });
     savePointSites(updated);
@@ -2002,7 +2117,11 @@ function AppMain() {
       setPointSites(ps.map(p=>({
         id:p.id,name:p.name,exchangeName:p.exchangeName,exchangeDate:p.exchangeDate,
         targetAmount:p.targetAmount,targetSiteName:p.targetSiteName,
-        targetCycleDays:p.targetCycleDays,sessions:p.sessions as any,
+        targetCycleDays:p.targetCycleDays,
+        // ★ rev.8: DB 스키마에 필드가 있으면 가져옴 (없으면 undefined). 구버전 데이터 호환.
+        targetStartDate:(p as any).targetStartDate,
+        targetEndDate:(p as any).targetEndDate,
+        sessions:p.sessions as any,
       })) as PointSite[]);
       setDailyQuestsRaw(dq.map(q=>({id:q.id,name:q.name,createdAt:q.createdAt,history:q.history})) as DailyQuest[]);
       setCodeMemosRaw(cm);
@@ -2307,17 +2426,20 @@ function AppMain() {
         }
       }
 
-      // 4) 그저께 이전 데이터 자동 삭제 (KST 기준 2일 전 00:00 이전)
+      // 4) 오래된 데이터 자동 삭제 (KST 기준 그저께 00:00 이전 = 어제 데이터는 보존)
+      //    어제 경기까지 호출하므로 어제 데이터는 살려둬야 함
       try {
-        const kstYesterday = new Date(Date.now() + 9*3600_000);
-        kstYesterday.setUTCHours(0,0,0,0);
-        kstYesterday.setUTCDate(kstYesterday.getUTCDate() - 1);
-        const deleteBeforeUtc = new Date(kstYesterday.getTime() - 9*3600_000).toISOString();
+        const kstCutoff = new Date(Date.now() + 9*3600_000);
+        kstCutoff.setUTCHours(0,0,0,0);
+        kstCutoff.setUTCDate(kstCutoff.getUTCDate() - 2); // 2일 전 KST 00:00
+        const deleteBeforeUtc = new Date(kstCutoff.getTime() - 9*3600_000).toISOString();
         await supabase.from('fixtures').delete().lt('start_time', deleteBeforeUtc);
       } catch(e) { console.warn('[refreshFixtures] 오래된 데이터 삭제 실패:', e); }
 
       // 5) 활성 종목 × 날짜 호출
-      const dates = Array.from({length: FETCH_DAYS}, (_, i) => kstDateStr(i));
+      // FETCH_DAYS=3 → [-1, 0, 1] = [어제, 오늘, 내일]
+      // 어제도 호출해서 종료된 경기의 결과를 반영함
+      const dates = Array.from({length: FETCH_DAYS}, (_, i) => kstDateStr(i - 1));
       const lastCallsBySport: Record<string, number> = {};
       const lastResultBySport: Record<string, { fetched: number; upserted: number; error?: string }> = {};
       let totalCalls = 0;
@@ -3333,31 +3455,40 @@ function AppMain() {
           <div style={{background:C.bg3,border:`1px solid ${C.teal}`,borderRadius:14,padding:24,width:440,maxHeight:"90vh",overflowY:"auto"}}>
             <div style={{fontSize:14,fontWeight:700,color:C.teal,marginBottom:14}}>🎁 포인트 교환 추가</div>
 
-            {/* 저장된 프리셋 — 있으면 표시. 클릭하면 모든 필드 자동 채움 (날짜만 비움) */}
+            {/* 저장된 프리셋 — 버튼 클릭 시 펼쳐서 표시 (기본 접힘) */}
             {pointPresets.length>0 && (
-              <div style={{marginBottom:14,padding:"9px 11px",background:`${C.purple}11`,border:`1px solid ${C.purple}44`,borderRadius:7}}>
-                <div style={{fontSize:10,fontWeight:800,color:C.purple,marginBottom:6,letterSpacing:0.5}}>📚 저장된 프리셋 — 클릭해서 불러오기 (날짜만 새로 지정)</div>
-                <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
-                  {pointPresets.map(p=>{
-                    const cycleLbl = p.targetCycleDays===7?"1주":p.targetCycleDays===14?"2주":p.targetCycleDays===30?"1달":p.targetCycleDays===60?"2달":p.targetCycleDays===90?"3달":`${p.targetCycleDays}일`;
-                    const amtLbl = p.targetAmount>0 ? `${(p.targetAmount/10000).toFixed(0)}만` : "목표X";
-                    const isSelected = newPointSite.exchangeName === p.exchangeName
-                      && newPointSite.targetAmount === p.targetAmount
-                      && newPointSite.targetCycleDays === p.targetCycleDays
-                      && (newPointSite.targetSiteName||"") === (p.targetSiteName||"");
-                    return (
-                      <div key={p.id} style={{display:"flex",alignItems:"stretch",borderRadius:5,overflow:"hidden",border:isSelected?`1.5px solid ${C.purple}`:`1px solid ${C.purple}55`}}>
-                        <button onClick={()=>handleLoadPointPreset(p.id)} title="이 프리셋 불러오기"
-                          style={{padding:"5px 9px",background:isSelected?`${C.purple}33`:`${C.purple}11`,color:isSelected?C.purple:C.text,cursor:"pointer",border:"none",fontSize:11,fontWeight:isSelected?800:600,display:"flex",flexDirection:"column",alignItems:"flex-start",gap:1}}>
-                          <span>{p.exchangeName}</span>
-                          <span style={{fontSize:8,color:C.dim,fontWeight:600}}>{amtLbl} · {cycleLbl}{p.targetSiteName?` · ${p.targetSiteName}`:""}</span>
-                        </button>
-                        <button onClick={()=>handleDeletePointPreset(p.id)} title="프리셋 삭제"
-                          style={{padding:"0 7px",background:`${C.red}11`,border:"none",borderLeft:`1px solid ${C.purple}44`,color:C.red,cursor:"pointer",fontSize:10,fontWeight:700}}>✕</button>
-                      </div>
-                    );
-                  })}
-                </div>
+              <div style={{marginBottom:14}}>
+                <button onClick={()=>setPointPresetPanelOpen(o=>!o)}
+                  style={{width:"100%",padding:"7px 11px",borderRadius:7,border:`1px solid ${C.purple}55`,background:pointPresetPanelOpen?`${C.purple}22`:`${C.purple}11`,color:C.purple,cursor:"pointer",fontSize:11,fontWeight:800,display:"flex",justifyContent:"space-between",alignItems:"center",letterSpacing:0.3}}>
+                  <span>📚 프리셋 불러오기 ({pointPresets.length})</span>
+                  <span style={{fontSize:10}}>{pointPresetPanelOpen?"▼":"▶"}</span>
+                </button>
+                {pointPresetPanelOpen && (
+                  <div style={{marginTop:6,padding:"9px 11px",background:`${C.purple}11`,border:`1px solid ${C.purple}44`,borderRadius:7}}>
+                    <div style={{fontSize:10,fontWeight:700,color:C.purple,marginBottom:6,letterSpacing:0.3}}>클릭해서 불러오기 (날짜만 새로 지정)</div>
+                    <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
+                      {pointPresets.map(p=>{
+                        const cycleLbl = p.targetCycleDays===7?"1주":p.targetCycleDays===14?"2주":p.targetCycleDays===30?"1달":p.targetCycleDays===60?"2달":p.targetCycleDays===90?"3달":`${p.targetCycleDays}일`;
+                        const amtLbl = p.targetAmount>0 ? `${(p.targetAmount/10000).toFixed(0)}만` : "목표X";
+                        const isSelected = newPointSite.exchangeName === p.exchangeName
+                          && newPointSite.targetAmount === p.targetAmount
+                          && newPointSite.targetCycleDays === p.targetCycleDays
+                          && (newPointSite.targetSiteName||"") === (p.targetSiteName||"");
+                        return (
+                          <div key={p.id} style={{display:"flex",alignItems:"stretch",borderRadius:5,overflow:"hidden",border:isSelected?`1.5px solid ${C.purple}`:`1px solid ${C.purple}55`}}>
+                            <button onClick={()=>{handleLoadPointPreset(p.id);setPointPresetPanelOpen(false);}} title="이 프리셋 불러오기"
+                              style={{padding:"5px 9px",background:isSelected?`${C.purple}33`:`${C.purple}11`,color:isSelected?C.purple:C.text,cursor:"pointer",border:"none",fontSize:11,fontWeight:isSelected?800:600,display:"flex",flexDirection:"column",alignItems:"flex-start",gap:1}}>
+                              <span>{p.exchangeName}</span>
+                              <span style={{fontSize:8,color:C.dim,fontWeight:600}}>{amtLbl} · {cycleLbl}{p.targetSiteName?` · ${p.targetSiteName}`:""}</span>
+                            </button>
+                            <button onClick={()=>handleDeletePointPreset(p.id)} title="프리셋 삭제"
+                              style={{padding:"0 7px",background:`${C.red}11`,border:"none",borderLeft:`1px solid ${C.purple}44`,color:C.red,cursor:"pointer",fontSize:10,fontWeight:700}}>✕</button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -3392,26 +3523,126 @@ function AppMain() {
                 style={{...S,boxSizing:"border-box"}}/>
             </div>
 
-            {/* 목표 기간 */}
+            {/* 목표 기간 — 시작일/종료일 날짜 범위로 직접 지정 */}
             <div style={{marginBottom:8}}>
-              <div style={L}>📅 목표 기간 (교환일 기준 과거 N일간 누적 입금을 목표와 비교)</div>
-              <div style={{display:"flex",gap:4,marginBottom:4}}>
-                {[
-                  {d:7,l:"1주"},{d:14,l:"2주"},{d:30,l:"1달"},{d:60,l:"2달"},{d:90,l:"3달"},
-                ].map(opt=>(
-                  <button key={opt.d} onClick={()=>setNewPointSite(p=>({...p,targetCycleDays:opt.d}))}
-                    style={{flex:1,padding:"6px 0",borderRadius:5,cursor:"pointer",border:newPointSite.targetCycleDays===opt.d?`2px solid ${C.teal}`:`1px solid ${C.border}`,background:newPointSite.targetCycleDays===opt.d?`${C.teal}22`:C.bg2,color:newPointSite.targetCycleDays===opt.d?C.teal:C.muted,fontWeight:newPointSite.targetCycleDays===opt.d?800:600,fontSize:11}}>
-                    {opt.l}
-                  </button>
-                ))}
+              <div style={L}>📅 목표 기간 (이 기간 동안의 누적 입금을 목표와 비교)</div>
+              {/* 선택된 범위 요약 + 달력 토글 버튼 */}
+              <div style={{display:"flex",gap:6,alignItems:"center",marginBottom:5}}>
+                <div style={{flex:1,padding:"7px 10px",borderRadius:5,border:`1px solid ${(newPointSite.targetStartDate&&newPointSite.targetEndDate)?C.teal:C.border}`,background:(newPointSite.targetStartDate&&newPointSite.targetEndDate)?`${C.teal}11`:C.bg2,fontSize:12,fontWeight:700,color:(newPointSite.targetStartDate&&newPointSite.targetEndDate)?C.teal:C.dim}}>
+                  {newPointSite.targetStartDate && newPointSite.targetEndDate
+                    ? `${newPointSite.targetStartDate} ~ ${newPointSite.targetEndDate} (${Math.round((new Date(newPointSite.targetEndDate+"T00:00:00Z").getTime()-new Date(newPointSite.targetStartDate+"T00:00:00Z").getTime())/(1000*60*60*24))+1}일)`
+                    : newPointSite.targetStartDate
+                      ? `시작: ${newPointSite.targetStartDate} · 종료일을 선택하세요`
+                      : "기간이 선택되지 않음"}
+                </div>
+                <button onClick={()=>{
+                  setPointDateCalOpen(o=>!o);
+                  // 달력 첫 표시 월 = 시작일이 있으면 그 월, 아니면 교환일 또는 오늘
+                  if(!pointDateCalOpen){
+                    const seed = newPointSite.targetStartDate || newPointSite.exchangeDate || today;
+                    setPointDateCalMonth(seed.slice(0,7));
+                    setPointDateClickStep(newPointSite.targetStartDate && !newPointSite.targetEndDate ? "end" : "start");
+                  }
+                }} style={{padding:"7px 12px",borderRadius:5,border:`1px solid ${C.teal}`,background:pointDateCalOpen?`${C.teal}22`:C.bg2,color:C.teal,cursor:"pointer",fontSize:11,fontWeight:700,whiteSpace:"nowrap"}}>
+                  {pointDateCalOpen?"▼ 달력 닫기":"📅 달력 열기"}
+                </button>
+                {(newPointSite.targetStartDate||newPointSite.targetEndDate) && (
+                  <button onClick={()=>{
+                    setNewPointSite(p=>({...p,targetStartDate:"",targetEndDate:""}));
+                    setPointDateClickStep("start");
+                  }} title="기간 초기화"
+                    style={{padding:"7px 9px",borderRadius:5,border:`1px solid ${C.red}44`,background:`${C.red}11`,color:C.red,cursor:"pointer",fontSize:10,fontWeight:700}}>✕</button>
+                )}
               </div>
-              <input type="number"
-                value={newPointSite.targetCycleDays||30}
-                onChange={e=>setNewPointSite(p=>({...p,targetCycleDays:parseInt(e.target.value)||30}))}
-                min={1} max={365}
-                style={{...S,boxSizing:"border-box",...noSpin}}
-                placeholder="직접 입력 (일수)"/>
-              <div style={{fontSize:9,color:C.dim,marginTop:3}}>예: 목표 200만원 + 기간 30일 = 교환일 직전 30일간 200만원 입금이 목표</div>
+
+              {/* 인라인 달력 */}
+              {pointDateCalOpen && (()=>{
+                const monStr = pointDateCalMonth || today.slice(0,7);
+                const [yStr,mStr] = monStr.split("-");
+                const y = parseInt(yStr), mIdx = parseInt(mStr)-1;
+                const monStart = new Date(y, mIdx, 1);
+                const monEnd = new Date(y, mIdx+1, 0);
+                const days = monEnd.getDate();
+                const firstDow = monStart.getDay();
+                const shiftMon = (delta:number) => {
+                  const d = new Date(y, mIdx+delta, 1);
+                  setPointDateCalMonth(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`);
+                };
+                const handleDayClick = (dateStr:string) => {
+                  // 1번째 클릭: 시작일 / 2번째 클릭: 종료일 (시작일보다 빠르면 시작일을 새로 잡음)
+                  if (pointDateClickStep === "start") {
+                    setNewPointSite(p=>({...p, targetStartDate: dateStr, targetEndDate: ""}));
+                    setPointDateClickStep("end");
+                  } else {
+                    // 종료일이 시작일보다 이전이면 시작일을 다시 잡고 종료일은 빈 상태
+                    if (newPointSite.targetStartDate && dateStr < newPointSite.targetStartDate) {
+                      setNewPointSite(p=>({...p, targetStartDate: dateStr, targetEndDate: ""}));
+                      setPointDateClickStep("end");
+                    } else {
+                      setNewPointSite(p=>({...p, targetEndDate: dateStr}));
+                      setPointDateClickStep("start"); // 다음 클릭은 새 시작점으로
+                    }
+                  }
+                };
+                const startDate = newPointSite.targetStartDate;
+                const endDate = newPointSite.targetEndDate;
+                return (
+                  <div style={{background:C.bg2,border:`1px solid ${C.teal}55`,borderRadius:6,padding:"8px 10px",marginTop:3}}>
+                    {/* 안내 메시지 */}
+                    <div style={{fontSize:10,color:C.amber,marginBottom:6,fontWeight:700,textAlign:"center"}}>
+                      {pointDateClickStep === "start" ? "1️⃣ 시작일을 클릭하세요" : "2️⃣ 종료일을 클릭하세요"}
+                    </div>
+                    {/* 월 이동 헤더 */}
+                    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
+                      <button onClick={()=>shiftMon(-1)} title="이전 달"
+                        style={{background:`${C.teal}11`,border:`1px solid ${C.teal}44`,color:C.teal,cursor:"pointer",fontSize:11,padding:"3px 10px",borderRadius:4,fontWeight:800}}>◀</button>
+                      <div style={{fontSize:12,color:C.text,fontWeight:800}}>{y}년 {mIdx+1}월</div>
+                      <button onClick={()=>shiftMon(1)} title="다음 달"
+                        style={{background:`${C.teal}11`,border:`1px solid ${C.teal}44`,color:C.teal,cursor:"pointer",fontSize:11,padding:"3px 10px",borderRadius:4,fontWeight:800}}>▶</button>
+                    </div>
+                    {/* 요일 헤더 */}
+                    <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:2,marginBottom:2}}>
+                      {["일","월","화","수","목","금","토"].map((d,i)=>(
+                        <div key={d} style={{textAlign:"center",fontSize:10,color:i===0?C.red:i===6?C.teal:C.dim,lineHeight:"18px",fontWeight:700}}>{d}</div>
+                      ))}
+                    </div>
+                    {/* 날짜 셀 */}
+                    <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:2}}>
+                      {Array.from({length:firstDow},(_,i)=><div key={`p-${i}`} style={{height:28}}/>)}
+                      {Array.from({length:days},(_,i)=>{
+                        const dayN = i+1;
+                        const dateStr = `${y}-${String(mIdx+1).padStart(2,"0")}-${String(dayN).padStart(2,"0")}`;
+                        const isStart = dateStr === startDate;
+                        const isEnd = dateStr === endDate;
+                        const inRange = startDate && endDate && dateStr >= startDate && dateStr <= endDate;
+                        const isToday = dateStr === today;
+                        return (
+                          <div key={dateStr}
+                            onClick={()=>handleDayClick(dateStr)}
+                            title={dateStr}
+                            style={{
+                              height:28,
+                              background: (isStart||isEnd) ? C.teal : inRange ? `${C.teal}33` : isToday ? `${C.amber}22` : C.bg,
+                              borderRadius: isStart && isEnd ? 4 : isStart ? "4px 0 0 4px" : isEnd ? "0 4px 4px 0" : 4,
+                              display:"flex",
+                              alignItems:"center",
+                              justifyContent:"center",
+                              fontSize:11,
+                              fontWeight: (isStart||isEnd) ? 900 : 600,
+                              color: (isStart||isEnd) ? "#fff" : inRange ? C.teal : isToday ? C.amber : C.text,
+                              border: isToday && !isStart && !isEnd ? `1px solid ${C.amber}` : "none",
+                              cursor:"pointer",
+                              userSelect:"none",
+                            }}>
+                            {dayN}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
+              <div style={{fontSize:9,color:C.dim,marginTop:5}}>달력에서 첫 클릭=시작일, 두번째 클릭=종료일. 두 번째 클릭이 시작일보다 빠르면 시작일이 다시 잡힙니다.</div>
             </div>
 
             {/* 기준 사이트 선택 - 누적입금 계산할 사이트 */}
@@ -4061,7 +4292,7 @@ function AppMain() {
       {/* ══════════════════════════════════════════════════════════
           🎯 스포츠 탭
           - API(Supabase fixtures)에서 모든 종목/국가/리그 자동 추출
-          - KST 기준 오늘+내일 경기 표시 (구분선 포함)
+          - KST 기준 어제+오늘+내일 경기 표시 (어제는 결과 반영용)
           - 팀명 한글 자동 변환 (translateTeamName)
           ══════════════════════════════════════════════════════════ */}
       {tab==="bettingCombo" && (()=>{
@@ -4223,7 +4454,7 @@ function AppMain() {
                       <div style={{display:"flex",gap:2,alignItems:"stretch",marginBottom:1}}>
                         <button onClick={()=>{setStExpandedSports(p=>({...p,[sport]:!p[sport]}));setStSelSport(sport);}}
                           style={{flex:1,display:"flex",justifyContent:"space-between",alignItems:"center",padding:"11px 12px",textAlign:"left",borderRadius:6,cursor:"pointer",border:isSportSel?`1px solid ${C.teal}`:`1px solid ${C.border}`,background:isSportSel?`${C.teal}22`:C.bg3,color:isSportSel?C.teal:C.text,fontSize:14,fontWeight:800}}>
-                          <span>{meta.icon} {meta.kr} <span style={{fontSize:11,color:C.dim,fontWeight:400}}>({tree.totalGames})</span></span>
+                          <span><span style={{display:"inline-block",width:22,textAlign:"center"}}>{meta.icon}</span>{meta.kr} <span style={{fontSize:11,color:C.dim,fontWeight:400}}>({tree.totalGames})</span></span>
                           <span style={{fontSize:11,color:C.dim}}>{sportOpen?"▼":"▶"}</span>
                         </button>
                         <button onClick={()=>setAddCountryModal({sport:sKr})} title={`${meta.kr}에 국가 추가`}
@@ -4320,7 +4551,7 @@ function AppMain() {
                       <div style={{display:"flex",gap:2,alignItems:"stretch",marginBottom:1}}>
                         <button onClick={()=>{setStExpandedSports(p=>({...p,[sport]:!p[sport]}));setStSelSport(sport);}}
                           style={{flex:1,display:"flex",justifyContent:"space-between",alignItems:"center",padding:"11px 12px",textAlign:"left",borderRadius:6,cursor:"pointer",border:isSportSel?`1px solid ${C.purple}`:`1px solid ${C.border}`,background:isSportSel?`${C.purple}22`:C.bg3,color:isSportSel?C.purple:C.text,fontSize:14,fontWeight:800}}>
-                          <span>{icon} {sportName} <span style={{fontSize:11,color:C.dim,fontWeight:400}}>({totalGames})</span></span>
+                          <span><span style={{display:"inline-block",width:22,textAlign:"center"}}>{icon}</span>{sportName} <span style={{fontSize:11,color:C.dim,fontWeight:400}}>({totalGames})</span></span>
                           <span style={{fontSize:11,color:C.dim}}>{sportOpen?"▼":"▶"}</span>
                         </button>
                         <button onClick={()=>setAddCountryModal({sport:sKr})} title={`${sportName}에 국가 추가`}
@@ -4946,8 +5177,8 @@ function AppMain() {
                       <div style={{...L,fontSize:12,marginBottom:5}}>1️⃣ 사이트</div>
                       {activeSiteNames.length===0 ? <div style={{fontSize:11,color:C.dim}}>활성 사이트 없음</div> :
                         <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
-                          {activeSiteNames.filter(s=>krwSites.includes(s)).map(s=><button key={s} onClick={()=>{setSlipSite(s);if(slipAmount===0)setSlipAmount(10000);setTimeout(()=>{const el=document.getElementById("st-slip-odds-input")as HTMLInputElement|null;if(el)el.focus();},10);}} style={{...siteBtn(slipSite===s,false),fontSize:12,padding:"5px 10px"}}>₩ {s}</button>)}
-                          {activeSiteNames.filter(s=>usdSites.includes(s)).map(s=><button key={s} onClick={()=>{setSlipSite(s);if(slipAmount===0||slipAmount===10000)setSlipAmount(7);setTimeout(()=>{const el=document.getElementById("st-slip-odds-input")as HTMLInputElement|null;if(el)el.focus();},10);}} style={{...siteBtn(slipSite===s,true),fontSize:12,padding:"5px 10px"}}>$ {s}</button>)}
+                          {activeSiteNames.filter(s=>krwSites.includes(s)).map(s=><button key={s} onClick={()=>{setSlipSite(s);setSlipAmount(10000);setTimeout(()=>{const el=document.getElementById("st-slip-odds-input")as HTMLInputElement|null;if(el)el.focus();},10);}} style={{...siteBtn(slipSite===s,false),fontSize:12,padding:"5px 10px"}}>₩ {s}</button>)}
+                          {activeSiteNames.filter(s=>usdSites.includes(s)).map(s=><button key={s} onClick={()=>{setSlipSite(s);setSlipAmount(10);setTimeout(()=>{const el=document.getElementById("st-slip-odds-input")as HTMLInputElement|null;if(el)el.focus();},10);}} style={{...siteBtn(slipSite===s,true),fontSize:12,padding:"5px 10px"}}>$ {s}</button>)}
                         </div>}
                     </div>
 
@@ -6262,13 +6493,28 @@ function AppMain() {
                         <div style={{display:"flex",alignItems:"center",gap:6}}>
                           <input type="checkbox" checked={done} onChange={()=>toggleQuestToday(q.id)} style={{width:16,height:16,accentColor:C.green,cursor:"pointer",flexShrink:0}}/>
                           <div style={{flex:1,minWidth:0}}>
-                            <div onClick={()=>toggleQuestToday(q.id)} style={{fontSize:12,fontWeight:700,color:done?C.green:C.text,cursor:"pointer",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{q.name}</div>
+                            {editingQuestId===q.id ? (
+                              <input
+                                autoFocus
+                                value={editingQuestName}
+                                onChange={e=>setEditingQuestName(e.target.value)}
+                                onBlur={()=>handleRenameQuest(q.id)}
+                                onKeyDown={e=>{
+                                  if(e.key==="Enter") handleRenameQuest(q.id);
+                                  else if(e.key==="Escape"){setEditingQuestId(null);setEditingQuestName("");}
+                                }}
+                                style={{...S,boxSizing:"border-box",fontSize:12,padding:"3px 6px",fontWeight:700,width:"100%"}}
+                              />
+                            ) : (
+                              <div onClick={()=>toggleQuestToday(q.id)} onDoubleClick={()=>{setEditingQuestId(q.id);setEditingQuestName(q.name);}} title="클릭: 완료 토글 · 더블클릭: 이름 수정" style={{fontSize:12,fontWeight:700,color:done?C.green:C.text,cursor:"pointer",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{q.name}</div>
+                            )}
                             <div style={{fontSize:10,color:C.muted,marginTop:2}}>📅 <b style={{color:C.amber}}>{dayNum}일차</b> · 이번달 <b style={{color:C.teal}}>{monthHistory.length}회</b> · 총 <b style={{color:C.purple}}>{totalAttend}회</b></div>
                           </div>
                           {done && (
                             <span style={{fontSize:9,fontWeight:900,color:C.green,background:`${C.green}22`,border:`1px solid ${C.green}`,borderRadius:3,padding:"2px 5px",letterSpacing:0.3,flexShrink:0}}>✓</span>
                           )}
                           <div style={{display:"flex",gap:3,flexShrink:0,zIndex:1}}>
+                            <button onClick={()=>{setEditingQuestId(q.id);setEditingQuestName(q.name);}} title="제목 수정" style={{background:"transparent",border:`1px solid ${C.border}`,color:C.dim,cursor:"pointer",fontSize:10,padding:"3px 6px",borderRadius:3,whiteSpace:"nowrap"}}>✏️</button>
                             <button onClick={()=>setQuestCalendarExpanded(p=>({...p,[q.id]:!calOpen}))} title="출석 보기" style={{background:calOpen?`${C.teal}22`:"transparent",border:`1px solid ${calOpen?C.teal:C.border}`,color:calOpen?C.teal:C.dim,cursor:"pointer",fontSize:10,padding:"3px 6px",borderRadius:3,whiteSpace:"nowrap"}}>📅</button>
                             <button onClick={()=>handleDeleteQuest(q.id)} title="삭제" style={{background:"transparent",border:`1px solid ${C.border}`,color:C.dim,cursor:"pointer",fontSize:10,padding:"3px 6px",borderRadius:3}}>🗑</button>
                           </div>
@@ -6404,7 +6650,10 @@ function AppMain() {
                 <div style={{fontSize:14,fontWeight:800,color:C.teal}}>🎁 포인트 교환 ({pointSites.length})</div>
                 <button onClick={()=>{
                   // 모달 초기화: 모든 필드 빈 값으로 (프리셋 클릭 또는 직접 입력 둘 다 가능)
-                  setNewPointSite({name:"",exchangeName:"",exchangeDate:"",targetAmount:0,targetSiteName:"",targetCycleDays:30});
+                  setNewPointSite({name:"",exchangeName:"",exchangeDate:"",targetAmount:0,targetSiteName:"",targetCycleDays:30,targetStartDate:"",targetEndDate:""});
+                  setPointPresetPanelOpen(false); // 프리셋 패널 접힘으로 초기화
+                  setPointDateCalOpen(false);
+                  setPointDateClickStep("start");
                   setAddPointSiteModal(true);
                 }} style={{padding:"5px 12px",borderRadius:5,border:`1px solid ${C.teal}`,background:`${C.teal}22`,color:C.teal,cursor:"pointer",fontWeight:700,fontSize:11}}>+ 추가</button>
               </div>
@@ -6419,13 +6668,25 @@ function AppMain() {
                     const lastSession=ps.sessions[ps.sessions.length-1];
                     const isCompleted=!!lastSession;
                     const baseDate=isCompleted?lastSession.nextTargetDate:ps.exchangeDate;
-                    const startDate=new Date(baseDate);startDate.setDate(startDate.getDate()-1);
-                    const startStr=startDate.toISOString().slice(0,10);
-                    // ★ 목표 기간(targetCycleDays)만큼 과거로 이동하여 누적 계산 시작일 산출
-                    const cycle = ps.targetCycleDays || 30;
-                    const fromDate=new Date(startStr);fromDate.setDate(fromDate.getDate()-(cycle-1));
-                    const fromStr=fromDate.toISOString().slice(0,10);
-                    const periodDeps=deposits.filter(d=>d.date>=fromStr&&d.date<=startStr&&(!ps.targetSiteName||d.site===ps.targetSiteName));
+                    // ★ rev.8: 누적 입금 집계 기간 산출
+                    //   - 새 필드(targetStartDate/targetEndDate)가 있으면 우선 사용
+                    //   - 없으면 기존 방식: 교환일 직전 N일 (cycleDays)로 fallback (구버전 데이터 호환)
+                    let fromStr:string, toStr:string, periodLabel:string;
+                    if (ps.targetStartDate && ps.targetEndDate) {
+                      fromStr = ps.targetStartDate;
+                      toStr = ps.targetEndDate;
+                      // 기간 라벨: 시작일~종료일 (MM/DD ~ MM/DD)
+                      periodLabel = `${fromStr.slice(5).replace("-","/")} ~ ${toStr.slice(5).replace("-","/")}`;
+                    } else {
+                      const startDate=new Date(baseDate);startDate.setDate(startDate.getDate()-1);
+                      const startStr=startDate.toISOString().slice(0,10);
+                      const cycle = ps.targetCycleDays || 30;
+                      const fromDate=new Date(startStr);fromDate.setDate(fromDate.getDate()-(cycle-1));
+                      fromStr=fromDate.toISOString().slice(0,10);
+                      toStr=startStr;
+                      periodLabel = cycle===7?"1주":cycle===14?"2주":cycle===30?"1달":cycle===60?"2달":cycle===90?"3달":`${cycle}일`;
+                    }
+                    const periodDeps=deposits.filter(d=>d.date>=fromStr&&d.date<=toStr&&(!ps.targetSiteName||d.site===ps.targetSiteName));
                     const totalKrw=periodDeps.reduce((s,d)=>s+(isUSD(d.site)?d.amount*usdKrw:d.amount),0);
                     const hasTarget = ps.targetAmount>0;
                     const achieved = hasTarget && totalKrw>=ps.targetAmount;
@@ -6433,8 +6694,7 @@ function AppMain() {
                     // D-DAY: 순수 날짜 기준 차이 (시간 무시). baseDate와 today 모두 YYYY-MM-DD 문자열 → UTC 자정 Date 비교 → round
                     const daysLeft = Math.round((new Date(baseDate+"T00:00:00Z").getTime() - new Date(today+"T00:00:00Z").getTime())/(1000*60*60*24));
                     const dayColor = daysLeft<0?C.red:daysLeft<=3?C.red:daysLeft<=7?C.amber:C.teal;
-                    // 기간 라벨 (1주/2주/1달/2달/3달, 그 외는 N일)
-                    const cycleLabel = cycle===7?"1주":cycle===14?"2주":cycle===30?"1달":cycle===60?"2달":cycle===90?"3달":`${cycle}일`;
+                    const cycleLabel = periodLabel;
                     return(
                       <div key={ps.id} style={{background:C.bg2,border:`1.5px solid ${achieved?C.green:C.border2}`,borderRadius:8,padding:12,position:"relative",overflow:"hidden",display:"flex",flexDirection:"column",gap:7}}>
                         {achieved && (
@@ -6442,7 +6702,7 @@ function AppMain() {
                         )}
                         <div>
                           <div style={{fontSize:15,fontWeight:900,color:C.text,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",paddingRight:achieved?54:0}}>{ps.name}</div>
-                          <div style={{fontSize:12,color:C.teal,fontWeight:700,marginTop:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{ps.exchangeName} · 📅 기간 {cycleLabel}</div>
+                          <div style={{fontSize:12,color:C.teal,fontWeight:700,marginTop:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{ps.exchangeName} · 📅 {cycleLabel}</div>
                         </div>
                         <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:C.muted}}>
                           <span style={{fontWeight:700}}>{baseDate.slice(5).replace("-","월 ")}일</span>
@@ -6647,7 +6907,7 @@ function AppMain() {
               <div style={{flex:1,minWidth:260}}>
                 <div style={{fontSize:18,fontWeight:900,color:C.purple}}>🔑 API 관리</div>
                 <div style={{fontSize:11,color:C.muted,marginTop:3,lineHeight:1.5}}>
-                  클라이언트 직접 호출 · 사용자 트리거 전용 · 활성 {ACTIVE_SPORTS.length}종목 · KST 오늘+내일 ({FETCH_DAYS}일치) · 캐시 {CACHE_FRESH_MIN}분
+                  클라이언트 직접 호출 · 사용자 트리거 전용 · 활성 {ACTIVE_SPORTS.length}종목 · KST 어제+오늘+내일 ({FETCH_DAYS}일치) · 캐시 {CACHE_FRESH_MIN}분
                 </div>
                 {lastFetchedAt && (
                   <div style={{fontSize:11,color:isFresh?C.green:C.muted,marginTop:4}}>
