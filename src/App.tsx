@@ -1778,6 +1778,14 @@ function AppMain() {
     if(!window.confirm(`"${q.name}" 퀘스트를 삭제하시겠습니까?\n(출석 기록도 함께 삭제됩니다)`))return;
     saveDailyQuests(dailyQuests.filter(x=>x.id!==id));
   };
+  // 출석 횟수 초기화 — history만 비우고 퀘스트 자체는 유지. createdAt도 today로 리셋
+  const handleResetQuestAttendance = (id:string) => {
+    const q = dailyQuests.find(x=>x.id===id);
+    if(!q) return;
+    if(q.history.length===0) { alert("초기화할 출석 기록이 없습니다."); return; }
+    if(!window.confirm(`"${q.name}" 출석 횟수를 초기화하시겠습니까?\n\n현재 출석: ${q.history.length}회\n시작일: ${q.createdAt}\n\n→ 출석 0회, 시작일 ${today}로 리셋됩니다.\n(퀘스트 자체는 유지됩니다)`)) return;
+    saveDailyQuests(dailyQuests.map(x=>x.id===id ? {...x, history:[], createdAt: today} : x));
+  };
 
   // 출석 일수 (createdAt부터 today까지의 달력일수)
   const questAttendanceDay = (q:DailyQuest) => {
@@ -2591,6 +2599,58 @@ function AppMain() {
   // 기타수익 카테고리 추가 모달
   const [pextAddMenu,setPextAddMenu]=useState<null|{type:"site"|"cat"|"subcat"}>(null);
   const [pextAddName,setPextAddName]=useState("");
+  // pext 항목 인라인 이름 수정 — { type, oldName } 이면 그 항목이 편집 모드, 입력값은 pextEditName
+  const [pextEditingItem,setPextEditingItem]=useState<null|{type:"site"|"cat"|"subcat";oldName:string}>(null);
+  const [pextEditName,setPextEditName]=useState("");
+  // pext 항목 이름 변경 — 목록 자체와 기존 데이터(profitExtras)의 카테고리/사이트명도 함께 마이그레이션
+  const handleRenamePextItem = async (type:"site"|"cat"|"subcat", oldName:string) => {
+    const newName = pextEditName.trim();
+    if (!newName) { setPextEditingItem(null); setPextEditName(""); return; }
+    if (newName === oldName) { setPextEditingItem(null); setPextEditName(""); return; }
+    // 중복 체크
+    const list = type==="site"?pextSiteList:type==="cat"?pextCatList:pextSubCatList;
+    if (list.includes(newName)) { alert("이미 존재하는 이름입니다"); return; }
+    // 1) 목록 업데이트
+    const newList = list.map(x => x===oldName ? newName : x).sort();
+    if (type==="site") savePextSiteList(newList);
+    else if (type==="cat") savePextCatList(newList);
+    else savePextSubCatList(newList);
+    // 2) 기존 profitExtras 데이터 마이그레이션 — 해당 필드를 새 이름으로 변경
+    //    DB에 update API가 없어 delete + insert로 마이그레이션 (id는 새로 부여됨)
+    const affected: typeof profitExtras = [];
+    const newExtras = profitExtras.map(e => {
+      let changed = false;
+      let next: any = e;
+      if (type==="site"   && e.site===oldName) { next = { ...next, site:newName }; changed = true; }
+      if (type==="cat"    && e.category===oldName) { next = { ...next, category:newName }; changed = true; }
+      if (type==="subcat") {
+        if ((e as any).subCategory===oldName)    { next = { ...next, subCategory:newName }; changed = true; }
+        if ((e as any).subSubCategory===oldName) { next = { ...next, subSubCategory:newName }; changed = true; }
+      }
+      if (changed) { affected.push(e); return next; }
+      return e;
+    });
+    if (affected.length > 0) {
+      // state 먼저 즉시 반영 (UI 즉시 업데이트)
+      setProfitExtrasRaw(newExtras);
+      // DB 동기화 — 기존 항목 삭제 후 새 id로 재삽입
+      for (const oldItem of affected) {
+        try { await db.deleteProfitExtra(oldItem.id); } catch(err) { console.warn("[rename] delete fail:", err); }
+      }
+      for (const newItem of newExtras) {
+        const wasAffected = affected.some(a => a.id === newItem.id);
+        if (wasAffected) {
+          // 새 id로 재삽입
+          const reinserted = { ...newItem, id: String(Date.now()) + "_" + Math.random().toString(36).slice(2,7) };
+          try { await db.insertProfitExtra(reinserted as any); } catch(err) { console.warn("[rename] insert fail:", err); }
+          // state에서도 새 id로 교체
+          setProfitExtrasRaw(prev => prev.map(p => p.id === newItem.id ? reinserted as any : p));
+        }
+      }
+    }
+    setPextEditingItem(null);
+    setPextEditName("");
+  };
   // 기타수익 펼침 상태
   const [pextExpanded,setPextExpanded]=useState<Record<string,boolean>>({});
   // 기타수익 입력 모드: 폼 펼침
@@ -6191,17 +6251,40 @@ function AppMain() {
                     <div style={{marginTop:14,paddingTop:12,borderTop:`1px solid ${C.border}`}}>
                       <div style={{fontSize:10,color:C.muted,marginBottom:6}}>기존 {pextAddMenu.type==="site"?"사이트":pextAddMenu.type==="cat"?"분류":"하위"} 목록 ({list.length})</div>
                       <div style={{display:"flex",flexWrap:"wrap",gap:4,maxHeight:120,overflowY:"auto"}}>
-                        {list.map(it=>(
-                          <div key={it} style={{display:"flex",alignItems:"center",gap:3,background:C.bg3,border:`1px solid ${C.border}`,borderRadius:4,padding:"3px 5px 3px 8px",fontSize:10}}>
-                            <span style={{color:C.text}}>{it}</span>
-                            <button onClick={()=>{
-                              if(!window.confirm(`"${it}" 삭제? (기존 데이터의 이 ${pextAddMenu.type==="site"?"사이트":pextAddMenu.type==="cat"?"분류":"하위 카테고리"}는 유지됩니다)`))return;
-                              if(pextAddMenu.type==="site")savePextSiteList(list.filter(x=>x!==it));
-                              else if(pextAddMenu.type==="cat")savePextCatList(list.filter(x=>x!==it));
-                              else savePextSubCatList(list.filter(x=>x!==it));
-                            }} style={{background:"transparent",border:"none",color:C.dim,cursor:"pointer",fontSize:10,padding:0}}>✕</button>
-                          </div>
-                        ))}
+                        {list.map(it=>{
+                          const isEditing = pextEditingItem?.type===pextAddMenu.type && pextEditingItem?.oldName===it;
+                          if (isEditing) {
+                            return (
+                              <div key={it} style={{display:"flex",alignItems:"center",gap:3,background:`${C.amber}11`,border:`1px solid ${C.amber}`,borderRadius:4,padding:"3px 5px 3px 5px",fontSize:10}}>
+                                <input
+                                  autoFocus
+                                  value={pextEditName}
+                                  onChange={e=>setPextEditName(e.target.value)}
+                                  onBlur={()=>handleRenamePextItem(pextAddMenu.type,it)}
+                                  onKeyDown={e=>{
+                                    if(e.key==="Enter") handleRenamePextItem(pextAddMenu.type,it);
+                                    else if(e.key==="Escape"){setPextEditingItem(null);setPextEditName("");}
+                                  }}
+                                  style={{background:C.bg,border:`1px solid ${C.amber}`,color:C.text,fontSize:10,padding:"2px 5px",borderRadius:3,width:80,outline:"none"}}
+                                />
+                              </div>
+                            );
+                          }
+                          return (
+                            <div key={it} style={{display:"flex",alignItems:"center",gap:3,background:C.bg3,border:`1px solid ${C.border}`,borderRadius:4,padding:"3px 5px 3px 8px",fontSize:10}}>
+                              <span style={{color:C.text}}>{it}</span>
+                              <button onClick={()=>{setPextEditingItem({type:pextAddMenu.type,oldName:it});setPextEditName(it);}}
+                                title="이름 수정"
+                                style={{background:"transparent",border:"none",color:C.amber,cursor:"pointer",fontSize:10,padding:0}}>✏️</button>
+                              <button onClick={()=>{
+                                if(!window.confirm(`"${it}" 삭제? (기존 데이터의 이 ${pextAddMenu.type==="site"?"사이트":pextAddMenu.type==="cat"?"분류":"하위 카테고리"}는 유지됩니다)`))return;
+                                if(pextAddMenu.type==="site")savePextSiteList(list.filter(x=>x!==it));
+                                else if(pextAddMenu.type==="cat")savePextCatList(list.filter(x=>x!==it));
+                                else savePextSubCatList(list.filter(x=>x!==it));
+                              }} style={{background:"transparent",border:"none",color:C.dim,cursor:"pointer",fontSize:10,padding:0}}>✕</button>
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
                   );
@@ -6465,7 +6548,6 @@ function AppMain() {
                 <div style={{display:"flex",flexDirection:"column",gap:6}}>
                   {dailyQuests.map(q=>{
                     const done = isQuestDoneToday(q);
-                    const dayNum = questAttendanceDay(q);
                     const totalAttend = q.history.length;
                     const calOpen = !!questCalendarExpanded[q.id];
                     // 달력에서 보고 있는 월 (없으면 오늘 기준)
@@ -6508,7 +6590,7 @@ function AppMain() {
                             ) : (
                               <div onClick={()=>toggleQuestToday(q.id)} onDoubleClick={()=>{setEditingQuestId(q.id);setEditingQuestName(q.name);}} title="클릭: 완료 토글 · 더블클릭: 이름 수정" style={{fontSize:12,fontWeight:700,color:done?C.green:C.text,cursor:"pointer",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{q.name}</div>
                             )}
-                            <div style={{fontSize:10,color:C.muted,marginTop:2}}>📅 <b style={{color:C.amber}}>{dayNum}일차</b> · 이번달 <b style={{color:C.teal}}>{monthHistory.length}회</b> · 총 <b style={{color:C.purple}}>{totalAttend}회</b></div>
+                            <div style={{fontSize:10,color:C.muted,marginTop:2}}>📅 출석 <b style={{color:C.purple}}>{totalAttend}회</b> · 이번달 <b style={{color:C.teal}}>{monthHistory.length}회</b></div>
                           </div>
                           {done && (
                             <span style={{fontSize:9,fontWeight:900,color:C.green,background:`${C.green}22`,border:`1px solid ${C.green}`,borderRadius:3,padding:"2px 5px",letterSpacing:0.3,flexShrink:0}}>✓</span>
@@ -6529,7 +6611,11 @@ function AppMain() {
                               <button onClick={()=>canGoNext && shiftMonth(1)} title={canGoNext?"다음 달":"미래 달은 볼 수 없음"} disabled={!canGoNext}
                                 style={{background:canGoNext?`${C.teal}11`:"transparent",border:`1px solid ${canGoNext?C.teal+"44":C.border}`,color:canGoNext?C.teal:C.dim,cursor:canGoNext?"pointer":"not-allowed",fontSize:10,padding:"3px 8px",borderRadius:3,fontWeight:800}}>▶</button>
                             </div>
-                            <div style={{fontSize:9,color:C.dim,marginBottom:3}}>이번 달 출석 <b style={{color:C.teal}}>{monthHistory.length}회</b> · 시작 {q.createdAt.slice(5)}</div>
+                            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:3,gap:6}}>
+                              <div style={{fontSize:9,color:C.dim}}>이번 달 출석 <b style={{color:C.teal}}>{monthHistory.length}회</b> · 총 <b style={{color:C.purple}}>{totalAttend}회</b> · 시작 {q.createdAt.slice(5)}</div>
+                              <button onClick={()=>handleResetQuestAttendance(q.id)} title="출석 횟수 초기화"
+                                style={{background:`${C.red}11`,border:`1px solid ${C.red}66`,color:C.red,cursor:"pointer",fontSize:9,padding:"2px 7px",borderRadius:3,fontWeight:700,whiteSpace:"nowrap",flexShrink:0}}>🔄 출석 초기화</button>
+                            </div>
                             <div style={{background:C.bg,borderRadius:4,padding:"4px 5px",maxWidth:210}}>
                               <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:1,marginBottom:1}}>
                                 {["일","월","화","수","목","금","토"].map((d,i)=>(
