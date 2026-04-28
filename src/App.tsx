@@ -3049,13 +3049,20 @@ function AppMain() {
   };
 
   // 확인 버튼 — 대기_* 최종 확정. siteStates 절대 건드리지 않음
-  // ★ confirmedAt: 사용자가 확인 누른 시각. "오늘 완료 목록"에서 12시간 윈도우 표시용.
-  //   (DB 매핑이 없을 수도 있어 (b as any)로 처리 — DB 저장 실패해도 로컬에선 동작)
+  // ★ confirmedAt: 사용자가 확인 누른 시각. "최근 완료 목록" 1시간 윈도우 표시용.
+  // ★ pendingBeforeConfirm: 확인 누르기 직전 상태(예: "대기_승") 저장 →
+  //   처리취소 시 이 값으로 복원해야 진행중이 아닌 대기상태로 돌아감.
   const confirmResult=(id:string)=>{
     const bet=bets.find(b=>b.id===id);if(!bet)return;
     const actualResult=bet.result==="대기_승"?"승":bet.result==="대기_패"?"패":(bet.result==="대기_취소"||bet.result==="대기_연기"||bet.result==="대기_중단")?"취소":["취소","연기","중단"].includes(bet.result)?"취소":bet.result;
     const finalProfit=actualResult==="승"?parseFloat((bet.amount*bet.odds-bet.amount).toFixed(2)):actualResult==="패"?-bet.amount:0;
-    const confirmed={...bet,result:actualResult,profit:finalProfit,confirmedAt:new Date().toISOString()} as Bet;
+    const confirmed={
+      ...bet,
+      result:actualResult,
+      profit:finalProfit,
+      confirmedAt:new Date().toISOString(),
+      pendingBeforeConfirm: bet.result, // ★ 처리취소 복원용 (예: "대기_승")
+    } as Bet;
     setBetsRaw(b=>b.map(x=>x.id===id?confirmed:x));
     db.upsertBet(confirmed);
     addLog(actualResult==="취소"?"↩ 환원":actualResult==="승"?"✅ 확인":"❌ 확인",`${bet.homeTeam||bet.teamName||""}`);
@@ -3063,13 +3070,22 @@ function AppMain() {
   const revertToPending=(id:string)=>{
     const bet=bets.find(b=>b.id===id);if(!bet)return;
     // result/profit만 되돌림 — siteStates(입금/베팅/잔여) 절대 건드리지 않음
-    // ★ confirmedAt도 제거 (다시 진행중으로 돌아가므로)
-    const reverted={...bet,result:"진행중",profit:null,confirmedAt:undefined} as Bet;
+    // ★ pendingBeforeConfirm이 있으면 그 상태(대기_승 등)로 복원,
+    //   없으면(=수동 적중/실패 처리한 경우) 진행중으로.
+    const prev = (bet as any).pendingBeforeConfirm as string | undefined;
+    const restoredResult = (prev && prev.startsWith("대기_")) ? prev : "진행중";
+    const reverted={
+      ...bet,
+      result:restoredResult,
+      profit:null,
+      confirmedAt:undefined,
+      pendingBeforeConfirm:undefined, // 일회용 — 복원했으니 비움
+    } as Bet;
     setBetsRaw(b=>b.map(x=>x.id===id?reverted:x));
     db.upsertBet(reverted);
     addLog("↩ 처리 취소",`${bet.site}/${bet.homeTeam||bet.teamName||id}`);
     // ★ 처리취소 후 자동결제(autoSettle) 재실행 안 함:
-    //   사용자가 의도적으로 진행중으로 되돌렸는데 즉시 자동 재판정되면 의미가 없음.
+    //   사용자가 의도적으로 되돌렸는데 즉시 자동 재판정되면 의미가 없음.
     //   다음 새로고침(refreshFixtures) 때 다시 판정됨.
   };
   const deleteFromStats=(id:string)=>{

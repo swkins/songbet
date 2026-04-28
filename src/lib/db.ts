@@ -66,6 +66,9 @@ export async function loadBets(): Promise<Bet[]> {
       ...(r.fixture_id != null ? { fixtureId: Number(r.fixture_id) } : {}),
       ...(r.fixture_sport != null ? { fixtureSport: r.fixture_sport } : {}),
       ...(r.is_manual != null ? { isManual: r.is_manual } : {}),
+      // rev.9: "최근 완료" 1시간 윈도우 + 처리취소 복원용
+      ...(r.confirmed_at != null ? { confirmedAt: r.confirmed_at } : {}),
+      ...(r.pending_before_confirm != null ? { pendingBeforeConfirm: r.pending_before_confirm } : {}),
     } as Bet))
   } catch (e) { logLoadError('bets', e); return [] }
 }
@@ -82,6 +85,9 @@ export async function upsertBet(b: Bet) {
       fixture_id: (b as any).fixtureId ?? null,
       fixture_sport: (b as any).fixtureSport ?? null,
       is_manual: (b as any).isManual ?? false,
+      // rev.9: "최근 완료" 1시간 윈도우 + 처리취소 복원용
+      confirmed_at: (b as any).confirmedAt ?? null,
+      pending_before_confirm: (b as any).pendingBeforeConfirm ?? null,
     })
   } catch (e) { logSaveError('bets', e) }
 }
