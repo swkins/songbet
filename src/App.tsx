@@ -1012,6 +1012,8 @@ function AppMain() {
   const [stExpandedGameId,setStExpandedGameId]=useState<number|null>(null);
   // 오늘 경기 중 종료된 그룹 펼침 여부 (기본: 접힘)
   const [stShowFinished,setStShowFinished]=useState<boolean>(false);
+  // ★ 숨긴 국가/리그(=베팅 가능 경기 없는 항목) 표시 여부 (기본: 숨김)
+  const [stShowEmpty,setStShowEmpty]=useState<boolean>(false);
   const [stFetchedAt,setStFetchedAt]=useState<number|null>(null);
 
   const loadSportsTestData = useCallback(async()=>{
@@ -5042,7 +5044,8 @@ function AppMain() {
 
         // 트리에 표시될 항목 (사용자가 만든 국가/리그)
         // ★ 베팅 가능한(=종료/연기/취소되지 않은) 경기만 카운트.
-        //   카운트가 0인 리그/국가는 트리에서 숨김.
+        //   stShowEmpty=false: 카운트 0인 리그/국가는 숨김 (기본)
+        //   stShowEmpty=true:  모두 표시 (체크박스 켜면)
         const buildSportTree = (sport:Sport) => {
           const sKr = sportToKr(sport);
           const countries = allCountriesForSport(sKr);
@@ -5063,12 +5066,12 @@ function AppMain() {
                 : 0;
               totalGames += games;
               return { league: lg, apiId, games };
-            // 카운트 0인 리그 숨김
-            }).filter(l => l.games > 0);
+            // 카운트 0인 리그 숨김 (체크박스 켜져 있으면 모두 표시)
+            }).filter(l => stShowEmpty || l.games > 0);
             const cGames = lgItems.reduce((a,b)=>a+b.games,0);
             return { country, leagues: lgItems, games: cGames };
-          // 카운트 0인 국가 숨김
-          }).filter(c => c.games > 0);
+          // 카운트 0인 국가 숨김 (체크박스 켜져 있으면 모두 표시)
+          }).filter(c => stShowEmpty || c.games > 0);
           return { countries: items, totalGames };
         };
 
@@ -5080,9 +5083,14 @@ function AppMain() {
               <div style={{padding:"10px 12px",borderBottom:`1px solid ${C.border}`,flexShrink:0,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                 <div>
                   <div style={{fontSize:12,fontWeight:800,color:C.text}}>📂 카테고리</div>
-                  <div style={{fontSize:9,color:C.dim}}>
-                    종목 {sportsList.length + customOnlySports.length} · {stFixtures.length}경기
-                    {stFetchedAt && <span style={{marginLeft:4}}>· {new Date(stFetchedAt).toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit"})}</span>}
+                  <div style={{fontSize:9,color:C.dim,display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                    <span>종목 {sportsList.length + customOnlySports.length} · {stFixtures.length}경기</span>
+                    {stFetchedAt && <span>· {new Date(stFetchedAt).toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit"})}</span>}
+                    {/* ★ 빈 국가/리그(베팅 가능 경기 0개) 표시 토글 */}
+                    <label style={{display:"inline-flex",alignItems:"center",gap:3,cursor:"pointer",color:stShowEmpty?C.amber:C.dim,fontWeight:stShowEmpty?700:400}} title="베팅 가능한 경기가 없는 국가/리그도 함께 표시">
+                      <input type="checkbox" checked={stShowEmpty} onChange={e=>setStShowEmpty(e.target.checked)} style={{cursor:"pointer",margin:0}}/>
+                      <span>숨김 표시</span>
+                    </label>
                   </div>
                 </div>
                 <div style={{display:"flex",gap:4,alignItems:"center"}}>
@@ -5199,7 +5207,7 @@ function AppMain() {
                   const icon = customSportIcon(sportName);
 
                   // 트리 빌드 (buildSportTree와 동일하지만 sKr 직접 사용)
-                  // ★ 빈 리그/국가는 숨김 (1번 요청)
+                  // ★ stShowEmpty=false: 빈 리그/국가 숨김 / true: 모두 표시
                   const countries = allCountriesForSport(sKr);
                   let totalGames = 0;
                   const treeCountries = countries.map(country => {
@@ -5209,10 +5217,10 @@ function AppMain() {
                       const games = manualGames.filter(g=>g.sportCat===sKr && g.country===country && g.league===lg && !g.finished).length;
                       totalGames += games;
                       return { league: lg, apiId: "", games };
-                    }).filter(l => l.games > 0);  // 빈 리그 숨김
+                    }).filter(l => stShowEmpty || l.games > 0);  // 빈 리그 숨김 (토글 켜면 모두)
                     const cGames = lgItems.reduce((a,b)=>a+b.games,0);
                     return { country, leagues: lgItems, games: cGames };
-                  }).filter(c => c.games > 0);  // 빈 국가 숨김
+                  }).filter(c => stShowEmpty || c.games > 0);  // 빈 국가 숨김 (토글 켜면 모두)
 
                   return (
                     <div key={`custom__${sportName}`} style={{marginBottom:3}}>
