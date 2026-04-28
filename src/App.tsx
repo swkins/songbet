@@ -1012,6 +1012,8 @@ function AppMain() {
   const [stExpandedGameId,setStExpandedGameId]=useState<number|null>(null);
   // 오늘 경기 중 종료된 그룹 펼침 여부 (기본: 접힘)
   const [stShowFinished,setStShowFinished]=useState<boolean>(false);
+  // ★ 종목별 "숨긴 국가/리그도 표시" 토글 — true면 베팅 가능 경기 0개라도 표시
+  const [stShowHidden, setStShowHidden] = useState<Record<string, boolean>>({});
   const [stFetchedAt,setStFetchedAt]=useState<number|null>(null);
 
   const loadSportsTestData = useCallback(async()=>{
@@ -3816,8 +3818,9 @@ function AppMain() {
     });return teams;
   },[esportsRecords,esportsStratLeague]);
 
-  const krwRemaining=activeSiteNames.filter(s=>!isUSD(s)).reduce((sum,site)=>{const st=siteStates[site]||{deposited:0,betTotal:0};return sum+Math.max(0,st.deposited-st.betTotal);},0);
-  const usdRemaining=activeSiteNames.filter(s=>isUSD(s)).reduce((sum,site)=>{const st=siteStates[site]||{deposited:0,betTotal:0};return sum+Math.max(0,st.deposited-st.betTotal);},0);
+  // ★ 잔여 합계: (입금+포인트)−베팅 — 사이트별 진행률과 일관
+  const krwRemaining=activeSiteNames.filter(s=>!isUSD(s)).reduce((sum,site)=>{const st=siteStates[site]||{deposited:0,betTotal:0,pointTotal:0};return sum+Math.max(0,(st.deposited+(st.pointTotal||0))-st.betTotal);},0);
+  const usdRemaining=activeSiteNames.filter(s=>isUSD(s)).reduce((sum,site)=>{const st=siteStates[site]||{deposited:0,betTotal:0,pointTotal:0};return sum+Math.max(0,(st.deposited+(st.pointTotal||0))-st.betTotal);},0);
 
   // ── 현재 세션(마감 전) 사이트별 실시간 수익 ──
   // 마지막 마감(=출금) 이후의 베팅들 중 결과가 확정된 것만 합산
@@ -5152,8 +5155,10 @@ function AppMain() {
         //   - API 매핑 안 된 리그(!apiId)는 항상 표시 (사용자가 매핑할 수 있도록)
         //   - API 매핑된 리그는 베팅 가능 경기(종료/연기/취소 제외)가 있을 때만 표시
         //   - 표시할 리그가 하나라도 있는 국가만 표시
+        //   - 단, stShowHidden[sport]가 true면 모두 표시
         const buildSportTree = (sport:Sport) => {
           const sKr = sportToKr(sport);
+          const showHidden = !!stShowHidden[sport];
           const countries = allCountriesForSport(sKr);
           let totalGames = 0;
           const items = countries.map(country => {
@@ -5172,11 +5177,11 @@ function AppMain() {
                 : 0;
               totalGames += games;
               return { league: lg, apiId, games };
-            // ★ 표시 조건: 미매핑이거나(=apiId 없음), 매핑되었으면서 베팅 가능 경기 1개 이상
-            }).filter(l => !l.apiId || l.games > 0);
+            // ★ 표시 조건: 토글 켜짐 OR 미매핑 OR 매핑됐으면서 베팅 가능 경기 1개 이상
+            }).filter(l => showHidden || !l.apiId || l.games > 0);
             const cGames = lgItems.reduce((a,b)=>a+b.games,0);
             return { country, leagues: lgItems, games: cGames };
-          // ★ 표시할 리그가 하나라도 있으면 국가 표시
+          // ★ 표시할 리그가 하나라도 있으면 국가 표시 (토글 켜짐 시 동일)
           }).filter(c => c.leagues.length > 0);
           return { countries: items, totalGames };
         };
@@ -5225,6 +5230,27 @@ function AppMain() {
                   const tree = buildSportTree(sport);
                   const isSportSel = stSelSport===sport;
                   const meta = SPORT_META[sport];
+                  // ★ 이 종목에서 숨겨진(매핑됐으나 경기 0개) 리그 카운트 — 토글 안내용
+                  const hiddenCount = (()=>{
+                    if (stShowHidden[sport]) return 0; // 이미 다 보이는 중
+                    const all = allCountriesForSport(sKr);
+                    let cnt = 0;
+                    for (const country of all) {
+                      for (const lg of allLeaguesForCountry(sKr, country)) {
+                        const apiId = stLeagueMap[mapKey(sKr, country, lg)];
+                        if (!apiId) continue; // 미매핑은 어차피 보임
+                        const games = stFixtures.filter(f =>
+                          f.sport===sport
+                          && String(f.league_id)===apiId
+                          && !isFinished(f.status_short)
+                          && !isPostponed(f.status_short)
+                        ).length;
+                        if (games === 0) cnt++;
+                      }
+                    }
+                    return cnt;
+                  })();
+                  const showHidden = !!stShowHidden[sport];
                   return (
                     <div key={sport} style={{marginBottom:3}}>
                       <div style={{display:"flex",gap:2,alignItems:"stretch",marginBottom:1}}>
@@ -5233,6 +5259,15 @@ function AppMain() {
                           <span><span style={{display:"inline-block",width:22,textAlign:"center"}}>{meta.icon}</span>{meta.kr} <span style={{fontSize:11,color:C.dim,fontWeight:400}}>({tree.totalGames})</span></span>
                           <span style={{fontSize:11,color:C.dim}}>{sportOpen?"▼":"▶"}</span>
                         </button>
+                        {/* ★ 숨김 토글: 클릭 시 이 종목의 빈 리그/국가도 표시. hiddenCount=0이면 안 보임 */}
+                        {(showHidden || hiddenCount > 0) && (
+                          <button onClick={(e)=>{e.stopPropagation();setStShowHidden(p=>({...p,[sport]:!showHidden}));}}
+                            title={showHidden?"숨김 해제 — 다시 비어있는 리그 숨김":`숨겨진 ${hiddenCount}개 리그 표시`}
+                            style={{padding:"0 10px",borderRadius:5,border:`2px solid ${showHidden?C.amber:C.border2}`,background:showHidden?`${C.amber}22`:C.bg2,color:showHidden?C.amber:C.muted,cursor:"pointer",fontSize:11,fontWeight:700,display:"flex",alignItems:"center",gap:3}}>
+                            <span>{showHidden?"👁":"👁‍🗨"}</span>
+                            {!showHidden && hiddenCount > 0 && <span style={{fontSize:10}}>+{hiddenCount}</span>}
+                          </button>
+                        )}
                         <button onClick={()=>setAddCountryModal({sport:sKr})} title={`${meta.kr}에 국가 추가`}
                           style={{padding:"0 14px",borderRadius:5,border:`2px solid ${C.teal}88`,background:`${C.teal}22`,color:C.teal,cursor:"pointer",fontSize:18,fontWeight:900}}>+</button>
                       </div>
@@ -6105,11 +6140,11 @@ function AppMain() {
                     {activeSiteNames.map(site=>{
                       const st=siteStates[site]||{deposited:0,betTotal:0,active:false,isDollar:false};
                       const dollar=isUSD(site);
-                      const remaining=Math.max(0,parseFloat((st.deposited-st.betTotal).toFixed(2)));
+                      // ★ 잔여/진행률 일관: 둘 다 (입금+포인트) 기준. 포인트도 베팅 가능 자금으로 인정.
                       const totalBase=parseFloat((st.deposited+(st.pointTotal||0)).toFixed(2));
-                      // 진행률: 소수점 1자리. 100%는 오직 잔여=0일 때만.
+                      const remaining=Math.max(0,parseFloat((totalBase-st.betTotal).toFixed(2)));
                       const pctRawCalc = totalBase>0 ? (st.betTotal/totalBase*100) : 0;
-                      // 잔여가 0이 아니면 절대 100% 표시 안 함 (최대 99.9%로 캡)
+                      // 잔여 있는데 100%↑ = 소수점 오차 → 99.9로 캡. 잔여=0이면 100% 그대로.
                       const pctRaw = remaining>0 && pctRawCalc>=100 ? 99.9 : Math.round(pctRawCalc*10)/10;
                       const pct=Math.min(100,pctRaw);
                       const isComplete = remaining<=0 && pctRaw>=100;
@@ -6208,11 +6243,10 @@ function AppMain() {
               {activeSiteNames.map(site=>{
                 const st=siteStates[site]||{deposited:0,betTotal:0,active:false,isDollar:false};
                 const dollar=isUSD(site);
-                const remaining=Math.max(0,parseFloat((st.deposited-st.betTotal).toFixed(2)));
+                // ★ 잔여/진행률 일관: 둘 다 (입금+포인트) 기준. 포인트도 베팅 가능 자금으로 인정.
                 const totalBase=parseFloat((st.deposited+(st.pointTotal||0)).toFixed(2));
-                // 진행률: 소수점 1자리. 100%는 오직 잔여=0일 때만.
+                const remaining=Math.max(0,parseFloat((totalBase-st.betTotal).toFixed(2)));
                 const pctRawCalc = totalBase>0 ? (st.betTotal/totalBase*100) : 0;
-                // 잔여가 0이 아니면 절대 100% 표시 안 함 (최대 99.9%로 캡)
                 const pctRaw = remaining>0 && pctRawCalc>=100 ? 99.9 : Math.round(pctRawCalc*10)/10;
                 const pct=Math.min(100,pctRaw);
                 const is100 = remaining<=0 && pctRaw>=100;
@@ -7407,8 +7441,9 @@ function AppMain() {
                         {activeSiteNames.map(site=>{
                           const st=siteStates[site]||{deposited:0,betTotal:0,active:false,isDollar:false};
                           const dollar=isUSD(site);
-                          const remaining=Math.max(0,parseFloat((st.deposited-st.betTotal).toFixed(2)));
-                          const totalBase=parseFloat(st.deposited.toFixed(2));
+                          // ★ 잔여/진행률 일관: 둘 다 (입금+포인트) 기준. 포인트도 베팅 가능 자금으로 인정.
+                          const totalBase=parseFloat((st.deposited+(st.pointTotal||0)).toFixed(2));
+                          const remaining=Math.max(0,parseFloat((totalBase-st.betTotal).toFixed(2)));
                           const pctRawCalc = totalBase>0 ? (st.betTotal/totalBase*100) : 0;
                           const pctRaw = remaining>0 && pctRawCalc>=100 ? 99.9 : Math.round(pctRawCalc*10)/10;
                           const pct=Math.min(100,pctRaw);
