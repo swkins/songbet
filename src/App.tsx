@@ -1012,8 +1012,6 @@ function AppMain() {
   const [stExpandedGameId,setStExpandedGameId]=useState<number|null>(null);
   // 오늘 경기 중 종료된 그룹 펼침 여부 (기본: 접힘)
   const [stShowFinished,setStShowFinished]=useState<boolean>(false);
-  // ★ 숨긴 국가/리그(=베팅 가능 경기 없는 항목) 표시 여부 (기본: 숨김)
-  const [stShowEmpty,setStShowEmpty]=useState<boolean>(false);
   const [stFetchedAt,setStFetchedAt]=useState<number|null>(null);
 
   const loadSportsTestData = useCallback(async()=>{
@@ -5043,9 +5041,10 @@ function AppMain() {
         const sportsList: Sport[] = apiSportsList;
 
         // 트리에 표시될 항목 (사용자가 만든 국가/리그)
-        // ★ 베팅 가능한(=종료/연기/취소되지 않은) 경기만 카운트.
-        //   stShowEmpty=false: 카운트 0인 리그/국가는 숨김 (기본)
-        //   stShowEmpty=true:  모두 표시 (체크박스 켜면)
+        // ★ 숨김 규칙:
+        //   - API 매핑 안 된 리그(!apiId)는 항상 표시 (사용자가 매핑할 수 있도록)
+        //   - API 매핑된 리그는 베팅 가능 경기(종료/연기/취소 제외)가 있을 때만 표시
+        //   - 표시할 리그가 하나라도 있는 국가만 표시
         const buildSportTree = (sport:Sport) => {
           const sKr = sportToKr(sport);
           const countries = allCountriesForSport(sKr);
@@ -5066,12 +5065,12 @@ function AppMain() {
                 : 0;
               totalGames += games;
               return { league: lg, apiId, games };
-            // 카운트 0인 리그 숨김 (체크박스 켜져 있으면 모두 표시)
-            }).filter(l => stShowEmpty || l.games > 0);
+            // ★ 표시 조건: 미매핑이거나(=apiId 없음), 매핑되었으면서 베팅 가능 경기 1개 이상
+            }).filter(l => !l.apiId || l.games > 0);
             const cGames = lgItems.reduce((a,b)=>a+b.games,0);
             return { country, leagues: lgItems, games: cGames };
-          // 카운트 0인 국가 숨김 (체크박스 켜져 있으면 모두 표시)
-          }).filter(c => stShowEmpty || c.games > 0);
+          // ★ 표시할 리그가 하나라도 있으면 국가 표시
+          }).filter(c => c.leagues.length > 0);
           return { countries: items, totalGames };
         };
 
@@ -5083,14 +5082,9 @@ function AppMain() {
               <div style={{padding:"10px 12px",borderBottom:`1px solid ${C.border}`,flexShrink:0,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                 <div>
                   <div style={{fontSize:12,fontWeight:800,color:C.text}}>📂 카테고리</div>
-                  <div style={{fontSize:9,color:C.dim,display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
-                    <span>종목 {sportsList.length + customOnlySports.length} · {stFixtures.length}경기</span>
-                    {stFetchedAt && <span>· {new Date(stFetchedAt).toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit"})}</span>}
-                    {/* ★ 빈 국가/리그(베팅 가능 경기 0개) 표시 토글 */}
-                    <label style={{display:"inline-flex",alignItems:"center",gap:3,cursor:"pointer",color:stShowEmpty?C.amber:C.dim,fontWeight:stShowEmpty?700:400}} title="베팅 가능한 경기가 없는 국가/리그도 함께 표시">
-                      <input type="checkbox" checked={stShowEmpty} onChange={e=>setStShowEmpty(e.target.checked)} style={{cursor:"pointer",margin:0}}/>
-                      <span>숨김 표시</span>
-                    </label>
+                  <div style={{fontSize:9,color:C.dim}}>
+                    종목 {sportsList.length + customOnlySports.length} · {stFixtures.length}경기
+                    {stFetchedAt && <span style={{marginLeft:4}}>· {new Date(stFetchedAt).toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit"})}</span>}
                   </div>
                 </div>
                 <div style={{display:"flex",gap:4,alignItems:"center"}}>
@@ -5207,20 +5201,20 @@ function AppMain() {
                   const icon = customSportIcon(sportName);
 
                   // 트리 빌드 (buildSportTree와 동일하지만 sKr 직접 사용)
-                  // ★ stShowEmpty=false: 빈 리그/국가 숨김 / true: 모두 표시
+                  // ★ 사용자 정의 종목은 API 매핑 개념이 없음 → 등록된 모든 국가/리그 항상 표시
                   const countries = allCountriesForSport(sKr);
                   let totalGames = 0;
                   const treeCountries = countries.map(country => {
                     const leagues = allLeaguesForCountry(sKr, country);
                     const lgItems = leagues.map(lg => {
-                      // 사용자 정의 종목은 API 매핑 없음 → manualGames만 카운트
+                      // 사용자 정의 종목은 API 매핑 없음 → manualGames만 카운트 (표시 여부와 무관)
                       const games = manualGames.filter(g=>g.sportCat===sKr && g.country===country && g.league===lg && !g.finished).length;
                       totalGames += games;
                       return { league: lg, apiId: "", games };
-                    }).filter(l => stShowEmpty || l.games > 0);  // 빈 리그 숨김 (토글 켜면 모두)
+                    });
                     const cGames = lgItems.reduce((a,b)=>a+b.games,0);
                     return { country, leagues: lgItems, games: cGames };
-                  }).filter(c => stShowEmpty || c.games > 0);  // 빈 국가 숨김 (토글 켜면 모두)
+                  });
 
                   return (
                     <div key={`custom__${sportName}`} style={{marginBottom:3}}>
