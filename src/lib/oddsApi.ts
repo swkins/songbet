@@ -205,3 +205,141 @@ export async function testConnection(): Promise<{ ok: boolean; error?: string }>
     return { ok: false, error: e?.message || String(e) };
   }
 }
+
+// ──────────────────────────────────────────────────────────────────
+// 룰 매칭 헬퍼 (3단계 — 추천 탭에서 사용)
+// ──────────────────────────────────────────────────────────────────
+// 핵심 가정: odds-api.io의 outcome.name 값은 다음 패턴 중 하나로 옵니다.
+//   h2h:    "Home" / "Away" / "Draw" / 또는 팀명 그대로
+//   spreads: 팀명 (point 필드에 +/- 핸디캡 값)
+//   totals: "Over" / "Under" (point 필드에 라인 값)
+// 다른 표기 변형이 있을 수 있어, 매칭 함수를 관대하게 작성.
+
+export type SimpleRule = {
+  market: "h2h" | "spreads" | "totals";
+  selection: "home" | "away" | "draw" | "favorite" | "underdog" | "over" | "under";
+  oddsMin?: number | null;
+  oddsMax?: number | null;
+};
+
+export interface MatchResult {
+  bookmakerTitle: string;
+  marketKey: string;
+  outcomeName: string;
+  price: number;
+  point?: number;
+}
+
+/**
+ * outcome.name이 "home"/"away"/"draw" 의미인지 판단.
+ * 팀명으로 들어오는 경우(spreads, h2h)도 처리하려면 home/away 팀명을 인자로 받음.
+ */
+function classifyOutcomeName(
+  name: string,
+  homeTeam: string,
+  awayTeam: string
+): "home" | "away" | "draw" | "over" | "under" | "unknown" {
+  const n = (name || "").trim().toLowerCase();
+  const h = (homeTeam || "").trim().toLowerCase();
+  const a = (awayTeam || "").trim().toLowerCase();
+  if (n === "home" || (h && n === h)) return "home";
+  if (n === "away" || (a && n === a)) return "away";
+  if (n === "draw" || n === "tie" || n === "x") return "draw";
+  if (n === "over" || n.startsWith("over ")) return "over";
+  if (n === "under" || n.startsWith("under ")) return "under";
+  return "unknown";
+}
+
+/**
+ * 한 경기의 배당 데이터 + 팀명을 받아서, 주어진 룰에 매칭되는 outcome을 찾는다.
+ * 매칭되면 MatchResult, 아니면 null.
+ *
+ * favorite/underdog 처리:
+ *   - h2h 마켓에서 home/away 가격 비교 → 낮은 쪽이 favorite, 높은 쪽이 underdog
+ *   - 두 가격이 같으면 매칭 안 함 (애매)
+ */
+export function matchRuleAgainstOdds(
+  rule: SimpleRule,
+  odds: OddsApiOdds | undefined,
+  homeTeam: string,
+  awayTeam: string
+): MatchResult | null {
+  if (!odds || !odds.bookmakers) return null;
+
+  const rOddsMin = rule.oddsMin ?? -Infinity;
+  const rOddsMax = rule.oddsMax ?? Infinity;
+  const inRange = (p: number) => p >= rOddsMin && p <= rOddsMax;
+
+  for (const bm of odds.bookmakers) {
+    const targetMarketKeys: string[] =
+      rule.market === "h2h" ? ["h2h", "moneyline"] :
+      rule.market === "spreads" ? ["spreads", "spread", "handicap"] :
+      ["totals", "total", "over_under"];
+
+    for (const m of bm.markets || []) {
+      if (!targetMarketKeys.includes(m.key)) continue;
+
+      // 마켓 내 outcome 분류 + 가격
+      const outcomes = m.outcomes || [];
+      const classified = outcomes.map(o => ({
+        cls: classifyOutcomeName(o.name, homeTeam, awayTeam),
+        outcome: o,
+      }));
+
+      // favorite/underdog: home/away 가격 비교
+      let favSide: "home" | "away" | null = null;
+      let dogSide: "home" | "away" | null = null;
+      if (rule.selection === "favorite" || rule.selection === "underdog") {
+        const homeOutcome = classified.find(c => c.cls === "home")?.outcome;
+        const awayOutcome = classified.find(c => c.cls === "away")?.outcome;
+        if (!homeOutcome || !awayOutcome) continue;
+        if (homeOutcome.price < awayOutcome.price) {
+          favSide = "home"; dogSide = "away";
+        } else if (homeOutcome.price > awayOutcome.price) {
+          favSide = "away"; dogSide = "home";
+        } else {
+          continue; // 가격 같음 — 애매
+        }
+      }
+
+      // 매칭할 셀렉션 결정
+      const targetCls: "home" | "away" | "draw" | "over" | "under" | null =
+        rule.selection === "favorite" ? favSide :
+        rule.selection === "underdog" ? dogSide :
+        rule.selection;
+
+      if (!targetCls) continue;
+      const found = classified.find(c => c.cls === targetCls);
+      if (!found) continue;
+
+      if (!inRange(found.outcome.price)) continue;
+
+      return {
+        bookmakerTitle: bm.title,
+        marketKey: m.key,
+        outcomeName: found.outcome.name,
+        price: found.outcome.price,
+        point: found.outcome.point,
+      };
+    }
+  }
+  return null;
+}
+
+/** 룰을 사람이 읽기 좋은 한국어로 요약 */
+export function ruleSummary(rule: SimpleRule & { sport: string }): string {
+  const sportKr: Record<string,string> = {
+    football:"⚽ 축구", basketball:"🏀 농구", baseball:"⚾ 야구", hockey:"🏒 하키", volleyball:"🏐 배구"
+  };
+  const marketKr: Record<string,string> = { h2h:"승무패", spreads:"핸디캡", totals:"오버언더" };
+  const selKr: Record<string,string> = {
+    home:"홈", away:"원정", draw:"무승부",
+    favorite:"정배", underdog:"역배",
+    over:"오버", under:"언더",
+  };
+  let oddsPart = "";
+  if (rule.oddsMin != null && rule.oddsMax != null) oddsPart = ` ${rule.oddsMin}~${rule.oddsMax}`;
+  else if (rule.oddsMin != null) oddsPart = ` ${rule.oddsMin}↑`;
+  else if (rule.oddsMax != null) oddsPart = ` ${rule.oddsMax}↓`;
+  return `${sportKr[rule.sport] || rule.sport} · ${marketKr[rule.market] || rule.market} · ${selKr[rule.selection] || rule.selection}${oddsPart}`;
+}

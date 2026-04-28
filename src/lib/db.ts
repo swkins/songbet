@@ -622,6 +622,8 @@ export interface AppSettingsBundle {
   sports_test_league_map: Record<string, string>
   fixtures_cache_meta: FixturesCacheMeta
   point_exchange_presets: PointExchangePreset[]
+  // rev.10: odds-api.io 통합 (배당 기반 추천)
+  odds_api_io_key: string
 }
 export async function loadAppSettingsBundle(): Promise<AppSettingsBundle> {
   try {
@@ -652,6 +654,7 @@ export async function loadAppSettingsBundle(): Promise<AppSettingsBundle> {
       sports_test_league_map: typeof map.sports_test_league_map === 'object' && map.sports_test_league_map !== null ? map.sports_test_league_map : {},
       fixtures_cache_meta: cacheMeta,
       point_exchange_presets: Array.isArray(map.point_exchange_presets) ? map.point_exchange_presets : [],
+      odds_api_io_key: typeof map.odds_api_io_key === 'string' ? map.odds_api_io_key : '',
     }
   } catch (e) {
     logLoadError('app_settings', e)
@@ -663,6 +666,7 @@ export async function loadAppSettingsBundle(): Promise<AppSettingsBundle> {
       sports_test_league_map: {},
       fixtures_cache_meta: { ...EMPTY_FIXTURES_CACHE_META },
       point_exchange_presets: [],
+      odds_api_io_key: '',
     }
   }
 }
@@ -794,4 +798,179 @@ export async function loadFixturesCacheMeta(): Promise<FixturesCacheMeta> {
 
 export async function saveFixturesCacheMeta(meta: FixturesCacheMeta): Promise<void> {
   await saveAppSetting('fixtures_cache_meta', meta)
+}
+
+// ═════════════════════════════════════════════════════════════
+// ODDS_EVENTS (odds-api.io 캐시) ★ rev.11 ★
+// ═════════════════════════════════════════════════════════════
+// 사용자가 [📥 다음 10경기 가져오기] 누를 때마다 누적 저장.
+// 자동 정리: 시작 시각 지난 경기는 매일 자동 삭제 (DB 절약).
+
+export interface OddsEventRow {
+  event_id: number
+  sport: string         // "football" | "basketball" | ...
+  league_slug?: string
+  league_name?: string
+  home: string
+  away: string
+  start_time: string    // ISO
+  status?: string
+  odds_json?: any       // bookmakers/markets/outcomes 전체
+  fetched_at?: string
+}
+
+/** 모든 odds_events 로드 (시작 시각 오름차순) */
+export async function loadOddsEvents(): Promise<OddsEventRow[]> {
+  try {
+    const { data, error } = await supabase
+      .from('odds_events')
+      .select('*')
+      .order('start_time', { ascending: true })
+      .limit(2000)
+    if (error) throw error
+    return (data ?? []) as OddsEventRow[]
+  } catch (e) { logLoadError('odds_events', e); return [] }
+}
+
+/** 한 행 upsert (event_id 기준). odds_json은 JSONB로 저장. */
+export async function upsertOddsEvent(row: OddsEventRow): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const { error } = await supabase.from('odds_events').upsert({
+      event_id: row.event_id,
+      sport: row.sport,
+      league_slug: row.league_slug ?? null,
+      league_name: row.league_name ?? null,
+      home: row.home,
+      away: row.away,
+      start_time: row.start_time,
+      status: row.status ?? null,
+      odds_json: row.odds_json ?? null,
+      fetched_at: row.fetched_at ?? new Date().toISOString(),
+    }, { onConflict: 'event_id' })
+    if (error) throw error
+    return { ok: true }
+  } catch (e: any) {
+    logSaveError('odds_events(upsert)', e)
+    return { ok: false, error: String(e?.message ?? e) }
+  }
+}
+
+/** 여러 행 일괄 upsert */
+export async function upsertOddsEvents(rows: OddsEventRow[]): Promise<{ ok: boolean; count: number; error?: string }> {
+  if (rows.length === 0) return { ok: true, count: 0 }
+  try {
+    const payload = rows.map(r => ({
+      event_id: r.event_id,
+      sport: r.sport,
+      league_slug: r.league_slug ?? null,
+      league_name: r.league_name ?? null,
+      home: r.home,
+      away: r.away,
+      start_time: r.start_time,
+      status: r.status ?? null,
+      odds_json: r.odds_json ?? null,
+      fetched_at: r.fetched_at ?? new Date().toISOString(),
+    }))
+    const { error } = await supabase.from('odds_events').upsert(payload, { onConflict: 'event_id' })
+    if (error) throw error
+    return { ok: true, count: rows.length }
+  } catch (e: any) {
+    logSaveError('odds_events(upsert-many)', e)
+    return { ok: false, count: 0, error: String(e?.message ?? e) }
+  }
+}
+
+/** 단일 행 삭제 */
+export async function deleteOddsEvent(eventId: number) {
+  try { await supabase.from('odds_events').delete().eq('event_id', eventId) }
+  catch (e) { logSaveError('odds_events(delete)', e) }
+}
+
+/** 전체 삭제 (사용자 수동 "누적 비우기" 용) */
+export async function clearOddsEvents(): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const { error } = await supabase.from('odds_events').delete().gte('event_id', 0)
+    if (error) throw error
+    return { ok: true }
+  } catch (e: any) {
+    logSaveError('odds_events(clear)', e)
+    return { ok: false, error: String(e?.message ?? e) }
+  }
+}
+
+/** 시작 시각이 지난(=이미 종료/시작된) 경기 삭제. 반환: 삭제된 행 수 */
+export async function purgeStaleOddsEvents(): Promise<number> {
+  try {
+    const cutoff = new Date().toISOString()
+    const { error, count } = await supabase
+      .from('odds_events')
+      .delete({ count: 'exact' })
+      .lt('start_time', cutoff)
+    if (error) throw error
+    return count ?? 0
+  } catch (e) {
+    logSaveError('odds_events(purge)', e)
+    return -1
+  }
+}
+
+// ═════════════════════════════════════════════════════════════
+// ODDS_FILTER_RULES (추천 탭 필터 룰) ★ rev.12 ★
+// ═════════════════════════════════════════════════════════════
+
+export type OddsRuleMarket = 'h2h' | 'spreads' | 'totals'
+export type OddsRuleSelection =
+  | 'home' | 'away' | 'draw'           // h2h
+  | 'favorite' | 'underdog'            // h2h (배당 기준 자동 판정)
+  | 'over' | 'under'                   // totals
+  // spreads 셀렉션은 home/away 사용 (핸디캡 라인은 다음 단계에서 추가)
+
+export interface OddsFilterRuleRow {
+  id: string
+  name: string
+  enabled: boolean
+  sport: string
+  market: OddsRuleMarket
+  selection: OddsRuleSelection
+  odds_min: number | null
+  odds_max: number | null
+  created_at?: string
+}
+
+export async function loadOddsFilterRules(): Promise<OddsFilterRuleRow[]> {
+  try {
+    const { data, error } = await supabase
+      .from('odds_filter_rules')
+      .select('*')
+      .order('created_at', { ascending: true })
+    if (error) throw error
+    return (data ?? []) as OddsFilterRuleRow[]
+  } catch (e) { logLoadError('odds_filter_rules', e); return [] }
+}
+
+export async function upsertOddsFilterRule(row: OddsFilterRuleRow): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const payload: any = {
+      name: row.name,
+      enabled: row.enabled,
+      sport: row.sport,
+      market: row.market,
+      selection: row.selection,
+      odds_min: row.odds_min,
+      odds_max: row.odds_max,
+    }
+    // id가 있을 때만 포함 (없으면 DB가 gen_random_uuid()로 자동 생성)
+    if (row.id) payload.id = row.id
+    const { error } = await supabase.from('odds_filter_rules').upsert(payload, { onConflict: 'id' })
+    if (error) throw error
+    return { ok: true }
+  } catch (e: any) {
+    logSaveError('odds_filter_rules(upsert)', e)
+    return { ok: false, error: String(e?.message ?? e) }
+  }
+}
+
+export async function deleteOddsFilterRule(id: string) {
+  try { await supabase.from('odds_filter_rules').delete().eq('id', id) }
+  catch (e) { logSaveError('odds_filter_rules(delete)', e) }
 }
