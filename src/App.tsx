@@ -3883,6 +3883,20 @@ function AppMain() {
           ═══════════════════════════════════════════════════════════ */}
       <style>{`
         @media (max-width: 768px) {
+          /* ───── input 자동 확대(iOS Safari/Chrome) 차단 ─────
+             iOS는 input/textarea/select의 font-size가 16px 미만일 때
+             포커스 시 화면을 확대시킨다. 16px 이상으로 강제하면 차단됨.
+             PC(>768px)에는 영향 없음. */
+          .bt-app-root input,
+          .bt-app-root textarea,
+          .bt-app-root select {
+            font-size: 16px !important;
+          }
+          /* type=number의 스피너로 인한 폭 변화도 방지 */
+          .bt-app-root input[type="number"] {
+            font-size: 16px !important;
+          }
+
           /* ───── 공통: 가로 스크롤 방지 ───── */
           .bt-app-root {
             overflow-x: hidden !important;
