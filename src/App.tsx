@@ -120,7 +120,6 @@
 import React, { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, LineChart, Line, CartesianGrid } from "recharts";
 import * as db from "./lib/db";
-import * as oddsApi from "./lib/oddsApi";
 import { supabase } from "./lib/supabase";
 import type { Bet, Deposit, Withdrawal, SiteState as SiteStateBase, Log, EsportsRecord, ProfitExtra } from "./types";
 
@@ -848,7 +847,7 @@ function AppMain() {
   const today = useTodayStr();
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const [tab,setTab]=useState<"home"|"bettingCombo"|"bettingComboTest"|"stats"|"roi"|"strategy"|"pending"|"apiManager"|"dataManager"|"oddsApi"|"recommend">("home");
+  const [tab,setTab]=useState<"home"|"bettingCombo"|"bettingComboTest"|"stats"|"roi"|"strategy"|"pending"|"apiManager"|"dataManager">("home");
   // ── 데이터 탭 state ────────────────────────────────────────
   const [dataTableStats,setDataTableStats]=useState<Record<string,{rows:number,size:string,sizeBytes:number}>>({});
   const [dataStatsLoading,setDataStatsLoading]=useState(false);
@@ -1015,20 +1014,6 @@ function AppMain() {
   const [stShowFinished,setStShowFinished]=useState<boolean>(false);
   const [stFetchedAt,setStFetchedAt]=useState<number|null>(null);
 
-  // ─── 💰 스포츠 (배당) 탭 — odds-api.io ───
-  // 1단계: 메모리 상태만 사용 (DB 저장은 다음 단계). 페이지 새로고침 시 초기화.
-  const [oaSport, setOaSport] = useState<oddsApi.OddsApiSport>("football");
-  const [oaLoading, setOaLoading] = useState(false);
-  const [oaError, setOaError] = useState<string>("");
-  // 가져온 경기 + 배당 누적 (DB와 sync됨)
-  const [oaEvents, setOaEvents] = useState<oddsApi.OddsApiEvent[]>([]);
-  const [oaOddsMap, setOaOddsMap] = useState<Record<number, oddsApi.OddsApiOdds>>({});
-  // 이미 가져온 event id (DB+메모리 일관)
-  const oaFetchedIds = useMemo(()=>new Set(oaEvents.map(e=>e.id)),[oaEvents]);
-  // 시간당 사용 req 카운터 (참고용, 정확하진 않음)
-  const [oaReqCountThisHour, setOaReqCountThisHour] = useState(0);
-  const [oaReqHourStart, setOaReqHourStart] = useState<number>(Date.now());
-
   const loadSportsTestData = useCallback(async()=>{
     setStLoading(true); setStError("");
     try {
@@ -1041,173 +1026,6 @@ function AppMain() {
     } finally { setStLoading(false); }
   },[]);
 
-  // ─── 💰 스포츠(배당) — 다음 10개 경기 가져오기 ───
-  // 2단계: Supabase에 영구 저장 — 새로고침해도 유지.
-  //   - 가져온 경기 즉시 DB upsert
-  //   - "이미 가져온 거 제외"는 메모리(oaEvents)와 DB 모두 일관됨
-  //   - 자정/시작시각 지난 경기는 앱 시작 시 자동 정리에서 처리
-  const oaFetchNext = useCallback(async()=>{
-    setOaError(""); setOaLoading(true);
-    try {
-      // 시간당 카운터: 1시간 지났으면 리셋
-      const now = Date.now();
-      if (now - oaReqHourStart > 60*60*1000) {
-        setOaReqHourStart(now);
-        setOaReqCountThisHour(0);
-      }
-
-      // 현재 메모리에 있는 event id들을 제외 목록으로 사용
-      // (DB에서 로드된 것 + 이번 세션에서 가져온 것 모두 포함)
-      const result = await oddsApi.fetchNextEventsWithOdds(oaSport, oaFetchedIds, 10);
-
-      // 카운터 갱신
-      setOaReqCountThisHour(c => c + result.reqCount);
-
-      if (result.events.length === 0) {
-        setOaError("더 가져올 경기가 없습니다 (이 종목의 예정 경기를 모두 받았거나, 결과 자체가 없음)");
-        return;
-      }
-
-      // 메모리 업데이트
-      setOaEvents(prev => [...prev, ...result.events]);
-      const oddsMapNext: Record<number, oddsApi.OddsApiOdds> = {};
-      for (const o of result.odds) oddsMapNext[o.id] = o;
-      setOaOddsMap(prev => ({ ...prev, ...oddsMapNext }));
-
-      // ★ DB upsert — 백그라운드 비동기. 화면 응답성 우선.
-      const rowsForDb: db.OddsEventRow[] = result.events.map(ev => ({
-        event_id: ev.id,
-        sport: ev.sport?.slug || oaSport,
-        league_slug: ev.league?.slug,
-        league_name: ev.league?.name,
-        home: ev.home,
-        away: ev.away,
-        start_time: ev.date,
-        status: ev.status,
-        odds_json: oddsMapNext[ev.id] ?? null, // 같은 시점의 배당 함께 저장
-        fetched_at: new Date().toISOString(),
-      }));
-      db.upsertOddsEvents(rowsForDb).then(res=>{
-        if (!res.ok) console.warn("[odds_events] DB 저장 일부 실패:", res.error);
-      });
-    } catch(e:any) {
-      setOaError(e?.message || "조회 실패");
-    } finally { setOaLoading(false); }
-  },[oaSport, oaFetchedIds, oaReqHourStart]);
-
-  // 누적분 비우기 (수동 리셋) — DB에서도 삭제
-  const oaClearAccumulated = useCallback(async()=>{
-    if (!window.confirm("가져온 경기 목록을 모두 비우시겠습니까?\n(DB에 저장된 데이터도 함께 삭제됩니다)")) return;
-    setOaEvents([]);
-    setOaOddsMap({});
-    setOaError("");
-    const res = await db.clearOddsEvents();
-    if (!res.ok) console.warn("[odds_events] 전체 삭제 실패:", res.error);
-  },[]);
-
-  // ★ DB → 메모리 로드 (앱 시작 시 + 자동 정리 직후 호출)
-  // useCallback으로 만들면 자동정리에서 직접 호출 가능.
-  // 외부 의존성 없는 함수라 deps 비움.
-  const loadOddsEventsFromDb = useCallback(async()=>{
-    try {
-      const rows = await db.loadOddsEvents();
-      // DB row → oddsApi.OddsApiEvent 형태로 복원
-      const events: oddsApi.OddsApiEvent[] = rows.map(r => ({
-        id: r.event_id,
-        home: r.home,
-        away: r.away,
-        date: r.start_time,
-        sport: { name: r.sport, slug: r.sport },
-        league: { name: r.league_name || "", slug: r.league_slug || "" },
-        status: r.status || "pending",
-      }));
-      // odds_json 복원 (저장된 배당 그대로)
-      const oddsMap: Record<number, oddsApi.OddsApiOdds> = {};
-      for (const r of rows) {
-        if (r.odds_json) oddsMap[r.event_id] = r.odds_json as oddsApi.OddsApiOdds;
-      }
-      setOaEvents(events);
-      setOaOddsMap(oddsMap);
-    } catch (e) {
-      console.warn("[odds_events] DB 로드 실패:", e);
-    }
-  },[]);
-
-  // ─── ⭐ 스포츠(추천) — 필터 룰 + 매칭 ───
-  // 룰은 DB에 영구 저장. 룰 변경 시 즉시 매칭 결과 갱신 (API 호출 없음).
-  const [oaRules, setOaRules] = useState<db.OddsFilterRuleRow[]>([]);
-  const [oaRuleModal, setOaRuleModal] = useState<db.OddsFilterRuleRow | null>(null); // null=닫힘 / 객체=편집중
-
-  const loadOddsRulesFromDb = useCallback(async()=>{
-    try {
-      const rows = await db.loadOddsFilterRules();
-      setOaRules(rows);
-    } catch (e) {
-      console.warn("[odds_filter_rules] DB 로드 실패:", e);
-    }
-  },[]);
-
-  // 새 룰 모달 열기 (빈 템플릿)
-  const oaOpenNewRuleModal = useCallback(()=>{
-    setOaRuleModal({
-      id: "", // 비어있으면 DB가 자동 생성
-      name: "",
-      enabled: true,
-      sport: "baseball",
-      market: "h2h",
-      selection: "underdog",
-      odds_min: 2.10,
-      odds_max: 2.99,
-    });
-  },[]);
-
-  // 룰 저장 (신규/수정 공통)
-  const oaSaveRule = useCallback(async(rule: db.OddsFilterRuleRow)=>{
-    if (!rule.name.trim()) { alert("룰 이름을 입력하세요"); return; }
-    const res = await db.upsertOddsFilterRule(rule);
-    if (!res.ok) { alert("저장 실패: " + res.error); return; }
-    setOaRuleModal(null);
-    await loadOddsRulesFromDb();
-  },[loadOddsRulesFromDb]);
-
-  // 룰 삭제
-  const oaDeleteRule = useCallback(async(id: string)=>{
-    if (!window.confirm("이 룰을 삭제하시겠습니까?")) return;
-    await db.deleteOddsFilterRule(id);
-    await loadOddsRulesFromDb();
-  },[loadOddsRulesFromDb]);
-
-  // 룰 enabled 토글
-  const oaToggleRule = useCallback(async(rule: db.OddsFilterRuleRow)=>{
-    const updated = { ...rule, enabled: !rule.enabled };
-    await db.upsertOddsFilterRule(updated);
-    setOaRules(prev => prev.map(r => r.id === rule.id ? updated : r));
-  },[]);
-
-  // ★ 매칭 결과 — 룰/이벤트 변경 시 자동 재계산
-  // 결과: 룰별로 매칭된 [event, matchResult] 쌍 배열
-  const oaMatches = useMemo(()=>{
-    const result: { rule: db.OddsFilterRuleRow; matches: { event: oddsApi.OddsApiEvent; match: oddsApi.MatchResult }[] }[] = [];
-    for (const rule of oaRules) {
-      if (!rule.enabled) continue;
-      const matches: { event: oddsApi.OddsApiEvent; match: oddsApi.MatchResult }[] = [];
-      const sportEvents = oaEvents.filter(e => (e.sport?.slug || "") === rule.sport);
-      for (const ev of sportEvents) {
-        const oddsForEv = oaOddsMap[ev.id];
-        const m = oddsApi.matchRuleAgainstOdds(
-          { market: rule.market, selection: rule.selection, oddsMin: rule.odds_min, oddsMax: rule.odds_max },
-          oddsForEv,
-          ev.home,
-          ev.away
-        );
-        if (m) matches.push({ event: ev, match: m });
-      }
-      // 시작 시각 오름차순
-      matches.sort((a,b)=>new Date(a.event.date).getTime() - new Date(b.event.date).getTime());
-      result.push({ rule, matches });
-    }
-    return result;
-  },[oaRules, oaEvents, oaOddsMap]);
 
   // ── 베팅 슬립 ──────────────────────────────────────────────
   interface SlipItem {
@@ -2607,7 +2425,7 @@ function AppMain() {
 
       // ─── 자동 정리: 오래된 캐시 데이터 삭제 (하루에 1회만 실행) ───
       // 통계에 영향 주는 테이블(bets, deposits, withdrawals, profit_extras 등)은
-      // 절대 건드리지 않음. fixtures/manual_games/odds_events 캐시성 데이터만.
+      // 절대 건드리지 않음. fixtures/manual_games 캐시성 데이터만.
       try {
         const todayStr = new Date().toISOString().slice(0,10); // YYYY-MM-DD
         const lastPurgeDate = localStorage.getItem("bt_last_purge_date");
@@ -2616,20 +2434,11 @@ function AppMain() {
           (async()=>{
             const fxDeleted = await db.purgeOldFixtures(7);
             const mgDeleted = await db.purgeOldManualGames(30);
-            // ★ rev.11: odds-api.io 캐시 — 시작 시각 지난 경기 자동 삭제
-            const oeDeleted = await db.purgeStaleOddsEvents();
             localStorage.setItem("bt_last_purge_date", todayStr);
-            if (fxDeleted > 0 || mgDeleted > 0 || oeDeleted > 0) {
-              console.log(`[자동 정리] fixtures: ${fxDeleted}행, manual_games: ${mgDeleted}행, odds_events: ${oeDeleted}행 삭제`);
+            if (fxDeleted > 0 || mgDeleted > 0) {
+              console.log(`[자동 정리] fixtures: ${fxDeleted}행 삭제, manual_games: ${mgDeleted}행 삭제`);
             }
-            // 정리 끝나면 odds_events DB에서 메모리로 로드 (1단계와 다른 점)
-            await loadOddsEventsFromDb();
-            await loadOddsRulesFromDb();
           })();
-        } else {
-          // 정리 안 해도 되는 날 — 그래도 DB에서 로드
-          loadOddsEventsFromDb();
-          loadOddsRulesFromDb();
         }
       } catch (e) {
         // 정리 실패해도 앱 동작에는 영향 없음
@@ -3087,8 +2896,6 @@ function AppMain() {
   const [oddsApiKeyDraft, setOddsApiKeyDraft] = useState<string>(""); // 입력 중 임시값
   const [oddsApiTestResult, setOddsApiTestResult] = useState<null|{ok:boolean; msg:string; sportsCount?:number; sample?:string[]}>(null);
   const [oddsApiTesting, setOddsApiTesting] = useState<boolean>(false);
-  // ★ 사용자 저장 키 → oddsApi 모듈로 sync (Vercel 환경변수 없을 때 폴백)
-  useEffect(()=>{ oddsApi.setApiKey(oddsApiKey || null); },[oddsApiKey]);
   const saveOddsApiKey = (k: string) => {
     setOddsApiKey(k);
     db.saveAppSetting("odds_api_io_key", k);
@@ -5213,9 +5020,9 @@ function AppMain() {
         </div>
         <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
           {([
-            ["home","🏠 대시보드"],["bettingCombo","🎯 스포츠"],["pending","⏳ 베팅 내역"],["stats","📊 통계"],["roi","💹 수익률"],["strategy","📋 전략"],["apiManager","🔑 API 관리"],["dataManager","🗄 데이터"],["oddsApi","💰 스포츠 (배당)"],["recommend","⭐ 스포츠 (추천)"],
+            ["home","🏠 대시보드"],["bettingCombo","🎯 스포츠"],["pending","⏳ 베팅 내역"],["stats","📊 통계"],["roi","💹 수익률"],["strategy","📋 전략"],["apiManager","🔑 API 관리"],["dataManager","🗄 데이터"],["bettingComboTest","🧪 스포츠 (테스트)"],
           ] as [string,string][]).map(([k,l])=>{
-            const ac = k==="pending"?C.amber:k==="home"?C.green:k==="apiManager"?C.purple:k==="dataManager"?C.red:k==="oddsApi"?C.teal:k==="recommend"?C.amber:C.orange;
+            const ac = k==="pending"?C.amber:k==="home"?C.green:k==="apiManager"?C.purple:k==="dataManager"?C.red:k==="bettingComboTest"?C.teal:C.orange;
             const active = tab===k;
             return (
               <button key={k} onClick={()=>setTab(k as any)}
@@ -8740,376 +8547,6 @@ $$;`}
         );
       })()}
 
-      {/* ═══════════════════════════════════════════════════════════
-          💰 스포츠 (배당) 탭 — odds-api.io
-          2단계: Supabase 영구 저장. 새로고침해도 유지.
-          ═══════════════════════════════════════════════════════════ */}
-      {tab==="oddsApi" && (
-        <div style={{flex:1,minHeight:0,overflow:"auto",padding:"16px 20px"}}>
-          <div style={{maxWidth:1100,margin:"0 auto"}}>
-            <div style={{fontSize:18,fontWeight:800,color:C.teal,marginBottom:6}}>💰 스포츠 (배당)</div>
-            <div style={{fontSize:11,color:C.muted,marginBottom:14}}>
-              odds-api.io에서 다음 10경기씩 가져옵니다 · 무료 티어 시간당 100req · 한 번 호출 = 약 2req · 시작 시각 지난 경기는 매일 자동 정리
-            </div>
-
-            {/* API 키 상태 */}
-            {!oddsApi.hasApiKey() && (
-              <div style={{padding:"12px 14px",borderRadius:8,background:`${C.red}11`,border:`1px solid ${C.red}66`,color:C.red,fontSize:12,marginBottom:14}}>
-                ⚠ <b>odds-api.io API 키가 설정되지 않았습니다.</b><br/>
-                <span style={{color:C.muted,fontSize:11}}>
-                  두 가지 방법 중 하나로 설정 가능:<br/>
-                  ① Vercel 대시보드 → Project Settings → Environment Variables → <code>VITE_ODDS_API_KEY</code> 추가 후 재배포 (모든 사용자 공유)<br/>
-                  ② 🔑 API 관리 탭에서 키 입력 (이 사용자만)
-                </span>
-              </div>
-            )}
-
-            {/* 컨트롤 패널 */}
-            <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap",padding:"12px 14px",background:C.bg3,borderRadius:10,border:`1px solid ${C.border}`,marginBottom:14}}>
-              <span style={{fontSize:11,color:C.muted,fontWeight:700}}>종목:</span>
-              <select value={oaSport} onChange={e=>setOaSport(e.target.value as oddsApi.OddsApiSport)}
-                style={{padding:"6px 10px",borderRadius:6,border:`1px solid ${C.border2}`,background:C.bg2,color:C.text,fontSize:12,cursor:"pointer"}}>
-                <option value="football">⚽ 축구</option>
-                <option value="basketball">🏀 농구</option>
-                <option value="baseball">⚾ 야구</option>
-                <option value="hockey">🏒 하키</option>
-                <option value="volleyball">🏐 배구</option>
-              </select>
-              <button onClick={oaFetchNext} disabled={oaLoading || !oddsApi.hasApiKey()}
-                style={{padding:"7px 14px",borderRadius:6,border:`1px solid ${C.teal}`,background:oaLoading?C.bg3:`${C.teal}33`,color:C.teal,fontWeight:800,fontSize:12,cursor:oaLoading?"wait":"pointer",opacity:oaLoading||!oddsApi.hasApiKey()?0.5:1}}>
-                {oaLoading ? "불러오는 중..." : "📥 다음 10경기 가져오기"}
-              </button>
-              {oaEvents.length > 0 && (
-                <button onClick={oaClearAccumulated}
-                  style={{padding:"7px 12px",borderRadius:6,border:`1px solid ${C.red}66`,background:`${C.red}11`,color:C.red,fontSize:11,cursor:"pointer"}}>
-                  🗑 전체 비우기
-                </button>
-              )}
-              <span style={{flex:1}}/>
-              <span style={{fontSize:10,color:C.muted}}>
-                저장 {oaEvents.length}경기 · 이번 시간 사용 {oaReqCountThisHour}/100 req
-              </span>
-            </div>
-
-            {/* 종목별 카운트 */}
-            {oaEvents.length > 0 && (()=>{
-              const SPORT_LABELS: Record<string,string> = {
-                football:"⚽ 축구", basketball:"🏀 농구", baseball:"⚾ 야구", hockey:"🏒 하키", volleyball:"🏐 배구"
-              };
-              const counts: Record<string,number> = {};
-              for (const ev of oaEvents) {
-                const s = ev.sport?.slug || "";
-                counts[s] = (counts[s] || 0) + 1;
-              }
-              return (
-                <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:12,fontSize:11}}>
-                  {Object.entries(counts).sort((a,b)=>b[1]-a[1]).map(([sp,n])=>(
-                    <span key={sp} style={{padding:"4px 10px",borderRadius:4,background:C.bg3,border:`1px solid ${C.border}`,color:C.muted}}>
-                      {SPORT_LABELS[sp] || sp} <b style={{color:C.teal,marginLeft:3}}>{n}</b>
-                    </span>
-                  ))}
-                </div>
-              );
-            })()}
-
-            {oaError && (
-              <div style={{padding:"10px 14px",borderRadius:8,background:`${C.amber}11`,border:`1px solid ${C.amber}66`,color:C.amber,fontSize:12,marginBottom:14}}>
-                {oaError}
-              </div>
-            )}
-
-            {/* 가져온 경기 목록 — 현재 선택된 종목만 표시 */}
-            {(()=>{
-              const filtered = oaEvents.filter(e => (e.sport?.slug || "") === oaSport);
-              if (oaEvents.length === 0) {
-                return (
-                  <div style={{padding:"40px 20px",textAlign:"center",color:C.dim,fontSize:13}}>
-                    위 [📥 다음 10경기 가져오기] 버튼을 눌러 경기를 가져오세요.
-                  </div>
-                );
-              }
-              if (filtered.length === 0) {
-                return (
-                  <div style={{padding:"30px 20px",textAlign:"center",color:C.dim,fontSize:12}}>
-                    이 종목으로 가져온 경기가 없습니다. 위 [📥 가져오기]를 눌러보세요.
-                  </div>
-                );
-              }
-              return (
-                <div style={{display:"flex",flexDirection:"column",gap:8}}>
-                  {filtered.map(ev => {
-                    const odds = oaOddsMap[ev.id];
-                    const dt = new Date(ev.date);
-                    const dateStr = dt.toLocaleString("ko-KR",{month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"});
-                    const firstBm = odds?.bookmakers?.[0];
-                    const h2h = firstBm?.markets?.find(m => m.key === "h2h" || m.key === "moneyline");
-                    return (
-                      <div key={ev.id} style={{padding:"10px 14px",borderRadius:8,background:C.bg3,border:`1px solid ${C.border}`,fontSize:12}}>
-                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:6}}>
-                          <div>
-                            <span style={{fontWeight:700,color:C.text}}>{ev.home}</span>
-                            <span style={{color:C.dim,margin:"0 6px"}}>vs</span>
-                            <span style={{fontWeight:700,color:C.text}}>{ev.away}</span>
-                          </div>
-                          <span style={{fontSize:10,color:C.muted}}>{dateStr}</span>
-                        </div>
-                        <div style={{fontSize:10,color:C.dim,marginBottom:6}}>
-                          {ev.league.name} · ID {ev.id}
-                        </div>
-                        {h2h && h2h.outcomes.length > 0 ? (
-                          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                            {h2h.outcomes.map((o,i)=>(
-                              <span key={i} style={{padding:"3px 8px",borderRadius:4,background:C.bg2,border:`1px solid ${C.border2}`,fontSize:11}}>
-                                <span style={{color:C.muted,marginRight:4}}>{o.name}:</span>
-                                <span style={{color:C.green,fontWeight:700}}>{o.price.toFixed(2)}</span>
-                              </span>
-                            ))}
-                            <span style={{fontSize:10,color:C.dim,marginLeft:"auto"}}>via {firstBm?.title}</span>
-                          </div>
-                        ) : (
-                          <div style={{fontSize:11,color:C.dim,fontStyle:"italic"}}>배당 데이터 없음</div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              );
-            })()}
-
-            <div style={{marginTop:30,padding:"12px 14px",background:C.bg3,borderRadius:8,border:`1px dashed ${C.border2}`,fontSize:11,color:C.muted,lineHeight:1.6}}>
-              <b style={{color:C.text}}>📌 동작 안내:</b><br/>
-              • [📥 가져오기]를 누를 때마다 새로운 경기 10개가 추가됩니다 (이미 가져온 것은 제외).<br/>
-              • 가져온 경기는 Supabase에 영구 저장되어 새로고침해도 유지됩니다.<br/>
-              • 시작 시각이 지난 경기는 매일 앱 시작 시 자동 삭제됩니다 (DB 절약).<br/>
-              • 다음 단계에서 필터 룰 + 추천 탭 매칭이 추가됩니다.
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ═══════════════════════════════════════════════════════════
-          ⭐ 스포츠 (추천) 탭 — 룰 매칭
-          ═══════════════════════════════════════════════════════════ */}
-      {tab==="recommend" && (
-        <div style={{flex:1,minHeight:0,overflow:"auto",padding:"16px 20px"}}>
-          <div style={{maxWidth:1100,margin:"0 auto"}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:6,flexWrap:"wrap",gap:10}}>
-              <div>
-                <div style={{fontSize:18,fontWeight:800,color:C.amber}}>⭐ 스포츠 (추천)</div>
-                <div style={{fontSize:11,color:C.muted}}>
-                  필터 룰에 매칭되는 경기를 자동으로 표시 · 💰 스포츠(배당)에서 가져온 데이터 기준 · 룰 변경 시 즉시 반영
-                </div>
-              </div>
-              <button onClick={oaOpenNewRuleModal}
-                style={{padding:"8px 14px",borderRadius:6,border:`1px solid ${C.amber}`,background:`${C.amber}33`,color:C.amber,fontWeight:800,fontSize:12,cursor:"pointer"}}>
-                ➕ 새 룰 만들기
-              </button>
-            </div>
-
-            {/* 룰 목록 */}
-            <div style={{marginTop:14,marginBottom:18}}>
-              <div style={{fontSize:12,fontWeight:800,color:C.muted,marginBottom:8}}>📋 룰 목록 ({oaRules.length}개)</div>
-              {oaRules.length === 0 ? (
-                <div style={{padding:"20px",textAlign:"center",color:C.dim,fontSize:12,background:C.bg3,borderRadius:8,border:`1px dashed ${C.border}`}}>
-                  아직 룰이 없습니다. 위 [➕ 새 룰 만들기]로 시작하세요.
-                </div>
-              ) : (
-                <div style={{display:"flex",flexDirection:"column",gap:6}}>
-                  {oaRules.map(rule => {
-                    const matchCount = oaMatches.find(m => m.rule.id === rule.id)?.matches.length ?? 0;
-                    return (
-                      <div key={rule.id} style={{padding:"10px 12px",borderRadius:6,background:rule.enabled?C.bg3:C.bg2,border:`1px solid ${rule.enabled?C.border:C.border2}`,fontSize:12,opacity:rule.enabled?1:0.55,display:"flex",alignItems:"center",gap:10}}>
-                        <input type="checkbox" checked={rule.enabled} onChange={()=>oaToggleRule(rule)} style={{cursor:"pointer"}}/>
-                        <div style={{flex:1,minWidth:0}}>
-                          <div style={{fontWeight:700,color:C.text,marginBottom:2}}>{rule.name}</div>
-                          <div style={{fontSize:10,color:C.muted}}>
-                            {oddsApi.ruleSummary({ sport:rule.sport, market:rule.market, selection:rule.selection, oddsMin:rule.odds_min, oddsMax:rule.odds_max })}
-                          </div>
-                        </div>
-                        <span style={{padding:"2px 8px",borderRadius:4,background:matchCount>0?`${C.green}22`:`${C.dim}22`,color:matchCount>0?C.green:C.dim,fontSize:10,fontWeight:700,whiteSpace:"nowrap"}}>
-                          매칭 {matchCount}
-                        </span>
-                        <button onClick={()=>setOaRuleModal(rule)}
-                          style={{padding:"4px 10px",borderRadius:4,border:`1px solid ${C.border2}`,background:C.bg2,color:C.muted,fontSize:10,cursor:"pointer"}}>
-                          ✏️ 수정
-                        </button>
-                        <button onClick={()=>oaDeleteRule(rule.id)}
-                          style={{padding:"4px 10px",borderRadius:4,border:`1px solid ${C.red}66`,background:`${C.red}11`,color:C.red,fontSize:10,cursor:"pointer"}}>
-                          🗑
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-            {/* 매칭 결과 */}
-            <div style={{borderTop:`1px solid ${C.border}`,paddingTop:14}}>
-              <div style={{fontSize:12,fontWeight:800,color:C.muted,marginBottom:8}}>🎯 매칭된 경기</div>
-              {oaEvents.length === 0 ? (
-                <div style={{padding:"20px",textAlign:"center",color:C.dim,fontSize:12,background:C.bg3,borderRadius:8,border:`1px dashed ${C.border}`}}>
-                  💰 스포츠(배당) 탭에서 먼저 경기를 가져오세요.
-                </div>
-              ) : oaMatches.filter(m => m.matches.length > 0).length === 0 ? (
-                <div style={{padding:"20px",textAlign:"center",color:C.dim,fontSize:12,background:C.bg3,borderRadius:8,border:`1px dashed ${C.border}`}}>
-                  활성 룰에 매칭되는 경기가 없습니다.<br/>
-                  <span style={{fontSize:10}}>(저장된 경기 {oaEvents.length}개 · 활성 룰 {oaRules.filter(r=>r.enabled).length}개)</span>
-                </div>
-              ) : (
-                <div style={{display:"flex",flexDirection:"column",gap:14}}>
-                  {oaMatches.filter(m => m.matches.length > 0).map(({rule, matches})=>(
-                    <div key={rule.id} style={{background:C.bg3,borderRadius:8,border:`1px solid ${C.border}`,padding:"12px 14px"}}>
-                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:8,paddingBottom:8,borderBottom:`1px solid ${C.border2}`}}>
-                        <div>
-                          <span style={{fontWeight:800,color:C.amber,fontSize:13}}>{rule.name}</span>
-                          <span style={{fontSize:10,color:C.dim,marginLeft:8}}>{oddsApi.ruleSummary({ sport:rule.sport, market:rule.market, selection:rule.selection, oddsMin:rule.odds_min, oddsMax:rule.odds_max })}</span>
-                        </div>
-                        <span style={{fontSize:11,color:C.green,fontWeight:700}}>{matches.length}경기 매칭</span>
-                      </div>
-                      <div style={{display:"flex",flexDirection:"column",gap:6}}>
-                        {matches.map(({event, match}) => {
-                          const dt = new Date(event.date);
-                          const dateStr = dt.toLocaleString("ko-KR",{month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"});
-                          return (
-                            <div key={event.id} style={{padding:"8px 10px",borderRadius:5,background:C.bg2,border:`1px solid ${C.border2}`,fontSize:11,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
-                              <span style={{fontWeight:700,color:C.text,flex:1,minWidth:200}}>
-                                {event.home} <span style={{color:C.dim}}>vs</span> {event.away}
-                              </span>
-                              <span style={{fontSize:10,color:C.muted}}>{event.league.name}</span>
-                              <span style={{fontSize:10,color:C.muted}}>{dateStr}</span>
-                              <span style={{padding:"2px 8px",borderRadius:4,background:`${C.green}22`,color:C.green,fontWeight:800,fontSize:11}}>
-                                {match.outcomeName} {match.point !== undefined ? `(${match.point>0?"+":""}${match.point})` : ""} @ {match.price.toFixed(2)}
-                              </span>
-                              <span style={{fontSize:9,color:C.dim}}>via {match.bookmakerTitle}</span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div style={{marginTop:30,padding:"12px 14px",background:C.bg3,borderRadius:8,border:`1px dashed ${C.border2}`,fontSize:11,color:C.muted,lineHeight:1.6}}>
-              <b style={{color:C.text}}>📌 동작 안내:</b><br/>
-              • 룰은 모든 경기에 동시에 적용 (AND 조건). 룰 1: 야구 역배 2.1~2.99 → 그 조건 맞는 경기만 표시.<br/>
-              • <b>정배(favorite)</b> = 두 팀 중 배당이 낮은 쪽 / <b>역배(underdog)</b> = 배당이 높은 쪽 (자동 판정).<br/>
-              • 핸디캡 라인 조건(예: 5.5~29.5 플핸)은 다음 단계에서 추가됩니다.<br/>
-              • 룰 켜기/끄기는 체크박스로. API 호출 없이 즉시 반영.
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ═══════════════════════════════════════════════════════════
-          ⭐ 룰 편집 모달 (신규/수정 공용)
-          ═══════════════════════════════════════════════════════════ */}
-      {oaRuleModal && (()=>{
-        const draft = oaRuleModal;
-        // 마켓 변경 시 selection 자동 보정
-        const validSelections: Record<string,db.OddsRuleSelection[]> = {
-          h2h: ["home","away","draw","favorite","underdog"],
-          spreads: ["home","away"],
-          totals: ["over","under"],
-        };
-        const fixSelection = (market: db.OddsRuleMarket, sel: db.OddsRuleSelection): db.OddsRuleSelection => {
-          if (validSelections[market].includes(sel)) return sel;
-          return validSelections[market][0];
-        };
-        return (
-          <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:9999,padding:20}}>
-            <div style={{background:C.bg2,borderRadius:12,border:`2px solid ${C.amber}`,padding:24,maxWidth:520,width:"100%",maxHeight:"90vh",overflow:"auto"}}>
-              <div style={{fontSize:15,fontWeight:800,color:C.amber,marginBottom:16}}>
-                {draft.id ? "✏️ 룰 수정" : "➕ 새 룰 만들기"}
-              </div>
-
-              <div style={{display:"flex",flexDirection:"column",gap:12,fontSize:12}}>
-                <div>
-                  <div style={{color:C.muted,marginBottom:4,fontWeight:700}}>룰 이름</div>
-                  <input value={draft.name} onChange={e=>setOaRuleModal({...draft,name:e.target.value})}
-                    placeholder="예: 야구 역배 안전 구간"
-                    style={{width:"100%",padding:"7px 10px",borderRadius:5,border:`1px solid ${C.border2}`,background:C.bg3,color:C.text,fontSize:12,boxSizing:"border-box"}}/>
-                </div>
-
-                <div>
-                  <div style={{color:C.muted,marginBottom:4,fontWeight:700}}>종목</div>
-                  <select value={draft.sport} onChange={e=>setOaRuleModal({...draft,sport:e.target.value})}
-                    style={{width:"100%",padding:"7px 10px",borderRadius:5,border:`1px solid ${C.border2}`,background:C.bg3,color:C.text,fontSize:12,cursor:"pointer"}}>
-                    <option value="football">⚽ 축구</option>
-                    <option value="basketball">🏀 농구</option>
-                    <option value="baseball">⚾ 야구</option>
-                    <option value="hockey">🏒 하키</option>
-                    <option value="volleyball">🏐 배구</option>
-                  </select>
-                </div>
-
-                <div>
-                  <div style={{color:C.muted,marginBottom:4,fontWeight:700}}>마켓 종류</div>
-                  <select value={draft.market} onChange={e=>{
-                    const market = e.target.value as db.OddsRuleMarket;
-                    setOaRuleModal({...draft, market, selection: fixSelection(market, draft.selection)});
-                  }} style={{width:"100%",padding:"7px 10px",borderRadius:5,border:`1px solid ${C.border2}`,background:C.bg3,color:C.text,fontSize:12,cursor:"pointer"}}>
-                    <option value="h2h">승무패 (h2h)</option>
-                    <option value="spreads">핸디캡 (spreads)</option>
-                    <option value="totals">오버언더 (totals)</option>
-                  </select>
-                </div>
-
-                <div>
-                  <div style={{color:C.muted,marginBottom:4,fontWeight:700}}>선택 옵션</div>
-                  <select value={draft.selection} onChange={e=>setOaRuleModal({...draft,selection:e.target.value as db.OddsRuleSelection})}
-                    style={{width:"100%",padding:"7px 10px",borderRadius:5,border:`1px solid ${C.border2}`,background:C.bg3,color:C.text,fontSize:12,cursor:"pointer"}}>
-                    {validSelections[draft.market].map(sel => (
-                      <option key={sel} value={sel}>
-                        {sel==="home"?"홈":sel==="away"?"원정":sel==="draw"?"무승부":sel==="favorite"?"정배 (배당 낮은 쪽)":sel==="underdog"?"역배 (배당 높은 쪽)":sel==="over"?"오버":sel==="under"?"언더":sel}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div style={{display:"flex",gap:10}}>
-                  <div style={{flex:1}}>
-                    <div style={{color:C.muted,marginBottom:4,fontWeight:700}}>최소 배당</div>
-                    <input type="number" step="0.01" value={draft.odds_min ?? ""} onChange={e=>{
-                      const v = e.target.value === "" ? null : parseFloat(e.target.value);
-                      setOaRuleModal({...draft, odds_min: v});
-                    }} placeholder="예: 2.10" style={{width:"100%",padding:"7px 10px",borderRadius:5,border:`1px solid ${C.border2}`,background:C.bg3,color:C.text,fontSize:12,boxSizing:"border-box"}}/>
-                  </div>
-                  <div style={{flex:1}}>
-                    <div style={{color:C.muted,marginBottom:4,fontWeight:700}}>최대 배당</div>
-                    <input type="number" step="0.01" value={draft.odds_max ?? ""} onChange={e=>{
-                      const v = e.target.value === "" ? null : parseFloat(e.target.value);
-                      setOaRuleModal({...draft, odds_max: v});
-                    }} placeholder="예: 2.99" style={{width:"100%",padding:"7px 10px",borderRadius:5,border:`1px solid ${C.border2}`,background:C.bg3,color:C.text,fontSize:12,boxSizing:"border-box"}}/>
-                  </div>
-                </div>
-
-                <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",color:C.muted,fontSize:11}}>
-                  <input type="checkbox" checked={draft.enabled} onChange={e=>setOaRuleModal({...draft,enabled:e.target.checked})}/>
-                  활성화
-                </label>
-
-                <div style={{padding:"8px 10px",background:C.bg3,borderRadius:5,fontSize:10,color:C.dim}}>
-                  <b style={{color:C.muted}}>요약:</b> {oddsApi.ruleSummary({ sport:draft.sport, market:draft.market, selection:draft.selection, oddsMin:draft.odds_min, oddsMax:draft.odds_max })}
-                </div>
-              </div>
-
-              <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:18,paddingTop:14,borderTop:`1px solid ${C.border}`}}>
-                <button onClick={()=>setOaRuleModal(null)}
-                  style={{padding:"8px 16px",borderRadius:6,border:`1px solid ${C.border2}`,background:C.bg3,color:C.muted,cursor:"pointer",fontWeight:700,fontSize:12}}>
-                  취소
-                </button>
-                <button onClick={()=>oaSaveRule(draft)}
-                  style={{padding:"8px 18px",borderRadius:6,border:`1px solid ${C.amber}`,background:`${C.amber}33`,color:C.amber,cursor:"pointer",fontWeight:800,fontSize:12}}>
-                  💾 저장
-                </button>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
 
     </div>
   );
