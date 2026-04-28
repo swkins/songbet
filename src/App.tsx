@@ -120,6 +120,7 @@
 import React, { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, LineChart, Line, CartesianGrid } from "recharts";
 import * as db from "./lib/db";
+import * as oddsApi from "./lib/oddsApi";
 import { supabase } from "./lib/supabase";
 import type { Bet, Deposit, Withdrawal, SiteState as SiteStateBase, Log, EsportsRecord, ProfitExtra } from "./types";
 
@@ -847,7 +848,7 @@ function AppMain() {
   const today = useTodayStr();
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const [tab,setTab]=useState<"home"|"bettingCombo"|"bettingComboTest"|"stats"|"roi"|"strategy"|"pending"|"apiManager"|"dataManager">("home");
+  const [tab,setTab]=useState<"home"|"bettingCombo"|"bettingComboTest"|"stats"|"roi"|"strategy"|"pending"|"apiManager"|"dataManager"|"oddsApi"|"recommend">("home");
   // ── 데이터 탭 state ────────────────────────────────────────
   const [dataTableStats,setDataTableStats]=useState<Record<string,{rows:number,size:string,sizeBytes:number}>>({});
   const [dataStatsLoading,setDataStatsLoading]=useState(false);
@@ -1014,6 +1015,21 @@ function AppMain() {
   const [stShowFinished,setStShowFinished]=useState<boolean>(false);
   const [stFetchedAt,setStFetchedAt]=useState<number|null>(null);
 
+  // ─── 💰 스포츠 (배당) 탭 — odds-api.io ───
+  // 1단계: 메모리 상태만 사용 (DB 저장은 다음 단계). 페이지 새로고침 시 초기화.
+  const [oaSport, setOaSport] = useState<oddsApi.OddsApiSport>("football");
+  const [oaLoading, setOaLoading] = useState(false);
+  const [oaError, setOaError] = useState<string>("");
+  // 가져온 경기 + 배당 누적
+  const [oaEvents, setOaEvents] = useState<oddsApi.OddsApiEvent[]>([]);
+  const [oaOddsMap, setOaOddsMap] = useState<Record<number, oddsApi.OddsApiOdds>>({});
+  // 이미 가져온 event id 추적 (오늘 단위 — 자정 지나면 자동 리셋되도록 날짜 키와 함께 저장)
+  const [oaFetchedDate, setOaFetchedDate] = useState<string>(""); // YYYY-MM-DD
+  const oaFetchedIds = useMemo(()=>new Set(oaEvents.map(e=>e.id)),[oaEvents]);
+  // 시간당 사용 req 카운터 (참고용, 정확하진 않음)
+  const [oaReqCountThisHour, setOaReqCountThisHour] = useState(0);
+  const [oaReqHourStart, setOaReqHourStart] = useState<number>(Date.now());
+
   const loadSportsTestData = useCallback(async()=>{
     setStLoading(true); setStError("");
     try {
@@ -1024,6 +1040,61 @@ function AppMain() {
     } catch(e:any) {
       setStError(e?.message || "불러오기 실패");
     } finally { setStLoading(false); }
+  },[]);
+
+  // ─── 💰 스포츠(배당) — 다음 10개 경기 가져오기 ───
+  // 사용자가 [📥 다음 10경기 가져오기] 누르면 호출.
+  // 1단계: DB 저장 없음. 메모리에만 누적.
+  //   - 같은 종목 누적 (다른 종목 누르면 그 종목 별도 누적)
+  //   - 자정 지나면 누적분 자동 리셋 (오늘 단위 정책)
+  const oaFetchNext = useCallback(async()=>{
+    setOaError(""); setOaLoading(true);
+    try {
+      // 자정 리셋: 오늘 날짜와 다른 누적분이면 비우기
+      const todayStr = new Date().toISOString().slice(0,10);
+      let excludeIds = oaFetchedIds;
+      if (oaFetchedDate !== todayStr) {
+        // 새 날 — 누적 초기화
+        setOaEvents([]);
+        setOaOddsMap({});
+        setOaFetchedDate(todayStr);
+        excludeIds = new Set();
+      }
+      // 시간당 카운터: 1시간 지났으면 리셋
+      const now = Date.now();
+      if (now - oaReqHourStart > 60*60*1000) {
+        setOaReqHourStart(now);
+        setOaReqCountThisHour(0);
+      }
+
+      const result = await oddsApi.fetchNextEventsWithOdds(oaSport, excludeIds, 10);
+
+      // 카운터 갱신
+      setOaReqCountThisHour(c => c + result.reqCount);
+
+      if (result.events.length === 0) {
+        setOaError("더 가져올 경기가 없습니다 (이 종목의 예정 경기를 모두 받았거나, 결과 자체가 없음)");
+        return;
+      }
+
+      // 누적
+      setOaEvents(prev => [...prev, ...result.events]);
+      setOaOddsMap(prev => {
+        const next = { ...prev };
+        for (const o of result.odds) next[o.id] = o;
+        return next;
+      });
+    } catch(e:any) {
+      setOaError(e?.message || "조회 실패");
+    } finally { setOaLoading(false); }
+  },[oaSport, oaFetchedIds, oaFetchedDate, oaReqHourStart]);
+
+  // 누적분 비우기 (수동 리셋)
+  const oaClearAccumulated = useCallback(()=>{
+    if (!window.confirm("가져온 경기 목록을 모두 비우시겠습니까?")) return;
+    setOaEvents([]);
+    setOaOddsMap({});
+    setOaError("");
   },[]);
 
   // ── 베팅 슬립 ──────────────────────────────────────────────
@@ -2415,6 +2486,12 @@ function AppMain() {
       }
       if(settings.league_api_map) setLeagueApiMap(settings.league_api_map as Record<string,string>);
       if(settings.sports_test_league_map) setStLeagueMap(settings.sports_test_league_map as Record<string,string>);
+      // rev.10: odds-api.io 키 복원
+      const oddsKey = (settings as any).odds_api_io_key;
+      if(typeof oddsKey === "string") {
+        setOddsApiKey(oddsKey);
+        setOddsApiKeyDraft(oddsKey);
+      }
 
       // ─── 자동 정리: 오래된 캐시 데이터 삭제 (하루에 1회만 실행) ───
       // 통계에 영향 주는 테이블(bets, deposits, withdrawals, profit_extras 등)은
@@ -2881,6 +2958,56 @@ function AppMain() {
   // 매핑 선택 모달 (리그 클릭 시 열림)
   const [stMappingModal, setStMappingModal] = useState<{sport:Sport; sportKr:string; country:string; league:string}|null>(null);
   const [stMappingSelectedId, setStMappingSelectedId] = useState<string>("");
+
+  // ── [odds-api.io] 외부 배당 API (rev.10) ──────────────────
+  // 무료 티어: 시간당 100req. /sports 엔드포인트는 쿼터 차감 안 됨(테스트용)
+  // 키는 app_settings 테이블에 "odds_api_io_key"로 저장. 사용자 입력 마스킹 표시.
+  const [oddsApiKey, setOddsApiKey] = useState<string>("");
+  const [oddsApiKeyDraft, setOddsApiKeyDraft] = useState<string>(""); // 입력 중 임시값
+  const [oddsApiTestResult, setOddsApiTestResult] = useState<null|{ok:boolean; msg:string; sportsCount?:number; sample?:string[]}>(null);
+  const [oddsApiTesting, setOddsApiTesting] = useState<boolean>(false);
+  // ★ 사용자 저장 키 → oddsApi 모듈로 sync (Vercel 환경변수 없을 때 폴백)
+  useEffect(()=>{ oddsApi.setApiKey(oddsApiKey || null); },[oddsApiKey]);
+  const saveOddsApiKey = (k: string) => {
+    setOddsApiKey(k);
+    db.saveAppSetting("odds_api_io_key", k);
+  };
+  // odds-api.io 연결 테스트 — /sports 엔드포인트 호출 (가벼운 호출, 쿼터 영향 적음)
+  const testOddsApiConnection = async (key: string) => {
+    if (!key.trim()) { setOddsApiTestResult({ok:false, msg:"키가 비어있습니다."}); return; }
+    setOddsApiTesting(true);
+    setOddsApiTestResult(null);
+    try {
+      // odds-api.io v3 — /sports 엔드포인트
+      const url = `https://api.odds-api.io/v3/sports?apiKey=${encodeURIComponent(key.trim())}`;
+      const res = await fetch(url);
+      if (!res.ok) {
+        const txt = await res.text().catch(()=>"");
+        if (res.status === 401 || res.status === 403) {
+          setOddsApiTestResult({ok:false, msg:`인증 실패 (${res.status}) — 키가 잘못됐거나 만료됨`});
+        } else if (res.status === 429) {
+          setOddsApiTestResult({ok:false, msg:"호출 한도 초과 (429) — 시간당 100req 한도 도달"});
+        } else {
+          setOddsApiTestResult({ok:false, msg:`HTTP ${res.status} — ${txt.slice(0,80)}`});
+        }
+        return;
+      }
+      const data = await res.json();
+      // 응답이 배열이거나 {data: [...]} 형태일 수 있어 둘 다 처리
+      const list: any[] = Array.isArray(data) ? data : (Array.isArray((data as any)?.data) ? (data as any).data : []);
+      const names: string[] = list.slice(0,5).map((s:any) => s?.name || s?.title || s?.key || "?").filter(Boolean);
+      setOddsApiTestResult({
+        ok: true,
+        msg: `연결 성공 — ${list.length}개 종목 사용 가능`,
+        sportsCount: list.length,
+        sample: names,
+      });
+    } catch (e:any) {
+      setOddsApiTestResult({ok:false, msg:`네트워크 오류: ${e?.message||String(e)}`});
+    } finally {
+      setOddsApiTesting(false);
+    }
+  };
 
   // ── 수익률 기타 ──────────────────────────────────────────
   const [pextForm,setPextForm]=useState({category:"",subCategory:"",subSubCategory:"",amount:0,note:"",isIncome:true});
@@ -4965,9 +5092,9 @@ function AppMain() {
         </div>
         <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
           {([
-            ["home","🏠 대시보드"],["bettingCombo","🎯 스포츠"],["pending","⏳ 베팅 내역"],["stats","📊 통계"],["roi","💹 수익률"],["strategy","📋 전략"],["apiManager","🔑 API 관리"],["dataManager","🗄 데이터"],["bettingComboTest","🧪 스포츠 (테스트)"],
+            ["home","🏠 대시보드"],["bettingCombo","🎯 스포츠"],["pending","⏳ 베팅 내역"],["stats","📊 통계"],["roi","💹 수익률"],["strategy","📋 전략"],["apiManager","🔑 API 관리"],["dataManager","🗄 데이터"],["oddsApi","💰 스포츠 (배당)"],["recommend","⭐ 스포츠 (추천)"],
           ] as [string,string][]).map(([k,l])=>{
-            const ac = k==="pending"?C.amber:k==="home"?C.green:k==="apiManager"?C.purple:k==="dataManager"?C.red:k==="bettingComboTest"?C.teal:C.orange;
+            const ac = k==="pending"?C.amber:k==="home"?C.green:k==="apiManager"?C.purple:k==="dataManager"?C.red:k==="oddsApi"?C.teal:k==="recommend"?C.amber:C.orange;
             const active = tab===k;
             return (
               <button key={k} onClick={()=>setTab(k as any)}
@@ -8017,6 +8144,111 @@ function AppMain() {
               })}
             </div>
 
+            {/* ── odds-api.io (외부 배당 API) ── */}
+            {(()=>{
+              // 키 마스킹: 앞 4자 + ... + 뒤 4자만 노출
+              const maskKey = (k:string) => {
+                if (!k) return "";
+                if (k.length <= 10) return "•".repeat(k.length);
+                return `${k.slice(0,4)}${"•".repeat(Math.min(20, k.length-8))}${k.slice(-4)}`;
+              };
+              const hasKey = oddsApiKey.trim().length > 0;
+              const draftChanged = oddsApiKeyDraft.trim() !== oddsApiKey.trim();
+              return (
+                <div style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:10,padding:14,marginBottom:14}}>
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10,gap:8,flexWrap:"wrap"}}>
+                    <div>
+                      <div style={{fontSize:13,fontWeight:800,color:C.purple}}>🎯 odds-api.io (배당 추천용)</div>
+                      <div style={{fontSize:10,color:C.muted,marginTop:2}}>
+                        무료 티어 시간당 100req · 야구 역배 / 농구 핸디 / 축구 승무패 등 배당 조건 필터링
+                      </div>
+                    </div>
+                    {hasKey && (
+                      <div style={{padding:"3px 8px",borderRadius:8,fontSize:10,fontWeight:800,background:`${C.green}22`,color:C.green,border:`1px solid ${C.green}55`}}>
+                        🟢 키 등록됨
+                      </div>
+                    )}
+                  </div>
+
+                  <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
+                    <input
+                      type="password"
+                      value={oddsApiKeyDraft}
+                      onChange={e=>setOddsApiKeyDraft(e.target.value)}
+                      placeholder={hasKey ? maskKey(oddsApiKey) : "odds-api.io API 키 입력"}
+                      style={{
+                        flex:1, minWidth:200, padding:"7px 10px",
+                        background:C.bg2, border:`1px solid ${C.border2}`, borderRadius:6,
+                        color:C.text, fontSize:12, fontFamily:"monospace",
+                      }}
+                      autoComplete="off"
+                      spellCheck={false}
+                    />
+                    <button
+                      onClick={()=>{
+                        const k = oddsApiKeyDraft.trim();
+                        saveOddsApiKey(k);
+                        addLog(k ? "🔑 odds-api.io 키 저장" : "🗑 odds-api.io 키 삭제", "");
+                      }}
+                      disabled={!draftChanged}
+                      style={{
+                        padding:"7px 12px", borderRadius:6, fontSize:11, fontWeight:800,
+                        cursor: draftChanged ? "pointer" : "not-allowed",
+                        background: draftChanged ? `${C.purple}1f` : C.bg2,
+                        border:`1px solid ${draftChanged ? C.purple : C.border}`,
+                        color: draftChanged ? C.purple : C.dim,
+                      }}>💾 저장</button>
+                    <button
+                      onClick={()=>testOddsApiConnection(oddsApiKeyDraft || oddsApiKey)}
+                      disabled={oddsApiTesting || (!oddsApiKeyDraft.trim() && !oddsApiKey.trim())}
+                      style={{
+                        padding:"7px 12px", borderRadius:6, fontSize:11, fontWeight:800,
+                        cursor: oddsApiTesting ? "wait" : "pointer",
+                        background:`${C.teal}1f`, border:`1px solid ${C.teal}`, color:C.teal,
+                        opacity: oddsApiTesting ? 0.6 : 1,
+                      }}>{oddsApiTesting ? "⏳ 테스트 중…" : "🧪 연결 테스트"}</button>
+                    {hasKey && (
+                      <button
+                        onClick={()=>{
+                          if (!window.confirm("저장된 키를 삭제할까요?")) return;
+                          setOddsApiKeyDraft("");
+                          saveOddsApiKey("");
+                          setOddsApiTestResult(null);
+                          addLog("🗑 odds-api.io 키 삭제","");
+                        }}
+                        style={{
+                          padding:"7px 12px", borderRadius:6, fontSize:11, fontWeight:800,
+                          cursor:"pointer",
+                          background:`${C.red}1f`, border:`1px solid ${C.red}55`, color:C.red,
+                        }}>삭제</button>
+                    )}
+                  </div>
+
+                  {/* 테스트 결과 */}
+                  {oddsApiTestResult && (
+                    <div style={{
+                      marginTop:10, padding:"8px 10px", borderRadius:6, fontSize:11,
+                      background: oddsApiTestResult.ok ? `${C.green}11` : `${C.red}11`,
+                      border:`1px solid ${oddsApiTestResult.ok ? C.green : C.red}55`,
+                      color: oddsApiTestResult.ok ? C.green : C.red,
+                    }}>
+                      <div style={{fontWeight:800}}>{oddsApiTestResult.ok ? "✅ " : "❌ "}{oddsApiTestResult.msg}</div>
+                      {oddsApiTestResult.ok && oddsApiTestResult.sample && oddsApiTestResult.sample.length > 0 && (
+                        <div style={{marginTop:4,color:C.muted,fontSize:10}}>
+                          샘플 종목: {oddsApiTestResult.sample.join(", ")}{oddsApiTestResult.sportsCount! > 5 ? " ..." : ""}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  <div style={{marginTop:10,fontSize:10,color:C.dim,lineHeight:1.5}}>
+                    💡 키는 Supabase <code style={{color:C.text,background:C.bg2,padding:"1px 4px",borderRadius:3}}>app_settings</code> 테이블에 저장 · 모든 기기에서 공유됨
+                    <br/>💡 무료 티어 제한: 한 번에 북메이커 2개 / 시간당 100req — 매시간 리셋
+                  </div>
+                </div>
+              );
+            })()}
+
             {/* ── 안내 박스 ── */}
             <div style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:10,padding:14,fontSize:11,color:C.muted,lineHeight:1.7}}>
               <div style={{fontSize:13,fontWeight:800,color:C.teal,marginBottom:8}}>ℹ️ 호출 정책 (rev.7)</div>
@@ -8387,6 +8619,136 @@ $$;`}
         );
       })()}
 
+      {/* ═══════════════════════════════════════════════════════════
+          💰 스포츠 (배당) 탭 — odds-api.io
+          1단계: 다음 10경기 가져오기 + 화면 표시 (DB 저장 없음)
+          ═══════════════════════════════════════════════════════════ */}
+      {tab==="oddsApi" && (
+        <div style={{flex:1,minHeight:0,overflow:"auto",padding:"16px 20px"}}>
+          <div style={{maxWidth:1100,margin:"0 auto"}}>
+            <div style={{fontSize:18,fontWeight:800,color:C.teal,marginBottom:6}}>💰 스포츠 (배당)</div>
+            <div style={{fontSize:11,color:C.muted,marginBottom:14}}>
+              odds-api.io에서 다음 10경기씩 가져옵니다 · 무료 티어 시간당 100req · 한 번 호출 = 약 2req
+            </div>
+
+            {/* API 키 상태 */}
+            {!oddsApi.hasApiKey() && (
+              <div style={{padding:"12px 14px",borderRadius:8,background:`${C.red}11`,border:`1px solid ${C.red}66`,color:C.red,fontSize:12,marginBottom:14}}>
+                ⚠ <b>odds-api.io API 키가 설정되지 않았습니다.</b><br/>
+                <span style={{color:C.muted,fontSize:11}}>
+                  두 가지 방법 중 하나로 설정 가능:<br/>
+                  ① Vercel 대시보드 → Project Settings → Environment Variables → <code>VITE_ODDS_API_KEY</code> 추가 후 재배포 (모든 사용자 공유)<br/>
+                  ② 🔑 API 관리 탭에서 키 입력 (이 사용자만)
+                </span>
+              </div>
+            )}
+
+            {/* 컨트롤 패널 */}
+            <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap",padding:"12px 14px",background:C.bg3,borderRadius:10,border:`1px solid ${C.border}`,marginBottom:14}}>
+              <span style={{fontSize:11,color:C.muted,fontWeight:700}}>종목:</span>
+              <select value={oaSport} onChange={e=>setOaSport(e.target.value as oddsApi.OddsApiSport)}
+                style={{padding:"6px 10px",borderRadius:6,border:`1px solid ${C.border2}`,background:C.bg2,color:C.text,fontSize:12,cursor:"pointer"}}>
+                <option value="football">⚽ 축구</option>
+                <option value="basketball">🏀 농구</option>
+                <option value="baseball">⚾ 야구</option>
+                <option value="hockey">🏒 하키</option>
+                <option value="volleyball">🏐 배구</option>
+              </select>
+              <button onClick={oaFetchNext} disabled={oaLoading || !oddsApi.hasApiKey()}
+                style={{padding:"7px 14px",borderRadius:6,border:`1px solid ${C.teal}`,background:oaLoading?C.bg3:`${C.teal}33`,color:C.teal,fontWeight:800,fontSize:12,cursor:oaLoading?"wait":"pointer",opacity:oaLoading||!oddsApi.hasApiKey()?0.5:1}}>
+                {oaLoading ? "불러오는 중..." : "📥 다음 10경기 가져오기"}
+              </button>
+              {oaEvents.length > 0 && (
+                <button onClick={oaClearAccumulated}
+                  style={{padding:"7px 12px",borderRadius:6,border:`1px solid ${C.red}66`,background:`${C.red}11`,color:C.red,fontSize:11,cursor:"pointer"}}>
+                  🗑 누적 비우기
+                </button>
+              )}
+              <span style={{flex:1}}/>
+              <span style={{fontSize:10,color:C.muted}}>
+                누적 {oaEvents.length}경기 · 이번 시간 사용 {oaReqCountThisHour}/100 req
+              </span>
+            </div>
+
+            {oaError && (
+              <div style={{padding:"10px 14px",borderRadius:8,background:`${C.amber}11`,border:`1px solid ${C.amber}66`,color:C.amber,fontSize:12,marginBottom:14}}>
+                {oaError}
+              </div>
+            )}
+
+            {/* 가져온 경기 목록 */}
+            {oaEvents.length === 0 ? (
+              <div style={{padding:"40px 20px",textAlign:"center",color:C.dim,fontSize:13}}>
+                위 [📥 다음 10경기 가져오기] 버튼을 눌러 경기를 가져오세요.
+              </div>
+            ) : (
+              <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                {oaEvents.map(ev => {
+                  const odds = oaOddsMap[ev.id];
+                  const dt = new Date(ev.date);
+                  const dateStr = dt.toLocaleString("ko-KR",{month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"});
+                  // 첫 번째 북메이커의 h2h(머니라인) 마켓
+                  const firstBm = odds?.bookmakers?.[0];
+                  const h2h = firstBm?.markets?.find(m => m.key === "h2h" || m.key === "moneyline");
+                  return (
+                    <div key={ev.id} style={{padding:"10px 14px",borderRadius:8,background:C.bg3,border:`1px solid ${C.border}`,fontSize:12}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:6}}>
+                        <div>
+                          <span style={{fontWeight:700,color:C.text}}>{ev.home}</span>
+                          <span style={{color:C.dim,margin:"0 6px"}}>vs</span>
+                          <span style={{fontWeight:700,color:C.text}}>{ev.away}</span>
+                        </div>
+                        <span style={{fontSize:10,color:C.muted}}>{dateStr}</span>
+                      </div>
+                      <div style={{fontSize:10,color:C.dim,marginBottom:6}}>
+                        {ev.league.name} · ID {ev.id}
+                      </div>
+                      {h2h && h2h.outcomes.length > 0 ? (
+                        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                          {h2h.outcomes.map((o,i)=>(
+                            <span key={i} style={{padding:"3px 8px",borderRadius:4,background:C.bg2,border:`1px solid ${C.border2}`,fontSize:11}}>
+                              <span style={{color:C.muted,marginRight:4}}>{o.name}:</span>
+                              <span style={{color:C.green,fontWeight:700}}>{o.price.toFixed(2)}</span>
+                            </span>
+                          ))}
+                          <span style={{fontSize:10,color:C.dim,marginLeft:"auto"}}>via {firstBm?.title}</span>
+                        </div>
+                      ) : (
+                        <div style={{fontSize:11,color:C.dim,fontStyle:"italic"}}>배당 데이터 없음</div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            <div style={{marginTop:30,padding:"12px 14px",background:C.bg3,borderRadius:8,border:`1px dashed ${C.border2}`,fontSize:11,color:C.muted,lineHeight:1.6}}>
+              <b style={{color:C.text}}>📌 1단계 안내:</b><br/>
+              지금 단계는 odds-api.io 연결 확인 + 화면 표시까지입니다. 가져온 데이터는 <b>아직 DB에 저장되지 않습니다</b>. 새로고침하면 누적분이 사라져요.<br/>
+              다음 단계에서 Supabase 저장 + 필터 룰 + 추천 탭 매칭이 추가됩니다.
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════════
+          ⭐ 스포츠 (추천) 탭
+          1단계: 빈 골격만. 다음 단계에서 룰 매칭 로직 추가.
+          ═══════════════════════════════════════════════════════════ */}
+      {tab==="recommend" && (
+        <div style={{flex:1,minHeight:0,overflow:"auto",padding:"16px 20px"}}>
+          <div style={{maxWidth:1100,margin:"0 auto"}}>
+            <div style={{fontSize:18,fontWeight:800,color:C.amber,marginBottom:6}}>⭐ 스포츠 (추천)</div>
+            <div style={{fontSize:11,color:C.muted,marginBottom:14}}>
+              내가 정한 필터 룰에 매칭되는 경기를 자동으로 추천합니다.
+            </div>
+            <div style={{padding:"40px 20px",textAlign:"center",color:C.dim,fontSize:13,background:C.bg3,borderRadius:10,border:`1px dashed ${C.border}`}}>
+              아직 필터 룰이 설정되지 않았습니다.<br/>
+              <span style={{fontSize:11}}>2단계에서 룰 관리 UI가 추가됩니다.</span>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );
