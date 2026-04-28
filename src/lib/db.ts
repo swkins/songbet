@@ -707,6 +707,45 @@ export async function clearAllFixtures(): Promise<{ ok: boolean; error?: string 
   }
 }
 
+// ─────────────────────────────────────────────────────────────────
+// 자동 정리: 오래된 데이터 삭제 (DB 용량 관리용)
+// 통계에 영향 주는 테이블(bets, deposits, withdrawals, profit_extras 등)은
+// 절대 건드리지 않음. 캐시성 데이터만 정리.
+// ─────────────────────────────────────────────────────────────────
+
+/** start_time이 N일 이상 지난 fixtures 삭제. 반환: 삭제된 행 수 (실패 시 -1) */
+export async function purgeOldFixtures(daysOld: number = 7): Promise<number> {
+  try {
+    const cutoff = new Date(Date.now() - daysOld * 24 * 60 * 60 * 1000).toISOString()
+    const { error, count } = await supabase
+      .from('fixtures')
+      .delete({ count: 'exact' })
+      .lt('start_time', cutoff)
+    if (error) throw error
+    return count ?? 0
+  } catch (e) {
+    logSaveError('fixtures(purge)', e)
+    return -1
+  }
+}
+
+/** finished=true이고 created_at_num이 N일 이상 지난 manual_games 삭제. 반환: 삭제된 행 수 */
+export async function purgeOldManualGames(daysOld: number = 30): Promise<number> {
+  try {
+    const cutoff = Date.now() - daysOld * 24 * 60 * 60 * 1000
+    const { error, count } = await supabase
+      .from('manual_games')
+      .delete({ count: 'exact' })
+      .eq('finished', true)
+      .lt('created_at_num', cutoff)
+    if (error) throw error
+    return count ?? 0
+  } catch (e) {
+    logSaveError('manual_games(purge)', e)
+    return -1
+  }
+}
+
 // API-Sports 응답을 fixtures 테이블에 upsert.
 // 빈 배열이 들어오면 아무 것도 하지 않음.
 export async function upsertFixtureRows(rows: FixtureRow[]): Promise<{ ok: boolean; error?: string }> {

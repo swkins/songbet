@@ -2416,6 +2416,28 @@ function AppMain() {
       if(settings.league_api_map) setLeagueApiMap(settings.league_api_map as Record<string,string>);
       if(settings.sports_test_league_map) setStLeagueMap(settings.sports_test_league_map as Record<string,string>);
 
+      // ─── 자동 정리: 오래된 캐시 데이터 삭제 (하루에 1회만 실행) ───
+      // 통계에 영향 주는 테이블(bets, deposits, withdrawals, profit_extras 등)은
+      // 절대 건드리지 않음. fixtures/manual_games 캐시성 데이터만.
+      try {
+        const todayStr = new Date().toISOString().slice(0,10); // YYYY-MM-DD
+        const lastPurgeDate = localStorage.getItem("bt_last_purge_date");
+        if (lastPurgeDate !== todayStr) {
+          // 비동기로 백그라운드 실행 — 앱 로딩 차단하지 않음
+          (async()=>{
+            const fxDeleted = await db.purgeOldFixtures(7);
+            const mgDeleted = await db.purgeOldManualGames(30);
+            localStorage.setItem("bt_last_purge_date", todayStr);
+            if (fxDeleted > 0 || mgDeleted > 0) {
+              console.log(`[자동 정리] fixtures: ${fxDeleted}행 삭제, manual_games: ${mgDeleted}행 삭제`);
+            }
+          })();
+        }
+      } catch (e) {
+        // 정리 실패해도 앱 동작에는 영향 없음
+        console.warn("[자동 정리] 실패:", e);
+      }
+
       setDataLoadErrors(errors);
       setDbReady(true);
     })();
