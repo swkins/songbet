@@ -3624,8 +3624,13 @@ function AppMain() {
   // 통계 탭 — 종목별 옵션/리그 sub 탭 state (요청 #7~13)
   // ⚠️ 요청 #6: 통계 탭 안에 "종목별" 메뉴 추가 + 야구/축구/농구 통합
   // sportSub: 종목별 메뉴 안에서 어떤 종목을 보고 있는지
+  // ⚠️ 종목별 sub 탭 state — 더 이상 사용되지 않음 (모든 표를 한 화면에 펼침)
+  //   추후 sub 탭 방식이 필요해지면 다시 살릴 수 있도록 정의는 유지
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [footballSub, setFootballSub] = useState<"option"|"league"|"odds"|"odds_x_league">("option");
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [basketballSub, setBasketballSub] = useState<"option"|"league"|"odds"|"plus_minus">("option");
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [baseballSub, setBaseballSub] = useState<"option"|"league"|"odds"|"ou_league">("option");
   const [sportSub, setSportSub] = useState<"baseball"|"football"|"basketball">("football");
 
@@ -6617,7 +6622,7 @@ function AppMain() {
 
               {/* ── 배당별 통계 (2.0 ~ 2.9, 0.1 단위) — 종목 무관 전체 ── */}
               <div style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:8,padding:9,marginBottom:14,overflowX:"auto"}}>
-                <div style={{fontSize:13,fontWeight:800,color:C.amber,marginBottom:10}}>🎯 배당별 통계 (2.0 ~ 2.9, 0.1 단위) · 종목 무관 전체</div>
+                <div style={{fontSize:12,fontWeight:800,color:C.amber,marginBottom:6}}>🎯 배당별 통계 (2.0 ~ 2.9, 0.1 단위) · 종목 무관 전체</div>
                 <div style={{fontSize:10,color:C.muted,marginBottom:8}}>각 베팅의 배당을 소수점 1자리로 반올림한 값 기준 · 종목별 세분화는 [종목별] 탭 참조</div>
                 <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:420}}>
                   <thead>
@@ -6787,18 +6792,12 @@ function AppMain() {
                     <StatCard label="역배수" value={`${baseballDone.filter(b=>b.betOption==="역배"||((b.betOption==="홈승"||b.betOption==="원정승")&&b.odds>=2.0)).length}건`} color={C.purple}/>
                   </div>
 
-                  {/* 옵션별 / 리그별 / 배당별 / 리그×오버언더 sub 탭 */}
-                  <div style={{display:"flex",gap:5,marginBottom:12,flexWrap:"wrap"}}>
-                    <button onClick={()=>setBaseballSub("option")} style={tabBtn(baseballSub==="option",C.amber)}>📊 옵션별</button>
-                    <button onClick={()=>setBaseballSub("league")} style={tabBtn(baseballSub==="league",C.teal)}>🌍 리그×옵션</button>
-                    <button onClick={()=>setBaseballSub("odds")} style={tabBtn(baseballSub==="odds",C.purple)}>🎯 역배 배당별 (2.1~2.9)</button>
-                    <button onClick={()=>setBaseballSub("ou_league")} style={tabBtn(baseballSub==="ou_league",C.orange)}>⬆⬇ 리그별 오버/언더</button>
-                  </div>
+                  {/* ⚠️ sub 탭 제거 — 4개 표(옵션별/리그×옵션/역배배당별/리그별 오버언더) 모두 한눈에 펼침 */}
 
-                  {/* 옵션별 표 */}
-                  {baseballSub==="option" && (
-                    <div style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:8,padding:9,overflowX:"auto"}}>
-                      <div style={{fontSize:13,fontWeight:800,color:C.amber,marginBottom:10}}>⚾ 옵션별 통계 (승패 / 오버 / 언더)</div>
+                  {/* 옵션별 표 — 항상 표시 */}
+                  {(
+                    <div style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:7,padding:7,marginBottom:8,overflowX:"auto"}}>
+                      <div style={{fontSize:12,fontWeight:800,color:C.amber,marginBottom:6}}>⚾ 옵션별 통계 (승패 / 오버 / 언더)</div>
                       <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:420}}>
                         <thead>
                           <tr style={{borderBottom:`2px solid ${C.border2}`}}>
@@ -6826,10 +6825,10 @@ function AppMain() {
                     </div>
                   )}
 
-                  {/* 리그별 표 */}
-                  {baseballSub==="league" && (
-                    <div style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:8,padding:9,overflowX:"auto"}}>
-                      <div style={{fontSize:13,fontWeight:800,color:C.teal,marginBottom:10}}>⚾ 리그별 옵션 통계 (가나다순)</div>
+                  {/* 리그×옵션 — 항상 표시 */}
+                  {(
+                    <div style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:7,padding:7,marginBottom:8,overflowX:"auto"}}>
+                      <div style={{fontSize:12,fontWeight:800,color:C.teal,marginBottom:6}}>⚾ 리그별 옵션 통계 (가나다순)</div>
                       {baseballLeagueOptTable.length===0 ? (
                         <div style={{textAlign:"center",color:C.dim,padding:"30px"}}>리그별 기록 없음</div>
                       ) : (
@@ -6871,11 +6870,11 @@ function AppMain() {
                     </div>
                   )}
 
-                  {/* 배당별 표 (역배 2.1~2.9, 0.1단위) — 요청 #12 */}
-                  {baseballSub==="odds" && (
-                    <div style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:8,padding:9,overflowX:"auto"}}>
-                      <div style={{fontSize:13,fontWeight:800,color:C.purple,marginBottom:6}}>🎯 역배 배당별 통계 (2.1 ~ 2.9, 0.1단위)</div>
-                      <div style={{fontSize:10,color:C.muted,marginBottom:10,padding:"6px 10px",background:C.bg,borderRadius:6,lineHeight:1.5}}>
+                  {/* 역배 배당별 — 항상 표시 */}
+                  {(
+                    <div style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:7,padding:7,marginBottom:8,overflowX:"auto"}}>
+                      <div style={{fontSize:12,fontWeight:800,color:C.purple,marginBottom:4}}>🎯 역배 배당별 통계 (2.1 ~ 2.9, 0.1단위)</div>
+                      <div style={{fontSize:10,color:C.muted,marginBottom:6,padding:"4px 7px",background:C.bg,borderRadius:6,lineHeight:1.5}}>
                         💡 사용자 전략: 야구는 정배 비선호 → 2.1~2.9 무지성 역배. 배당별 적중률/수익률을 보고 베팅 구간을 좁힐 수 있음.<br/>
                         ※ 역배 = <code>betOption==="역배"</code> + (홈승/원정승 중 배당 ≥ 2.0)
                       </div>
@@ -6909,11 +6908,11 @@ function AppMain() {
                     </div>
                   )}
 
-                  {/* 리그별 오버/언더 비교 (요청 #12) */}
-                  {baseballSub==="ou_league" && (
-                    <div style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:8,padding:9,overflowX:"auto"}}>
-                      <div style={{fontSize:13,fontWeight:800,color:C.orange,marginBottom:6}}>⬆⬇ 리그별 오버/언더 비교</div>
-                      <div style={{fontSize:10,color:C.muted,marginBottom:10,padding:"6px 10px",background:C.bg,borderRadius:6,lineHeight:1.5}}>
+                  {/* 리그별 오버/언더 — 항상 표시 */}
+                  {(
+                    <div style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:7,padding:7,marginBottom:8,overflowX:"auto"}}>
+                      <div style={{fontSize:12,fontWeight:800,color:C.orange,marginBottom:4}}>⬆⬇ 리그별 오버/언더 비교</div>
+                      <div style={{fontSize:10,color:C.muted,marginBottom:6,padding:"4px 7px",background:C.bg,borderRadius:6,lineHeight:1.5}}>
                         💡 사용자 전략: 언오버는 추천 픽 vs 무지성 베팅 비교. 리그별 ROI 차이 ≥5%면 한쪽으로 추천.
                       </div>
                       {baseballLeagueOuTable.length===0 ? (
@@ -6971,21 +6970,15 @@ function AppMain() {
                     <StatCard label="리그 수" value={`${new Set(footballDone.map(b=>b.league)).size}개`} color={C.teal}/>
                   </div>
 
-                  {/* sub 탭: 옵션별 / 리그×옵션 / 배당별 / 리그×배당 */}
-                  <div style={{display:"flex",gap:5,marginBottom:12,flexWrap:"wrap"}}>
-                    <button onClick={()=>setFootballSub("option")} style={tabBtn(footballSub==="option",C.amber)}>📊 옵션별 (홈/원정 핸디)</button>
-                    <button onClick={()=>setFootballSub("league")} style={tabBtn(footballSub==="league",C.teal)}>🌍 리그×옵션</button>
-                    <button onClick={()=>setFootballSub("odds")} style={tabBtn(footballSub==="odds",C.purple)}>🎯 배당별 (1.4~3.0)</button>
-                    <button onClick={()=>setFootballSub("odds_x_league")} style={tabBtn(footballSub==="odds_x_league",C.orange)}>🌍×🎯 리그×배당</button>
-                  </div>
+                  {/* ⚠️ sub 탭 제거 — 옵션별/리그×옵션/배당별 3개를 한눈에 보이도록 모두 펼침
+                      (리그×배당은 사용자 요청으로 제외) */}
 
-                  {/* 옵션별 표 */}
-                  {footballSub==="option" && (
-                    <>
+                  {/* 옵션별 표 — 항상 표시 */}
+                  <>
                       {/* ── 핸디캡 라인 6칸 강조 (요청 #10) ── */}
                       <div style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:8,padding:9,marginBottom:12}}>
-                        <div style={{fontSize:13,fontWeight:800,color:C.green,marginBottom:6}}>📐 핸디캡 라인별 한눈에 (홈/원정 0.5/1.5/2.5)</div>
-                        <div style={{fontSize:10,color:C.muted,marginBottom:10,padding:"6px 10px",background:C.bg,borderRadius:6,lineHeight:1.5}}>
+                        <div style={{fontSize:12,fontWeight:800,color:C.green,marginBottom:4}}>📐 핸디캡 라인별 한눈에 (홈/원정 0.5/1.5/2.5)</div>
+                        <div style={{fontSize:10,color:C.muted,marginBottom:6,padding:"4px 7px",background:C.bg,borderRadius:6,lineHeight:1.5}}>
                           💡 사용자 전략: 역배 플핸. 배당 1.4↑, 0.5는 무 ≤3.5, 1.5는 무 ≤4.3, 2.5는 무 ≤6.5에서만 가는 중. 라인별 ROI 비교용.
                         </div>
                         <div style={{display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:4}}>
@@ -7006,8 +6999,8 @@ function AppMain() {
                       </div>
 
                       {/* 옵션별 전체 표 (홈/원정/무/오버/언더/기타) */}
-                      <div style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:8,padding:9,overflowX:"auto"}}>
-                        <div style={{fontSize:13,fontWeight:800,color:C.amber,marginBottom:10}}>⚽ 옵션별 통계 (수동 플핸 + 승무패 + 오버언더)</div>
+                      <div style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:7,padding:7,marginBottom:8,overflowX:"auto"}}>
+                        <div style={{fontSize:12,fontWeight:800,color:C.amber,marginBottom:6}}>⚽ 옵션별 통계 (수동 플핸 + 승무패 + 오버언더)</div>
                         <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:420}}>
                           <thead>
                             <tr style={{borderBottom:`2px solid ${C.border2}`}}>
@@ -7043,13 +7036,12 @@ function AppMain() {
                           </tbody>
                         </table>
                       </div>
-                    </>
-                  )}
+                  </>
 
-                  {/* 리그×옵션 */}
-                  {footballSub==="league" && (
-                    <div style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:8,padding:9,overflowX:"auto"}}>
-                      <div style={{fontSize:13,fontWeight:800,color:C.teal,marginBottom:10}}>⚽ 리그별 옵션 수익률 (가나다순)</div>
+                  {/* 리그×옵션 — 항상 표시 */}
+                  {(
+                    <div style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:7,padding:7,marginBottom:8,overflowX:"auto"}}>
+                      <div style={{fontSize:12,fontWeight:800,color:C.teal,marginBottom:6}}>⚽ 리그별 옵션 수익률 (가나다순)</div>
                       {footballLeagueOptTable.length===0 ? (
                         <div style={{textAlign:"center",color:C.dim,padding:"30px"}}>리그별 기록 없음</div>
                       ) : (
@@ -7099,11 +7091,11 @@ function AppMain() {
                     </div>
                   )}
 
-                  {/* 배당별 표 (요청 #8) — 1.4 ~ 3.0, 0.1 단위 */}
-                  {footballSub==="odds" && (
-                    <div style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:8,padding:9,overflowX:"auto"}}>
-                      <div style={{fontSize:13,fontWeight:800,color:C.purple,marginBottom:6}}>🎯 배당별 통계 (1.4 ~ 3.0, 0.1단위)</div>
-                      <div style={{fontSize:10,color:C.muted,marginBottom:10,padding:"6px 10px",background:C.bg,borderRadius:6,lineHeight:1.5}}>
+                  {/* 배당별 표 — 항상 표시 */}
+                  {(
+                    <div style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:7,padding:7,marginBottom:8,overflowX:"auto"}}>
+                      <div style={{fontSize:12,fontWeight:800,color:C.purple,marginBottom:4}}>🎯 배당별 통계 (1.4 ~ 3.0, 0.1단위)</div>
+                      <div style={{fontSize:10,color:C.muted,marginBottom:6,padding:"4px 7px",background:C.bg,borderRadius:6,lineHeight:1.5}}>
                         💡 사용자 전략: 배당 1.4↑에서 베팅 중. 어느 배당 구간이 ROI가 좋은지 / 적중률이 따라주는지 확인해 베팅 구간 좁히기.
                       </div>
                       <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:420}}>
@@ -7136,56 +7128,7 @@ function AppMain() {
                     </div>
                   )}
 
-                  {/* 리그 × 배당 교차 (요청 #10) */}
-                  {footballSub==="odds_x_league" && (
-                    <div style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:8,padding:9,overflowX:"auto"}}>
-                      <div style={{fontSize:13,fontWeight:800,color:C.orange,marginBottom:6}}>🌍×🎯 리그 × 배당 구간</div>
-                      <div style={{fontSize:10,color:C.muted,marginBottom:10,padding:"6px 10px",background:C.bg,borderRadius:6,lineHeight:1.5}}>
-                        💡 어떤 리그가 어떤 배당 구간에서 잘 맞는지 / 피해야 하는 구간이 어딘지 확인용.
-                      </div>
-                      {footballLeagueOddsTable.length===0 ? (
-                        <div style={{textAlign:"center",color:C.dim,padding:"30px"}}>리그별 기록 없음</div>
-                      ) : (
-                        <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:500}}>
-                          <thead>
-                            <tr style={{borderBottom:`2px solid ${C.border2}`}}>
-                              <th style={{textAlign:"left",padding:"4px 6px",color:C.muted,fontWeight:700,minWidth:90,borderRight:`1px solid ${C.border}`}}>리그</th>
-                              {[
-                                {label:"1.4~1.6",color:C.green},
-                                {label:"1.6~1.8",color:C.teal},
-                                {label:"1.8~2.0",color:C.amber},
-                                {label:"2.0+",color:C.purple},
-                              ].map(r=>(
-                                <th key={r.label} style={{textAlign:"right",padding:"8px 8px",color:r.color,fontWeight:700,fontSize:10}}>{r.label}</th>
-                              ))}
-                              <th style={{textAlign:"right",padding:"4px 6px",color:C.purple,fontWeight:700,borderLeft:`1px solid ${C.border}`}}>전체</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {footballLeagueOddsTable.map(row=>(
-                              <tr key={row.league} style={{borderBottom:`1px solid ${C.border}`}}>
-                                <td style={{padding:"4px 6px",fontWeight:800,color:C.text,borderRight:`1px solid ${C.border}`}}>{row.league}</td>
-                                {row.ranges.map(r=>(
-                                  <td key={r.key} style={{padding:"4px 5px",textAlign:"right"}}>
-                                    {r.count===0 ? <span style={{color:C.dim}}>-</span> : (
-                                      <>
-                                        <div style={{color:r.roi>=0?C.green:C.red,fontWeight:800}}>{r.roi>=0?"+":""}{r.roi}%</div>
-                                        <div style={{color:C.muted,fontSize:9}}>{r.winRate}%·{r.count}</div>
-                                      </>
-                                    )}
-                                  </td>
-                                ))}
-                                <td style={{padding:"4px 6px",textAlign:"right",color:row.totalRoi>=0?C.green:C.red,fontWeight:800,borderLeft:`1px solid ${C.border}`}}>
-                                  <div>{row.totalRoi>=0?"+":""}{row.totalRoi}%</div>
-                                  <div style={{color:C.muted,fontSize:9,fontWeight:600}}>{row.totalCount}건</div>
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      )}
-                    </div>
-                  )}
+                  {/* ⚠️ 사용자 요청: 리그×배당 표 제거 — 한눈에 보기 위해 항목 줄임 */}
                 </>
               )}
             </div>
@@ -7206,19 +7149,14 @@ function AppMain() {
                     <StatCard label="평균 ROI" value={`${(()=>{const a=basketballOptStats.filter(d=>d.count>0);return a.length>0?(a.reduce((s,d)=>s+d.roi,0)/a.length).toFixed(1):"0";})()}%`} color={C.purple}/>
                   </div>
 
-                  {/* sub 탭: 옵션별 / 리그별 / 배당별 / 플마핸 */}
-                  <div style={{display:"flex",gap:5,marginBottom:12,flexWrap:"wrap"}}>
-                    <button onClick={()=>setBasketballSub("option")} style={tabBtn(basketballSub==="option",C.amber)}>📊 옵션별 (5.5~29.5)</button>
-                    <button onClick={()=>setBasketballSub("league")} style={tabBtn(basketballSub==="league",C.teal)}>🌍 리그×범위 (5단위)</button>
-                    <button onClick={()=>setBasketballSub("odds")} style={tabBtn(basketballSub==="odds",C.purple)}>🎯 배당별 (1.8~3.0)</button>
-                    <button onClick={()=>setBasketballSub("plus_minus")} style={tabBtn(basketballSub==="plus_minus",C.orange)}>🟢🔴 리그별 플/마핸</button>
-                  </div>
+                  {/* ⚠️ sub 탭 제거 — 옵션별/리그×범위/플마핸 3개 모두 한눈에 펼침
+                      (배당별은 사용자 요청으로 제외) */}
 
-                  {/* 옵션별 표 (5.5~29.5 1단위) */}
-                  {basketballSub==="option" && (
-                    <div style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:8,padding:9,overflowX:"auto"}}>
+                  {/* 옵션별 표 — 항상 표시 */}
+                  {(
+                    <div style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:7,padding:7,marginBottom:8,overflowX:"auto"}}>
                       <div style={{fontSize:13,fontWeight:800,color:C.amber,marginBottom:6}}>🏀 옵션별 통계 (5.5 ~ 29.5 핸디 — 플/마 통합)</div>
-                      <div style={{fontSize:10,color:C.muted,marginBottom:10,padding:"6px 10px",background:C.bg,borderRadius:6,lineHeight:1.5}}>
+                      <div style={{fontSize:10,color:C.muted,marginBottom:6,padding:"4px 7px",background:C.bg,borderRadius:6,lineHeight:1.5}}>
                         💡 사용자 전략: 배당 1.8↑, 플핸 5.5↑부터 적중률이 오르는 느낌. 어느 라인부터 ROI가 좋은지 확인용.
                       </div>
                       <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:420}}>
@@ -7252,11 +7190,11 @@ function AppMain() {
                     </div>
                   )}
 
-                  {/* 리그×핸디범위 (5단위 그룹) */}
-                  {basketballSub==="league" && (
-                    <div style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:8,padding:9,overflowX:"auto"}}>
+                  {/* 리그×핸디범위 — 항상 표시 */}
+                  {(
+                    <div style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:7,padding:7,marginBottom:8,overflowX:"auto"}}>
                       <div style={{fontSize:13,fontWeight:800,color:C.teal,marginBottom:6}}>🏀 리그별 핸디 범위 수익률 (가나다순)</div>
-                      <div style={{fontSize:10,color:C.muted,marginBottom:10,padding:"6px 10px",background:C.bg,borderRadius:6,lineHeight:1.5}}>
+                      <div style={{fontSize:10,color:C.muted,marginBottom:6,padding:"4px 7px",background:C.bg,borderRadius:6,lineHeight:1.5}}>
                         💡 어느 리그가 어느 범위에서 잘 맞는지 / 피해야 할 리그·범위 확인용.
                       </div>
                       {basketballLeagueRangeTable.length===0 ? (
@@ -7300,48 +7238,13 @@ function AppMain() {
                     </div>
                   )}
 
-                  {/* 배당별 표 (요청 #11) — 1.8 ~ 3.0, 0.1 단위 */}
-                  {basketballSub==="odds" && (
-                    <div style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:8,padding:9,overflowX:"auto"}}>
-                      <div style={{fontSize:13,fontWeight:800,color:C.purple,marginBottom:6}}>🎯 배당별 통계 (1.8 ~ 3.0, 0.1단위)</div>
-                      <div style={{fontSize:10,color:C.muted,marginBottom:10,padding:"6px 10px",background:C.bg,borderRadius:6,lineHeight:1.5}}>
-                        💡 사용자 전략: 배당 1.8↑로 베팅 중. 배당 구간별 ROI / 적중률을 확인해 베팅 구간 좁히기.
-                      </div>
-                      <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:420}}>
-                        <thead>
-                          <tr style={{borderBottom:`2px solid ${C.border2}`}}>
-                            <th style={{textAlign:"left",padding:"4px 6px",color:C.muted,fontWeight:700,minWidth:45}}>배당</th>
-                            <th style={{textAlign:"right",padding:"4px 6px",color:C.muted,fontWeight:700}}>베팅수</th>
-                            <th style={{textAlign:"right",padding:"4px 6px",color:C.muted,fontWeight:700}}>적중</th>
-                            <th style={{textAlign:"right",padding:"4px 6px",color:C.muted,fontWeight:700}}>실패</th>
-                            <th style={{textAlign:"right",padding:"4px 6px",color:C.muted,fontWeight:700}}>적중률</th>
-                            <th style={{textAlign:"right",padding:"4px 6px",color:C.muted,fontWeight:700}}>수익률</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {basketballOddsBucketStats.map(s=>{
-                            const isEmpty = s.count===0;
-                            return (
-                              <tr key={s.odds} style={{borderBottom:`1px solid ${C.border}`,opacity:isEmpty?0.4:1}}>
-                                <td style={{padding:"4px 6px",fontWeight:800,color:isEmpty?C.dim:C.text}}>{s.odds}</td>
-                                <td style={{padding:"4px 6px",textAlign:"right",color:isEmpty?C.dim:C.text}}>{s.count}</td>
-                                <td style={{padding:"4px 6px",textAlign:"right",color:isEmpty?C.dim:C.green,fontWeight:700}}>{s.wins}</td>
-                                <td style={{padding:"4px 6px",textAlign:"right",color:isEmpty?C.dim:C.red,fontWeight:700}}>{s.losses}</td>
-                                <td style={{padding:"4px 6px",textAlign:"right",color:isEmpty?C.dim:s.winRate>=50?C.green:C.muted,fontWeight:700}}>{isEmpty?"-":`${s.winRate}%`}</td>
-                                <td style={{padding:"4px 6px",textAlign:"right",color:isEmpty?C.dim:s.roi>=0?C.green:C.red,fontWeight:800}}>{isEmpty?"-":`${s.roi>=0?"+":""}${s.roi}%`}</td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
+                  {/* ⚠️ 사용자 요청: 농구 배당별 표 제거 — 한눈에 보기 위해 항목 줄임 */}
 
-                  {/* 리그별 플핸 vs 마핸 (요청 #11) */}
-                  {basketballSub==="plus_minus" && (
-                    <div style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:8,padding:9,overflowX:"auto"}}>
-                      <div style={{fontSize:13,fontWeight:800,color:C.orange,marginBottom:6}}>🟢🔴 리그별 플핸 vs 마핸</div>
-                      <div style={{fontSize:10,color:C.muted,marginBottom:10,padding:"6px 10px",background:C.bg,borderRadius:6,lineHeight:1.5}}>
+                  {/* 리그별 플핸 vs 마핸 — 항상 표시 */}
+                  {(
+                    <div style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:7,padding:7,marginBottom:8,overflowX:"auto"}}>
+                      <div style={{fontSize:12,fontWeight:800,color:C.orange,marginBottom:4}}>🟢🔴 리그별 플핸 vs 마핸</div>
+                      <div style={{fontSize:10,color:C.muted,marginBottom:6,padding:"4px 7px",background:C.bg,borderRadius:6,lineHeight:1.5}}>
                         💡 어느 리그가 플핸·마핸 중 어느 쪽이 유리한지 확인용. ROI 차이 ≥5%면 한쪽으로 추천.
                       </div>
                       {basketballPlusMinusTable.length===0 ? (
