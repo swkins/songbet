@@ -714,11 +714,11 @@ const EXTRA:Record<string,string[]> = {
 const getOptGroups = (cat:string) => {
   if(cat==="축구") return [{g:"홈",opts:["홈 0.5","홈 1.5","홈 2.5"]},{g:"원정",opts:["원정 0.5","원정 1.5","원정 2.5"]}];
   if(cat==="야구") return [{g:"승패",opts:["정배","역배"]},{g:"오버",opts:Array.from({length:14},(_,i)=>`${4.5+i} 오버`)},{g:"언더",opts:Array.from({length:14},(_,i)=>`${4.5+i} 언더`)}];
-  if(cat==="농구") return [{g:"플핸",opts:Array.from({length:25},(_,i)=>`${5.5+i} 플핸`)},{g:"마핸",opts:Array.from({length:54},(_,i)=>`${(2.5+i).toFixed(1)} 마핸`)}];
+  if(cat==="농구") return [{g:"마핸",opts:Array.from({length:8},(_,i)=>`${(2.5+i).toFixed(1)} 마핸`)},{g:"플핸",opts:Array.from({length:5},(_,i)=>`${(10.5+i).toFixed(1)} 플핸`)}];
   if(cat==="배구") return [{g:"승패",opts:["홈 승","원정 승"]},{g:"오버/언더",opts:["오버","언더"]}];
   return [];
 };
-const getDefaultGroup = (cat:string) => cat==="축구"?"홈":cat==="농구"?"플핸":cat==="야구"?"승패":"";
+const getDefaultGroup = (cat:string) => cat==="축구"?"홈":cat==="농구"?"마핸":cat==="야구"?"승패":"";
 const getDefaultOpt = (_cat:string,_g:string,_league="") => "";
 
 const TEAM_DB = ["뉴욕 양키스","LA 다저스","보스턴 레드삭스","시카고 컵스","샌프란시스코 자이언츠","휴스턴 애스트로스","애틀란타 브레이브스","뉴욕 메츠","필라델피아 필리스","샌디에이고 파드리스","시애틀 매리너스","토론토 블루제이스","미네소타 트윈스","클리블랜드 가디언스","텍사스 레인저스","탬파베이 레이스","볼티모어 오리올스","밀워키 브루어스","애리조나 다이아몬드백스","LA 에인절스","오클랜드 애슬레틱스","콜로라도 로키스","캔자스시티 로열스","피츠버그 파이리츠","신시내티 레즈","마이애미 말린스","워싱턴 내셔널스","디트로이트 타이거스","시카고 화이트삭스","세인트루이스 카디널스","LA 레이커스","골든스테이트 워리어스","보스턴 셀틱스","마이애미 히트","시카고 불스","브루클린 네츠","밀워키 벅스","피닉스 선즈","댈러스 매버릭스","덴버 너기츠","멤피스 그리즐리스","필라델피아 세븐티식서스","애틀란타 호크스","클리블랜드 캐벌리어스","뉴욕 닉스","토론토 랩터스","새크라멘토 킹스","뉴올리언스 펠리컨스","인디애나 페이서스","미네소타 팀버울브스","오클라호마시티 선더","포틀랜드 트레일블레이저스","유타 재즈","샌안토니오 스퍼스","샬럿 호네츠","워싱턴 위저즈","올랜도 매직","디트로이트 피스톤스","휴스턴 로케츠","LA 클리퍼스","맨체스터 시티","아스날","리버풀","첼시","맨체스터 유나이티드","토트넘","레알 마드리드","바르셀로나","아틀레티코 마드리드","바이에른 뮌헨","도르트문트","인테르 밀란","AC 밀란","유벤투스","파리 생제르맹","T1","Gen.G","DK","KT","BRO","NS","DRX","HLE","FNC","G2","C9","TL","NRG","100T","EG","FLY","BLG","JDG","EDG","WBG"];
@@ -848,7 +848,7 @@ function AppMain() {
   const fileRef = useRef<HTMLInputElement>(null);
 
   // ⚠️ 요청 #1: "bettingComboTest" 탭 삭제 — tab 타입 정의에서도 제거
-  const [tab,setTab]=useState<"home"|"bettingCombo"|"stats"|"roi"|"strategy"|"pending"|"apiManager"|"dataManager">("home");
+  const [tab,setTab]=useState<"home"|"bettingCombo"|"stats"|"roi"|"strategy"|"pending"|"apiManager"|"dataManager"|"logs">("home");
   // ── 데이터 탭 state ────────────────────────────────────────
   const [dataTableStats,setDataTableStats]=useState<Record<string,{rows:number,size:string,sizeBytes:number}>>({});
   const [dataStatsLoading,setDataStatsLoading]=useState(false);
@@ -2452,6 +2452,158 @@ function AppMain() {
   },[dbReloadNonce]);
 
   const addLog=(type:string,desc:string)=>setLogs(p=>[{id:String(Date.now()),ts:new Date().toLocaleString("ko-KR"),type,desc},...p].slice(0,200));
+
+  // ── 임의 로그 취소: 로그 ID로 해당 행동을 되돌림 ──
+  // desc 문자열 매칭으로 원래 데이터를 찾아 복귀.
+  // 일부 행동(이름 수정 등)은 desc에서 변경 정보를 추출하여 역방향 적용.
+  const undoLogById = (logId:string) => {
+    const log = logs.find(l=>l.id===logId);
+    if (!log) return alert("로그를 찾을 수 없습니다.");
+    const t = log.type;
+    const d = log.desc;
+
+    // ── 1) 베팅 추가: 가장 최근 동일 desc 패턴의 베팅 영구삭제 ──
+    if (t==="➕ 베팅") {
+      const m = d.match(/^(.+?) vs (.+?)\/(.+?)\//);
+      if (!m) return alert("베팅 정보를 파싱할 수 없습니다.");
+      const home = m[1], away = m[2], optLabel = m[3];
+      const cands = bets.filter(b=>(b.homeTeam===home && b.awayTeam===away)||b.teamName===home);
+      const target = [...cands].sort((a,b)=>parseFloat(b.id)-parseFloat(a.id))[0];
+      if (!target) return alert("취소할 베팅을 찾을 수 없습니다.");
+      if (!window.confirm(`이 베팅을 영구 삭제합니다.\n${d}\n\n계속하시겠습니까?`)) return;
+      setBetsRaw(b=>b.filter(x=>x.id!==target.id));
+      db.deleteBet(target.id);
+      if (siteStates[target.site]) {
+        const upd = {...siteStates[target.site],betTotal:parseFloat(Math.max(0, siteStates[target.site].betTotal-target.amount).toFixed(2))};
+        setSiteStatesRaw(p=>({...p,[target.site]:upd}));
+        db.upsertSiteState(target.site,upd);
+      }
+      setLogs(p=>p.filter(l=>l.id!==logId));
+      addLog("↶ 행동 취소",`${t} → ${optLabel}`);
+      return;
+    }
+
+    // ── 2) 결과 처리(적중/실패/확인): 진행중으로 되돌림 ──
+    if (t==="✅ 적중" || t==="❌ 실패" || t==="✅ 확인" || t==="❌ 확인") {
+      const targetResult = (t==="✅ 적중"||t==="✅ 확인") ? "승" : "패";
+      const cands = bets.filter(b=>b.result===targetResult && (b.homeTeam===d||b.teamName===d||d.startsWith(b.homeTeam||"")||d.startsWith(b.teamName||"")));
+      const target = [...cands].sort((a,b)=>parseFloat(b.id)-parseFloat(a.id))[0];
+      if (!target) return alert("처리된 베팅을 찾을 수 없습니다.");
+      if (!window.confirm(`결과 처리를 취소하고 진행중으로 되돌립니다.\n${d}`)) return;
+      revertToPending(target.id);
+      setLogs(p=>p.filter(l=>l.id!==logId));
+      addLog("↶ 행동 취소",`${t} 되돌림`);
+      return;
+    }
+
+    // ── 3) 환원 처리 ──
+    if (t==="↩ 환원") {
+      const cands = bets.filter(b=>b.result==="취소" && (b.homeTeam===d||b.teamName===d||d.startsWith(b.homeTeam||"")||d.startsWith(b.teamName||"")));
+      const target = [...cands].sort((a,b)=>parseFloat(b.id)-parseFloat(a.id))[0];
+      if (!target) return alert("환원된 베팅을 찾을 수 없습니다.");
+      if (!window.confirm(`환원 처리를 취소합니다.\n${d}`)) return;
+      revertToPending(target.id);
+      setLogs(p=>p.filter(l=>l.id!==logId));
+      addLog("↶ 행동 취소",`${t} 되돌림`);
+      return;
+    }
+
+    // ── 4) 베팅 취소: 다시 진행중으로 ──
+    if (t==="🚫 취소") {
+      const cands = bets.filter(b=>b.result==="취소" && (b.homeTeam===d||b.teamName===d));
+      const target = [...cands].sort((a,b)=>parseFloat(b.id)-parseFloat(a.id))[0];
+      if (!target) return alert("취소된 베팅을 찾을 수 없습니다.");
+      if (!window.confirm(`취소를 되돌려 진행중으로 복귀합니다.\n${d}`)) return;
+      revertToPending(target.id);
+      setLogs(p=>p.filter(l=>l.id!==logId));
+      addLog("↶ 행동 취소",`${t} 되돌림`);
+      return;
+    }
+
+    // ── 5) 입금: deposits 삭제 + 사이트 deposited 감소 ──
+    if (t==="💵 입금") {
+      const m = d.match(/^(.+?)\//);
+      const site = m ? m[1] : "";
+      const cands = deposits.filter(x=>x.site===site);
+      const target = [...cands].sort((a,b)=>parseFloat(b.id)-parseFloat(a.id))[0];
+      if (!target) return alert("입금 기록을 찾을 수 없습니다.");
+      if (!window.confirm(`입금을 취소하고 사이트 잔여금을 되돌립니다.\n${d}`)) return;
+      setDepositsRaw(dp=>dp.filter(x=>x.id!==target.id));
+      if (siteStates[target.site]) {
+        const upd = {...siteStates[target.site],deposited:parseFloat(Math.max(0, siteStates[target.site].deposited-target.amount).toFixed(2))};
+        setSiteStatesRaw(p=>({...p,[target.site]:upd}));
+        db.upsertSiteState(target.site,upd);
+      }
+      setLogs(p=>p.filter(l=>l.id!==logId));
+      addLog("↶ 행동 취소",`${t} 취소`);
+      return;
+    }
+
+    // ── 6) 포인트 추가: 사이트 잔여금 감소 ──
+    if (t==="🎁 포인트") {
+      const m = d.match(/^(.+?)\/(\$?)([\d,]+(?:\.\d+)?)/);
+      if (!m) return alert("포인트 정보를 파싱할 수 없습니다.");
+      const site = m[1];
+      const amt = parseFloat(m[3].replace(/,/g,""));
+      if (!siteStates[site]) return alert("사이트를 찾을 수 없습니다.");
+      if (!window.confirm(`포인트 ${m[2]}${amt}을(를) 사이트 잔여금에서 차감합니다.\n${d}`)) return;
+      const upd = {...siteStates[site],remaining:parseFloat(Math.max(0, siteStates[site].remaining-amt).toFixed(2))};
+      setSiteStatesRaw(p=>({...p,[site]:upd}));
+      db.upsertSiteState(site,upd);
+      setLogs(p=>p.filter(l=>l.id!==logId));
+      addLog("↶ 행동 취소",`${t} 취소`);
+      return;
+    }
+
+    // ── 7) 마감: 매우 위험 — 안전을 위해 거부 ──
+    if (t==="🔒 마감") {
+      alert(`"${t}" 처리는 자동 취소가 위험합니다.\n수익률 탭에서 직접 사이트 상태를 복구해주세요.`);
+      return;
+    }
+
+    // ── 8) 사이트 취소(사이트 비활성화 처리): siteStates에서 cancelled 해제 ──
+    if (t==="❌ 사이트 취소") {
+      const site = d;
+      if (!siteStates[site]) return alert("사이트를 찾을 수 없습니다.");
+      if (!window.confirm(`사이트 "${site}" 취소를 되돌립니다.`)) return;
+      const upd = {...siteStates[site], cancelled:false};
+      setSiteStatesRaw(p=>({...p,[site]:upd}));
+      db.upsertSiteState(site,upd);
+      setLogs(p=>p.filter(l=>l.id!==logId));
+      addLog("↶ 행동 취소",`${t} 되돌림`);
+      return;
+    }
+
+    // ── 9) 영구삭제 / 통계삭제: 복구 불가 ──
+    if (t==="💥 영구삭제" || t==="🗑 통계삭제") {
+      alert(`"${t}"는 데이터가 이미 삭제되어 자동 복구가 불가합니다.\n백업이 있다면 데이터 탭에서 복원해주세요.`);
+      return;
+    }
+
+    // ── 10) 백업/복구/삭제계열: 처리 불가 안내 ──
+    if (t==="📤 백업" || t==="📥 복구" || t.includes("삭제") || t.includes("추가") || t.includes("수정")) {
+      alert(`"${t}" 유형은 자동 취소가 지원되지 않습니다.\n해당 탭에서 직접 처리해주세요.`);
+      return;
+    }
+
+    // ── 11) 이미 취소된 로그(↶ 행동 취소): 재취소 불가 ──
+    if (t==="↶ 행동 취소" || t==="↶ 로그 취소") {
+      alert("이미 취소된 행동입니다. 추가 취소는 지원하지 않습니다.");
+      return;
+    }
+
+    // 매칭 안 된 기타
+    alert(`"${t}" 유형은 자동 취소가 지원되지 않습니다.`);
+  };
+
+  // ── 로그 항목이 자동 취소 가능한지 판별 ──
+  const isLogUndoable = (type:string):boolean => {
+    const undoableTypes = [
+      "➕ 베팅","✅ 적중","❌ 실패","✅ 확인","❌ 확인","↩ 환원","🚫 취소",
+      "💵 입금","🎁 포인트","❌ 사이트 취소"
+    ];
+    return undoableTypes.includes(type);
+  };
 
   // 최근 로그 행동 취소 (첫번째 로그만)
   const undoLastLog = () => {
@@ -5457,9 +5609,9 @@ function AppMain() {
         <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
           {([
             // ⚠️ 요청 #1: 스포츠 (테스트) 탭(bettingComboTest) 삭제됨
-            ["home","🏠 대시보드"],["bettingCombo","🎯 스포츠"],["pending","⏳ 베팅 내역"],["stats","📊 통계"],["roi","💹 수익률"],["strategy","📋 전략"],["apiManager","🔑 API 관리"],["dataManager","🗄 데이터"],
+            ["home","🏠 대시보드"],["bettingCombo","🎯 스포츠"],["pending","⏳ 베팅 내역"],["stats","📊 통계"],["roi","💹 수익률"],["strategy","📋 전략"],["apiManager","🔑 API 관리"],["dataManager","🗄 데이터"],["logs","📜 로그"],
           ] as [string,string][]).map(([k,l])=>{
-            const ac = k==="pending"?C.amber:k==="home"?C.green:k==="apiManager"?C.purple:k==="dataManager"?C.red:C.orange;
+            const ac = k==="pending"?C.amber:k==="home"?C.green:k==="apiManager"?C.purple:k==="dataManager"?C.red:k==="logs"?C.teal:C.orange;
             const active = tab===k;
             return (
               <button key={k} onClick={()=>setTab(k as any)}
@@ -6096,8 +6248,9 @@ function AppMain() {
                         const ouLinesBaseball = [4.5,5.5,6.5,7.5,8.5,9.5,10.5,11.5,12.5,13.5,14.5,15.5,16.5,17.5];
                         const ouLinesBasketball = [155.5,160.5,165.5,170.5,175.5,180.5,185.5,190.5,195.5,200.5,205.5,210.5,215.5,220.5];
                         const handiLinesSoccer = [0.5,1.5,2.5];
-                        // 농구 플핸 라인: 5.5 ~ 29.5 (1단위, 25개)
-                        const handiLinesBasketball = Array.from({length:25}, (_,i)=>5.5+i);
+                        // 농구 신규 전략: 마핸 -2.5 ~ -9.5 (8개) / 플핸 +10.5 ~ +14.5 (5개)
+                        const handiMinusBasketball = Array.from({length:8}, (_,i)=>2.5+i);   // 2.5,3.5,...,9.5 (마이너스)
+                        const handiPlusBasketball  = Array.from({length:5}, (_,i)=>10.5+i);  // 10.5,11.5,...,14.5 (플러스)
 
                         // ⚠️ 요청 #1: 스포츠 (테스트) 탭 삭제됨.
                         // isTestTab을 false 고정하면 배당 표시 UI가 자동으로 숨겨지므로,
@@ -6254,10 +6407,10 @@ function AppMain() {
                               </div>
                             )}
 
-                            {/* 농구: 플핸 (5.5 ~ 29.5, 1단위) */}
+                            {/* 농구: 마핸 (-2.5 ~ -9.5) — 사용자 신규 전략 */}
                             {isBasketball && (
                               <div style={{marginBottom:14}}>
-                                <div style={{fontSize:10,fontWeight:800,color:C.amber,marginBottom:6,letterSpacing:1}}>플핸</div>
+                                <div style={{fontSize:10,fontWeight:800,color:C.red,marginBottom:6,letterSpacing:1}}>마핸 (정배 -2.5 ~ -9.5)</div>
                                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
                                   {[
                                     {team:krTeam(g.home_team),color:C.green},
@@ -6266,7 +6419,39 @@ function AppMain() {
                                     <div key={team}>
                                       <div style={{fontSize:10,color,marginBottom:5,fontWeight:800,textAlign:"center",background:`${color}22`,borderRadius:4,padding:"2px 0",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{team}</div>
                                       <div style={{display:"flex",flexDirection:"column",gap:3}}>
-                                        {handiLinesBasketball.map(ln=>{
+                                        {handiMinusBasketball.map(ln=>{
+                                          const opt=`${team} (-${ln})`;
+                                          const added=inSlip(opt);
+                                          return <button key={opt} onClick={()=>handleSlipPick(g,opt)}
+                                            style={{padding:"7px 10px",borderRadius:5,cursor:"pointer",
+                                              border:added?`2px solid ${C.red}`:`1px solid ${C.border}`,
+                                              background:added?`${C.red}33`:C.bg2,color:added?C.red:C.text,
+                                              fontWeight:added?800:600,fontSize:11,
+                                              display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,textAlign:"left"}}>
+                                            <span style={{flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{team} <b>(-{ln})</b></span>
+                                            <span style={{color:added?C.red:(isTestTab && oddsFor(opt)!=="—"?C.amber:C.dim),fontSize:11,fontWeight:isTestTab?800:700,minWidth:32,textAlign:"right",flexShrink:0}}>{oddsFor(opt)}</span>
+                                          </button>;
+                                        })}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* 농구: 플핸 (+10.5 ~ +14.5) — 사용자 신규 전략 */}
+                            {isBasketball && (
+                              <div style={{marginBottom:14}}>
+                                <div style={{fontSize:10,fontWeight:800,color:C.green,marginBottom:6,letterSpacing:1}}>플핸 (역배 +10.5 ~ +14.5)</div>
+                                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                                  {[
+                                    {team:krTeam(g.home_team),color:C.green},
+                                    {team:krTeam(g.away_team),color:C.teal},
+                                  ].map(({team,color})=>(
+                                    <div key={team}>
+                                      <div style={{fontSize:10,color,marginBottom:5,fontWeight:800,textAlign:"center",background:`${color}22`,borderRadius:4,padding:"2px 0",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{team}</div>
+                                      <div style={{display:"flex",flexDirection:"column",gap:3}}>
+                                        {handiPlusBasketball.map(ln=>{
                                           const opt=`${team} (+${ln})`;
                                           const added=inSlip(opt);
                                           return <button key={opt} onClick={()=>handleSlipPick(g,opt)}
@@ -8496,7 +8681,86 @@ function AppMain() {
       )}
 
       {/* ══ 로그 탭 ══ */}
-      {/* 로그 탭 제거됨 (요청 #6) */}
+      {tab==="logs"&&(
+        <div style={{flex:1,overflowY:"auto",padding:20}}>
+          <div style={{display:"flex",alignItems:"center",marginBottom:14,gap:10,flexWrap:"wrap"}}>
+            <div style={{fontSize:16,fontWeight:800,color:C.teal}}>📜 행동 로그 <span style={{fontSize:11,color:C.muted,fontWeight:600}}>({logs.length}건)</span></div>
+            <div style={{marginLeft:"auto",display:"flex",gap:6}}>
+              <button
+                onClick={()=>{
+                  if(logs.length===0)return;
+                  if(window.confirm("모든 로그를 삭제합니다. 베팅/입출금 데이터는 그대로 유지됩니다.\n계속하시겠습니까?")){
+                    setLogs([]);
+                  }
+                }}
+                style={{padding:"6px 12px",borderRadius:6,border:`1px solid ${C.red}66`,background:`${C.red}11`,color:C.red,cursor:"pointer",fontSize:11,fontWeight:700}}
+              >🗑 로그 전체삭제</button>
+            </div>
+          </div>
+
+          <div style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:7,padding:"10px 12px",marginBottom:14,fontSize:11,color:C.muted,lineHeight:1.6}}>
+            💡 <strong style={{color:C.text}}>취소 가능</strong>: ➕베팅 / ✅적중·확인 / ❌실패·확인 / ↩환원 / 🚫취소 / 💵입금 / 🎁포인트 / ❌사이트 취소<br/>
+            ⚠️ <strong style={{color:C.text}}>취소 불가</strong>: 🔒마감(수익률 직접 처리) / 💥영구삭제·🗑통계삭제(데이터 손실) / 📤백업·📥복구 / 추가·수정·삭제 메뉴<br/>
+            🔁 취소 시 원래 베팅 / 입금 / 사이트 잔여금 등이 <strong style={{color:C.green}}>실제 데이터에서 자동 복원</strong>됩니다.
+          </div>
+
+          {logs.length===0 ? (
+            <div style={{textAlign:"center",color:C.dim,padding:"60px",background:C.bg3,borderRadius:8,border:`1px solid ${C.border}`}}>
+              아직 행동 기록이 없습니다.<br/>
+              <span style={{fontSize:11,color:C.muted}}>베팅, 입금, 결과 처리 등을 하면 여기에 기록됩니다.</span>
+            </div>
+          ) : (
+            <div style={{display:"flex",flexDirection:"column",gap:6}}>
+              {logs.map(log=>{
+                const undoable = isLogUndoable(log.type);
+                const isUndo = log.type.startsWith("↶");
+                // 색상 매핑
+                let typeColor = C.text;
+                if (log.type.startsWith("✅")) typeColor = C.green;
+                else if (log.type.startsWith("❌") || log.type.startsWith("💥") || log.type.startsWith("🚫") || log.type.startsWith("🗑")) typeColor = C.red;
+                else if (log.type.startsWith("➕")) typeColor = C.amber;
+                else if (log.type.startsWith("💵") || log.type.startsWith("🎁") || log.type.startsWith("🔒")) typeColor = C.teal;
+                else if (log.type.startsWith("↶") || log.type.startsWith("↩")) typeColor = C.muted;
+                else if (log.type.startsWith("✏️")) typeColor = C.purple;
+                else if (log.type.startsWith("📤") || log.type.startsWith("📥")) typeColor = C.orange;
+
+                return (
+                  <div key={log.id} style={{
+                    background:C.bg3,
+                    border:`1px solid ${C.border}`,
+                    borderLeft:`3px solid ${typeColor}`,
+                    borderRadius:7,
+                    padding:"9px 12px",
+                    display:"grid",
+                    gridTemplateColumns:"130px 100px 1fr 80px",
+                    gap:10,
+                    alignItems:"center",
+                    opacity:isUndo?0.6:1,
+                  }}>
+                    <div style={{fontSize:10,color:C.muted,fontFamily:"monospace"}}>{log.ts}</div>
+                    <div style={{fontSize:11,fontWeight:800,color:typeColor}}>{log.type}</div>
+                    <div style={{fontSize:11,color:C.text,wordBreak:"break-word"}}>{log.desc||"-"}</div>
+                    <div style={{textAlign:"right"}}>
+                      {undoable && !isUndo ? (
+                        <button
+                          onClick={()=>undoLogById(log.id)}
+                          style={{
+                            padding:"4px 10px",borderRadius:5,
+                            border:`1px solid ${C.amber}66`,background:`${C.amber}11`,
+                            color:C.amber,cursor:"pointer",fontSize:10,fontWeight:700,
+                          }}
+                        >↶ 취소</button>
+                      ) : (
+                        <span style={{fontSize:9,color:C.dim}}>{isUndo?"이미 취소됨":"취소 불가"}</span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ══ 홈 탭 ══ */}
       {tab==="home"&&(()=>{
