@@ -3974,6 +3974,7 @@ function AppMain() {
       losses: s.losses,
       winRate: s.winRate,
       roi: s.roi,
+      profit: s.profit,
     }));
     const baseball = baseballOptTable.slice(0,3).map(s=>({
       sport:"⚾",
@@ -3983,6 +3984,7 @@ function AppMain() {
       losses: s.losses,
       winRate: s.winRate,
       roi: s.roi,
+      profit: s.profit,
     }));
     const basketballGroups = [
       {label:"5.5~9.5",   from:5.5,  to:9.5},
@@ -4008,6 +4010,7 @@ function AppMain() {
         wins, losses,
         winRate: bs.length>0 ? Math.round(wins/bs.length*100) : 0,
         roi: bet>0 ? parseFloat(((profit/bet)*100).toFixed(1)) : 0,
+        profit,
       };
     });
     return { football, baseball, basketball };
@@ -8450,20 +8453,20 @@ function AppMain() {
                 야구: 승패/오버/언더
                 농구: 5단위 그룹 (5.5~9.5 / 10.5~14.5 / 15.5~19.5 / 20.5~24.5 / 25.5~29.5)
             */}
-            <div style={{background:C.bg3,border:`1px solid ${C.amber}44`,borderRadius:12,padding:13}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:9}}>
-                <div style={{fontSize:14,fontWeight:800,color:C.amber}}>🎯 옵션별 종합 (종목 전체)</div>
-                <button onClick={()=>setTab("stats")} style={{padding:"3px 9px",borderRadius:5,border:`1px solid ${C.amber}66`,background:`${C.amber}11`,color:C.amber,cursor:"pointer",fontSize:10,fontWeight:700}}>자세히 →</button>
+            <div style={{background:C.bg3,border:`1px solid ${C.amber}44`,borderRadius:12,padding:14}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                <div style={{fontSize:15,fontWeight:800,color:C.amber}}>🎯 옵션별 종합 (종목 전체)</div>
+                <button onClick={()=>setTab("stats")} style={{padding:"4px 10px",borderRadius:5,border:`1px solid ${C.amber}66`,background:`${C.amber}11`,color:C.amber,cursor:"pointer",fontSize:11,fontWeight:700}}>자세히 →</button>
               </div>
-              {/* 표 헤더 */}
-              <div style={{display:"grid",gridTemplateColumns:"22px 1fr 38px 38px 38px 50px 56px",gap:4,padding:"4px 6px",fontSize:9,color:C.muted,fontWeight:700,borderBottom:`1px solid ${C.border}`,marginBottom:3}}>
+              {/* 표 헤더 — 컬럼: [종목][옵션][베팅][적중][실패][적중률][수익금(%)] */}
+              <div style={{display:"grid",gridTemplateColumns:"26px 1fr 44px 44px 44px 56px 110px",gap:5,padding:"5px 7px",fontSize:11,color:C.muted,fontWeight:700,borderBottom:`1px solid ${C.border}`,marginBottom:4}}>
                 <span></span>
                 <span>옵션</span>
                 <span style={{textAlign:"right"}}>베팅</span>
                 <span style={{textAlign:"right"}}>적중</span>
                 <span style={{textAlign:"right"}}>실패</span>
                 <span style={{textAlign:"right"}}>적중률</span>
-                <span style={{textAlign:"right"}}>수익률</span>
+                <span style={{textAlign:"right"}}>수익금 (%)</span>
               </div>
               {/* 종목별 행 — 축구 → 야구 → 농구 순 */}
               <div style={{display:"flex",flexDirection:"column",gap:1}}>
@@ -8472,18 +8475,26 @@ function AppMain() {
                   {label:"⚾ 야구", color:C.amber, items: optionAllStats.baseball},
                   {label:"🏀 농구", color:C.purple, items: optionAllStats.basketball},
                 ]).map((sec,i)=>(
-                  <div key={sec.label} style={{borderTop:i>0?`1px dashed ${C.border}`:undefined,paddingTop:i>0?3:0,marginTop:i>0?2:0}}>
+                  <div key={sec.label} style={{borderTop:i>0?`1px dashed ${C.border}`:undefined,paddingTop:i>0?4:0,marginTop:i>0?3:0}}>
                     {sec.items.map((s:any,j:number)=>{
                       const isEmpty = s.count===0;
+                      const profitColor = isEmpty ? C.dim : (s.profit>=0 ? C.green : C.red);
                       return (
-                        <div key={j} style={{display:"grid",gridTemplateColumns:"22px 1fr 38px 38px 38px 50px 56px",gap:4,alignItems:"center",padding:"3px 6px",fontSize:11,opacity:isEmpty?0.4:1}}>
-                          <span style={{textAlign:"center",fontSize:11}}>{j===0?sec.label.split(" ")[0]:""}</span>
+                        <div key={j} style={{display:"grid",gridTemplateColumns:"26px 1fr 44px 44px 44px 56px 110px",gap:5,alignItems:"center",padding:"5px 7px",fontSize:13,opacity:isEmpty?0.4:1}}>
+                          <span style={{textAlign:"center",fontSize:13}}>{j===0?sec.label.split(" ")[0]:""}</span>
                           <span style={{color:isEmpty?C.dim:sec.color,fontWeight:700,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{s.label}</span>
                           <span style={{textAlign:"right",color:isEmpty?C.dim:C.text,fontWeight:700}}>{s.count}</span>
                           <span style={{textAlign:"right",color:isEmpty?C.dim:C.green,fontWeight:700}}>{s.wins}</span>
                           <span style={{textAlign:"right",color:isEmpty?C.dim:C.red,fontWeight:700}}>{s.losses}</span>
                           <span style={{textAlign:"right",color:isEmpty?C.dim:s.winRate>=50?C.green:C.muted,fontWeight:700}}>{isEmpty?"-":`${s.winRate}%`}</span>
-                          <span style={{textAlign:"right",color:isEmpty?C.dim:s.roi>=0?C.green:C.red,fontWeight:800}}>{isEmpty?"-":`${s.roi>=0?"+":""}${s.roi}%`}</span>
+                          <span style={{textAlign:"right",color:profitColor,fontWeight:800,whiteSpace:"nowrap"}}>
+                            {isEmpty ? "-" : (
+                              <>
+                                {s.profit>=0?"+":""}{Math.round(s.profit).toLocaleString()}
+                                <span style={{fontSize:10,marginLeft:3,opacity:0.85,fontWeight:700}}>({s.roi>=0?"+":""}{s.roi}%)</span>
+                              </>
+                            )}
+                          </span>
                         </div>
                       );
                     })}
