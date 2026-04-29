@@ -2539,15 +2539,21 @@ function AppMain() {
       return;
     }
 
-    // ── 6) 포인트 추가: 사이트 잔여금 감소 ──
+    // ── 6) 포인트 추가: deposited와 pointTotal 둘 다 차감 (handleAddPoint와 역방향) ──
     if (t==="🎁 포인트") {
       const m = d.match(/^(.+?)\/(\$?)([\d,]+(?:\.\d+)?)/);
       if (!m) return alert("포인트 정보를 파싱할 수 없습니다.");
       const site = m[1];
       const amt = parseFloat(m[3].replace(/,/g,""));
       if (!siteStates[site]) return alert("사이트를 찾을 수 없습니다.");
-      if (!window.confirm(`포인트 ${m[2]}${amt}을(를) 사이트 잔여금에서 차감합니다.\n${d}`)) return;
-      const upd = {...siteStates[site],remaining:parseFloat(Math.max(0, siteStates[site].remaining-amt).toFixed(2))};
+      if (!window.confirm(`포인트 ${m[2]}${amt}을(를) 사이트에서 차감합니다.\n${d}`)) return;
+      const cur = siteStates[site];
+      const prevPoint = parseFloat(String(cur.pointTotal||0));
+      const upd = {
+        ...cur,
+        deposited: parseFloat(Math.max(0, cur.deposited - amt).toFixed(2)),
+        pointTotal: parseFloat(Math.max(0, prevPoint - amt).toFixed(2)),
+      };
       setSiteStatesRaw(p=>({...p,[site]:upd}));
       db.upsertSiteState(site,upd);
       setLogs(p=>p.filter(l=>l.id!==logId));
@@ -2561,16 +2567,9 @@ function AppMain() {
       return;
     }
 
-    // ── 8) 사이트 취소(사이트 비활성화 처리): siteStates에서 cancelled 해제 ──
+    // ── 8) 사이트 취소: deposited/betTotal/pointTotal이 모두 0 처리되어 이전 값 복구 불가 ──
     if (t==="❌ 사이트 취소") {
-      const site = d;
-      if (!siteStates[site]) return alert("사이트를 찾을 수 없습니다.");
-      if (!window.confirm(`사이트 "${site}" 취소를 되돌립니다.`)) return;
-      const upd = {...siteStates[site], cancelled:false};
-      setSiteStatesRaw(p=>({...p,[site]:upd}));
-      db.upsertSiteState(site,upd);
-      setLogs(p=>p.filter(l=>l.id!==logId));
-      addLog("↶ 행동 취소",`${t} 되돌림`);
+      alert(`"${t}"는 사이트의 입금/베팅/포인트 데이터가 모두 0 처리되어\n이전 값을 자동 복구할 수 없습니다.\n수익률 탭에서 직접 입금을 다시 추가해주세요.`);
       return;
     }
 
@@ -2600,7 +2599,7 @@ function AppMain() {
   const isLogUndoable = (type:string):boolean => {
     const undoableTypes = [
       "➕ 베팅","✅ 적중","❌ 실패","✅ 확인","❌ 확인","↩ 환원","🚫 취소",
-      "💵 입금","🎁 포인트","❌ 사이트 취소"
+      "💵 입금","🎁 포인트"
     ];
     return undoableTypes.includes(type);
   };
@@ -8699,8 +8698,8 @@ function AppMain() {
           </div>
 
           <div style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:7,padding:"10px 12px",marginBottom:14,fontSize:11,color:C.muted,lineHeight:1.6}}>
-            💡 <strong style={{color:C.text}}>취소 가능</strong>: ➕베팅 / ✅적중·확인 / ❌실패·확인 / ↩환원 / 🚫취소 / 💵입금 / 🎁포인트 / ❌사이트 취소<br/>
-            ⚠️ <strong style={{color:C.text}}>취소 불가</strong>: 🔒마감(수익률 직접 처리) / 💥영구삭제·🗑통계삭제(데이터 손실) / 📤백업·📥복구 / 추가·수정·삭제 메뉴<br/>
+            💡 <strong style={{color:C.text}}>취소 가능</strong>: ➕베팅 / ✅적중·확인 / ❌실패·확인 / ↩환원 / 🚫취소 / 💵입금 / 🎁포인트<br/>
+            ⚠️ <strong style={{color:C.text}}>취소 불가</strong>: 🔒마감·❌사이트 취소(데이터 0처리됨) / 💥영구삭제·🗑통계삭제 / 📤백업·📥복구 / 추가·수정·삭제 메뉴<br/>
             🔁 취소 시 원래 베팅 / 입금 / 사이트 잔여금 등이 <strong style={{color:C.green}}>실제 데이터에서 자동 복원</strong>됩니다.
           </div>
 
