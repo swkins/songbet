@@ -3877,6 +3877,128 @@ function AppMain() {
     });
   },[basketballDone]);
 
+  // ═════════════════════════════════════════════════════════════
+  // 대시보드용 통계 (포인트 교환 박스 제거 + 새 패널들 추가)
+  // ─────────────────────────────────────────────────────────────
+
+  // [대시보드] 이번 주 사이트별 입금액 (월~일 기준)
+  // 오늘 날짜 기준 가장 가까운 월요일 ~ 그 다음 일요일까지의 입금액 합계
+  const thisWeekDeposits = useMemo(()=>{
+    const t = new Date(today + "T00:00:00Z");
+    // getUTCDay(): 0=일,1=월,...,6=토
+    const day = t.getUTCDay();
+    // 월요일이 주의 시작 → 0=일이면 6일 전이 월요일, 1=월이면 0일 전 ...
+    const daysToMonday = (day + 6) % 7;
+    const monday = new Date(t);
+    monday.setUTCDate(t.getUTCDate() - daysToMonday);
+    const sunday = new Date(monday);
+    sunday.setUTCDate(monday.getUTCDate() + 6);
+    const monStr = monday.toISOString().slice(0,10);
+    const sunStr = sunday.toISOString().slice(0,10);
+    const weekDeps = deposits.filter(d => d.date >= monStr && d.date <= sunStr);
+    // 사이트별 합계
+    const bySite: Record<string, {amount:number, count:number, dollar:boolean}> = {};
+    for(const d of weekDeps){
+      const dollar = isUSD(d.site);
+      if(!bySite[d.site]) bySite[d.site] = {amount:0, count:0, dollar};
+      bySite[d.site].amount += d.amount;
+      bySite[d.site].count += 1;
+    }
+    // 활성 사이트 우선, 같은 그룹 내 KRW 환산 큰 순
+    const sortedSites = Object.keys(bySite).sort((a,b)=>{
+      const aa = siteStates[a]?.active ? 0 : 1;
+      const bb = siteStates[b]?.active ? 0 : 1;
+      if(aa !== bb) return aa - bb;
+      const aKrw = bySite[a].dollar ? bySite[a].amount * usdKrw : bySite[a].amount;
+      const bKrw = bySite[b].dollar ? bySite[b].amount * usdKrw : bySite[b].amount;
+      return bKrw - aKrw;
+    });
+    const totalKrw = sortedSites.reduce((s,site)=>{
+      const v = bySite[site];
+      return s + (v.dollar ? v.amount * usdKrw : v.amount);
+    },0);
+    return { monStr, sunStr, sites: sortedSites.map(s=>({site:s, ...bySite[s]})), totalKrw };
+  },[deposits, today, siteStates, usdKrw, isUSD]);
+
+  // [대시보드] 종목 전체 옵션별 통계 (한눈에)
+  //   축구: 홈/원정 0.5/1.5/2.5
+  //   야구: 승패/오버/언더
+  //   농구: 5단위 그룹 (플/마 통합)
+  // 각 옵션별: 베팅수, 적중수, 실패수, 적중률, 수익률
+  const optionAllStats = useMemo(()=>{
+    const football = footballHandicapLineStats.map(s=>({
+      sport:"⚽",
+      label: s.opt,
+      count: s.count,
+      wins: s.wins,
+      losses: s.losses,
+      winRate: s.winRate,
+      roi: s.roi,
+    }));
+    const baseball = baseballOptTable.slice(0,3).map(s=>({
+      sport:"⚾",
+      label: s.label,
+      count: s.count,
+      wins: s.wins,
+      losses: s.losses,
+      winRate: s.winRate,
+      roi: s.roi,
+    }));
+    const basketballGroups = [
+      {label:"5.5~9.5",   from:5.5,  to:9.5},
+      {label:"10.5~14.5", from:10.5, to:14.5},
+      {label:"15.5~19.5", from:15.5, to:19.5},
+      {label:"20.5~24.5", from:20.5, to:24.5},
+      {label:"25.5~29.5", from:25.5, to:29.5},
+    ];
+    const basketball = basketballGroups.map(g=>{
+      const bs = basketballDone.filter(b=>{
+        const p = parseBasketballOpt(b.betOption);
+        if(!p) return false;
+        return p.value>=g.from && p.value<=g.to;
+      });
+      const wins = bs.filter(b=>b.result==="승").length;
+      const losses = bs.filter(b=>b.result==="패").length;
+      const profit = bs.reduce((s,b)=>s+(b.profit??0),0);
+      const bet = bs.reduce((s,b)=>s+b.amount,0);
+      return {
+        sport:"🏀",
+        label: g.label,
+        count: bs.length,
+        wins, losses,
+        winRate: bs.length>0 ? Math.round(wins/bs.length*100) : 0,
+        roi: bet>0 ? parseFloat(((profit/bet)*100).toFixed(1)) : 0,
+      };
+    });
+    return { football, baseball, basketball };
+  },[footballHandicapLineStats, baseballOptTable, basketballDone]);
+
+  // [대시보드] 이번 달 사이트별 수익/지출 + 기타 수익/지출 목록
+  const thisMonthSiteStats = useMemo(()=>{
+    const monthPrefix = today.slice(0,7); // "YYYY-MM"
+    const monthDeps = deposits.filter(d=>d.date.startsWith(monthPrefix));
+    const monthWths = withdrawals.filter(w=>w.date.startsWith(monthPrefix));
+    const sites = [...new Set([...monthDeps.map(d=>d.site), ...monthWths.map(w=>w.site)])];
+    const siteRows = sites.map(site=>{
+      const dollar = isUSD(site);
+      const dep = monthDeps.filter(d=>d.site===site).reduce((s,d)=>s+d.amount,0);
+      const wth = monthWths.filter(w=>w.site===site).reduce((s,w)=>s+w.amount,0);
+      const net = wth - dep;
+      const depKrw = dollar ? dep * usdKrw : dep;
+      const wthKrw = dollar ? wth * usdKrw : wth;
+      const netKrw = dollar ? net * usdKrw : net;
+      return {site, dollar, dep, wth, net, depKrw, wthKrw, netKrw};
+    }).sort((a,b)=>b.netKrw - a.netKrw);
+    const monthExtras = (profitExtras as any[]).filter(e=>(e.date||"").startsWith(monthPrefix));
+    const extraIncomes = monthExtras.filter(e=>e.isIncome).sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+    const extraExpenses = monthExtras.filter(e=>!e.isIncome).sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+    const totalSiteNet = siteRows.reduce((s,r)=>s+r.netKrw,0);
+    const totalExtraIncome = extraIncomes.reduce((s,e)=>s+(e.amount||0),0);
+    const totalExtraExpense = extraExpenses.reduce((s,e)=>s+(e.amount||0),0);
+    const grandNet = totalSiteNet + totalExtraIncome - totalExtraExpense;
+    return { monthPrefix, siteRows, extraIncomes, extraExpenses, totalSiteNet, totalExtraIncome, totalExtraExpense, grandNet };
+  },[deposits, withdrawals, profitExtras, today, usdKrw, isUSD]);
+
 
   const roiStats=useMemo(()=>{
     return ALL_SITES.map(site=>{
@@ -7844,14 +7966,15 @@ function AppMain() {
           </div>
 
           {/* 새 레이아웃 (3컬럼 grid):
-               1행: [사이트 활성화 320px][사이트별 진행률 320px][📊 통계 한눈에 1fr]
-               2행: [오늘 할 일 320px][포인트 교환 320px][💹 수익률+세부 1fr]
-               ⚠️ 사용자 요청: 사이트별 진행률/포인트 교환은 좁게(가로 짧게),
-                                우측 남은 공간에 통계/수익률 핵심을 배치 */}
+               1행: [사이트 활성화 + 이번주 입금 360px][사이트별 진행률 480px][📊 통계 한눈에 1fr]
+               2행: [오늘 할 일 360px][🎯 옵션별 종합 480px][💹 이번달 수익률 1fr]
+               ⚠️ 사용자 요청: 포인트 교환 박스 제거. 사이트별 진행률 폭 확대.
+                                우측에 옵션별 수익 + 이번달 수익률 추가 */}
           <div style={{display:"flex",flexDirection:"column",gap:12}}>
-          <div style={{display:"grid",gridTemplateColumns:"320px 320px 1fr",gap:12,alignItems:"start"}}>
+          <div style={{display:"grid",gridTemplateColumns:"360px 480px 1fr",gap:12,alignItems:"start"}}>
 
-            {/* [좌상] 입금/포인트 인라인 폼 */}
+            {/* [좌상] 입금/포인트 인라인 폼 + 이번 주 입금 (wrapper로 묶어 한 셀에 세로 정렬) */}
+            <div style={{display:"flex",flexDirection:"column",gap:12}}>
             <div style={{background:C.bg3,border:`1px solid ${C.green}44`,borderRadius:12,padding:13}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
                 <div style={{fontSize:14,fontWeight:800,color:C.green}}>💵 사이트 활성화</div>
@@ -7910,6 +8033,37 @@ function AppMain() {
               </div>
             </div>
 
+            {/* [좌상-2] 이번 주 사이트별 입금 (월~일) */}
+            <div style={{background:C.bg3,border:`1px solid ${C.teal}44`,borderRadius:12,padding:13}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:9}}>
+                <div style={{fontSize:13,fontWeight:800,color:C.teal}}>📅 이번 주 입금 ({thisWeekDeposits.monStr.slice(5).replace("-","/")} ~ {thisWeekDeposits.sunStr.slice(5).replace("-","/")})</div>
+                <span style={{fontSize:11,fontWeight:900,color:C.green}}>총 ₩{Math.round(thisWeekDeposits.totalKrw).toLocaleString()}</span>
+              </div>
+              {thisWeekDeposits.sites.length === 0 ? (
+                <div style={{textAlign:"center",color:C.dim,padding:"15px 0",fontSize:11}}>이번 주 입금 내역 없음</div>
+              ) : (
+                <div style={{display:"flex",flexDirection:"column",gap:4}}>
+                  {thisWeekDeposits.sites.map(s=>{
+                    const active = siteStates[s.site]?.active;
+                    const krw = s.dollar ? s.amount * usdKrw : s.amount;
+                    return (
+                      <div key={s.site} style={{display:"flex",alignItems:"center",gap:8,padding:"5px 9px",background:C.bg2,borderRadius:5,border:`1px solid ${active?C.green+"33":C.border}`,opacity:active?1:0.65}}>
+                        <span style={{fontSize:11,fontWeight:800,color:active?(s.dollar?C.amber:C.green):C.dim,minWidth:75,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{s.dollar?"$":"₩"} {s.site}</span>
+                        <span style={{flex:1,fontSize:11,color:C.text,fontWeight:700,textAlign:"right"}}>
+                          {s.dollar ? `$${s.amount.toFixed(2)}` : `₩${s.amount.toLocaleString()}`}
+                        </span>
+                        {s.dollar && (
+                          <span style={{fontSize:9,color:C.dim,minWidth:75,textAlign:"right"}}>(₩{Math.round(krw).toLocaleString()})</span>
+                        )}
+                        <span style={{fontSize:9,color:C.muted,fontWeight:700,minWidth:32,textAlign:"right"}}>{s.count}회</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+            </div>
+
             {/* [우상-중] 사이트별 진행률 — 가운데 셀, 가로 짧게 세로 정렬 */}
               <div style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:12,padding:13}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
@@ -7938,33 +8092,30 @@ function AppMain() {
                           const barColor=isComplete?C.purple:pctRaw>=90?C.red:pctRaw>=70?C.amber:C.green;
                           const sitePending=pending.filter(b=>b.site===site).length;
                           const sp = currentSessionProfits[site];
-                          // 좁은 셀(320px)용 2단 구조:
-                          //   1단: [사이트명][진행바][%]
-                          //   2단: [잔액] [진행N] [세션ROI]
+                          // 480px 폭 → 가로 한 줄: [사이트명][진행바+%][잔액][진행N][세션ROI]
                           return (
-                            <div key={site} style={{background:C.bg2,border:`1px solid ${barColor}33`,borderRadius:7,padding:"6px 8px",display:"flex",flexDirection:"column",gap:4}}>
-                              {/* 1단 */}
-                              <div style={{display:"flex",alignItems:"center",gap:6}}>
-                                <span style={{fontSize:12,fontWeight:800,color:C.text,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:75,flexShrink:0}}>{dollar?"$":"₩"} {site}</span>
-                                {isComplete && <span style={{fontSize:8,fontWeight:900,color:C.purple,background:`${C.purple}22`,border:`1px solid ${C.purple}`,borderRadius:3,padding:"0 3px",letterSpacing:1,flexShrink:0}}>✓</span>}
-                                <div style={{flex:1,height:10,background:C.bg,borderRadius:3,overflow:"hidden",minWidth:40}}>
+                            <div key={site} style={{background:C.bg2,border:`1px solid ${barColor}33`,borderRadius:7,padding:"7px 10px",display:"flex",alignItems:"center",gap:8}}>
+                              <div style={{display:"flex",alignItems:"center",gap:5,minWidth:85,flexShrink:0}}>
+                                <span style={{fontSize:12,fontWeight:800,color:C.text,whiteSpace:"nowrap"}}>{dollar?"$":"₩"} {site}</span>
+                                {isComplete && <span style={{fontSize:8,fontWeight:900,color:C.purple,background:`${C.purple}22`,border:`1px solid ${C.purple}`,borderRadius:3,padding:"0 3px",letterSpacing:1}}>✓</span>}
+                              </div>
+                              <div style={{flex:1,display:"flex",alignItems:"center",gap:6,minWidth:80}}>
+                                <div style={{flex:1,height:11,background:C.bg,borderRadius:3,overflow:"hidden"}}>
                                   <div style={{width:`${pct}%`,height:"100%",background:barColor,transition:"width 0.3s",borderRadius:3}}/>
                                 </div>
-                                <span style={{fontSize:10,color:barColor,fontWeight:800,minWidth:36,textAlign:"right",flexShrink:0}}>{pctRaw.toFixed(1)}%</span>
+                                <span style={{fontSize:10,color:barColor,fontWeight:800,minWidth:36,textAlign:"right"}}>{pctRaw.toFixed(1)}%</span>
                               </div>
-                              {/* 2단 */}
-                              <div style={{display:"flex",alignItems:"center",gap:6,fontSize:10}}>
-                                <span style={{color:C.muted,flexShrink:0}}>잔 <b style={{color:C.teal,fontSize:10}}>{fmtDisp(remaining,dollar)}</b></span>
-                                {sitePending>0 && (
-                                  <span style={{color:C.amber,fontWeight:700,flexShrink:0}}>· 진행 {sitePending}</span>
-                                )}
-                                <span style={{flex:1}}/>
-                                {sp && sp.betCount>0 && (
-                                  <span style={{color:sp.profit>=0?C.green:C.red,fontWeight:800,padding:"1px 5px",background:`${sp.profit>=0?C.green:C.red}11`,borderRadius:3,flexShrink:0}}>
-                                    {sp.profit>=0?"+":""}{fmtDisp(sp.profit,dollar)} ({sp.roi>=0?"+":""}{sp.roi.toFixed(1)}%)
-                                  </span>
-                                )}
-                              </div>
+                              <span style={{fontSize:10,color:C.muted,minWidth:75,textAlign:"right",flexShrink:0,whiteSpace:"nowrap"}}>잔 <b style={{color:C.teal,fontSize:11}}>{fmtDisp(remaining,dollar)}</b></span>
+                              {sitePending>0 && (
+                                <span style={{fontSize:10,color:C.amber,fontWeight:700,minWidth:42,textAlign:"right",flexShrink:0}}>진 {sitePending}</span>
+                              )}
+                              {sp && sp.betCount>0 ? (
+                                <span style={{fontSize:10,color:sp.profit>=0?C.green:C.red,fontWeight:800,minWidth:90,textAlign:"right",flexShrink:0,padding:"2px 6px",background:`${sp.profit>=0?C.green:C.red}11`,borderRadius:4,whiteSpace:"nowrap"}}>
+                                  {sp.profit>=0?"+":""}{fmtDisp(sp.profit,dollar)} ({sp.roi>=0?"+":""}{sp.roi.toFixed(1)}%)
+                                </span>
+                              ) : (
+                                <span style={{minWidth:90,flexShrink:0}}/>
+                              )}
                             </div>
                           );
                         })}
@@ -8044,7 +8195,7 @@ function AppMain() {
 
             {/* [하단] 오늘 할 일 + 포인트 교환 + 우측 정보 패널 */}
           </div>
-          <div style={{display:"grid",gridTemplateColumns:"320px 320px 1fr",gap:12,alignItems:"start"}}>
+          <div style={{display:"grid",gridTemplateColumns:"360px 480px 1fr",gap:12,alignItems:"start"}}>
             {/* [하단-좌] 오늘 할 일 (세로 정렬) */}
             <div style={{background:C.bg3,border:`1px solid ${C.green}44`,borderRadius:12,padding:13}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:9}}>
@@ -8214,165 +8365,137 @@ function AppMain() {
               )}
             </div>
 
-            {/* [하단-우] 포인트 교환 (구 포인트 사이트)
-                ⚠️ 요청 #5: 박스 전체적으로 작게 변경 — 카드 minmax 220→160, 폰트/패딩 축소,
-                            금액 단위 k(천 원)로 단순 표기, 진행바 얇게 */}
-            <div style={{background:C.bg3,border:`1px solid ${C.teal}44`,borderRadius:10,padding:10}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-                <div style={{fontSize:12,fontWeight:800,color:C.teal}}>🎁 포인트 교환 ({pointSites.length})</div>
-                <button onClick={()=>{
-                  // 모달 초기화: 모든 필드 빈 값으로 (프리셋 클릭 또는 직접 입력 둘 다 가능)
-                  setNewPointSite({name:"",exchangeName:"",exchangeDate:"",targetAmount:0,targetSiteName:"",targetCycleDays:30,targetStartDate:"",targetEndDate:""});
-                  setPointPresetPanelOpen(false); // 프리셋 패널 접힘으로 초기화
-                  setPointDateCalOpen(false);
-                  setPointDateClickStep("start");
-                  setAddPointSiteModal(true);
-                }} style={{padding:"3px 9px",borderRadius:4,border:`1px solid ${C.teal}`,background:`${C.teal}22`,color:C.teal,cursor:"pointer",fontWeight:700,fontSize:10}}>+ 추가</button>
+            {/* [하단-중] 🎯 옵션별 종합 — 한눈에 종목/옵션별 베팅수·적중률·수익률
+                ⚠️ 사용자 요청: 포인트 교환 박스 제거하고 그 자리에 종목 전체 옵션별 수익 표시
+                축구: 홈/원정 0.5/1.5/2.5
+                야구: 승패/오버/언더
+                농구: 5단위 그룹 (5.5~9.5 / 10.5~14.5 / 15.5~19.5 / 20.5~24.5 / 25.5~29.5)
+            */}
+            <div style={{background:C.bg3,border:`1px solid ${C.amber}44`,borderRadius:12,padding:13}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:9}}>
+                <div style={{fontSize:14,fontWeight:800,color:C.amber}}>🎯 옵션별 종합 (종목 전체)</div>
+                <button onClick={()=>setTab("stats")} style={{padding:"3px 9px",borderRadius:5,border:`1px solid ${C.amber}66`,background:`${C.amber}11`,color:C.amber,cursor:"pointer",fontSize:10,fontWeight:700}}>자세히 →</button>
               </div>
-              {pointSites.length===0 ? (
-                <div style={{textAlign:"center",color:C.dim,padding:"20px 0"}}>
-                  <div style={{fontSize:24,marginBottom:4}}>🎁</div>
-                  <div style={{fontSize:11,color:C.muted}}>등록된 포인트 교환 없음</div>
-                </div>
-              ) : (
-                <div style={{display:"flex",flexDirection:"column",gap:5}}>
-                  {pointSites.map(ps=>{
-                    const lastSession=ps.sessions[ps.sessions.length-1];
-                    const isCompleted=!!lastSession;
-                    const baseDate=isCompleted?lastSession.nextTargetDate:ps.exchangeDate;
-                    let fromStr:string, toStr:string, periodLabel:string;
-                    if (ps.targetStartDate && ps.targetEndDate) {
-                      fromStr = ps.targetStartDate;
-                      toStr = ps.targetEndDate;
-                      periodLabel = `${fromStr.slice(5).replace("-","/")} ~ ${toStr.slice(5).replace("-","/")}`;
-                    } else {
-                      const startDate=new Date(baseDate);startDate.setDate(startDate.getDate()-1);
-                      const startStr=startDate.toISOString().slice(0,10);
-                      const cycle = ps.targetCycleDays || 30;
-                      const fromDate=new Date(startStr);fromDate.setDate(fromDate.getDate()-(cycle-1));
-                      fromStr=fromDate.toISOString().slice(0,10);
-                      toStr=startStr;
-                      periodLabel = cycle===7?"1주":cycle===14?"2주":cycle===30?"1달":cycle===60?"2달":cycle===90?"3달":`${cycle}일`;
-                    }
-                    const periodDeps=deposits.filter(d=>d.date>=fromStr&&d.date<=toStr&&(!ps.targetSiteName||d.site===ps.targetSiteName));
-                    const totalKrw=periodDeps.reduce((s,d)=>s+(isUSD(d.site)?d.amount*usdKrw:d.amount),0);
-                    const hasTarget = ps.targetAmount>0;
-                    const achieved = hasTarget && totalKrw>=ps.targetAmount;
-                    const pct = hasTarget ? Math.min(100,Math.round(totalKrw/ps.targetAmount*100)) : 0;
-                    const daysLeft = Math.round((new Date(baseDate+"T00:00:00Z").getTime() - new Date(today+"T00:00:00Z").getTime())/(1000*60*60*24));
-                    const dayColor = daysLeft<0?C.red:daysLeft<=3?C.red:daysLeft<=7?C.amber:C.teal;
-                    const cycleLabel = periodLabel;
-                    return(
-                      <div key={ps.id} style={{background:C.bg2,border:`1.5px solid ${achieved?C.green:C.border2}`,borderRadius:6,padding:"6px 8px",position:"relative",overflow:"hidden",display:"flex",flexDirection:"column",gap:3}}>
-                        {/* 1단: 이름 / D-day / 완료·삭제 버튼 한 줄 */}
-                        <div style={{display:"flex",alignItems:"center",gap:6}}>
-                          <span style={{fontSize:11,fontWeight:900,color:C.text,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",flex:1,minWidth:0}}>{achieved?"✓ ":""}{ps.name}</span>
-                          <span style={{fontSize:9,color:C.teal,fontWeight:700,whiteSpace:"nowrap",flexShrink:0}}>{ps.exchangeName}</span>
-                          <span style={{color:dayColor,fontWeight:900,fontSize:10,flexShrink:0}}>{daysLeft<0?`${Math.abs(daysLeft)}↑`:daysLeft===0?"오늘":`D-${daysLeft}`}</span>
-                          <button onClick={()=>handlePointExchangeComplete(ps.id)} style={{padding:"1px 6px",borderRadius:3,border:`1px solid ${C.orange}66`,background:`${C.orange}22`,color:C.orange,cursor:"pointer",fontWeight:800,fontSize:9,flexShrink:0}}>완료</button>
-                          <button onClick={()=>{
-                            const cnt = ps.sessions.length;
-                            const msg = cnt>0 ? `"${ps.name}" 영구 삭제? (완료 ${cnt}건도 함께 삭제됩니다)` : `"${ps.name}" 영구 삭제하시겠습니까?`;
-                            if(!window.confirm(msg))return;
-                            savePointSites(pointSites.filter(x=>x.id!==ps.id));
-                          }} title="영구 삭제" style={{padding:"1px 4px",borderRadius:3,border:`1px solid ${C.red}44`,background:`${C.red}11`,color:C.red,cursor:"pointer",fontSize:9,flexShrink:0}}>🗑</button>
-                        </div>
-                        {/* 2단: 📅 기간 + 누적/목표 + 진행바 */}
-                        {hasTarget ? (
-                          <div style={{display:"flex",alignItems:"center",gap:6}}>
-                            <span style={{fontSize:9,color:C.muted,fontWeight:700,flexShrink:0,whiteSpace:"nowrap"}}>📅 {cycleLabel}</span>
-                            <div style={{flex:1,height:7,background:C.bg,borderRadius:3,overflow:"hidden",minWidth:30}}>
-                              <div style={{width:`${pct}%`,height:"100%",background:achieved?C.green:C.amber,transition:"width 0.3s",borderRadius:3}}/>
-                            </div>
-                            <span style={{fontSize:10,fontWeight:800,color:achieved?C.green:C.amber,flexShrink:0,whiteSpace:"nowrap"}}>{Math.round(totalKrw/1000)}k/{Math.round(ps.targetAmount/1000)}k ({pct}%)</span>
-                          </div>
-                        ) : (
-                          <div style={{display:"flex",alignItems:"center",gap:6}}>
-                            <span style={{fontSize:9,color:C.muted,fontWeight:700,flexShrink:0,whiteSpace:"nowrap"}}>📅 {cycleLabel}</span>
-                            <span style={{fontSize:9,color:C.muted,flex:1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>📥 {ps.targetSiteName||"전체"}</span>
-                            <span style={{fontSize:10,fontWeight:900,color:C.teal,flexShrink:0}}>₩{Math.round(totalKrw/1000)}k</span>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-            {/* [하단-우] 💹 수익률 + 최근 활동 */}
-            <div style={{display:"flex",flexDirection:"column",gap:12}}>
-              {/* 수익률 핵심 요약 */}
-              <div style={{background:C.bg3,border:`1px solid ${C.purple}44`,borderRadius:12,padding:13}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:9}}>
-                  <div style={{fontSize:14,fontWeight:800,color:C.purple}}>💹 수익률 요약</div>
-                  <button onClick={()=>setTab("roi")} style={{padding:"3px 9px",borderRadius:5,border:`1px solid ${C.purple}66`,background:`${C.purple}11`,color:C.purple,cursor:"pointer",fontSize:10,fontWeight:700}}>자세히 →</button>
-                </div>
-                <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6}}>
-                  <div style={{background:C.bg2,padding:"8px 10px",borderRadius:6,textAlign:"center",border:`1px solid ${C.green}33`}}>
-                    <div style={{color:C.muted,fontSize:10,fontWeight:700,marginBottom:2}}>수입</div>
-                    <div style={{color:C.green,fontWeight:900,fontSize:14}}>+{Math.round(unifiedTotalIncome).toLocaleString()}</div>
-                  </div>
-                  <div style={{background:C.bg2,padding:"8px 10px",borderRadius:6,textAlign:"center",border:`1px solid ${C.red}33`}}>
-                    <div style={{color:C.muted,fontSize:10,fontWeight:700,marginBottom:2}}>지출</div>
-                    <div style={{color:C.red,fontWeight:900,fontSize:14}}>-{Math.round(unifiedTotalExpense).toLocaleString()}</div>
-                  </div>
-                  <div style={{background:C.bg2,padding:"8px 10px",borderRadius:6,textAlign:"center",border:`1px solid ${unifiedNet>=0?C.green:C.red}33`}}>
-                    <div style={{color:C.muted,fontSize:10,fontWeight:700,marginBottom:2}}>순이익</div>
-                    <div style={{color:unifiedNet>=0?C.green:C.red,fontWeight:900,fontSize:14}}>{unifiedNet>=0?"+":""}{Math.round(unifiedNet).toLocaleString()}</div>
-                  </div>
-                  <div style={{background:C.bg2,padding:"8px 10px",borderRadius:6,textAlign:"center",border:`1px solid ${parseFloat(roiPctOverall)>=0?C.green:C.red}33`}}>
-                    <div style={{color:C.muted,fontSize:10,fontWeight:700,marginBottom:2}}>ROI</div>
-                    <div style={{color:parseFloat(roiPctOverall)>=0?C.green:C.red,fontWeight:900,fontSize:14}}>{parseFloat(roiPctOverall)>=0?"+":""}{roiPctOverall}%</div>
-                  </div>
-                </div>
+              {/* 표 헤더 */}
+              <div style={{display:"grid",gridTemplateColumns:"22px 1fr 38px 38px 38px 50px 56px",gap:4,padding:"4px 6px",fontSize:9,color:C.muted,fontWeight:700,borderBottom:`1px solid ${C.border}`,marginBottom:3}}>
+                <span></span>
+                <span>옵션</span>
+                <span style={{textAlign:"right"}}>베팅</span>
+                <span style={{textAlign:"right"}}>적중</span>
+                <span style={{textAlign:"right"}}>실패</span>
+                <span style={{textAlign:"right"}}>적중률</span>
+                <span style={{textAlign:"right"}}>수익률</span>
               </div>
-
-              {/* 최근 베팅 5건 */}
-              <div style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:12,padding:13}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:9}}>
-                  <div style={{fontSize:14,fontWeight:800,color:C.text}}>📋 최근 베팅 5건</div>
-                  <button onClick={()=>setTab("bettingCombo")} style={{padding:"3px 9px",borderRadius:5,border:`1px solid ${C.teal}66`,background:`${C.teal}11`,color:C.teal,cursor:"pointer",fontSize:10,fontWeight:700}}>전체 →</button>
-                </div>
-                {done.length===0 ? (
-                  <div style={{textAlign:"center",color:C.dim,padding:"15px 0",fontSize:11}}>베팅 기록 없음</div>
-                ) : (
-                  <div style={{display:"flex",flexDirection:"column",gap:4}}>
-                    {[...done].sort((a,b)=>b.date.localeCompare(a.date)||b.id.localeCompare(a.id)).slice(0,5).map(b=>{
-                      const dollar=isUSD(b.site);
-                      const win = b.result==="승";
-                      const dr = b.result==="무" || b.result==="적특";
+              {/* 종목별 행 — 축구 → 야구 → 농구 순 */}
+              <div style={{display:"flex",flexDirection:"column",gap:1}}>
+                {([
+                  {label:"⚽ 축구", color:C.green, items: optionAllStats.football},
+                  {label:"⚾ 야구", color:C.amber, items: optionAllStats.baseball},
+                  {label:"🏀 농구", color:C.purple, items: optionAllStats.basketball},
+                ]).map((sec,i)=>(
+                  <div key={sec.label} style={{borderTop:i>0?`1px dashed ${C.border}`:undefined,paddingTop:i>0?3:0,marginTop:i>0?2:0}}>
+                    {sec.items.map((s:any,j:number)=>{
+                      const isEmpty = s.count===0;
                       return (
-                        <div key={b.id} style={{background:C.bg2,padding:"6px 9px",borderRadius:5,display:"flex",alignItems:"center",gap:8,fontSize:11,borderLeft:`3px solid ${win?C.green:dr?C.muted:C.red}`}}>
-                          <span style={{color:C.muted,fontSize:10,minWidth:42}}>{b.date.slice(5)}</span>
-                          <span style={{fontSize:10,minWidth:18,textAlign:"center"}}>{b.category==="축구"?"⚽":b.category==="야구"?"⚾":b.category==="농구"?"🏀":"🎲"}</span>
-                          <span style={{flex:1,color:C.text,fontWeight:700,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",minWidth:0}}>{(b as any).homeTeam && (b as any).awayTeam ? `${(b as any).homeTeam} vs ${(b as any).awayTeam}` : ((b as any).teamName || b.league)}</span>
-                          <span style={{color:C.amber,fontSize:10,minWidth:30,textAlign:"right"}}>{b.odds.toFixed(2)}</span>
-                          <span style={{color:win?C.green:dr?C.muted:C.red,fontWeight:900,minWidth:60,textAlign:"right"}}>{(b.profit??0)>=0?"+":""}{fmtDisp(b.profit??0,dollar)}</span>
+                        <div key={j} style={{display:"grid",gridTemplateColumns:"22px 1fr 38px 38px 38px 50px 56px",gap:4,alignItems:"center",padding:"3px 6px",fontSize:11,opacity:isEmpty?0.4:1}}>
+                          <span style={{textAlign:"center",fontSize:11}}>{j===0?sec.label.split(" ")[0]:""}</span>
+                          <span style={{color:isEmpty?C.dim:sec.color,fontWeight:700,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{s.label}</span>
+                          <span style={{textAlign:"right",color:isEmpty?C.dim:C.text,fontWeight:700}}>{s.count}</span>
+                          <span style={{textAlign:"right",color:isEmpty?C.dim:C.green,fontWeight:700}}>{s.wins}</span>
+                          <span style={{textAlign:"right",color:isEmpty?C.dim:C.red,fontWeight:700}}>{s.losses}</span>
+                          <span style={{textAlign:"right",color:isEmpty?C.dim:s.winRate>=50?C.green:C.muted,fontWeight:700}}>{isEmpty?"-":`${s.winRate}%`}</span>
+                          <span style={{textAlign:"right",color:isEmpty?C.dim:s.roi>=0?C.green:C.red,fontWeight:800}}>{isEmpty?"-":`${s.roi>=0?"+":""}${s.roi}%`}</span>
                         </div>
                       );
                     })}
                   </div>
+                ))}
+              </div>
+            </div>
+
+            {/* [하단-우] 💹 이번 달 사이트별 수익률 + 기타 수익/지출 목록
+                ⚠️ 사용자 요청: 통계 옆에 수익률 추가 — 이번 달 사이트별 지출/수익 + 기타 수익/지출 세로 나열 */}
+            <div style={{background:C.bg3,border:`1px solid ${C.purple}44`,borderRadius:12,padding:13}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:9}}>
+                <div style={{fontSize:14,fontWeight:800,color:C.purple}}>💹 이번 달 수익률 ({thisMonthSiteStats.monthPrefix})</div>
+                <button onClick={()=>setTab("roi")} style={{padding:"3px 9px",borderRadius:5,border:`1px solid ${C.purple}66`,background:`${C.purple}11`,color:C.purple,cursor:"pointer",fontSize:10,fontWeight:700}}>자세히 →</button>
+              </div>
+
+              {/* 합계 4칸 */}
+              <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:5,marginBottom:10}}>
+                <div style={{background:C.bg2,padding:"6px 8px",borderRadius:5,textAlign:"center",border:`1px solid ${C.green}33`}}>
+                  <div style={{color:C.muted,fontSize:9,fontWeight:700,marginBottom:2}}>사이트 순익</div>
+                  <div style={{color:thisMonthSiteStats.totalSiteNet>=0?C.green:C.red,fontWeight:900,fontSize:13}}>{thisMonthSiteStats.totalSiteNet>=0?"+":""}{Math.round(thisMonthSiteStats.totalSiteNet/1000)}k</div>
+                </div>
+                <div style={{background:C.bg2,padding:"6px 8px",borderRadius:5,textAlign:"center",border:`1px solid ${C.teal}33`}}>
+                  <div style={{color:C.muted,fontSize:9,fontWeight:700,marginBottom:2}}>기타 수익</div>
+                  <div style={{color:C.teal,fontWeight:900,fontSize:13}}>+{Math.round(thisMonthSiteStats.totalExtraIncome/1000)}k</div>
+                </div>
+                <div style={{background:C.bg2,padding:"6px 8px",borderRadius:5,textAlign:"center",border:`1px solid ${C.amber}33`}}>
+                  <div style={{color:C.muted,fontSize:9,fontWeight:700,marginBottom:2}}>기타 지출</div>
+                  <div style={{color:C.amber,fontWeight:900,fontSize:13}}>-{Math.round(thisMonthSiteStats.totalExtraExpense/1000)}k</div>
+                </div>
+                <div style={{background:C.bg2,padding:"6px 8px",borderRadius:5,textAlign:"center",border:`1px solid ${thisMonthSiteStats.grandNet>=0?C.green:C.red}55`}}>
+                  <div style={{color:C.muted,fontSize:9,fontWeight:700,marginBottom:2}}>총 순익</div>
+                  <div style={{color:thisMonthSiteStats.grandNet>=0?C.green:C.red,fontWeight:900,fontSize:13}}>{thisMonthSiteStats.grandNet>=0?"+":""}{Math.round(thisMonthSiteStats.grandNet/1000)}k</div>
+                </div>
+              </div>
+
+              {/* 사이트별 입출금 목록 */}
+              <div style={{marginBottom:10}}>
+                <div style={{fontSize:11,fontWeight:800,color:C.text,marginBottom:4,paddingLeft:2}}>💳 사이트별 입출금</div>
+                {thisMonthSiteStats.siteRows.length===0 ? (
+                  <div style={{textAlign:"center",color:C.dim,padding:"10px 0",fontSize:11}}>이번 달 입출금 내역 없음</div>
+                ) : (
+                  <div style={{display:"flex",flexDirection:"column",gap:2,maxHeight:180,overflowY:"auto"}}>
+                    {thisMonthSiteStats.siteRows.map(r=>(
+                      <div key={r.site} style={{display:"flex",alignItems:"center",gap:6,padding:"4px 8px",background:C.bg2,borderRadius:4,fontSize:10}}>
+                        <span style={{fontSize:11,fontWeight:800,color:r.dollar?C.amber:C.green,minWidth:70,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{r.dollar?"$":"₩"} {r.site}</span>
+                        <span style={{color:C.red,fontWeight:700,minWidth:70,textAlign:"right"}}>지 {r.dollar?`$${r.dep.toFixed(0)}`:`${Math.round(r.dep/1000)}k`}</span>
+                        <span style={{color:C.green,fontWeight:700,minWidth:70,textAlign:"right"}}>수 {r.dollar?`$${r.wth.toFixed(0)}`:`${Math.round(r.wth/1000)}k`}</span>
+                        <span style={{flex:1,color:r.netKrw>=0?C.green:C.red,fontWeight:900,textAlign:"right",fontSize:11}}>{r.netKrw>=0?"+":""}{Math.round(r.netKrw/1000)}k</span>
+                      </div>
+                    ))}
+                  </div>
                 )}
               </div>
 
-              {/* 종목별 진행중 카운트 */}
-              {pending.length>0 && (
-                <div style={{background:C.bg3,border:`1px solid ${C.amber}44`,borderRadius:12,padding:13}}>
-                  <div style={{fontSize:14,fontWeight:800,color:C.amber,marginBottom:9}}>⏳ 진행중 베팅 ({pending.length}건)</div>
-                  <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6}}>
-                    {([
-                      {name:"⚽ 축구", cnt:pending.filter(b=>b.category==="축구").length, color:C.green},
-                      {name:"⚾ 야구", cnt:pending.filter(b=>b.category==="야구").length, color:C.amber},
-                      {name:"🏀 농구", cnt:pending.filter(b=>b.category==="농구").length, color:C.purple},
-                    ]).map(s=>(
-                      <div key={s.name} style={{background:C.bg2,padding:"7px 9px",borderRadius:5,textAlign:"center",border:`1px solid ${s.color}33`,opacity:s.cnt===0?0.4:1}}>
-                        <div style={{color:s.color,fontSize:11,fontWeight:800,marginBottom:2}}>{s.name}</div>
-                        <div style={{color:C.text,fontWeight:900,fontSize:14}}>{s.cnt}건</div>
+              {/* 기타 수익 목록 */}
+              {thisMonthSiteStats.extraIncomes.length>0 && (
+                <div style={{marginBottom:10}}>
+                  <div style={{fontSize:11,fontWeight:800,color:C.teal,marginBottom:4,paddingLeft:2}}>📈 기타 수익 ({thisMonthSiteStats.extraIncomes.length}건)</div>
+                  <div style={{display:"flex",flexDirection:"column",gap:2,maxHeight:140,overflowY:"auto"}}>
+                    {thisMonthSiteStats.extraIncomes.map((e:any,i:number)=>(
+                      <div key={i} style={{display:"flex",alignItems:"center",gap:6,padding:"4px 8px",background:C.bg2,borderRadius:4,fontSize:10,borderLeft:`2px solid ${C.teal}77`}}>
+                        <span style={{color:C.muted,minWidth:36,fontSize:9}}>{(e.date||"").slice(5)}</span>
+                        <span style={{color:C.teal,fontWeight:700,fontSize:9,minWidth:50,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{e.category||"-"}</span>
+                        <span style={{flex:1,color:C.text,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{e.subCategory||e.subSubCategory||e.note||e.memo||"-"}</span>
+                        <span style={{color:C.green,fontWeight:900,fontSize:11}}>+{Math.round((e.amount||0)/1000)}k</span>
                       </div>
                     ))}
                   </div>
                 </div>
+              )}
+
+              {/* 기타 지출 목록 */}
+              {thisMonthSiteStats.extraExpenses.length>0 && (
+                <div>
+                  <div style={{fontSize:11,fontWeight:800,color:C.amber,marginBottom:4,paddingLeft:2}}>📉 기타 지출 ({thisMonthSiteStats.extraExpenses.length}건)</div>
+                  <div style={{display:"flex",flexDirection:"column",gap:2,maxHeight:140,overflowY:"auto"}}>
+                    {thisMonthSiteStats.extraExpenses.map((e:any,i:number)=>(
+                      <div key={i} style={{display:"flex",alignItems:"center",gap:6,padding:"4px 8px",background:C.bg2,borderRadius:4,fontSize:10,borderLeft:`2px solid ${C.amber}77`}}>
+                        <span style={{color:C.muted,minWidth:36,fontSize:9}}>{(e.date||"").slice(5)}</span>
+                        <span style={{color:C.amber,fontWeight:700,fontSize:9,minWidth:50,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{e.category||"-"}</span>
+                        <span style={{flex:1,color:C.text,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{e.subCategory||e.subSubCategory||e.note||e.memo||"-"}</span>
+                        <span style={{color:C.red,fontWeight:900,fontSize:11}}>-{Math.round((e.amount||0)/1000)}k</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {thisMonthSiteStats.extraIncomes.length===0 && thisMonthSiteStats.extraExpenses.length===0 && thisMonthSiteStats.siteRows.length>0 && (
+                <div style={{textAlign:"center",color:C.dim,padding:"6px 0",fontSize:10}}>이번 달 기타 수익/지출 없음</div>
               )}
             </div>
           </div>
