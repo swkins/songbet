@@ -9894,9 +9894,13 @@ $$;`}
           apiLeagues.get(id)!.count++;
         }
         // 다른 사용자 리그가 이미 매핑한 API ID는 표시하되 비활성화
+        // ★ 같은 종목(sportKr) 내에서만 충돌 검사 — 다른 종목의 같은 ID는 별개의 리그임
         const otherMappings: Record<string,string> = {}; // apiId → "다른 사용자 리그 표시명"
+        const currentSportPrefix = `${m.sportKr}__`;
         for (const otherKey of Object.keys(stLeagueMap)) {
           if (otherKey === k) continue;
+          // 다른 종목의 매핑은 무시 (예: 축구 매핑 시 농구 매핑은 충돌 아님)
+          if (!otherKey.startsWith(currentSportPrefix)) continue;
           otherMappings[stLeagueMap[otherKey]] = otherKey;
         }
         const apiList = Array.from(apiLeagues.entries())
