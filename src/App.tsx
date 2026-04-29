@@ -2868,4 +2868,633 @@ function AppMain() {
         let totalBytes = 0;
         for (const row of data) {
           m[row.table_name] = { rows: Number(row.row_count), size: row.size_pretty, sizeBytes: Number(row.size_bytes)||0 };
-          totalBytes += Numbe
+          totalBytes += Number(row.size_bytes)||0;
+        }
+        setDataTableStats(m);
+        setDataTotalSize(totalBytes>0 ? (totalBytes/1024/1024).toFixed(2)+" MB" : "");
+      } else {
+        // fallback: count만 조회
+        const tableKeys = ["bets","fixtures","deposits","withdrawals","manual_games","team_names","app_settings","logs","custom_leagues","m_meta","site_states"];
+        const m: Record<string,{rows:number,size:string,sizeBytes:number}> = {};
+        await Promise.all(tableKeys.map(async k=>{
+          const { count } = await supabase.from(k as any).select("*",{count:"exact",head:true});
+          m[k] = { rows: count||0, size:"-", sizeBytes:0 };
+        }));
+        setDataTableStats(m);
+        setDataTotalSize("");
+      }
+    } catch(e) { console.error(e); }
+    finally { setDataStatsLoading(false); }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[]);
+
+  // 데이터 탭 진입 시 자동 조회
+  useEffect(()=>{
+    if(tab==="dataManager") loadDataStats();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[tab]);
+
+  // ── 자동 결제 함수 ───────────────────────────────────────────
+  // refreshFixtures() 호출 후 실행.
+  // 진행중 베팅 중 fixtureId 있는 것만 대상.
+  // fixtures 테이블에서 결과 조회 → 승/패/취소/연기/중단 자동 판정.
+  // 판정 후 bets 테이블 업데이트 + 로컬 state 반영.
+  // 확인 버튼은 UI에서 처리 (여기선 판정만).
+  // ── 리그-API 매핑 state ──────────────────────────────────────
+  // 리그별로 어떤 API를 사용하는지 매핑 { "리그명": "sport_id" }
+  // app_settings 테이블에 "league_api_map" 키로 저장
+  const [leagueApiMap, setLeagueApiMap] = useState<Record<string,string>>({});
+  const saveLeagueApiMap = (m: Record<string,string>) => {
+    setLeagueApiMap(m);
+    db.saveAppSetting("league_api_map", m);
+  };
+  // 리그 API 매핑 모달
+  const [leagueApiModal, setLeagueApiModal] = useState<{league:string; sport:string; country:string}|null>(null);
+  const [leagueApiTab, setLeagueApiTab] = useState<"recommend"|"all">("recommend");
+
+  // ── [스포츠 테스트] 사용자 리그 ↔ API 리그 매핑 ──────────────
+  // 키: 사용자 리그 식별자 "{sport_kr}__{country}__{league}"
+  // 값: API league_id (number를 string으로)
+  // app_settings 테이블에 "sports_test_league_map" 키로 저장
+  const [stLeagueMap, setStLeagueMap] = useState<Record<string,string>>({});
+  const saveStLeagueMap = (m: Record<string,string>) => {
+    setStLeagueMap(m);
+    db.saveAppSetting("sports_test_league_map", m);
+  };
+  // 매핑 선택 모달 (리그 클릭 시 열림)
+  const [stMappingModal, setStMappingModal] = useState<{sport:Sport; sportKr:string; country:string; league:string}|null>(null);
+  const [stMappingSelectedId, setStMappingSelectedId] = useState<string>("");
+
+  // ⚠️ 요청 #2: odds-api.io 외부 배당 API 관련 state/함수 모두 삭제됨.
+  //   (oddsApiKey, oddsApiKeyDraft, oddsApiTestResult, oddsApiTesting,
+  //    saveOddsApiKey, testOddsApiConnection)
+  //   API 관리 탭에는 VITE_API_SPORTS_KEY를 통한 일정·결과 수신만 남김.
+
+  // ── 수익률 기타 ──────────────────────────────────────────
+  const [pextForm,setPextForm]=useState({category:"",subCategory:"",subSubCategory:"",amount:0,note:"",isIncome:true});
+  // 기타수익 카테고리 추가 모달
+  const [pextAddMenu,setPextAddMenu]=useState<null|{type:"site"|"cat"|"subcat"}>(null);
+  const [pextAddName,setPextAddName]=useState("");
+  // pext 항목 인라인 이름 수정 — { type, oldName } 이면 그 항목이 편집 모드, 입력값은 pextEditName
+  const [pextEditingItem,setPextEditingItem]=useState<null|{type:"site"|"cat"|"subcat";oldName:string}>(null);
+  const [pextEditName,setPextEditName]=useState("");
+  // pext 항목 이름 변경 — 목록 자체와 기존 데이터(profitExtras)의 카테고리/사이트명도 함께 마이그레이션
+  const handleRenamePextItem = async (type:"site"|"cat"|"subcat", oldName:string) => {
+    const newName = pextEditName.trim();
+    if (!newName) { setPextEditingItem(null); setPextEditName(""); return; }
+    if (newName === oldName) { setPextEditingItem(null); setPextEditName(""); return; }
+    // 중복 체크
+    const list = type==="site"?pextSiteList:type==="cat"?pextCatList:pextSubCatList;
+    if (list.includes(newName)) { alert("이미 존재하는 이름입니다"); return; }
+    // 1) 목록 업데이트
+    const newList = list.map(x => x===oldName ? newName : x).sort();
+    if (type==="site") savePextSiteList(newList);
+    else if (type==="cat") savePextCatList(newList);
+    else savePextSubCatList(newList);
+    // 2) 기존 profitExtras 데이터 마이그레이션 — 해당 필드를 새 이름으로 변경
+    //    DB에 update API가 없어 delete + insert로 마이그레이션 (id는 새로 부여됨)
+    //    ※ UI 라벨과 ProfitExtra 필드 매핑:
+    //       UI "사이트" → ProfitExtra.category
+    //       UI "분류"   → ProfitExtra.subCategory
+    //       UI "하위"   → ProfitExtra.subSubCategory
+    const affected: typeof profitExtras = [];
+    const newExtras = profitExtras.map(e => {
+      let changed = false;
+      let next: any = e;
+      if (type==="site"   && e.category===oldName)         { next = { ...next, category:newName };       changed = true; }
+      if (type==="cat"    && (e as any).subCategory===oldName) { next = { ...next, subCategory:newName };    changed = true; }
+      if (type==="subcat" && (e as any).subSubCategory===oldName) { next = { ...next, subSubCategory:newName }; changed = true; }
+      if (changed) { affected.push(e); return next; }
+      return e;
+    });
+    if (affected.length > 0) {
+      // state 먼저 즉시 반영 (UI 즉시 업데이트)
+      setProfitExtrasRaw(newExtras);
+      // DB 동기화 — 기존 항목 삭제 후 새 id로 재삽입
+      for (const oldItem of affected) {
+        try { await db.deleteProfitExtra(oldItem.id); } catch(err) { console.warn("[rename] delete fail:", err); }
+      }
+      for (const newItem of newExtras) {
+        const wasAffected = affected.some(a => a.id === newItem.id);
+        if (wasAffected) {
+          // 새 id로 재삽입
+          const reinserted = { ...newItem, id: String(Date.now()) + "_" + Math.random().toString(36).slice(2,7) };
+          try { await db.insertProfitExtra(reinserted as any); } catch(err) { console.warn("[rename] insert fail:", err); }
+          // state에서도 새 id로 교체
+          setProfitExtrasRaw(prev => prev.map(p => p.id === newItem.id ? reinserted as any : p));
+        }
+      }
+    }
+    setPextEditingItem(null);
+    setPextEditName("");
+  };
+  // 기타수익 펼침 상태
+  const [pextExpanded,setPextExpanded]=useState<Record<string,boolean>>({});
+  // 기타수익 입력 모드: 폼 펼침
+  const [pextFormOpen,setPextFormOpen]=useState(false);
+  const [newPextSite,setNewPextSite]=useState("");
+  const [newPextCat,setNewPextCat]=useState("");
+
+  // ── 리그 핸들러 ──────────────────────────────────────────
+  const handleAddLeague=()=>{
+    const name=newLeagueName.trim();if(!name||!addLeagueModal)return;
+    // ★ 중복 검사 — 같은 카테고리에 같은 이름 리그가 이미 있으면 경고
+    const existing = customLeagues[addLeagueModal.cat] || [];
+    if (existing.includes(name)) {
+      alert(`이미 존재하는 리그입니다: "${addLeagueModal.cat} / ${name}"`);
+      return;
+    }
+    setCustomLeaguesRaw(p=>({...p,[addLeagueModal.cat]:[...(p[addLeagueModal.cat]||[]),name]}));
+    db.insertCustomLeague(addLeagueModal.cat,name);
+    setNewLeagueName("");setAddLeagueModal(null);addLog("➕ 리그 추가",`${addLeagueModal.cat}/${name}`);
+  };
+  const handleEditLeague=()=>{
+    const name=editLeagueName.trim();if(!name||!editLeagueModal)return;
+    setCustomLeaguesRaw(p=>{const arr=[...(p[editLeagueModal.cat]||[])];arr[editLeagueModal.idx]=name;return{...p,[editLeagueModal.cat]:arr};});
+    db.updateCustomLeague(editLeagueModal.cat,editLeagueModal.old,name);
+    setEditLeagueModal(null);setEditLeagueName("");
+  };
+
+  const cancelBet=(id:string)=>{
+    if(!window.confirm("베팅을 취소하시겠습니까?"))return;
+    const bet=bets.find(b=>b.id===id);if(!bet)return;
+    setBetsRaw(b=>b.filter(x=>x.id!==id));db.deleteBet(id);
+    const newSS2={...siteStates,[bet.site]:{...siteStates[bet.site],betTotal:parseFloat(Math.max(0,siteStates[bet.site].betTotal-bet.amount).toFixed(2))}};
+    setSiteStatesRaw(newSS2);db.upsertSiteState(bet.site,newSS2[bet.site]);
+    addLog("🚫 취소",bet.homeTeam||bet.teamName||id);
+  };
+
+  const handleDeposit=()=>{
+    if(!depSite)return alert("사이트를 선택해주세요.");
+    if(depAmt<=0&&depPoint<=0)return;
+    if(depAmt>0){
+      const newDep={id:String(Date.now()),site:depSite,amount:depAmt,date:today,isDollar:depIsDollar};
+      setDepositsRaw(d=>[...d,newDep]);db.insertDeposit(newDep);
+      const newSS3={...siteStates,[depSite]:{...siteStates[depSite],deposited:parseFloat((siteStates[depSite].deposited+depAmt).toFixed(2)),active:true,isDollar:depIsDollar}};
+      setSiteStatesRaw(newSS3);db.upsertSiteState(depSite,newSS3[depSite]);
+      addLog("💵 입금",`${depSite}/${fmtDisp(depAmt,depIsDollar)}`);
+    }
+    if(depPoint>0){
+      const curSS=siteStates[depSite];
+      const prevPoint=parseFloat(String(curSS.pointTotal||0));
+      const updatedSiteP={...curSS,active:true,isDollar:depIsDollar,betTotal:parseFloat((curSS.betTotal+depPoint).toFixed(2)),pointTotal:parseFloat((prevPoint+depPoint).toFixed(2))};
+      const newSS4={...siteStates,[depSite]:updatedSiteP};
+      setSiteStatesRaw(newSS4);
+      db.upsertSiteState(depSite,updatedSiteP);
+      addLog("🎁 포인트",`${depSite}/${fmtDisp(depPoint,depIsDollar)}`);
+    }
+    setDepSite("");setDepAmt(0);setDepPoint(0);
+  };
+
+  // 포인트 전용 추가 (입금 통계엔 기록 X, 사이트 잔여금만 증가)
+  const handleAddPoint=(site:string, amount:number)=>{
+    if(!site) return alert("사이트를 선택해주세요.");
+    if(!amount||amount<=0) return alert("포인트 금액을 입력해주세요.");
+    const dollar=isUSD(site);
+    const curSS = siteStates[site] || {deposited:0,betTotal:0,active:false,isDollar:dollar,pointTotal:0};
+    const prevPoint = parseFloat(String(curSS.pointTotal||0));
+    const updated = {
+      ...curSS,
+      active: true,
+      isDollar: dollar,
+      // deposited에 +하여 잔여금(=deposited-betTotal) 증가 → 베팅 가능 금액 증가
+      deposited: parseFloat((curSS.deposited + amount).toFixed(2)),
+      pointTotal: parseFloat((prevPoint + amount).toFixed(2)),
+    };
+    setSiteStatesRaw(p=>({...p,[site]:updated}));
+    db.upsertSiteState(site,updated);
+    addLog("🎁 포인트",`${site}/${fmtDisp(amount,dollar)}`);
+    // deposits 배열(입금 통계)엔 추가하지 않음 - 수익률 계산에서 제외
+  };
+
+  const handleClose=(site:string)=>{setCloseWithdrawAmt(0);setCloseModal({site});};
+  const confirmClose=()=>{
+    if(!closeModal)return;const site=closeModal.site;
+    const dollar=isUSD(site);
+    // 진행중 베팅 있으면 재확인
+    const pendingBetsAtSite = bets.filter(b=>b.site===site && b.result==="진행중");
+    if(pendingBetsAtSite.length>0){
+      if(!window.confirm(`⚠ ${site}에 진행중 베팅 ${pendingBetsAtSite.length}건이 있습니다.\n\n그래도 마감하시겠어요?\n(진행중 베팅은 결과 확정 시까지 유지됩니다)`)){
+        return;
+      }
+    }
+    // 세션 수익 계산 (직전 출금 이후 입금액 - 이번 출금액)
+    const siteWths = withdrawals.filter(w=>w.site===site).sort((a,b)=>a.date.localeCompare(b.date));
+    const prevWthDate = siteWths.length>0 ? siteWths[siteWths.length-1].date : "0000-00-00";
+    const sessionDepSum = deposits.filter(d=>d.site===site && d.date>prevWthDate).reduce((s,d)=>s+d.amount,0);
+    const sessionNet = closeWithdrawAmt - sessionDepSum;
+
+    if(closeWithdrawAmt>0){
+      const newWth={id:String(Date.now()),site,amount:closeWithdrawAmt,date:today,isDollar:dollar};
+      setWithdrawalsRaw(w=>[...w,newWth]);db.insertWithdrawal(newWth);
+    }
+    // ★ 마감 시에만 사이트 초기화 (deposited, betTotal, pointTotal 모두 0)
+    const closedSS={...siteStates,[site]:{...siteStates[site],deposited:0,betTotal:0,active:false,pointTotal:0}};
+    setSiteStatesRaw(closedSS);db.upsertSiteState(site,closedSS[site]);
+    // 로그에 세션 수익 표시
+    const netStr = `${sessionNet>=0?"+":""}${fmtDisp(sessionNet,dollar)}`;
+    addLog("🔒 마감",`${site} · 입금 ${fmtDisp(sessionDepSum,dollar)} → 출금 ${fmtDisp(closeWithdrawAmt,dollar)} = ${netStr}`);
+    setCloseModal(null);
+  };
+  const cancelSite=(site:string)=>{
+    if(!window.confirm(`${site} 취소? 입금 금액도 삭제됩니다.`))return;
+    const cancelledSS={...siteStates,[site]:{...siteStates[site],deposited:0,betTotal:0,active:false,pointTotal:0}};
+    setSiteStatesRaw(cancelledSS);db.upsertSiteState(site,cancelledSS[site]);
+    setDepositsRaw(d=>d.filter(dep=>dep.site!==site));db.deleteDepositsBySite(site);
+    addLog("❌ 사이트 취소",site);
+  };
+  const updateResult=(id:string,result:string)=>{
+    setBetsRaw(b=>{
+      const next=b.map(bet=>{
+        if(bet.id!==id)return bet;
+        const profit=result==="승"?parseFloat((bet.amount*bet.odds-bet.amount).toFixed(2)):result==="패"?-bet.amount:0;
+        // ★ confirmedAt: 처리 시각 기록 (베팅 내역 탭 "오늘 완료 12시간" 윈도우용)
+        const updated={...bet,result,profit,confirmedAt:new Date().toISOString()} as Bet;
+        db.upsertBet(updated);
+        addLog(result==="승"?"✅ 적중":"❌ 실패",bet.homeTeam||bet.teamName||"");
+        return updated;
+      });
+      return next;
+    });
+  };
+
+  // 확인 버튼 — 대기_* 최종 확정. siteStates 절대 건드리지 않음
+  // ★ confirmedAt: 사용자가 확인 누른 시각. "최근 완료 목록" 1시간 윈도우 표시용.
+  // ★ pendingBeforeConfirm: 확인 누르기 직전 상태(예: "대기_승") 저장 →
+  //   처리취소 시 이 값으로 복원해야 진행중이 아닌 대기상태로 돌아감.
+  const confirmResult=(id:string)=>{
+    const bet=bets.find(b=>b.id===id);if(!bet)return;
+    const actualResult=bet.result==="대기_승"?"승":bet.result==="대기_패"?"패":(bet.result==="대기_취소"||bet.result==="대기_연기"||bet.result==="대기_중단")?"취소":["취소","연기","중단"].includes(bet.result)?"취소":bet.result;
+    const finalProfit=actualResult==="승"?parseFloat((bet.amount*bet.odds-bet.amount).toFixed(2)):actualResult==="패"?-bet.amount:0;
+    const confirmed={
+      ...bet,
+      result:actualResult,
+      profit:finalProfit,
+      confirmedAt:new Date().toISOString(),
+      pendingBeforeConfirm: bet.result, // ★ 처리취소 복원용 (예: "대기_승")
+    } as Bet;
+    setBetsRaw(b=>b.map(x=>x.id===id?confirmed:x));
+    db.upsertBet(confirmed);
+    addLog(actualResult==="취소"?"↩ 환원":actualResult==="승"?"✅ 확인":"❌ 확인",`${bet.homeTeam||bet.teamName||""}`);
+  };
+  const revertToPending=(id:string)=>{
+    const bet=bets.find(b=>b.id===id);if(!bet)return;
+    // result/profit만 되돌림 — siteStates(입금/베팅/잔여) 절대 건드리지 않음
+    // ★ pendingBeforeConfirm이 있으면 그 상태(대기_승 등)로 복원,
+    //   없으면(=수동 적중/실패 처리한 경우) 진행중으로.
+    const prev = (bet as any).pendingBeforeConfirm as string | undefined;
+    const restoredResult = (prev && prev.startsWith("대기_")) ? prev : "진행중";
+    const reverted={
+      ...bet,
+      result:restoredResult,
+      profit:null,
+      confirmedAt:undefined,
+      pendingBeforeConfirm:undefined, // 일회용 — 복원했으니 비움
+    } as Bet;
+    setBetsRaw(b=>b.map(x=>x.id===id?reverted:x));
+    db.upsertBet(reverted);
+    addLog("↩ 처리 취소",`${bet.site}/${bet.homeTeam||bet.teamName||id}`);
+    // ★ 처리취소 후 자동결제(autoSettle) 재실행 안 함:
+    //   사용자가 의도적으로 되돌렸는데 즉시 자동 재판정되면 의미가 없음.
+    //   다음 새로고침(refreshFixtures) 때 다시 판정됨.
+  };
+  const deleteFromStats=(id:string)=>{
+    setBetsRaw(b=>b.map(bet=>{if(bet.id!==id)return bet;const u={...bet,includeStats:false};db.upsertBet(u);return u;}));
+    addLog("🗑 통계삭제","");
+  };
+  const deleteForever=(id:string)=>{
+    setBetsRaw(b=>b.filter(x=>x.id!==id));db.deleteBet(id);addLog("💥 영구삭제","");
+  };
+  const handleDeleteChoice=(choice:"stats"|"forever")=>{if(!deleteModal)return;choice==="stats"?deleteFromStats(deleteModal.betId):deleteForever(deleteModal.betId);setDeleteModal(null);};
+
+  const isOverUnder=(opt:string)=>opt.includes("오버")||opt.includes("언더");
+
+  // ── 진행중 베팅 카드 렌더링 헬퍼 (도장 UI) ────────────────────
+  // 스포츠 탭 / 베팅 내역 탭 공용
+  const renderPendingCard = (b: Bet) => {
+    const title=(b.homeTeam&&b.awayTeam)?`${b.homeTeam} vs ${b.awayTeam}`:(b.teamName||"-");
+    const displayBetOption=b.betOption==="홈승"&&b.homeTeam?`${b.homeTeam} 승`:b.betOption==="원정승"&&b.awayTeam?`${b.awayTeam} 승`:b.betOption;
+    const dollar=b.isDollar;
+    const isManual=(b as any).isManual===true;
+    const hasFixtureId=!isManual&&(b as any).fixtureId!=null;
+
+    // 대기_* = 자동 판정 완료, 사용자 확인 대기
+    const autoResult = b.result.startsWith("대기_");
+    const actualResult = b.result==="대기_승"?"승":b.result==="대기_패"?"패":b.result==="대기_취소"?"취소":b.result==="대기_연기"?"연기":b.result==="대기_중단"?"중단":b.result;
+    const stampColor = actualResult==="승"?C.green:actualResult==="패"?C.red:C.amber;
+    const stampText = actualResult==="승"?"적중":actualResult==="패"?"실패":actualResult==="취소"?"취소":actualResult==="연기"?"연기":"중단";
+
+    return (
+      <div key={b.id} style={{position:"relative",background:autoResult?`${stampColor}0d`:C.bg3,border:`1px solid ${autoResult?stampColor+"99":C.amber+"44"}`,borderRadius:7,padding:"9px 11px",marginBottom:6,overflow:"hidden"}}>
+        {autoResult && (
+          <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",pointerEvents:"none",zIndex:1}}>
+            <div style={{border:`5px solid ${stampColor}`,borderRadius:10,padding:"8px 22px",transform:"rotate(-12deg)",fontSize:26,fontWeight:900,color:stampColor,letterSpacing:6,opacity:0.7,textShadow:`0 0 12px ${stampColor}`,background:`${stampColor}18`}}>{stampText}</div>
+          </div>
+        )}
+        <div style={{position:"relative",zIndex:2,opacity:autoResult?0.5:1}}>
+          <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:5,flexWrap:"wrap"}}>
+            <span style={{fontSize:13,flexShrink:0}}>{SPORT_ICON[b.category]||"🎯"}</span>
+            <span style={{fontSize:9,color:dollar?C.amber:C.green,background:`${dollar?C.amber:C.green}22`,border:`1px solid ${dollar?C.amber:C.green}44`,padding:"1px 5px",borderRadius:3,fontWeight:700}}>{dollar?"$":"₩"} {b.site}</span>
+            {(b as any).country && <span style={{fontSize:9,color:C.teal,background:`${C.teal}11`,border:`1px solid ${C.teal}33`,padding:"1px 5px",borderRadius:3,fontWeight:700}}>{(b as any).country}</span>}
+            {b.league && <span style={{fontSize:9,color:C.muted,background:C.bg,padding:"1px 5px",borderRadius:3}}>{b.league}</span>}
+            {isManual && <span style={{fontSize:9,color:C.purple,background:`${C.purple}22`,border:`1px solid ${C.purple}44`,padding:"1px 5px",borderRadius:3,fontWeight:700}}>수동</span>}
+            <span style={{fontSize:11,color:C.orange,fontWeight:800,marginLeft:"auto"}}>{displayBetOption}</span>
+          </div>
+          <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:6,lineHeight:1.3,wordBreak:"break-word"}}>{title}</div>
+          <div style={{display:"flex",alignItems:"center",gap:7,flexWrap:"wrap"}}>
+            <div style={{display:"flex",gap:8,flex:1,minWidth:100}}>
+              <span style={{fontSize:10,color:C.muted}}>배당 <span style={{color:C.teal,fontWeight:800,fontSize:11}}>{b.odds}</span></span>
+              <span style={{fontSize:11,color:C.amber,fontWeight:800}}>{fmtDisp(b.amount,b.isDollar)}</span>
+            </div>
+            {!autoResult && (
+              <div style={{display:"flex",gap:3,flexShrink:0}}>
+                {isManual||!hasFixtureId?(<><button onClick={()=>updateResult(b.id,"승")} style={{background:`${C.green}22`,border:`1px solid ${C.green}`,color:C.green,padding:"4px 10px",borderRadius:4,cursor:"pointer",fontWeight:800,fontSize:11}}>적중</button><button onClick={()=>updateResult(b.id,"패")} style={{background:`${C.red}22`,border:`1px solid ${C.red}`,color:C.red,padding:"4px 10px",borderRadius:4,cursor:"pointer",fontWeight:800,fontSize:11}}>실패</button></>):null}
+                <button onClick={()=>cancelBet(b.id)} style={{background:C.bg,border:`1px solid ${C.border2}`,color:C.muted,padding:"4px 10px",borderRadius:4,cursor:"pointer",fontSize:11}}>취소</button>
+              </div>
+            )}
+          </div>
+        </div>
+        {autoResult && (
+          <div style={{position:"relative",zIndex:3,marginTop:8,display:"flex",justifyContent:"flex-end"}}>
+            <button onClick={()=>confirmResult(b.id)} style={{padding:"6px 20px",borderRadius:6,fontWeight:900,fontSize:13,cursor:"pointer",letterSpacing:1,background:stampColor,border:`2px solid ${stampColor}`,color:C.bg,boxShadow:`0 2px 10px ${stampColor}66`}}>
+              {actualResult==="승"?"✅ 적중 확인":actualResult==="패"?"❌ 실패 확인":"✔ 확인"}
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // ── 통계 계산 ─────────────────────────────────────────────
+  const weekDeposits=useMemo(()=>{
+    const wm=weekMonday(),m:Record<string,number>=Object.fromEntries(ALL_SITES.map(s=>[s,0]));
+    deposits.filter(d=>d.date>=wm).forEach(d=>{m[d.site]+=d.amount;});return m;
+  },[deposits,ALL_SITES]);
+
+  const pending=bets.filter(b=>b.result==="진행중"||b.result.startsWith("대기_"));
+  // 진행중 최신순 정렬 — bettingCombo + sportsTest 탭 공용
+  const pendingSorted=[...pending].sort((a,b)=>{
+    const ta=parseFloat(a.id)||0;
+    const tb=parseFloat(b.id)||0;
+    return tb-ta;
+  });
+  // ⚡ 라이브 베팅(isLive=true)은 별도 "실시간" 통계에서만 집계되도록 done에서 제외
+  const done=bets.filter(b=>!b.result.startsWith("대기_")&&b.result!=="진행중"&&b.includeStats!==false&&(b as any).isLive!==true);
+  const doneFull=bets.filter(b=>!b.result.startsWith("대기_")&&b.result!=="진행중"&&(b as any).isLive!==true);
+  const doneTodayFull=doneFull.filter(b=>b.date===today);
+  const doneOldFull=doneFull.filter(b=>b.date!==today);
+  const krwProfit=done.filter(b=>!b.isDollar).reduce((s,b)=>s+(b.profit??0),0);
+  const usdProfit=done.filter(b=>b.isDollar).reduce((s,b)=>s+(b.profit??0),0);
+  const wins=done.filter(b=>b.result==="승").length;
+  const winRate=done.length>0?Math.round(wins/done.length*100):0;
+  const avgOdds=done.length>0?(done.reduce((s,b)=>s+b.odds,0)/done.length).toFixed(2):"0";
+
+  const dailyStats=useMemo(()=>{
+    const m:Record<string,{profit:number,count:number,wins:number,bet:number}>={};
+    done.filter(b=>!b.isDollar).forEach(b=>{if(!m[b.date])m[b.date]={profit:0,count:0,wins:0,bet:0};m[b.date].profit+=b.profit??0;m[b.date].count++;m[b.date].bet+=b.amount;if(b.result==="승")m[b.date].wins++;});
+    return Object.entries(m).sort((a,b)=>a[0].localeCompare(b[0])).map(([date,v])=>({date:date.slice(5),fullDate:date,...v,winRate:Math.round(v.wins/v.count*100),roi:v.bet>0?((v.profit/v.bet)*100).toFixed(1):"0"}));
+  },[done]);
+  const cumCurve=useMemo(()=>{let c=0;return dailyStats.map(d=>{c+=d.profit;return{date:d.date,cumProfit:c};});},[dailyStats]);
+  const {maxW,maxL,curS}=useMemo(()=>{
+    const sorted=[...done].sort((a,b)=>a.date.localeCompare(b.date));
+    let mW=0,mL=0,cW=0,cL=0;
+    sorted.forEach(b=>{if(b.result==="승"){cW++;cL=0;mW=Math.max(mW,cW);}else if(b.result==="패"){cL++;cW=0;mL=Math.max(mL,cL);}});
+    const lr=sorted.length?sorted[sorted.length-1].result:"";
+    return{maxW:mW,maxL:mL,curS:lr==="승"?`${cW}연승`:lr==="패"?`${cL}연패`:"—"};
+  },[done]);
+  const baseballDone=done.filter(b=>b.category==="야구");
+  const bbLeagueStats=useMemo(()=>[...new Set(baseballDone.map(b=>b.league))].map(league=>({league,data:["역배","오버","언더"].map(opt=>{const bs=baseballDone.filter(b=>b.league===league&&(opt==="역배"?b.betOption==="역배":opt==="오버"?b.betOption.includes("오버"):b.betOption.includes("언더")));const wins=bs.filter(b=>b.result==="승").length;const profit=bs.reduce((s,b)=>s+(b.profit??0),0);const bet=bs.reduce((s,b)=>s+b.amount,0);return{opt,count:bs.length,wins,profit,roi:bet>0?((profit/bet)*100).toFixed(1):"0",winRate:bs.length>0?Math.round(wins/bs.length*100):0};})})),[baseballDone]);
+  const bbOptStats=useMemo(()=>["역배","오버","언더"].map(opt=>({opt,data:[...new Set(baseballDone.filter(b=>opt==="역배"?b.betOption==="역배":opt==="오버"?b.betOption.includes("오버"):b.betOption.includes("언더")).map(b=>b.league))].map(league=>{const bs=baseballDone.filter(b=>b.league===league&&(opt==="역배"?b.betOption==="역배":opt==="오버"?b.betOption.includes("오버"):b.betOption.includes("언더")));const wins=bs.filter(b=>b.result==="승").length;const profit=bs.reduce((s,b)=>s+(b.profit??0),0);const bet=bs.reduce((s,b)=>s+b.amount,0);return{league,count:bs.length,wins,profit,roi:bet>0?((profit/bet)*100).toFixed(1):"0",winRate:bs.length>0?Math.round(wins/bs.length*100):0};})})),[baseballDone]);
+  const advStats=useMemo(()=>{
+    const catDone=done.filter(b=>b.category===advCat);
+    if(advMode==="league")return[...new Set(catDone.map(b=>b.league))].map(league=>({key:league,subs:[...new Set(catDone.filter(b=>b.league===league).map(b=>b.betOption))].map(opt=>{const bs=catDone.filter(b=>b.league===league&&b.betOption===opt);const wins=bs.filter(b=>b.result==="승").length;const profit=bs.reduce((s,b)=>s+(b.profit??0),0);const bet=bs.reduce((s,b)=>s+b.amount,0);return{name:opt,count:bs.length,wins,profit,roi:bet>0?((profit/bet)*100).toFixed(1):"0",winRate:bs.length>0?Math.round(wins/bs.length*100):0};})}));
+    return[...new Set(catDone.map(b=>b.betOption))].map(opt=>({key:opt,subs:[...new Set(catDone.filter(b=>b.betOption===opt).map(b=>b.league))].map(league=>{const bs=catDone.filter(b=>b.betOption===opt&&b.league===league);const wins=bs.filter(b=>b.result==="승").length;const profit=bs.reduce((s,b)=>s+(b.profit??0),0);const bet=bs.reduce((s,b)=>s+b.amount,0);return{name:league,count:bs.length,wins,profit,roi:bet>0?((profit/bet)*100).toFixed(1):"0",winRate:bs.length>0?Math.round(wins/bs.length*100):0};})}));
+  },[done,advCat,advMode]);
+
+  // 전체 ROI (KRW 기준)
+  const roiPctOverall = useMemo(()=>{
+    const totalBet = done.reduce((s,b)=>s+b.amount,0);
+    const totalProf = done.reduce((s,b)=>s+(b.profit??0),0);
+    return totalBet>0 ? ((totalProf/totalBet)*100).toFixed(1) : "0";
+  },[done]);
+
+  // ── 배당별 통계 (0.1 단위, 2.0 ~ 2.9) ─────────────────────────
+  // 각 베팅의 b.odds를 소수점 1자리로 반올림한 값이 해당 버킷과 같으면 포함.
+  // 예: odds=2.13 → 2.1 / odds=2.25 → 2.3 / odds=2.05 → 2.1
+  // 종목 무관 전체 통계.
+  const oddsBucketStats = useMemo(()=>{
+    const buckets:string[] = [];
+    for (let v=2.0; v<=2.95; v+=0.1) buckets.push(v.toFixed(1));
+    return buckets.map(bStr=>{
+      const target = parseFloat(bStr);
+      const bs = done.filter(b=>{
+        // odds를 소수점 1자리 반올림
+        const r = Math.round(b.odds*10)/10;
+        return Math.abs(r-target) < 0.001;
+      });
+      const wins = bs.filter(b=>b.result==="승").length;
+      const losses = bs.filter(b=>b.result==="패").length;
+      const profit = bs.reduce((s,b)=>s+(b.profit??0),0);
+      const bet = bs.reduce((s,b)=>s+b.amount,0);
+      return {
+        odds: bStr,
+        count: bs.length,
+        wins, losses,
+        profit, bet,
+        roi: bet>0 ? parseFloat(((profit/bet)*100).toFixed(1)) : 0,
+        winRate: bs.length>0 ? Math.round(wins/bs.length*100) : 0,
+      };
+    });
+  },[done]);
+
+  // ── 야구: 승패 / 언오버 종합 통계 ──
+  // ★ 승패 = 정배 + 역배 + (API-Sports 표기) 홈승/원정승 통합
+  const baseballSummary = useMemo(()=>{
+    const calc = (filt:(b:Bet)=>boolean)=>{
+      const bs = baseballDone.filter(filt);
+      const profit = bs.reduce((s,b)=>s+(b.profit??0),0);
+      const bet = bs.reduce((s,b)=>s+b.amount,0);
+      const wins = bs.filter(b=>b.result==="승").length;
+      return {count:bs.length,profit,bet,wins,roi:bet>0?((profit/bet)*100).toFixed(1):"0",winRate:bs.length>0?Math.round(wins/bs.length*100):0};
+    };
+    // 승패: 정배/역배(수동) + 홈승/원정승(API) — 오버/언더가 아닌 모든 것
+    const isWinLose = (b:Bet)=>{
+      const o = b.betOption||"";
+      if (o==="정배"||o==="역배") return true;
+      if (o==="홈승"||o==="원정승"||o==="홈"||o==="원정") return true;
+      return false;
+    };
+    return {
+      승패: calc(isWinLose),
+      오버: calc(b=>b.betOption.includes("오버")),
+      언더: calc(b=>b.betOption.includes("언더")),
+    };
+  },[baseballDone]);
+
+  // ── 야구 리그별 종합 (승패+언오버) ──
+  const baseballLeagueSummary = useMemo(()=>{
+    const leagues = [...new Set(baseballDone.map(b=>b.league))];
+    return leagues.map(league=>{
+      const calc = (filt:(b:Bet)=>boolean)=>{
+        const bs = baseballDone.filter(b=>b.league===league && filt(b));
+        const profit = bs.reduce((s,b)=>s+(b.profit??0),0);
+        const bet = bs.reduce((s,b)=>s+b.amount,0);
+        const wins = bs.filter(b=>b.result==="승").length;
+        return {count:bs.length,profit,roi:bet>0?((profit/bet)*100).toFixed(1):"0",winRate:bs.length>0?Math.round(wins/bs.length*100):0};
+      };
+      const totalProfit = baseballDone.filter(b=>b.league===league).reduce((s,b)=>s+(b.profit??0),0);
+      return {
+        league,
+        totalProfit,
+        winLose: calc(b=>b.betOption==="정배"||b.betOption==="역배"),
+        overUnder: calc(b=>b.betOption.includes("오버")||b.betOption.includes("언더")),
+      };
+    }).sort((a,b)=>b.totalProfit - a.totalProfit);
+  },[baseballDone]);
+
+  // ── 축구 옵션별 (수동 6옵션 + API-Sports 옵션 매칭) ──
+  const footballDone = done.filter(b=>b.category==="축구");
+  // 옵션 매칭 규칙 — 베팅옵션 라벨이 어느 통계 카테고리에 속하는지 결정
+  // ★★ 사용자 피드백: 거의 다 "기타"로 빠지는 문제 → 숫자 추출 기반으로 전면 재작성
+  // 흡수해야 하는 표기 변형들:
+  //   수동: "홈 0.5", "홈 1.5", "원정 2.5", "무승부", "오버 2.5", "언더 1.5"
+  //   API-Sports / odds-api: "홈승", "원정승", "홈 (-1.5)", "원정 (+0.5)", "홈 -1", "원정 +2.5",
+  //                          "Home -1", "Away +0.5", "Draw" 등
+  //   ★ 핵심 규칙:
+  //     1) "홈"/"home"으로 시작 → 홈 카테고리 → 숫자 추출 → |값|을 0.5/1.5/2.5 중 가장 가까운 라인으로
+  //        (홈승/홈 = 핸디 0 → 0.5로 간주)
+  //     2) "원정"/"away"로 시작 → 원정 카테고리 → 동일 규칙
+  //     3) "무" 또는 "draw" → 무승부
+  //     4) "오버"/"over" → 오버,  "언더"/"under" → 언더
+  //     5) 어느 것도 아니면 → 기타 (이 경우 거의 발생 안 해야 정상)
+  const _extractFootballNum = (bo:string):number=>{
+    // 문자열에서 첫 숫자(소수 포함, 부호 포함) 추출
+    const m = bo.match(/[+-]?\d+(?:\.\d+)?/);
+    if (!m) return 0;
+    return Math.abs(parseFloat(m[0]));
+  };
+  const _classifyHomeAwayLine = (n:number):"0.5"|"1.5"|"2.5"=>{
+    // 추출한 숫자값을 가장 가까운 핸디 라인으로 분류
+    // 0~1 미만 → 0.5, 1~2 미만 → 1.5, 2 이상 → 2.5
+    if (n < 1) return "0.5";
+    if (n < 2) return "1.5";
+    return "2.5";
+  };
+  const footballOptMatchers: {opt:string, match:(bo:string)=>boolean}[] = [
+    // 홈 핸디캡 0.5 — 홈승/홈/홈 0/홈 0.5 + 홈 + 숫자값 < 1
+    {opt:"홈 0.5",   match:(bo)=>{
+      const s = (bo||"").trim().toLowerCase();
+      if (!/^(홈|home)/.test(s)) return false;
+      // 숫자 없는 "홈", "홈승", "home win" → 0.5로
+      if (!/\d/.test(s)) return true;
+      return _classifyHomeAwayLine(_extractFootballNum(s)) === "0.5";
+    }},
+    {opt:"홈 1.5", match:(bo)=>{
+      const s = (bo||"").trim().toLowerCase();
+      if (!/^(홈|home)/.test(s)) return false;
+      if (!/\d/.test(s)) return false;
+      return _classifyHomeAwayLine(_extractFootballNum(s)) === "1.5";
+    }},
+    {opt:"홈 2.5", match:(bo)=>{
+      const s = (bo||"").trim().toLowerCase();
+      if (!/^(홈|home)/.test(s)) return false;
+      if (!/\d/.test(s)) return false;
+      return _classifyHomeAwayLine(_extractFootballNum(s)) === "2.5";
+    }},
+    {opt:"원정 0.5", match:(bo)=>{
+      const s = (bo||"").trim().toLowerCase();
+      if (!/^(원정|away)/.test(s)) return false;
+      if (!/\d/.test(s)) return true;
+      return _classifyHomeAwayLine(_extractFootballNum(s)) === "0.5";
+    }},
+    {opt:"원정 1.5", match:(bo)=>{
+      const s = (bo||"").trim().toLowerCase();
+      if (!/^(원정|away)/.test(s)) return false;
+      if (!/\d/.test(s)) return false;
+      return _classifyHomeAwayLine(_extractFootballNum(s)) === "1.5";
+    }},
+    {opt:"원정 2.5", match:(bo)=>{
+      const s = (bo||"").trim().toLowerCase();
+      if (!/^(원정|away)/.test(s)) return false;
+      if (!/\d/.test(s)) return false;
+      return _classifyHomeAwayLine(_extractFootballNum(s)) === "2.5";
+    }},
+    {opt:"무승부",   match:(bo)=>{
+      const s = (bo||"").trim().toLowerCase();
+      return s==="무승부"||s==="무"||s==="x"||s==="draw"||/무$/.test(s);
+    }},
+    {opt:"오버",     match:(bo)=>{
+      const s = (bo||"").toLowerCase();
+      return s.includes("오버") || s.includes("over");
+    }},
+    {opt:"언더",     match:(bo)=>{
+      const s = (bo||"").toLowerCase();
+      return s.includes("언더") || s.includes("under");
+    }},
+    // 기타: 위 어디에도 안 맞는 것 (디버깅용)
+    {opt:"기타",     match:(bo)=>{
+      const s = (bo||"").trim().toLowerCase();
+      if (!s) return false;
+      if (/^(홈|home|원정|away)/.test(s)) return false;
+      if (s==="무승부"||s==="무"||s==="x"||s==="draw"||/무$/.test(s)) return false;
+      if (s.includes("오버")||s.includes("over")) return false;
+      if (s.includes("언더")||s.includes("under")) return false;
+      return true;
+    }},
+  ];
+  const footballOptStats = useMemo(()=>{
+    return footballOptMatchers.map(({opt, match})=>{
+      const bs = footballDone.filter(b=>match(b.betOption));
+      const profit = bs.reduce((s,b)=>s+(b.profit??0),0);
+      const bet = bs.reduce((s,b)=>s+b.amount,0);
+      const wins = bs.filter(b=>b.result==="승").length;
+      return {opt, count:bs.length, profit, bet, wins,
+        roi: bet>0?parseFloat(((profit/bet)*100).toFixed(1)):0,
+        winRate: bs.length>0?Math.round(wins/bs.length*100):0};
+    });
+  },[footballDone]);
+
+  // ── 축구 리그별 종합 ──
+  const footballLeagueSummary = useMemo(()=>{
+    const leagues = [...new Set(footballDone.map(b=>b.league))];
+    return leagues.map(league=>{
+      const bs = footballDone.filter(b=>b.league===league);
+      const profit = bs.reduce((s,b)=>s+(b.profit??0),0);
+      const bet = bs.reduce((s,b)=>s+b.amount,0);
+      const wins = bs.filter(b=>b.result==="승").length;
+      return {league, count:bs.length, profit,
+        roi: bet>0?((profit/bet)*100).toFixed(1):"0",
+        winRate: bs.length>0?Math.round(wins/bs.length*100):0};
+    }).sort((a,b)=>b.profit-a.profit);
+  },[footballDone]);
+
+  // ── 농구 5.5 ~ 29.5 핸디캡 옵션별 ──
+  // ★ 플핸/마핸 모두 집계 (기존엔 플핸만 봐서 마핸 베팅이 통계에서 누락됨)
+  // ★ 표기 변형 흡수: "5.5 플핸", "5.5플핸", "5.5 핸디", "+5.5", "(-5.5)" 등
+  const basketballDone = done.filter(b=>b.category==="농구");
+
+  // 베팅 옵션에서 핸디캡 숫자 + 종류(플/마)를 뽑는 헬퍼
+  // 반환: { value: 숫자(절대값), kind: "플"|"마"|"기타" } | null
+  const parseBasketballOpt = (bo:string):{value:number,kind:"플"|"마"|"기타"}|null => {
+    if (!bo) return null;
+    // "5.5 플핸", "5.5플핸", "플핸 5.5"
+    let m = bo.match(/(\d+(?:\.\d+)?)\s*플핸|플핸\s*(\d+(?:\.\d+)?)/);
+    if (m) return {value: parseFloat(m[1]||m[2]), kind:"플"};
+    // "5.5 마핸", "마핸 5.5"
+    m = bo.match(/(\d+(?:\.\d+)?)\s*마핸|마핸\s*(\d+(?:\.\d+)?)/);
+    if (m) return {value: parseFloat(m[1]||m[2]), kind:"마"};
+    // "+5.5", "(-5.5)" 같은 부호 형식 — 부호로 플/마 구분
+    m = bo.match(/\(?\s*([+-])\s*(\d+(?:\.\d+)?)\s*\)?/);
+    if (m) return {value: parseFloat(m[2]), kind: m[1]==="+"?"플":"마"};
+    // 그냥 숫자만: "5.5"
+    m = bo.match(/^(\d+(?:\.\d+)?)$/);
+    if (m) return {value: parseFloat(m[1]), kind:"기타"};
+    return null;
+  };
+
+  const basketballOptStats = useMemo(()=>{
+    // 5.5 ~ 29.5 (1단위) 포인트 행
+    const opts:string[] = [];
+    for(let v=5.5; v<=29.5; v+=1) opts.push(v.toFixed(1));
+    return opts.map(vStr=>{
+      const target
