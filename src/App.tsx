@@ -3705,6 +3705,8 @@ function AppMain() {
   //   추후 sub 탭 방식이 필요해지면 다시 살릴 수 있도록 정의는 유지
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [footballSub, setFootballSub] = useState<"option"|"league"|"odds"|"odds_x_league">("option");
+  // 디버그: 핸디캡 라인 카드 클릭 → 그 라인에 잡힌 실제 베팅 목록을 펼쳐서 보여줌
+  const [footballHandiInspect, setFootballHandiInspect] = useState<string|null>(null);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [basketballSub, setBasketballSub] = useState<"option"|"league"|"odds"|"plus_minus">("option");
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -7187,23 +7189,80 @@ function AppMain() {
                       <div style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:7,padding:9}}>
                         <div style={{fontSize:13,fontWeight:800,color:C.green,marginBottom:6}}>📐 핸디캡 라인별 한눈에 (홈/원정 0.5/1.5/2.5)</div>
                         <div style={{fontSize:11,color:C.muted,marginBottom:7,padding:"5px 8px",background:C.bg,borderRadius:6,lineHeight:1.5}}>
-                          💡 사용자 전략: 역배 플핸. 배당 1.4↑, 0.5는 무 ≤3.5, 1.5는 무 ≤4.3, 2.5는 무 ≤6.5에서만 가는 중. 라인별 ROI 비교용.
+                          💡 사용자 전략: 역배 플핸. 배당 1.4↑, 0.5는 무 ≤3.5, 1.5는 무 ≤4.3, 2.5는 무 ≤6.5에서만 가는 중. 라인별 ROI 비교용.<br/>
+                          🔍 카드 클릭 → 그 라인에 잡힌 베팅 목록 펼침 (수익이 이상하면 어떤 베팅이 잡혔는지 확인용)
                         </div>
                         <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:5}}>
                           {footballHandicapLineStats.map(s=>{
                             const isEmpty = s.count===0;
                             const isHome = s.opt.startsWith("홈");
                             const accentColor = isEmpty?C.dim:(s.roi>=0?C.green:C.red);
+                            const isSelected = footballHandiInspect === s.opt;
                             return (
-                              <div key={s.opt} style={{background:C.bg2,border:`1.5px solid ${accentColor}55`,borderRadius:7,padding:"8px 9px"}}>
-                                <div style={{fontSize:12,fontWeight:800,color:isEmpty?C.dim:(isHome?C.green:C.amber),marginBottom:3}}>{isHome?"🏠":"✈️"} {s.opt}</div>
+                              <div key={s.opt}
+                                onClick={()=>{ if(!isEmpty) setFootballHandiInspect(isSelected ? null : s.opt); }}
+                                style={{
+                                  background:isSelected ? `${accentColor}22` : C.bg2,
+                                  border:`1.5px solid ${isSelected ? accentColor : accentColor+"55"}`,
+                                  borderRadius:7,padding:"8px 9px",
+                                  cursor:isEmpty?"default":"pointer",
+                                  transition:"all 0.15s",
+                                }}>
+                                <div style={{fontSize:12,fontWeight:800,color:isEmpty?C.dim:(isHome?C.green:C.amber),marginBottom:3}}>
+                                  {isHome?"🏠":"✈️"} {s.opt} {isSelected && "▼"}
+                                </div>
                                 <div style={{fontSize:16,fontWeight:900,color:accentColor,marginBottom:2}}>{isEmpty?"-":`${s.roi>=0?"+":""}${s.roi}%`}</div>
                                 <div style={{fontSize:10,color:C.muted,fontWeight:700}}>{s.count}건 · 적중 {isEmpty?"-":`${s.winRate}%`}</div>
                                 {!isEmpty && <div style={{fontSize:10,color:C.dim,marginTop:1}}>평균배당 {s.avgOdds}</div>}
+                                {!isEmpty && (
+                                  <div style={{fontSize:10,color:s.profit>=0?C.green:C.red,fontWeight:800,marginTop:2}}>
+                                    수익 {s.profit>=0?"+":""}{Math.round(s.profit).toLocaleString()}원
+                                  </div>
+                                )}
                               </div>
                             );
                           })}
                         </div>
+
+                        {/* 선택된 라인의 베팅 목록 펼침 (디버그) */}
+                        {footballHandiInspect && (()=>{
+                          const matcher = footballOptMatchers.find(m=>m.opt===footballHandiInspect);
+                          if(!matcher) return null;
+                          const bs = footballDone.filter(b=>matcher.match(b.betOption, b)).sort((a,b)=>b.date.localeCompare(a.date));
+                          const totalBet = bs.reduce((s,b)=>s+b.amount,0);
+                          const totalProfit = bs.reduce((s,b)=>s+(b.profit??0),0);
+                          return (
+                            <div style={{marginTop:9,background:C.bg,border:`1px solid ${C.border2}`,borderRadius:6,padding:9}}>
+                              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                                <div style={{fontSize:12,fontWeight:800,color:C.text}}>🔍 "{footballHandiInspect}" 잡힌 베팅 ({bs.length}건)</div>
+                                <div style={{fontSize:11,color:C.muted}}>
+                                  총베팅 <b style={{color:C.text}}>{Math.round(totalBet).toLocaleString()}원</b> · 총수익 <b style={{color:totalProfit>=0?C.green:C.red}}>{totalProfit>=0?"+":""}{Math.round(totalProfit).toLocaleString()}원</b>
+                                </div>
+                              </div>
+                              <div style={{display:"flex",flexDirection:"column",gap:3,maxHeight:280,overflowY:"auto"}}>
+                                {bs.map((b,i)=>{
+                                  const dollar = isUSD(b.site);
+                                  const win = b.result==="승";
+                                  const dr = b.result==="무"||b.result==="적특"||b.result==="취소";
+                                  return (
+                                    <div key={i} style={{display:"grid",gridTemplateColumns:"60px 50px 1fr 1fr 60px 70px 24px 90px",gap:5,alignItems:"center",padding:"4px 7px",background:C.bg2,borderRadius:4,fontSize:11,borderLeft:`3px solid ${win?C.green:dr?C.muted:C.red}`}}>
+                                      <span style={{color:C.muted,fontSize:10}}>{b.date.slice(5)}</span>
+                                      <span style={{color:C.amber,fontWeight:700,fontSize:10}}>{b.site}</span>
+                                      <span style={{color:C.text,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",fontWeight:700}}>{b.betOption}</span>
+                                      <span style={{color:C.dim,fontSize:10,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+                                        {b.homeTeam||"?"} vs {b.awayTeam||"?"}
+                                      </span>
+                                      <span style={{color:C.amber,textAlign:"right",fontSize:10}}>@{b.odds.toFixed(2)}</span>
+                                      <span style={{color:C.text,textAlign:"right",fontWeight:700}}>{fmtDisp(b.amount,dollar)}</span>
+                                      <span style={{color:win?C.green:dr?C.muted:C.red,fontWeight:900,textAlign:"center"}}>{b.result}</span>
+                                      <span style={{color:(b.profit??0)>=0?C.green:C.red,fontWeight:900,textAlign:"right"}}>{(b.profit??0)>=0?"+":""}{fmtDisp(b.profit??0,dollar)}</span>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          );
+                        })()}
                       </div>
 
                       {/* 옵션별 전체 표 (홈/원정/무/오버/언더/기타) */}
