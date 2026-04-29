@@ -3533,9 +3533,9 @@ function AppMain() {
   };
 
   const basketballOptStats = useMemo(()=>{
-    // 5.5 ~ 29.5 (1단위) 포인트 행
+    // 2.5 ~ 14.5 (1단위) — 사용자 신규 전략: 2.5~9.5 마핸 / 10.5~14.5 플핸
     const opts:string[] = [];
-    for(let v=5.5; v<=29.5; v+=1) opts.push(v.toFixed(1));
+    for(let v=2.5; v<=14.5; v+=1) opts.push(v.toFixed(1));
     return opts.map(vStr=>{
       const target = parseFloat(vStr);
       // 플핸/마핸 둘 다 포함, 숫자가 소수점 미만 차이 0.05 이내면 매칭
@@ -3547,9 +3547,12 @@ function AppMain() {
       const profit = bs.reduce((s,b)=>s+(b.profit??0),0);
       const bet = bs.reduce((s,b)=>s+b.amount,0);
       const wins = bs.filter(b=>b.result==="승").length;
+      // 권장 전략: 2.5~9.5 = 마핸, 10.5~14.5 = 플핸
+      const recommendedKind: "마"|"플" = target <= 9.5 ? "마" : "플";
       return {opt:vStr, label:vStr, count:bs.length, profit, bet, wins,
         roi: bet>0?parseFloat(((profit/bet)*100).toFixed(1)):0,
-        winRate: bs.length>0?Math.round(wins/bs.length*100):0};
+        winRate: bs.length>0?Math.round(wins/bs.length*100):0,
+        recommendedKind};
     });
   },[basketballDone]);
 
@@ -3600,15 +3603,15 @@ function AppMain() {
   // 농구 옵션별 표 (요청 #10) — 세로: 5.5~29.5 (1단위), 가로: 베팅/적중/실패/적중률/수익률
   // 기존 basketballOptStats 그대로 사용
 
-  // 농구 리그별 표 — 세로: 리그(가나다순), 가로: 5단위 그룹 5개 ROI + 전체 ROI
+  // 농구 리그별 표 — 세로: 리그(가나다순), 가로: 신규 전략 구간 (2.5~9.5 마핸 / 10.5~14.5 플핸)
   // ★ parseBasketballOpt를 써서 플핸/마핸 모두 집계
   const basketballLeagueRangeTable = useMemo(()=>{
     const ranges = [
-      {key:"5~9", label:"5.5~9.5",   from:5.5,  to:9.5},
-      {key:"10~14",label:"10.5~14.5",from:10.5, to:14.5},
-      {key:"15~19",label:"15.5~19.5",from:15.5, to:19.5},
-      {key:"20~24",label:"20.5~24.5",from:20.5, to:24.5},
-      {key:"25~29",label:"25.5~29.5",from:25.5, to:29.5},
+      {key:"2_4",  label:"2.5~4.5",  from:2.5,  to:4.5,  hint:"마핸"},
+      {key:"5_6",  label:"5.5~6.5",  from:5.5,  to:6.5,  hint:"마핸"},
+      {key:"7_9",  label:"7.5~9.5",  from:7.5,  to:9.5,  hint:"마핸"},
+      {key:"10_12",label:"10.5~12.5",from:10.5, to:12.5, hint:"플핸"},
+      {key:"13_14",label:"13.5~14.5",from:13.5, to:14.5, hint:"플핸"},
     ];
     const leagues = [...new Set(basketballDone.map(b=>b.league))].sort((a,b)=>a.localeCompare(b,"ko"));
     return leagues.map(league=>{
@@ -3801,8 +3804,8 @@ function AppMain() {
     });
   },[footballDone]);
 
-  // [야구] 역배 배당 0.1 단위 (2.1 ~ 2.9) (요청 #12)
-  // 사용자 전략: 2.1~2.9 무지성 역배 베팅 중. 배당별 적중률/수익률 필수.
+  // [야구] 역배 배당 0.1 단위 (2.0 ~ 2.9)
+  // 사용자 전략: 2.00~2.99 역배 베팅. 언오버 라인 역배 겹치면 낮은 역배.
   const baseballReverseOddsStats = useMemo(()=>{
     // 역배만 필터: betOption이 "역배"이거나 (홈/원정승 중 배당 2.0 이상)
     const reverseOnly = (b:Bet) => {
@@ -3812,7 +3815,7 @@ function AppMain() {
       return false;
     };
     const buckets:string[] = [];
-    for (let v=2.1; v<=2.95; v+=0.1) buckets.push(v.toFixed(1));
+    for (let v=2.0; v<=2.95; v+=0.1) buckets.push(v.toFixed(1));
     return buckets.map(bStr=>{
       const target = parseFloat(bStr);
       const bs = baseballDone.filter(b=>{
@@ -3864,11 +3867,11 @@ function AppMain() {
     });
   },[baseballDone]);
 
-  // [농구] 배당별 통계 (요청 #11) — 1.8 이상부터 0.1 단위
-  // 사용자 전략: 배당 1.8 이상에서만 베팅 중. 배당별 ROI를 보고 좁히기.
+  // [농구] 배당별 통계 — 1.4부터 0.1단위
+  // 사용자 신규 전략: 2.5~14.5 라인 / 마핸 1.5~2.0 배당대 / 플핸 1.5~2.0 배당대 모두 포함
   const basketballOddsBucketStats = useMemo(()=>{
     const buckets:string[] = [];
-    for (let v=1.8; v<=3.05; v+=0.1) buckets.push(v.toFixed(1));
+    for (let v=1.4; v<=3.05; v+=0.1) buckets.push(v.toFixed(1));
     return buckets.map(bStr=>{
       const target = parseFloat(bStr);
       const bs = basketballDone.filter(b=>{
@@ -7137,9 +7140,9 @@ function AppMain() {
                   {/* 역배 배당별 — 항상 표시 */}
                   {(
                     <div style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:7,padding:9,overflowX:"auto"}}>
-                      <div style={{fontSize:13,fontWeight:800,color:C.purple,marginBottom:6}}>🎯 역배 배당별 통계 (2.1 ~ 2.9, 0.1단위)</div>
+                      <div style={{fontSize:13,fontWeight:800,color:C.purple,marginBottom:6}}>🎯 역배 배당별 통계 (2.0 ~ 2.9, 0.1단위)</div>
                       <div style={{fontSize:11,color:C.muted,marginBottom:7,padding:"5px 8px",background:C.bg,borderRadius:6,lineHeight:1.5}}>
-                        💡 사용자 전략: 야구는 정배 비선호 → 2.1~2.9 무지성 역배. 배당별 적중률/수익률을 보고 베팅 구간을 좁힐 수 있음.<br/>
+                        💡 사용자 전략: <strong style={{color:C.amber}}>2.00~2.99 역배</strong>. 언오버 라인별 역배 겹칠 경우 낮은 역배 선택. 배당별 적중률/ROI로 약한 구간 발견.<br/>
                         ※ 역배 = <code>betOption==="역배"</code> + (홈승/원정승 중 배당 ≥ 2.0)
                       </div>
                       <table style={{width:"100%",borderCollapse:"collapse",fontSize:13,minWidth:420}}>
@@ -7246,8 +7249,11 @@ function AppMain() {
                       <div style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:7,padding:9}}>
                         <div style={{fontSize:13,fontWeight:800,color:C.green,marginBottom:6}}>📐 핸디캡 라인별 한눈에 (홈/원정 0.5/1.5/2.5)</div>
                         <div style={{fontSize:11,color:C.muted,marginBottom:7,padding:"5px 8px",background:C.bg,borderRadius:6,lineHeight:1.5}}>
-                          💡 사용자 전략: 역배 플핸. 배당 1.4↑, 0.5는 무 ≤3.5, 1.5는 무 ≤4.3, 2.5는 무 ≤6.5에서만 가는 중. 라인별 ROI 비교용.<br/>
-                          🔍 카드 클릭 → 그 라인에 잡힌 베팅 목록 펼침 (수익이 이상하면 어떤 베팅이 잡혔는지 확인용)
+                          💡 사용자 신규 전략:<br/>
+                          • <strong style={{color:C.teal}}>0.5 플핸</strong>: 무배당 3.6↓ + 정배 배당대 / 1.55~1.95 추천<br/>
+                          • <strong style={{color:C.green}}>1.5 플핸</strong>: 정배 1.40↑, 1.5플핸 1.40↑, 무배당 ≤4.6 (정배 1.5↑이면 완화)<br/>
+                          • <strong style={{color:C.amber}}>2.5 플핸</strong>: 정배 1.20↑, 2.5플핸 1.40↑, 무배당 ≤6.6 (정배 강도별 차등)<br/>
+                          🔍 카드 클릭 → 그 라인에 잡힌 베팅 목록 펼침
                         </div>
                         <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:5}}>
                           {footballHandicapLineStats.map(s=>{
@@ -7565,14 +7571,15 @@ function AppMain() {
                   {/* 옵션별 표 */}
                   {(
                     <div style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:7,padding:9,overflowX:"auto"}}>
-                      <div style={{fontSize:13,fontWeight:800,color:C.amber,marginBottom:6}}>🏀 옵션별 통계 (5.5 ~ 29.5 핸디 — 플/마 통합)</div>
+                      <div style={{fontSize:13,fontWeight:800,color:C.amber,marginBottom:6}}>🏀 옵션별 통계 (2.5 ~ 14.5 — 마핸/플핸 분기)</div>
                       <div style={{fontSize:11,color:C.muted,marginBottom:7,padding:"5px 8px",background:C.bg,borderRadius:6,lineHeight:1.5}}>
-                        💡 사용자 전략: 배당 1.8↑, 플핸 5.5↑부터 적중률이 오르는 느낌. 어느 라인부터 ROI가 좋은지 확인용.
+                        💡 사용자 전략: <strong style={{color:C.red}}>2.5~9.5 마핸</strong> / <strong style={{color:C.green}}>10.5~14.5 플핸</strong> / 15.5+ 회피. 라인별 ROI / 적중률을 확인해 약한 자리 발견 시 베팅 중단.
                       </div>
-                      <table style={{width:"100%",borderCollapse:"collapse",fontSize:13,minWidth:420}}>
+                      <table style={{width:"100%",borderCollapse:"collapse",fontSize:13,minWidth:480}}>
                         <thead>
                           <tr style={{borderBottom:`2px solid ${C.border2}`}}>
                             <th style={{textAlign:"left",padding:"5px 7px",color:C.muted,fontWeight:700,minWidth:45}}>핸디</th>
+                            <th style={{textAlign:"center",padding:"5px 7px",color:C.muted,fontWeight:700}}>전략</th>
                             <th style={{textAlign:"right",padding:"5px 7px",color:C.muted,fontWeight:700}}>베팅수</th>
                             <th style={{textAlign:"right",padding:"5px 7px",color:C.muted,fontWeight:700}}>적중</th>
                             <th style={{textAlign:"right",padding:"5px 7px",color:C.muted,fontWeight:700}}>실패</th>
@@ -7584,9 +7591,12 @@ function AppMain() {
                           {basketballOptStats.map(s=>{
                             const losses = s.count - s.wins;
                             const isEmpty = s.count===0;
+                            const recColor = s.recommendedKind==="마"?C.red:C.green;
+                            const recLabel = s.recommendedKind==="마"?"마핸":"플핸";
                             return (
                               <tr key={s.opt} style={{borderBottom:`1px solid ${C.border}`,opacity:isEmpty?0.4:1}}>
                                 <td style={{padding:"5px 7px",fontWeight:800,color:isEmpty?C.dim:C.text}}>{s.label}</td>
+                                <td style={{padding:"5px 7px",textAlign:"center",fontWeight:800,color:recColor,fontSize:11}}>{recLabel}</td>
                                 <td style={{padding:"5px 7px",textAlign:"right",color:isEmpty?C.dim:C.text}}>{s.count}</td>
                                 <td style={{padding:"5px 7px",textAlign:"right",color:isEmpty?C.dim:C.green,fontWeight:700}}>{s.wins}</td>
                                 <td style={{padding:"5px 7px",textAlign:"right",color:isEmpty?C.dim:C.red,fontWeight:700}}>{losses}</td>
@@ -7605,19 +7615,26 @@ function AppMain() {
                     <div style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:7,padding:9,overflowX:"auto"}}>
                       <div style={{fontSize:13,fontWeight:800,color:C.teal,marginBottom:6}}>🏀 리그별 핸디 범위 수익률 (가나다순)</div>
                       <div style={{fontSize:11,color:C.muted,marginBottom:7,padding:"5px 8px",background:C.bg,borderRadius:6,lineHeight:1.5}}>
-                        💡 어느 리그가 어느 범위에서 잘 맞는지 / 피해야 할 리그·범위 확인용.
+                        💡 <strong style={{color:C.red}}>2.5~9.5 마핸</strong> / <strong style={{color:C.green}}>10.5~14.5 플핸</strong> 전략. 어느 리그가 어느 라인 구간에서 잘 맞는지 확인용.
                       </div>
                       {basketballLeagueRangeTable.length===0 ? (
                         <div style={{textAlign:"center",color:C.dim,padding:"30px"}}>리그별 기록 없음</div>
                       ) : (
-                        <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:460}}>
+                        <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:520}}>
                           <thead>
                             <tr style={{borderBottom:`2px solid ${C.border2}`}}>
                               <th style={{textAlign:"left",padding:"5px 7px",color:C.muted,fontWeight:700,minWidth:90,borderRight:`1px solid ${C.border}`}}>리그</th>
                               {[
-                                {label:"5.5~9.5"},{label:"10.5~14.5"},{label:"15.5~19.5"},{label:"20.5~24.5"},{label:"25.5~29.5"}
+                                {label:"2.5~4.5",hint:"마핸",color:C.red},
+                                {label:"5.5~6.5",hint:"마핸",color:C.red},
+                                {label:"7.5~9.5",hint:"마핸",color:C.red},
+                                {label:"10.5~12.5",hint:"플핸",color:C.green},
+                                {label:"13.5~14.5",hint:"플핸",color:C.green},
                               ].map(r=>(
-                                <th key={r.label} style={{textAlign:"right",padding:"8px 8px",color:C.amber,fontWeight:700,fontSize:11}}>{r.label}</th>
+                                <th key={r.label} style={{textAlign:"right",padding:"6px 6px",color:r.color,fontWeight:700,fontSize:10}}>
+                                  <div>{r.label}</div>
+                                  <div style={{fontSize:9,opacity:0.7,fontWeight:600}}>{r.hint}</div>
+                                </th>
                               ))}
                               <th style={{textAlign:"right",padding:"5px 7px",color:C.purple,fontWeight:700,borderLeft:`1px solid ${C.border}`}}>전체 수익률</th>
                             </tr>
@@ -7648,7 +7665,42 @@ function AppMain() {
                     </div>
                   )}
 
-                  {/* ⚠️ 사용자 요청: 농구 배당별 표 제거 — 한눈에 보기 위해 항목 줄임 */}
+                  {/* 농구 배당별 통계 표 — 1.4 ~ 3.0 */}
+                  {(
+                    <div style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:7,padding:9,overflowX:"auto"}}>
+                      <div style={{fontSize:13,fontWeight:800,color:C.purple,marginBottom:6}}>🎯 배당별 통계 (1.4 ~ 3.0, 0.1단위)</div>
+                      <div style={{fontSize:11,color:C.muted,marginBottom:7,padding:"5px 8px",background:C.bg,borderRadius:6,lineHeight:1.5}}>
+                        💡 마핸/플핸 신규 전략에서 어느 배당대가 ROI / 적중률 좋은지 확인. 배당 1.5~2.0 위주.
+                      </div>
+                      <table style={{width:"100%",borderCollapse:"collapse",fontSize:13,minWidth:420}}>
+                        <thead>
+                          <tr style={{borderBottom:`2px solid ${C.border2}`}}>
+                            <th style={{textAlign:"left",padding:"5px 7px",color:C.muted,fontWeight:700,minWidth:45}}>배당</th>
+                            <th style={{textAlign:"right",padding:"5px 7px",color:C.muted,fontWeight:700}}>베팅수</th>
+                            <th style={{textAlign:"right",padding:"5px 7px",color:C.muted,fontWeight:700}}>적중</th>
+                            <th style={{textAlign:"right",padding:"5px 7px",color:C.muted,fontWeight:700}}>실패</th>
+                            <th style={{textAlign:"right",padding:"5px 7px",color:C.muted,fontWeight:700}}>적중률</th>
+                            <th style={{textAlign:"right",padding:"5px 7px",color:C.muted,fontWeight:700}}>수익률</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {basketballOddsBucketStats.map(s=>{
+                            const isEmpty = s.count===0;
+                            return (
+                              <tr key={s.odds} style={{borderBottom:`1px solid ${C.border}`,opacity:isEmpty?0.4:1}}>
+                                <td style={{padding:"5px 7px",fontWeight:800,color:isEmpty?C.dim:C.text}}>{s.odds}</td>
+                                <td style={{padding:"5px 7px",textAlign:"right",color:isEmpty?C.dim:C.text}}>{s.count}</td>
+                                <td style={{padding:"5px 7px",textAlign:"right",color:isEmpty?C.dim:C.green,fontWeight:700}}>{s.wins}</td>
+                                <td style={{padding:"5px 7px",textAlign:"right",color:isEmpty?C.dim:C.red,fontWeight:700}}>{s.losses}</td>
+                                <td style={{padding:"5px 7px",textAlign:"right",color:isEmpty?C.dim:s.winRate>=50?C.green:C.muted,fontWeight:700}}>{isEmpty?"-":`${s.winRate}%`}</td>
+                                <td style={{padding:"5px 7px",textAlign:"right",color:isEmpty?C.dim:s.roi>=0?C.green:C.red,fontWeight:800}}>{isEmpty?"-":`${s.roi>=0?"+":""}${s.roi}%`}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
 
                   {/* 리그별 플핸 vs 마핸 — 항상 표시 */}
                   {(
@@ -8149,22 +8201,273 @@ function AppMain() {
       {/* ══ 전략 탭 ══ */}
       {tab==="strategy"&&(
         <div style={{flex:1,overflowY:"auto",padding:20}}>
-          <div style={{fontSize:16,fontWeight:800,color:C.amber,marginBottom:14}}>📋 베팅 전략</div>
+          <div style={{fontSize:16,fontWeight:800,color:C.amber,marginBottom:14}}>📋 베팅 전략 종합</div>
           <div style={{display:"flex",gap:5,marginBottom:16,flexWrap:"wrap"}}>
             {["축구","농구","야구","E스포츠"].map(c=><button key={c} onClick={()=>setStratCat(c)} style={tabBtn(stratCat===c,C.orange)}>{c}</button>)}
           </div>
+
+          {/* ⚽ 축구 전략 */}
           {stratCat==="축구"&&(
-            <div style={{display:"flex",flexDirection:"column",gap:12}}>
-              {[{title:"⚽ 0.5 플핸",color:C.teal,content:["배당 1.6 이상","정배 배당: 1.60 ~ 2.19","무배당: 3.6 이하"]},{title:"⚽ 1.5 플핸",color:C.green,content:["배당 1.40 이상","정배 배당: 1.30 ~ 1.59","무배당: 4.3 이하"]},{title:"⚽ 2.5 플핸",color:C.amber,content:["배당 1.40 이상","정배 배당: 1.10 ~ 1.29","무배당: 6.6 이하"]}].map(s=>(
-                <div key={s.title} style={{background:C.bg3,border:`1px solid ${s.color}33`,borderRadius:10,padding:16}}>
-                  <div style={{fontSize:14,fontWeight:800,color:s.color,marginBottom:10}}>{s.title}</div>
-                  {s.content.map((line,i)=><div key={i} style={{fontSize:12,color:C.text,padding:"4px 0",borderBottom:i<s.content.length-1?`1px solid ${C.border}`:"none"}}>• {line}</div>)}
+            <div style={{display:"flex",flexDirection:"column",gap:14}}>
+
+              {/* 1) 무배당 3.6 이상 */}
+              <div style={{background:C.bg3,border:`1px solid ${C.teal}55`,borderRadius:10,padding:16}}>
+                <div style={{fontSize:14,fontWeight:800,color:C.teal,marginBottom:4}}>⚽ 무배당 3.6 이상 (접전 매치)</div>
+                <div style={{fontSize:11,color:C.muted,marginBottom:10}}>변동성 작음 · 정배 미세 우위</div>
+                {[
+                  {tier:"1순위",label:"홈 정배",range:"1.55 ~ 1.75",color:C.green,star:"★★★"},
+                  {tier:"2순위",label:"원정 정배",range:"1.65 ~ 1.85",color:C.green,star:"★★"},
+                  {tier:"3순위",label:"홈 정배",range:"1.40 ~ 1.55",color:C.amber,star:"★"},
+                  {tier:"4순위",label:"원정 정배",range:"1.50 ~ 1.65",color:C.muted,star:"△"},
+                ].map((s,i)=>(
+                  <div key={i} style={{display:"grid",gridTemplateColumns:"55px 1fr 100px 30px",gap:10,padding:"6px 0",borderBottom:i<3?`1px solid ${C.border}`:"none",alignItems:"center"}}>
+                    <div style={{fontSize:11,fontWeight:800,color:s.color}}>{s.tier}</div>
+                    <div style={{fontSize:12,color:C.text}}>{s.label}</div>
+                    <div style={{fontSize:12,color:C.text,fontWeight:700,fontFamily:"monospace"}}>{s.range}</div>
+                    <div style={{fontSize:10,color:s.color,textAlign:"right"}}>{s.star}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* 2) 무배당 3.6 미만 */}
+              <div style={{background:C.bg3,border:`1px solid ${C.purple}55`,borderRadius:10,padding:16}}>
+                <div style={{fontSize:14,fontWeight:800,color:C.purple,marginBottom:4}}>⚽ 무배당 3.6 미만 + 0.5 핸디캡</div>
+                <div style={{fontSize:11,color:C.muted,marginBottom:10}}>격차 매치 · 0.5 핸디캡으로 가치 잡기</div>
+                {[
+                  {tier:"1순위",label:"원정 0.5 핸디",range:"1.80 ~ 1.95",color:C.green,star:"★★★"},
+                  {tier:"2순위",label:"홈 0.5 핸디",range:"1.80 ~ 1.95",color:C.green,star:"★★"},
+                  {tier:"3순위",label:"원정 0.5 핸디",range:"1.55 ~ 1.80",color:C.amber,star:"★"},
+                  {tier:"4순위",label:"홈 0.5 핸디",range:"1.55 ~ 1.80",color:C.muted,star:"△"},
+                ].map((s,i)=>(
+                  <div key={i} style={{display:"grid",gridTemplateColumns:"55px 1fr 100px 30px",gap:10,padding:"6px 0",borderBottom:i<3?`1px solid ${C.border}`:"none",alignItems:"center"}}>
+                    <div style={{fontSize:11,fontWeight:800,color:s.color}}>{s.tier}</div>
+                    <div style={{fontSize:12,color:C.text}}>{s.label}</div>
+                    <div style={{fontSize:12,color:C.text,fontWeight:700,fontFamily:"monospace"}}>{s.range}</div>
+                    <div style={{fontSize:10,color:s.color,textAlign:"right"}}>{s.star}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* 3) 1.5 플핸 (중간 격차) */}
+              <div style={{background:C.bg3,border:`1px solid ${C.green}55`,borderRadius:10,padding:16}}>
+                <div style={{fontSize:14,fontWeight:800,color:C.green,marginBottom:4}}>⚽ 1.5 플핸 (중간 격차 약팀 보호)</div>
+                <div style={{fontSize:11,color:C.muted,marginBottom:6}}>기본 조건: 정배 1.40↑ + 1.5플핸 1.40↑</div>
+                <div style={{fontSize:10,color:C.dim,marginBottom:10,padding:"6px 8px",background:C.bg,borderRadius:5}}>
+                  📊 무배당 컷오프 (정배 강도별 차등):<br/>
+                  • 정배 1.40~1.50 → 무배당 4.3↓ &nbsp; • 정배 1.50~1.85 → 무배당 4.6↓<br/>
+                  • 정배 1.85~2.20 → 무배당 5.0↓ &nbsp; • 정배 2.20+ → 무배당 무관
                 </div>
-              ))}
+                {[
+                  {tier:"1순위",label:"정배 1.65~1.85",range:"플핸 1.45~1.65",color:C.green,star:"★★★"},
+                  {tier:"2순위",label:"정배 1.50~1.65",range:"플핸 1.50~1.70",color:C.green,star:"★★"},
+                  {tier:"3순위",label:"정배 1.85~2.00",range:"플핸 1.40~1.55",color:C.amber,star:"★"},
+                  {tier:"4순위",label:"정배 1.40~1.50",range:"플핸 1.55~1.70",color:C.muted,star:"△ (추가 신호 필수)"},
+                ].map((s,i)=>(
+                  <div key={i} style={{display:"grid",gridTemplateColumns:"55px 1fr 1fr 110px",gap:10,padding:"6px 0",borderBottom:i<3?`1px solid ${C.border}`:"none",alignItems:"center"}}>
+                    <div style={{fontSize:11,fontWeight:800,color:s.color}}>{s.tier}</div>
+                    <div style={{fontSize:11,color:C.text,fontFamily:"monospace"}}>{s.label}</div>
+                    <div style={{fontSize:11,color:C.text,fontFamily:"monospace"}}>{s.range}</div>
+                    <div style={{fontSize:10,color:s.color,textAlign:"right"}}>{s.star}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* 4) 2.5 플핸 (큰 격차) */}
+              <div style={{background:C.bg3,border:`1px solid ${C.amber}55`,borderRadius:10,padding:16}}>
+                <div style={{fontSize:14,fontWeight:800,color:C.amber,marginBottom:4}}>⚽ 2.5 플핸 (큰 격차 약팀 보호)</div>
+                <div style={{fontSize:11,color:C.muted,marginBottom:6}}>기본 조건: 정배 1.20↑ + 2.5플핸 1.40↑</div>
+                <div style={{fontSize:10,color:C.dim,marginBottom:10,padding:"6px 8px",background:C.bg,borderRadius:5}}>
+                  📊 무배당 컷오프 (정배 강도별 차등):<br/>
+                  • 정배 1.20~1.30 → 무배당 7.5↓ &nbsp; • 정배 1.30~1.45 → 무배당 6.6↓<br/>
+                  • 정배 1.45~1.65 → 무배당 5.5↓ &nbsp; • 정배 1.65↑ → 1.5 플핸 권장
+                </div>
+                {[
+                  {tier:"1순위",label:"정배 1.40~1.55",range:"플핸 1.45~1.65",color:C.green,star:"★★★"},
+                  {tier:"2순위",label:"정배 1.30~1.40",range:"플핸 1.50~1.70",color:C.green,star:"★★"},
+                  {tier:"3순위",label:"정배 1.55~1.65",range:"플핸 1.40~1.50",color:C.amber,star:"★"},
+                  {tier:"4순위",label:"정배 1.20~1.30",range:"플핸 1.55~1.75",color:C.muted,star:"△ (추가 신호 필수)"},
+                ].map((s,i)=>(
+                  <div key={i} style={{display:"grid",gridTemplateColumns:"55px 1fr 1fr 110px",gap:10,padding:"6px 0",borderBottom:i<3?`1px solid ${C.border}`:"none",alignItems:"center"}}>
+                    <div style={{fontSize:11,fontWeight:800,color:s.color}}>{s.tier}</div>
+                    <div style={{fontSize:11,color:C.text,fontFamily:"monospace"}}>{s.label}</div>
+                    <div style={{fontSize:11,color:C.text,fontFamily:"monospace"}}>{s.range}</div>
+                    <div style={{fontSize:10,color:s.color,textAlign:"right"}}>{s.star}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* 5) 1.5 vs 2.5 플핸 분업 */}
+              <div style={{background:C.bg3,border:`1px solid ${C.orange}55`,borderRadius:10,padding:16}}>
+                <div style={{fontSize:14,fontWeight:800,color:C.orange,marginBottom:10}}>⚽ 1.5 vs 2.5 플핸 분업 가이드</div>
+                <table style={{width:"100%",fontSize:11,borderCollapse:"collapse"}}>
+                  <thead>
+                    <tr style={{borderBottom:`1px solid ${C.border}`}}>
+                      <th style={{textAlign:"left",padding:"6px 8px",color:C.muted,fontWeight:700}}>정배 범위</th>
+                      <th style={{textAlign:"left",padding:"6px 8px",color:C.muted,fontWeight:700}}>권장 전략</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[
+                      {range:"1.20 ~ 1.30",pick:"2.5 플핸 only",color:C.amber},
+                      {range:"1.30 ~ 1.45",pick:"2.5 플핸 권장",color:C.amber},
+                      {range:"1.45 ~ 1.65",pick:"선택 (배당 비교)",color:C.purple},
+                      {range:"1.65 ~ 2.00",pick:"1.5 플핸 권장",color:C.green},
+                      {range:"2.00 +",pick:"1.5 플핸 only",color:C.green},
+                    ].map((r,i)=>(
+                      <tr key={i} style={{borderBottom:i<4?`1px solid ${C.border}`:"none"}}>
+                        <td style={{padding:"6px 8px",fontFamily:"monospace",color:C.text}}>{r.range}</td>
+                        <td style={{padding:"6px 8px",fontWeight:700,color:r.color}}>{r.pick}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* 6) 2.5 언더 */}
+              <div style={{background:C.bg3,border:`1px solid #7ac4ff55`,borderRadius:10,padding:16}}>
+                <div style={{fontSize:14,fontWeight:800,color:"#7ac4ff",marginBottom:4}}>⚽ 2.5 언더</div>
+                <div style={{fontSize:11,color:C.muted,marginBottom:10}}>조건: 정배 1.60~1.80 + 양득 NO 배당이 정배</div>
+                {[
+                  {tier:"1순위",label:"2.5 언더",range:"1.65 ~ 1.85",color:C.green,star:"★★"},
+                  {tier:"2순위",label:"2.5 언더",range:"1.45 ~ 1.65",color:C.amber,star:"★"},
+                ].map((s,i)=>(
+                  <div key={i} style={{display:"grid",gridTemplateColumns:"55px 1fr 100px 30px",gap:10,padding:"6px 0",borderBottom:i<1?`1px solid ${C.border}`:"none",alignItems:"center"}}>
+                    <div style={{fontSize:11,fontWeight:800,color:s.color}}>{s.tier}</div>
+                    <div style={{fontSize:12,color:C.text}}>{s.label}</div>
+                    <div style={{fontSize:12,color:C.text,fontWeight:700,fontFamily:"monospace"}}>{s.range}</div>
+                    <div style={{fontSize:10,color:s.color,textAlign:"right"}}>{s.star}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* 7) 2.5 오버 */}
+              <div style={{background:C.bg3,border:`1px solid #e05a9a55`,borderRadius:10,padding:16}}>
+                <div style={{fontSize:14,fontWeight:800,color:"#e05a9a",marginBottom:4}}>⚽ 2.5 오버</div>
+                <div style={{fontSize:11,color:C.muted,marginBottom:10}}>조건: BTTS(양팀득점) 1.70↓ + 정배 1.60↑</div>
+                {[
+                  {tier:"1순위",label:"2.5 오버",range:"1.45 ~ 1.60",color:C.green,star:"★★"},
+                  {tier:"2순위",label:"2.5 오버",range:"1.60 ~ 1.75",color:C.amber,star:"★"},
+                ].map((s,i)=>(
+                  <div key={i} style={{display:"grid",gridTemplateColumns:"55px 1fr 100px 30px",gap:10,padding:"6px 0",borderBottom:i<1?`1px solid ${C.border}`:"none",alignItems:"center"}}>
+                    <div style={{fontSize:11,fontWeight:800,color:s.color}}>{s.tier}</div>
+                    <div style={{fontSize:12,color:C.text}}>{s.label}</div>
+                    <div style={{fontSize:12,color:C.text,fontWeight:700,fontFamily:"monospace"}}>{s.range}</div>
+                    <div style={{fontSize:10,color:s.color,textAlign:"right"}}>{s.star}</div>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
-          {stratCat==="농구"&&(<div style={{background:C.bg3,border:`1px solid ${C.purple}33`,borderRadius:10,padding:16}}><div style={{fontSize:14,fontWeight:800,color:C.purple,marginBottom:10}}>🏀 농구 전략</div><div style={{fontSize:12,color:C.text}}>• 5.5 ~ 29.5 플핸 → 플핸 베팅</div><div style={{fontSize:12,color:C.text}}>• 30.5 이상 → 마핸 베팅</div></div>)}
-          {stratCat==="야구"&&(<div style={{background:C.bg3,border:`1px solid ${C.red}33`,borderRadius:10,padding:16}}><div style={{fontSize:14,fontWeight:800,color:C.red,marginBottom:8}}>⚾ 야구 전략</div><div style={{fontSize:12,color:C.text}}>• 무지성 역배 / 언오버 테스트 중</div></div>)}
+
+          {/* 🏀 농구 전략 */}
+          {stratCat==="농구"&&(
+            <div style={{display:"flex",flexDirection:"column",gap:14}}>
+
+              {/* 핵심 원칙 */}
+              <div style={{background:C.bg3,border:`1px solid ${C.purple}55`,borderRadius:10,padding:16}}>
+                <div style={{fontSize:14,fontWeight:800,color:C.purple,marginBottom:8}}>🏀 농구 핸디캡 전략 (전세계 공통)</div>
+                <div style={{fontSize:11,color:C.muted,marginBottom:10,lineHeight:1.5}}>
+                  핵심 논리: 작은~중간 라인은 강팀 실력 차 누적 효과 / 큰 라인은 가비지타임 효과
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+                  <div style={{background:`${C.red}11`,border:`1px solid ${C.red}55`,borderRadius:7,padding:10,textAlign:"center"}}>
+                    <div style={{fontSize:11,color:C.red,fontWeight:800,marginBottom:4}}>2.5 ~ 9.5</div>
+                    <div style={{fontSize:18,fontWeight:900,color:C.red}}>마핸</div>
+                    <div style={{fontSize:9,color:C.muted,marginTop:3}}>강팀이 점수 차 벌림</div>
+                  </div>
+                  <div style={{background:`${C.green}11`,border:`1px solid ${C.green}55`,borderRadius:7,padding:10,textAlign:"center"}}>
+                    <div style={{fontSize:11,color:C.green,fontWeight:800,marginBottom:4}}>10.5 ~ 14.5</div>
+                    <div style={{fontSize:18,fontWeight:900,color:C.green}}>플핸</div>
+                    <div style={{fontSize:9,color:C.muted,marginTop:3}}>가비지타임 효과</div>
+                  </div>
+                  <div style={{background:`${C.muted}11`,border:`1px solid ${C.muted}55`,borderRadius:7,padding:10,textAlign:"center"}}>
+                    <div style={{fontSize:11,color:C.muted,fontWeight:800,marginBottom:4}}>15.5 +</div>
+                    <div style={{fontSize:18,fontWeight:900,color:C.muted}}>회피</div>
+                    <div style={{fontSize:9,color:C.muted,marginTop:3}}>표본 부족·변동성↑</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* 라인별 상세 */}
+              <div style={{background:C.bg3,border:`1px solid ${C.amber}55`,borderRadius:10,padding:16}}>
+                <div style={{fontSize:14,fontWeight:800,color:C.amber,marginBottom:10}}>🏀 라인별 상세 가이드</div>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(80px, 1fr))",gap:6}}>
+                  {[
+                    {line:"2.5",pick:"마핸",color:C.red},
+                    {line:"3.5",pick:"마핸",color:C.red},
+                    {line:"4.5",pick:"마핸",color:C.red},
+                    {line:"5.5",pick:"마핸",color:C.red},
+                    {line:"6.5",pick:"마핸",color:C.red},
+                    {line:"7.5",pick:"마핸",color:C.red},
+                    {line:"8.5",pick:"마핸",color:C.red},
+                    {line:"9.5",pick:"마핸 ★",color:C.red,strong:true},
+                    {line:"10.5",pick:"플핸",color:C.green},
+                    {line:"11.5",pick:"플핸",color:C.green},
+                    {line:"12.5",pick:"플핸",color:C.green},
+                    {line:"13.5",pick:"플핸",color:C.green},
+                    {line:"14.5",pick:"플핸",color:C.green},
+                  ].map(s=>(
+                    <div key={s.line} style={{
+                      background:C.bg2,
+                      border:`1.5px solid ${s.color}${s.strong?"":"55"}`,
+                      borderRadius:7,
+                      padding:"8px 6px",
+                      textAlign:"center",
+                    }}>
+                      <div style={{fontSize:13,fontWeight:800,color:C.text,fontFamily:"monospace"}}>{s.line}</div>
+                      <div style={{fontSize:11,fontWeight:s.strong?900:700,color:s.color,marginTop:3}}>{s.pick}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* 추가 노트 */}
+              <div style={{background:C.bg3,border:`1px solid ${C.teal}55`,borderRadius:10,padding:16}}>
+                <div style={{fontSize:14,fontWeight:800,color:C.teal,marginBottom:8}}>💡 추가 참고</div>
+                <div style={{fontSize:11,color:C.text,lineHeight:1.7}}>
+                  • <strong style={{color:C.amber}}>9.5 마핸</strong>은 NBA 데이터 기준 가장 강한 자리 (ATS 55%+)<br/>
+                  • <strong style={{color:C.muted}}>3.5는 키 넘버(3점)</strong> 영향 큼 — 변동성 주의<br/>
+                  • <strong style={{color:C.red}}>15.5 이상</strong>은 표본 부족 + 변동성 큼 → 자리 잡고 단계적 추가 검토<br/>
+                  • 정수 라인(3, 5, 7, 9 등) 푸시 위험 → 0.5 라인 우선<br/>
+                  • <strong style={{color:C.purple}}>잡리그(KBL·CBA)</strong>는 라인 비효율로 큰 라인 플핸 가치 있을 수 있음
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ⚾ 야구 전략 */}
+          {stratCat==="야구"&&(
+            <div style={{display:"flex",flexDirection:"column",gap:14}}>
+              <div style={{background:C.bg3,border:`1px solid ${C.red}55`,borderRadius:10,padding:16}}>
+                <div style={{fontSize:14,fontWeight:800,color:C.red,marginBottom:8}}>⚾ 야구 역배 (언더독)</div>
+                <div style={{fontSize:11,color:C.muted,marginBottom:10,lineHeight:1.5}}>
+                  핵심 논리: 야구는 고변동성 종목 → 언더독 가치 큼. 선발 투수·구장 변수로 라인 비효율 발생.
+                </div>
+                <div style={{background:`${C.red}11`,border:`1px solid ${C.red}55`,borderRadius:7,padding:14}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                    <div style={{fontSize:13,fontWeight:800,color:C.red}}>📌 베팅 기준</div>
+                    <div style={{fontSize:18,fontWeight:900,color:C.amber,fontFamily:"monospace"}}>2.00 ~ 2.99</div>
+                  </div>
+                  <div style={{fontSize:11,color:C.text,lineHeight:1.6}}>
+                    • 배당 범위: <strong style={{color:C.amber}}>2.00 ~ 2.99 역배만</strong><br/>
+                    • 언오버 라인별 역배 겹칠 경우 → <strong style={{color:C.green}}>낮은 역배 선택</strong><br/>
+                    • 손익분기점: 배당별로 다름 (2.0 ≈ 50% / 2.5 ≈ 40% / 2.9 ≈ 35%)
+                  </div>
+                </div>
+              </div>
+
+              <div style={{background:C.bg3,border:`1px solid ${C.purple}33`,borderRadius:10,padding:16}}>
+                <div style={{fontSize:14,fontWeight:800,color:C.purple,marginBottom:8}}>💡 검증 포인트</div>
+                <div style={{fontSize:11,color:C.text,lineHeight:1.7}}>
+                  • <strong style={{color:C.amber}}>배당별 ROI 추적</strong> — 2.0~2.3 / 2.4~2.6 / 2.7~2.9 구간별 적중률 비교<br/>
+                  • <strong style={{color:C.green}}>리그별 분리</strong> — MLB · KBO · NPB 어디가 강한지<br/>
+                  • <strong style={{color:C.teal}}>오버/언더 vs 승패</strong> — 언오버 동시 노출 시 어느 쪽이 더 강한지
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 🎮 E스포츠 전략 */}
           {stratCat==="E스포츠"&&(
             <div>
               <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:12}}>
