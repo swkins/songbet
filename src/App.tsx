@@ -3367,6 +3367,9 @@ function AppMain() {
   //     3) "무" 또는 "draw" → 무승부
   //     4) "오버"/"over" → 오버,  "언더"/"under" → 언더
   //     5) 어느 것도 아니면 → 기타 (이 경우 거의 발생 안 해야 정상)
+  //  ★★ 사용자 피드백 (재): 여전히 다 "기타"로 빠짐
+  //     원인: 실제 베팅 옵션은 "맨체스터유나이티드 (-1.5)" 처럼 팀명으로 시작하는 경우가 많음
+  //     해결: bet 객체 자체를 같이 받아서 bet.homeTeam/awayTeam과 옵션 텍스트를 비교 → 홈/원정 판별
   const _extractFootballNum = (bo:string):number=>{
     // 문자열에서 첫 숫자(소수 포함, 부호 포함) 추출
     const m = bo.match(/[+-]?\d+(?:\.\d+)?/);
@@ -3380,62 +3383,99 @@ function AppMain() {
     if (n < 2) return "1.5";
     return "2.5";
   };
-  const footballOptMatchers: {opt:string, match:(bo:string)=>boolean}[] = [
-    // 홈 핸디캡 0.5 — 홈승/홈/홈 0/홈 0.5 + 홈 + 숫자값 < 1
-    {opt:"홈 0.5",   match:(bo)=>{
-      const s = (bo||"").trim().toLowerCase();
-      if (!/^(홈|home)/.test(s)) return false;
-      // 숫자 없는 "홈", "홈승", "home win" → 0.5로
-      if (!/\d/.test(s)) return true;
-      return _classifyHomeAwayLine(_extractFootballNum(s)) === "0.5";
+  // 옵션 텍스트(bo)와 베팅(bet)을 받아 홈/원정 판별
+  //   "홈"/"home" 으로 시작 → 홈
+  //   "원정"/"away" 으로 시작 → 원정
+  //   bet.homeTeam이 옵션에 포함 → 홈
+  //   bet.awayTeam이 옵션에 포함 → 원정
+  //   부분 일치(첫 단어) 폴백
+  // 무승부/오버/언더는 false 반환 (홈/원정 분류 대상 아님)
+  const _classifyHomeAway = (bo:string, bet:Bet):"홈"|"원정"|null => {
+    const s = (bo||"").trim().toLowerCase();
+    // 명시적 키워드 우선
+    if (/^(홈|home)/.test(s)) return "홈";
+    if (/^(원정|away)/.test(s)) return "원정";
+    // 팀명 매칭 (옵션 텍스트에 팀명이 들어있으면)
+    const optBeforeParen = bo.split("(")[0].trim();  // "(" 앞부분만
+    const ht = (bet.homeTeam||"").trim();
+    const at = (bet.awayTeam||"").trim();
+    if (ht && optBeforeParen.includes(ht)) return "홈";
+    if (at && optBeforeParen.includes(at)) return "원정";
+    // 부분 매칭 폴백 — 팀명 첫 단어
+    if (ht) {
+      const hWord = ht.split(/\s+/)[0];
+      if (hWord && hWord.length>=2 && optBeforeParen.toLowerCase().includes(hWord.toLowerCase())) return "홈";
+    }
+    if (at) {
+      const aWord = at.split(/\s+/)[0];
+      if (aWord && aWord.length>=2 && optBeforeParen.toLowerCase().includes(aWord.toLowerCase())) return "원정";
+    }
+    return null;
+  };
+  // 매처: 옵션 텍스트(bo)와 베팅(bet)을 받아 boolean 반환
+  const footballOptMatchers: {opt:string, match:(bo:string, bet:Bet)=>boolean}[] = [
+    // 홈 핸디캡 0.5 — 홈으로 분류 + 숫자값 < 1 (또는 숫자 없음)
+    {opt:"홈 0.5", match:(bo,bet)=>{
+      if (_classifyHomeAway(bo,bet) !== "홈") return false;
+      // 오버/언더가 옵션에 같이 있으면 핸디캡 아님 (제외)
+      const sl = (bo||"").toLowerCase();
+      if (sl.includes("오버")||sl.includes("under")||sl.includes("언더")||sl.includes("over")) return false;
+      if (!/\d/.test(bo)) return true;  // 숫자 없는 "홈"/"홈승" → 0.5
+      return _classifyHomeAwayLine(_extractFootballNum(bo)) === "0.5";
     }},
-    {opt:"홈 1.5", match:(bo)=>{
-      const s = (bo||"").trim().toLowerCase();
-      if (!/^(홈|home)/.test(s)) return false;
-      if (!/\d/.test(s)) return false;
-      return _classifyHomeAwayLine(_extractFootballNum(s)) === "1.5";
+    {opt:"홈 1.5", match:(bo,bet)=>{
+      if (_classifyHomeAway(bo,bet) !== "홈") return false;
+      const sl = (bo||"").toLowerCase();
+      if (sl.includes("오버")||sl.includes("under")||sl.includes("언더")||sl.includes("over")) return false;
+      if (!/\d/.test(bo)) return false;
+      return _classifyHomeAwayLine(_extractFootballNum(bo)) === "1.5";
     }},
-    {opt:"홈 2.5", match:(bo)=>{
-      const s = (bo||"").trim().toLowerCase();
-      if (!/^(홈|home)/.test(s)) return false;
-      if (!/\d/.test(s)) return false;
-      return _classifyHomeAwayLine(_extractFootballNum(s)) === "2.5";
+    {opt:"홈 2.5", match:(bo,bet)=>{
+      if (_classifyHomeAway(bo,bet) !== "홈") return false;
+      const sl = (bo||"").toLowerCase();
+      if (sl.includes("오버")||sl.includes("under")||sl.includes("언더")||sl.includes("over")) return false;
+      if (!/\d/.test(bo)) return false;
+      return _classifyHomeAwayLine(_extractFootballNum(bo)) === "2.5";
     }},
-    {opt:"원정 0.5", match:(bo)=>{
-      const s = (bo||"").trim().toLowerCase();
-      if (!/^(원정|away)/.test(s)) return false;
-      if (!/\d/.test(s)) return true;
-      return _classifyHomeAwayLine(_extractFootballNum(s)) === "0.5";
+    {opt:"원정 0.5", match:(bo,bet)=>{
+      if (_classifyHomeAway(bo,bet) !== "원정") return false;
+      const sl = (bo||"").toLowerCase();
+      if (sl.includes("오버")||sl.includes("under")||sl.includes("언더")||sl.includes("over")) return false;
+      if (!/\d/.test(bo)) return true;
+      return _classifyHomeAwayLine(_extractFootballNum(bo)) === "0.5";
     }},
-    {opt:"원정 1.5", match:(bo)=>{
-      const s = (bo||"").trim().toLowerCase();
-      if (!/^(원정|away)/.test(s)) return false;
-      if (!/\d/.test(s)) return false;
-      return _classifyHomeAwayLine(_extractFootballNum(s)) === "1.5";
+    {opt:"원정 1.5", match:(bo,bet)=>{
+      if (_classifyHomeAway(bo,bet) !== "원정") return false;
+      const sl = (bo||"").toLowerCase();
+      if (sl.includes("오버")||sl.includes("under")||sl.includes("언더")||sl.includes("over")) return false;
+      if (!/\d/.test(bo)) return false;
+      return _classifyHomeAwayLine(_extractFootballNum(bo)) === "1.5";
     }},
-    {opt:"원정 2.5", match:(bo)=>{
-      const s = (bo||"").trim().toLowerCase();
-      if (!/^(원정|away)/.test(s)) return false;
-      if (!/\d/.test(s)) return false;
-      return _classifyHomeAwayLine(_extractFootballNum(s)) === "2.5";
+    {opt:"원정 2.5", match:(bo,bet)=>{
+      if (_classifyHomeAway(bo,bet) !== "원정") return false;
+      const sl = (bo||"").toLowerCase();
+      if (sl.includes("오버")||sl.includes("under")||sl.includes("언더")||sl.includes("over")) return false;
+      if (!/\d/.test(bo)) return false;
+      return _classifyHomeAwayLine(_extractFootballNum(bo)) === "2.5";
     }},
-    {opt:"무승부",   match:(bo)=>{
+    {opt:"무승부", match:(bo)=>{
       const s = (bo||"").trim().toLowerCase();
       return s==="무승부"||s==="무"||s==="x"||s==="draw"||/무$/.test(s);
     }},
-    {opt:"오버",     match:(bo)=>{
+    {opt:"오버", match:(bo)=>{
       const s = (bo||"").toLowerCase();
       return s.includes("오버") || s.includes("over");
     }},
-    {opt:"언더",     match:(bo)=>{
+    {opt:"언더", match:(bo)=>{
       const s = (bo||"").toLowerCase();
       return s.includes("언더") || s.includes("under");
     }},
-    // 기타: 위 어디에도 안 맞는 것 (디버깅용)
-    {opt:"기타",     match:(bo)=>{
+    // 기타: 위 어디에도 안 맞는 것 (디버깅용 — 정상 동작 시 거의 비어있어야 함)
+    {opt:"기타", match:(bo,bet)=>{
       const s = (bo||"").trim().toLowerCase();
       if (!s) return false;
-      if (/^(홈|home|원정|away)/.test(s)) return false;
+      // 홈/원정으로 분류된다면 기타 아님
+      if (_classifyHomeAway(bo,bet) !== null) return false;
       if (s==="무승부"||s==="무"||s==="x"||s==="draw"||/무$/.test(s)) return false;
       if (s.includes("오버")||s.includes("over")) return false;
       if (s.includes("언더")||s.includes("under")) return false;
@@ -3444,7 +3484,7 @@ function AppMain() {
   ];
   const footballOptStats = useMemo(()=>{
     return footballOptMatchers.map(({opt, match})=>{
-      const bs = footballDone.filter(b=>match(b.betOption));
+      const bs = footballDone.filter(b=>match(b.betOption, b));
       const profit = bs.reduce((s,b)=>s+(b.profit??0),0);
       const bet = bs.reduce((s,b)=>s+b.amount,0);
       const wins = bs.filter(b=>b.result==="승").length;
@@ -3542,7 +3582,7 @@ function AppMain() {
       const profitAll = bsAll.reduce((s,b)=>s+(b.profit??0),0);
       const betAll = bsAll.reduce((s,b)=>s+b.amount,0);
       const optStats = footballOptMatchers.map(({opt, match})=>{
-        const bs = bsAll.filter(b=>match(b.betOption));
+        const bs = bsAll.filter(b=>match(b.betOption, b));
         const profit = bs.reduce((s,b)=>s+(b.profit??0),0);
         const bet = bs.reduce((s,b)=>s+b.amount,0);
         const wins = bs.filter(b=>b.result==="승").length;
@@ -3713,7 +3753,7 @@ function AppMain() {
     const lines = ["홈 0.5","홈 1.5","홈 2.5","원정 0.5","원정 1.5","원정 2.5"];
     return lines.map(lineOpt=>{
       const matcher = footballOptMatchers.find(m=>m.opt===lineOpt);
-      const bs = matcher ? footballDone.filter(b=>matcher.match(b.betOption)) : [];
+      const bs = matcher ? footballDone.filter(b=>matcher.match(b.betOption, b)) : [];
       const wins = bs.filter(b=>b.result==="승").length;
       const losses = bs.filter(b=>b.result==="패").length;
       const profit = bs.reduce((s,b)=>s+(b.profit??0),0);
@@ -7201,6 +7241,45 @@ function AppMain() {
                           </tbody>
                         </table>
                       </div>
+
+                      {/* 🔍 기타 분류 디버그 — 어떤 옵션이 자동 분류 안 됐는지 확인용
+                          홈/원정 0.5/1.5/2.5/무/오버/언더 어디에도 안 잡힌 옵션 목록을 보여줌
+                          (정상 동작하면 비어있어야 함) */}
+                      {(()=>{
+                        const otherMatcher = footballOptMatchers.find(m=>m.opt==="기타");
+                        if (!otherMatcher) return null;
+                        const otherBets = footballDone.filter(b=>otherMatcher.match(b.betOption, b));
+                        if (otherBets.length === 0) return null;
+                        // betOption + homeTeam vs awayTeam 별로 그룹화
+                        const groupMap = new Map<string,{count:number,sample:Bet}>();
+                        for(const b of otherBets){
+                          const key = `${b.betOption}||${b.homeTeam||"-"} vs ${b.awayTeam||"-"}`;
+                          const ex = groupMap.get(key);
+                          if(ex) ex.count++; else groupMap.set(key,{count:1,sample:b});
+                        }
+                        const groups = [...groupMap.entries()].sort((a,b)=>b[1].count-a[1].count);
+                        return (
+                          <div style={{background:`${C.amber}11`,border:`1px solid ${C.amber}55`,borderRadius:7,padding:9,marginTop:8}}>
+                            <div style={{fontSize:13,fontWeight:800,color:C.amber,marginBottom:6}}>🔍 "기타"로 분류된 옵션 — 패턴 확인용 ({otherBets.length}건, {groups.length}종)</div>
+                            <div style={{fontSize:10,color:C.muted,marginBottom:7,padding:"4px 7px",background:C.bg,borderRadius:4,lineHeight:1.5}}>
+                              💡 아래 항목이 0건이어야 정상. 항목이 있다면 그 옵션 텍스트가 매처 규칙에 안 잡히는 것 — 패턴을 알려주시면 매처 추가 가능.<br/>
+                              ※ 매처는 옵션 텍스트가 "홈"/"home"/"원정"/"away"로 시작하거나, 옵션에 베팅의 홈팀/원정팀 이름이 포함되어 있을 때 자동 분류함.
+                            </div>
+                            <div style={{display:"flex",flexDirection:"column",gap:3,maxHeight:200,overflowY:"auto"}}>
+                              {groups.map(([key,info],i)=>{
+                                const [bo,teams] = key.split("||");
+                                return (
+                                  <div key={i} style={{display:"flex",alignItems:"center",gap:8,padding:"4px 8px",background:C.bg2,borderRadius:4,fontSize:11}}>
+                                    <span style={{color:C.amber,fontWeight:800,minWidth:24,textAlign:"center"}}>{info.count}</span>
+                                    <span style={{flex:1,color:C.text,fontWeight:700,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{bo}</span>
+                                    <span style={{color:C.muted,fontSize:10,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:200}}>({teams})</span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })()}
 
                   {/* 리그×옵션 — 항상 표시 */}
                   {(
