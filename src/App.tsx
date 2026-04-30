@@ -5954,7 +5954,7 @@ function AppMain() {
                             return (
                               <div key={country} style={{marginBottom:2}}>
                                 <div style={{display:"flex",gap:2,alignItems:"stretch"}}>
-                                  <button onClick={()=>{setStExpandedCountries(p=>({...p,[key]:!p[key]}));setStSelSport(sport);setStSelCountry(country);}}
+                                  <button onClick={()=>{setStExpandedCountries(p=>({[key]:!p[key]}));setStSelSport(sport);setStSelCountry(country);}}
                                     style={{flex:1,display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 10px",textAlign:"left",borderRadius:5,cursor:"pointer",border:isCountrySel?`1px solid ${C.teal}`:"1px solid transparent",background:isCountrySel?`${C.teal}22`:"transparent",color:isCountrySel?C.teal:C.muted,fontSize:13,fontWeight:isCountrySel?700:500,minWidth:0}}>
                                     <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{cOpen?"▼":"▶"} {krCountry(country)} <span style={{fontSize:10,color:C.dim,fontWeight:400}}>({cGames})</span></span>
                                   </button>
@@ -6068,7 +6068,7 @@ function AppMain() {
                             return (
                               <div key={country} style={{marginBottom:2}}>
                                 <div style={{display:"flex",gap:2,alignItems:"stretch"}}>
-                                  <button onClick={()=>{setStExpandedCountries(p=>({...p,[key]:!p[key]}));setStSelSport(sport);setStSelCountry(country);}}
+                                  <button onClick={()=>{setStExpandedCountries(p=>({[key]:!p[key]}));setStSelSport(sport);setStSelCountry(country);}}
                                     style={{flex:1,display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 10px",textAlign:"left",borderRadius:5,cursor:"pointer",border:isCountrySel?`1px solid ${C.purple}`:"1px solid transparent",background:isCountrySel?`${C.purple}22`:"transparent",color:isCountrySel?C.purple:C.muted,fontSize:13,fontWeight:isCountrySel?700:500,minWidth:0}}>
                                     <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{cOpen?"▼":"▶"} {krCountry(country)} <span style={{fontSize:10,color:C.dim,fontWeight:400}}>({cGames})</span></span>
                                   </button>
