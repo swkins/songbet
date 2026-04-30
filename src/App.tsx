@@ -4128,7 +4128,7 @@ function AppMain() {
   // [대시보드] 종목 전체 옵션별 통계 (한눈에)
   //   축구: 홈/원정 0.5/1.5
   //   야구: 승패/오버/언더
-  //   농구: 5단위 그룹 (플/마 통합)
+  //   농구: 마핸(2.5~9.5) / 플핸(10.5~14.5)  ★ 통계 탭의 신규 전략과 동일
   // 각 옵션별: 베팅수, 적중수, 실패수, 적중률, 수익률
   const optionAllStats = useMemo(()=>{
     const football = footballHandicapLineStats.map(s=>({
@@ -4151,12 +4151,13 @@ function AppMain() {
       roi: s.roi,
       profit: s.profit,
     }));
+    // ★ 농구 — 통계 탭의 권장 전략과 일치하도록 변경 (마핸/플핸 두 그룹)
+    //   - 마핸: 2.5~9.5
+    //   - 플핸: 10.5~14.5
+    //   기존 5.5~29.5 5단위 그룹은 폐기 (통계 탭과 불일치)
     const basketballGroups = [
-      {label:"5.5~9.5",   from:5.5,  to:9.5},
-      {label:"10.5~14.5", from:10.5, to:14.5},
-      {label:"15.5~19.5", from:15.5, to:19.5},
-      {label:"20.5~24.5", from:20.5, to:24.5},
-      {label:"25.5~29.5", from:25.5, to:29.5},
+      {label:"마핸 (2.5~9.5)",  from:2.5,  to:9.5},
+      {label:"플핸 (10.5~14.5)", from:10.5, to:14.5},
     ];
     const basketball = basketballGroups.map(g=>{
       const bs = basketballDone.filter(b=>{
@@ -9364,7 +9365,7 @@ function AppMain() {
                 ⚠️ 사용자 요청: 포인트 교환 박스 제거하고 그 자리에 종목 전체 옵션별 수익 표시
                 축구: 홈/원정 0.5/1.5
                 야구: 승패/오버/언더
-                농구: 5단위 그룹 (5.5~9.5 / 10.5~14.5 / 15.5~19.5 / 20.5~24.5 / 25.5~29.5)
+                농구: 마핸 (2.5~9.5) / 플핸 (10.5~14.5)  ★ 통계 탭의 신규 전략과 일치
             */}
             <div style={{background:C.bg3,border:`1px solid ${C.amber}44`,borderRadius:12,padding:14}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
