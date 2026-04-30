@@ -1016,6 +1016,9 @@ function AppMain() {
   const [stShowFinished,setStShowFinished]=useState<boolean>(false);
   // ★ 종목별 "숨긴 국가/리그도 표시" 토글 — true면 베팅 가능 경기 0개라도 표시
   const [stShowHidden, setStShowHidden] = useState<Record<string, boolean>>({});
+  // ★ 종목별 "숨김 처리된(finished=true) 수동 경기 보기" 토글
+  //   사용자 요청: 결과 입력으로 finished 된 경기를 7일 자동 삭제 전까지 다시 볼 수 있게
+  const [stShowFinishedManual, setStShowFinishedManual] = useState<Record<string, boolean>>({});
   const [stFetchedAt,setStFetchedAt]=useState<number|null>(null);
 
   const loadSportsTestData = useCallback(async()=>{
@@ -2432,7 +2435,10 @@ function AppMain() {
           // 비동기로 백그라운드 실행 — 앱 로딩 차단하지 않음
           (async()=>{
             const fxDeleted = await db.purgeOldFixtures(7);
-            const mgDeleted = await db.purgeOldManualGames(30);
+            // ★ 수동 경기 자동 삭제 기간: 30일 → 7일 (사용자 요청)
+            //   finished=true 로 처리된 경기는 화면에서 숨김 처리되며,
+            //   7일 경과 후 DB 자동 삭제. "숨김 경기 보기" 토글로 7일 이내엔 다시 볼 수 있음.
+            const mgDeleted = await db.purgeOldManualGames(7);
             localStorage.setItem("bt_last_purge_date", todayStr);
             if (fxDeleted > 0 || mgDeleted > 0) {
               console.log(`[자동 정리] fixtures: ${fxDeleted}행 삭제, manual_games: ${mgDeleted}행 삭제`);
@@ -5750,9 +5756,11 @@ function AppMain() {
           ? stFixtures.filter(f => f.sport===stSelSport && String(f.league_id)===selApiId)
           : [];
         // 수동 경기 (LiveFixture 형태로 변환)
+        // 기본: finished=true 경기 숨김. 토글(stShowFinishedManual)이 켜져 있으면 finished 경기도 포함.
+        const showFinishedManualForSel = stSelSport ? !!stShowFinishedManual[stSelSport] : false;
         const manualFixtures: LiveFixture[] = (stSelSport && stSelCountry && stSelLeague)
           ? manualGames
-              .filter(g=>g.sportCat===selSportKr && g.country===stSelCountry && g.league===stSelLeague && !g.finished)
+              .filter(g=>g.sportCat===selSportKr && g.country===stSelCountry && g.league===stSelLeague && (showFinishedManualForSel || !g.finished))
               .map(g=>({
                 id: parseInt(g.id) || (g.createdAt % 100000000),
                 sport: stSelSport!,
@@ -5773,6 +5781,14 @@ function AppMain() {
           .sort((a,b)=>new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
         const todayGames = selectedFixtures.filter(f=>kstDateOf(f.start_time)===kstToday);
         const tomorrowGames = selectedFixtures.filter(f=>kstDateOf(f.start_time)===kstTomorrow);
+        // ★ 수동 경기 중 "오늘/내일" 어디에도 안 잡히는 것들 (어제 또는 그 이전 추가, 아직 미종료)
+        //   수동 경기의 start_time은 createdAt 기준이라 이틀 이상 된 e스포츠/장기전 등은 날짜 필터에서 누락됨.
+        //   사용자가 직접 등록한 미종료 경기는 항상 베팅 가능해야 하므로 별도 그룹으로 표시.
+        const manualOngoingGames = manualFixtures.filter(f=>{
+          if (isFinished(f.status_short)) return false;
+          const d = kstDateOf(f.start_time);
+          return d !== kstToday && d !== kstTomorrow;
+        });
         const selGame = stExpandedGameId ? selectedFixtures.find(g=>g.id===stExpandedGameId) : null;
 
         // 종목별 경기 수 (트리에 표시용) — 매핑된 사용자 리그 기준
@@ -5999,14 +6015,19 @@ function AppMain() {
 
                   // 트리 빌드 (buildSportTree와 동일하지만 sKr 직접 사용)
                   // ★ 사용자 정의 종목은 API 매핑 개념이 없음 → 등록된 모든 국가/리그 항상 표시
+                  const showFinManual = !!stShowFinishedManual[sport];
                   const countries = allCountriesForSport(sKr);
                   let totalGames = 0;
+                  let totalFinishedHidden = 0; // 토글 OFF 상태에서 숨겨진 finished 경기 수
                   const treeCountries = countries.map(country => {
                     const leagues = allLeaguesForCountry(sKr, country);
                     const lgItems = leagues.map(lg => {
-                      // 사용자 정의 종목은 API 매핑 없음 → manualGames만 카운트 (표시 여부와 무관)
-                      const games = manualGames.filter(g=>g.sportCat===sKr && g.country===country && g.league===lg && !g.finished).length;
+                      // manualGames 카운트: 토글 ON 이면 finished 도 포함, OFF 면 미종료만
+                      const allGames = manualGames.filter(g=>g.sportCat===sKr && g.country===country && g.league===lg);
+                      const finishedCnt = allGames.filter(g=>g.finished).length;
+                      const games = showFinManual ? allGames.length : (allGames.length - finishedCnt);
                       totalGames += games;
+                      if (!showFinManual) totalFinishedHidden += finishedCnt;
                       return { league: lg, apiId: "", games };
                     });
                     const cGames = lgItems.reduce((a,b)=>a+b.games,0);
@@ -6021,6 +6042,16 @@ function AppMain() {
                           <span><span style={{display:"inline-block",width:22,textAlign:"center"}}>{icon}</span>{sportName} <span style={{fontSize:11,color:C.dim,fontWeight:400}}>({totalGames})</span></span>
                           <span style={{fontSize:11,color:C.dim}}>{sportOpen?"▼":"▶"}</span>
                         </button>
+                        {/* ★ 숨김(종료된) 수동 경기 토글 — finished=true 경기가 1개 이상이거나 토글이 이미 ON 일 때만 표시
+                            ON 상태: 종료된 경기들도 회색으로 트리/리스트에 표시. 7일 자동 삭제 전까진 복원 가능. */}
+                        {(showFinManual || totalFinishedHidden > 0) && (
+                          <button onClick={(e)=>{e.stopPropagation();setStShowFinishedManual(p=>({...p,[sport]:!showFinManual}));}}
+                            title={showFinManual?"종료된 경기 다시 숨기기":`종료된 경기 ${totalFinishedHidden}개 보기 (7일 후 자동 삭제)`}
+                            style={{padding:"0 10px",borderRadius:5,border:`2px solid ${showFinManual?C.amber:C.border2}`,background:showFinManual?`${C.amber}22`:C.bg2,color:showFinManual?C.amber:C.muted,cursor:"pointer",fontSize:11,fontWeight:700,display:"flex",alignItems:"center",gap:3}}>
+                            <span>{showFinManual?"👁":"🙈"}</span>
+                            {!showFinManual && totalFinishedHidden > 0 && <span style={{fontSize:10}}>+{totalFinishedHidden}</span>}
+                          </button>
+                        )}
                         <button onClick={()=>setAddCountryModal({sport:sKr})} title={`${sportName}에 국가 추가`}
                           style={{padding:"0 14px",borderRadius:5,border:`2px solid ${C.purple}88`,background:`${C.purple}22`,color:C.purple,cursor:"pointer",fontSize:18,fontWeight:900}}>+</button>
                       </div>
@@ -6143,7 +6174,7 @@ function AppMain() {
                   </div>
                 ) : (
                   <>
-                    {todayGames.length > 0 && (()=>{
+                    {(todayGames.length > 0 || manualOngoingGames.length > 0) && (()=>{
                       // 오늘 경기를 두 그룹으로 분리: 종료(finished) vs 그 외(라이브/예정/연기)
                       // 종료된 경기는 기본적으로 접혀있고, 사용자가 헤더 클릭 시 펼쳐짐.
                       const todayActive = todayGames.filter(g=>!isFinished(g.status_short));
@@ -6185,11 +6216,27 @@ function AppMain() {
                       };
                       return (
                         <>
-                          <div style={{display:"flex",alignItems:"center",gap:8,margin:"4px 2px 8px",padding:"4px 8px",background:`${C.green}11`,borderRadius:5,border:`1px solid ${C.green}33`}}>
-                            <span style={{fontSize:11,fontWeight:900,color:C.green,letterSpacing:1}}>📅 오늘 ({kstToday})</span>
-                            <span style={{flex:1,height:1,background:`${C.green}44`}}/>
-                            <span style={{fontSize:10,fontWeight:700,color:C.green}}>{todayGames.length}경기</span>
-                          </div>
+                          {/* ★ 진행 중인 수동 경기 (오늘/내일 외 날짜에 등록된 미종료 수동 경기)
+                              사용자가 직접 등록한 경기인데 createdAt 이 오늘/내일이 아니면
+                              아래 todayGames/tomorrowGames 필터에 안 걸려서 사라지던 문제 — 별도 섹션으로 항상 표시 */}
+                          {manualOngoingGames.length > 0 && (
+                            <>
+                              <div style={{display:"flex",alignItems:"center",gap:8,margin:"4px 2px 8px",padding:"4px 8px",background:`${C.purple}11`,borderRadius:5,border:`1px solid ${C.purple}33`}}>
+                                <span style={{fontSize:11,fontWeight:900,color:C.purple,letterSpacing:1}}>📌 진행 중인 수동 경기</span>
+                                <span style={{flex:1,height:1,background:`${C.purple}44`}}/>
+                                <span style={{fontSize:10,fontWeight:700,color:C.purple}}>{manualOngoingGames.length}경기</span>
+                              </div>
+                              {manualOngoingGames.map(renderGameCard)}
+                            </>
+                          )}
+
+                          {todayGames.length > 0 && (
+                            <div style={{display:"flex",alignItems:"center",gap:8,margin:"4px 2px 8px",padding:"4px 8px",background:`${C.green}11`,borderRadius:5,border:`1px solid ${C.green}33`}}>
+                              <span style={{fontSize:11,fontWeight:900,color:C.green,letterSpacing:1}}>📅 오늘 ({kstToday})</span>
+                              <span style={{flex:1,height:1,background:`${C.green}44`}}/>
+                              <span style={{fontSize:10,fontWeight:700,color:C.green}}>{todayGames.length}경기</span>
+                            </div>
+                          )}
 
                           {/* 진행중/예정/연기 경기 */}
                           {todayActive.map(renderGameCard)}
@@ -6280,6 +6327,32 @@ function AppMain() {
                       </div>
                       <button onClick={()=>setStExpandedGameId(null)} title="닫기" style={{background:"transparent",border:`1px solid ${C.border}`,color:C.muted,padding:"5px 10px",borderRadius:5,cursor:"pointer",fontSize:12,marginLeft:10,flexShrink:0}}>✕</button>
                     </div>
+                    {/* ★ 종료된 수동 경기일 때 — 복원 버튼 노출 (숨김 보기 토글 ON 상태에서 펼친 경우)
+                        manualGames 에 매칭되는 finished 경기여야만 표시.
+                        복원 = finished:false 로 되돌려서 다시 활성 리스트로 노출. */}
+                    {(()=>{
+                      if (!finished) return null;
+                      // selGame.id 는 parseInt(g.id) 또는 createdAt%... 이라 manualGames id 와 직접 비교 불가.
+                      // home_team/away_team/league/country 로 매칭.
+                      const mg = manualGames.find(x =>
+                        x.homeTeam === g.home_team && x.awayTeam === g.away_team &&
+                        x.league === g.league_name && x.country === g.country &&
+                        x.finished
+                      );
+                      if (!mg) return null;
+                      return (
+                        <div style={{padding:"8px 18px",background:`${C.amber}11`,borderBottom:`1px solid ${C.amber}33`,display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,flexShrink:0}}>
+                          <span style={{fontSize:11,color:C.amber,fontWeight:700}}>🙈 종료 처리된 경기 · 7일 후 자동 삭제</span>
+                          <button onClick={()=>{
+                              if (!window.confirm("이 경기를 다시 활성 상태로 복원할까요?\n(스코어와 종료 표시가 해제됩니다)")) return;
+                              handleUnfinishGame(mg.id);
+                            }}
+                            style={{padding:"4px 12px",borderRadius:5,border:`1px solid ${C.amber}88`,background:`${C.amber}22`,color:C.amber,cursor:"pointer",fontSize:11,fontWeight:800}}>
+                            ↩ 복원
+                          </button>
+                        </div>
+                      );
+                    })()}
                     <div style={{flex:1,overflowY:"auto",padding:"16px 18px 22px",minHeight:0}}>
 
                       <div style={{marginBottom:16,padding:"14px 16px",background:C.bg2,borderRadius:8,border:`1px solid ${C.border}`}}>
