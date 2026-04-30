@@ -712,7 +712,7 @@ const EXTRA:Record<string,string[]> = {
 };
 
 const getOptGroups = (cat:string) => {
-  if(cat==="축구") return [{g:"홈",opts:["홈 0.5","홈 1.5"]},{g:"원정",opts:["원정 0.5","원정 1.5"]}];
+  if(cat==="축구") return [{g:"홈",opts:["홈 -0.5","홈 0.5","홈 1.5"]},{g:"원정",opts:["원정 -0.5","원정 0.5","원정 1.5"]}];
   if(cat==="야구") return [{g:"승패",opts:["정배","역배"]},{g:"오버",opts:Array.from({length:14},(_,i)=>`${4.5+i} 오버`)},{g:"언더",opts:Array.from({length:14},(_,i)=>`${4.5+i} 언더`)}];
   if(cat==="농구") return [{g:"마핸",opts:Array.from({length:8},(_,i)=>`${(2.5+i).toFixed(1)} 마핸`)},{g:"플핸",opts:Array.from({length:5},(_,i)=>`${(10.5+i).toFixed(1)} 플핸`)}];
   if(cat==="배구") return [{g:"승패",opts:["홈 승","원정 승"]},{g:"오버/언더",opts:["오버","언더"]}];
@@ -3543,13 +3543,20 @@ function AppMain() {
   //     원인: 실제 베팅 옵션은 "맨체스터유나이티드 (-1.5)" 처럼 팀명으로 시작하는 경우가 많음
   //     해결: bet 객체 자체를 같이 받아서 bet.homeTeam/awayTeam과 옵션 텍스트를 비교 → 홈/원정 판별
   const _extractFootballNum = (bo:string):number=>{
-    // 문자열에서 첫 숫자(소수 포함, 부호 포함) 추출
+    // 문자열에서 첫 숫자(소수 포함, 부호 포함) 추출 — 절댓값 (라인 크기 분류용)
     const m = bo.match(/[+-]?\d+(?:\.\d+)?/);
     if (!m) return 0;
     return Math.abs(parseFloat(m[0]));
   };
+  // ★ 음수 핸디 지원: 부호 그대로 추출 (강팀 마핸 -0.5 등 식별용)
+  //   "맨유 (-0.5)" → -0.5, "리버풀 (+0.5)" → +0.5, "홈 0.5" → 0.5 (부호 없으면 양수로 간주)
+  const _extractFootballNumSigned = (bo:string):number=>{
+    const m = bo.match(/[+-]?\d+(?:\.\d+)?/);
+    if (!m) return 0;
+    return parseFloat(m[0]);
+  };
   const _classifyHomeAwayLine = (n:number):"0.5"|"1.5"|"2.5"=>{
-    // 추출한 숫자값을 가장 가까운 핸디 라인으로 분류
+    // 추출한 숫자값(절댓값)을 가장 가까운 핸디 라인으로 분류
     // 0~1 미만 → 0.5, 1~2 미만 → 1.5, 2 이상 → 2.5
     if (n < 1) return "0.5";
     if (n < 2) return "1.5";
@@ -3587,14 +3594,27 @@ function AppMain() {
   // 매처: 옵션 텍스트(bo)와 베팅(bet)을 받아 boolean 반환
   // ※ 사용자 요청: 홈 2.5 / 원정 2.5 매처 삭제 — 통계에서 표시 안 됨
   //   과거에 2.5 핸디로 등록된 베팅이 있다면 "기타"로 분류되어 디버그 영역에서 확인 가능
+  // ★ 음수 핸디 (-0.5) 추가 — 강팀이 0.5골 차로 이겨야 적중하는 마핸
+  //   "맨유 (-0.5)" 처럼 부호로 구분. 양수 0.5 매처는 음수 값 배제.
   const footballOptMatchers: {opt:string, match:(bo:string, bet:Bet)=>boolean}[] = [
-    // 홈 핸디캡 0.5 — 홈으로 분류 + 숫자값 < 1 (또는 숫자 없음)
+    // 홈 마핸 -0.5 — 홈 + 부호 음수 + 절댓값 < 1
+    {opt:"홈 -0.5", match:(bo,bet)=>{
+      if (_classifyHomeAway(bo,bet) !== "홈") return false;
+      const sl = (bo||"").toLowerCase();
+      if (sl.includes("오버")||sl.includes("under")||sl.includes("언더")||sl.includes("over")) return false;
+      if (!/\d/.test(bo)) return false; // 숫자 없는 "홈"/"홈승" 은 마핸 아님
+      const signed = _extractFootballNumSigned(bo);
+      return signed < 0 && Math.abs(signed) < 1;
+    }},
+    // 홈 핸디캡 0.5 — 홈으로 분류 + 숫자값 < 1 (또는 숫자 없음) + 양수 (또는 부호 없음)
     {opt:"홈 0.5", match:(bo,bet)=>{
       if (_classifyHomeAway(bo,bet) !== "홈") return false;
       // 오버/언더가 옵션에 같이 있으면 핸디캡 아님 (제외)
       const sl = (bo||"").toLowerCase();
       if (sl.includes("오버")||sl.includes("under")||sl.includes("언더")||sl.includes("over")) return false;
       if (!/\d/.test(bo)) return true;  // 숫자 없는 "홈"/"홈승" → 0.5
+      const signed = _extractFootballNumSigned(bo);
+      if (signed < 0) return false; // 음수는 마핸이라 제외
       return _classifyHomeAwayLine(_extractFootballNum(bo)) === "0.5";
     }},
     {opt:"홈 1.5", match:(bo,bet)=>{
@@ -3604,11 +3624,22 @@ function AppMain() {
       if (!/\d/.test(bo)) return false;
       return _classifyHomeAwayLine(_extractFootballNum(bo)) === "1.5";
     }},
+    // 원정 마핸 -0.5
+    {opt:"원정 -0.5", match:(bo,bet)=>{
+      if (_classifyHomeAway(bo,bet) !== "원정") return false;
+      const sl = (bo||"").toLowerCase();
+      if (sl.includes("오버")||sl.includes("under")||sl.includes("언더")||sl.includes("over")) return false;
+      if (!/\d/.test(bo)) return false;
+      const signed = _extractFootballNumSigned(bo);
+      return signed < 0 && Math.abs(signed) < 1;
+    }},
     {opt:"원정 0.5", match:(bo,bet)=>{
       if (_classifyHomeAway(bo,bet) !== "원정") return false;
       const sl = (bo||"").toLowerCase();
       if (sl.includes("오버")||sl.includes("under")||sl.includes("언더")||sl.includes("over")) return false;
       if (!/\d/.test(bo)) return true;
+      const signed = _extractFootballNumSigned(bo);
+      if (signed < 0) return false;
       return _classifyHomeAwayLine(_extractFootballNum(bo)) === "0.5";
     }},
     {opt:"원정 1.5", match:(bo,bet)=>{
@@ -3911,11 +3942,11 @@ function AppMain() {
     });
   },[footballDone]);
 
-  // [축구] 핸디캡 라인별 (홈/원정 0.5/1.5) 통계 (요청 #10)
-  // 사용자 전략: 0.5/1.5 각각의 적중률/수익률을 알고 싶음.
-  // (옵션별 표에 이미 있긴 한데, 가독성 위해 핸디캡만 따로 4칸으로 강조)
+  // [축구] 핸디캡 라인별 (홈/원정 -0.5/0.5/1.5) 통계
+  // 사용자 전략: 각 라인의 적중률/수익률을 알고 싶음.
+  // ★ -0.5 (마핸) 추가 — 강팀이 0.5골 차로 이겨야 적중. +0.5 와는 의미 정반대.
   const footballHandicapLineStats = useMemo(()=>{
-    const lines = ["홈 0.5","홈 1.5","원정 0.5","원정 1.5"];
+    const lines = ["홈 -0.5","홈 0.5","홈 1.5","원정 -0.5","원정 0.5","원정 1.5"];
     return lines.map(lineOpt=>{
       const matcher = footballOptMatchers.find(m=>m.opt===lineOpt);
       const bs = matcher ? footballDone.filter(b=>matcher.match(b.betOption, b)) : [];
@@ -6397,7 +6428,7 @@ function AppMain() {
                         const ouLinesSoccer = [1.5,2.5,3.5];
                         const ouLinesBaseball = [4.5,5.5,6.5,7.5,8.5,9.5,10.5,11.5,12.5,13.5,14.5,15.5,16.5,17.5];
                         const ouLinesBasketball = [155.5,160.5,165.5,170.5,175.5,180.5,185.5,190.5,195.5,200.5,205.5,210.5,215.5,220.5];
-                        const handiLinesSoccer = [0.5,1.5];
+                        const handiLinesSoccer = [-0.5,0.5,1.5];
                         // 농구 신규 전략: 마핸 -2.5 ~ -9.5 (8개) / 플핸 +10.5 ~ +14.5 (5개)
                         const handiMinusBasketball = Array.from({length:8}, (_,i)=>2.5+i);   // 2.5,3.5,...,9.5 (마이너스)
                         const handiPlusBasketball  = Array.from({length:5}, (_,i)=>10.5+i);  // 10.5,11.5,...,14.5 (플러스)
@@ -7580,9 +7611,9 @@ function AppMain() {
                   <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(480px, 1fr))",gap:10,alignItems:"start"}}>
 
                   {/* 옵션별 표 — 핸디캡 라인 박스 + 옵션별 통계표 (각각 별도 grid 셀) */}
-                      {/* ── 핸디캡 라인 4칸 강조 ── grid 안에서 한 셀이므로 4칸 → 자동 fit */}
+                      {/* ── 핸디캡 라인 6칸 강조 ── grid 안에서 한 셀이므로 6칸 → 자동 fit */}
                       <div style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:7,padding:9}}>
-                        <div style={{fontSize:13,fontWeight:800,color:C.green,marginBottom:6}}>📐 핸디캡 라인별 한눈에 (홈/원정 0.5/1.5)</div>
+                        <div style={{fontSize:13,fontWeight:800,color:C.green,marginBottom:6}}>📐 핸디캡 라인별 한눈에 (홈/원정 -0.5/0.5/1.5)</div>
                         <div style={{fontSize:11,color:C.muted,marginBottom:7,padding:"5px 8px",background:C.bg,borderRadius:6,lineHeight:1.5}}>
                           💡 사용자 신규 전략:<br/>
                           • <strong style={{color:C.teal}}>0.5 플핸</strong>: 무배당 3.6↓ + 정배 배당대 / 1.55~1.95 추천<br/>
@@ -7796,17 +7827,19 @@ function AppMain() {
                           <thead>
                             <tr style={{borderBottom:`2px solid ${C.border2}`}}>
                               <th rowSpan={2} style={{textAlign:"left",padding:"5px 7px",color:C.muted,fontWeight:700,minWidth:90,verticalAlign:"middle",borderRight:`1px solid ${C.border}`}}>리그</th>
-                              <th colSpan={2} style={{textAlign:"center",padding:"3px 4px",color:C.green,fontWeight:700,fontSize:10,borderBottom:`1px solid ${C.border}`}}>🏠 홈 플핸 수익률</th>
-                              <th colSpan={2} style={{textAlign:"center",padding:"3px 4px",color:C.amber,fontWeight:700,fontSize:10,borderBottom:`1px solid ${C.border}`,borderLeft:`1px solid ${C.border}`}}>✈️ 원정 플핸 수익률</th>
+                              <th colSpan={3} style={{textAlign:"center",padding:"3px 4px",color:C.green,fontWeight:700,fontSize:10,borderBottom:`1px solid ${C.border}`}}>🏠 홈 핸디 수익률</th>
+                              <th colSpan={3} style={{textAlign:"center",padding:"3px 4px",color:C.amber,fontWeight:700,fontSize:10,borderBottom:`1px solid ${C.border}`,borderLeft:`1px solid ${C.border}`}}>✈️ 원정 핸디 수익률</th>
                               <th rowSpan={2} style={{textAlign:"right",padding:"5px 7px",color:C.muted,fontWeight:700,fontSize:10,verticalAlign:"middle",borderLeft:`1px solid ${C.border}`}}>🤝 무</th>
                               <th rowSpan={2} style={{textAlign:"right",padding:"5px 7px",color:"#e05a9a",fontWeight:700,fontSize:10,verticalAlign:"middle",borderLeft:`1px solid ${C.border}`}}>⬆️ 오버</th>
                               <th rowSpan={2} style={{textAlign:"right",padding:"5px 7px",color:"#7ac4ff",fontWeight:700,fontSize:10,verticalAlign:"middle",borderLeft:`1px solid ${C.border}`}}>⬇️ 언더</th>
                               <th rowSpan={2} style={{textAlign:"right",padding:"5px 7px",color:C.purple,fontWeight:700,verticalAlign:"middle",borderLeft:`1px solid ${C.border}`}}>전체 수익률</th>
                             </tr>
                             <tr style={{borderBottom:`1px solid ${C.border2}`}}>
+                              <th style={{textAlign:"right",padding:"3px 4px",color:C.red,fontWeight:700,fontSize:11}}>-0.5</th>
                               <th style={{textAlign:"right",padding:"3px 4px",color:C.muted,fontWeight:700,fontSize:11}}>0.5</th>
                               <th style={{textAlign:"right",padding:"3px 4px",color:C.muted,fontWeight:700,fontSize:11}}>1.5</th>
-                              <th style={{textAlign:"right",padding:"3px 4px",color:C.muted,fontWeight:700,fontSize:10,borderLeft:`1px solid ${C.border}`}}>0.5</th>
+                              <th style={{textAlign:"right",padding:"3px 4px",color:C.red,fontWeight:700,fontSize:10,borderLeft:`1px solid ${C.border}`}}>-0.5</th>
+                              <th style={{textAlign:"right",padding:"3px 4px",color:C.muted,fontWeight:700,fontSize:11}}>0.5</th>
                               <th style={{textAlign:"right",padding:"3px 4px",color:C.muted,fontWeight:700,fontSize:11}}>1.5</th>
                             </tr>
                           </thead>
@@ -7815,7 +7848,7 @@ function AppMain() {
                               <tr key={row.league} style={{borderBottom:`1px solid ${C.border}`}}>
                                 <td style={{padding:"5px 7px",fontWeight:800,color:C.text,borderRight:`1px solid ${C.border}`}}>{leagueNameMap[row.league]||row.league}</td>
                                 {row.opts.map((o,idx)=>(
-                                  <td key={o.opt} style={{padding:"5px 6px",textAlign:"right",borderLeft:(idx===2||idx===4||idx===5||idx===6)?`1px solid ${C.border}`:"none"}}>
+                                  <td key={o.opt} style={{padding:"5px 6px",textAlign:"right",borderLeft:(idx===3||idx===6||idx===7||idx===8)?`1px solid ${C.border}`:"none"}}>
                                     {o.count===0 ? <span style={{color:C.dim}}>-</span> : (
                                       <>
                                         <div style={{color:o.roi>=0?C.green:C.red,fontWeight:800}}>{o.roi>=0?"+":""}{o.roi}%</div>
