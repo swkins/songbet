@@ -712,7 +712,7 @@ const EXTRA:Record<string,string[]> = {
 };
 
 const getOptGroups = (cat:string) => {
-  if(cat==="축구") return [{g:"홈",opts:["홈 0.5","홈 1.5","홈 2.5"]},{g:"원정",opts:["원정 0.5","원정 1.5","원정 2.5"]}];
+  if(cat==="축구") return [{g:"홈",opts:["홈 0.5","홈 1.5"]},{g:"원정",opts:["원정 0.5","원정 1.5"]}];
   if(cat==="야구") return [{g:"승패",opts:["정배","역배"]},{g:"오버",opts:Array.from({length:14},(_,i)=>`${4.5+i} 오버`)},{g:"언더",opts:Array.from({length:14},(_,i)=>`${4.5+i} 언더`)}];
   if(cat==="농구") return [{g:"마핸",opts:Array.from({length:8},(_,i)=>`${(2.5+i).toFixed(1)} 마핸`)},{g:"플핸",opts:Array.from({length:5},(_,i)=>`${(10.5+i).toFixed(1)} 플핸`)}];
   if(cat==="배구") return [{g:"승패",opts:["홈 승","원정 승"]},{g:"오버/언더",opts:["오버","언더"]}];
@@ -3230,9 +3230,19 @@ function AppMain() {
       }
     }
     // 세션 수익 계산 (직전 출금 이후 입금액 - 이번 출금액)
-    const siteWths = withdrawals.filter(w=>w.site===site).sort((a,b)=>a.date.localeCompare(b.date));
-    const prevWthDate = siteWths.length>0 ? siteWths[siteWths.length-1].date : "0000-00-00";
-    const sessionDepSum = deposits.filter(d=>d.site===site && d.date>prevWthDate).reduce((s,d)=>s+d.amount,0);
+    // ★ ID(=Date.now() ms 타임스탬프) 비교로 정밀화 — 같은 날 마감-재입금 누락 방지
+    const siteWths = withdrawals.filter(w=>w.site===site)
+      .sort((a,b)=>a.date.localeCompare(b.date) || (Number(a.id)||0)-(Number(b.id)||0));
+    const lastWth = siteWths.length>0 ? siteWths[siteWths.length-1] : null;
+    const prevWthDate = lastWth ? lastWth.date : "0000-00-00";
+    const prevWthIdNum = lastWth ? Number(lastWth.id) : 0;
+    const isAfterLastWth = (rec:{id:string; date:string}) => {
+      if (!lastWth) return true;
+      const rid = Number(rec.id);
+      if (!isNaN(rid) && rid>0 && prevWthIdNum>0) return rid > prevWthIdNum;
+      return rec.date >= prevWthDate;
+    };
+    const sessionDepSum = deposits.filter(d=>d.site===site && isAfterLastWth(d)).reduce((s,d)=>s+d.amount,0);
     const sessionNet = closeWithdrawAmt - sessionDepSum;
 
     if(closeWithdrawAmt>0){
@@ -3564,6 +3574,8 @@ function AppMain() {
     return null;
   };
   // 매처: 옵션 텍스트(bo)와 베팅(bet)을 받아 boolean 반환
+  // ※ 사용자 요청: 홈 2.5 / 원정 2.5 매처 삭제 — 통계에서 표시 안 됨
+  //   과거에 2.5 핸디로 등록된 베팅이 있다면 "기타"로 분류되어 디버그 영역에서 확인 가능
   const footballOptMatchers: {opt:string, match:(bo:string, bet:Bet)=>boolean}[] = [
     // 홈 핸디캡 0.5 — 홈으로 분류 + 숫자값 < 1 (또는 숫자 없음)
     {opt:"홈 0.5", match:(bo,bet)=>{
@@ -3581,13 +3593,6 @@ function AppMain() {
       if (!/\d/.test(bo)) return false;
       return _classifyHomeAwayLine(_extractFootballNum(bo)) === "1.5";
     }},
-    {opt:"홈 2.5", match:(bo,bet)=>{
-      if (_classifyHomeAway(bo,bet) !== "홈") return false;
-      const sl = (bo||"").toLowerCase();
-      if (sl.includes("오버")||sl.includes("under")||sl.includes("언더")||sl.includes("over")) return false;
-      if (!/\d/.test(bo)) return false;
-      return _classifyHomeAwayLine(_extractFootballNum(bo)) === "2.5";
-    }},
     {opt:"원정 0.5", match:(bo,bet)=>{
       if (_classifyHomeAway(bo,bet) !== "원정") return false;
       const sl = (bo||"").toLowerCase();
@@ -3601,13 +3606,6 @@ function AppMain() {
       if (sl.includes("오버")||sl.includes("under")||sl.includes("언더")||sl.includes("over")) return false;
       if (!/\d/.test(bo)) return false;
       return _classifyHomeAwayLine(_extractFootballNum(bo)) === "1.5";
-    }},
-    {opt:"원정 2.5", match:(bo,bet)=>{
-      if (_classifyHomeAway(bo,bet) !== "원정") return false;
-      const sl = (bo||"").toLowerCase();
-      if (sl.includes("오버")||sl.includes("under")||sl.includes("언더")||sl.includes("over")) return false;
-      if (!/\d/.test(bo)) return false;
-      return _classifyHomeAwayLine(_extractFootballNum(bo)) === "2.5";
     }},
     {opt:"무승부", match:(bo)=>{
       const s = (bo||"").trim().toLowerCase();
@@ -3902,11 +3900,11 @@ function AppMain() {
     });
   },[footballDone]);
 
-  // [축구] 핸디캡 라인별 (홈/원정 0.5/1.5/2.5) 통계 (요청 #10)
-  // 사용자 전략: 0.5/1.5/2.5 각각의 적중률/수익률을 알고 싶음.
-  // (옵션별 표에 이미 있긴 한데, 가독성 위해 핸디캡만 따로 6칸으로 강조)
+  // [축구] 핸디캡 라인별 (홈/원정 0.5/1.5) 통계 (요청 #10)
+  // 사용자 전략: 0.5/1.5 각각의 적중률/수익률을 알고 싶음.
+  // (옵션별 표에 이미 있긴 한데, 가독성 위해 핸디캡만 따로 4칸으로 강조)
   const footballHandicapLineStats = useMemo(()=>{
-    const lines = ["홈 0.5","홈 1.5","홈 2.5","원정 0.5","원정 1.5","원정 2.5"];
+    const lines = ["홈 0.5","홈 1.5","원정 0.5","원정 1.5"];
     return lines.map(lineOpt=>{
       const matcher = footballOptMatchers.find(m=>m.opt===lineOpt);
       const bs = matcher ? footballDone.filter(b=>matcher.match(b.betOption, b)) : [];
@@ -4117,7 +4115,7 @@ function AppMain() {
   },[deposits, today, siteStates, usdKrw, isUSD]);
 
   // [대시보드] 종목 전체 옵션별 통계 (한눈에)
-  //   축구: 홈/원정 0.5/1.5/2.5
+  //   축구: 홈/원정 0.5/1.5
   //   야구: 승패/오버/언더
   //   농구: 5단위 그룹 (플/마 통합)
   // 각 옵션별: 베팅수, 적중수, 실패수, 적중률, 수익률
@@ -4409,6 +4407,10 @@ function AppMain() {
   // ── 현재 세션(마감 전) 사이트별 실시간 수익 ──
   // 마지막 마감(=출금) 이후의 베팅들 중 결과가 확정된 것만 합산
   // 진행중 베팅은 제외, 포인트는 입금/수익 계산에 미포함
+  // ★ 이전 로직 버그: b.date>prevWthDate (날짜 문자열) 비교만 하면
+  //    같은 날 "마감 → 재입금 → 새 베팅" 흐름에서 새 베팅이 prevWthDate==b.date로
+  //    누락되어 "활성화 이후 수익"이 0으로 표시되는 문제가 있었음.
+  //   → ID(=Date.now() ms 타임스탬프)로 정밀 비교 + 날짜 fallback 으로 수정
   const currentSessionProfits = useMemo(()=>{
     const result:Record<string,{
       profit:number,        // 결과 확정된 베팅 순수익
@@ -4419,14 +4421,31 @@ function AppMain() {
       sessionStartDate:string, // 세션 시작 날짜 (직전 마감 다음날)
     }> = {};
     ALL_SITES.forEach(site=>{
-      // 마지막 출금(마감) 날짜 찾기
-      const siteWths = withdrawals.filter(w=>w.site===site).sort((a,b)=>a.date.localeCompare(b.date));
-      const prevWthDate = siteWths.length>0 ? siteWths[siteWths.length-1].date : "0000-00-00";
-      // 직전 마감 이후 입금
-      const sessionDeps = deposits.filter(d=>d.site===site && d.date>prevWthDate);
+      // 마지막 출금(마감) 찾기 — 날짜 + ID 정렬 (같은 날 여러 출금 대비)
+      const siteWths = withdrawals.filter(w=>w.site===site)
+        .sort((a,b)=>a.date.localeCompare(b.date) || (Number(a.id)||0)-(Number(b.id)||0));
+      const lastWth = siteWths.length>0 ? siteWths[siteWths.length-1] : null;
+      const prevWthDate = lastWth ? lastWth.date : "0000-00-00";
+      const prevWthIdNum = lastWth ? Number(lastWth.id) : 0;
+
+      // 세션 경계 비교 함수: ID(=ms 타임스탬프) 우선, 실패 시 날짜 fallback
+      // ID 기반: 베팅/입금 ID > 마지막 출금 ID
+      // 날짜 기반: rec.date > prevWthDate (단, 같은 날이면 ID 비교 필요)
+      const isAfterLastWth = (rec:{id:string; date:string}) => {
+        if (!lastWth) return true; // 첫 세션: 모든 기록 포함
+        const rid = Number(rec.id);
+        // 둘 다 숫자 ID(타임스탬프)면 정밀 비교
+        if (!isNaN(rid) && rid>0 && prevWthIdNum>0) {
+          return rid > prevWthIdNum;
+        }
+        // fallback: 날짜만 비교 (>= 로 같은 날도 포함 — 마감 후 같은 날 베팅 보호)
+        return rec.date >= prevWthDate;
+      };
+
+      // 직전 마감 이후 입금 / 베팅
+      const sessionDeps = deposits.filter(d=>d.site===site && isAfterLastWth(d));
       const sessionDep = sessionDeps.reduce((s,d)=>s+d.amount,0);
-      // 직전 마감 이후 베팅
-      const sessionBets = bets.filter(b=>b.site===site && b.date>prevWthDate);
+      const sessionBets = bets.filter(b=>b.site===site && isAfterLastWth(b));
       const doneBets = sessionBets.filter(b=>b.result==="승"||b.result==="패");
       const profit = doneBets.reduce((s,b)=>s+(b.profit??0),0);
       const pendingCount = sessionBets.filter(b=>b.result==="진행중").length;
@@ -4438,7 +4457,7 @@ function AppMain() {
         pendingCount,
         sessionDep,
         roi,
-        sessionStartDate: prevWthDate==="0000-00-00" ? (sessionDeps[0]?.date || "") : prevWthDate,
+        sessionStartDate: !lastWth ? (sessionDeps[0]?.date || "") : prevWthDate,
       };
     });
     return result;
@@ -5485,15 +5504,27 @@ function AppMain() {
         const site = closeModal.site;
         const dollar = isUSD(site);
         const curSS = siteStates[site] || {deposited:0,betTotal:0,active:false,isDollar:dollar,pointTotal:0};
-        // 직전 마감 날짜 찾기 (이전 출금 = 직전 마감 시점)
-        const siteWths = withdrawals.filter(w=>w.site===site).sort((a,b)=>a.date.localeCompare(b.date));
-        const prevWthDate = siteWths.length>0 ? siteWths[siteWths.length-1].date : "0000-00-00";
+        // 직전 마감 찾기 (이전 출금 = 직전 마감 시점) — 날짜+ID 정렬로 같은 날 다중 출금 대비
+        const siteWths = withdrawals.filter(w=>w.site===site)
+          .sort((a,b)=>a.date.localeCompare(b.date) || (Number(a.id)||0)-(Number(b.id)||0));
+        const lastWth = siteWths.length>0 ? siteWths[siteWths.length-1] : null;
+        const prevWthDate = lastWth ? lastWth.date : "0000-00-00";
+        const prevWthIdNum = lastWth ? Number(lastWth.id) : 0;
+        // 세션 경계 비교 (ID 우선, 날짜 fallback)
+        // ★ 버그 수정: 기존엔 b.date>prevWthDate 만 봐서 같은 날 마감-재입금 패턴에서
+        //    "세션 입금 0"으로 표시되는 문제가 있었음
+        const isAfterLastWth = (rec:{id:string; date:string}) => {
+          if (!lastWth) return true;
+          const rid = Number(rec.id);
+          if (!isNaN(rid) && rid>0 && prevWthIdNum>0) return rid > prevWthIdNum;
+          return rec.date >= prevWthDate;
+        };
         // 직전 마감 이후 입금 내역
-        const sessionDeps = deposits.filter(d=>d.site===site && d.date>prevWthDate).sort((a,b)=>a.date.localeCompare(b.date));
+        const sessionDeps = deposits.filter(d=>d.site===site && isAfterLastWth(d)).sort((a,b)=>a.date.localeCompare(b.date));
         const sessionDepSum = sessionDeps.reduce((s,d)=>s+d.amount,0);
         // 포인트 누적 (입금으로 카운트 X)
         const pointSum = curSS.pointTotal||0;
-        // 이번 세션 베팅 내역
+        // 이번 세션 베팅 내역 (현재 사이트의 진행중/완료 모두 — 사이트 단위로 보여주기 위함)
         const sessionBets = bets.filter(b=>b.site===site);
         const pendingCnt = sessionBets.filter(b=>b.result==="진행중").length;
         const doneCnt = sessionBets.filter(b=>b.result==="승"||b.result==="패").length;
@@ -5890,6 +5921,7 @@ function AppMain() {
                                           <button onClick={()=>{
                                               setStMappingModal({sport,sportKr:sKr,country,league:lg});
                                               setStMappingSelectedId(stLeagueMap[mapKey(sKr,country,lg)] || "");
+                                              setTnSearch(""); // 검색어 초기화 → 자동 포커스 input에서 바로 타이핑 가능
                                             }}
                                             title={mapped?`API 매핑됨 (ID: ${apiId})`:"API 리그 매핑"}
                                             style={{padding:"0 7px",borderRadius:3,border:`1px solid ${mapped?C.teal+"88":C.border}`,background:mapped?`${C.teal}22`:C.bg,color:mapped?C.teal:C.dim,cursor:"pointer",fontSize:9,fontWeight:700,flexShrink:0}}>
@@ -7300,7 +7332,7 @@ function AppMain() {
                           <tbody>
                             {baseballLeagueOptTable.map(row=>(
                               <tr key={row.league} style={{borderBottom:`1px solid ${C.border}`}}>
-                                <td style={{padding:"5px 7px",fontWeight:800,color:C.text,borderRight:`1px solid ${C.border}`}}>{row.league}</td>
+                                <td style={{padding:"5px 7px",fontWeight:800,color:C.text,borderRight:`1px solid ${C.border}`}}>{leagueNameMap[row.league]||row.league}</td>
                                 {row.opts.map(o=>(
                                   <td key={o.key} style={{padding:"5px 6px",textAlign:"right"}}>
                                     {o.count===0 ? <span style={{color:C.dim}}>-</span> : (
@@ -7386,7 +7418,7 @@ function AppMain() {
                           <tbody>
                             {baseballLeagueOuTable.map(row=>(
                               <tr key={row.league} style={{borderBottom:`1px solid ${C.border}`}}>
-                                <td style={{padding:"5px 7px",fontWeight:800,color:C.text,borderRight:`1px solid ${C.border}`}}>{row.league}</td>
+                                <td style={{padding:"5px 7px",fontWeight:800,color:C.text,borderRight:`1px solid ${C.border}`}}>{leagueNameMap[row.league]||row.league}</td>
                                 <td style={{padding:"5px 6px",textAlign:"right",color:C.text}}>{row.ov.count||"-"}</td>
                                 <td style={{padding:"5px 6px",textAlign:"right",color:row.ov.winRate>=50?C.green:C.muted,fontWeight:700}}>{row.ov.count>0?`${row.ov.winRate}%`:"-"}</td>
                                 <td style={{padding:"5px 6px",textAlign:"right",color:row.ov.roi>=0?C.green:C.red,fontWeight:800}}>{row.ov.count>0?`${row.ov.roi>=0?"+":""}${row.ov.roi}%`:"-"}</td>
@@ -7429,9 +7461,9 @@ function AppMain() {
                   <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(480px, 1fr))",gap:10,alignItems:"start"}}>
 
                   {/* 옵션별 표 — 핸디캡 라인 박스 + 옵션별 통계표 (각각 별도 grid 셀) */}
-                      {/* ── 핸디캡 라인 6칸 강조 ── grid 안에서 한 셀이므로 6칸 → 자동 fit */}
+                      {/* ── 핸디캡 라인 4칸 강조 ── grid 안에서 한 셀이므로 4칸 → 자동 fit */}
                       <div style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:7,padding:9}}>
-                        <div style={{fontSize:13,fontWeight:800,color:C.green,marginBottom:6}}>📐 핸디캡 라인별 한눈에 (홈/원정 0.5/1.5/2.5)</div>
+                        <div style={{fontSize:13,fontWeight:800,color:C.green,marginBottom:6}}>📐 핸디캡 라인별 한눈에 (홈/원정 0.5/1.5)</div>
                         <div style={{fontSize:11,color:C.muted,marginBottom:7,padding:"5px 8px",background:C.bg,borderRadius:6,lineHeight:1.5}}>
                           💡 사용자 신규 전략:<br/>
                           • <strong style={{color:C.teal}}>0.5 플핸</strong>: 무배당 3.6↓ + 정배 배당대 / 1.55~1.95 추천<br/>
@@ -7596,7 +7628,7 @@ function AppMain() {
                       </div>
 
                       {/* 🔍 기타 분류 디버그 — 어떤 옵션이 자동 분류 안 됐는지 확인용
-                          홈/원정 0.5/1.5/2.5/무/오버/언더 어디에도 안 잡힌 옵션 목록을 보여줌
+                          홈/원정 0.5/1.5/무/오버/언더 어디에도 안 잡힌 옵션 목록을 보여줌
                           (정상 동작하면 비어있어야 함) */}
                       {(()=>{
                         const otherMatcher = footballOptMatchers.find(m=>m.opt==="기타");
@@ -7645,8 +7677,8 @@ function AppMain() {
                           <thead>
                             <tr style={{borderBottom:`2px solid ${C.border2}`}}>
                               <th rowSpan={2} style={{textAlign:"left",padding:"5px 7px",color:C.muted,fontWeight:700,minWidth:90,verticalAlign:"middle",borderRight:`1px solid ${C.border}`}}>리그</th>
-                              <th colSpan={3} style={{textAlign:"center",padding:"3px 4px",color:C.green,fontWeight:700,fontSize:10,borderBottom:`1px solid ${C.border}`}}>🏠 홈 플핸 수익률</th>
-                              <th colSpan={3} style={{textAlign:"center",padding:"3px 4px",color:C.amber,fontWeight:700,fontSize:10,borderBottom:`1px solid ${C.border}`,borderLeft:`1px solid ${C.border}`}}>✈️ 원정 플핸 수익률</th>
+                              <th colSpan={2} style={{textAlign:"center",padding:"3px 4px",color:C.green,fontWeight:700,fontSize:10,borderBottom:`1px solid ${C.border}`}}>🏠 홈 플핸 수익률</th>
+                              <th colSpan={2} style={{textAlign:"center",padding:"3px 4px",color:C.amber,fontWeight:700,fontSize:10,borderBottom:`1px solid ${C.border}`,borderLeft:`1px solid ${C.border}`}}>✈️ 원정 플핸 수익률</th>
                               <th rowSpan={2} style={{textAlign:"right",padding:"5px 7px",color:C.muted,fontWeight:700,fontSize:10,verticalAlign:"middle",borderLeft:`1px solid ${C.border}`}}>🤝 무</th>
                               <th rowSpan={2} style={{textAlign:"right",padding:"5px 7px",color:"#e05a9a",fontWeight:700,fontSize:10,verticalAlign:"middle",borderLeft:`1px solid ${C.border}`}}>⬆️ 오버</th>
                               <th rowSpan={2} style={{textAlign:"right",padding:"5px 7px",color:"#7ac4ff",fontWeight:700,fontSize:10,verticalAlign:"middle",borderLeft:`1px solid ${C.border}`}}>⬇️ 언더</th>
@@ -7655,18 +7687,16 @@ function AppMain() {
                             <tr style={{borderBottom:`1px solid ${C.border2}`}}>
                               <th style={{textAlign:"right",padding:"3px 4px",color:C.muted,fontWeight:700,fontSize:11}}>0.5</th>
                               <th style={{textAlign:"right",padding:"3px 4px",color:C.muted,fontWeight:700,fontSize:11}}>1.5</th>
-                              <th style={{textAlign:"right",padding:"3px 4px",color:C.muted,fontWeight:700,fontSize:11}}>2.5</th>
                               <th style={{textAlign:"right",padding:"3px 4px",color:C.muted,fontWeight:700,fontSize:10,borderLeft:`1px solid ${C.border}`}}>0.5</th>
                               <th style={{textAlign:"right",padding:"3px 4px",color:C.muted,fontWeight:700,fontSize:11}}>1.5</th>
-                              <th style={{textAlign:"right",padding:"3px 4px",color:C.muted,fontWeight:700,fontSize:11}}>2.5</th>
                             </tr>
                           </thead>
                           <tbody>
                             {footballLeagueOptTable.map(row=>(
                               <tr key={row.league} style={{borderBottom:`1px solid ${C.border}`}}>
-                                <td style={{padding:"5px 7px",fontWeight:800,color:C.text,borderRight:`1px solid ${C.border}`}}>{row.league}</td>
+                                <td style={{padding:"5px 7px",fontWeight:800,color:C.text,borderRight:`1px solid ${C.border}`}}>{leagueNameMap[row.league]||row.league}</td>
                                 {row.opts.map((o,idx)=>(
-                                  <td key={o.opt} style={{padding:"5px 6px",textAlign:"right",borderLeft:(idx===3||idx===6||idx===7||idx===8)?`1px solid ${C.border}`:"none"}}>
+                                  <td key={o.opt} style={{padding:"5px 6px",textAlign:"right",borderLeft:(idx===2||idx===4||idx===5||idx===6)?`1px solid ${C.border}`:"none"}}>
                                     {o.count===0 ? <span style={{color:C.dim}}>-</span> : (
                                       <>
                                         <div style={{color:o.roi>=0?C.green:C.red,fontWeight:800}}>{o.roi>=0?"+":""}{o.roi}%</div>
@@ -7826,7 +7856,7 @@ function AppMain() {
                           <tbody>
                             {basketballLeagueRangeTable.map(row=>(
                               <tr key={row.league} style={{borderBottom:`1px solid ${C.border}`}}>
-                                <td style={{padding:"5px 7px",fontWeight:800,color:C.text,borderRight:`1px solid ${C.border}`}}>{row.league}</td>
+                                <td style={{padding:"5px 7px",fontWeight:800,color:C.text,borderRight:`1px solid ${C.border}`}}>{leagueNameMap[row.league]||row.league}</td>
                                 {row.ranges.map(r=>(
                                   <td key={r.key} style={{padding:"5px 6px",textAlign:"right"}}>
                                     {r.count===0 ? <span style={{color:C.dim}}>-</span> : (
@@ -7913,7 +7943,7 @@ function AppMain() {
                           <tbody>
                             {basketballPlusMinusTable.map(row=>(
                               <tr key={row.league} style={{borderBottom:`1px solid ${C.border}`}}>
-                                <td style={{padding:"5px 7px",fontWeight:800,color:C.text,borderRight:`1px solid ${C.border}`}}>{row.league}</td>
+                                <td style={{padding:"5px 7px",fontWeight:800,color:C.text,borderRight:`1px solid ${C.border}`}}>{leagueNameMap[row.league]||row.league}</td>
                                 <td style={{padding:"5px 6px",textAlign:"right",color:C.text}}>{row.plus.count||"-"}</td>
                                 <td style={{padding:"5px 6px",textAlign:"right",color:C.muted}}>{row.plus.count>0?row.plus.avgValue:"-"}</td>
                                 <td style={{padding:"5px 6px",textAlign:"right",color:row.plus.winRate>=50?C.green:C.muted,fontWeight:700}}>{row.plus.count>0?`${row.plus.winRate}%`:"-"}</td>
@@ -9175,7 +9205,7 @@ function AppMain() {
 
             {/* [하단-중] 🎯 옵션별 종합 — 한눈에 종목/옵션별 베팅수·적중률·수익률
                 ⚠️ 사용자 요청: 포인트 교환 박스 제거하고 그 자리에 종목 전체 옵션별 수익 표시
-                축구: 홈/원정 0.5/1.5/2.5
+                축구: 홈/원정 0.5/1.5
                 야구: 승패/오버/언더
                 농구: 5단위 그룹 (5.5~9.5 / 10.5~14.5 / 15.5~19.5 / 20.5~24.5 / 25.5~29.5)
             */}
@@ -9956,6 +9986,8 @@ $$;`}
               {/* 검색 (간단히) */}
               {apiList.length > 8 && (
                 <input
+                  autoFocus
+                  ref={el=>{ if(el) setTimeout(()=>el.focus(),0); }}
                   placeholder={`🔍 ${apiList.length}개의 ${m.sportKr} API 리그 검색...`}
                   value={tnSearch}
                   onChange={e=>setTnSearch(e.target.value)}
