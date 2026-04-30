@@ -9105,4 +9105,1050 @@ function AppMain() {
                   <div style={{color:C.teal,fontWeight:900,fontSize:12}}>{winRate}%</div>
                 </div>
                 <div style={{background:C.bg2,padding:"6px 7px",borderRadius:5,textAlign:"center"}}>
-                  <div style={{color:C.mute
+                  <div style={{color:C.muted,fontSize:9,fontWeight:700}}>현재 연속</div>
+                  <div style={{color:curS.includes("승")?C.green:curS.includes("패")?C.red:C.muted,fontWeight:900,fontSize:12}}>{curS||"-"}</div>
+                </div>
+                <div style={{background:C.bg2,padding:"6px 7px",borderRadius:5,textAlign:"center"}}>
+                  <div style={{color:C.muted,fontSize:9,fontWeight:700}}>진행중</div>
+                  <div style={{color:C.amber,fontWeight:900,fontSize:12}}>{pending.length}건</div>
+                </div>
+              </div>
+            </div>
+
+            {/* [하단] 오늘 할 일 + 포인트 교환 + 우측 정보 패널 */}
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"360px 480px 1fr",gap:12,alignItems:"start"}}>
+            {/* [하단-좌] 오늘 할 일 (세로 정렬) */}
+            <div style={{background:C.bg3,border:`1px solid ${C.green}44`,borderRadius:12,padding:13}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:9}}>
+                <div style={{fontSize:14,fontWeight:800,color:C.green}}>✅ 오늘 할 일</div>
+                {dailyQuests.length>0 && (()=>{
+                  const doneCnt = dailyQuests.filter(q=>isQuestDoneToday(q)).length;
+                  const pct = Math.round(doneCnt/dailyQuests.length*100);
+                  return <span style={{fontSize:11,color:pct===100?C.green:C.amber,fontWeight:800}}>{doneCnt}/{dailyQuests.length} ({pct}%)</span>;
+                })()}
+              </div>
+              {dailyQuests.length>0 && (()=>{
+                const doneCnt = dailyQuests.filter(q=>isQuestDoneToday(q)).length;
+                const pct = Math.round(doneCnt/dailyQuests.length*100);
+                return (
+                  <div style={{height:8,background:C.bg,borderRadius:4,overflow:"hidden",marginBottom:9}}>
+                    <div style={{width:`${pct}%`,height:"100%",background:pct===100?C.green:C.amber,transition:"width 0.3s"}}/>
+                  </div>
+                );
+              })()}
+              <div style={{display:"flex",gap:5,marginBottom:9}}>
+                <input value={newQuestName} onChange={e=>setNewQuestName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleAddQuest()} placeholder="새 할 일" style={{...S,flex:1,boxSizing:"border-box",fontSize:12,padding:"6px 10px"}}/>
+                <button onClick={handleAddQuest} disabled={!newQuestName.trim()} style={{padding:"5px 12px",borderRadius:5,border:`1px solid ${newQuestName.trim()?C.green:C.border}`,background:newQuestName.trim()?`${C.green}22`:C.bg,color:newQuestName.trim()?C.green:C.dim,cursor:newQuestName.trim()?"pointer":"default",fontWeight:700,fontSize:12,whiteSpace:"nowrap"}}>+ 추가</button>
+              </div>
+              {/* 요청 #1: 포인트 교환이 D-DAY가 될 경우 자동으로 "포인트 교환하기" 항목 표시 */}
+              {(()=>{
+                const ddaySites = pointSites.filter(ps=>{
+                  const lastSession = ps.sessions[ps.sessions.length-1];
+                  const baseDate = lastSession ? lastSession.nextTargetDate : ps.exchangeDate;
+                  const daysLeft = Math.round((new Date(baseDate+"T00:00:00Z").getTime() - new Date(today+"T00:00:00Z").getTime())/(1000*60*60*24));
+                  return daysLeft<=0; // 오늘이거나 이미 지난 경우
+                });
+                if(ddaySites.length===0) return null;
+                return (
+                  <div style={{marginBottom:9,paddingBottom:9,borderBottom:`1px dashed ${C.teal}44`}}>
+                    <div style={{fontSize:10,color:C.teal,fontWeight:800,marginBottom:5}}>🎁 D-DAY 포인트 교환</div>
+                    <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                      {ddaySites.map(ps=>{
+                        const lastSession = ps.sessions[ps.sessions.length-1];
+                        const baseDate = lastSession ? lastSession.nextTargetDate : ps.exchangeDate;
+                        const daysLeft = Math.round((new Date(baseDate+"T00:00:00Z").getTime() - new Date(today+"T00:00:00Z").getTime())/(1000*60*60*24));
+                        return (
+                          <div key={ps.id} style={{background:`${C.teal}11`,border:`1px solid ${C.teal}66`,borderRadius:6,padding:"6px 9px",display:"flex",justifyContent:"space-between",alignItems:"center",gap:6}}>
+                            <div style={{flex:1,minWidth:0}}>
+                              <div style={{fontSize:12,fontWeight:800,color:C.teal,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>📌 포인트 교환하기</div>
+                              <div style={{fontSize:10,color:C.muted,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{ps.name} · {ps.exchangeName} {daysLeft<0?`· ${Math.abs(daysLeft)}일 지남`:""}</div>
+                            </div>
+                            <button onClick={()=>handlePointExchangeComplete(ps.id)} style={{padding:"4px 9px",borderRadius:4,border:`1px solid ${C.orange}`,background:`${C.orange}22`,color:C.orange,cursor:"pointer",fontSize:10,fontWeight:800,whiteSpace:"nowrap"}}>완료</button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
+              {dailyQuests.length===0 ? (
+                <div style={{textAlign:"center",color:C.dim,padding:"20px 0"}}>
+                  <div style={{fontSize:11,color:C.muted}}>등록된 할 일 없음</div>
+                </div>
+              ) : (
+                <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                  {dailyQuests.map(q=>{
+                    const done = isQuestDoneToday(q);
+                    const totalAttend = q.history.length;
+                    const calOpen = !!questCalendarExpanded[q.id];
+                    // 달력에서 보고 있는 월 (없으면 오늘 기준)
+                    const todayDt = new Date(today+"T00:00:00");
+                    const viewedMonStr = questCalendarMonth[q.id] || `${todayDt.getFullYear()}-${String(todayDt.getMonth()+1).padStart(2,"0")}`;
+                    const [viewYearStr, viewMonStr] = viewedMonStr.split("-");
+                    const monYear2 = parseInt(viewYearStr);
+                    const monIdx2 = parseInt(viewMonStr) - 1;
+                    const monStart2 = new Date(monYear2, monIdx2, 1);
+                    const monEnd2 = new Date(monYear2, monIdx2+1, 0);
+                    const monthDays2 = monEnd2.getDate();
+                    const monthFirstDow2 = monStart2.getDay();
+                    const monthHistory = q.history.filter(d=>d.startsWith(`${monYear2}-${String(monIdx2+1).padStart(2,"0")}`));
+                    // 이전/다음 달 이동 헬퍼
+                    const shiftMonth = (delta:number) => {
+                      const d = new Date(monYear2, monIdx2+delta, 1);
+                      const newKey = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+                      setQuestCalendarMonth(p=>({...p,[q.id]:newKey}));
+                    };
+                    // 미래 달 이동 차단 (오늘이 속한 달까지만)
+                    const todayMonStr = `${todayDt.getFullYear()}-${String(todayDt.getMonth()+1).padStart(2,"0")}`;
+                    const canGoNext = viewedMonStr < todayMonStr;
+                    return (
+                      <div key={q.id} style={{background:done?`${C.green}11`:C.bg2,border:`1px solid ${done?C.green:C.border}`,borderRadius:6,padding:"7px 10px",position:"relative",overflow:"hidden"}}>
+                        <div style={{display:"flex",alignItems:"center",gap:6}}>
+                          <input type="checkbox" checked={done} onChange={()=>toggleQuestToday(q.id)} style={{width:16,height:16,accentColor:C.green,cursor:"pointer",flexShrink:0}}/>
+                          <div style={{flex:1,minWidth:0}}>
+                            {editingQuestId===q.id ? (
+                              <input
+                                autoFocus
+                                value={editingQuestName}
+                                onChange={e=>setEditingQuestName(e.target.value)}
+                                onBlur={()=>handleRenameQuest(q.id)}
+                                onKeyDown={e=>{
+                                  if(e.key==="Enter") handleRenameQuest(q.id);
+                                  else if(e.key==="Escape"){setEditingQuestId(null);setEditingQuestName("");}
+                                }}
+                                style={{...S,boxSizing:"border-box",fontSize:12,padding:"3px 6px",fontWeight:700,width:"100%"}}
+                              />
+                            ) : (
+                              <div onClick={()=>toggleQuestToday(q.id)} onDoubleClick={()=>{setEditingQuestId(q.id);setEditingQuestName(q.name);}} title="클릭: 완료 토글 · 더블클릭: 이름 수정" style={{fontSize:12,fontWeight:700,color:done?C.green:C.text,cursor:"pointer",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{q.name}</div>
+                            )}
+                            <div style={{fontSize:10,color:C.muted,marginTop:2}}>📅 출석 <b style={{color:C.purple}}>{totalAttend}회</b> · 이번달 <b style={{color:C.teal}}>{monthHistory.length}회</b></div>
+                          </div>
+                          {done && (
+                            <span style={{fontSize:9,fontWeight:900,color:C.green,background:`${C.green}22`,border:`1px solid ${C.green}`,borderRadius:3,padding:"2px 5px",letterSpacing:0.3,flexShrink:0}}>✓</span>
+                          )}
+                          <div style={{display:"flex",gap:3,flexShrink:0,zIndex:1}}>
+                            <button onClick={()=>{setEditingQuestId(q.id);setEditingQuestName(q.name);}} title="제목 수정" style={{background:"transparent",border:`1px solid ${C.border}`,color:C.dim,cursor:"pointer",fontSize:10,padding:"3px 6px",borderRadius:3,whiteSpace:"nowrap"}}>✏️</button>
+                            <button onClick={()=>setQuestCalendarExpanded(p=>({...p,[q.id]:!calOpen}))} title="출석 보기" style={{background:calOpen?`${C.teal}22`:"transparent",border:`1px solid ${calOpen?C.teal:C.border}`,color:calOpen?C.teal:C.dim,cursor:"pointer",fontSize:10,padding:"3px 6px",borderRadius:3,whiteSpace:"nowrap"}}>📅</button>
+                            <button onClick={()=>handleDeleteQuest(q.id)} title="삭제" style={{background:"transparent",border:`1px solid ${C.border}`,color:C.dim,cursor:"pointer",fontSize:10,padding:"3px 6px",borderRadius:3}}>🗑</button>
+                          </div>
+                        </div>
+                        {calOpen && (
+                          <div style={{marginTop:6,paddingTop:6,borderTop:`1px dashed ${C.border}`}}>
+                            {/* 월 이동 헤더 */}
+                            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:5,maxWidth:210}}>
+                              <button onClick={()=>shiftMonth(-1)} title="이전 달"
+                                style={{background:`${C.teal}11`,border:`1px solid ${C.teal}44`,color:C.teal,cursor:"pointer",fontSize:10,padding:"3px 8px",borderRadius:3,fontWeight:800}}>◀</button>
+                              <div style={{fontSize:10,color:C.text,fontWeight:700}}>{monYear2}년 {monIdx2+1}월</div>
+                              <button onClick={()=>canGoNext && shiftMonth(1)} title={canGoNext?"다음 달":"미래 달은 볼 수 없음"} disabled={!canGoNext}
+                                style={{background:canGoNext?`${C.teal}11`:"transparent",border:`1px solid ${canGoNext?C.teal+"44":C.border}`,color:canGoNext?C.teal:C.dim,cursor:canGoNext?"pointer":"not-allowed",fontSize:10,padding:"3px 8px",borderRadius:3,fontWeight:800}}>▶</button>
+                            </div>
+                            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:3,gap:6}}>
+                              <div style={{fontSize:9,color:C.dim}}>이번 달 출석 <b style={{color:C.teal}}>{monthHistory.length}회</b> · 총 <b style={{color:C.purple}}>{totalAttend}회</b> · 시작 {q.createdAt.slice(5)}</div>
+                              <button onClick={()=>handleResetQuestAttendance(q.id)} title="출석 횟수 초기화"
+                                style={{background:`${C.red}11`,border:`1px solid ${C.red}66`,color:C.red,cursor:"pointer",fontSize:9,padding:"2px 7px",borderRadius:3,fontWeight:700,whiteSpace:"nowrap",flexShrink:0}}>🔄 출석 초기화</button>
+                            </div>
+                            <div style={{background:C.bg,borderRadius:4,padding:"4px 5px",maxWidth:210}}>
+                              <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:1,marginBottom:1}}>
+                                {["일","월","화","수","목","금","토"].map((d,i)=>(
+                                  <div key={d} style={{textAlign:"center",fontSize:8,color:i===0?C.red:i===6?C.teal:C.dim,lineHeight:"14px"}}>{d}</div>
+                                ))}
+                              </div>
+                              <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:1}}>
+                                {Array.from({length:monthFirstDow2},(_,i)=><div key={`p-${i}`} style={{height:22}}/>)}
+                                {Array.from({length:monthDays2},(_,i)=>{
+                                  const dayN = i+1;
+                                  const dateStr = `${monYear2}-${String(monIdx2+1).padStart(2,"0")}-${String(dayN).padStart(2,"0")}`;
+                                  const isAttended = q.history.includes(dateStr);
+                                  const isToday = dateStr===today;
+                                  const isPast = dateStr<today;
+                                  const isFuture = dateStr>today;
+                                  // 클릭 가능 조건: 미래만 X (createdAt 이전이어도 자유롭게 체크 가능)
+                                  const clickable = !isFuture;
+                                  return (
+                                    <div key={dateStr} title={dateStr+(isAttended?" ✓ (클릭으로 해제)":clickable?" (클릭으로 출석)":" (미래)")}
+                                      onClick={clickable ? ()=>toggleQuestDate(q.id, dateStr) : undefined}
+                                      style={{height:22,background: isAttended ? C.green : isToday ? `${C.amber}33` : isPast ? `${C.red}11` : C.bg2, borderRadius:2, display:"flex", alignItems:"center", justifyContent:"center", fontSize:9, fontWeight: isToday?900:600, color: isAttended?"#fff":isToday?C.amber:isPast?C.red:C.muted, border: isToday?`1px solid ${C.amber}`:"none", cursor: clickable?"pointer":"default", userSelect:"none", transition:"transform 0.1s"}}
+                                      onMouseDown={clickable?(e)=>{(e.currentTarget as HTMLElement).style.transform="scale(0.9)";}:undefined}
+                                      onMouseUp={clickable?(e)=>{(e.currentTarget as HTMLElement).style.transform="scale(1)";}:undefined}
+                                      onMouseLeave={clickable?(e)=>{(e.currentTarget as HTMLElement).style.transform="scale(1)";}:undefined}>
+                                      {dayN}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* [하단-중] 🎯 옵션별 종합 — 한눈에 종목/옵션별 베팅수·적중률·수익률
+                ⚠️ 사용자 요청: 포인트 교환 박스 제거하고 그 자리에 종목 전체 옵션별 수익 표시
+                축구: 홈/원정 0.5/1.5
+                야구: 승패/오버/언더
+                농구: 5단위 그룹 (5.5~9.5 / 10.5~14.5 / 15.5~19.5 / 20.5~24.5 / 25.5~29.5)
+            */}
+            <div style={{background:C.bg3,border:`1px solid ${C.amber}44`,borderRadius:12,padding:14}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                <div style={{fontSize:15,fontWeight:800,color:C.amber}}>🎯 옵션별 종합 (종목 전체)</div>
+                <button onClick={()=>setTab("stats")} style={{padding:"4px 10px",borderRadius:5,border:`1px solid ${C.amber}66`,background:`${C.amber}11`,color:C.amber,cursor:"pointer",fontSize:11,fontWeight:700}}>자세히 →</button>
+              </div>
+              {/* 표 헤더 — 컬럼: [종목][옵션][베팅][적중][실패][적중률][수익금(%)] */}
+              <div style={{display:"grid",gridTemplateColumns:"26px 1fr 44px 44px 44px 56px 110px",gap:5,padding:"5px 7px",fontSize:11,color:C.muted,fontWeight:700,borderBottom:`1px solid ${C.border}`,marginBottom:4}}>
+                <span></span>
+                <span>옵션</span>
+                <span style={{textAlign:"right"}}>베팅</span>
+                <span style={{textAlign:"right"}}>적중</span>
+                <span style={{textAlign:"right"}}>실패</span>
+                <span style={{textAlign:"right"}}>적중률</span>
+                <span style={{textAlign:"right"}}>수익금 (%)</span>
+              </div>
+              {/* 종목별 행 — 축구 → 야구 → 농구 순 */}
+              <div style={{display:"flex",flexDirection:"column",gap:1}}>
+                {([
+                  {label:"⚽ 축구", color:C.green, items: optionAllStats.football},
+                  {label:"⚾ 야구", color:C.amber, items: optionAllStats.baseball},
+                  {label:"🏀 농구", color:C.purple, items: optionAllStats.basketball},
+                ]).map((sec,i)=>(
+                  <div key={sec.label} style={{borderTop:i>0?`1px dashed ${C.border}`:undefined,paddingTop:i>0?4:0,marginTop:i>0?3:0}}>
+                    {sec.items.map((s:any,j:number)=>{
+                      const isEmpty = s.count===0;
+                      const profitColor = isEmpty ? C.dim : (s.profit>=0 ? C.green : C.red);
+                      return (
+                        <div key={j} style={{display:"grid",gridTemplateColumns:"26px 1fr 44px 44px 44px 56px 110px",gap:5,alignItems:"center",padding:"5px 7px",fontSize:13,opacity:isEmpty?0.4:1}}>
+                          <span style={{textAlign:"center",fontSize:13}}>{j===0?sec.label.split(" ")[0]:""}</span>
+                          <span style={{color:isEmpty?C.dim:sec.color,fontWeight:700,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{s.label}</span>
+                          <span style={{textAlign:"right",color:isEmpty?C.dim:C.text,fontWeight:700}}>{s.count}</span>
+                          <span style={{textAlign:"right",color:isEmpty?C.dim:C.green,fontWeight:700}}>{s.wins}</span>
+                          <span style={{textAlign:"right",color:isEmpty?C.dim:C.red,fontWeight:700}}>{s.losses}</span>
+                          <span style={{textAlign:"right",color:isEmpty?C.dim:s.winRate>=50?C.green:C.muted,fontWeight:700}}>{isEmpty?"-":`${s.winRate}%`}</span>
+                          <span style={{textAlign:"right",color:profitColor,fontWeight:800,whiteSpace:"nowrap"}}>
+                            {isEmpty ? "-" : (
+                              <>
+                                {s.profit>=0?"+":""}{Math.round(s.profit).toLocaleString()}
+                                <span style={{fontSize:10,marginLeft:3,opacity:0.85,fontWeight:700}}>({s.roi>=0?"+":""}{s.roi}%)</span>
+                              </>
+                            )}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* [하단-우] 💹 이번 달 사이트별 수익률 + 기타 수익/지출 목록
+                ⚠️ 사용자 요청: 통계 옆에 수익률 추가 — 이번 달 사이트별 지출/수익 + 기타 수익/지출 세로 나열 */}
+            <div style={{background:C.bg3,border:`1px solid ${C.purple}44`,borderRadius:12,padding:13}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:9}}>
+                <div style={{fontSize:14,fontWeight:800,color:C.purple}}>💹 이번 달 수익률 ({thisMonthSiteStats.monthPrefix})</div>
+                <button onClick={()=>setTab("roi")} style={{padding:"3px 9px",borderRadius:5,border:`1px solid ${C.purple}66`,background:`${C.purple}11`,color:C.purple,cursor:"pointer",fontSize:10,fontWeight:700}}>자세히 →</button>
+              </div>
+
+              {/* 합계 4칸 */}
+              <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:5,marginBottom:10}}>
+                <div style={{background:C.bg2,padding:"6px 8px",borderRadius:5,textAlign:"center",border:`1px solid ${C.green}33`}}>
+                  <div style={{color:C.muted,fontSize:9,fontWeight:700,marginBottom:2}}>사이트 순익</div>
+                  <div style={{color:thisMonthSiteStats.totalSiteNet>=0?C.green:C.red,fontWeight:900,fontSize:13}}>{thisMonthSiteStats.totalSiteNet>=0?"+":""}{Math.round(thisMonthSiteStats.totalSiteNet/1000)}k</div>
+                </div>
+                <div style={{background:C.bg2,padding:"6px 8px",borderRadius:5,textAlign:"center",border:`1px solid ${C.teal}33`}}>
+                  <div style={{color:C.muted,fontSize:9,fontWeight:700,marginBottom:2}}>기타 수익</div>
+                  <div style={{color:C.teal,fontWeight:900,fontSize:13}}>+{Math.round(thisMonthSiteStats.totalExtraIncome/1000)}k</div>
+                </div>
+                <div style={{background:C.bg2,padding:"6px 8px",borderRadius:5,textAlign:"center",border:`1px solid ${C.amber}33`}}>
+                  <div style={{color:C.muted,fontSize:9,fontWeight:700,marginBottom:2}}>기타 지출</div>
+                  <div style={{color:C.amber,fontWeight:900,fontSize:13}}>-{Math.round(thisMonthSiteStats.totalExtraExpense/1000)}k</div>
+                </div>
+                <div style={{background:C.bg2,padding:"6px 8px",borderRadius:5,textAlign:"center",border:`1px solid ${thisMonthSiteStats.grandNet>=0?C.green:C.red}55`}}>
+                  <div style={{color:C.muted,fontSize:9,fontWeight:700,marginBottom:2}}>총 순익</div>
+                  <div style={{color:thisMonthSiteStats.grandNet>=0?C.green:C.red,fontWeight:900,fontSize:13}}>{thisMonthSiteStats.grandNet>=0?"+":""}{Math.round(thisMonthSiteStats.grandNet/1000)}k</div>
+                </div>
+              </div>
+
+              {/* 사이트별 입출금 목록 */}
+              <div style={{marginBottom:10}}>
+                <div style={{fontSize:11,fontWeight:800,color:C.text,marginBottom:4,paddingLeft:2}}>💳 사이트별 입출금</div>
+                {thisMonthSiteStats.siteRows.length===0 ? (
+                  <div style={{textAlign:"center",color:C.dim,padding:"10px 0",fontSize:11}}>이번 달 입출금 내역 없음</div>
+                ) : (
+                  <div style={{display:"flex",flexDirection:"column",gap:2,maxHeight:180,overflowY:"auto"}}>
+                    {thisMonthSiteStats.siteRows.map(r=>(
+                      <div key={r.site} style={{display:"flex",alignItems:"center",gap:6,padding:"4px 8px",background:C.bg2,borderRadius:4,fontSize:10}}>
+                        <span style={{fontSize:11,fontWeight:800,color:r.dollar?C.amber:C.green,minWidth:70,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{r.dollar?"$":"₩"} {r.site}</span>
+                        <span style={{color:C.red,fontWeight:700,minWidth:70,textAlign:"right"}}>지 {r.dollar?`$${r.dep.toFixed(0)}`:`${Math.round(r.dep/1000)}k`}</span>
+                        <span style={{color:C.green,fontWeight:700,minWidth:70,textAlign:"right"}}>수 {r.dollar?`$${r.wth.toFixed(0)}`:`${Math.round(r.wth/1000)}k`}</span>
+                        <span style={{flex:1,color:r.netKrw>=0?C.green:C.red,fontWeight:900,textAlign:"right",fontSize:11}}>{r.netKrw>=0?"+":""}{Math.round(r.netKrw/1000)}k</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* 기타 수익 목록 */}
+              {thisMonthSiteStats.extraIncomes.length>0 && (
+                <div style={{marginBottom:10}}>
+                  <div style={{fontSize:11,fontWeight:800,color:C.teal,marginBottom:4,paddingLeft:2}}>📈 기타 수익 ({thisMonthSiteStats.extraIncomes.length}건)</div>
+                  <div style={{display:"flex",flexDirection:"column",gap:2,maxHeight:140,overflowY:"auto"}}>
+                    {thisMonthSiteStats.extraIncomes.map((e:any,i:number)=>(
+                      <div key={i} style={{display:"flex",alignItems:"center",gap:6,padding:"4px 8px",background:C.bg2,borderRadius:4,fontSize:10,borderLeft:`2px solid ${C.teal}77`}}>
+                        <span style={{color:C.muted,minWidth:36,fontSize:9}}>{(e.date||"").slice(5)}</span>
+                        <span style={{color:C.teal,fontWeight:700,fontSize:9,minWidth:50,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{e.category||"-"}</span>
+                        <span style={{flex:1,color:C.text,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{e.subCategory||e.subSubCategory||e.note||e.memo||"-"}</span>
+                        <span style={{color:C.green,fontWeight:900,fontSize:11}}>+{Math.round((e.amount||0)/1000)}k</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* 기타 지출 목록 */}
+              {thisMonthSiteStats.extraExpenses.length>0 && (
+                <div>
+                  <div style={{fontSize:11,fontWeight:800,color:C.amber,marginBottom:4,paddingLeft:2}}>📉 기타 지출 ({thisMonthSiteStats.extraExpenses.length}건)</div>
+                  <div style={{display:"flex",flexDirection:"column",gap:2,maxHeight:140,overflowY:"auto"}}>
+                    {thisMonthSiteStats.extraExpenses.map((e:any,i:number)=>(
+                      <div key={i} style={{display:"flex",alignItems:"center",gap:6,padding:"4px 8px",background:C.bg2,borderRadius:4,fontSize:10,borderLeft:`2px solid ${C.amber}77`}}>
+                        <span style={{color:C.muted,minWidth:36,fontSize:9}}>{(e.date||"").slice(5)}</span>
+                        <span style={{color:C.amber,fontWeight:700,fontSize:9,minWidth:50,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{e.category||"-"}</span>
+                        <span style={{flex:1,color:C.text,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{e.subCategory||e.subSubCategory||e.note||e.memo||"-"}</span>
+                        <span style={{color:C.red,fontWeight:900,fontSize:11}}>-{Math.round((e.amount||0)/1000)}k</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {thisMonthSiteStats.extraIncomes.length===0 && thisMonthSiteStats.extraExpenses.length===0 && thisMonthSiteStats.siteRows.length>0 && (
+                <div style={{textAlign:"center",color:C.dim,padding:"6px 0",fontSize:10}}>이번 달 기타 수익/지출 없음</div>
+              )}
+            </div>
+          </div>
+          </div>
+
+        </div>
+        );
+      })()}
+
+
+      {/* ══ 리그-API 매핑 모달 ══ */}
+      {leagueApiModal && (()=>{
+        const { league, sport, country } = leagueApiModal;
+        // 종목 매핑 (스포츠 탭 종목명 → API sport id)
+        const sportToApiId: Record<string,string> = {
+          "축구":"football","야구":"baseball","농구":"basketball","배구":"volleyball","하키":"hockey",
+          "football":"football","baseball":"baseball","basketball":"basketball","volleyball":"volleyball","hockey":"hockey",
+        };
+        const apiSportId = sportToApiId[sport] || "";
+
+        // 추천 목록: 국가명으로 리그 추론
+        const countryToLeagues: Record<string,string[]> = {
+          "한국":["K리그1","K리그2","KBO","V리그 남자","V리그 여자"],
+          "미국":["MLB","NBA","NFL","NHL","MLS"],
+          "일본":["J리그","NPB","B리그"],
+          "영국":["프리미어리그","EFL 챔피언십","FA컵"],
+          "스페인":["라리가","세군다"],
+          "독일":["분데스리가","2. 분데스리가"],
+          "이탈리아":["세리에A","세리에B"],
+          "프랑스":["리그1","리그2"],
+          "중국":["CSL"],
+          "호주":["A리그"],
+        };
+        const recommendedLeagues = countryToLeagues[country] || [];
+
+        // 전체 목록: 해당 종목 API만
+        const allApiInfo = API_SPORTS_INFO.filter(a => !apiSportId || a.sport === apiSportId);
+        const currentMapping = leagueApiMap[league];
+
+        return (
+          <div style={{position:"fixed",inset:0,background:"#000c",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center"}}>
+            <div style={{background:C.bg3,border:`1px solid ${C.teal}`,borderRadius:14,padding:22,width:480,maxHeight:"85vh",overflowY:"auto"}}>
+              <div style={{fontSize:15,fontWeight:800,color:C.teal,marginBottom:4}}>🔗 API 연결</div>
+              <div style={{fontSize:11,color:C.muted,marginBottom:14}}>
+                <span style={{color:C.amber,fontWeight:700}}>{league}</span>
+                <span style={{color:C.dim}}> · {country} · {sport}</span>
+                {currentMapping && <span style={{marginLeft:8,color:C.teal,fontWeight:700}}>현재: {currentMapping}</span>}
+              </div>
+
+              {/* 탭 */}
+              <div style={{display:"flex",gap:6,marginBottom:14}}>
+                {(["recommend","all"] as const).map(t=>(
+                  <button key={t} onClick={()=>setLeagueApiTab(t)}
+                    style={{flex:1,padding:"7px 0",borderRadius:6,cursor:"pointer",fontWeight:700,fontSize:12,
+                      border:leagueApiTab===t?`2px solid ${C.teal}`:`1px solid ${C.border}`,
+                      background:leagueApiTab===t?`${C.teal}22`:C.bg2,
+                      color:leagueApiTab===t?C.teal:C.muted}}>
+                    {t==="recommend"?"⭐ 추천 목록":"📋 전체 목록"}
+                  </button>
+                ))}
+              </div>
+
+              {leagueApiTab==="recommend" ? (
+                <div>
+                  <div style={{fontSize:10,color:C.dim,marginBottom:8}}>
+                    {country} 국가 기준 추천 API / 종목: {apiSportId||sport}
+                  </div>
+                  {allApiInfo.length === 0 ? (
+                    <div style={{textAlign:"center",padding:"20px 0",color:C.dim,fontSize:12}}>
+                      해당 종목 API 없음 · 전체 목록에서 선택해주세요
+                    </div>
+                  ) : allApiInfo.map(api=>(
+                    <div key={api.id} onClick={()=>{saveLeagueApiMap({...leagueApiMap,[league]:api.id});setLeagueApiModal(null);}}
+                      style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 12px",marginBottom:6,background:currentMapping===api.id?`${C.teal}22`:C.bg2,border:`1px solid ${currentMapping===api.id?C.teal:C.border}`,borderRadius:8,cursor:"pointer"}}>
+                      <div>
+                        <div style={{fontSize:13,fontWeight:700,color:currentMapping===api.id?C.teal:C.text}}>{api.name}</div>
+                        <div style={{fontSize:10,color:C.dim,marginTop:2}}>{api.host}</div>
+                        {recommendedLeagues.some(r=>r.includes(league.slice(0,2))) && (
+                          <div style={{fontSize:9,color:C.amber,marginTop:2}}>⭐ 추천</div>
+                        )}
+                      </div>
+                      <div style={{fontSize:11,color:C.muted,textAlign:"right" as const}}>
+                        <div>{api.dailyLimit}콜/일</div>
+                        <div style={{color: ACTIVE_SPORTS.includes(api.sport) ? C.green : C.dim}}>
+                          {ACTIVE_SPORTS.includes(api.sport) ? "활성" : "비활성"}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div>
+                  <div style={{fontSize:10,color:C.dim,marginBottom:8}}>전체 API 목록 (종목: {apiSportId||"전체"})</div>
+                  {API_SPORTS_INFO.map(api=>(
+                    <div key={api.id} onClick={()=>{saveLeagueApiMap({...leagueApiMap,[league]:api.id});setLeagueApiModal(null);}}
+                      style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 12px",marginBottom:6,background:currentMapping===api.id?`${C.teal}22`:C.bg2,border:`1px solid ${currentMapping===api.id?C.teal:C.border}`,borderRadius:8,cursor:"pointer"}}>
+                      <div>
+                        <div style={{fontSize:13,fontWeight:700,color:currentMapping===api.id?C.teal:C.text}}>{api.name}</div>
+                        <div style={{fontSize:10,color:C.dim,marginTop:2}}>{api.host}/{api.path}</div>
+                      </div>
+                      <div style={{fontSize:11,color:C.muted,textAlign:"right" as const}}>
+                        <div>{api.dailyLimit}콜/일</div>
+                        <div style={{color: ACTIVE_SPORTS.includes(api.sport) ? C.green : C.dim}}>
+                          {ACTIVE_SPORTS.includes(api.sport) ? "활성" : "비활성"}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div style={{display:"flex",gap:8,marginTop:14}}>
+                {currentMapping && (
+                  <button onClick={()=>{const m={...leagueApiMap};delete m[league];saveLeagueApiMap(m);setLeagueApiModal(null);}}
+                    style={{flex:1,padding:"8px",borderRadius:6,border:`1px solid ${C.red}44`,background:`${C.red}11`,color:C.red,cursor:"pointer",fontWeight:700,fontSize:12}}>
+                    🗑 연결 해제
+                  </button>
+                )}
+                <button onClick={()=>setLeagueApiModal(null)}
+                  style={{flex:1,background:C.bg2,border:`1px solid ${C.border}`,color:C.muted,padding:"8px",borderRadius:6,cursor:"pointer"}}>
+                  취소
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ══ API 관리 탭 (rev.7 — 클라이언트 직접 호출 + DB 캐시) ══ */}
+      {tab==="apiManager" && (()=>{
+        // 캐시 메타에서 정보 추출
+        const lastFetchedAt = cacheMeta.lastFetchedAt;
+        const lastTotalCalls = cacheMeta.lastTotalCalls || 0;
+        const lastResults = cacheMeta.lastResultBySport || {};
+        const lastCalls = cacheMeta.lastCallsBySport || {};
+
+        // 오늘(KST) 누적 콜 — 자정에 자동 리셋되도록 todayDateKst 비교
+        const todayKst = kstDateStr(0);
+        const todayTotalCalls = (cacheMeta.todayDateKst === todayKst)
+          ? (cacheMeta.todayTotalCalls || 0)
+          : 0;
+
+        // 캐시 신선도 (분)
+        const ageMin = lastFetchedAt
+          ? Math.max(0, Math.floor((Date.now() - new Date(lastFetchedAt).getTime()) / 60_000))
+          : null;
+        const isFresh = ageMin !== null && ageMin < CACHE_FRESH_MIN;
+
+        // 호출 결과의 에러 여부
+        const hasAnyError = Object.values(lastResults).some((r: any) => !!r?.error);
+
+        // 활성 종목 일일 한도 합 (3종목 × 100 = 300, 5종목이면 500)
+        const totalDailyLimit = ACTIVE_SPORTS.reduce((s, sp) => {
+          const info = API_SPORTS_INFO.find(a => a.sport === sp);
+          return s + (info?.dailyLimit || 0);
+        }, 0);
+        const todayUsagePct = totalDailyLimit > 0
+          ? Math.min(100, Math.round(todayTotalCalls / totalDailyLimit * 100))
+          : 0;
+        const usageColor = todayUsagePct >= 90 ? C.red : todayUsagePct >= 70 ? C.amber : C.green;
+
+        return (
+          <div style={{flex:1,overflowY:"auto",padding:20,minHeight:0}}>
+
+            {/* ── 헤더 ── */}
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14,gap:12,flexWrap:"wrap" as const}}>
+              <div style={{flex:1,minWidth:260}}>
+                <div style={{fontSize:18,fontWeight:900,color:C.purple}}>🔑 API 관리</div>
+                <div style={{fontSize:11,color:C.muted,marginTop:3,lineHeight:1.5}}>
+                  클라이언트 직접 호출 · 사용자 트리거 전용 · 활성 {ACTIVE_SPORTS.length}종목 · KST 어제+오늘+내일 ({FETCH_DAYS}일치) · 캐시 {CACHE_FRESH_MIN}분
+                </div>
+                {lastFetchedAt && (
+                  <div style={{fontSize:11,color:isFresh?C.green:C.muted,marginTop:4}}>
+                    마지막 호출: <b>{new Date(lastFetchedAt).toLocaleString("ko-KR")}</b>
+                    <span style={{marginLeft:6}}>({fmtRelTime(lastFetchedAt)})</span>
+                    <span style={{marginLeft:8,padding:"1px 7px",borderRadius:9,fontSize:10,fontWeight:800,
+                      background:isFresh?`${C.green}22`:`${C.amber}22`,
+                      border:`1px solid ${isFresh?C.green:C.amber}55`,
+                      color:isFresh?C.green:C.amber}}>
+                      {isFresh ? `🟢 신선 (${ageMin}분)` : `🟡 만료 (${ageMin}분 ≥ ${CACHE_FRESH_MIN})`}
+                    </span>
+                  </div>
+                )}
+                {!lastFetchedAt && (
+                  <div style={{fontSize:11,color:C.amber,marginTop:4}}>
+                    ⚠ 아직 호출된 적 없음 — 새로고침 버튼을 눌러 첫 호출을 실행하세요
+                  </div>
+                )}
+              </div>
+
+              <div style={{display:"flex",gap:8,flexWrap:"wrap" as const}}>
+                <button onClick={()=>refreshFixtures({force:false})} disabled={refreshLoading||isMobile}
+                  title={isMobile ? "모바일에서는 차단됩니다" : `캐시 ${CACHE_FRESH_MIN}분 이내면 호출 생략`}
+                  style={{padding:"9px 14px",borderRadius:7,border:`1px solid ${C.teal}`,background:`${C.teal}22`,color:C.teal,cursor:(refreshLoading||isMobile)?"not-allowed":"pointer",fontWeight:800,fontSize:12,opacity:(refreshLoading||isMobile)?0.5:1}}>
+                  {refreshLoading?"⏳ 진행중…":"🔄 새로고침"}
+                </button>
+                <button onClick={()=>{
+                    if (isMobile) return;
+                    if (!confirm(`⚡ 강제 새로고침\n\n캐시(${CACHE_FRESH_MIN}분)를 무시하고 무조건 API를 호출합니다.\n계속하시겠습니까?`)) return;
+                    refreshFixtures({force:true});
+                  }} disabled={refreshLoading||isMobile}
+                  title={isMobile ? "모바일에서는 차단됩니다" : "캐시 무시하고 무조건 호출"}
+                  style={{padding:"9px 14px",borderRadius:7,border:`1px solid ${C.amber}`,background:`${C.amber}22`,color:C.amber,cursor:(refreshLoading||isMobile)?"not-allowed":"pointer",fontWeight:800,fontSize:12,opacity:(refreshLoading||isMobile)?0.5:1}}>
+                  {refreshLoading?"⏳":"⚡ 강제"}
+                </button>
+              </div>
+            </div>
+
+            {/* ── 모바일 안내 배너 ── */}
+            {isMobile && (
+              <div style={{padding:"10px 14px",borderRadius:8,background:`${C.amber}11`,border:`1px solid ${C.amber}44`,marginBottom:14,fontSize:12,color:C.amber,lineHeight:1.5}}>
+                📱 <b>모바일 감지됨</b> — 이 기기에서는 API 호출이 차단됩니다.
+                <div style={{fontSize:10,color:C.muted,marginTop:3}}>
+                  모바일 통신사 IP는 매번 바뀌어서 API-Sports에 키 공유로 오인될 수 있습니다.
+                  데이터는 PC에서 새로고침해 주세요. 이 기기에서는 마지막 PC 호출 결과를 그대로 봅니다.
+                </div>
+              </div>
+            )}
+
+            {/* ── 새로고침 결과 배너 ── */}
+            {refreshNote && (
+              <div style={{padding:"10px 14px",borderRadius:8,marginBottom:14,fontSize:12,lineHeight:1.5,
+                background: refreshNote.kind==="error" ? `${C.red}11`
+                          : refreshNote.kind==="warn"  ? `${C.amber}11`
+                          : refreshNote.kind==="success" ? `${C.green}11`
+                          : `${C.teal}11`,
+                border: `1px solid ${
+                  refreshNote.kind==="error" ? C.red+"55"
+                : refreshNote.kind==="warn"  ? C.amber+"55"
+                : refreshNote.kind==="success" ? C.green+"55"
+                : C.teal+"55"}`,
+                color: refreshNote.kind==="error" ? C.red
+                     : refreshNote.kind==="warn"  ? C.amber
+                     : refreshNote.kind==="success" ? C.green
+                     : C.teal,
+                display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
+                <span style={{flex:1}}>{refreshNote.text}</span>
+                <button onClick={()=>setRefreshNote(null)}
+                  style={{background:"transparent",border:"none",color:"inherit",cursor:"pointer",fontSize:14,lineHeight:1,opacity:0.7}}>×</button>
+              </div>
+            )}
+
+            {/* ── 요약 카드 ── */}
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:10,marginBottom:20}}>
+              {[
+                {label:"활성 종목",value:`${ACTIVE_SPORTS.length}종목`,sub:`정의 ${API_SPORTS_INFO.length}종목`,color:C.purple},
+                {label:"마지막 호출 콜 수",value:`${lastTotalCalls}콜`,sub:lastFetchedAt?fmtRelTime(lastFetchedAt):"-",color:C.teal},
+                {label:`오늘 누적 (KST)`,value:`${todayTotalCalls}콜`,sub:`한도 ${totalDailyLimit}콜 (${todayUsagePct}%)`,color:usageColor},
+                {label:"마지막 호출 상태",value:hasAnyError?"❌ 오류":(lastFetchedAt?"✅ 정상":"-"),color:hasAnyError?C.red:(lastFetchedAt?C.green:C.dim)},
+              ].map(sc=>(
+                <div key={sc.label} style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:10,padding:"12px 14px"}}>
+                  <div style={{fontSize:10,color:C.muted,marginBottom:4}}>{sc.label}</div>
+                  <div style={{fontSize:18,fontWeight:800,color:sc.color}}>{sc.value}</div>
+                  {(sc as any).sub && <div style={{fontSize:10,color:C.muted,marginTop:2}}>{(sc as any).sub}</div>}
+                </div>
+              ))}
+            </div>
+
+            {/* ── 오늘 누적 사용량 바 ── */}
+            <div style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:10,padding:"10px 14px",marginBottom:20}}>
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:5}}>
+                <span style={{color:C.muted}}>오늘(KST) 누적 사용량 — 활성 종목 합산</span>
+                <span style={{color:usageColor,fontWeight:800}}>{todayTotalCalls} / {totalDailyLimit}콜 ({todayUsagePct}%)</span>
+              </div>
+              <div style={{height:8,background:C.bg,borderRadius:4,overflow:"hidden"}}>
+                <div style={{width:`${todayUsagePct}%`,height:"100%",background:usageColor,borderRadius:4,transition:"width 0.3s"}}/>
+              </div>
+              <div style={{fontSize:9,color:C.dim,marginTop:5}}>
+                ※ 한 번 새로고침하면 활성 {ACTIVE_SPORTS.length}종목 × {FETCH_DAYS}일 = 최대 {ACTIVE_SPORTS.length * FETCH_DAYS}콜 사용
+              </div>
+            </div>
+
+            {/* ── 종목별 카드 ── */}
+            <div style={{fontSize:12,color:C.muted,marginBottom:8,fontWeight:700}}>📊 종목별 현황</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:12,marginBottom:24}}>
+              {API_SPORTS_INFO.map(api=>{
+                const isActive = ACTIVE_SPORTS.includes(api.sport);
+                const result   = lastResults[api.sport];
+                const calls    = lastCalls[api.sport] ?? 0;
+                const hasError = !!result?.error;
+                const statusColor = !isActive ? C.dim
+                                  : !result   ? C.muted
+                                  : hasError  ? C.red
+                                  : C.green;
+
+                return (
+                  <div key={api.id} style={{background:C.bg2,border:`1.5px solid ${statusColor}44`,borderRadius:12,padding:14,display:"flex",flexDirection:"column",gap:8,opacity:isActive?1:0.55}}>
+                    {/* 헤더 */}
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                      <div style={{display:"flex",alignItems:"center",gap:8}}>
+                        <div style={{width:9,height:9,borderRadius:"50%",background:statusColor,boxShadow:isActive?`0 0 6px ${statusColor}`:"none"}}/>
+                        <span style={{fontSize:14,fontWeight:900,color:C.text}}>{api.name}</span>
+                      </div>
+                      <span style={{fontSize:9,padding:"2px 7px",borderRadius:4,
+                        background: isActive ? `${C.purple}22` : `${C.dim}22`,
+                        border:`1px solid ${isActive?C.purple+"55":C.dim+"55"}`,
+                        color: isActive ? C.purple : C.dim,
+                        fontWeight:700}}>
+                        {isActive ? "활성" : "비활성"}
+                      </span>
+                    </div>
+
+                    {/* 호스트 */}
+                    <div style={{fontSize:10,color:C.dim,fontFamily:"monospace",background:C.bg,padding:"4px 8px",borderRadius:4}}>
+                      🌐 {api.host}/{api.path}
+                    </div>
+
+                    {/* 활성 종목만: 통계 */}
+                    {isActive ? (
+                      <>
+                        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:5}}>
+                          {[
+                            {l:"가져온 경기", v: result?.fetched ?? "-",  c: C.teal},
+                            {l:"저장된 경기", v: result?.upserted ?? "-", c: C.green},
+                            {l:"API 콜",      v: calls || "-",            c: C.amber},
+                          ].map(st=>(
+                            <div key={st.l} style={{background:C.bg3,borderRadius:5,padding:"6px 8px",textAlign:"center" as const}}>
+                              <div style={{fontSize:9,color:C.muted,marginBottom:2}}>{st.l}</div>
+                              <div style={{fontSize:14,fontWeight:800,color:st.c}}>{st.v}</div>
+                            </div>
+                          ))}
+                        </div>
+                        {hasError && (
+                          <div style={{fontSize:10,color:C.red,padding:"5px 8px",background:`${C.red}11`,border:`1px solid ${C.red}44`,borderRadius:5,wordBreak:"break-all" as const}}>
+                            ⚠ {String(result.error).slice(0,120)}
+                          </div>
+                        )}
+                        <div style={{fontSize:9,color:C.muted}}>
+                          한도 {api.dailyLimit}콜/일 · 마지막 호출당 최대 {FETCH_DAYS}콜 사용
+                        </div>
+                      </>
+                    ) : (
+                      <div style={{fontSize:10,color:C.dim,padding:"6px 8px",background:C.bg3,borderRadius:5,lineHeight:1.5}}>
+                        비활성 종목 — 새로고침 시 호출되지 않습니다.<br/>
+                        <span style={{color:C.muted}}>활성화하려면 코드의 ACTIVE_SPORTS 배열에 "{api.sport}" 추가</span>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* ⚠️ 요청 #2: odds-api.io 외부 배당 API UI 박스 삭제됨.
+                (관련 state oddsApiKey/oddsApiKeyDraft/testOddsApiConnection 등도 정리)
+                남은 것은 VITE_API_SPORTS_KEY를 통한 일정·결과 수신 기능뿐. */}
+
+            {/* ── 안내 박스 ── */}
+            <div style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:10,padding:14,fontSize:11,color:C.muted,lineHeight:1.7}}>
+              <div style={{fontSize:13,fontWeight:800,color:C.teal,marginBottom:8}}>ℹ️ 호출 정책 (rev.7)</div>
+              <div>· <b>자동 호출 없음</b> — 새로고침 버튼을 눌렀을 때만 API에 요청합니다.</div>
+              <div>· <b>캐시 {CACHE_FRESH_MIN}분</b> — 일반 새로고침은 캐시가 신선하면 호출 생략, DB만 다시 읽습니다.</div>
+              <div>· <b>⚡ 강제 새로고침</b> — 캐시 무시하고 무조건 호출 (라이브 점수 즉시 확인용).</div>
+              <div>· <b>활성 종목만 호출</b> — 현재 {ACTIVE_SPORTS.map(s=>{const i=API_SPORTS_INFO.find(a=>a.sport===s);return i?.name||s;}).join(", ")}.</div>
+              <div>· <b>모바일 차단</b> — 통신사 IP가 자주 바뀌어 API 정지 위험이 큽니다. PC에서만 호출.</div>
+              <div>· <b>저장 위치</b> — Supabase fixtures 테이블 (다른 기기는 이걸 읽기만).</div>
+              <div style={{marginTop:8,padding:"8px 10px",background:C.bg,borderRadius:6,fontSize:10}}>
+                <b style={{color:C.amber}}>⚠ 첫 사용 시</b>: Vercel 환경변수에 <code style={{color:C.text,background:C.bg2,padding:"1px 5px",borderRadius:3}}>VITE_API_SPORTS_KEY</code>가 설정되어 있어야 합니다.
+              </div>
+            </div>
+
+          </div>
+        );
+      })()}
+
+
+
+
+      {/* ══ 데이터 관리 탭 ══ */}
+      {tab==="dataManager" && (()=>{
+        const tables: {
+          key: string; label: string; desc: string;
+          deletable: boolean; onDelete?: ()=>void;
+        }[] = [
+          { key:"bets",          label:"베팅 기록",        desc:"모든 베팅 내역 (진행중/완료)",       deletable:true,  onDelete:async()=>{ if(!confirm("베팅 기록을 전체 삭제합니다. 계속?"))return; await supabase.from("bets").delete().neq("id","__none__"); setBetsRaw([]); addLog("🗑 데이터 삭제","bets 전체"); loadDataStats(); } },
+          { key:"fixtures",      label:"경기 데이터",      desc:"API 경기 캐시",                      deletable:true,  onDelete:async()=>{ if(!confirm("경기 캐시를 전체 삭제합니다. 계속?"))return; await supabase.from("fixtures").delete().neq("id",0); setStFixtures([]); addLog("🗑 데이터 삭제","fixtures 전체"); loadDataStats(); } },
+          { key:"deposits",      label:"입금 기록",        desc:"사이트별 입금 내역",                 deletable:false },
+          { key:"withdrawals",   label:"출금 기록",        desc:"사이트별 출금 내역",                 deletable:false },
+          { key:"manual_games",  label:"수동 경기",        desc:"수동으로 추가한 경기 목록",          deletable:true,  onDelete:async()=>{ if(!confirm("수동 경기를 전체 삭제합니다. 계속?"))return; await supabase.from("manual_games").delete().neq("id","__none__"); setManualGames([]); addLog("🗑 데이터 삭제","manual_games 전체"); loadDataStats(); } },
+          { key:"team_names",    label:"팀/국가/리그 이름", desc:"한글 이름 매핑 테이블",             deletable:true,  onDelete:async()=>{ if(!confirm("팀/국가/리그 한글 이름을 전체 삭제합니다. 계속?"))return; await supabase.from("team_names").delete().neq("original","__none__"); addLog("🗑 데이터 삭제","team_names 전체"); loadDataStats(); } },
+          { key:"app_settings",  label:"앱 설정",          desc:"리그 매핑, 사이트 설정 등",         deletable:false },
+          { key:"logs",          label:"로그",             desc:"앱 동작 로그",                      deletable:true,  onDelete:async()=>{ if(!confirm("로그를 전체 삭제합니다. 계속?"))return; await supabase.from("logs").delete().neq("id",0); addLog("🗑 데이터 삭제","logs 전체"); loadDataStats(); } },
+          { key:"custom_leagues",label:"커스텀 리그",      desc:"사용자 정의 리그 목록",             deletable:false },
+          { key:"m_meta",        label:"수동 메타",        desc:"수동 경기 종목/국가/리그 메타",     deletable:false },
+          { key:"site_states",   label:"사이트 상태",      desc:"입금액/진행률 (삭제 비추천)",       deletable:false },
+        ];
+        const usedMB = dataTotalSize ? parseFloat(dataTotalSize) : 0;
+        const limitMB = 500;
+        const pct = Math.min(100,(usedMB/limitMB)*100);
+        const barColor = pct>80?C.red:pct>50?C.amber:C.green;
+        return (
+          <div style={{flex:1,overflowY:"auto",padding:24}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+              <div>
+                <div style={{fontSize:18,fontWeight:900,color:C.red}}>🗄 데이터 관리</div>
+                <div style={{fontSize:11,color:C.muted,marginTop:3}}>
+                  Supabase 테이블별 데이터 현황 · 무료 한도: 500MB
+                  {dataTotalSize && <span style={{marginLeft:8,color:C.teal,fontWeight:700}}>사용중: {dataTotalSize}</span>}
+                </div>
+              </div>
+              <button onClick={loadDataStats} disabled={dataStatsLoading}
+                style={{padding:"7px 16px",borderRadius:7,border:`1px solid ${C.teal}`,background:`${C.teal}22`,color:C.teal,cursor:dataStatsLoading?"not-allowed":"pointer",fontWeight:700,fontSize:12,opacity:dataStatsLoading?0.6:1}}>
+                {dataStatsLoading?"⏳ 조회중...":"🔄 새로고침"}
+              </button>
+            </div>
+
+            {dataTotalSize && (
+              <div style={{marginBottom:20,background:C.bg2,borderRadius:10,padding:"14px 18px"}}>
+                <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
+                  <span style={{fontSize:12,fontWeight:700,color:C.text}}>전체 DB 사용량</span>
+                  <span style={{fontSize:13,fontWeight:800,color:barColor}}>{usedMB.toFixed(2)} MB / 500 MB ({pct.toFixed(1)}%)</span>
+                </div>
+                <div style={{height:10,background:C.bg,borderRadius:5,overflow:"hidden"}}>
+                  <div style={{width:`${pct}%`,height:"100%",background:barColor,transition:"width 0.5s",borderRadius:5}}/>
+                </div>
+              </div>
+            )}
+
+            <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:12}}>
+              {tables.map(t=>{
+                const stat = dataTableStats[t.key];
+                return (
+                  <div key={t.key} style={{background:C.bg2,border:`1px solid ${t.deletable?C.border2:C.border}`,borderRadius:10,padding:"14px 16px"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
+                      <div>
+                        <div style={{fontSize:13,fontWeight:800,color:C.text}}>{t.label}</div>
+                        <div style={{fontSize:10,color:C.muted,marginTop:2}}>{t.desc}</div>
+                      </div>
+                      {t.deletable && (
+                        <button onClick={t.onDelete}
+                          style={{padding:"4px 10px",borderRadius:5,border:`1px solid ${C.red}66`,background:`${C.red}11`,color:C.red,cursor:"pointer",fontWeight:700,fontSize:10,flexShrink:0,marginLeft:8}}>
+                          🗑 삭제
+                        </button>
+                      )}
+                    </div>
+                    <div style={{display:"flex",gap:16,alignItems:"center"}}>
+                      {stat ? (
+                        <>
+                          <span style={{fontSize:16,fontWeight:900,color:C.teal}}>{stat.rows.toLocaleString()}<span style={{fontSize:10,color:C.muted,fontWeight:400}}> 행</span></span>
+                          {stat.size!=="-" && <span style={{fontSize:12,fontWeight:700,color:C.amber}}>{stat.size}</span>}
+                        </>
+                      ) : dataStatsLoading ? (
+                        <span style={{fontSize:11,color:C.dim}}>조회중...</span>
+                      ) : (
+                        <span style={{fontSize:11,color:C.dim}}>— <span style={{fontSize:9}}>새로고침 클릭</span></span>
+                      )}
+                    </div>
+                    <div style={{fontSize:9,color:C.dim,marginTop:4,fontFamily:"monospace"}}>{t.key}</div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div style={{marginTop:16,padding:"12px 16px",background:`${C.amber}11`,border:`1px solid ${C.amber}44`,borderRadius:8}}>
+              <div style={{fontSize:11,color:C.amber,fontWeight:700,marginBottom:6}}>💡 정확한 용량 표시를 위한 Supabase 함수 (최초 1회 실행)</div>
+              <div style={{fontSize:9,color:C.teal,fontFamily:"monospace",lineHeight:1.8,background:C.bg,padding:"8px 12px",borderRadius:6,whiteSpace:"pre-wrap",wordBreak:"break-all"}}>
+{`CREATE OR REPLACE FUNCTION get_table_sizes()
+RETURNS TABLE(table_name text, row_count bigint, size_pretty text, size_bytes bigint)
+LANGUAGE sql SECURITY DEFINER AS $$
+  SELECT relname::text, n_live_tup,
+    pg_size_pretty(pg_total_relation_size(c.oid)),
+    pg_total_relation_size(c.oid)
+  FROM pg_class c
+  JOIN pg_stat_user_tables s ON c.relname=s.relname
+  WHERE c.relkind='r'
+  ORDER BY pg_total_relation_size(c.oid) DESC;
+$$;`}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ══════════════════════════════════════════════════════════
+          🧪 스포츠(테스트) 탭 - 이름 편집 모달
+          국가/리그/팀 이름을 인라인으로 한글(또는 다른 이름)로 변경
+          저장하면 DB에 보관되어 다음 로드 때 자동 적용됨
+          ══════════════════════════════════════════════════════════ */}
+      {editNameModal && (()=>{
+        const m = editNameModal;
+        const typeLabel = m.type==="team"?"팀":m.type==="country"?"국가":"리그";
+        const typeColor = m.type==="team"?C.green:m.type==="country"?C.teal:C.amber;
+        const handleSave = ()=>{
+          const newName = editNameInput.trim();
+          if (m.type==="team") {
+            if (newName) saveTeamNameEntry(m.original, newName);
+            else deleteTeamNameEntry(m.original);
+          } else if (m.type==="country") {
+            saveCountryName(m.original, newName);
+          } else {
+            saveLeagueName(m.original, newName);
+          }
+          setEditNameModal(null);
+          setEditNameInput("");
+        };
+        const handleDelete = ()=>{
+          if (m.type==="team") deleteTeamNameEntry(m.original);
+          else if (m.type==="country") saveCountryName(m.original, "");
+          else saveLeagueName(m.original, "");
+          setEditNameModal(null);
+          setEditNameInput("");
+        };
+        const hasMapping = m.type==="team" ? !!teamNameMap[m.original]
+                         : m.type==="country" ? !!countryNameMap[m.original]
+                         : !!leagueNameMap[m.original];
+        return (
+          <div
+            style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+            <div
+              style={{background:C.bg2,border:`1px solid ${typeColor}`,borderRadius:10,padding:"20px 24px",minWidth:380,maxWidth:480,boxShadow:`0 10px 40px ${typeColor}33`}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+                <div>
+                  <div style={{fontSize:11,color:typeColor,fontWeight:800,letterSpacing:1,marginBottom:3}}>✏️ {typeLabel} 이름 수정</div>
+                  <div style={{fontSize:13,color:C.text,fontWeight:700}}>원문: <span style={{color:C.muted}}>{m.original}</span></div>
+                </div>
+                <button onClick={()=>setEditNameModal(null)}
+                  style={{background:"transparent",border:`1px solid ${C.border}`,color:C.muted,padding:"4px 10px",borderRadius:5,cursor:"pointer",fontSize:12}}>✕</button>
+              </div>
+
+              <div style={{marginBottom:14}}>
+                <div style={{fontSize:10,color:C.dim,marginBottom:6,letterSpacing:0.5}}>표시할 이름 (한글 또는 원하는 이름)</div>
+                <input
+                  autoFocus
+                  value={editNameInput}
+                  onChange={e=>setEditNameInput(e.target.value)}
+                  onKeyDown={e=>{
+                    if (e.key==="Enter") handleSave();
+                    if (e.key==="Escape") setEditNameModal(null);
+                  }}
+                  placeholder={m.type==="team"?"예: 맨체스터 유나이티드":m.type==="country"?"예: 잉글랜드":"예: 프리미어리그"}
+                  style={{width:"100%",padding:"10px 12px",borderRadius:6,border:`1px solid ${C.border2}`,background:C.bg,color:C.text,fontSize:14,fontWeight:700,outline:"none",boxSizing:"border-box"}}
+                />
+              </div>
+
+              <div style={{fontSize:10,color:C.dim,marginBottom:14,padding:"8px 10px",background:C.bg3,borderRadius:5,lineHeight:1.6}}>
+                💡 저장 후 모든 곳(이 탭, 슬립, 베팅 내역 등)에서 자동으로 이 이름이 사용됩니다.<br/>
+                {m.type==="team" && <span>💡 팀명은 기존 통계/베팅 데이터에도 즉시 반영됩니다.</span>}
+                {hasMapping && m.type!=="team" && <span style={{color:C.amber}}>⚠️ 이 {typeLabel}은 이미 매핑이 있습니다. 비워두고 저장하면 매핑이 삭제됩니다.</span>}
+                {hasMapping && m.type==="team" && <span style={{color:C.amber}}>⚠️ 이 팀은 이미 매핑이 있습니다. 비워두고 저장하면 매핑이 삭제됩니다.</span>}
+              </div>
+
+              <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+                {hasMapping && (
+                  <button onClick={handleDelete}
+                    style={{padding:"9px 16px",borderRadius:6,border:`1px solid ${C.red}66`,background:`${C.red}11`,color:C.red,cursor:"pointer",fontWeight:700,fontSize:12}}>
+                    🗑 매핑 삭제
+                  </button>
+                )}
+                <button onClick={()=>setEditNameModal(null)}
+                  style={{padding:"9px 16px",borderRadius:6,border:`1px solid ${C.border2}`,background:C.bg3,color:C.muted,cursor:"pointer",fontWeight:700,fontSize:12}}>
+                  취소
+                </button>
+                <button onClick={handleSave}
+                  style={{padding:"9px 18px",borderRadius:6,border:`1px solid ${typeColor}`,background:`${typeColor}33`,color:typeColor,cursor:"pointer",fontWeight:800,fontSize:12}}>
+                  💾 저장
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+
+      {/* ══════════════════════════════════════════════════════════
+          🧪 스포츠(테스트) 탭 - API 리그 매핑 모달
+          사용자 리그 1개를 API 리그 1개에 연결 (1:1, 변경 가능)
+          ══════════════════════════════════════════════════════════ */}
+      {stMappingModal && (()=>{
+        const m = stMappingModal;
+        const k = `${m.sportKr}__${m.country}__${m.league}`;
+        const currentMapping = stLeagueMap[k] || "";
+
+        // 후보: 같은 종목의 API 리그들 (중복 제거, 경기 수 포함)
+        const apiLeagues = new Map<string, {name:string; country:string; count:number}>();
+        for (const f of stFixtures) {
+          if (f.sport !== m.sport) continue;
+          const id = String(f.league_id);
+          if (!apiLeagues.has(id)) {
+            apiLeagues.set(id, {name:f.league_name, country:f.country||"", count:0});
+          }
+          apiLeagues.get(id)!.count++;
+        }
+        // 다른 사용자 리그가 이미 매핑한 API ID는 표시하되 비활성화
+        // ★ 같은 종목(sportKr) 내에서만 충돌 검사 — 다른 종목의 같은 ID는 별개의 리그임
+        const otherMappings: Record<string,string> = {}; // apiId → "다른 사용자 리그 표시명"
+        const currentSportPrefix = `${m.sportKr}__`;
+        for (const otherKey of Object.keys(stLeagueMap)) {
+          if (otherKey === k) continue;
+          // 다른 종목의 매핑은 무시 (예: 축구 매핑 시 농구 매핑은 충돌 아님)
+          if (!otherKey.startsWith(currentSportPrefix)) continue;
+          otherMappings[stLeagueMap[otherKey]] = otherKey;
+        }
+        const apiList = Array.from(apiLeagues.entries())
+          .map(([id, info]) => ({id, ...info}))
+          .sort((a,b) => a.name.localeCompare(b.name));
+
+        const handleSave = () => {
+          const next = {...stLeagueMap};
+          if (stMappingSelectedId) next[k] = stMappingSelectedId;
+          else delete next[k];
+          saveStLeagueMap(next);
+          setStMappingModal(null);
+          setStMappingSelectedId("");
+        };
+        const handleClear = () => {
+          const next = {...stLeagueMap};
+          delete next[k];
+          saveStLeagueMap(next);
+          setStMappingModal(null);
+          setStMappingSelectedId("");
+        };
+
+        return (
+          <div
+            style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+            <div
+              style={{background:C.bg2,border:`1px solid ${C.teal}`,borderRadius:10,padding:"20px 24px",minWidth:520,maxWidth:640,width:"90%",maxHeight:"85vh",display:"flex",flexDirection:"column",boxShadow:`0 10px 40px ${C.teal}33`}}>
+
+              {/* 헤더 */}
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14,flexShrink:0}}>
+                <div>
+                  <div style={{fontSize:11,color:C.teal,fontWeight:800,letterSpacing:1,marginBottom:4}}>🔗 API 리그 매핑</div>
+                  <div style={{fontSize:14,color:C.text,fontWeight:800}}>
+                    {(SPORT_META[m.sport]?.icon) || "🏅"} {m.sportKr} · {countryNameMap[m.country]||COUNTRY_KR[m.country]||m.country} · <span style={{color:C.amber}}>{leagueNameMap[m.league]||m.league}</span>
+                  </div>
+                  <div style={{fontSize:10,color:C.dim,marginTop:4}}>이 사용자 리그에 연결할 API 리그를 선택하세요 (1:1)</div>
+                </div>
+                <button onClick={()=>setStMappingModal(null)}
+                  style={{background:"transparent",border:`1px solid ${C.border}`,color:C.muted,padding:"4px 10px",borderRadius:5,cursor:"pointer",fontSize:12,flexShrink:0}}>✕</button>
+              </div>
+
+              {/* 현재 매핑 상태 */}
+              {currentMapping && (
+                <div style={{padding:"10px 12px",background:`${C.teal}11`,border:`1px solid ${C.teal}44`,borderRadius:6,marginBottom:12,fontSize:11,color:C.teal,flexShrink:0}}>
+                  ✅ 현재 매핑됨: API ID <b>{currentMapping}</b>
+                  {(()=>{
+                    const cur = apiLeagues.get(currentMapping);
+                    return cur ? <span style={{marginLeft:6,color:C.muted}}>({cur.name})</span> : null;
+                  })()}
+                </div>
+              )}
+
+              {/* 검색 (간단히) */}
+              {apiList.length > 8 && (
+                <input
+                  autoFocus
+                  ref={el=>{ if(el) setTimeout(()=>el.focus(),0); }}
+                  placeholder={`🔍 ${apiList.length}개의 ${m.sportKr} API 리그 검색...`}
+                  value={tnSearch}
+                  onChange={e=>setTnSearch(e.target.value)}
+                  style={{width:"100%",padding:"8px 12px",borderRadius:6,border:`1px solid ${C.border2}`,background:C.bg,color:C.text,fontSize:12,marginBottom:10,boxSizing:"border-box",flexShrink:0,outline:"none"}}
+                />
+              )}
+
+              {/* API 리그 리스트 (라디오) */}
+              <div style={{flex:1,overflowY:"auto",padding:"4px",border:`1px solid ${C.border}`,borderRadius:6,background:C.bg}}>
+                {apiList.length === 0 ? (
+                  <div style={{textAlign:"center",padding:"30px 10px",color:C.muted,fontSize:11}}>
+                    <div style={{fontSize:24,marginBottom:8}}>📭</div>
+                    {m.sportKr}에 해당하는 API 데이터가 없어요.<br/>
+                    <span style={{fontSize:10,color:C.dim}}>fixtures 테이블에 데이터가 들어와야 표시됩니다.</span>
+                  </div>
+                ) : (
+                  apiList
+                    .filter(it => !tnSearch || it.name.toLowerCase().includes(tnSearch.toLowerCase()) || it.country.toLowerCase().includes(tnSearch.toLowerCase()))
+                    .map(it => {
+                      const takenBy = otherMappings[it.id]; // 다른 사용자 리그가 이미 매핑한 경우
+                      const isSelected = stMappingSelectedId === it.id;
+                      const isCurrent = currentMapping === it.id;
+                      const disabled = !!takenBy;
+                      return (
+                        <label key={it.id}
+                          style={{display:"flex",alignItems:"center",gap:10,padding:"9px 12px",borderRadius:5,cursor:disabled?"not-allowed":"pointer",opacity:disabled?0.45:1,background:isSelected?`${C.teal}22`:"transparent",border:isSelected?`1px solid ${C.teal}66`:`1px solid transparent`,marginBottom:2}}>
+                          <input type="radio"
+                            name="apiLeagueChoice"
+                            checked={isSelected}
+                            disabled={disabled}
+                            onChange={()=>!disabled && setStMappingSelectedId(it.id)}
+                            style={{cursor:disabled?"not-allowed":"pointer",accentColor:C.teal}}
+                          />
+                          <div style={{flex:1,minWidth:0}}>
+                            <div style={{fontSize:12,fontWeight:isSelected?800:600,color:disabled?C.dim:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                              {it.name}
+                              {isCurrent && <span style={{marginLeft:6,fontSize:9,padding:"1px 6px",borderRadius:99,background:`${C.teal}33`,color:C.teal,fontWeight:700}}>현재</span>}
+                            </div>
+                            <div style={{fontSize:10,color:C.dim,marginTop:2}}>
+                              {it.country ? `${COUNTRY_KR[it.country]||it.country} · ` : ""}
+                              ID: {it.id} · {it.count}경기
+                              {takenBy && <span style={{marginLeft:6,color:C.amber}}>· "{takenBy.split("__").slice(-1)[0]}"에 이미 매핑됨</span>}
+                            </div>
+                          </div>
+                        </label>
+                      );
+                    })
+                )}
+              </div>
+
+              {/* 액션 버튼 */}
+              <div style={{display:"flex",gap:8,justifyContent:"space-between",marginTop:14,flexShrink:0}}>
+                <div>
+                  {currentMapping && (
+                    <button onClick={handleClear}
+                      style={{padding:"9px 14px",borderRadius:6,border:`1px solid ${C.red}66`,background:`${C.red}11`,color:C.red,cursor:"pointer",fontWeight:700,fontSize:12}}>
+                      🗑 매핑 해제
+                    </button>
+                  )}
+                </div>
+                <div style={{display:"flex",gap:8}}>
+                  <button onClick={()=>setStMappingModal(null)}
+                    style={{padding:"9px 16px",borderRadius:6,border:`1px solid ${C.border2}`,background:C.bg3,color:C.muted,cursor:"pointer",fontWeight:700,fontSize:12}}>
+                    취소
+                  </button>
+                  <button onClick={handleSave} disabled={!stMappingSelectedId || stMappingSelectedId === currentMapping}
+                    style={{padding:"9px 18px",borderRadius:6,border:`1px solid ${C.teal}`,background:(!stMappingSelectedId || stMappingSelectedId === currentMapping)?`${C.teal}11`:`${C.teal}33`,color:C.teal,cursor:(!stMappingSelectedId || stMappingSelectedId === currentMapping)?"not-allowed":"pointer",fontWeight:800,fontSize:12,opacity:(!stMappingSelectedId || stMappingSelectedId === currentMapping)?0.5:1}}>
+                    💾 매핑 저장
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+
+    </div>
+  );
+}
