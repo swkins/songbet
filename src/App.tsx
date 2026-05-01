@@ -925,6 +925,9 @@ function MarginCalcTab() {
   // ── 분석 필터 ─────────────────────────────────────────
   const [filterSport,setFilterSport] = useState<"전체"|"축구"|"야구"|"농구">("전체");
   const [filterLeague,setFilterLeague] = useState<string>("전체");
+  // ── 펼쳐진 리그 (드릴다운 아코디언) ────────────────────
+  //   리그명을 클릭하면 그 리그 안의 사이트별 마진율 비교가 펼쳐짐
+  const [expandedLeague,setExpandedLeague] = useState<string|null>(null);
 
   // ── 마진 계산 함수 ────────────────────────────────────
   const calcMargin = (odds:number[]): number => {
@@ -1023,6 +1026,46 @@ function MarginCalcTab() {
     arr.sort((a,b)=>a.avgMargin-b.avgMargin);
     return arr;
   },[records,filterSport,filterLeague]);
+
+  // ── 분석: 리그별 → 그 안의 사이트별 마진율 (드릴다운) ──────
+  //   각 리그에 대해 그 리그에서 베팅 가능한 사이트들의 평균 마진율을 계산
+  //   "MLB에서 BET365는 4.2%, PINNACLE은 4.8%" 같은 비교를 위함
+  const leagueSiteBreakdown = useMemo(()=>{
+    const map = new Map<string, Map<string, number[]>>();
+    // sport+league 단위로, site별 margins 배열
+    for(const r of records){
+      const lkey = `${r.sport}__${r.league}`;
+      if(!map.has(lkey)) map.set(lkey, new Map());
+      const siteMap = map.get(lkey)!;
+      if(!siteMap.has(r.site)) siteMap.set(r.site, []);
+      siteMap.get(r.site)!.push(r.margin);
+    }
+    const result: Record<string, {site:string, avgMargin:number, count:number}[]> = {};
+    for(const [lkey, siteMap] of map.entries()){
+      const arr = Array.from(siteMap.entries()).map(([site,margins])=>({
+        site,
+        avgMargin: margins.reduce((a,b)=>a+b,0)/margins.length,
+        count: margins.length,
+      }));
+      arr.sort((a,b)=>a.avgMargin-b.avgMargin);
+      result[lkey] = arr;
+    }
+    return result;
+  },[records]);
+
+  // ── 분석: 최고/최악 요약 (TOP 카드용) ─────────────────
+  //   leagueRanking은 낮은 순으로 이미 정렬되어 있으므로:
+  //   첫 번째 = 마진율 가장 낮음(가장 좋음), 마지막 = 가장 높음(가장 나쁨)
+  const summary = useMemo(()=>{
+    const ranking = leagueRanking;
+    const sites = siteRanking;
+    return {
+      bestLeague:  ranking.length>0 ? ranking[0] : null,
+      worstLeague: ranking.length>0 ? ranking[ranking.length-1] : null,
+      bestSite:    sites.length>0 ? sites[0] : null,
+      worstSite:   sites.length>0 ? sites[sites.length-1] : null,
+    };
+  },[leagueRanking,siteRanking]);
 
   // ── 리그 필터 옵션 (필터된 종목의 리그 목록) ──────────
   const leagueFilterOptions = useMemo(()=>{
@@ -1244,6 +1287,101 @@ function MarginCalcTab() {
         <div style={{marginBottom:18}}>
           <div style={{fontSize:13,fontWeight:800,color:cs.text,marginBottom:10}}>📊 마진율 분석</div>
 
+          {/* ── TOP 요약 카드 (가장 좋음/나쁨 한눈에) ── */}
+          <div style={{display:"grid",gridTemplateColumns:"repeat(4, 1fr)",gap:10,marginBottom:12}}>
+            {/* 가장 좋은 리그 */}
+            <div style={{
+              background:`${cs.green}11`,border:`1px solid ${cs.green}66`,borderRadius:8,
+              padding:"12px 14px",
+            }}>
+              <div style={{fontSize:9,color:cs.green,fontWeight:800,marginBottom:5,letterSpacing:0.5}}>
+                🏆 가장 좋은 리그
+              </div>
+              {summary.bestLeague ? (
+                <>
+                  <div style={{fontSize:13,fontWeight:900,color:cs.text,marginBottom:2}}>
+                    {summary.bestLeague.sport==="축구"?"⚽":summary.bestLeague.sport==="야구"?"⚾":"🏀"} {summary.bestLeague.league}
+                  </div>
+                  <div style={{fontSize:18,fontWeight:900,color:cs.green,fontFamily:"monospace"}}>
+                    {summary.bestLeague.avgMargin.toFixed(2)}%
+                  </div>
+                  <div style={{fontSize:9,color:cs.dim,marginTop:2}}>
+                    {summary.bestLeague.count}건 / {summary.bestLeague.siteCount}개 사이트
+                  </div>
+                </>
+              ) : <div style={{fontSize:11,color:cs.dim}}>데이터 없음</div>}
+            </div>
+
+            {/* 가장 나쁜 리그 */}
+            <div style={{
+              background:`${cs.red}11`,border:`1px solid ${cs.red}66`,borderRadius:8,
+              padding:"12px 14px",
+            }}>
+              <div style={{fontSize:9,color:cs.red,fontWeight:800,marginBottom:5,letterSpacing:0.5}}>
+                🚫 가장 나쁜 리그
+              </div>
+              {summary.worstLeague ? (
+                <>
+                  <div style={{fontSize:13,fontWeight:900,color:cs.text,marginBottom:2}}>
+                    {summary.worstLeague.sport==="축구"?"⚽":summary.worstLeague.sport==="야구"?"⚾":"🏀"} {summary.worstLeague.league}
+                  </div>
+                  <div style={{fontSize:18,fontWeight:900,color:cs.red,fontFamily:"monospace"}}>
+                    {summary.worstLeague.avgMargin.toFixed(2)}%
+                  </div>
+                  <div style={{fontSize:9,color:cs.dim,marginTop:2}}>
+                    {summary.worstLeague.count}건 / {summary.worstLeague.siteCount}개 사이트
+                  </div>
+                </>
+              ) : <div style={{fontSize:11,color:cs.dim}}>데이터 없음</div>}
+            </div>
+
+            {/* 가장 좋은 사이트 */}
+            <div style={{
+              background:`${cs.teal}11`,border:`1px solid ${cs.teal}66`,borderRadius:8,
+              padding:"12px 14px",
+            }}>
+              <div style={{fontSize:9,color:cs.teal,fontWeight:800,marginBottom:5,letterSpacing:0.5}}>
+                ✅ 가장 좋은 사이트
+              </div>
+              {summary.bestSite ? (
+                <>
+                  <div style={{fontSize:13,fontWeight:900,color:cs.text,marginBottom:2}}>
+                    {summary.bestSite.site}
+                  </div>
+                  <div style={{fontSize:18,fontWeight:900,color:cs.teal,fontFamily:"monospace"}}>
+                    {summary.bestSite.avgMargin.toFixed(2)}%
+                  </div>
+                  <div style={{fontSize:9,color:cs.dim,marginTop:2}}>
+                    {summary.bestSite.count}건 / {summary.bestSite.leagueCount}개 리그
+                  </div>
+                </>
+              ) : <div style={{fontSize:11,color:cs.dim}}>데이터 없음</div>}
+            </div>
+
+            {/* 가장 나쁜 사이트 */}
+            <div style={{
+              background:`${cs.red}11`,border:`1px solid ${cs.red}66`,borderRadius:8,
+              padding:"12px 14px",
+            }}>
+              <div style={{fontSize:9,color:cs.red,fontWeight:800,marginBottom:5,letterSpacing:0.5}}>
+                ❌ 가장 나쁜 사이트
+              </div>
+              {summary.worstSite ? (
+                <>
+                  <div style={{fontSize:13,fontWeight:900,color:cs.text,marginBottom:2}}>
+                    {summary.worstSite.site}
+                  </div>
+                  <div style={{fontSize:18,fontWeight:900,color:cs.red,fontFamily:"monospace"}}>
+                    {summary.worstSite.avgMargin.toFixed(2)}%
+                  </div>
+                  <div style={{fontSize:9,color:cs.dim,marginTop:2}}>
+                    {summary.worstSite.count}건 / {summary.worstSite.leagueCount}개 리그
+                  </div>
+                </>
+              ) : <div style={{fontSize:11,color:cs.dim}}>데이터 없음</div>}
+            </div>
+          </div>
+
           {/* 필터 */}
           <div style={{
             background:cs.bg3,border:`1px solid ${cs.border}`,borderRadius:7,
@@ -1289,38 +1427,124 @@ function MarginCalcTab() {
                     const tier = evalLeagueTier(r.avgMargin);
                     const tierColor = (cs as any)[tier.color] || cs.muted;
                     const isJunk = tier.tier === "잡리그";
+                    const lkey = `${r.sport}__${r.league}`;
+                    const isExpanded = expandedLeague === lkey;
+                    const siteBreakdown = leagueSiteBreakdown[lkey] || [];
+                    const canExpand = siteBreakdown.length > 0;
                     return (
-                      <div key={`${r.sport}__${r.league}`} style={{
-                        display:"grid",
-                        gridTemplateColumns:"24px 16px 1fr 60px 70px 40px",
-                        gap:6,padding:"7px 8px",
-                        background:isJunk ? `${cs.red}15` : cs.bg2,
-                        border:isJunk ? `1px solid ${cs.red}55` : "1px solid transparent",
-                        borderRadius:5,
-                        alignItems:"center",fontSize:11,
-                      }}>
-                        <div style={{fontWeight:900,color:i<3?cs.amber:cs.muted,fontSize:11}}>#{i+1}</div>
-                        <div>{r.sport==="축구"?"⚽":r.sport==="야구"?"⚾":"🏀"}</div>
-                        <div style={{
-                          fontWeight:700,
-                          color:isJunk ? cs.red : cs.text,
-                          textDecoration:isJunk ? "line-through" : "none",
-                        }}>{r.league}</div>
-                        <div style={{textAlign:"right",fontWeight:900,color,fontFamily:"monospace"}}>
-                          {r.avgMargin.toFixed(2)}%
+                      <div key={lkey}>
+                        {/* 리그 행 (클릭 가능) */}
+                        <div
+                          onClick={()=>canExpand && setExpandedLeague(isExpanded ? null : lkey)}
+                          style={{
+                            display:"grid",
+                            gridTemplateColumns:"18px 24px 16px 1fr 60px 70px 40px",
+                            gap:6,padding:"7px 8px",
+                            background:isExpanded ? `${cs.pink}15` : (isJunk ? `${cs.red}15` : cs.bg2),
+                            border:isExpanded ? `1px solid ${cs.pink}66` : (isJunk ? `1px solid ${cs.red}55` : "1px solid transparent"),
+                            borderRadius:5,
+                            alignItems:"center",fontSize:11,
+                            cursor:canExpand ? "pointer" : "default",
+                            transition:"all 0.12s",
+                          }}>
+                          <div style={{fontSize:10,color:canExpand ? (isExpanded ? cs.pink : cs.muted) : cs.dim,fontWeight:900,textAlign:"center"}}>
+                            {canExpand ? (isExpanded ? "▼" : "▶") : ""}
+                          </div>
+                          <div style={{fontWeight:900,color:i<3?cs.amber:cs.muted,fontSize:11}}>#{i+1}</div>
+                          <div>{r.sport==="축구"?"⚽":r.sport==="야구"?"⚾":"🏀"}</div>
+                          <div style={{
+                            fontWeight:700,
+                            color:isJunk ? cs.red : cs.text,
+                            textDecoration:isJunk ? "line-through" : "none",
+                          }}>{r.league}</div>
+                          <div style={{textAlign:"right",fontWeight:900,color,fontFamily:"monospace"}}>
+                            {r.avgMargin.toFixed(2)}%
+                          </div>
+                          <div style={{
+                            textAlign:"center",fontSize:9,fontWeight:800,
+                            padding:"3px 5px",borderRadius:3,
+                            background:`${tierColor}22`,
+                            color:tierColor,
+                            border:`1px solid ${tierColor}55`,
+                          }} title={tier.desc}>
+                            {tier.emoji} {tier.tier}
+                          </div>
+                          <div style={{textAlign:"right",fontSize:9,color:cs.dim}}>
+                            {r.count}/{r.siteCount}
+                          </div>
                         </div>
-                        <div style={{
-                          textAlign:"center",fontSize:9,fontWeight:800,
-                          padding:"3px 5px",borderRadius:3,
-                          background:`${tierColor}22`,
-                          color:tierColor,
-                          border:`1px solid ${tierColor}55`,
-                        }} title={tier.desc}>
-                          {tier.emoji} {tier.tier}
-                        </div>
-                        <div style={{textAlign:"right",fontSize:9,color:cs.dim}}>
-                          {r.count}/{r.siteCount}
-                        </div>
+
+                        {/* ▼ 펼쳐지면 그 리그의 사이트별 비교 표 */}
+                        {isExpanded && siteBreakdown.length>0 && (
+                          <div style={{
+                            background:`${cs.pink}08`,
+                            border:`1px solid ${cs.pink}33`,
+                            borderRadius:5,
+                            padding:"10px 12px",
+                            marginTop:3,marginLeft:18,marginBottom:3,
+                          }}>
+                            <div style={{fontSize:10,color:cs.pink,fontWeight:800,marginBottom:8,letterSpacing:0.3}}>
+                              🏪 {r.league}에서 사이트별 마진율 (낮은 순 = 베팅 유리)
+                            </div>
+                            <div style={{display:"flex",flexDirection:"column",gap:3}}>
+                              {siteBreakdown.map((sb,si)=>{
+                                const sColor = evalMarginColor(sb.avgMargin,cs);
+                                const sVerdict = evalSiteVerdict(sb.avgMargin);
+                                const svColor = (cs as any)[sVerdict.color] || cs.muted;
+                                const isPass = sVerdict.verdict === "패스";
+                                return (
+                                  <div key={sb.site} style={{
+                                    display:"grid",
+                                    gridTemplateColumns:"22px 1fr 55px 60px 30px",
+                                    gap:5,padding:"5px 8px",
+                                    background:isPass ? `${cs.red}15` : cs.bg2,
+                                    borderRadius:4,
+                                    alignItems:"center",fontSize:10,
+                                  }}>
+                                    <div style={{fontWeight:900,color:si===0?cs.green:si===siteBreakdown.length-1?cs.red:cs.muted,fontSize:10}}>
+                                      {si===0 ? "👑" : `#${si+1}`}
+                                    </div>
+                                    <div style={{
+                                      fontWeight:700,
+                                      color:isPass ? cs.red : cs.teal,
+                                      textDecoration:isPass ? "line-through" : "none",
+                                    }}>{sb.site}</div>
+                                    <div style={{textAlign:"right",fontWeight:900,color:sColor,fontFamily:"monospace"}}>
+                                      {sb.avgMargin.toFixed(2)}%
+                                    </div>
+                                    <div style={{
+                                      textAlign:"center",fontSize:8,fontWeight:800,
+                                      padding:"2px 4px",borderRadius:3,
+                                      background:`${svColor}22`,color:svColor,
+                                      border:`1px solid ${svColor}55`,
+                                    }}>
+                                      {sVerdict.emoji} {sVerdict.verdict}
+                                    </div>
+                                    <div style={{textAlign:"right",fontSize:8,color:cs.dim}}>{sb.count}건</div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                            {/* 비교 인사이트 */}
+                            {siteBreakdown.length>=2 && (() => {
+                              const best = siteBreakdown[0];
+                              const worst = siteBreakdown[siteBreakdown.length-1];
+                              const diff = worst.avgMargin - best.avgMargin;
+                              if(diff < 0.5) return null; // 차이 미미하면 표시 안 함
+                              return (
+                                <div style={{
+                                  marginTop:8,padding:"6px 9px",
+                                  background:cs.bg2,borderRadius:4,
+                                  fontSize:9,color:cs.muted,lineHeight:1.5,
+                                }}>
+                                  💡 <strong style={{color:cs.green}}>{best.site}</strong>가 <strong style={{color:cs.red}}>{worst.site}</strong>보다
+                                  마진율 <strong style={{color:cs.amber}}>{diff.toFixed(2)}%p</strong> 낮음 →
+                                  <strong style={{color:cs.text}}> {best.site} 추천</strong>
+                                </div>
+                              );
+                            })()}
+                          </div>
+                        )}
                       </div>
                     );
                   })}
@@ -1329,6 +1553,8 @@ function MarginCalcTab() {
               {/* 등급 범례 */}
               <div style={{marginTop:10,paddingTop:8,borderTop:`1px solid ${cs.border}`,fontSize:9,color:cs.muted,lineHeight:1.6}}>
                 🏆 메이저 (≤5%) · ⭐ 중위 (≤7%) · ⚠️ 하위 (≤10%) · 🚫 잡리그 (&gt;10%)
+                <br/>
+                <span style={{color:cs.pink}}>▶</span> 클릭하면 그 리그의 사이트별 비교가 펼쳐집니다
               </div>
             </div>
 
