@@ -935,6 +935,21 @@ function MarginCalcTab() {
   };
 
   // ── 레코드 추가 ───────────────────────────────────────
+  // ── 배당 자동 변환 ─────────────────────────────────────
+  //   소수점 없는 정수 입력 → 자동으로 소수점 두 자리로 변환
+  //   예) "134" → "1.34", "1000" → "10.00", "185" → "1.85"
+  //   이미 소수점 있으면 그대로. 빈 값/유효하지 않은 값도 그대로.
+  const formatOdds = (raw:string): string => {
+    const trimmed = raw.trim();
+    if(!trimmed) return raw;
+    if(trimmed.includes(".")) return raw; // 이미 소수점 있음
+    const n = parseInt(trimmed,10);
+    if(isNaN(n) || n <= 0) return raw;
+    if(trimmed.length <= 1) return raw; // 한 자리는 그대로 ("2" → "2")
+    // 정수를 100으로 나눠서 소수점 두 자리
+    return (n / 100).toFixed(2);
+  };
+
   const addRecord = (sport:"축구"|"야구"|"농구") => {
     const f = sport==="축구" ? form축구 : sport==="야구" ? form야구 : form농구;
     const setF = sport==="축구" ? setForm축구 : sport==="야구" ? setForm야구 : setForm농구;
@@ -943,9 +958,13 @@ function MarginCalcTab() {
       alert("사이트와 리그를 입력해주세요.");
       return;
     }
-    const o1 = parseFloat(f.o1);
-    const oX = parseFloat(f.oX);
-    const o2 = parseFloat(f.o2);
+    // 자동 변환 적용 (134 → 1.34 등)
+    const fmt1 = formatOdds(f.o1);
+    const fmtX = formatOdds(f.oX);
+    const fmt2 = formatOdds(f.o2);
+    const o1 = parseFloat(fmt1);
+    const oX = parseFloat(fmtX);
+    const o2 = parseFloat(fmt2);
 
     let odds: number[];
     if(sport==="축구" && f.option==="승패"){
@@ -1085,6 +1104,7 @@ function MarginCalcTab() {
       border:`1px solid ${cs.border2}`,background:cs.bg2,color:cs.text,
       fontSize:12,fontWeight:600,fontFamily:"monospace",
       boxSizing:"border-box" as const,
+      width:"100%",
     };
     const labelStyle = {fontSize:9,color:cs.muted,fontWeight:700,marginBottom:3,textTransform:"uppercase" as const,letterSpacing:0.5};
 
@@ -1098,80 +1118,87 @@ function MarginCalcTab() {
       <div style={{
         background:cs.bg3,
         border:`1px solid ${cs.border}`,
-        borderLeft:`4px solid ${accentColor}`,
+        borderTop:`4px solid ${accentColor}`,
         borderRadius:8,
         padding:"12px 14px",
-        marginBottom:10,
+        display:"flex",
+        flexDirection:"column",
+        gap:9,
       }}>
-        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+        {/* 헤더 */}
+        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:2}}>
           <span style={{fontSize:18}}>{emoji}</span>
           <span style={{fontSize:14,fontWeight:900,color:accentColor}}>{sport}</span>
         </div>
 
-        <div style={{
-          display:"grid",
-          gridTemplateColumns: is3way
-            ? "1.2fr 1.2fr 0.9fr 0.7fr 0.7fr 0.7fr auto"
-            : "1.2fr 1.2fr 0.9fr 0.8fr 0.8fr auto",
-          gap:8,
-          alignItems:"end",
-        }}>
-          {/* 사이트 */}
-          <div>
-            <div style={labelStyle}>사이트</div>
-            <input type="text" value={f.site} onChange={e=>setF({...f,site:e.target.value})}
-              placeholder="예: BET365" style={{...inputStyle,width:"100%"}}/>
-          </div>
-          {/* 리그 */}
-          <div>
-            <div style={labelStyle}>리그</div>
-            <input type="text" value={f.league} onChange={e=>setF({...f,league:e.target.value})}
-              placeholder={sport==="축구"?"예: EPL":sport==="야구"?"예: MLB":"예: NBA"}
-              style={{...inputStyle,width:"100%"}}/>
-          </div>
-          {/* 옵션 */}
-          <div>
-            <div style={labelStyle}>옵션</div>
-            <select value={f.option} onChange={e=>setF({...f,option:e.target.value as any})}
-              style={{...inputStyle,width:"100%",cursor:"pointer"}}>
-              <option value="승패">승패</option>
-              <option value="언오버">언오버</option>
-              <option value="핸디캡">핸디캡</option>
-            </select>
-          </div>
-          {/* 배당 */}
+        {/* 사이트 */}
+        <div>
+          <div style={labelStyle}>사이트</div>
+          <input type="text" value={f.site} onChange={e=>setF({...f,site:e.target.value})}
+            placeholder="예: BET365" style={inputStyle}/>
+        </div>
+
+        {/* 리그 */}
+        <div>
+          <div style={labelStyle}>리그</div>
+          <input type="text" value={f.league} onChange={e=>setF({...f,league:e.target.value})}
+            placeholder={sport==="축구"?"예: EPL":sport==="야구"?"예: MLB":"예: NBA"}
+            style={inputStyle}/>
+        </div>
+
+        {/* 옵션 */}
+        <div>
+          <div style={labelStyle}>옵션</div>
+          <select value={f.option} onChange={e=>setF({...f,option:e.target.value as any})}
+            style={{...inputStyle,cursor:"pointer"}}>
+            <option value="승패">승패</option>
+            <option value="언오버">언오버</option>
+            <option value="핸디캡">핸디캡</option>
+          </select>
+        </div>
+
+        {/* 배당 영역 (3-way면 3개, 2-way면 2개) */}
+        <div style={{display:"grid",gridTemplateColumns:is3way?"1fr 1fr 1fr":"1fr 1fr",gap:6}}>
           <div>
             <div style={labelStyle}>{oddsLabels[0]}</div>
-            <input type="number" step="0.01" value={f.o1} onChange={e=>setF({...f,o1:e.target.value})}
-              onKeyDown={e=>{if(e.key==="Enter")addRecord(sport);}}
-              placeholder="1.85" style={{...inputStyle,width:"100%"}}/>
+            <input type="text" inputMode="decimal" value={f.o1}
+              onChange={e=>setF({...f,o1:e.target.value})}
+              onBlur={e=>setF({...f,o1:formatOdds(e.target.value)})}
+              onKeyDown={e=>{if(e.key==="Enter"){(e.target as HTMLInputElement).blur();addRecord(sport);}}}
+              placeholder="1.85 또는 185" style={inputStyle}/>
           </div>
           {is3way && (
             <div>
               <div style={labelStyle}>{oddsLabels[1]}</div>
-              <input type="number" step="0.01" value={f.oX} onChange={e=>setF({...f,oX:e.target.value})}
-                onKeyDown={e=>{if(e.key==="Enter")addRecord(sport);}}
-                placeholder="3.50" style={{...inputStyle,width:"100%"}}/>
+              <input type="text" inputMode="decimal" value={f.oX}
+                onChange={e=>setF({...f,oX:e.target.value})}
+                onBlur={e=>setF({...f,oX:formatOdds(e.target.value)})}
+                onKeyDown={e=>{if(e.key==="Enter"){(e.target as HTMLInputElement).blur();addRecord(sport);}}}
+                placeholder="3.50 또는 350" style={inputStyle}/>
             </div>
           )}
           <div>
             <div style={labelStyle}>{is3way ? oddsLabels[2] : oddsLabels[1]}</div>
-            <input type="number" step="0.01" value={f.o2} onChange={e=>setF({...f,o2:e.target.value})}
-              onKeyDown={e=>{if(e.key==="Enter")addRecord(sport);}}
-              placeholder={is3way?"4.20":"1.95"} style={{...inputStyle,width:"100%"}}/>
+            <input type="text" inputMode="decimal" value={f.o2}
+              onChange={e=>setF({...f,o2:e.target.value})}
+              onBlur={e=>setF({...f,o2:formatOdds(e.target.value)})}
+              onKeyDown={e=>{if(e.key==="Enter"){(e.target as HTMLInputElement).blur();addRecord(sport);}}}
+              placeholder={is3way?"4.20 또는 420":"1.95 또는 195"} style={inputStyle}/>
           </div>
-          {/* 추가 버튼 */}
-          <button onClick={()=>addRecord(sport)}
-            style={{
-              padding:"7px 14px",borderRadius:5,
-              border:`1.5px solid ${accentColor}`,
-              background:`${accentColor}33`,color:accentColor,
-              cursor:"pointer",fontWeight:900,fontSize:12,
-              whiteSpace:"nowrap",
-            }}>
-            + 추가
-          </button>
         </div>
+
+        {/* 추가 버튼 (가로 풀 폭) */}
+        <button onClick={()=>addRecord(sport)}
+          style={{
+            marginTop:3,
+            padding:"9px 14px",borderRadius:5,
+            border:`1.5px solid ${accentColor}`,
+            background:`${accentColor}33`,color:accentColor,
+            cursor:"pointer",fontWeight:900,fontSize:13,
+            width:"100%",
+          }}>
+          + 추가
+        </button>
       </div>
     );
   };
@@ -1197,12 +1224,19 @@ function MarginCalcTab() {
         ❌ <strong style={{color:cs.red}}>7% 초과: 패스</strong>
       </div>
 
-      {/* ── 종목별 입력 행 ── */}
+      {/* ── 종목별 입력 행 (가로 3분할: 축구 / 야구 / 농구) ── */}
       <div style={{marginBottom:18}}>
         <div style={{fontSize:13,fontWeight:800,color:cs.text,marginBottom:8}}>📝 배당 입력</div>
-        {renderInputRow("축구","⚽",cs.green)}
-        {renderInputRow("야구","⚾",cs.amber)}
-        {renderInputRow("농구","🏀",cs.orange)}
+        <div style={{
+          display:"grid",
+          gridTemplateColumns:"1fr 1fr 1fr",
+          gap:12,
+          alignItems:"start",
+        }}>
+          {renderInputRow("축구","⚽",cs.green)}
+          {renderInputRow("야구","⚾",cs.amber)}
+          {renderInputRow("농구","🏀",cs.orange)}
+        </div>
       </div>
 
       {/* ── 누적 기록 표 ── */}
