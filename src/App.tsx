@@ -9241,4 +9241,308 @@ function AppMain() {
                     const canGoNext = viewedMonStr < todayMonStr;
                     return (
                       <div key={q.id} style={{background:done?`${C.green}11`:C.bg2,border:`1px solid ${done?C.green:C.border}`,borderRadius:6,padding:"7px 10px",position:"relative",overflow:"hidden"}}>
-                        
+                        <div style={{display:"flex",alignItems:"center",gap:6}}>
+                          <input type="checkbox" checked={done} onChange={()=>toggleQuestToday(q.id)} style={{width:16,height:16,accentColor:C.green,cursor:"pointer",flexShrink:0}}/>
+                          <div style={{flex:1,minWidth:0}}>
+                            {editingQuestId===q.id ? (
+                              <input
+                                autoFocus
+                                value={editingQuestName}
+                                onChange={e=>setEditingQuestName(e.target.value)}
+                                onBlur={()=>handleRenameQuest(q.id)}
+                                onKeyDown={e=>{
+                                  if(e.key==="Enter") handleRenameQuest(q.id);
+                                  else if(e.key==="Escape"){setEditingQuestId(null);setEditingQuestName("");}
+                                }}
+                                style={{...S,boxSizing:"border-box",fontSize:12,padding:"3px 6px",fontWeight:700,width:"100%"}}
+                              />
+                            ) : (
+                              <div onClick={()=>toggleQuestToday(q.id)} onDoubleClick={()=>{setEditingQuestId(q.id);setEditingQuestName(q.name);}} title="클릭: 완료 토글 · 더블클릭: 이름 수정" style={{fontSize:12,fontWeight:700,color:done?C.green:C.text,cursor:"pointer",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{q.name}</div>
+                            )}
+                            <div style={{fontSize:10,color:C.muted,marginTop:2}}>📅 출석 <b style={{color:C.purple}}>{totalAttend}회</b> · 이번달 <b style={{color:C.teal}}>{monthHistory.length}회</b></div>
+                          </div>
+                          {done && (
+                            <span style={{fontSize:9,fontWeight:900,color:C.green,background:`${C.green}22`,border:`1px solid ${C.green}`,borderRadius:3,padding:"2px 5px",letterSpacing:0.3,flexShrink:0}}>✓</span>
+                          )}
+                          <div style={{display:"flex",gap:3,flexShrink:0,zIndex:1}}>
+                            <button onClick={()=>{setEditingQuestId(q.id);setEditingQuestName(q.name);}} title="제목 수정" style={{background:"transparent",border:`1px solid ${C.border}`,color:C.dim,cursor:"pointer",fontSize:10,padding:"3px 6px",borderRadius:3,whiteSpace:"nowrap"}}>✏️</button>
+                            <button onClick={()=>setQuestCalendarExpanded(p=>({...p,[q.id]:!calOpen}))} title="출석 보기" style={{background:calOpen?`${C.teal}22`:"transparent",border:`1px solid ${calOpen?C.teal:C.border}`,color:calOpen?C.teal:C.dim,cursor:"pointer",fontSize:10,padding:"3px 6px",borderRadius:3,whiteSpace:"nowrap"}}>📅</button>
+                            <button onClick={()=>handleDeleteQuest(q.id)} title="삭제" style={{background:"transparent",border:`1px solid ${C.border}`,color:C.dim,cursor:"pointer",fontSize:10,padding:"3px 6px",borderRadius:3}}>🗑</button>
+                          </div>
+                        </div>
+                        {calOpen && (
+                          <div style={{marginTop:6,paddingTop:6,borderTop:`1px dashed ${C.border}`}}>
+                            {/* 월 이동 헤더 */}
+                            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:5,maxWidth:210}}>
+                              <button onClick={()=>shiftMonth(-1)} title="이전 달"
+                                style={{background:`${C.teal}11`,border:`1px solid ${C.teal}44`,color:C.teal,cursor:"pointer",fontSize:10,padding:"3px 8px",borderRadius:3,fontWeight:800}}>◀</button>
+                              <div style={{fontSize:10,color:C.text,fontWeight:700}}>{monYear2}년 {monIdx2+1}월</div>
+                              <button onClick={()=>canGoNext && shiftMonth(1)} title={canGoNext?"다음 달":"미래 달은 볼 수 없음"} disabled={!canGoNext}
+                                style={{background:canGoNext?`${C.teal}11`:"transparent",border:`1px solid ${canGoNext?C.teal+"44":C.border}`,color:canGoNext?C.teal:C.dim,cursor:canGoNext?"pointer":"not-allowed",fontSize:10,padding:"3px 8px",borderRadius:3,fontWeight:800}}>▶</button>
+                            </div>
+                            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:3,gap:6}}>
+                              <div style={{fontSize:9,color:C.dim}}>이번 달 출석 <b style={{color:C.teal}}>{monthHistory.length}회</b> · 총 <b style={{color:C.purple}}>{totalAttend}회</b> · 시작 {q.createdAt.slice(5)}</div>
+                              <button onClick={()=>handleResetQuestAttendance(q.id)} title="출석 횟수 초기화"
+                                style={{background:`${C.red}11`,border:`1px solid ${C.red}66`,color:C.red,cursor:"pointer",fontSize:9,padding:"2px 7px",borderRadius:3,fontWeight:700,whiteSpace:"nowrap",flexShrink:0}}>🔄 출석 초기화</button>
+                            </div>
+                            <div style={{background:C.bg,borderRadius:4,padding:"4px 5px",maxWidth:210}}>
+                              <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:1,marginBottom:1}}>
+                                {["일","월","화","수","목","금","토"].map((d,i)=>(
+                                  <div key={d} style={{textAlign:"center",fontSize:8,color:i===0?C.red:i===6?C.teal:C.dim,lineHeight:"14px"}}>{d}</div>
+                                ))}
+                              </div>
+                              <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:1}}>
+                                {Array.from({length:monthFirstDow2},(_,i)=><div key={`p-${i}`} style={{height:22}}/>)}
+                                {Array.from({length:monthDays2},(_,i)=>{
+                                  const dayN = i+1;
+                                  const dateStr = `${monYear2}-${String(monIdx2+1).padStart(2,"0")}-${String(dayN).padStart(2,"0")}`;
+                                  const isAttended = q.history.includes(dateStr);
+                                  const isToday = dateStr===today;
+                                  const isPast = dateStr<today;
+                                  const isFuture = dateStr>today;
+                                  // 클릭 가능 조건: 미래만 X (createdAt 이전이어도 자유롭게 체크 가능)
+                                  const clickable = !isFuture;
+                                  return (
+                                    <div key={dateStr} title={dateStr+(isAttended?" ✓ (클릭으로 해제)":clickable?" (클릭으로 출석)":" (미래)")}
+                                      onClick={clickable ? ()=>toggleQuestDate(q.id, dateStr) : undefined}
+                                      style={{height:22,background: isAttended ? C.green : isToday ? `${C.amber}33` : isPast ? `${C.red}11` : C.bg2, borderRadius:2, display:"flex", alignItems:"center", justifyContent:"center", fontSize:9, fontWeight: isToday?900:600, color: isAttended?"#fff":isToday?C.amber:isPast?C.red:C.muted, border: isToday?`1px solid ${C.amber}`:"none", cursor: clickable?"pointer":"default", userSelect:"none", transition:"transform 0.1s"}}
+                                      onMouseDown={clickable?(e)=>{(e.currentTarget as HTMLElement).style.transform="scale(0.9)";}:undefined}
+                                      onMouseUp={clickable?(e)=>{(e.currentTarget as HTMLElement).style.transform="scale(1)";}:undefined}
+                                      onMouseLeave={clickable?(e)=>{(e.currentTarget as HTMLElement).style.transform="scale(1)";}:undefined}>
+                                      {dayN}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* [하단-중] 🎯 옵션별 종합 — 한눈에 종목/옵션별 베팅수·적중률·수익률
+                ⚠️ 사용자 요청: 포인트 교환 박스 제거하고 그 자리에 종목 전체 옵션별 수익 표시
+                축구: 홈/원정 0.5/1.5
+                야구: 승패/오버/언더
+                농구: 마핸 (2.5~9.5) / 플핸 (10.5~14.5)  ★ 통계 탭의 신규 전략과 일치
+            */}
+            <div style={{background:C.bg3,border:`1px solid ${C.amber}44`,borderRadius:12,padding:14}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                <div style={{fontSize:15,fontWeight:800,color:C.amber}}>🎯 옵션별 종합 (종목 전체)</div>
+                <button onClick={()=>setTab("stats")} style={{padding:"4px 10px",borderRadius:5,border:`1px solid ${C.amber}66`,background:`${C.amber}11`,color:C.amber,cursor:"pointer",fontSize:11,fontWeight:700}}>자세히 →</button>
+              </div>
+              {/* 표 헤더 — 컬럼: [종목][옵션][베팅][적중][실패][적중률][수익금(%)] */}
+              <div style={{display:"grid",gridTemplateColumns:"26px 1fr 44px 44px 44px 56px 110px",gap:5,padding:"5px 7px",fontSize:11,color:C.muted,fontWeight:700,borderBottom:`1px solid ${C.border}`,marginBottom:4}}>
+                <span></span>
+                <span>옵션</span>
+                <span style={{textAlign:"right"}}>베팅</span>
+                <span style={{textAlign:"right"}}>적중</span>
+                <span style={{textAlign:"right"}}>실패</span>
+                <span style={{textAlign:"right"}}>적중률</span>
+                <span style={{textAlign:"right"}}>수익금 (%)</span>
+              </div>
+              {/* 종목별 행 — 축구 → 야구 → 농구 순 */}
+              <div style={{display:"flex",flexDirection:"column",gap:1}}>
+                {([
+                  {label:"⚽ 축구", color:C.green, items: optionAllStats.football},
+                  {label:"⚾ 야구", color:C.amber, items: optionAllStats.baseball},
+                  {label:"🏀 농구", color:C.purple, items: optionAllStats.basketball},
+                ]).map((sec,i)=>(
+                  <div key={sec.label} style={{borderTop:i>0?`1px dashed ${C.border}`:undefined,paddingTop:i>0?4:0,marginTop:i>0?3:0}}>
+                    {sec.items.map((s:any,j:number)=>{
+                      const isEmpty = s.count===0;
+                      const profitColor = isEmpty ? C.dim : (s.profit>=0 ? C.green : C.red);
+                      return (
+                        <div key={j} style={{display:"grid",gridTemplateColumns:"26px 1fr 44px 44px 44px 56px 110px",gap:5,alignItems:"center",padding:"5px 7px",fontSize:13,opacity:isEmpty?0.4:1}}>
+                          <span style={{textAlign:"center",fontSize:13}}>{j===0?sec.label.split(" ")[0]:""}</span>
+                          <span style={{color:isEmpty?C.dim:sec.color,fontWeight:700,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{s.label}</span>
+                          <span style={{textAlign:"right",color:isEmpty?C.dim:C.text,fontWeight:700}}>{s.count}</span>
+                          <span style={{textAlign:"right",color:isEmpty?C.dim:C.green,fontWeight:700}}>{s.wins}</span>
+                          <span style={{textAlign:"right",color:isEmpty?C.dim:C.red,fontWeight:700}}>{s.losses}</span>
+                          <span style={{textAlign:"right",color:isEmpty?C.dim:s.winRate>=50?C.green:C.muted,fontWeight:700}}>{isEmpty?"-":`${s.winRate}%`}</span>
+                          <span style={{textAlign:"right",color:profitColor,fontWeight:800,whiteSpace:"nowrap"}}>
+                            {isEmpty ? "-" : (
+                              <>
+                                {s.profit>=0?"+":""}{Math.round(s.profit).toLocaleString()}
+                                <span style={{fontSize:10,marginLeft:3,opacity:0.85,fontWeight:700}}>({s.roi>=0?"+":""}{s.roi}%)</span>
+                              </>
+                            )}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* [하단-우] 💹 이번 달 사이트별 수익률 + 기타 수익/지출 목록
+                ⚠️ 사용자 요청: 통계 옆에 수익률 추가 — 이번 달 사이트별 지출/수익 + 기타 수익/지출 세로 나열 */}
+            <div style={{background:C.bg3,border:`1px solid ${C.purple}44`,borderRadius:12,padding:13}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:9}}>
+                <div style={{fontSize:14,fontWeight:800,color:C.purple}}>💹 이번 달 수익률 ({thisMonthSiteStats.monthPrefix})</div>
+                <button onClick={()=>setTab("roi")} style={{padding:"3px 9px",borderRadius:5,border:`1px solid ${C.purple}66`,background:`${C.purple}11`,color:C.purple,cursor:"pointer",fontSize:10,fontWeight:700}}>자세히 →</button>
+              </div>
+
+              {/* 합계 4칸 */}
+              <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:5,marginBottom:10}}>
+                <div style={{background:C.bg2,padding:"6px 8px",borderRadius:5,textAlign:"center",border:`1px solid ${C.green}33`}}>
+                  <div style={{color:C.muted,fontSize:9,fontWeight:700,marginBottom:2}}>사이트 순익</div>
+                  <div style={{color:thisMonthSiteStats.totalSiteNet>=0?C.green:C.red,fontWeight:900,fontSize:13}}>{thisMonthSiteStats.totalSiteNet>=0?"+":""}{Math.round(thisMonthSiteStats.totalSiteNet/1000)}k</div>
+                </div>
+                <div style={{background:C.bg2,padding:"6px 8px",borderRadius:5,textAlign:"center",border:`1px solid ${C.teal}33`}}>
+                  <div style={{color:C.muted,fontSize:9,fontWeight:700,marginBottom:2}}>기타 수익</div>
+                  <div style={{color:C.teal,fontWeight:900,fontSize:13}}>+{Math.round(thisMonthSiteStats.totalExtraIncome/1000)}k</div>
+                </div>
+                <div style={{background:C.bg2,padding:"6px 8px",borderRadius:5,textAlign:"center",border:`1px solid ${C.amber}33`}}>
+                  <div style={{color:C.muted,fontSize:9,fontWeight:700,marginBottom:2}}>기타 지출</div>
+                  <div style={{color:C.amber,fontWeight:900,fontSize:13}}>-{Math.round(thisMonthSiteStats.totalExtraExpense/1000)}k</div>
+                </div>
+                <div style={{background:C.bg2,padding:"6px 8px",borderRadius:5,textAlign:"center",border:`1px solid ${thisMonthSiteStats.grandNet>=0?C.green:C.red}55`}}>
+                  <div style={{color:C.muted,fontSize:9,fontWeight:700,marginBottom:2}}>총 순익</div>
+                  <div style={{color:thisMonthSiteStats.grandNet>=0?C.green:C.red,fontWeight:900,fontSize:13}}>{thisMonthSiteStats.grandNet>=0?"+":""}{Math.round(thisMonthSiteStats.grandNet/1000)}k</div>
+                </div>
+              </div>
+
+              {/* 사이트별 입출금 목록 */}
+              <div style={{marginBottom:10}}>
+                <div style={{fontSize:11,fontWeight:800,color:C.text,marginBottom:4,paddingLeft:2}}>💳 사이트별 입출금</div>
+                {thisMonthSiteStats.siteRows.length===0 ? (
+                  <div style={{textAlign:"center",color:C.dim,padding:"10px 0",fontSize:11}}>이번 달 입출금 내역 없음</div>
+                ) : (
+                  <div style={{display:"flex",flexDirection:"column",gap:2,maxHeight:180,overflowY:"auto"}}>
+                    {thisMonthSiteStats.siteRows.map(r=>(
+                      <div key={r.site} style={{display:"flex",alignItems:"center",gap:6,padding:"4px 8px",background:C.bg2,borderRadius:4,fontSize:10}}>
+                        <span style={{fontSize:11,fontWeight:800,color:r.dollar?C.amber:C.green,minWidth:70,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{r.dollar?"$":"₩"} {r.site}</span>
+                        <span style={{color:C.red,fontWeight:700,minWidth:70,textAlign:"right"}}>지 {r.dollar?`$${r.dep.toFixed(0)}`:`${Math.round(r.dep/1000)}k`}</span>
+                        <span style={{color:C.green,fontWeight:700,minWidth:70,textAlign:"right"}}>수 {r.dollar?`$${r.wth.toFixed(0)}`:`${Math.round(r.wth/1000)}k`}</span>
+                        <span style={{flex:1,color:r.netKrw>=0?C.green:C.red,fontWeight:900,textAlign:"right",fontSize:11}}>{r.netKrw>=0?"+":""}{Math.round(r.netKrw/1000)}k</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* 기타 수익 목록 */}
+              {thisMonthSiteStats.extraIncomes.length>0 && (
+                <div style={{marginBottom:10}}>
+                  <div style={{fontSize:11,fontWeight:800,color:C.teal,marginBottom:4,paddingLeft:2}}>📈 기타 수익 ({thisMonthSiteStats.extraIncomes.length}건)</div>
+                  <div style={{display:"flex",flexDirection:"column",gap:2,maxHeight:140,overflowY:"auto"}}>
+                    {thisMonthSiteStats.extraIncomes.map((e:any,i:number)=>(
+                      <div key={i} style={{display:"flex",alignItems:"center",gap:6,padding:"4px 8px",background:C.bg2,borderRadius:4,fontSize:10,borderLeft:`2px solid ${C.teal}77`}}>
+                        <span style={{color:C.muted,minWidth:36,fontSize:9}}>{(e.date||"").slice(5)}</span>
+                        <span style={{color:C.teal,fontWeight:700,fontSize:9,minWidth:50,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{e.category||"-"}</span>
+                        <span style={{flex:1,color:C.text,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{e.subCategory||e.subSubCategory||e.note||e.memo||"-"}</span>
+                        <span style={{color:C.green,fontWeight:900,fontSize:11}}>+{Math.round((e.amount||0)/1000)}k</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* 기타 지출 목록 */}
+              {thisMonthSiteStats.extraExpenses.length>0 && (
+                <div>
+                  <div style={{fontSize:11,fontWeight:800,color:C.amber,marginBottom:4,paddingLeft:2}}>📉 기타 지출 ({thisMonthSiteStats.extraExpenses.length}건)</div>
+                  <div style={{display:"flex",flexDirection:"column",gap:2,maxHeight:140,overflowY:"auto"}}>
+                    {thisMonthSiteStats.extraExpenses.map((e:any,i:number)=>(
+                      <div key={i} style={{display:"flex",alignItems:"center",gap:6,padding:"4px 8px",background:C.bg2,borderRadius:4,fontSize:10,borderLeft:`2px solid ${C.amber}77`}}>
+                        <span style={{color:C.muted,minWidth:36,fontSize:9}}>{(e.date||"").slice(5)}</span>
+                        <span style={{color:C.amber,fontWeight:700,fontSize:9,minWidth:50,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{e.category||"-"}</span>
+                        <span style={{flex:1,color:C.text,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{e.subCategory||e.subSubCategory||e.note||e.memo||"-"}</span>
+                        <span style={{color:C.red,fontWeight:900,fontSize:11}}>-{Math.round((e.amount||0)/1000)}k</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {thisMonthSiteStats.extraIncomes.length===0 && thisMonthSiteStats.extraExpenses.length===0 && thisMonthSiteStats.siteRows.length>0 && (
+                <div style={{textAlign:"center",color:C.dim,padding:"6px 0",fontSize:10}}>이번 달 기타 수익/지출 없음</div>
+              )}
+            </div>
+          </div>
+          </div>
+
+        </div>
+        );
+      })()}
+
+
+      {/* ══ 리그-API 매핑 모달 ══ */}
+      {leagueApiModal && (()=>{
+        const { league, sport, country } = leagueApiModal;
+        // 종목 매핑 (스포츠 탭 종목명 → API sport id)
+        const sportToApiId: Record<string,string> = {
+          "축구":"football","야구":"baseball","농구":"basketball","배구":"volleyball","하키":"hockey",
+          "football":"football","baseball":"baseball","basketball":"basketball","volleyball":"volleyball","hockey":"hockey",
+        };
+        const apiSportId = sportToApiId[sport] || "";
+
+        // 추천 목록: 국가명으로 리그 추론
+        const countryToLeagues: Record<string,string[]> = {
+          "한국":["K리그1","K리그2","KBO","V리그 남자","V리그 여자"],
+          "미국":["MLB","NBA","NFL","NHL","MLS"],
+          "일본":["J리그","NPB","B리그"],
+          "영국":["프리미어리그","EFL 챔피언십","FA컵"],
+          "스페인":["라리가","세군다"],
+          "독일":["분데스리가","2. 분데스리가"],
+          "이탈리아":["세리에A","세리에B"],
+          "프랑스":["리그1","리그2"],
+          "중국":["CSL"],
+          "호주":["A리그"],
+        };
+        const recommendedLeagues = countryToLeagues[country] || [];
+
+        // 전체 목록: 해당 종목 API만
+        const allApiInfo = API_SPORTS_INFO.filter(a => !apiSportId || a.sport === apiSportId);
+        const currentMapping = leagueApiMap[league];
+
+        return (
+          <div style={{position:"fixed",inset:0,background:"#000c",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center"}}>
+            <div style={{background:C.bg3,border:`1px solid ${C.teal}`,borderRadius:14,padding:22,width:480,maxHeight:"85vh",overflowY:"auto"}}>
+              <div style={{fontSize:15,fontWeight:800,color:C.teal,marginBottom:4}}>🔗 API 연결</div>
+              <div style={{fontSize:11,color:C.muted,marginBottom:14}}>
+                <span style={{color:C.amber,fontWeight:700}}>{league}</span>
+                <span style={{color:C.dim}}> · {country} · {sport}</span>
+                {currentMapping && <span style={{marginLeft:8,color:C.teal,fontWeight:700}}>현재: {currentMapping}</span>}
+              </div>
+
+              {/* 탭 */}
+              <div style={{display:"flex",gap:6,marginBottom:14}}>
+                {(["recommend","all"] as const).map(t=>(
+                  <button key={t} onClick={()=>setLeagueApiTab(t)}
+                    style={{flex:1,padding:"7px 0",borderRadius:6,cursor:"pointer",fontWeight:700,fontSize:12,
+                      border:leagueApiTab===t?`2px solid ${C.teal}`:`1px solid ${C.border}`,
+                      background:leagueApiTab===t?`${C.teal}22`:C.bg2,
+                      color:leagueApiTab===t?C.teal:C.muted}}>
+                    {t==="recommend"?"⭐ 추천 목록":"📋 전체 목록"}
+                  </button>
+                ))}
+              </div>
+
+              {leagueApiTab==="recommend" ? (
+                <div>
+                  <div style={{fontSize:10,color:C.dim,marginBottom:8}}>
+                    {country} 국가 기준 추천 API / 종목: {apiSportId||sport}
+                  </div>
+                  {allApiInfo.length === 0 ? (
+                    <div style={{textAlign:"center",padding:"20px 0",color:C.dim,fontSize:12}}>
+                      해당 종목 API 없음 · 전체 목록에서 선택해주세요
+                    </div>
+                  ) : allApiInfo.map(api=>(
+                    <div key={api.id} onClick={()=>{saveLeagueApiMap({...leagueApiMap,[league]:api.id});setLeagueApiModal(null);}}
+                      style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 12px",marginBottom:6,background:currentMapping===api.id?`${C.teal}22`:C.bg2,border:`1px solid ${currentMapping===api.id?C.teal:C.border}`,borderRadius:8,cursor:"pointer"}}>
+                      <div>
+                        <div style={{fontSize:13,fontWeight:700,color:currentMapping===api.id?C.teal:C.text}}>{api.name}</div>
+                        <div style={{fontSize:10,color:C.dim,marginTop:2}}>{api.host}</div>
+                        {recommendedLeagues.some(r=>r.includes(league.slice(0,2))) && (
+                          <div style={{fontSize:9,color:C.amber,marginTop:2}}>⭐ 추천</div>
+                        )}
+                      </div>
+                      <div style={{fontSize:11,color:C.muted,textAlign:"right" as const}}>
+   
