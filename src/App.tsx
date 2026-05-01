@@ -9154,4 +9154,91 @@ function AppMain() {
 
             {/* [하단] 오늘 할 일 + 포인트 교환 + 우측 정보 패널 */}
           </div>
-       
+          <div style={{display:"grid",gridTemplateColumns:"360px 480px 1fr",gap:12,alignItems:"start"}}>
+            {/* [하단-좌] 오늘 할 일 (세로 정렬) */}
+            <div style={{background:C.bg3,border:`1px solid ${C.green}44`,borderRadius:12,padding:13}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:9}}>
+                <div style={{fontSize:14,fontWeight:800,color:C.green}}>✅ 오늘 할 일</div>
+                {dailyQuests.length>0 && (()=>{
+                  const doneCnt = dailyQuests.filter(q=>isQuestDoneToday(q)).length;
+                  const pct = Math.round(doneCnt/dailyQuests.length*100);
+                  return <span style={{fontSize:11,color:pct===100?C.green:C.amber,fontWeight:800}}>{doneCnt}/{dailyQuests.length} ({pct}%)</span>;
+                })()}
+              </div>
+              {dailyQuests.length>0 && (()=>{
+                const doneCnt = dailyQuests.filter(q=>isQuestDoneToday(q)).length;
+                const pct = Math.round(doneCnt/dailyQuests.length*100);
+                return (
+                  <div style={{height:8,background:C.bg,borderRadius:4,overflow:"hidden",marginBottom:9}}>
+                    <div style={{width:`${pct}%`,height:"100%",background:pct===100?C.green:C.amber,transition:"width 0.3s"}}/>
+                  </div>
+                );
+              })()}
+              <div style={{display:"flex",gap:5,marginBottom:9}}>
+                <input value={newQuestName} onChange={e=>setNewQuestName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleAddQuest()} placeholder="새 할 일" style={{...S,flex:1,boxSizing:"border-box",fontSize:12,padding:"6px 10px"}}/>
+                <button onClick={handleAddQuest} disabled={!newQuestName.trim()} style={{padding:"5px 12px",borderRadius:5,border:`1px solid ${newQuestName.trim()?C.green:C.border}`,background:newQuestName.trim()?`${C.green}22`:C.bg,color:newQuestName.trim()?C.green:C.dim,cursor:newQuestName.trim()?"pointer":"default",fontWeight:700,fontSize:12,whiteSpace:"nowrap"}}>+ 추가</button>
+              </div>
+              {/* 요청 #1: 포인트 교환이 D-DAY가 될 경우 자동으로 "포인트 교환하기" 항목 표시 */}
+              {(()=>{
+                const ddaySites = pointSites.filter(ps=>{
+                  const lastSession = ps.sessions[ps.sessions.length-1];
+                  const baseDate = lastSession ? lastSession.nextTargetDate : ps.exchangeDate;
+                  const daysLeft = Math.round((new Date(baseDate+"T00:00:00Z").getTime() - new Date(today+"T00:00:00Z").getTime())/(1000*60*60*24));
+                  return daysLeft<=0; // 오늘이거나 이미 지난 경우
+                });
+                if(ddaySites.length===0) return null;
+                return (
+                  <div style={{marginBottom:9,paddingBottom:9,borderBottom:`1px dashed ${C.teal}44`}}>
+                    <div style={{fontSize:10,color:C.teal,fontWeight:800,marginBottom:5}}>🎁 D-DAY 포인트 교환</div>
+                    <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                      {ddaySites.map(ps=>{
+                        const lastSession = ps.sessions[ps.sessions.length-1];
+                        const baseDate = lastSession ? lastSession.nextTargetDate : ps.exchangeDate;
+                        const daysLeft = Math.round((new Date(baseDate+"T00:00:00Z").getTime() - new Date(today+"T00:00:00Z").getTime())/(1000*60*60*24));
+                        return (
+                          <div key={ps.id} style={{background:`${C.teal}11`,border:`1px solid ${C.teal}66`,borderRadius:6,padding:"6px 9px",display:"flex",justifyContent:"space-between",alignItems:"center",gap:6}}>
+                            <div style={{flex:1,minWidth:0}}>
+                              <div style={{fontSize:12,fontWeight:800,color:C.teal,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>📌 포인트 교환하기</div>
+                              <div style={{fontSize:10,color:C.muted,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{ps.name} · {ps.exchangeName} {daysLeft<0?`· ${Math.abs(daysLeft)}일 지남`:""}</div>
+                            </div>
+                            <button onClick={()=>handlePointExchangeComplete(ps.id)} style={{padding:"4px 9px",borderRadius:4,border:`1px solid ${C.orange}`,background:`${C.orange}22`,color:C.orange,cursor:"pointer",fontSize:10,fontWeight:800,whiteSpace:"nowrap"}}>완료</button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
+              {dailyQuests.length===0 ? (
+                <div style={{textAlign:"center",color:C.dim,padding:"20px 0"}}>
+                  <div style={{fontSize:11,color:C.muted}}>등록된 할 일 없음</div>
+                </div>
+              ) : (
+                <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                  {dailyQuests.map(q=>{
+                    const done = isQuestDoneToday(q);
+                    const totalAttend = q.history.length;
+                    const calOpen = !!questCalendarExpanded[q.id];
+                    // 달력에서 보고 있는 월 (없으면 오늘 기준)
+                    const todayDt = new Date(today+"T00:00:00");
+                    const viewedMonStr = questCalendarMonth[q.id] || `${todayDt.getFullYear()}-${String(todayDt.getMonth()+1).padStart(2,"0")}`;
+                    const [viewYearStr, viewMonStr] = viewedMonStr.split("-");
+                    const monYear2 = parseInt(viewYearStr);
+                    const monIdx2 = parseInt(viewMonStr) - 1;
+                    const monStart2 = new Date(monYear2, monIdx2, 1);
+                    const monEnd2 = new Date(monYear2, monIdx2+1, 0);
+                    const monthDays2 = monEnd2.getDate();
+                    const monthFirstDow2 = monStart2.getDay();
+                    const monthHistory = q.history.filter(d=>d.startsWith(`${monYear2}-${String(monIdx2+1).padStart(2,"0")}`));
+                    // 이전/다음 달 이동 헬퍼
+                    const shiftMonth = (delta:number) => {
+                      const d = new Date(monYear2, monIdx2+delta, 1);
+                      const newKey = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+                      setQuestCalendarMonth(p=>({...p,[q.id]:newKey}));
+                    };
+                    // 미래 달 이동 차단 (오늘이 속한 달까지만)
+                    const todayMonStr = `${todayDt.getFullYear()}-${String(todayDt.getMonth()+1).padStart(2,"0")}`;
+                    const canGoNext = viewedMonStr < todayMonStr;
+                    return (
+                      <div key={q.id} style={{background:done?`${C.green}11`:C.bg2,border:`1px solid ${done?C.green:C.border}`,borderRadius:6,padding:"7px 10px",position:"relative",overflow:"hidden"}}>
+                        
