@@ -3950,4 +3950,1033 @@ function AppMain() {
       });
       return {
         league, ranges: rangeStats, totalCount: bsAll.length,
-        totalRoi: betAll>0?par
+        totalRoi: betAll>0?parseFloat(((profitAll/betAll)*100).toFixed(1)):0,
+      };
+    });
+  },[footballDone]);
+
+  // [야구] 역배 배당 0.1 단위 (2.0 ~ 2.9)
+  // 사용자 전략: 2.00~2.99 역배 베팅. 언오버 라인 역배 겹치면 낮은 역배.
+  const baseballReverseOddsStats = useMemo(()=>{
+    // 역배만 필터: betOption이 "역배"이거나 (홈/원정승 중 배당 2.0 이상)
+    const reverseOnly = (b:Bet) => {
+      if (b.betOption === "역배") return true;
+      // API가 "홈승"/"원정승"으로 기록한 경우 — 배당 2.0 이상이면 역배로 간주
+      if ((b.betOption === "홈승" || b.betOption === "원정승" || b.betOption === "홈" || b.betOption === "원정") && b.odds >= 2.0) return true;
+      return false;
+    };
+    const buckets:string[] = [];
+    for (let v=2.0; v<=2.95; v+=0.1) buckets.push(v.toFixed(1));
+    return buckets.map(bStr=>{
+      const target = parseFloat(bStr);
+      const bs = baseballDone.filter(b=>{
+        if (!reverseOnly(b)) return false;
+        const r = Math.round(b.odds*10)/10;
+        return Math.abs(r-target) < 0.001;
+      });
+      const wins = bs.filter(b=>b.result==="승").length;
+      const losses = bs.filter(b=>b.result==="패").length;
+      const profit = bs.reduce((s,b)=>s+(b.profit??0),0);
+      const bet = bs.reduce((s,b)=>s+b.amount,0);
+      return {
+        odds: bStr,
+        count: bs.length, wins, losses,
+        profit, bet,
+        roi: bet>0?parseFloat(((profit/bet)*100).toFixed(1)):0,
+        winRate: bs.length>0?Math.round(wins/bs.length*100):0,
+      };
+    });
+  },[baseballDone]);
+
+  // [야구] 리그별 오버/언더 비교 (요청 #12)
+  // 사용자 전략: 오버/언더는 어느 리그에서 어느 쪽이 잘 들어맞는지 보고 무지성 베팅 결정 가능성
+  const baseballLeagueOuTable = useMemo(()=>{
+    const leagues = [...new Set(baseballDone.map(b=>b.league))].sort((a,b)=>a.localeCompare(b,"ko"));
+    return leagues.map(league=>{
+      const bsAll = baseballDone.filter(b=>b.league===league);
+      const ovBs = bsAll.filter(b=>b.betOption.includes("오버"));
+      const unBs = bsAll.filter(b=>b.betOption.includes("언더"));
+      const calc = (bs:Bet[])=>{
+        const profit = bs.reduce((s,b)=>s+(b.profit??0),0);
+        const bet = bs.reduce((s,b)=>s+b.amount,0);
+        const wins = bs.filter(b=>b.result==="승").length;
+        return {count:bs.length, profit, bet, wins,
+          roi: bet>0?parseFloat(((profit/bet)*100).toFixed(1)):0,
+          winRate: bs.length>0?Math.round(wins/bs.length*100):0};
+      };
+      const ov = calc(ovBs);
+      const un = calc(unBs);
+      // 추천: 둘 다 5건 이상이고 ROI 차이가 5% 이상이면 한쪽으로 추천
+      let recommend = "—";
+      if (ov.count>=5 && un.count>=5) {
+        if (ov.roi - un.roi >= 5) recommend = "⬆️ 오버";
+        else if (un.roi - ov.roi >= 5) recommend = "⬇️ 언더";
+        else recommend = "≈ 비슷";
+      } else if (ov.count>=3 && un.count===0) recommend = "오버만 데이터";
+      else if (un.count>=3 && ov.count===0) recommend = "언더만 데이터";
+      return { league, ov, un, recommend, totalCount: bsAll.length };
+    });
+  },[baseballDone]);
+
+  // [농구] 배당별 통계 — ❌ 삭제됨 (사용자 요청: 농구 배당별 통계 삭제)
+  //   기존 basketballOddsBucketStats useMemo 제거. UI 표도 함께 제거됨.
+
+  // [농구] 플핸 vs 마핸 — 리그별 어느 쪽이 유리한지 (요청 #11)
+  // parseBasketballOpt로 플/마 구분 가능 (이미 정의됨)
+  const basketballPlusMinusTable = useMemo(()=>{
+    const leagues = [...new Set(basketballDone.map(b=>b.league))].sort((a,b)=>a.localeCompare(b,"ko"));
+    return leagues.map(league=>{
+      const bsAll = basketballDone.filter(b=>b.league===league);
+      const plusBs = bsAll.filter(b=>{const p=parseBasketballOpt(b.betOption);return p?.kind==="플";});
+      const minusBs = bsAll.filter(b=>{const p=parseBasketballOpt(b.betOption);return p?.kind==="마";});
+      const calc = (bs:Bet[])=>{
+        const profit = bs.reduce((s,b)=>s+(b.profit??0),0);
+        const bet = bs.reduce((s,b)=>s+b.amount,0);
+        const wins = bs.filter(b=>b.result==="승").length;
+        const avgValue = bs.length>0 ? parseFloat((bs.reduce((s,b)=>{const p=parseBasketballOpt(b.betOption);return s+(p?.value||0);},0)/bs.length).toFixed(1)) : 0;
+        return {count:bs.length, profit, bet, wins, avgValue,
+          roi: bet>0?parseFloat(((profit/bet)*100).toFixed(1)):0,
+          winRate: bs.length>0?Math.round(wins/bs.length*100):0};
+      };
+      const plus = calc(plusBs);
+      const minus = calc(minusBs);
+      let recommend = "—";
+      if (plus.count>=3 && minus.count>=3) {
+        if (plus.roi - minus.roi >= 5) recommend = "🟢 플핸";
+        else if (minus.roi - plus.roi >= 5) recommend = "🔴 마핸";
+        else recommend = "≈ 비슷";
+      } else if (plus.count>=3 && minus.count===0) recommend = "플핸만 데이터";
+      else if (minus.count>=3 && plus.count===0) recommend = "마핸만 데이터";
+      return { league, plus, minus, recommend, totalCount: bsAll.length };
+    });
+  },[basketballDone]);
+
+  // ═════════════════════════════════════════════════════════════
+  // 대시보드용 통계 (포인트 교환 박스 제거 + 새 패널들 추가)
+  // ─────────────────────────────────────────────────────────────
+
+  // [대시보드] 이번 주 사이트별 입금액 (월~일 기준)
+  // 오늘 날짜 기준 가장 가까운 월요일 ~ 그 다음 일요일까지의 입금액 합계
+  const thisWeekDeposits = useMemo(()=>{
+    const t = new Date(today + "T00:00:00Z");
+    // getUTCDay(): 0=일,1=월,...,6=토
+    const day = t.getUTCDay();
+    // 월요일이 주의 시작 → 0=일이면 6일 전이 월요일, 1=월이면 0일 전 ...
+    const daysToMonday = (day + 6) % 7;
+    const monday = new Date(t);
+    monday.setUTCDate(t.getUTCDate() - daysToMonday);
+    const sunday = new Date(monday);
+    sunday.setUTCDate(monday.getUTCDate() + 6);
+    const monStr = monday.toISOString().slice(0,10);
+    const sunStr = sunday.toISOString().slice(0,10);
+    const weekDeps = deposits.filter(d => d.date >= monStr && d.date <= sunStr);
+    // 사이트별 합계
+    const bySite: Record<string, {amount:number, count:number, dollar:boolean}> = {};
+    for(const d of weekDeps){
+      const dollar = isUSD(d.site);
+      if(!bySite[d.site]) bySite[d.site] = {amount:0, count:0, dollar};
+      bySite[d.site].amount += d.amount;
+      bySite[d.site].count += 1;
+    }
+    // 활성 사이트 우선, 같은 그룹 내 KRW 환산 큰 순
+    const sortedSites = Object.keys(bySite).sort((a,b)=>{
+      const aa = siteStates[a]?.active ? 0 : 1;
+      const bb = siteStates[b]?.active ? 0 : 1;
+      if(aa !== bb) return aa - bb;
+      const aKrw = bySite[a].dollar ? bySite[a].amount * usdKrw : bySite[a].amount;
+      const bKrw = bySite[b].dollar ? bySite[b].amount * usdKrw : bySite[b].amount;
+      return bKrw - aKrw;
+    });
+    const totalKrw = sortedSites.reduce((s,site)=>{
+      const v = bySite[site];
+      return s + (v.dollar ? v.amount * usdKrw : v.amount);
+    },0);
+    return { monStr, sunStr, sites: sortedSites.map(s=>({site:s, ...bySite[s]})), totalKrw };
+  },[deposits, today, siteStates, usdKrw, isUSD]);
+
+  // [대시보드] 종목 전체 옵션별 통계 (한눈에)
+  //   축구: 홈/원정 0.5/1.5
+  //   야구: 승패/오버/언더
+  //   농구: 마핸(2.5~9.5) / 플핸(10.5~14.5)  ★ 통계 탭의 신규 전략과 동일
+  // 각 옵션별: 베팅수, 적중수, 실패수, 적중률, 수익률
+  const optionAllStats = useMemo(()=>{
+    const football = footballHandicapLineStats.map(s=>({
+      sport:"⚽",
+      label: s.opt,
+      count: s.count,
+      wins: s.wins,
+      losses: s.losses,
+      winRate: s.winRate,
+      roi: s.roi,
+      profit: s.profit,
+    }));
+    const baseball = baseballOptTable.slice(0,3).map(s=>({
+      sport:"⚾",
+      label: s.label,
+      count: s.count,
+      wins: s.wins,
+      losses: s.losses,
+      winRate: s.winRate,
+      roi: s.roi,
+      profit: s.profit,
+    }));
+    // ★ 농구 — 통계 탭의 권장 전략과 일치하도록 변경 (마핸/플핸 두 그룹)
+    //   - 마핸: 2.5~9.5
+    //   - 플핸: 10.5~14.5
+    //   기존 5.5~29.5 5단위 그룹은 폐기 (통계 탭과 불일치)
+    const basketballGroups = [
+      {label:"마핸 (2.5~9.5)",  from:2.5,  to:9.5},
+      {label:"플핸 (10.5~14.5)", from:10.5, to:14.5},
+    ];
+    const basketball = basketballGroups.map(g=>{
+      const bs = basketballDone.filter(b=>{
+        const p = parseBasketballOpt(b.betOption);
+        if(!p) return false;
+        return p.value>=g.from && p.value<=g.to;
+      });
+      const wins = bs.filter(b=>b.result==="승").length;
+      const losses = bs.filter(b=>b.result==="패").length;
+      const profit = bs.reduce((s,b)=>s+(b.profit??0),0);
+      const bet = bs.reduce((s,b)=>s+b.amount,0);
+      return {
+        sport:"🏀",
+        label: g.label,
+        count: bs.length,
+        wins, losses,
+        winRate: bs.length>0 ? Math.round(wins/bs.length*100) : 0,
+        roi: bet>0 ? parseFloat(((profit/bet)*100).toFixed(1)) : 0,
+        profit,
+      };
+    });
+    return { football, baseball, basketball };
+  },[footballHandicapLineStats, baseballOptTable, basketballDone]);
+
+  // [대시보드] 이번 달 사이트별 수익/지출 + 기타 수익/지출 목록
+  const thisMonthSiteStats = useMemo(()=>{
+    const monthPrefix = today.slice(0,7); // "YYYY-MM"
+    const monthDeps = deposits.filter(d=>d.date.startsWith(monthPrefix));
+    const monthWths = withdrawals.filter(w=>w.date.startsWith(monthPrefix));
+    const sites = [...new Set([...monthDeps.map(d=>d.site), ...monthWths.map(w=>w.site)])];
+    const siteRows = sites.map(site=>{
+      const dollar = isUSD(site);
+      const dep = monthDeps.filter(d=>d.site===site).reduce((s,d)=>s+d.amount,0);
+      const wth = monthWths.filter(w=>w.site===site).reduce((s,w)=>s+w.amount,0);
+      const net = wth - dep;
+      const depKrw = dollar ? dep * usdKrw : dep;
+      const wthKrw = dollar ? wth * usdKrw : wth;
+      const netKrw = dollar ? net * usdKrw : net;
+      return {site, dollar, dep, wth, net, depKrw, wthKrw, netKrw};
+    }).sort((a,b)=>b.netKrw - a.netKrw);
+    const monthExtras = (profitExtras as any[]).filter(e=>(e.date||"").startsWith(monthPrefix));
+    const extraIncomes = monthExtras.filter(e=>e.isIncome).sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+    const extraExpenses = monthExtras.filter(e=>!e.isIncome).sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+    const totalSiteNet = siteRows.reduce((s,r)=>s+r.netKrw,0);
+    const totalExtraIncome = extraIncomes.reduce((s,e)=>s+(e.amount||0),0);
+    const totalExtraExpense = extraExpenses.reduce((s,e)=>s+(e.amount||0),0);
+    const grandNet = totalSiteNet + totalExtraIncome - totalExtraExpense;
+    return { monthPrefix, siteRows, extraIncomes, extraExpenses, totalSiteNet, totalExtraIncome, totalExtraExpense, grandNet };
+  },[deposits, withdrawals, profitExtras, today, usdKrw, isUSD]);
+
+
+  const roiStats=useMemo(()=>{
+    return ALL_SITES.map(site=>{
+      const dollar=isUSD(site);
+      const siteWths=withdrawals.filter(w=>w.site===site).sort((a,b)=>a.date.localeCompare(b.date));
+      if(siteWths.length===0)return null;
+      const siteDepsAll=deposits.filter(d=>d.site===site).sort((a,b)=>a.date.localeCompare(b.date));
+      const sessions=siteWths.map((wth,idx)=>{
+        const prevWthDate=idx>0?siteWths[idx-1].date:"0000-00-00";
+        const sessionDeps=siteDepsAll.filter(d=>d.date>prevWthDate&&d.date<=wth.date);
+        const totalDep=sessionDeps.reduce((s,d)=>s+d.amount,0);
+        const netKRW=dollar?(wth.amount-totalDep)*usdKrw:(wth.amount-totalDep);
+        return{sessionIdx:idx+1,wthDate:wth.date,wthAmt:wth.amount,totalDep,netKRW,deps:sessionDeps};
+      });
+      const totalDep=sessions.reduce((s,ss)=>s+ss.totalDep,0);
+      const totalWth=siteWths.reduce((s,w)=>s+w.amount,0);
+      const netKRW=sessions.reduce((s,ss)=>s+ss.netKRW,0);
+      return{site,dollar,totalDep,totalWth,netKRW,sessions,hasData:true};
+    }).filter(Boolean) as {site:string,dollar:boolean,totalDep:number,totalWth:number,netKRW:number,sessions:any[],hasData:boolean}[];
+  },[deposits,withdrawals,usdKrw,ALL_SITES,isUSD]);
+
+  const activeTotalKrwDep=ALL_SITES.filter(s=>!isUSD(s)).reduce((s,site)=>s+(siteStates[site]?.active?siteStates[site].deposited:0),0);
+  const activeTotalUsdDep=ALL_SITES.filter(s=>isUSD(s)).reduce((s,site)=>s+(siteStates[site]?.active?siteStates[site].deposited:0),0);
+  const activeTotalKrwBet=ALL_SITES.filter(s=>!isUSD(s)).reduce((s,site)=>s+(siteStates[site]?.active?siteStates[site].betTotal:0),0);
+  const activeTotalUsdBet=ALL_SITES.filter(s=>isUSD(s)).reduce((s,site)=>s+(siteStates[site]?.active?siteStates[site].betTotal:0),0);
+
+  const extraRoiStats=useMemo(()=>{
+    const cats:Record<string,{income:number,expense:number,items:any[],bySub:Record<string,{income:number,expense:number,items:any[],bySubSub:Record<string,{income:number,expense:number,items:any[]}>}>}>={};
+    profitExtras.forEach((e:any)=>{
+      if(!cats[e.category])cats[e.category]={income:0,expense:0,items:[],bySub:{}};
+      if(e.isIncome)cats[e.category].income+=e.amount;else cats[e.category].expense+=e.amount;
+      cats[e.category].items.push(e);
+      const sub = e.subCategory||"기타";
+      if(!cats[e.category].bySub[sub])cats[e.category].bySub[sub]={income:0,expense:0,items:[],bySubSub:{}};
+      if(e.isIncome)cats[e.category].bySub[sub].income+=e.amount;else cats[e.category].bySub[sub].expense+=e.amount;
+      cats[e.category].bySub[sub].items.push(e);
+      const subSub = e.subSubCategory||"-";
+      if(!cats[e.category].bySub[sub].bySubSub[subSub])cats[e.category].bySub[sub].bySubSub[subSub]={income:0,expense:0,items:[]};
+      if(e.isIncome)cats[e.category].bySub[sub].bySubSub[subSub].income+=e.amount;else cats[e.category].bySub[sub].bySubSub[subSub].expense+=e.amount;
+      cats[e.category].bySub[sub].bySubSub[subSub].items.push(e);
+    });
+    return cats;
+  },[profitExtras]);
+
+  const totalRoiKRW=useMemo(()=>roiStats.reduce((s,r)=>s+r.netKRW,0)+profitExtras.reduce((s,e)=>s+(e.isIncome?e.amount:-e.amount),0),[roiStats,profitExtras]);
+
+  // ── 통합 수익/지출 뷰 (요청 #5) ─────────────────────────────
+  //   입금   → 자동 지출 (포인트 입금 제외)
+  //   출금   → 자동 수입 (마감 시)
+  //   profitExtras → 수동 입력 수익/지출
+  //   모두 KRW 환산해서 통합 목록으로 표시
+  // 환율 적용해서 KRW로 환산하는 헬퍼 (unifiedIncomeExpense에서 먼저 사용하므로 여기 위치)
+  const toKRW = useCallback((amt:number, dollar:boolean)=>dollar?amt*usdKrw:amt,[usdKrw]);
+
+  const unifiedIncomeExpense = useMemo(()=>{
+    type Item = {
+      id: string;
+      kind: "auto-deposit" | "auto-withdraw" | "manual";
+      isIncome: boolean;
+      amount: number;        // KRW 환산
+      origAmount: number;    // 원래 금액
+      origIsDollar: boolean;
+      date: string;
+      site?: string;         // 사이트명 (auto)
+      category?: string;     // 카테고리 (manual)
+      subCategory?: string;
+      note?: string;
+      manualRef?: any;       // 원본 profitExtra (수정/삭제용)
+    };
+    const items: Item[] = [];
+    // 입금 → 자동 지출 (포인트는 deposits에 안 들어가므로 자연 제외)
+    deposits.forEach(d=>{
+      items.push({
+        id: `dep-${d.id}`,
+        kind: "auto-deposit",
+        isIncome: false,
+        amount: toKRW(d.amount, d.isDollar),
+        origAmount: d.amount,
+        origIsDollar: d.isDollar,
+        date: d.date,
+        site: d.site,
+        note: `${d.site} 입금`,
+      });
+    });
+    // 출금 (마감) → 자동 수입
+    withdrawals.forEach(w=>{
+      items.push({
+        id: `wth-${w.id}`,
+        kind: "auto-withdraw",
+        isIncome: true,
+        amount: toKRW(w.amount, w.isDollar),
+        origAmount: w.amount,
+        origIsDollar: w.isDollar,
+        date: w.date,
+        site: w.site,
+        note: `${w.site} 마감 (출금)`,
+      });
+    });
+    // 수동 입력
+    profitExtras.forEach(e=>{
+      items.push({
+        id: `pe-${e.id}`,
+        kind: "manual",
+        isIncome: e.isIncome,
+        amount: e.amount,
+        origAmount: e.amount,
+        origIsDollar: false,
+        date: e.date,
+        category: e.category,
+        subCategory: e.subCategory,
+        note: e.note || `${e.category}${e.subCategory?` / ${e.subCategory}`:""}`,
+        manualRef: e,
+      });
+    });
+    return items.sort((a,b)=>b.date.localeCompare(a.date));
+  },[deposits, withdrawals, profitExtras, toKRW]);
+
+  const unifiedIncomeList = useMemo(()=>unifiedIncomeExpense.filter(i=>i.isIncome),[unifiedIncomeExpense]);
+  const unifiedExpenseList = useMemo(()=>unifiedIncomeExpense.filter(i=>!i.isIncome),[unifiedIncomeExpense]);
+
+  // ── 이번 달 사이트별 수입 vs 지출 비교 (요청 #2) ──
+  // 이번 달(YYYY-MM)에 발생한 모든 항목을 사이트(site or category)로 그룹핑.
+  //   • 자동 입금(지출) + 수동 지출(category=사이트) 합산 → 지출
+  //   • 자동 출금(수입) + 수동 수입(category=사이트) 합산 → 수입
+  //   • 동일 사이트의 수입/지출 차이로 손익 한눈에
+  const monthlySiteCompare = useMemo(()=>{
+    const ym = today.slice(0,7); // 이번 달 prefix
+    const map = new Map<string,{site:string; income:number; expense:number; incomeCount:number; expenseCount:number}>();
+    const get = (site:string) => {
+      let r = map.get(site);
+      if (!r) { r = {site, income:0, expense:0, incomeCount:0, expenseCount:0}; map.set(site, r); }
+      return r;
+    };
+    unifiedIncomeExpense.forEach(it=>{
+      if (!(it.date||"").startsWith(ym)) return;
+      const siteKey = it.site || it.category || "기타";
+      const row = get(siteKey);
+      if (it.isIncome) { row.income += it.amount; row.incomeCount++; }
+      else { row.expense += it.amount; row.expenseCount++; }
+    });
+    // 활동 많은 사이트 우선, 그 다음 사이트명 가나다순
+    return Array.from(map.values())
+      .map(r=>({...r, net: r.income - r.expense}))
+      .sort((a,b)=>(b.income+b.expense)-(a.income+a.expense) || a.site.localeCompare(b.site,"ko"));
+  },[unifiedIncomeExpense, today]);
+
+  const unifiedTotalIncome = useMemo(()=>unifiedIncomeList.reduce((s,i)=>s+i.amount,0),[unifiedIncomeList]);
+  const unifiedTotalExpense = useMemo(()=>unifiedExpenseList.reduce((s,i)=>s+i.amount,0),[unifiedExpenseList]);
+  const unifiedNet = unifiedTotalIncome - unifiedTotalExpense;
+
+  // ── ROI 탭 달력 보기 토글 (요청 #5: 달력은 상시 X, 버튼으로 토글) ──
+  const [roiCalendarOpen, setRoiCalendarOpen] = useState(false);
+
+  // ── 주간/월간/일별 수익률 통계 ─────────────────────────────
+  const dateRanges = useMemo(()=>{
+    const t = new Date(today+"T00:00:00");
+    const day = t.getDay(); // 0=일, 1=월
+    const monOff = day===0?-6:1-day;
+    const weekStart = new Date(t); weekStart.setDate(t.getDate()+monOff);
+    const monthStart = new Date(t.getFullYear(), t.getMonth(), 1);
+    const monthEnd = new Date(t.getFullYear(), t.getMonth()+1, 0);
+    const weekStartStr = weekStart.toISOString().slice(0,10);
+    const monthStartStr = monthStart.toISOString().slice(0,10);
+    const monthEndStr = monthEnd.toISOString().slice(0,10);
+    return {weekStartStr, monthStartStr, monthEndStr,
+      monthYear: t.getFullYear(), monthIdx: t.getMonth(),
+      monthDays: monthEnd.getDate(),
+      monthFirstDow: monthStart.getDay()};
+  },[today]);
+
+  // 일별 종합 수익 (베팅 + 기타수익 - 기타지출)
+  // 입금/출금은 사이트별 마감 정산 후에만 수익 인정되므로 일별 그래프엔 베팅+기타만
+  const dailyAllRoi = useMemo(()=>{
+    const m:Record<string,{betProfit:number,extraIncome:number,extraExpense:number,deposit:number,withdraw:number,betCount:number}>={};
+    bets.filter(b=>b.result==="승"||b.result==="패").forEach(b=>{
+      if(!m[b.date]) m[b.date]={betProfit:0,extraIncome:0,extraExpense:0,deposit:0,withdraw:0,betCount:0};
+      m[b.date].betProfit += toKRW(b.profit??0, b.isDollar);
+      m[b.date].betCount++;
+    });
+    profitExtras.forEach(e=>{
+      if(!m[e.date]) m[e.date]={betProfit:0,extraIncome:0,extraExpense:0,deposit:0,withdraw:0,betCount:0};
+      if(e.isIncome) m[e.date].extraIncome += e.amount;
+      else m[e.date].extraExpense += e.amount;
+    });
+    deposits.forEach(d=>{
+      if(!m[d.date]) m[d.date]={betProfit:0,extraIncome:0,extraExpense:0,deposit:0,withdraw:0,betCount:0};
+      m[d.date].deposit += toKRW(d.amount, d.isDollar);
+    });
+    withdrawals.forEach(w=>{
+      if(!m[w.date]) m[w.date]={betProfit:0,extraIncome:0,extraExpense:0,deposit:0,withdraw:0,betCount:0};
+      m[w.date].withdraw += toKRW(w.amount, w.isDollar);
+    });
+    return Object.entries(m)
+      .map(([date,v])=>({date, ...v, total: v.betProfit + v.extraIncome - v.extraExpense}))
+      .sort((a,b)=>b.date.localeCompare(a.date)); // 최근 → 과거
+  },[bets, profitExtras, deposits, withdrawals, toKRW]);
+
+  // 이번 주 수익
+  const weekRoi = useMemo(()=>{
+    return dailyAllRoi.filter(d=>d.date>=dateRanges.weekStartStr && d.date<=today)
+      .reduce((s,d)=>s+d.total,0);
+  },[dailyAllRoi, dateRanges.weekStartStr, today]);
+
+  // 이번 달 수익
+  const monthRoi = useMemo(()=>{
+    return dailyAllRoi.filter(d=>d.date>=dateRanges.monthStartStr && d.date<=dateRanges.monthEndStr)
+      .reduce((s,d)=>s+d.total,0);
+  },[dailyAllRoi, dateRanges.monthStartStr, dateRanges.monthEndStr]);
+
+  // 이번 달 캘린더용 데이터 (날짜 → 일별 수익)
+  const monthCalendar = useMemo(()=>{
+    const map:Record<string,{betProfit:number,extraIncome:number,extraExpense:number,deposit:number,withdraw:number,total:number,betCount:number}>={};
+    dailyAllRoi.forEach(d=>{
+      if(d.date>=dateRanges.monthStartStr && d.date<=dateRanges.monthEndStr){
+        map[d.date] = d;
+      }
+    });
+    return map;
+  },[dailyAllRoi, dateRanges.monthStartStr, dateRanges.monthEndStr]);
+
+  const esportsPrediction=useMemo(()=>{
+    const teams:Record<string,{wins:number,losses:number,scored:number,conceded:number}>={};
+    esportsRecords.filter(r=>r.league===esportsStratLeague).forEach(r=>{
+      if(!teams[r.teamA])teams[r.teamA]={wins:0,losses:0,scored:0,conceded:0};
+      if(!teams[r.teamB])teams[r.teamB]={wins:0,losses:0,scored:0,conceded:0};
+      if(r.scoreA>r.scoreB){teams[r.teamA].wins++;teams[r.teamB].losses++;}else{teams[r.teamB].wins++;teams[r.teamA].losses++;}
+      teams[r.teamA].scored+=r.scoreA;teams[r.teamA].conceded+=r.scoreB;
+      teams[r.teamB].scored+=r.scoreB;teams[r.teamB].conceded+=r.scoreA;
+    });return teams;
+  },[esportsRecords,esportsStratLeague]);
+
+  // ★ 잔여 합계: (입금+포인트)−베팅 — 사이트별 진행률과 일관
+  const krwRemaining=activeSiteNames.filter(s=>!isUSD(s)).reduce((sum,site)=>{const st=siteStates[site]||{deposited:0,betTotal:0,pointTotal:0};return sum+Math.max(0,(st.deposited+(st.pointTotal||0))-st.betTotal);},0);
+  const usdRemaining=activeSiteNames.filter(s=>isUSD(s)).reduce((sum,site)=>{const st=siteStates[site]||{deposited:0,betTotal:0,pointTotal:0};return sum+Math.max(0,(st.deposited+(st.pointTotal||0))-st.betTotal);},0);
+
+  // ── 현재 세션(마감 전) 사이트별 실시간 수익 ──
+  // 마지막 마감(=출금) 이후의 베팅들 중 결과가 확정된 것만 합산
+  // 진행중 베팅은 제외, 포인트는 입금/수익 계산에 미포함
+  // ★ 이전 로직 버그: b.date>prevWthDate (날짜 문자열) 비교만 하면
+  //    같은 날 "마감 → 재입금 → 새 베팅" 흐름에서 새 베팅이 prevWthDate==b.date로
+  //    누락되어 "활성화 이후 수익"이 0으로 표시되는 문제가 있었음.
+  //   → ID(=Date.now() ms 타임스탬프)로 정밀 비교 + 날짜 fallback 으로 수정
+  const currentSessionProfits = useMemo(()=>{
+    const result:Record<string,{
+      profit:number,        // 결과 확정된 베팅 순수익
+      betCount:number,      // 결과 확정된 베팅 수
+      pendingCount:number,  // 진행중 베팅 수
+      sessionDep:number,    // 이번 세션 입금액 (포인트 미포함)
+      roi:number,           // 수익률 % (입금 기준)
+      sessionStartDate:string, // 세션 시작 날짜 (직전 마감 다음날)
+    }> = {};
+    ALL_SITES.forEach(site=>{
+      // 마지막 출금(마감) 찾기 — 날짜 + ID 정렬 (같은 날 여러 출금 대비)
+      const siteWths = withdrawals.filter(w=>w.site===site)
+        .sort((a,b)=>a.date.localeCompare(b.date) || (Number(a.id)||0)-(Number(b.id)||0));
+      const lastWth = siteWths.length>0 ? siteWths[siteWths.length-1] : null;
+      const prevWthDate = lastWth ? lastWth.date : "0000-00-00";
+      const prevWthIdNum = lastWth ? Number(lastWth.id) : 0;
+
+      // 세션 경계 비교 함수: ID(=ms 타임스탬프) 우선, 실패 시 날짜 fallback
+      // ID 기반: 베팅/입금 ID > 마지막 출금 ID
+      // 날짜 기반: rec.date > prevWthDate (단, 같은 날이면 ID 비교 필요)
+      const isAfterLastWth = (rec:{id:string; date:string}) => {
+        if (!lastWth) return true; // 첫 세션: 모든 기록 포함
+        const rid = Number(rec.id);
+        // 둘 다 숫자 ID(타임스탬프)면 정밀 비교
+        if (!isNaN(rid) && rid>0 && prevWthIdNum>0) {
+          return rid > prevWthIdNum;
+        }
+        // fallback: 날짜만 비교 (>= 로 같은 날도 포함 — 마감 후 같은 날 베팅 보호)
+        return rec.date >= prevWthDate;
+      };
+
+      // 직전 마감 이후 입금 / 베팅
+      const sessionDeps = deposits.filter(d=>d.site===site && isAfterLastWth(d));
+      const sessionDep = sessionDeps.reduce((s,d)=>s+d.amount,0);
+      const sessionBets = bets.filter(b=>b.site===site && isAfterLastWth(b));
+      const doneBets = sessionBets.filter(b=>b.result==="승"||b.result==="패");
+      const profit = doneBets.reduce((s,b)=>s+(b.profit??0),0);
+      const pendingCount = sessionBets.filter(b=>b.result==="진행중").length;
+      const totalBetAmt = doneBets.reduce((s,b)=>s+b.amount,0);
+      const roi = totalBetAmt>0 ? (profit/totalBetAmt)*100 : 0;
+      result[site] = {
+        profit,
+        betCount: doneBets.length,
+        pendingCount,
+        sessionDep,
+        roi,
+        sessionStartDate: !lastWth ? (sessionDeps[0]?.date || "") : prevWthDate,
+      };
+    });
+    return result;
+  },[bets, deposits, withdrawals, ALL_SITES]);
+
+  // 활성 사이트 전체 세션 수익 합계 (KRW 환산)
+  const activeSessionProfitKRW = useMemo(()=>{
+    return activeSiteNames.reduce((sum,site)=>{
+      const sp = currentSessionProfits[site];
+      if(!sp) return sum;
+      return sum + (isUSD(site) ? sp.profit*usdKrw : sp.profit);
+    },0);
+  },[activeSiteNames, currentSessionProfits, usdKrw, isUSD]);
+
+  // ── 서브 컴포넌트 ─────────────────────────────────────────
+  const StatCard=({label,value,color,sub}:{label:string,value:string|number,color?:string,sub?:string})=>(
+    <div style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:8,padding:"7px 8px",minWidth:0}}>
+      <div style={{fontSize:9,color:C.muted,marginBottom:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{label}</div>
+      <div style={{fontSize:14,fontWeight:800,color:color??C.text,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{value}</div>
+      {sub&&<div style={{fontSize:9,color:C.dim,marginTop:1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{sub}</div>}
+    </div>
+  );
+  const SubRow=({s}:{s:any,key?:any})=>(
+    <div style={{display:"flex",alignItems:"center",gap:8,padding:"7px 10px",borderBottom:`1px solid ${C.border}`,fontSize:12}}>
+      <div style={{flex:1,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.name}</div>
+      <div style={{color:s.profit>=0?C.green:C.red,fontWeight:700,minWidth:70,textAlign:"right"}}>{fmtProfit(s.profit,false)}</div>
+      <div style={{color:Number(s.roi)>=0?C.green:C.red,minWidth:55,textAlign:"right",fontSize:11}}>ROI {s.roi}%</div>
+      <div style={{color:C.teal,minWidth:40,textAlign:"right",fontSize:11}}>{s.winRate}%</div>
+      <div style={{color:C.dim,minWidth:30,textAlign:"right",fontSize:11}}>{s.count}건</div>
+    </div>
+  );
+
+  const [editingBetId,setEditingBetId]=useState<string|null>(null);
+  const [editBetForm,setEditBetForm]=useState<Partial<Bet>>({});
+  const [editBetOddsRaw,setEditBetOddsRaw]=useState<string>("");
+
+  const PendingCard=({b}:{b:Bet,key?:any})=>renderPendingCard(b) as React.ReactElement;
+
+  const DoneCard=({b}:{b:Bet,key?:any})=>{
+    const rc=b.result==="승"?C.green:b.result==="패"?C.red:C.amber;
+    const title = (b.homeTeam && b.awayTeam) ? `${b.homeTeam} vs ${b.awayTeam}` : (b.teamName || "-");
+    // ★ 구 데이터 "홈승"/"원정승" → "팀명 승"
+    const displayBetOption =
+      b.betOption==="홈승" && b.homeTeam ? `${b.homeTeam} 승` :
+      b.betOption==="원정승" && b.awayTeam ? `${b.awayTeam} 승` :
+      b.betOption;
+    return(
+      <div style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:7,padding:9,opacity:b.includeStats===false?0.5:0.9}}>
+        {!b.includeStats&&<div style={{fontSize:8,color:C.dim,marginBottom:2}}>통계제외</div>}
+        <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+          <div style={{flex:1}}><div style={{fontSize:10,fontWeight:700,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{title}</div><div style={{fontSize:9,color:C.muted}}>{b.date}·{displayBetOption}</div></div>
+          <div style={{textAlign:"right",flexShrink:0,marginLeft:3}}>
+            <div style={{fontSize:9,color:rc,border:`1px solid ${rc}44`,borderRadius:3,padding:"1px 4px",marginBottom:2}}>{b.result}</div>
+            {b.profit!==null&&<div style={{fontSize:10,fontWeight:800,color:b.profit>=0?C.green:C.red}}>{fmtProfit(b.profit,b.isDollar)}</div>}
+          </div>
+        </div>
+        <div style={{display:"flex",gap:3}}>
+          {["승","패"].map(r=>(<button key={r} onClick={()=>updateResult(b.id,r)} style={{flex:1,background:b.result===r?C.border2:"transparent",border:`1px solid ${b.result===r?C.border2:C.border}`,color:b.result===r?C.text:C.dim,padding:"3px",borderRadius:3,cursor:"pointer",fontSize:10}}>{r==="승"?"적중":"실패"}</button>))}
+          <button onClick={()=>revertToPending(b.id)} title="진행중으로 되돌리기" style={{background:`${C.amber}11`,border:`1px solid ${C.amber}66`,color:C.amber,padding:"3px 8px",borderRadius:3,cursor:"pointer",fontSize:10,fontWeight:700}}>↩ 처리취소</button>
+          <button onClick={()=>setDeleteModal({betId:b.id})} title="삭제" style={{background:"transparent",border:`1px solid ${C.border}`,color:C.dim,padding:"3px 5px",borderRadius:3,cursor:"pointer",fontSize:10}}>🗑</button>
+        </div>
+      </div>
+    );
+  };
+
+  const tabBtn=(active:boolean,ac:string)=>({padding:"7px 18px",borderRadius:7,border:active?`1px solid ${ac}`:`1px solid ${C.border}`,background:active?`${ac}22`:"transparent",color:active?ac:C.muted,cursor:"pointer",fontWeight:700,fontSize:12} as React.CSSProperties);
+  const siteBtn=(active:boolean,dollar:boolean)=>({padding:"4px 10px",borderRadius:5,border:active?`1px solid ${dollar?C.amber:C.green}`:`1px solid ${C.border}`,background:active?`${dollar?C.amber:C.green}22`:C.bg2,color:active?dollar?C.amber:C.green:C.muted,cursor:"pointer",fontSize:11,fontWeight:active?700:400} as React.CSSProperties);
+
+  // ── 베팅 탭 트리 & 리그 게임 계산 (반드시 early return 전에 호출) ──
+  const bettingTree = useMemo(()=>{
+    const tree:Record<string,Record<string,LiveFixture[]>> = {};
+    for (const f of bettingFixtures) {
+      const c = ktr(f.country); const l = f.league_name;
+      if (!tree[c]) tree[c] = {};
+      if (!tree[c][l]) tree[c][l] = [];
+      tree[c][l].push(f);
+    }
+    return tree;
+  },[bettingFixtures]);
+
+  const bettingCountries = useMemo(()=>{
+    const ord = ["한국","미국","일본","잉글랜드","스페인","독일","이탈리아","프랑스","유럽","국제"];
+    return Object.keys(bettingTree).sort((a,b)=>{
+      const ai=ord.indexOf(a), bi=ord.indexOf(b);
+      if (ai>=0 && bi>=0) return ai-bi;
+      if (ai>=0) return -1;
+      if (bi>=0) return 1;
+      return a.localeCompare(b,"ko");
+    });
+  },[bettingTree]);
+
+  const bettingLeagueGames = useMemo(()=>{
+    if (!bettingCountry || !bettingLeague) return [];
+    return (bettingTree[bettingCountry]?.[bettingLeague] || [])
+      .sort((a,b)=>new Date(a.start_time).getTime()-new Date(b.start_time).getTime());
+  },[bettingTree, bettingCountry, bettingLeague]);
+
+  if(!authed) return <PasswordScreen onAuth={handleAuth}/>;
+  if(!dbReady) return(
+    <div style={{minHeight:"100vh",background:C.bg,display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:16}}>
+      <div style={{fontSize:32}}>⚡</div>
+      <div style={{color:C.orange,fontSize:18,fontWeight:800,letterSpacing:2}}>BET TRACKER</div>
+      <div style={{color:C.muted,fontSize:13}}>Supabase에서 데이터 불러오는 중...</div>
+    </div>
+  );
+
+  const bettingCacheMsg = (()=>{
+    if (!bettingCacheInfo.fetchedAt || !bettingCacheInfo.expiresAt) return "캐시 없음";
+    const remain = bettingCacheInfo.expiresAt - nowTick;
+    if (remain <= 0) return "캐시 만료 · 새로고침 시 재호출";
+    const m = Math.ceil(remain/60_000);
+    return `다음 갱신까지 ${m}분`;
+  })();
+
+  const spColor = SPORT_META[bettingSport].color;
+
+  return (
+    <div className="bt-app-root" data-tab={tab} style={{minHeight:"100vh",background:C.bg,color:C.text,fontFamily:"'Segoe UI',system-ui,sans-serif",display:"flex",flexDirection:"column"}}>
+      {/* ═══════════════════════════════════════════════════════════
+          📱 모바일 전용 스타일 (768px 이하에서만 발동)
+          PC 화면에는 영향 없음. data-tab 속성으로 탭별 분기.
+          ═══════════════════════════════════════════════════════════ */}
+      <style>{`
+        /* ───── type=number 화살표(스피너) 전역 제거 ─────
+           noSpin 인라인 스타일은 Firefox만 잡았던 문제 → Webkit/Chrome에서도
+           화살표가 안 보이도록 전역 처리. PC/모바일 모두 적용. */
+        .bt-app-root input[type="number"]::-webkit-inner-spin-button,
+        .bt-app-root input[type="number"]::-webkit-outer-spin-button {
+          -webkit-appearance: none;
+          appearance: none;
+          margin: 0;
+        }
+        .bt-app-root input[type="number"] {
+          -moz-appearance: textfield;
+        }
+
+        @media (max-width: 768px) {
+          /* ───── input 자동 확대(iOS Safari/Chrome) 차단 ─────
+             iOS는 input/textarea/select의 font-size가 16px 미만일 때
+             포커스 시 화면을 확대시킨다. 16px 이상으로 강제하면 차단됨.
+             PC(>768px)에는 영향 없음. */
+          .bt-app-root input,
+          .bt-app-root textarea,
+          .bt-app-root select {
+            font-size: 16px !important;
+          }
+          /* type=number의 스피너로 인한 폭 변화도 방지 */
+          .bt-app-root input[type="number"] {
+            font-size: 16px !important;
+          }
+
+          /* ───── 공통: 가로 스크롤 방지 ───── */
+          .bt-app-root {
+            overflow-x: hidden !important;
+          }
+          .bt-app-root * {
+            max-width: 100vw;
+          }
+
+          /* ───── 헤더 영역 (탭 네비게이션 위) ───── */
+          .bt-app-root > div[style*="padding: 12px 18px"],
+          .bt-app-root > div[style*="padding:12px 18px"] {
+            padding: 8px 10px !important;
+          }
+          /* 헤더 내부 폰트/간격 축소 */
+          .bt-app-root [style*="fontSize: 22"],
+          .bt-app-root [style*="fontSize:22"] {
+            font-size: 16px !important;
+          }
+          /* 탭 버튼: 가로 스크롤 가능하게 */
+          .bt-app-root > div > div[style*="flexWrap"][style*="wrap"] {
+            flex-wrap: nowrap !important;
+            overflow-x: auto !important;
+            -webkit-overflow-scrolling: touch;
+            padding-bottom: 4px;
+          }
+          .bt-app-root button[style*="padding: 10px 20px"],
+          .bt-app-root button[style*="padding:10px 20px"] {
+            padding: 7px 12px !important;
+            font-size: 12px !important;
+            white-space: nowrap !important;
+            flex-shrink: 0 !important;
+          }
+
+          /* ═══════════ 🏠 대시보드 탭 ═══════════ */
+          .bt-app-root[data-tab="home"] > div[style*="overflowY"][style*="auto"][style*="padding: 14"],
+          .bt-app-root[data-tab="home"] > div[style*="overflowY"][style*="auto"][style*="padding:14"] {
+            padding: 10px !important;
+          }
+          /* 2컬럼 그리드 → 1컬럼 세로 스택 */
+          .bt-app-root[data-tab="home"] div[style*="gridTemplateColumns: 360px 1fr"],
+          .bt-app-root[data-tab="home"] div[style*="gridTemplateColumns:360px 1fr"],
+          .bt-app-root[data-tab="home"] div[style*="grid-template-columns: 360px 1fr"] {
+            grid-template-columns: 1fr !important;
+            gap: 10px !important;
+          }
+          /* 사이트 활성화 4컬럼 → 3컬럼 */
+          .bt-app-root[data-tab="home"] div[style*="repeat(4, 1fr)"],
+          .bt-app-root[data-tab="home"] div[style*="repeat(4,1fr)"] {
+            grid-template-columns: repeat(3, 1fr) !important;
+          }
+          /* 카드 패딩 축소 */
+          .bt-app-root[data-tab="home"] div[style*="padding: 13"],
+          .bt-app-root[data-tab="home"] div[style*="padding:13"] {
+            padding: 11px !important;
+          }
+
+          /* ═══════════ 🎯 스포츠 탭 ═══════════ */
+          /* 3컬럼 가로 레이아웃 → 세로 스택, 사이드바 가로 스크롤 */
+          .bt-app-root[data-tab="bettingCombo"] > div[style*="flex"][style*="overflow"][style*="hidden"] {
+            flex-direction: column !important;
+          }
+          /* 사이드바(카테고리) 폭 줄이고 높이 제한 */
+          .bt-app-root[data-tab="bettingCombo"] > div > div[style*="width: 300"],
+          .bt-app-root[data-tab="bettingCombo"] > div > div[style*="width:300"] {
+            width: 100% !important;
+            max-height: 35vh !important;
+            border-right: none !important;
+            border-bottom: 1px solid #344534 !important;
+            flex-shrink: 0 !important;
+          }
+          /* 메인 영역 폭 보장 */
+          .bt-app-root[data-tab="bettingCombo"] > div > div:not([style*="width: 300"]):not([style*="width:300"]) {
+            width: 100% !important;
+            min-width: 0 !important;
+          }
+          /* 베팅 슬립 등 내부 그리드 단순화 */
+          .bt-app-root[data-tab="bettingCombo"] div[style*="repeat(3, 1fr)"],
+          .bt-app-root[data-tab="bettingCombo"] div[style*="repeat(3,1fr)"] {
+            grid-template-columns: 1fr 1fr !important;
+          }
+          .bt-app-root[data-tab="bettingCombo"] div[style*="repeat(4, 1fr)"],
+          .bt-app-root[data-tab="bettingCombo"] div[style*="repeat(4,1fr)"] {
+            grid-template-columns: repeat(2, 1fr) !important;
+          }
+
+          /* ═══════════ ⏳ 베팅 내역 탭 ═══════════ */
+          .bt-app-root[data-tab="pending"] div[style*="padding: 12px 18"],
+          .bt-app-root[data-tab="pending"] div[style*="padding:12px 18"] {
+            padding: 10px 12px !important;
+          }
+          .bt-app-root[data-tab="pending"] div[style*="padding: 16"],
+          .bt-app-root[data-tab="pending"] div[style*="padding:16"] {
+            padding: 10px !important;
+          }
+          /* 6컬럼 → 1컬럼 (사이트 카드) */
+          .bt-app-root[data-tab="pending"] div[style*="repeat(6, 1fr)"],
+          .bt-app-root[data-tab="pending"] div[style*="repeat(6,1fr)"] {
+            grid-template-columns: 1fr !important;
+            gap: 8px !important;
+          }
+          /* 잔여금 표시 줄바꿈 허용 */
+          .bt-app-root[data-tab="pending"] div[style*="fontSize: 14"][style*="display: flex"][style*="gap: 16"],
+          .bt-app-root[data-tab="pending"] div[style*="fontSize:14"][style*="display:flex"][style*="gap:16"] {
+            flex-wrap: wrap !important;
+            gap: 8px !important;
+            font-size: 12px !important;
+          }
+          /* 헤더 줄바꿈 허용 */
+          .bt-app-root[data-tab="pending"] div[style*="justifyContent: space-between"][style*="marginBottom: 6"] {
+            flex-wrap: wrap !important;
+            gap: 6px !important;
+          }
+
+          /* ═══════════ 📊 통계 탭 ═══════════ */
+          .bt-app-root[data-tab="stats"] > div[style*="padding: 20"],
+          .bt-app-root[data-tab="stats"] > div[style*="padding:20"] {
+            padding: 10px !important;
+          }
+          /* 5컬럼 → 2컬럼 (StatCard 그리드) */
+          .bt-app-root[data-tab="stats"] div[style*="repeat(5, 1fr)"],
+          .bt-app-root[data-tab="stats"] div[style*="repeat(5,1fr)"] {
+            grid-template-columns: repeat(2, 1fr) !important;
+            gap: 6px !important;
+          }
+          /* 4컬럼 → 2컬럼 */
+          .bt-app-root[data-tab="stats"] div[style*="repeat(4, 1fr)"],
+          .bt-app-root[data-tab="stats"] div[style*="repeat(4,1fr)"] {
+            grid-template-columns: repeat(2, 1fr) !important;
+          }
+          /* 3컬럼 → 1컬럼 (큰 차트 박스 등) */
+          .bt-app-root[data-tab="stats"] div[style*="repeat(3, 1fr)"],
+          .bt-app-root[data-tab="stats"] div[style*="repeat(3,1fr)"] {
+            grid-template-columns: 1fr !important;
+          }
+          /* 통계 탭 상단 탭 버튼 가로 스크롤 */
+          .bt-app-root[data-tab="stats"] > div > div:first-child > div[style*="flexWrap"] {
+            flex-wrap: nowrap !important;
+            overflow-x: auto !important;
+            -webkit-overflow-scrolling: touch;
+          }
+          /* 차트 높이 축소 */
+          .bt-app-root[data-tab="stats"] .recharts-responsive-container {
+            height: 140px !important;
+          }
+          /* 통계 카드 내부 폰트 축소 */
+          .bt-app-root[data-tab="stats"] div[style*="padding: 13"],
+          .bt-app-root[data-tab="stats"] div[style*="padding:13"],
+          .bt-app-root[data-tab="stats"] div[style*="padding: 16"],
+          .bt-app-root[data-tab="stats"] div[style*="padding:16"] {
+            padding: 10px !important;
+          }
+
+          /* ═══════════ 공통: 모달 가로 폭 보정 ═══════════ */
+          .bt-app-root div[style*="width: 380"],
+          .bt-app-root div[style*="width:380"],
+          .bt-app-root div[style*="width: 420"],
+          .bt-app-root div[style*="width:420"],
+          .bt-app-root div[style*="width: 480"],
+          .bt-app-root div[style*="width:480"] {
+            width: calc(100vw - 20px) !important;
+            max-width: 420px !important;
+          }
+        }
+      `}</style>
+
+
+      {/* ── 데이터 로드 실패 배너 ── */}
+      {dataLoadErrors.length>0 && (
+        <div style={{background:`${C.red}22`,border:`1px solid ${C.red}`,color:C.red,padding:"10px 14px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,fontSize:13}}>
+          <div style={{flex:1}}>
+            <b>⚠ 데이터 로드 실패</b> · 일부 데이터를 불러오지 못했습니다.
+            <span style={{opacity:0.7,marginLeft:8}}>({dataLoadErrors.join(", ")})</span>
+          </div>
+          <button onClick={()=>{setDataLoadErrors([]);setDbReloadNonce(n=>n+1);}}
+            style={{padding:"5px 12px",borderRadius:5,border:`1px solid ${C.red}`,background:"transparent",color:C.red,cursor:"pointer",fontWeight:700,fontSize:12,whiteSpace:"nowrap"}}>
+            🔄 다시 시도
+          </button>
+          <button onClick={()=>setDataLoadErrors([])}
+            style={{padding:"5px 10px",borderRadius:5,border:`1px solid ${C.red}66`,background:"transparent",color:C.red,cursor:"pointer",fontSize:12}}>
+            ✕
+          </button>
+        </div>
+      )}
+      {/* ── 모달들 ── */}
+      {siteManageModal&&(
+        <div style={{position:"fixed",inset:0,background:"#000b",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center"}}>
+          <div style={{background:C.bg3,border:`1px solid ${C.teal}`,borderRadius:14,padding:24,width:380,maxHeight:"80vh",overflowY:"auto"}}>
+            <div style={{fontSize:14,fontWeight:700,color:C.teal,marginBottom:16}}>🏢 사이트 관리</div>
+            <div style={{display:"flex",gap:6,marginBottom:10}}>
+              <input value={newSiteName} onChange={e=>setNewSiteName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleAddSite()} placeholder="사이트 이름" style={{...S,flex:1,boxSizing:"border-box"}}/>
+              <select value={newSiteType} onChange={e=>setNewSiteType(e.target.value as "krw"|"usd")} style={{...S,width:"auto"}}>
+                <option value="krw">₩ 원화</option>
+                <option value="usd">$ 달러</option>
+              </select>
+              <button onClick={handleAddSite} style={{padding:"7px 14px",background:`${C.teal}22`,border:`1px solid ${C.teal}`,color:C.teal,borderRadius:6,cursor:"pointer",fontWeight:700,whiteSpace:"nowrap"}}>추가</button>
+            </div>
+            <div style={{fontSize:12,color:C.muted,marginBottom:8}}>원화 사이트</div>
+            {krwSites.map(s=>(
+              <div key={s} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 10px",background:C.bg2,borderRadius:6,marginBottom:4}}>
+                <span style={{fontSize:12,color:C.green}}>₩ {s}</span>
+                <button onClick={()=>handleDeleteSite(s)} style={{background:"transparent",border:`1px solid ${C.red}44`,color:C.red,padding:"2px 8px",borderRadius:4,cursor:"pointer",fontSize:11}}>삭제</button>
+              </div>
+            ))}
+            <div style={{fontSize:12,color:C.muted,margin:"12px 0 8px"}}>달러 사이트</div>
+            {usdSites.map(s=>(
+              <div key={s} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 10px",background:C.bg2,borderRadius:6,marginBottom:4}}>
+                <span style={{fontSize:12,color:C.amber}}>$ {s}</span>
+                <button onClick={()=>handleDeleteSite(s)} style={{background:"transparent",border:`1px solid ${C.red}44`,color:C.red,padding:"2px 8px",borderRadius:4,cursor:"pointer",fontSize:11}}>삭제</button>
+              </div>
+            ))}
+            <button onClick={()=>setSiteManageModal(false)} style={{width:"100%",marginTop:16,background:C.bg2,border:`1px solid ${C.border}`,color:C.muted,padding:"8px",borderRadius:6,cursor:"pointer"}}>닫기</button>
+          </div>
+        </div>
+      )}
+
+      {addPointSiteModal&&(
+        <div style={{position:"fixed",inset:0,background:"#000b",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center"}}>
+          <div style={{background:C.bg3,border:`1px solid ${C.teal}`,borderRadius:14,padding:24,width:440,maxHeight:"90vh",overflowY:"auto"}}>
+            <div style={{fontSize:14,fontWeight:700,color:C.teal,marginBottom:14}}>🎁 포인트 교환 추가</div>
+
+            {/* 저장된 프리셋 — 버튼 클릭 시 펼쳐서 표시 (기본 접힘) */}
+            {pointPresets.length>0 && (
+              <div style={{marginBottom:14}}>
+                <button onClick={()=>setPointPresetPanelOpen(o=>!o)}
+                  style={{width:"100%",padding:"7px 11px",borderRadius:7,border:`1px solid ${C.purple}55`,background:pointPresetPanelOpen?`${C.purple}22`:`${C.purple}11`,color:C.purple,cursor:"pointer",fontSize:11,fontWeight:800,display:"flex",justifyContent:"space-between",alignItems:"center",letterSpacing:0.3}}>
+                  <span>📚 프리셋 불러오기 ({pointPresets.length})</span>
+                  <span style={{fontSize:10}}>{pointPresetPanelOpen?"▼":"▶"}</span>
+                </button>
+                {pointPresetPanelOpen && (
+                  <div style={{marginTop:6,padding:"9px 11px",background:`${C.purple}11`,border:`1px solid ${C.purple}44`,borderRadius:7}}>
+                    <div style={{fontSize:10,fontWeight:700,color:C.purple,marginBottom:6,letterSpacing:0.3}}>클릭해서 불러오기 (날짜만 새로 지정)</div>
+                    <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
+                      {pointPresets.map(p=>{
+                        const cycleLbl = p.targetCycleDays===7?"1주":p.targetCycleDays===14?"2주":p.targetCycleDays===30?"1달":p.targetCycleDays===60?"2달":p.targetCycleDays===90?"3달":`${p.targetCycleDays}일`;
+                        const amtLbl = p.targetAmount>0 ? `${(p.targetAmount/10000).toFixed(0)}만` : "목표X";
+                        const isSelected = newPointSite.exchangeName === p.exchangeName
+                          && newPointSite.targetAmount === p.targetAmount
+                          && newPointSite.targetCycleDays === p.targetCycleDays
+                          && (newPointSite.targetSiteName||"") === (p.targetSiteName||"");
+                        return (
+                          <div key={p.id} style={{display:"flex",alignItems:"stretch",borderRadius:5,overflow:"hidden",border:isSelected?`1.5px solid ${C.purple}`:`1px solid ${C.purple}55`}}>
+                            <button onClick={()=>{handleLoadPointPreset(p.id);setPointPresetPanelOpen(false);}} title="이 프리셋 불러오기"
+                              style={{padding:"5px 9px",background:isSelected?`${C.purple}33`:`${C.purple}11`,color:isSelected?C.purple:C.text,cursor:"pointer",border:"none",fontSize:11,fontWeight:isSelected?800:600,display:"flex",flexDirection:"column",alignItems:"flex-start",gap:1}}>
+                              <span>{p.exchangeName}</span>
+                              <span style={{fontSize:8,color:C.dim,fontWeight:600}}>{amtLbl} · {cycleLbl}{p.targetSiteName?` · ${p.targetSiteName}`:""}</span>
+                            </button>
+                            <button onClick={()=>handleDeletePointPreset(p.id)} title="프리셋 삭제"
+                              style={{padding:"0 7px",background:`${C.red}11`,border:"none",borderLeft:`1px solid ${C.purple}44`,color:C.red,cursor:"pointer",fontSize:10,fontWeight:700}}>✕</button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* 교환 이름 (사이트 + 교환 종류 통합) */}
+            <div style={{marginBottom:8}}>
+              <div style={L}>교환 이름 · <span style={{color:C.dim}}>예: "올인구조대 포인트교환", "벨라벳 기프티콘"</span></div>
+              <input value={newPointSite.exchangeName}
+                onChange={e=>setNewPointSite(p=>({...p,exchangeName:e.target.value,name:e.target.value}))}
+                placeholder="교환 이름을 입력하세요"
+                style={{...S,boxSizing:"border-box"}}/>
+            </div>
+
+            {/* 교환 목표 날짜 — 가장 중요한 필드. 강조 처리 */}
+            <div style={{marginBottom:8}}>
+              <div style={{...L,color:C.amber,fontWeight:800}}>📅 교환 목표 날짜 · <span style={{color:C.dim,fontWeight:400}}>이 날짜까지 입금을 채워야 함</span></div>
+              <input type="date" value={newPointSite.exchangeDate}
+                onChange={e=>setNewPointSite(p=>({...p,exchangeDate:e.target.value}))}
+                style={{...S,boxSizing:"border-box",border:`1.5px solid ${C.amber}66`,fontSize:14,fontWeight:700,color:C.amber,padding:"9px 9px"}}/>
+            </div>
+
+            {/* 목표 금액 */}
+            <div style={{marginBottom:8}}>
+              <div style={L}>목표 금액 (원화) · <span style={{color:C.dim}}>0이면 목표 없음 (입금 추적만)</span></div>
+              <input type="text" inputMode="numeric"
+                value={newPointSite.targetAmount? newPointSite.targetAmount.toLocaleString("en-US"):""}
+                onChange={e=>{
+                  const cleaned = e.target.value.replace(/[^0-9]/g,"");
+                  const v = parseInt(cleaned)||0;
+                  setNewPointSite(p=>({...p,targetAmount:v}));
+                }}
+                placeholder="0 (목표 없음)"
+                style={{...S,boxSizing:"border-box"}}/>
+            </div>
+
+            {/* 목표 기간 — 시작일/종료일 날짜 범위로 직접 지정 */}
+            <div style={{marginBottom:8}}>
+              <div style={L}>📅 목표 기간 (이 기간 동안의 누적 입금을 목표와 비교)</div>
+              {/* 선택된 범위 요약 + 달력 토글 버튼 */}
+              <div style={{display:"flex",gap:6,alignItems:"center",marginBottom:5}}>
+                <div style={{flex:1,padding:"7px 10px",borderRadius:5,border:`1px solid ${(newPointSite.targetStartDate&&newPointSite.targetEndDate)?C.teal:C.border}`,background:(newPointSite.targetStartDate&&newPointSite.targetEndDate)?`${C.teal}11`:C.bg2,fontSize:12,fontWeight:700,color:(newPointSite.targetStartDate&&newPointSite.targetEndDate)?C.teal:C.dim}}>
+                  {newPointSite.targetStartDate && newPointSite.targetEndDate
+                    ? `${newPointSite.targetStartDate} ~ ${newPointSite.targetEndDate} (${Math.round((new Date(newPointSite.targetEndDate+"T00:00:00Z").getTime()-new Date(newPointSite.targetStartDate+"T00:00:00Z").getTime())/(1000*60*60*24))+1}일)`
+                    : newPointSite.targetStartDate
+                      ? `시작: ${newPointSite.targetStartDate} · 종료일을 선택하세요`
+                      : "기간이 선택되지 않음"}
+                </div>
+                <button onClick={()=>{
+                  setPointDateCalOpen(o=>!o);
+                  // 달력 첫 표시 월 = 시작일이 있으면 그 월, 아니면 교환일 또는 오늘
+                  if(!pointDateCalOpen){
+                    const seed = newPointSite.targetStartDate || newPointSite.exchangeDate || today;
+                    setPointDateCalMonth(seed.slice(0,7));
+                    setPointDateClickStep(newPointSite.targetStartDate && !newPointSite.targetEndDate ? "end" : "start");
+                  }
+                }} style={{padding:"7px 12px",borderRadius:5,border:`1px solid ${C.teal}`,background:pointDateCalOpen?`${C.teal}22`:C.bg2,color:C.teal,cursor:"pointer",fontSize:11,fontWeight:700,whiteSpace:"nowrap"}}>
+                  {pointDateCalOpen?"▼ 달력 닫기":"📅 달력 열기"}
+                </button>
+                {(newPointSite.targetStartDate||newPointSite.targetEndDate) && (
+                  <button onClick={()=>{
+                    setNewPointSite(p=>({...p,targetStartDate:"",targetEndDate:""}));
+                    setPointDateClickStep("start");
+                  }} title="기간 초기화"
+                    style={{padding:"7px 9px",borderRadius:5,border:`1px solid ${C.red}44`,background:`${C.red}11`,color:C.red,cursor:"pointer",fontSize:10,fontWeight:700}}>✕</button>
+                )}
+              </div>
+
+              {/* 인라인 달력 */}
+              {pointDateCalOpen && (()=>{
+                const monStr = pointDateCalMonth || today.slice(0,7);
+                const [yStr,mStr] = monStr.split("-");
+                const y = parseInt(yStr), mIdx = parseInt(mStr)-1;
+                const monStart = new Date(y, mIdx, 1);
+                const monEnd = new Date(y, mIdx+1, 0);
+                const days = monEnd.getDate();
+                const firstDow = monStart.getDay();
+                const shiftMon = (delta:number) => {
+                  const d = new Date(y, mIdx+delta, 1);
+                  setPointDateCalMonth(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`);
+                };
+                const handleDayClick = (dateStr:string) => {
+                  // 1번째 클릭: 시작일 / 2번째 클릭: 종료일 (시작일보다 빠르면 시작일을 새로 잡음)
+                  if (pointDateClickStep === "start") {
+                    setNewPointSite(p=>({...p, targetStartDate: dateStr, targetEndDate: ""}));
+                    setPointDateClickStep("end");
+                  } else {
+                    // 종료일이 시작일보다 이전이면 시작일을 다시 잡고 종료일은 빈 상태
+                    if (newPointSite.targetStartDate && dateStr < newPointSite.targetStartDate) {
+                      setNewPointSite(p=>({...p, targetStartDate: dateStr, targetEndDate: ""}));
+                      setPointDateClickStep("end");
+                    } else {
+                      setNewPointSite(p=>({...p, targetEndDate: dateStr}));
+                      setPointDateClickStep("start"); // 다음 클릭은 새 시작점으로
+                    }
+                  }
+                };
+                const startDate = newPointSite.targetStartDate;
+                const endDate = newPointSite.targetEndDate;
+                return (
+                  <div style={{background:C.bg2,border:`1px solid ${C.teal}55`,borderRadius:6,padding:"8px 10px",marginTop:3}}>
+                    {/* 안내 메시지 */}
+                    <div style={{fontSize:10,color:C.amber,marginBottom:6,fontWeight:700,textAlign:"center"}}>
+                      {pointDateClickStep === "start" ? "1️⃣ 시작일을 클릭하세요" : "2️⃣ 종료일을 클릭하세요"}
+                    </div>
+                    {/* 월 이동 헤더 */}
+                    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
+                      <button onClick={()=>shiftMon(-1)} title="이전 달"
+                        style={{background:`${C.teal}11`,border:`1px solid ${C.teal}44`,color:C.teal,cursor:"pointer",fontSize:11,padding:"3px 10px",borderRadius:4,fontWeight:800}}>◀</button>
+                      <div style={{fontSize:12,color:C.text,fontWeight:800}}>{y}년 {mIdx+1}월</div>
+        
