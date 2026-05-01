@@ -712,7 +712,7 @@ const EXTRA:Record<string,string[]> = {
 };
 
 const getOptGroups = (cat:string) => {
-  if(cat==="축구") return [{g:"홈",opts:["홈 -0.5","홈 0.5","홈 1.5"]},{g:"원정",opts:["원정 -0.5","원정 0.5","원정 1.5"]}];
+  if(cat==="축구") return [{g:"홈",opts:["홈 0.5","홈 1.5"]},{g:"원정",opts:["원정 0.5","원정 1.5"]}];
   if(cat==="야구") return [{g:"승패",opts:["정배","역배"]},{g:"오버",opts:Array.from({length:14},(_,i)=>`${4.5+i} 오버`)},{g:"언더",opts:Array.from({length:14},(_,i)=>`${4.5+i} 언더`)}];
   if(cat==="농구") return [{g:"마핸",opts:Array.from({length:8},(_,i)=>`${(2.5+i).toFixed(1)} 마핸`)},{g:"플핸",opts:Array.from({length:5},(_,i)=>`${(10.5+i).toFixed(1)} 플핸`)}];
   if(cat==="배구") return [{g:"승패",opts:["홈 승","원정 승"]},{g:"오버/언더",opts:["오버","언더"]}];
@@ -1014,6 +1014,9 @@ function AppMain() {
   const [stExpandedGameId,setStExpandedGameId]=useState<number|null>(null);
   // 오늘 경기 중 종료된 그룹 펼침 여부 (기본: 접힘)
   const [stShowFinished,setStShowFinished]=useState<boolean>(false);
+  // ★ "진행 중인 수동 경기" (어제 또는 그 이전에 추가된 미종료 수동 경기) 펼침 여부 (기본: 접힘)
+  //   사용자 요청: 하루 지난 수동 경기는 삭제하지 않고 자동으로 접어놓기. 헤더 클릭 시 펼침.
+  const [stShowManualOngoing, setStShowManualOngoing] = useState<boolean>(false);
   // ★ 종목별 "숨긴 국가/리그도 표시" 토글 — true면 베팅 가능 경기 0개라도 표시
   const [stShowHidden, setStShowHidden] = useState<Record<string, boolean>>({});
   // ★ 종목별 "숨김 처리된(finished=true) 수동 경기 보기" 토글
@@ -3592,66 +3595,25 @@ function AppMain() {
     return null;
   };
   // 매처: 옵션 텍스트(bo)와 베팅(bet)을 받아 boolean 반환
-  // ※ 사용자 요청: 홈 2.5 / 원정 2.5 매처 삭제 — 통계에서 표시 안 됨
-  //   과거에 2.5 핸디로 등록된 베팅이 있다면 "기타"로 분류되어 디버그 영역에서 확인 가능
-  // ★ 음수 핸디 (-0.5) 추가 — 강팀이 0.5골 차로 이겨야 적중하는 마핸
-  //   "맨유 (-0.5)" 처럼 부호로 구분. 양수 0.5 매처는 음수 값 배제.
+  // ※ 사용자 요청 (최신):
+  //   1) 무승부 매처 제거 (축구 무승부 베팅 안 함)
+  //   2) "홈 -0.5", "홈 0.5", "홈 1.5"를 "홈" 하나로 통합 — 옛 "홈승" 베팅 데이터도 같은 항목으로 묶임
+  //   3) "원정 -0.5", "원정 0.5", "원정 1.5"를 "원정" 하나로 통합 — 옛 "원정승" 베팅 데이터도 같이 묶임
+  //   매처 로직: _classifyHomeAway가 "홈"/"원정"으로 분류한 모든 베팅을 포함 (오버/언더 제외)
   const footballOptMatchers: {opt:string, match:(bo:string, bet:Bet)=>boolean}[] = [
-    // 홈 마핸 -0.5 — 홈 + 부호 음수 + 절댓값 < 1
-    {opt:"홈 -0.5", match:(bo,bet)=>{
+    // 홈 (통합) — 모든 홈 핸디캡 + 옛 "홈승" 베팅 포함
+    {opt:"홈", match:(bo,bet)=>{
       if (_classifyHomeAway(bo,bet) !== "홈") return false;
       const sl = (bo||"").toLowerCase();
       if (sl.includes("오버")||sl.includes("under")||sl.includes("언더")||sl.includes("over")) return false;
-      if (!/\d/.test(bo)) return false; // 숫자 없는 "홈"/"홈승" 은 마핸 아님
-      const signed = _extractFootballNumSigned(bo);
-      return signed < 0 && Math.abs(signed) < 1;
+      return true;
     }},
-    // 홈 핸디캡 0.5 — 홈으로 분류 + 숫자값 < 1 (또는 숫자 없음) + 양수 (또는 부호 없음)
-    {opt:"홈 0.5", match:(bo,bet)=>{
-      if (_classifyHomeAway(bo,bet) !== "홈") return false;
-      // 오버/언더가 옵션에 같이 있으면 핸디캡 아님 (제외)
-      const sl = (bo||"").toLowerCase();
-      if (sl.includes("오버")||sl.includes("under")||sl.includes("언더")||sl.includes("over")) return false;
-      if (!/\d/.test(bo)) return true;  // 숫자 없는 "홈"/"홈승" → 0.5
-      const signed = _extractFootballNumSigned(bo);
-      if (signed < 0) return false; // 음수는 마핸이라 제외
-      return _classifyHomeAwayLine(_extractFootballNum(bo)) === "0.5";
-    }},
-    {opt:"홈 1.5", match:(bo,bet)=>{
-      if (_classifyHomeAway(bo,bet) !== "홈") return false;
-      const sl = (bo||"").toLowerCase();
-      if (sl.includes("오버")||sl.includes("under")||sl.includes("언더")||sl.includes("over")) return false;
-      if (!/\d/.test(bo)) return false;
-      return _classifyHomeAwayLine(_extractFootballNum(bo)) === "1.5";
-    }},
-    // 원정 마핸 -0.5
-    {opt:"원정 -0.5", match:(bo,bet)=>{
+    // 원정 (통합) — 모든 원정 핸디캡 + 옛 "원정승" 베팅 포함
+    {opt:"원정", match:(bo,bet)=>{
       if (_classifyHomeAway(bo,bet) !== "원정") return false;
       const sl = (bo||"").toLowerCase();
       if (sl.includes("오버")||sl.includes("under")||sl.includes("언더")||sl.includes("over")) return false;
-      if (!/\d/.test(bo)) return false;
-      const signed = _extractFootballNumSigned(bo);
-      return signed < 0 && Math.abs(signed) < 1;
-    }},
-    {opt:"원정 0.5", match:(bo,bet)=>{
-      if (_classifyHomeAway(bo,bet) !== "원정") return false;
-      const sl = (bo||"").toLowerCase();
-      if (sl.includes("오버")||sl.includes("under")||sl.includes("언더")||sl.includes("over")) return false;
-      if (!/\d/.test(bo)) return true;
-      const signed = _extractFootballNumSigned(bo);
-      if (signed < 0) return false;
-      return _classifyHomeAwayLine(_extractFootballNum(bo)) === "0.5";
-    }},
-    {opt:"원정 1.5", match:(bo,bet)=>{
-      if (_classifyHomeAway(bo,bet) !== "원정") return false;
-      const sl = (bo||"").toLowerCase();
-      if (sl.includes("오버")||sl.includes("under")||sl.includes("언더")||sl.includes("over")) return false;
-      if (!/\d/.test(bo)) return false;
-      return _classifyHomeAwayLine(_extractFootballNum(bo)) === "1.5";
-    }},
-    {opt:"무승부", match:(bo)=>{
-      const s = (bo||"").trim().toLowerCase();
-      return s==="무승부"||s==="무"||s==="x"||s==="draw"||/무$/.test(s);
+      return true;
     }},
     {opt:"오버", match:(bo)=>{
       const s = (bo||"").toLowerCase();
@@ -3667,7 +3629,6 @@ function AppMain() {
       if (!s) return false;
       // 홈/원정으로 분류된다면 기타 아님
       if (_classifyHomeAway(bo,bet) !== null) return false;
-      if (s==="무승부"||s==="무"||s==="x"||s==="draw"||/무$/.test(s)) return false;
       if (s.includes("오버")||s.includes("over")) return false;
       if (s.includes("언더")||s.includes("under")) return false;
       return true;
@@ -3942,11 +3903,10 @@ function AppMain() {
     });
   },[footballDone]);
 
-  // [축구] 핸디캡 라인별 (홈/원정 -0.5/0.5/1.5) 통계
-  // 사용자 전략: 각 라인의 적중률/수익률을 알고 싶음.
-  // ★ -0.5 (마핸) 추가 — 강팀이 0.5골 차로 이겨야 적중. +0.5 와는 의미 정반대.
+  // [축구] 라인별 (홈/원정) 통계 — 사용자 요청으로 -0.5/0.5/1.5 모두 통합
+  // 옛 "홈승"/"원정승" + 모든 핸디캡 베팅이 각각 "홈"/"원정"에 합쳐져 집계됨
   const footballHandicapLineStats = useMemo(()=>{
-    const lines = ["홈 -0.5","홈 0.5","홈 1.5","원정 -0.5","원정 0.5","원정 1.5"];
+    const lines = ["홈","원정"];
     return lines.map(lineOpt=>{
       const matcher = footballOptMatchers.find(m=>m.opt===lineOpt);
       const bs = matcher ? footballDone.filter(b=>matcher.match(b.betOption, b)) : [];
@@ -4058,30 +4018,8 @@ function AppMain() {
     });
   },[baseballDone]);
 
-  // [농구] 배당별 통계 — 1.4부터 0.1단위
-  // 사용자 신규 전략: 2.5~14.5 라인 / 마핸 1.5~2.0 배당대 / 플핸 1.5~2.0 배당대 모두 포함
-  const basketballOddsBucketStats = useMemo(()=>{
-    const buckets:string[] = [];
-    for (let v=1.4; v<=3.05; v+=0.1) buckets.push(v.toFixed(1));
-    return buckets.map(bStr=>{
-      const target = parseFloat(bStr);
-      const bs = basketballDone.filter(b=>{
-        const r = Math.round(b.odds*10)/10;
-        return Math.abs(r-target) < 0.001;
-      });
-      const wins = bs.filter(b=>b.result==="승").length;
-      const losses = bs.filter(b=>b.result==="패").length;
-      const profit = bs.reduce((s,b)=>s+(b.profit??0),0);
-      const bet = bs.reduce((s,b)=>s+b.amount,0);
-      return {
-        odds: bStr,
-        count: bs.length, wins, losses,
-        profit, bet,
-        roi: bet>0?parseFloat(((profit/bet)*100).toFixed(1)):0,
-        winRate: bs.length>0?Math.round(wins/bs.length*100):0,
-      };
-    });
-  },[basketballDone]);
+  // [농구] 배당별 통계 — ❌ 삭제됨 (사용자 요청: 농구 배당별 통계 삭제)
+  //   기존 basketballOddsBucketStats useMemo 제거. UI 표도 함께 제거됨.
 
   // [농구] 플핸 vs 마핸 — 리그별 어느 쪽이 유리한지 (요청 #11)
   // parseBasketballOpt로 플/마 구분 가능 (이미 정의됨)
@@ -6250,15 +6188,19 @@ function AppMain() {
                         <>
                           {/* ★ 진행 중인 수동 경기 (오늘/내일 외 날짜에 등록된 미종료 수동 경기)
                               사용자가 직접 등록한 경기인데 createdAt 이 오늘/내일이 아니면
-                              아래 todayGames/tomorrowGames 필터에 안 걸려서 사라지던 문제 — 별도 섹션으로 항상 표시 */}
+                              아래 todayGames/tomorrowGames 필터에 안 걸려서 사라지던 문제 — 별도 섹션으로 항상 표시
+                              ★ 사용자 요청: 하루 지난 수동 경기는 삭제하지 않고 자동으로 접어놓기.
+                              헤더 클릭 → 펼침/접힘 토글 (기본 접힘) */}
                           {manualOngoingGames.length > 0 && (
                             <>
-                              <div style={{display:"flex",alignItems:"center",gap:8,margin:"4px 2px 8px",padding:"4px 8px",background:`${C.purple}11`,borderRadius:5,border:`1px solid ${C.purple}33`}}>
-                                <span style={{fontSize:11,fontWeight:900,color:C.purple,letterSpacing:1}}>📌 진행 중인 수동 경기</span>
+                              <div onClick={()=>setStShowManualOngoing(v=>!v)}
+                                title={stShowManualOngoing?"진행 중인 수동 경기 접기":"진행 중인 수동 경기 펼치기"}
+                                style={{display:"flex",alignItems:"center",gap:8,margin:"4px 2px 8px",padding:"6px 10px",background:`${C.purple}11`,borderRadius:5,border:`1px solid ${C.purple}33`,cursor:"pointer",userSelect:"none"}}>
+                                <span style={{fontSize:11,fontWeight:900,color:C.purple,letterSpacing:1}}>{stShowManualOngoing?"▼":"▶"} 📌 진행 중인 수동 경기</span>
                                 <span style={{flex:1,height:1,background:`${C.purple}44`}}/>
                                 <span style={{fontSize:10,fontWeight:700,color:C.purple}}>{manualOngoingGames.length}경기</span>
                               </div>
-                              {manualOngoingGames.map(renderGameCard)}
+                              {stShowManualOngoing && manualOngoingGames.map(renderGameCard)}
                             </>
                           )}
 
@@ -7450,7 +7392,7 @@ function AppMain() {
                               <td style={{padding:"5px 7px",textAlign:"right",color:C.green,fontWeight:700}}>{s.wins}</td>
                               <td style={{padding:"5px 7px",textAlign:"right",color:C.red,fontWeight:700}}>{s.losses}</td>
                               <td style={{padding:"5px 7px",textAlign:"right",color:s.winRate>=50?C.green:C.muted,fontWeight:700}}>{s.winRate}%</td>
-                              <td style={{padding:"5px 7px",textAlign:"right",color:s.roi>=0?C.green:C.red,fontWeight:800}}>{s.count===0?"-":`${s.roi>=0?"+":""}${s.roi}%`}</td>
+                              <td style={{padding:"5px 7px",textAlign:"right",color:s.roi>=0?C.green:C.red,fontWeight:800}}>{s.count===0?"-":`${fmtProfit(s.profit,false)}원 (${s.roi>=0?"+":""}${s.roi}%)`}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -7487,14 +7429,18 @@ function AppMain() {
                                   <td key={o.key} style={{padding:"5px 6px",textAlign:"right"}}>
                                     {o.count===0 ? <span style={{color:C.dim}}>-</span> : (
                                       <>
-                                        <div style={{color:o.roi>=0?C.green:C.red,fontWeight:800}}>{o.roi>=0?"+":""}{o.roi}%</div>
+                                        <div style={{color:o.roi>=0?C.green:C.red,fontWeight:800}}>{fmtProfit(o.profit,false)}원</div>
+                                        <div style={{color:o.roi>=0?C.green:C.red,fontSize:10,fontWeight:700}}>({o.roi>=0?"+":""}{o.roi}%)</div>
                                         <div style={{color:C.muted,fontSize:10}}>{o.winRate}%·{o.count}</div>
                                       </>
                                     )}
                                   </td>
                                 ))}
                                 <td style={{padding:"5px 7px",textAlign:"right",color:row.totalWinRate>=50?C.green:C.muted,fontWeight:800,borderLeft:`1px solid ${C.border}`}}>{row.totalWinRate}%</td>
-                                <td style={{padding:"5px 7px",textAlign:"right",color:row.totalRoi>=0?C.green:C.red,fontWeight:800}}>{row.totalRoi>=0?"+":""}{row.totalRoi}%</td>
+                                <td style={{padding:"5px 7px",textAlign:"right",color:row.totalRoi>=0?C.green:C.red,fontWeight:800}}>
+                                  <div>{fmtProfit(row.totalProfit,false)}원</div>
+                                  <div style={{color:row.totalRoi>=0?C.green:C.red,fontSize:10,fontWeight:700}}>({row.totalRoi>=0?"+":""}{row.totalRoi}%)</div>
+                                </td>
                               </tr>
                             ))}
                           </tbody>
@@ -7532,7 +7478,7 @@ function AppMain() {
                                 <td style={{padding:"5px 7px",textAlign:"right",color:isEmpty?C.dim:C.green,fontWeight:700}}>{s.wins}</td>
                                 <td style={{padding:"5px 7px",textAlign:"right",color:isEmpty?C.dim:C.red,fontWeight:700}}>{s.losses}</td>
                                 <td style={{padding:"5px 7px",textAlign:"right",color:isEmpty?C.dim:s.winRate>=50?C.green:C.muted,fontWeight:700}}>{isEmpty?"-":`${s.winRate}%`}</td>
-                                <td style={{padding:"5px 7px",textAlign:"right",color:isEmpty?C.dim:s.roi>=0?C.green:C.red,fontWeight:800}}>{isEmpty?"-":`${s.roi>=0?"+":""}${s.roi}%`}</td>
+                                <td style={{padding:"5px 7px",textAlign:"right",color:isEmpty?C.dim:s.roi>=0?C.green:C.red,fontWeight:800}}>{isEmpty?"-":`${fmtProfit(s.profit,false)}원 (${s.roi>=0?"+":""}${s.roi}%)`}</td>
                               </tr>
                             );
                           })}
@@ -7571,10 +7517,24 @@ function AppMain() {
                                 <td style={{padding:"5px 7px",fontWeight:800,color:C.text,borderRight:`1px solid ${C.border}`}}>{leagueNameMap[row.league]||row.league}</td>
                                 <td style={{padding:"5px 6px",textAlign:"right",color:C.text}}>{row.ov.count||"-"}</td>
                                 <td style={{padding:"5px 6px",textAlign:"right",color:row.ov.winRate>=50?C.green:C.muted,fontWeight:700}}>{row.ov.count>0?`${row.ov.winRate}%`:"-"}</td>
-                                <td style={{padding:"5px 6px",textAlign:"right",color:row.ov.roi>=0?C.green:C.red,fontWeight:800}}>{row.ov.count>0?`${row.ov.roi>=0?"+":""}${row.ov.roi}%`:"-"}</td>
+                                <td style={{padding:"5px 6px",textAlign:"right",color:row.ov.roi>=0?C.green:C.red,fontWeight:800}}>
+                                  {row.ov.count>0 ? (
+                                    <>
+                                      <div>{fmtProfit(row.ov.profit,false)}원</div>
+                                      <div style={{fontSize:10,fontWeight:700}}>({row.ov.roi>=0?"+":""}{row.ov.roi}%)</div>
+                                    </>
+                                  ) : "-"}
+                                </td>
                                 <td style={{padding:"5px 6px",textAlign:"right",color:C.text,borderLeft:`1px solid ${C.border}`}}>{row.un.count||"-"}</td>
                                 <td style={{padding:"5px 6px",textAlign:"right",color:row.un.winRate>=50?C.green:C.muted,fontWeight:700}}>{row.un.count>0?`${row.un.winRate}%`:"-"}</td>
-                                <td style={{padding:"5px 6px",textAlign:"right",color:row.un.roi>=0?C.green:C.red,fontWeight:800}}>{row.un.count>0?`${row.un.roi>=0?"+":""}${row.un.roi}%`:"-"}</td>
+                                <td style={{padding:"5px 6px",textAlign:"right",color:row.un.roi>=0?C.green:C.red,fontWeight:800}}>
+                                  {row.un.count>0 ? (
+                                    <>
+                                      <div>{fmtProfit(row.un.profit,false)}원</div>
+                                      <div style={{fontSize:10,fontWeight:700}}>({row.un.roi>=0?"+":""}{row.un.roi}%)</div>
+                                    </>
+                                  ) : "-"}
+                                </td>
                                 <td style={{padding:"5px 6px",textAlign:"center",color:C.purple,fontWeight:800,fontSize:11,borderLeft:`1px solid ${C.border}`}}>{row.recommend}</td>
                               </tr>
                             ))}
@@ -7611,17 +7571,14 @@ function AppMain() {
                   <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(480px, 1fr))",gap:10,alignItems:"start"}}>
 
                   {/* 옵션별 표 — 핸디캡 라인 박스 + 옵션별 통계표 (각각 별도 grid 셀) */}
-                      {/* ── 핸디캡 라인 6칸 강조 ── grid 안에서 한 셀이므로 6칸 → 자동 fit */}
+                      {/* ── 라인별 (홈/원정) 강조 카드 ── */}
                       <div style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:7,padding:9}}>
-                        <div style={{fontSize:13,fontWeight:800,color:C.green,marginBottom:6}}>📐 핸디캡 라인별 한눈에 (홈/원정 -0.5/0.5/1.5)</div>
+                        <div style={{fontSize:13,fontWeight:800,color:C.green,marginBottom:6}}>📐 홈/원정 한눈에 (전 핸디 통합)</div>
                         <div style={{fontSize:11,color:C.muted,marginBottom:7,padding:"5px 8px",background:C.bg,borderRadius:6,lineHeight:1.5}}>
-                          💡 사용자 신규 전략:<br/>
-                          • <strong style={{color:C.teal}}>0.5 플핸</strong>: 무배당 3.6↓ + 정배 배당대 / 1.55~1.95 추천<br/>
-                          • <strong style={{color:C.green}}>1.5 플핸</strong>: 정배 1.40↑, 1.5플핸 1.40↑, 무배당 ≤4.6 (정배 1.5↑이면 완화)<br/>
-                          • <strong style={{color:C.amber}}>2.5 플핸</strong>: 정배 1.20↑, 2.5플핸 1.40↑, 무배당 ≤6.6 (정배 강도별 차등)<br/>
-                          🔍 카드 클릭 → 그 라인에 잡힌 베팅 목록 펼침
+                          💡 옛 "홈승"/"원정승" + 모든 핸디캡(-0.5/0.5/1.5)이 각각 홈/원정으로 통합 집계.<br/>
+                          🔍 카드 클릭 → 그 항목에 잡힌 베팅 목록 펼침
                         </div>
-                        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:5}}>
+                        <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:5}}>
                           {footballHandicapLineStats.map(s=>{
                             const isEmpty = s.count===0;
                             const isHome = s.opt.startsWith("홈");
@@ -7755,13 +7712,12 @@ function AppMain() {
                           <tbody>
                             {footballOptStats.map(s=>{
                               const losses = s.count - s.wins;
-                              const isHome=s.opt.startsWith("홈");
-                              const isAway=s.opt.startsWith("원정");
-                              const isDraw=s.opt==="무승부";
+                              const isHome=s.opt==="홈";
+                              const isAway=s.opt==="원정";
                               const isOver=s.opt==="오버";
                               const isUnder=s.opt==="언더";
-                              const icon=isHome?"🏠":isAway?"✈️":isDraw?"🤝":isOver?"⬆️":isUnder?"⬇️":"⚽";
-                              const labelColor=isHome?C.green:isAway?C.amber:isDraw?C.muted:isOver?"#e05a9a":isUnder?"#7ac4ff":C.text;
+                              const icon=isHome?"🏠":isAway?"✈️":isOver?"⬆️":isUnder?"⬇️":"⚽";
+                              const labelColor=isHome?C.green:isAway?C.amber:isOver?"#e05a9a":isUnder?"#7ac4ff":C.text;
                               return (
                                 <tr key={s.opt} style={{borderBottom:`1px solid ${C.border}`}}>
                                   <td style={{padding:"5px 7px",fontWeight:800,color:labelColor}}>{icon} {s.opt}</td>
@@ -7769,7 +7725,7 @@ function AppMain() {
                                   <td style={{padding:"5px 7px",textAlign:"right",color:C.green,fontWeight:700}}>{s.wins}</td>
                                   <td style={{padding:"5px 7px",textAlign:"right",color:C.red,fontWeight:700}}>{losses}</td>
                                   <td style={{padding:"5px 7px",textAlign:"right",color:s.winRate>=50?C.green:C.muted,fontWeight:700}}>{s.count===0?"-":`${s.winRate}%`}</td>
-                                  <td style={{padding:"5px 7px",textAlign:"right",color:s.roi>=0?C.green:C.red,fontWeight:800}}>{s.count===0?"-":`${s.roi>=0?"+":""}${s.roi}%`}</td>
+                                  <td style={{padding:"5px 7px",textAlign:"right",color:s.roi>=0?C.green:C.red,fontWeight:800}}>{s.count===0?"-":`${fmtProfit(s.profit,false)}원 (${s.roi>=0?"+":""}${s.roi}%)`}</td>
                                 </tr>
                               );
                             })}
@@ -7826,39 +7782,32 @@ function AppMain() {
                         <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:480}}>
                           <thead>
                             <tr style={{borderBottom:`2px solid ${C.border2}`}}>
-                              <th rowSpan={2} style={{textAlign:"left",padding:"5px 7px",color:C.muted,fontWeight:700,minWidth:90,verticalAlign:"middle",borderRight:`1px solid ${C.border}`}}>리그</th>
-                              <th colSpan={3} style={{textAlign:"center",padding:"3px 4px",color:C.green,fontWeight:700,fontSize:10,borderBottom:`1px solid ${C.border}`}}>🏠 홈 핸디 수익률</th>
-                              <th colSpan={3} style={{textAlign:"center",padding:"3px 4px",color:C.amber,fontWeight:700,fontSize:10,borderBottom:`1px solid ${C.border}`,borderLeft:`1px solid ${C.border}`}}>✈️ 원정 핸디 수익률</th>
-                              <th rowSpan={2} style={{textAlign:"right",padding:"5px 7px",color:C.muted,fontWeight:700,fontSize:10,verticalAlign:"middle",borderLeft:`1px solid ${C.border}`}}>🤝 무</th>
-                              <th rowSpan={2} style={{textAlign:"right",padding:"5px 7px",color:"#e05a9a",fontWeight:700,fontSize:10,verticalAlign:"middle",borderLeft:`1px solid ${C.border}`}}>⬆️ 오버</th>
-                              <th rowSpan={2} style={{textAlign:"right",padding:"5px 7px",color:"#7ac4ff",fontWeight:700,fontSize:10,verticalAlign:"middle",borderLeft:`1px solid ${C.border}`}}>⬇️ 언더</th>
-                              <th rowSpan={2} style={{textAlign:"right",padding:"5px 7px",color:C.purple,fontWeight:700,verticalAlign:"middle",borderLeft:`1px solid ${C.border}`}}>전체 수익률</th>
-                            </tr>
-                            <tr style={{borderBottom:`1px solid ${C.border2}`}}>
-                              <th style={{textAlign:"right",padding:"3px 4px",color:C.red,fontWeight:700,fontSize:11}}>-0.5</th>
-                              <th style={{textAlign:"right",padding:"3px 4px",color:C.muted,fontWeight:700,fontSize:11}}>0.5</th>
-                              <th style={{textAlign:"right",padding:"3px 4px",color:C.muted,fontWeight:700,fontSize:11}}>1.5</th>
-                              <th style={{textAlign:"right",padding:"3px 4px",color:C.red,fontWeight:700,fontSize:10,borderLeft:`1px solid ${C.border}`}}>-0.5</th>
-                              <th style={{textAlign:"right",padding:"3px 4px",color:C.muted,fontWeight:700,fontSize:11}}>0.5</th>
-                              <th style={{textAlign:"right",padding:"3px 4px",color:C.muted,fontWeight:700,fontSize:11}}>1.5</th>
+                              <th style={{textAlign:"left",padding:"5px 7px",color:C.muted,fontWeight:700,minWidth:90,borderRight:`1px solid ${C.border}`}}>리그</th>
+                              <th style={{textAlign:"right",padding:"5px 7px",color:C.green,fontWeight:700,fontSize:11}}>🏠 홈</th>
+                              <th style={{textAlign:"right",padding:"5px 7px",color:C.amber,fontWeight:700,fontSize:11,borderLeft:`1px solid ${C.border}`}}>✈️ 원정</th>
+                              <th style={{textAlign:"right",padding:"5px 7px",color:"#e05a9a",fontWeight:700,fontSize:11,borderLeft:`1px solid ${C.border}`}}>⬆️ 오버</th>
+                              <th style={{textAlign:"right",padding:"5px 7px",color:"#7ac4ff",fontWeight:700,fontSize:11,borderLeft:`1px solid ${C.border}`}}>⬇️ 언더</th>
+                              <th style={{textAlign:"right",padding:"5px 7px",color:C.purple,fontWeight:700,borderLeft:`1px solid ${C.border}`}}>전체 수익률</th>
                             </tr>
                           </thead>
                           <tbody>
                             {footballLeagueOptTable.map(row=>(
                               <tr key={row.league} style={{borderBottom:`1px solid ${C.border}`}}>
                                 <td style={{padding:"5px 7px",fontWeight:800,color:C.text,borderRight:`1px solid ${C.border}`}}>{leagueNameMap[row.league]||row.league}</td>
-                                {row.opts.map((o,idx)=>(
-                                  <td key={o.opt} style={{padding:"5px 6px",textAlign:"right",borderLeft:(idx===3||idx===6||idx===7||idx===8)?`1px solid ${C.border}`:"none"}}>
+                                {row.opts.filter(o=>o.opt!=="기타").map((o,idx)=>(
+                                  <td key={o.opt} style={{padding:"5px 6px",textAlign:"right",borderLeft:idx>0?`1px solid ${C.border}`:"none"}}>
                                     {o.count===0 ? <span style={{color:C.dim}}>-</span> : (
                                       <>
-                                        <div style={{color:o.roi>=0?C.green:C.red,fontWeight:800}}>{o.roi>=0?"+":""}{o.roi}%</div>
+                                        <div style={{color:o.roi>=0?C.green:C.red,fontWeight:800}}>{fmtProfit(o.profit,false)}원</div>
+                                        <div style={{color:o.roi>=0?C.green:C.red,fontSize:10,fontWeight:700}}>({o.roi>=0?"+":""}{o.roi}%)</div>
                                         <div style={{color:C.muted,fontSize:10}}>{o.count}건</div>
                                       </>
                                     )}
                                   </td>
                                 ))}
                                 <td style={{padding:"5px 7px",textAlign:"right",color:row.totalRoi>=0?C.green:C.red,fontWeight:800,borderLeft:`1px solid ${C.border}`}}>
-                                  <div>{row.totalRoi>=0?"+":""}{row.totalRoi}%</div>
+                                  <div>{fmtProfit(row.totalProfit,false)}원</div>
+                                  <div style={{color:row.totalRoi>=0?C.green:C.red,fontSize:10,fontWeight:700}}>({row.totalRoi>=0?"+":""}{row.totalRoi}%)</div>
                                   <div style={{color:C.muted,fontSize:10,fontWeight:600}}>{row.totalCount}건</div>
                                 </td>
                               </tr>
@@ -7897,7 +7846,7 @@ function AppMain() {
                                 <td style={{padding:"5px 7px",textAlign:"right",color:isEmpty?C.dim:C.green,fontWeight:700}}>{s.wins}</td>
                                 <td style={{padding:"5px 7px",textAlign:"right",color:isEmpty?C.dim:C.red,fontWeight:700}}>{s.losses}</td>
                                 <td style={{padding:"5px 7px",textAlign:"right",color:isEmpty?C.dim:s.winRate>=50?C.green:C.muted,fontWeight:700}}>{isEmpty?"-":`${s.winRate}%`}</td>
-                                <td style={{padding:"5px 7px",textAlign:"right",color:isEmpty?C.dim:s.roi>=0?C.green:C.red,fontWeight:800}}>{isEmpty?"-":`${s.roi>=0?"+":""}${s.roi}%`}</td>
+                                <td style={{padding:"5px 7px",textAlign:"right",color:isEmpty?C.dim:s.roi>=0?C.green:C.red,fontWeight:800}}>{isEmpty?"-":`${fmtProfit(s.profit,false)}원 (${s.roi>=0?"+":""}${s.roi}%)`}</td>
                               </tr>
                             );
                           })}
@@ -7967,7 +7916,7 @@ function AppMain() {
                                 <td style={{padding:"5px 7px",textAlign:"right",color:isEmpty?C.dim:C.green,fontWeight:700}}>{s.wins}</td>
                                 <td style={{padding:"5px 7px",textAlign:"right",color:isEmpty?C.dim:C.red,fontWeight:700}}>{losses}</td>
                                 <td style={{padding:"5px 7px",textAlign:"right",color:isEmpty?C.dim:s.winRate>=50?C.green:C.muted,fontWeight:700}}>{isEmpty?"-":`${s.winRate}%`}</td>
-                                <td style={{padding:"5px 7px",textAlign:"right",color:isEmpty?C.dim:s.roi>=0?C.green:C.red,fontWeight:800}}>{isEmpty?"-":`${s.roi>=0?"+":""}${s.roi}%`}</td>
+                                <td style={{padding:"5px 7px",textAlign:"right",color:isEmpty?C.dim:s.roi>=0?C.green:C.red,fontWeight:800}}>{isEmpty?"-":`${fmtProfit(s.profit,false)}원 (${s.roi>=0?"+":""}${s.roi}%)`}</td>
                               </tr>
                             );
                           })}
@@ -8013,14 +7962,16 @@ function AppMain() {
                                   <td key={r.key} style={{padding:"5px 6px",textAlign:"right"}}>
                                     {r.count===0 ? <span style={{color:C.dim}}>-</span> : (
                                       <>
-                                        <div style={{color:r.roi>=0?C.green:C.red,fontWeight:800}}>{r.roi>=0?"+":""}{r.roi}%</div>
+                                        <div style={{color:r.roi>=0?C.green:C.red,fontWeight:800}}>{fmtProfit(r.profit,false)}원</div>
+                                        <div style={{color:r.roi>=0?C.green:C.red,fontSize:10,fontWeight:700}}>({r.roi>=0?"+":""}{r.roi}%)</div>
                                         <div style={{color:C.muted,fontSize:10}}>{r.count}건</div>
                                       </>
                                     )}
                                   </td>
                                 ))}
                                 <td style={{padding:"5px 7px",textAlign:"right",color:row.totalRoi>=0?C.green:C.red,fontWeight:800,borderLeft:`1px solid ${C.border}`}}>
-                                  <div>{row.totalRoi>=0?"+":""}{row.totalRoi}%</div>
+                                  <div>{fmtProfit(row.totalProfit,false)}원</div>
+                                  <div style={{color:row.totalRoi>=0?C.green:C.red,fontSize:10,fontWeight:700}}>({row.totalRoi>=0?"+":""}{row.totalRoi}%)</div>
                                   <div style={{color:C.muted,fontSize:10,fontWeight:600}}>{row.totalCount}건</div>
                                 </td>
                               </tr>
@@ -8031,42 +7982,7 @@ function AppMain() {
                     </div>
                   )}
 
-                  {/* 농구 배당별 통계 표 — 1.4 ~ 3.0 */}
-                  {(
-                    <div style={{background:C.bg3,border:`1px solid ${C.border}`,borderRadius:7,padding:9,overflowX:"auto"}}>
-                      <div style={{fontSize:13,fontWeight:800,color:C.purple,marginBottom:6}}>🎯 배당별 통계 (1.4 ~ 3.0, 0.1단위)</div>
-                      <div style={{fontSize:11,color:C.muted,marginBottom:7,padding:"5px 8px",background:C.bg,borderRadius:6,lineHeight:1.5}}>
-                        💡 마핸/플핸 신규 전략에서 어느 배당대가 ROI / 적중률 좋은지 확인. 배당 1.5~2.0 위주.
-                      </div>
-                      <table style={{width:"100%",borderCollapse:"collapse",fontSize:13,minWidth:420}}>
-                        <thead>
-                          <tr style={{borderBottom:`2px solid ${C.border2}`}}>
-                            <th style={{textAlign:"left",padding:"5px 7px",color:C.muted,fontWeight:700,minWidth:45}}>배당</th>
-                            <th style={{textAlign:"right",padding:"5px 7px",color:C.muted,fontWeight:700}}>베팅수</th>
-                            <th style={{textAlign:"right",padding:"5px 7px",color:C.muted,fontWeight:700}}>적중</th>
-                            <th style={{textAlign:"right",padding:"5px 7px",color:C.muted,fontWeight:700}}>실패</th>
-                            <th style={{textAlign:"right",padding:"5px 7px",color:C.muted,fontWeight:700}}>적중률</th>
-                            <th style={{textAlign:"right",padding:"5px 7px",color:C.muted,fontWeight:700}}>수익률</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {basketballOddsBucketStats.map(s=>{
-                            const isEmpty = s.count===0;
-                            return (
-                              <tr key={s.odds} style={{borderBottom:`1px solid ${C.border}`,opacity:isEmpty?0.4:1}}>
-                                <td style={{padding:"5px 7px",fontWeight:800,color:isEmpty?C.dim:C.text}}>{s.odds}</td>
-                                <td style={{padding:"5px 7px",textAlign:"right",color:isEmpty?C.dim:C.text}}>{s.count}</td>
-                                <td style={{padding:"5px 7px",textAlign:"right",color:isEmpty?C.dim:C.green,fontWeight:700}}>{s.wins}</td>
-                                <td style={{padding:"5px 7px",textAlign:"right",color:isEmpty?C.dim:C.red,fontWeight:700}}>{s.losses}</td>
-                                <td style={{padding:"5px 7px",textAlign:"right",color:isEmpty?C.dim:s.winRate>=50?C.green:C.muted,fontWeight:700}}>{isEmpty?"-":`${s.winRate}%`}</td>
-                                <td style={{padding:"5px 7px",textAlign:"right",color:isEmpty?C.dim:s.roi>=0?C.green:C.red,fontWeight:800}}>{isEmpty?"-":`${s.roi>=0?"+":""}${s.roi}%`}</td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
+                  {/* 농구 배당별 통계 표 — ❌ 사용자 요청으로 삭제됨 */}
 
                   {/* 리그별 플핸 vs 마핸 — 항상 표시 */}
                   {(
@@ -8099,11 +8015,25 @@ function AppMain() {
                                 <td style={{padding:"5px 6px",textAlign:"right",color:C.text}}>{row.plus.count||"-"}</td>
                                 <td style={{padding:"5px 6px",textAlign:"right",color:C.muted}}>{row.plus.count>0?row.plus.avgValue:"-"}</td>
                                 <td style={{padding:"5px 6px",textAlign:"right",color:row.plus.winRate>=50?C.green:C.muted,fontWeight:700}}>{row.plus.count>0?`${row.plus.winRate}%`:"-"}</td>
-                                <td style={{padding:"5px 6px",textAlign:"right",color:row.plus.roi>=0?C.green:C.red,fontWeight:800}}>{row.plus.count>0?`${row.plus.roi>=0?"+":""}${row.plus.roi}%`:"-"}</td>
+                                <td style={{padding:"5px 6px",textAlign:"right",color:row.plus.roi>=0?C.green:C.red,fontWeight:800}}>
+                                  {row.plus.count>0 ? (
+                                    <>
+                                      <div>{fmtProfit(row.plus.profit,false)}원</div>
+                                      <div style={{fontSize:10,fontWeight:700}}>({row.plus.roi>=0?"+":""}{row.plus.roi}%)</div>
+                                    </>
+                                  ) : "-"}
+                                </td>
                                 <td style={{padding:"5px 6px",textAlign:"right",color:C.text,borderLeft:`1px solid ${C.border}`}}>{row.minus.count||"-"}</td>
                                 <td style={{padding:"5px 6px",textAlign:"right",color:C.muted}}>{row.minus.count>0?row.minus.avgValue:"-"}</td>
                                 <td style={{padding:"5px 6px",textAlign:"right",color:row.minus.winRate>=50?C.green:C.muted,fontWeight:700}}>{row.minus.count>0?`${row.minus.winRate}%`:"-"}</td>
-                                <td style={{padding:"5px 6px",textAlign:"right",color:row.minus.roi>=0?C.green:C.red,fontWeight:800}}>{row.minus.count>0?`${row.minus.roi>=0?"+":""}${row.minus.roi}%`:"-"}</td>
+                                <td style={{padding:"5px 6px",textAlign:"right",color:row.minus.roi>=0?C.green:C.red,fontWeight:800}}>
+                                  {row.minus.count>0 ? (
+                                    <>
+                                      <div>{fmtProfit(row.minus.profit,false)}원</div>
+                                      <div style={{fontSize:10,fontWeight:700}}>({row.minus.roi>=0?"+":""}{row.minus.roi}%)</div>
+                                    </>
+                                  ) : "-"}
+                                </td>
                                 <td style={{padding:"5px 6px",textAlign:"center",color:C.purple,fontWeight:800,fontSize:11,borderLeft:`1px solid ${C.border}`}}>{row.recommend}</td>
                               </tr>
                             ))}
