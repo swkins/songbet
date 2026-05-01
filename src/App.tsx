@@ -822,6 +822,227 @@ class ErrorBoundary extends React.Component<{children:React.ReactNode},{err:Erro
 }
 
 // ═════════════════════════════════════════════════════════════
+// 🧮 마진계산기 탭 컴포넌트
+//   - 부크메이커 마진율(오버라운드) 계산 도구
+//   - 3-way: 축구 1X2 (홈/무/원정)
+//   - 2-way: 승패·언오버·핸디캡 (배당 2개)
+//   - 50만 회전 시 예상 손실 자동 계산
+//   - 최근 8개 기록은 컴포넌트 state로만 보관 (DB 저장 안 함)
+// ═════════════════════════════════════════════════════════════
+function MarginCalcTab({evalMargin,pink}:{
+  evalMargin:(m:number)=>{label:string,color:string,emoji:string},
+  pink:string,
+}) {
+  const [mode,setMode] = useState<"3way"|"2way">("3way");
+  const [o1,setO1] = useState<string>("");
+  const [oX,setOX] = useState<string>("");
+  const [o2,setO2] = useState<string>("");
+  const [stake,setStake] = useState<number>(500000);
+  type HistoryItem = {odds:string, margin:number, label:string, color:string, emoji:string, mode:string};
+  const [history,setHistory] = useState<HistoryItem[]>([]);
+  const [errorMsg,setErrorMsg] = useState<string>("");
+  const [result,setResult] = useState<{margin:number,evalRes:ReturnType<typeof evalMargin>,oddsStr:string}|null>(null);
+
+  const calc = ()=>{
+    setErrorMsg("");
+    const a = parseFloat(o1);
+    const b = parseFloat(oX);
+    const c = parseFloat(o2);
+    if(mode==="3way"){
+      if(!a || !b || !c || a<1 || b<1 || c<1){
+        setErrorMsg("배당 세 개를 모두 입력해주세요. (1.0 이상)");
+        setResult(null);
+        return;
+      }
+      const margin = ((1/a) + (1/b) + (1/c) - 1) * 100;
+      const evalRes = evalMargin(margin);
+      const oddsStr = `${a.toFixed(2)} / ${b.toFixed(2)} / ${c.toFixed(2)}`;
+      setResult({margin,evalRes,oddsStr});
+      setHistory(prev=>[{odds:oddsStr,margin,label:evalRes.label,color:evalRes.color,emoji:evalRes.emoji,mode:"3-way"},...prev].slice(0,8));
+    } else {
+      if(!a || !c || a<1 || c<1){
+        setErrorMsg("배당 두 개를 입력해주세요. (1.0 이상)");
+        setResult(null);
+        return;
+      }
+      const margin = ((1/a) + (1/c) - 1) * 100;
+      const evalRes = evalMargin(margin);
+      const oddsStr = `${a.toFixed(2)} / ${c.toFixed(2)}`;
+      setResult({margin,evalRes,oddsStr});
+      setHistory(prev=>[{odds:oddsStr,margin,label:evalRes.label,color:evalRes.color,emoji:evalRes.emoji,mode:"2-way"},...prev].slice(0,8));
+    }
+  };
+
+  const reset = ()=>{
+    setO1(""); setOX(""); setO2("");
+    setResult(null);
+    setErrorMsg("");
+  };
+
+  // C 컬러는 이 컴포넌트에서 사용 못하므로(클로저 외부) 인라인 색상 정의
+  const cs = {
+    bg2:"#182018", bg3:"#1e261e", border:"#2a3a2a", border2:"#344534",
+    text:"#dde8dd", muted:"#7a9a7a", dim:"#3a5a3a",
+    green:"#5ddb8a", amber:"#f5c842", red:"#e05a5a", teal:"#4ad4c8",
+  };
+
+  const dailyLoss = result ? Math.round(stake * result.margin / 100) : 0;
+  const monthlyLoss = Math.round(dailyLoss * 30);
+
+  return (
+    <div style={{flex:1,overflowY:"auto",padding:20}}>
+      <div style={{display:"flex",alignItems:"center",marginBottom:14,gap:10,flexWrap:"wrap"}}>
+        <div style={{fontSize:16,fontWeight:800,color:pink}}>🧮 마진율 계산기</div>
+        <div style={{fontSize:11,color:cs.muted,fontWeight:600}}>회전용 베팅 손실 평가</div>
+      </div>
+
+      {/* 안내 */}
+      <div style={{background:cs.bg3,border:`1px solid ${cs.border}`,borderRadius:7,padding:"10px 12px",marginBottom:14,fontSize:11,color:cs.muted,lineHeight:1.6}}>
+        💡 <strong style={{color:cs.text}}>마진율(오버라운드)</strong>: 부크메이커가 가져가는 수수료. 낮을수록 너한테 유리.<br/>
+        ✅ <strong style={{color:cs.green}}>5% 이하</strong>: 메이저리그 핵심 마켓 — 베팅 OK<br/>
+        🟡 <strong style={{color:cs.amber}}>5~6%</strong>: 보통 — 물량 부족 시 보조용<br/>
+        ❌ <strong style={{color:cs.red}}>6% 초과</strong>: 잡리그·스페셜 마켓 — 회전 안 돌리는 게 이득
+      </div>
+
+      {/* 모드 선택 */}
+      <div style={{display:"flex",gap:8,marginBottom:14}}>
+        <button onClick={()=>{setMode("3way");setResult(null);}}
+          style={{
+            flex:1,padding:"10px 16px",borderRadius:7,
+            border:mode==="3way"?`2px solid ${pink}`:`1.5px solid ${cs.border}`,
+            background:mode==="3way"?`${pink}22`:cs.bg3,
+            color:mode==="3way"?pink:cs.muted,
+            cursor:"pointer",fontWeight:mode==="3way"?900:700,fontSize:13,
+            transition:"all 0.15s",
+          }}>⚽ 3-WAY (축구 1X2)</button>
+        <button onClick={()=>{setMode("2way");setResult(null);}}
+          style={{
+            flex:1,padding:"10px 16px",borderRadius:7,
+            border:mode==="2way"?`2px solid ${pink}`:`1.5px solid ${cs.border}`,
+            background:mode==="2way"?`${pink}22`:cs.bg3,
+            color:mode==="2way"?pink:cs.muted,
+            cursor:"pointer",fontWeight:mode==="2way"?900:700,fontSize:13,
+            transition:"all 0.15s",
+          }}>⚾🏀 2-WAY (승패·언오버·핸디캡)</button>
+      </div>
+
+      {/* 배당 입력 */}
+      <div style={{background:cs.bg3,border:`1px solid ${cs.border}`,borderRadius:8,padding:16,marginBottom:14}}>
+        <div style={{display:"grid",gridTemplateColumns:mode==="3way"?"1fr 1fr 1fr":"1fr 1fr",gap:12}}>
+          <div>
+            <div style={{fontSize:11,color:cs.muted,fontWeight:700,marginBottom:6}}>{mode==="3way"?"홈 (1)":"배당 1"}</div>
+            <input type="number" step="0.01" value={o1}
+              onChange={e=>setO1(e.target.value)}
+              onKeyDown={e=>{if(e.key==="Enter")calc();}}
+              placeholder={mode==="3way"?"1.85":"1.90"}
+              style={{width:"100%",boxSizing:"border-box",padding:"10px 12px",borderRadius:6,border:`1px solid ${cs.border2}`,background:cs.bg2,color:cs.text,fontSize:15,fontWeight:700,fontFamily:"monospace"}}/>
+          </div>
+          {mode==="3way" && (
+            <div>
+              <div style={{fontSize:11,color:cs.muted,fontWeight:700,marginBottom:6}}>무 (X)</div>
+              <input type="number" step="0.01" value={oX}
+                onChange={e=>setOX(e.target.value)}
+                onKeyDown={e=>{if(e.key==="Enter")calc();}}
+                placeholder="3.50"
+                style={{width:"100%",boxSizing:"border-box",padding:"10px 12px",borderRadius:6,border:`1px solid ${cs.border2}`,background:cs.bg2,color:cs.text,fontSize:15,fontWeight:700,fontFamily:"monospace"}}/>
+            </div>
+          )}
+          <div>
+            <div style={{fontSize:11,color:cs.muted,fontWeight:700,marginBottom:6}}>{mode==="3way"?"원정 (2)":"배당 2"}</div>
+            <input type="number" step="0.01" value={o2}
+              onChange={e=>setO2(e.target.value)}
+              onKeyDown={e=>{if(e.key==="Enter")calc();}}
+              placeholder={mode==="3way"?"4.20":"1.90"}
+              style={{width:"100%",boxSizing:"border-box",padding:"10px 12px",borderRadius:6,border:`1px solid ${cs.border2}`,background:cs.bg2,color:cs.text,fontSize:15,fontWeight:700,fontFamily:"monospace"}}/>
+          </div>
+        </div>
+
+        {/* 베팅 금액 (손실 계산용) */}
+        <div style={{marginTop:12,display:"flex",alignItems:"center",gap:10}}>
+          <div style={{fontSize:11,color:cs.muted,fontWeight:700}}>베팅 금액 (손실 계산용)</div>
+          <input type="number" step="10000" value={stake}
+            onChange={e=>setStake(parseInt(e.target.value)||0)}
+            style={{width:140,padding:"6px 10px",borderRadius:6,border:`1px solid ${cs.border2}`,background:cs.bg2,color:cs.text,fontSize:12,fontWeight:700,fontFamily:"monospace"}}/>
+          <div style={{fontSize:10,color:cs.dim}}>원 (기본: 500,000원)</div>
+        </div>
+
+        {/* 액션 버튼 */}
+        <div style={{display:"flex",gap:8,marginTop:14}}>
+          <button onClick={calc}
+            style={{flex:1,padding:"11px 16px",borderRadius:7,border:`2px solid ${pink}`,background:`${pink}33`,color:pink,cursor:"pointer",fontWeight:900,fontSize:14,letterSpacing:0.5}}>
+            마진율 계산
+          </button>
+          <button onClick={reset}
+            style={{padding:"11px 18px",borderRadius:7,border:`1px solid ${cs.border2}`,background:cs.bg2,color:cs.muted,cursor:"pointer",fontWeight:700,fontSize:13}}>
+            초기화
+          </button>
+        </div>
+
+        {errorMsg && (
+          <div style={{marginTop:10,padding:"8px 12px",borderRadius:6,background:`${cs.red}11`,border:`1px solid ${cs.red}44`,color:cs.red,fontSize:12,fontWeight:700}}>
+            ⚠️ {errorMsg}
+          </div>
+        )}
+      </div>
+
+      {/* 결과 */}
+      {result && (
+        <div style={{background:`${result.evalRes.color}11`,border:`2px solid ${result.evalRes.color}`,borderRadius:9,padding:"16px 20px",marginBottom:14}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:6}}>
+            <span style={{fontSize:12,color:result.evalRes.color,fontWeight:700}}>마진율 ({result.oddsStr})</span>
+            <span style={{fontSize:12,color:result.evalRes.color,fontWeight:800}}>{result.evalRes.emoji} {result.evalRes.label}</span>
+          </div>
+          <div style={{fontSize:36,fontWeight:900,color:result.evalRes.color,letterSpacing:0.5}}>{result.margin.toFixed(2)}%</div>
+          <div style={{fontSize:11,color:result.evalRes.color,marginTop:8,opacity:0.85}}>
+            {stake.toLocaleString()}원 베팅 시 기댓값 손실: <strong>{dailyLoss.toLocaleString()}원</strong>
+            {" · "}한 달(30일): 약 <strong>{Math.round(monthlyLoss/10000).toLocaleString()}만원</strong>
+          </div>
+        </div>
+      )}
+
+      {/* 최근 기록 */}
+      <div style={{marginTop:20}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+          <div style={{fontSize:13,fontWeight:800,color:cs.text}}>📋 최근 계산 기록 <span style={{fontSize:11,color:cs.muted,fontWeight:600}}>({history.length}/8)</span></div>
+          {history.length>0 && (
+            <button onClick={()=>setHistory([])}
+              style={{padding:"4px 10px",borderRadius:5,border:`1px solid ${cs.red}66`,background:`${cs.red}11`,color:cs.red,cursor:"pointer",fontSize:10,fontWeight:700}}>
+              🗑 기록 지우기
+            </button>
+          )}
+        </div>
+        {history.length===0 ? (
+          <div style={{textAlign:"center",color:cs.dim,padding:"30px",background:cs.bg3,borderRadius:8,border:`1px solid ${cs.border}`,fontSize:12}}>
+            아직 계산 기록이 없습니다.
+          </div>
+        ) : (
+          <div style={{display:"flex",flexDirection:"column",gap:6}}>
+            {history.map((h,i)=>(
+              <div key={i} style={{
+                background:cs.bg3,
+                border:`1px solid ${cs.border}`,
+                borderLeft:`3px solid ${h.color}`,
+                borderRadius:7,
+                padding:"9px 12px",
+                display:"grid",
+                gridTemplateColumns:"60px 1fr 80px 120px",
+                gap:10,
+                alignItems:"center",
+              }}>
+                <div style={{fontSize:9,color:cs.muted,fontWeight:700}}>{h.mode}</div>
+                <div style={{fontSize:13,color:cs.text,fontFamily:"monospace",fontWeight:700}}>{h.odds}</div>
+                <div style={{fontSize:14,fontWeight:900,color:h.color,fontFamily:"monospace",textAlign:"right"}}>{h.margin.toFixed(2)}%</div>
+                <div style={{fontSize:10,color:h.color,fontWeight:700,textAlign:"right"}}>{h.emoji} {h.label}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════
 export default function AppWrapper() {
   return <ErrorBoundary><AppMain/></ErrorBoundary>;
 }
@@ -848,7 +1069,7 @@ function AppMain() {
   const fileRef = useRef<HTMLInputElement>(null);
 
   // ⚠️ 요청 #1: "bettingComboTest" 탭 삭제 — tab 타입 정의에서도 제거
-  const [tab,setTab]=useState<"home"|"bettingCombo"|"stats"|"roi"|"strategy"|"pending"|"apiManager"|"dataManager"|"logs">("home");
+  const [tab,setTab]=useState<"home"|"bettingCombo"|"stats"|"roi"|"strategy"|"pending"|"apiManager"|"dataManager"|"logs"|"marginCalc">("home");
   // ── 데이터 탭 state ────────────────────────────────────────
   const [dataTableStats,setDataTableStats]=useState<Record<string,{rows:number,size:string,sizeBytes:number}>>({});
   const [dataStatsLoading,setDataStatsLoading]=useState(false);
@@ -5660,9 +5881,9 @@ function AppMain() {
         <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
           {([
             // ⚠️ 요청 #1: 스포츠 (테스트) 탭(bettingComboTest) 삭제됨
-            ["home","🏠 대시보드"],["bettingCombo","🎯 스포츠"],["pending","⏳ 베팅 내역"],["stats","📊 통계"],["roi","💹 수익률"],["strategy","📋 전략"],["apiManager","🔑 API 관리"],["dataManager","🗄 데이터"],["logs","📜 로그"],
+            ["home","🏠 대시보드"],["bettingCombo","🎯 스포츠"],["pending","⏳ 베팅 내역"],["stats","📊 통계"],["roi","💹 수익률"],["strategy","📋 전략"],["apiManager","🔑 API 관리"],["dataManager","🗄 데이터"],["logs","📜 로그"],["marginCalc","🧮 마진계산기"],
           ] as [string,string][]).map(([k,l])=>{
-            const ac = k==="pending"?C.amber:k==="home"?C.green:k==="apiManager"?C.purple:k==="dataManager"?C.red:k==="logs"?C.teal:C.orange;
+            const ac = k==="pending"?C.amber:k==="home"?C.green:k==="apiManager"?C.purple:k==="dataManager"?C.red:k==="logs"?C.teal:k==="marginCalc"?"#f068a8":C.orange;
             const active = tab===k;
             return (
               <button key={k} onClick={()=>setTab(k as any)}
@@ -8911,6 +9132,27 @@ function AppMain() {
           )}
         </div>
       )}
+
+      {/* ══════════════════════════════════════════════════════════
+          🧮 마진계산기 탭
+          - 부크메이커 마진율 계산 (회전용 베팅 손실 평가)
+          - 3-way (축구 1X2) / 2-way (승패·언오버·핸디캡) 지원
+          - 50만 베팅 시 예상 손실 자동 표시
+          - 최근 계산 기록 8개까지 보관 (메모리, 새로고침 시 초기화)
+          ══════════════════════════════════════════════════════════ */}
+      {tab==="marginCalc"&&(()=>{
+        const PINK = "#f068a8";
+        // 평가 기준
+        const evalMargin = (m:number)=>{
+          if(m<=3) return {label:"매우 좋음", color:C.green, emoji:"✅"};
+          if(m<=5) return {label:"좋음", color:C.green, emoji:"✅"};
+          if(m<=6) return {label:"보통", color:C.amber, emoji:"🟡"};
+          if(m<=7) return {label:"약간 높음 — 피함", color:C.amber, emoji:"⚠️"};
+          if(m<=10) return {label:"높음 — 패스", color:C.red, emoji:"❌"};
+          return {label:"매우 높음 — 절대 패스", color:C.red, emoji:"❌"};
+        };
+        return <MarginCalcTab evalMargin={evalMargin} pink={PINK}/>;
+      })()}
 
       {/* ══ 홈 탭 ══ */}
       {tab==="home"&&(()=>{
