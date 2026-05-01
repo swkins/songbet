@@ -611,6 +611,27 @@ export interface PointExchangePreset {
   createdAt: string            // 프리셋 생성 시각 (ISO)
 }
 
+// rev.7: 마진계산기 메타 (사이트/리그/옵션 목록을 종목별로 관리)
+//   - 모든 PC/모바일에서 공유되도록 app_settings에 저장
+//   - sites: 종목 무관 공통 (BET365 등은 모든 종목에서 공통 사용)
+//   - leaguesBySport: 종목별 리그 목록 ("축구"→["EPL","라리가",...])
+//   - optionsBySport: 종목별 옵션 목록 (축구는 "승무패" 포함, 야구/농구는 "승패")
+export interface MarginMeta {
+  sites: string[]
+  leaguesBySport: { 축구: string[]; 야구: string[]; 농구: string[] }
+  optionsBySport: { 축구: string[]; 야구: string[]; 농구: string[] }
+}
+
+export const EMPTY_MARGIN_META: MarginMeta = {
+  sites: [],
+  leaguesBySport: { 축구: [], 야구: [], 농구: [] },
+  optionsBySport: {
+    축구: ['승무패', '언오버', '핸디캡'],
+    야구: ['승패', '언오버', '핸디캡'],
+    농구: ['승패', '언오버', '핸디캡'],
+  },
+}
+
 export interface AppSettingsBundle {
   krw_sites: string[] | null
   usd_sites: string[] | null
@@ -624,6 +645,8 @@ export interface AppSettingsBundle {
   point_exchange_presets: PointExchangePreset[]
   // rev.10: odds-api.io 통합 (배당 기반 추천)
   odds_api_io_key: string
+  // rev.7: 마진계산기 메타 (종목별 사이트/리그/옵션 목록)
+  margin_meta: MarginMeta
 }
 export async function loadAppSettingsBundle(): Promise<AppSettingsBundle> {
   try {
@@ -655,6 +678,7 @@ export async function loadAppSettingsBundle(): Promise<AppSettingsBundle> {
       fixtures_cache_meta: cacheMeta,
       point_exchange_presets: Array.isArray(map.point_exchange_presets) ? map.point_exchange_presets : [],
       odds_api_io_key: typeof map.odds_api_io_key === 'string' ? map.odds_api_io_key : '',
+      margin_meta: parseMarginMeta(map.margin_meta),
     }
   } catch (e) {
     logLoadError('app_settings', e)
@@ -667,6 +691,7 @@ export async function loadAppSettingsBundle(): Promise<AppSettingsBundle> {
       fixtures_cache_meta: { ...EMPTY_FIXTURES_CACHE_META },
       point_exchange_presets: [],
       odds_api_io_key: '',
+      margin_meta: { ...EMPTY_MARGIN_META, leaguesBySport: { 축구: [], 야구: [], 농구: [] }, optionsBySport: { 축구: [...EMPTY_MARGIN_META.optionsBySport.축구], 야구: [...EMPTY_MARGIN_META.optionsBySport.야구], 농구: [...EMPTY_MARGIN_META.optionsBySport.농구] } },
     }
   }
 }
@@ -799,4 +824,155 @@ export async function loadFixturesCacheMeta(): Promise<FixturesCacheMeta> {
 export async function saveFixturesCacheMeta(meta: FixturesCacheMeta): Promise<void> {
   await saveAppSetting('fixtures_cache_meta', meta)
 }
+
+// ═════════════════════════════════════════════════════════════
+// MARGIN RECORDS (마진계산기 - 사이트/리그/옵션별 배당 기록) ★ rev.7 신규 ★
+// ═════════════════════════════════════════════════════════════
+//
+// 사용자가 입력한 배당 → 마진율(오버라운드) 계산 → DB에 누적.
+// 다른 PC/모바일에서도 같은 데이터를 보고 수정할 수 있도록 Supabase 사용.
+//
+// 테이블: margin_records
+//   id            text     PK
+//   ts            bigint   기록 시각 (Date.now())
+//   sport         text     "축구" | "야구" | "농구"
+//   site          text     사이트명 (예: BET365, PINNACLE)
+//   league        text     리그명 (예: EPL, MLB, NBA)
+//   option        text     옵션명 (예: 승무패, 승패, 언오버, 핸디캡)
+//   odds          jsonb    배당 배열 (3-way이면 길이 3, 2-way이면 2)
+//   margin        numeric  마진율 (% 단위)
+//   created_at    timestamptz default now()
+//
+// 다음 SQL을 Supabase SQL Editor에서 한 번 실행해야 함:
+//
+//   create table if not exists margin_records (
+//     id          text primary key,
+//     ts          bigint not null,
+//     sport       text not null,
+//     site        text not null,
+//     league      text not null,
+//     "option"    text not null,
+//     odds        jsonb not null,
+//     margin      numeric not null,
+//     created_at  timestamptz default now()
+//   );
+//   create index if not exists margin_records_sport_idx on margin_records(sport);
+//   create index if not exists margin_records_league_idx on margin_records(league);
+//   create index if not exists margin_records_site_idx on margin_records(site);
+//
+// ═════════════════════════════════════════════════════════════
+
+export interface MarginRecord {
+  id: string
+  ts: number
+  sport: '축구' | '야구' | '농구'
+  site: string
+  league: string
+  option: string  // "승무패" | "승패" | "언오버" | "핸디캡" 등 (사용자가 추가 가능)
+  odds: number[]  // 길이 2 또는 3
+  margin: number  // % 단위
+}
+
+export async function loadMarginRecords(): Promise<MarginRecord[]> {
+  try {
+    const { data, error } = await supabase
+      .from('margin_records')
+      .select('*')
+      .order('ts', { ascending: false })
+      .limit(10000)
+    if (error) throw error
+    return (data ?? []).map(r => ({
+      id: r.id,
+      ts: Number(r.ts),
+      sport: r.sport,
+      site: r.site,
+      league: r.league,
+      option: r.option,
+      odds: Array.isArray(r.odds) ? r.odds.map((o: any) => Number(o)) : [],
+      margin: Number(r.margin),
+    }))
+  } catch (e) {
+    logLoadError('margin_records', e)
+    return []
+  }
+}
+
+export async function upsertMarginRecord(rec: MarginRecord): Promise<void> {
+  try {
+    await supabase.from('margin_records').upsert({
+      id: rec.id,
+      ts: rec.ts,
+      sport: rec.sport,
+      site: rec.site,
+      league: rec.league,
+      option: rec.option,
+      odds: rec.odds,
+      margin: rec.margin,
+    })
+  } catch (e) {
+    logSaveError('margin_records', e)
+  }
+}
+
+export async function deleteMarginRecord(id: string): Promise<void> {
+  try {
+    await supabase.from('margin_records').delete().eq('id', id)
+  } catch (e) {
+    logSaveError('margin_records(delete)', e)
+  }
+}
+
+export async function clearAllMarginRecords(): Promise<void> {
+  try {
+    // PK가 항상 truthy이므로 not.is.null 트릭으로 전체 삭제
+    await supabase.from('margin_records').delete().not('id', 'is', null)
+  } catch (e) {
+    logSaveError('margin_records(clearAll)', e)
+  }
+}
+
+// ── MarginMeta (사이트/리그/옵션 목록) 파싱 헬퍼 ──────────────
+// 부정 입력에 대해 안전하게 EMPTY_MARGIN_META 폴백.
+function parseMarginMeta(raw: any): MarginMeta {
+  const fallback: MarginMeta = {
+    sites: [],
+    leaguesBySport: { 축구: [], 야구: [], 농구: [] },
+    optionsBySport: {
+      축구: [...EMPTY_MARGIN_META.optionsBySport.축구],
+      야구: [...EMPTY_MARGIN_META.optionsBySport.야구],
+      농구: [...EMPTY_MARGIN_META.optionsBySport.농구],
+    },
+  }
+  if (!raw || typeof raw !== 'object') return fallback
+  const sites = Array.isArray(raw.sites) ? raw.sites.filter((s: any) => typeof s === 'string') : []
+  const lbs = (raw.leaguesBySport && typeof raw.leaguesBySport === 'object') ? raw.leaguesBySport : {}
+  const obs = (raw.optionsBySport && typeof raw.optionsBySport === 'object') ? raw.optionsBySport : {}
+  const arr = (v: any): string[] => Array.isArray(v) ? v.filter((s: any) => typeof s === 'string') : []
+  const optOr = (v: any, def: string[]): string[] => {
+    const a = arr(v)
+    return a.length > 0 ? a : [...def]
+  }
+  return {
+    sites,
+    leaguesBySport: {
+      축구: arr(lbs['축구']),
+      야구: arr(lbs['야구']),
+      농구: arr(lbs['농구']),
+    },
+    optionsBySport: {
+      축구: optOr(obs['축구'], EMPTY_MARGIN_META.optionsBySport.축구),
+      야구: optOr(obs['야구'], EMPTY_MARGIN_META.optionsBySport.야구),
+      농구: optOr(obs['농구'], EMPTY_MARGIN_META.optionsBySport.농구),
+    },
+  }
+}
+
+export async function loadMarginMeta(): Promise<MarginMeta> {
+  return parseMarginMeta(await loadAppSetting<any>('margin_meta', null))
+}
+
+export async function saveMarginMeta(meta: MarginMeta): Promise<void> {
+  await saveAppSetting('margin_meta', meta)
+}
+
 

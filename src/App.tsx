@@ -50,6 +50,7 @@
 //  team_names      → 팀명 한글 매핑
 //  fixtures        → API-Sports 경기 캐시 (클라이언트가 직접 채움)
 //  api_fetch_log   → (rev.7부터 미사용 — 호환을 위해 테이블만 유지)
+//  margin_records  → 마진계산기 기록 (사이트/리그/옵션별 배당+마진율) ★ rev.8
 //  app_settings    → 기타 설정 key-value
 //                    현재 키 목록:
 //                    · krw_sites           : 원화 사이트 목록
@@ -61,6 +62,7 @@
 //                    · league_api_map      : 리그-API 매핑
 //                    · sports_test_league_map: 사용자리그 ↔ API리그 매핑
 //                    · fixtures_cache_meta : 캐시 메타 (마지막 호출/콜수)
+//                    · margin_meta         : 마진계산기 사이트/리그/옵션 목록 ★ rev.8
 //
 // ── 규칙 4. API-Sports 경기 데이터 (rev.7 변경됨) ──────────
 //  rev.7부터: 클라이언트에서 fetch로 직접 API-Sports 호출.
@@ -822,37 +824,29 @@ class ErrorBoundary extends React.Component<{children:React.ReactNode},{err:Erro
 }
 
 // ═════════════════════════════════════════════════════════════
-// 🧮 마진계산기 탭 컴포넌트 (rev.1 - 2026-05-02)
+// 🧮 마진계산기 탭 컴포넌트 (rev.2 - 2026-05-02)
 //
 //   목적:
-//   - 사이트별·리그별·옵션별 배당을 입력해서 마진율(오버라운드) 계산
-//   - 누적 데이터로 "어느 리그가 마진 낮은지", "어느 사이트가 유리한지" 분석
+//   - 사용자가 사이트·리그·옵션·배당을 입력해서 마진율(오버라운드) 계산
+//   - 누적된 데이터로 "어느 (종목+리그+옵션+사이트) 조합이 가장 가성비 좋은지" 분석
 //
-//   입력 구조:
-//   - 종목 3개 (축구 / 야구 / 농구) — 각 종목별 입력 폼
-//   - 사이트 + 리그 + 옵션(승패/언오버/핸디캡) + 배당
-//     · 축구 승패 = 3-way (홈/무/원정 배당 3개)
-//     · 야구·농구 승패 = 2-way (홈/원정 배당 2개)
-//     · 언오버 = 2-way (오버/언더 배당 2개)
-//     · 핸디캡 = 2-way (배당 2개)
+//   변경점 (rev.2):
+//   - 종목별로 따로 있던 입력 폼을 하나로 통합. 종목을 드롭다운에서 선택.
+//   - 사이트/리그/옵션도 모두 드롭다운 선택. 각 드롭다운 옆 "+ 추가" 버튼으로 항목 관리.
+//   - 종목을 바꾸면 그 종목에 등록된 리그/옵션만 보임.
+//   - 옵션이 "승무패" 또는 "1X2"일 때만 무 배당(3-way) 입력 칸이 추가로 보임.
+//   - Supabase 저장 (margin_records 테이블) → 다른 PC에서도 보이고 누적됨.
+//   - 마진율 7% 이상은 통계(순위/TOP 카드)에서 제외. 단, 누적 기록 표에서는 표시.
+//   - 메인 통계: "종목+리그+옵션+사이트" 단위로 마진율 가장 낮은 조합을 순위 표시.
+//     같은 (종목+리그+옵션)이 여러 사이트에 있으면 최저 마진 사이트만 메인 순위에.
+//     클릭하면 그 (종목+리그+옵션)에서 사이트별 마진율과 순위가 드릴다운으로 펼쳐짐.
 //
-//   분석:
-//   - 리그별 평균 마진율 순위 (낮을수록 가성비 좋음)
-//   - 종목·리그 필터링 후 사이트별 평균 마진율 순위
-//
-//   ⚠️ 현재 메모리 only (useState). 새로고침 시 데이터 날아감.
-//      UI 확정 후 db.ts 연동(margin_records 테이블) 예정.
+//   데이터:
+//   - records: margin_records 테이블 (Supabase)
+//   - meta:    app_settings.margin_meta 키 (사이트/리그/옵션 목록)
 // ═════════════════════════════════════════════════════════════
-type MarginRecord = {
-  id: string;
-  ts: number;
-  sport: "축구" | "야구" | "농구";
-  site: string;
-  league: string;
-  option: "승패" | "언오버" | "핸디캡";
-  odds: number[];      // 3-way이면 길이 3, 2-way이면 길이 2
-  margin: number;      // % 단위
-};
+type MarginRecord = db.MarginRecord;
+type Sport마진 = "축구" | "야구" | "농구";
 
 function evalMarginColor(m:number, cs:any){
   if(m<=3) return cs.green;
@@ -870,29 +864,14 @@ function evalMarginLabel(m:number){
   return "매우 높음";
 }
 
-// ── 리그 등급 판정 ────────────────────────────────────
-//   평균 마진율 기준:
-//   ≤ 5%   : 🏆 메이저  (적극 베팅)
-//   ≤ 7%   : ⭐ 중위    (보조 베팅)
-//   ≤ 10%  : ⚠️ 하위    (가급적 회피)
-//   > 10%  : 🚫 잡리그  (베팅 금지)
-function evalLeagueTier(avgMargin:number){
-  if(avgMargin<=5)  return {tier:"메이저",  emoji:"🏆", color:"green",  desc:"적극 베팅"};
-  if(avgMargin<=7)  return {tier:"중위",    emoji:"⭐", color:"amber",  desc:"보조 베팅"};
-  if(avgMargin<=10) return {tier:"하위",    emoji:"⚠️", color:"orange", desc:"회피 권장"};
-  return                   {tier:"잡리그",  emoji:"🚫", color:"red",    desc:"베팅 금지"};
+// 옵션 이름이 "승무패" 또는 "1X2"이면 3-way 입력 (홈/무/원정)
+function is3WayOption(option: string): boolean {
+  const o = option.trim().toLowerCase();
+  return o === "승무패" || o === "1x2";
 }
 
-// ── 사이트 판정 (특정 종목·리그 내 상대 평가 + 절대 평가) ───
-//   평균 마진율 기준:
-//   ≤ 5%   : ✅ 추천   (이 사이트에서 베팅)
-//   ≤ 7%   : 🟡 보통   (다른 사이트 없으면 OK)
-//   > 7%   : ❌ 패스   (다른 사이트 찾기)
-function evalSiteVerdict(avgMargin:number){
-  if(avgMargin<=5) return {verdict:"추천", emoji:"✅", color:"green", desc:"베팅 OK"};
-  if(avgMargin<=7) return {verdict:"보통", emoji:"🟡", color:"amber", desc:"보조용"};
-  return                  {verdict:"패스", emoji:"❌", color:"red",   desc:"다른 사이트로"};
-}
+// 통계 임계값: 마진율이 이 값 이상이면 순위/TOP 카드에서 제외
+const MARGIN_STAT_THRESHOLD = 7;
 
 function MarginCalcTab() {
   // 인라인 색상 (App.tsx 최상단 C와 동일 톤)
@@ -905,60 +884,164 @@ function MarginCalcTab() {
     pink:"#f068a8",
   };
 
-  // ── 누적 데이터 (메모리 only) ─────────────────────────
-  const [records,setRecords] = useState<MarginRecord[]>([]);
+  // ── 영속 데이터 ─────────────────────────────────────────
+  const [records, setRecords] = useState<MarginRecord[]>([]);
+  const [meta, setMeta] = useState<db.MarginMeta>({
+    sites: [],
+    leaguesBySport: { 축구: [], 야구: [], 농구: [] },
+    optionsBySport: {
+      축구: ["승무패", "언오버", "핸디캡"],
+      야구: ["승패", "언오버", "핸디캡"],
+      농구: ["승패", "언오버", "핸디캡"],
+    },
+  });
+  const [loading, setLoading] = useState(true);
 
-  // ── 입력 폼 (종목별로 독립적으로 관리) ────────────────
+  // 초기 로드
+  useEffect(()=>{
+    let cancelled = false;
+    (async ()=>{
+      try {
+        const [recs, m] = await Promise.all([
+          db.loadMarginRecords(),
+          db.loadMarginMeta(),
+        ]);
+        if(cancelled) return;
+        setRecords(recs);
+        setMeta(m);
+      } finally {
+        if(!cancelled) setLoading(false);
+      }
+    })();
+    return ()=>{ cancelled = true; };
+  },[]);
+
+  // ── 입력 폼 ───────────────────────────────────────────
   type FormState = {
+    sport: Sport마진;
     site: string;
     league: string;
-    option: "승패" | "언오버" | "핸디캡";
+    option: string;
     o1: string;
-    oX: string;  // 축구 승패에서만 사용
+    oX: string;  // 3-way에서만 사용
     o2: string;
   };
-  const emptyForm = (): FormState => ({site:"",league:"",option:"승패",o1:"",oX:"",o2:""});
-  const [form축구,setForm축구] = useState<FormState>(emptyForm());
-  const [form야구,setForm야구] = useState<FormState>(emptyForm());
-  const [form농구,setForm농구] = useState<FormState>(emptyForm());
+  const [form, setForm] = useState<FormState>({
+    sport: "축구",
+    site: "",
+    league: "",
+    option: "",
+    o1: "", oX: "", o2: "",
+  });
+
+  // 종목이 바뀌면 리그/옵션을 그 종목의 첫 항목으로 자동 선택 (있으면)
+  // 사이트는 종목 무관 공통이므로 유지.
+  useEffect(()=>{
+    setForm(f=>{
+      const lgs = meta.leaguesBySport[f.sport] || [];
+      const opts = meta.optionsBySport[f.sport] || [];
+      const nextLeague = lgs.includes(f.league) ? f.league : (lgs[0] || "");
+      const nextOption = opts.includes(f.option) ? f.option : (opts[0] || "");
+      const nextSite = meta.sites.includes(f.site) ? f.site : (meta.sites[0] || "");
+      return { ...f, site: nextSite, league: nextLeague, option: nextOption };
+    });
+  },[meta, form.sport]);
 
   // ── 분석 필터 ─────────────────────────────────────────
-  const [filterSport,setFilterSport] = useState<"전체"|"축구"|"야구"|"농구">("전체");
-  const [filterLeague,setFilterLeague] = useState<string>("전체");
-  // ── 펼쳐진 리그 (드릴다운 아코디언) ────────────────────
-  //   리그명을 클릭하면 그 리그 안의 사이트별 마진율 비교가 펼쳐짐
-  const [expandedLeague,setExpandedLeague] = useState<string|null>(null);
+  const [filterSport, setFilterSport] = useState<"전체"|Sport마진>("전체");
+  const [expandedKey, setExpandedKey] = useState<string|null>(null); // 메인 순위에서 클릭한 row의 key
 
-  // ── 마진 계산 함수 ────────────────────────────────────
-  const calcMargin = (odds:number[]): number => {
-    return (odds.reduce((sum,o)=>sum + 1/o, 0) - 1) * 100;
-  };
+  // ── 마진 계산 ─────────────────────────────────────────
+  const calcMargin = (odds:number[]): number =>
+    (odds.reduce((sum,o)=>sum + 1/o, 0) - 1) * 100;
 
-  // ── 레코드 추가 ───────────────────────────────────────
-  // ── 배당 자동 변환 ─────────────────────────────────────
-  //   소수점 없는 정수 입력 → 자동으로 소수점 두 자리로 변환
-  //   예) "134" → "1.34", "1000" → "10.00", "185" → "1.85"
-  //   이미 소수점 있으면 그대로. 빈 값/유효하지 않은 값도 그대로.
+  // ── 배당 자동 변환: "134" → "1.34" ────────────────────
   const formatOdds = (raw:string): string => {
     const trimmed = raw.trim();
     if(!trimmed) return raw;
-    if(trimmed.includes(".")) return raw; // 이미 소수점 있음
+    if(trimmed.includes(".")) return raw;
     const n = parseInt(trimmed,10);
     if(isNaN(n) || n <= 0) return raw;
-    if(trimmed.length <= 1) return raw; // 한 자리는 그대로 ("2" → "2")
-    // 정수를 100으로 나눠서 소수점 두 자리
+    if(trimmed.length <= 1) return raw;
     return (n / 100).toFixed(2);
   };
 
-  const addRecord = (sport:"축구"|"야구"|"농구") => {
-    const f = sport==="축구" ? form축구 : sport==="야구" ? form야구 : form농구;
-    const setF = sport==="축구" ? setForm축구 : sport==="야구" ? setForm야구 : setForm농구;
+  // ── 메타 변경 헬퍼 (DB 저장 포함) ──────────────────────
+  const saveMeta = async (next: db.MarginMeta) => {
+    setMeta(next);
+    await db.saveMarginMeta(next);
+  };
 
-    if(!f.site.trim() || !f.league.trim()){
-      alert("사이트와 리그를 입력해주세요.");
+  const addSite = async () => {
+    const v = window.prompt("추가할 사이트 이름을 입력하세요. (예: BET365, PINNACLE)")?.trim();
+    if(!v) return;
+    if(meta.sites.includes(v)) { alert("이미 등록된 사이트입니다."); return; }
+    await saveMeta({...meta, sites: [...meta.sites, v]});
+    setForm(f=>({...f, site: v}));
+  };
+  const removeSite = async (s: string) => {
+    if(!window.confirm(`사이트 "${s}"를 목록에서 제거하시겠습니까?\n(이미 입력된 기록은 유지됩니다)`)) return;
+    await saveMeta({...meta, sites: meta.sites.filter(x=>x!==s)});
+    setForm(f=> f.site === s ? {...f, site: meta.sites.find(x=>x!==s) || ""} : f);
+  };
+
+  const addLeague = async () => {
+    const sport = form.sport;
+    const v = window.prompt(`[${sport}]에 추가할 리그 이름을 입력하세요. (예: EPL, MLB, NBA)`)?.trim();
+    if(!v) return;
+    const cur = meta.leaguesBySport[sport] || [];
+    if(cur.includes(v)) { alert("이미 등록된 리그입니다."); return; }
+    const next: db.MarginMeta = {
+      ...meta,
+      leaguesBySport: {...meta.leaguesBySport, [sport]: [...cur, v]},
+    };
+    await saveMeta(next);
+    setForm(f=>({...f, league: v}));
+  };
+  const removeLeague = async (lg: string) => {
+    const sport = form.sport;
+    if(!window.confirm(`[${sport}] 리그 "${lg}"를 목록에서 제거하시겠습니까?\n(이미 입력된 기록은 유지됩니다)`)) return;
+    const cur = meta.leaguesBySport[sport] || [];
+    const next: db.MarginMeta = {
+      ...meta,
+      leaguesBySport: {...meta.leaguesBySport, [sport]: cur.filter(x=>x!==lg)},
+    };
+    await saveMeta(next);
+    setForm(f=> f.league === lg ? {...f, league: cur.filter(x=>x!==lg)[0] || ""} : f);
+  };
+
+  const addOption = async () => {
+    const sport = form.sport;
+    const v = window.prompt(`[${sport}]에 추가할 옵션 이름을 입력하세요.\n예) 승무패, 승패, 언오버, 핸디캡, 1X2 등\n(축구의 "승무패" 또는 "1X2"일 때만 무 배당 입력칸이 보입니다)`)?.trim();
+    if(!v) return;
+    const cur = meta.optionsBySport[sport] || [];
+    if(cur.includes(v)) { alert("이미 등록된 옵션입니다."); return; }
+    const next: db.MarginMeta = {
+      ...meta,
+      optionsBySport: {...meta.optionsBySport, [sport]: [...cur, v]},
+    };
+    await saveMeta(next);
+    setForm(f=>({...f, option: v}));
+  };
+  const removeOption = async (op: string) => {
+    const sport = form.sport;
+    if(!window.confirm(`[${sport}] 옵션 "${op}"을 목록에서 제거하시겠습니까?\n(이미 입력된 기록은 유지됩니다)`)) return;
+    const cur = meta.optionsBySport[sport] || [];
+    const next: db.MarginMeta = {
+      ...meta,
+      optionsBySport: {...meta.optionsBySport, [sport]: cur.filter(x=>x!==op)},
+    };
+    await saveMeta(next);
+    setForm(f=> f.option === op ? {...f, option: cur.filter(x=>x!==op)[0] || ""} : f);
+  };
+
+  // ── 레코드 추가 ──────────────────────────────────────
+  const addRecord = async () => {
+    const f = form;
+    if(!f.site || !f.league || !f.option){
+      alert("종목·사이트·리그·옵션을 모두 선택해주세요.\n(목록이 비어 있다면 + 버튼으로 먼저 추가하세요)");
       return;
     }
-    // 자동 변환 적용 (134 → 1.34 등)
     const fmt1 = formatOdds(f.o1);
     const fmtX = formatOdds(f.oX);
     const fmt2 = formatOdds(f.o2);
@@ -966,253 +1049,203 @@ function MarginCalcTab() {
     const oX = parseFloat(fmtX);
     const o2 = parseFloat(fmt2);
 
+    const threeWay = is3WayOption(f.option);
     let odds: number[];
-    if(sport==="축구" && f.option==="승패"){
-      // 3-way
+    if(threeWay){
       if(!o1 || !oX || !o2 || o1<1 || oX<1 || o2<1){
         alert("배당 3개를 모두 입력해주세요. (1.0 이상)");
         return;
       }
-      odds = [o1,oX,o2];
+      odds = [o1, oX, o2];
     } else {
-      // 2-way (야구/농구 승패, 모든 종목 언오버/핸디캡)
       if(!o1 || !o2 || o1<1 || o2<1){
         alert("배당 2개를 입력해주세요. (1.0 이상)");
         return;
       }
-      odds = [o1,o2];
+      odds = [o1, o2];
     }
 
     const margin = calcMargin(odds);
     const rec: MarginRecord = {
-      id: String(Date.now()+Math.random()),
+      id: String(Date.now()) + "_" + Math.random().toString(36).slice(2,8),
       ts: Date.now(),
-      sport, site:f.site.trim(), league:f.league.trim(),
-      option:f.option, odds, margin,
+      sport: f.sport,
+      site: f.site,
+      league: f.league,
+      option: f.option,
+      odds,
+      margin,
     };
-    setRecords(prev=>[rec,...prev]);
-    // 사이트/리그/옵션은 유지하고 배당만 비우기 (연속 입력 편의)
-    setF({...f, o1:"", oX:"", o2:""});
+    setRecords(prev=>[rec, ...prev]);
+    setForm(prev=>({...prev, o1:"", oX:"", o2:""}));
+    await db.upsertMarginRecord(rec);
   };
 
-  const deleteRecord = (id:string) => {
+  const deleteRecord = async (id: string) => {
     setRecords(prev=>prev.filter(r=>r.id!==id));
+    await db.deleteMarginRecord(id);
   };
-  const clearAll = () => {
+
+  const clearAll = async () => {
     if(records.length===0) return;
-    if(window.confirm(`전체 ${records.length}개 기록을 삭제합니다. 계속하시겠습니까?`)){
-      setRecords([]);
-    }
+    if(!window.confirm(`전체 ${records.length}개 기록을 삭제합니다. 계속하시겠습니까?`)) return;
+    setRecords([]);
+    await db.clearAllMarginRecords();
   };
 
-  // ── 분석: 리그별 평균 마진율 ──────────────────────────
-  const leagueRanking = useMemo(()=>{
-    const filtered = filterSport==="전체" ? records : records.filter(r=>r.sport===filterSport);
-    const map = new Map<string, {sport:string, league:string, margins:number[], sites:Set<string>}>();
-    for(const r of filtered){
-      const key = `${r.sport}__${r.league}`;
-      if(!map.has(key)) map.set(key,{sport:r.sport,league:r.league,margins:[],sites:new Set()});
-      map.get(key)!.margins.push(r.margin);
-      map.get(key)!.sites.add(r.site);
+  // ── 통계용 필터링: 마진율 ≥ 7% 제외 ──────────────────
+  // 사용자가 입력한 기록 자체는 유지(누적 기록 표에 그대로 보여줌).
+  // 단 통계(순위/TOP 카드)에서는 7% 이상은 노이즈로 간주해 제외.
+  const statsRecords = useMemo(()=>{
+    const sportFiltered = filterSport === "전체"
+      ? records
+      : records.filter(r=>r.sport === filterSport);
+    return sportFiltered.filter(r=>r.margin < MARGIN_STAT_THRESHOLD);
+  },[records, filterSport]);
+
+  // ── 메인 통계: (종목+리그+옵션+사이트) 단위 그룹화 ────
+  // 같은 조합으로 여러 번 입력했다면 평균 마진 사용.
+  type ComboStats = {
+    sport: Sport마진;
+    league: string;
+    option: string;
+    site: string;
+    avgMargin: number;
+    count: number;
+  };
+  const comboStats = useMemo<ComboStats[]>(()=>{
+    const map = new Map<string, {sport:Sport마진; league:string; option:string; site:string; margins:number[]}>();
+    for(const r of statsRecords){
+      const k = `${r.sport}__${r.league}__${r.option}__${r.site}`;
+      if(!map.has(k)) map.set(k, {sport:r.sport as Sport마진, league:r.league, option:r.option, site:r.site, margins:[]});
+      map.get(k)!.margins.push(r.margin);
     }
-    const arr = Array.from(map.values()).map(v=>({
-      sport:v.sport, league:v.league,
+    return Array.from(map.values()).map(v=>({
+      sport: v.sport, league: v.league, option: v.option, site: v.site,
       avgMargin: v.margins.reduce((a,b)=>a+b,0)/v.margins.length,
       count: v.margins.length,
-      siteCount: v.sites.size,
     }));
-    arr.sort((a,b)=>a.avgMargin-b.avgMargin); // 낮은 순
-    return arr;
-  },[records,filterSport]);
+  },[statsRecords]);
 
-  // ── 분석: 사이트별 평균 마진율 (필터 적용) ────────────
-  const siteRanking = useMemo(()=>{
-    let filtered = records;
-    if(filterSport!=="전체") filtered = filtered.filter(r=>r.sport===filterSport);
-    if(filterLeague!=="전체") filtered = filtered.filter(r=>r.league===filterLeague);
-    const map = new Map<string, {site:string, margins:number[], leagues:Set<string>}>();
-    for(const r of filtered){
-      if(!map.has(r.site)) map.set(r.site,{site:r.site,margins:[],leagues:new Set()});
-      map.get(r.site)!.margins.push(r.margin);
-      map.get(r.site)!.leagues.add(r.league);
+  // ── 메인 순위: (종목+리그+옵션) 단위로 묶고, 그 안에서 가장 마진 낮은 사이트만 대표로 ──
+  type GroupRank = {
+    sport: Sport마진;
+    league: string;
+    option: string;
+    bestSite: string;
+    bestMargin: number;
+    bestCount: number;
+    siteCount: number;     // 이 (종목+리그+옵션)에 등록된 사이트 수
+    sites: ComboStats[];   // 사이트별 마진율 (낮은 순)
+  };
+  const groupRanking = useMemo<GroupRank[]>(()=>{
+    const map = new Map<string, ComboStats[]>();
+    for(const c of comboStats){
+      const k = `${c.sport}__${c.league}__${c.option}`;
+      if(!map.has(k)) map.set(k, []);
+      map.get(k)!.push(c);
     }
-    const arr = Array.from(map.values()).map(v=>({
-      site:v.site,
-      avgMargin: v.margins.reduce((a,b)=>a+b,0)/v.margins.length,
-      count: v.margins.length,
-      leagueCount: v.leagues.size,
-    }));
-    arr.sort((a,b)=>a.avgMargin-b.avgMargin);
-    return arr;
-  },[records,filterSport,filterLeague]);
+    const out: GroupRank[] = [];
+    for(const [_, arr] of map.entries()){
+      arr.sort((a,b)=>a.avgMargin - b.avgMargin); // 낮은 순
+      const best = arr[0];
+      out.push({
+        sport: best.sport,
+        league: best.league,
+        option: best.option,
+        bestSite: best.site,
+        bestMargin: best.avgMargin,
+        bestCount: best.count,
+        siteCount: arr.length,
+        sites: arr,
+      });
+    }
+    out.sort((a,b)=>a.bestMargin - b.bestMargin); // 메인 순위도 낮은 마진 순
+    return out;
+  },[comboStats]);
 
-  // ── 분석: 리그별 → 그 안의 사이트별 마진율 (드릴다운) ──────
-  //   각 리그에 대해 그 리그에서 베팅 가능한 사이트들의 평균 마진율을 계산
-  //   "MLB에서 BET365는 4.2%, PINNACLE은 4.8%" 같은 비교를 위함
-  const leagueSiteBreakdown = useMemo(()=>{
-    const map = new Map<string, Map<string, number[]>>();
-    // sport+league 단위로, site별 margins 배열
-    for(const r of records){
-      const lkey = `${r.sport}__${r.league}`;
-      if(!map.has(lkey)) map.set(lkey, new Map());
-      const siteMap = map.get(lkey)!;
-      if(!siteMap.has(r.site)) siteMap.set(r.site, []);
-      siteMap.get(r.site)!.push(r.margin);
-    }
-    const result: Record<string, {site:string, avgMargin:number, count:number}[]> = {};
-    for(const [lkey, siteMap] of map.entries()){
-      const arr = Array.from(siteMap.entries()).map(([site,margins])=>({
-        site,
-        avgMargin: margins.reduce((a,b)=>a+b,0)/margins.length,
-        count: margins.length,
+  // ── 종목별 TOP (가장 좋은 종목별 1개 조합) ────────────
+  // filterSport와 무관하게 항상 종목별 1개씩 보여줌.
+  const topBySport = useMemo(()=>{
+    const allComboBy7 = records.filter(r=>r.margin < MARGIN_STAT_THRESHOLD);
+    const result: Record<Sport마진, GroupRank|null> = { 축구:null, 야구:null, 농구:null };
+    for(const sp of ["축구","야구","농구"] as Sport마진[]){
+      const recs = allComboBy7.filter(r=>r.sport === sp);
+      const map = new Map<string, ComboStats[]>();
+      const cmap = new Map<string, {sport:Sport마진; league:string; option:string; site:string; margins:number[]}>();
+      for(const r of recs){
+        const k = `${r.sport}__${r.league}__${r.option}__${r.site}`;
+        if(!cmap.has(k)) cmap.set(k, {sport:r.sport as Sport마진, league:r.league, option:r.option, site:r.site, margins:[]});
+        cmap.get(k)!.margins.push(r.margin);
+      }
+      const cs2 = Array.from(cmap.values()).map(v=>({
+        sport:v.sport, league:v.league, option:v.option, site:v.site,
+        avgMargin: v.margins.reduce((a,b)=>a+b,0)/v.margins.length,
+        count: v.margins.length,
       }));
-      arr.sort((a,b)=>a.avgMargin-b.avgMargin);
-      result[lkey] = arr;
+      for(const c of cs2){
+        const k = `${c.sport}__${c.league}__${c.option}`;
+        if(!map.has(k)) map.set(k, []);
+        map.get(k)!.push(c);
+      }
+      const groups: GroupRank[] = [];
+      for(const [_,arr] of map.entries()){
+        arr.sort((a,b)=>a.avgMargin-b.avgMargin);
+        const b = arr[0];
+        groups.push({ sport:b.sport, league:b.league, option:b.option, bestSite:b.site, bestMargin:b.avgMargin, bestCount:b.count, siteCount:arr.length, sites:arr });
+      }
+      groups.sort((a,b)=>a.bestMargin-b.bestMargin);
+      result[sp] = groups[0] || null;
     }
     return result;
   },[records]);
 
-  // ── 분석: 최고/최악 요약 (TOP 카드용) ─────────────────
-  //   leagueRanking은 낮은 순으로 이미 정렬되어 있으므로:
-  //   첫 번째 = 마진율 가장 낮음(가장 좋음), 마지막 = 가장 높음(가장 나쁨)
-  const summary = useMemo(()=>{
-    const ranking = leagueRanking;
-    const sites = siteRanking;
-    return {
-      bestLeague:  ranking.length>0 ? ranking[0] : null,
-      worstLeague: ranking.length>0 ? ranking[ranking.length-1] : null,
-      bestSite:    sites.length>0 ? sites[0] : null,
-      worstSite:   sites.length>0 ? sites[sites.length-1] : null,
-    };
-  },[leagueRanking,siteRanking]);
+  // ── 통계 제외 카운트 (7% 이상이라 빠진 기록 수) ───────
+  const excludedCount = useMemo(()=>{
+    const sportFiltered = filterSport === "전체" ? records : records.filter(r=>r.sport===filterSport);
+    return sportFiltered.filter(r=>r.margin >= MARGIN_STAT_THRESHOLD).length;
+  },[records, filterSport]);
 
-  // ── 리그 필터 옵션 (필터된 종목의 리그 목록) ──────────
-  const leagueFilterOptions = useMemo(()=>{
-    const filtered = filterSport==="전체" ? records : records.filter(r=>r.sport===filterSport);
-    const set = new Set(filtered.map(r=>r.league));
-    return ["전체",...Array.from(set).sort()];
-  },[records,filterSport]);
-
-  // ── 종목별 입력 행 렌더링 ────────────────────────────
-  const renderInputRow = (sport:"축구"|"야구"|"농구", emoji:string, accentColor:string) => {
-    const f = sport==="축구" ? form축구 : sport==="야구" ? form야구 : form농구;
-    const setF = sport==="축구" ? setForm축구 : sport==="야구" ? setForm야구 : setForm농구;
-    const is3way = sport==="축구" && f.option==="승패";
-
-    const inputStyle = {
-      padding:"7px 9px",borderRadius:5,
-      border:`1px solid ${cs.border2}`,background:cs.bg2,color:cs.text,
-      fontSize:12,fontWeight:600,fontFamily:"monospace",
-      boxSizing:"border-box" as const,
-      width:"100%",
-    };
-    const labelStyle = {fontSize:9,color:cs.muted,fontWeight:700,marginBottom:3,textTransform:"uppercase" as const,letterSpacing:0.5};
-
-    // 옵션별 배당 라벨
-    const oddsLabels = is3way ? ["홈 (1)","무 (X)","원정 (2)"] :
-                       f.option==="언오버" ? ["오버","언더"] :
-                       f.option==="핸디캡" ? ["배당 1","배당 2"] :
-                       ["홈 승","원정 승"];
-
-    return (
-      <div style={{
-        background:cs.bg3,
-        border:`1px solid ${cs.border}`,
-        borderTop:`4px solid ${accentColor}`,
-        borderRadius:8,
-        padding:"12px 14px",
-        display:"flex",
-        flexDirection:"column",
-        gap:9,
-      }}>
-        {/* 헤더 */}
-        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:2}}>
-          <span style={{fontSize:18}}>{emoji}</span>
-          <span style={{fontSize:14,fontWeight:900,color:accentColor}}>{sport}</span>
-        </div>
-
-        {/* 사이트 */}
-        <div>
-          <div style={labelStyle}>사이트</div>
-          <input type="text" value={f.site} onChange={e=>setF({...f,site:e.target.value})}
-            placeholder="예: BET365" style={inputStyle}/>
-        </div>
-
-        {/* 리그 */}
-        <div>
-          <div style={labelStyle}>리그</div>
-          <input type="text" value={f.league} onChange={e=>setF({...f,league:e.target.value})}
-            placeholder={sport==="축구"?"예: EPL":sport==="야구"?"예: MLB":"예: NBA"}
-            style={inputStyle}/>
-        </div>
-
-        {/* 옵션 */}
-        <div>
-          <div style={labelStyle}>옵션</div>
-          <select value={f.option} onChange={e=>setF({...f,option:e.target.value as any})}
-            style={{...inputStyle,cursor:"pointer"}}>
-            <option value="승패">승패</option>
-            <option value="언오버">언오버</option>
-            <option value="핸디캡">핸디캡</option>
-          </select>
-        </div>
-
-        {/* 배당 영역 (3-way면 3개, 2-way면 2개) */}
-        <div style={{display:"grid",gridTemplateColumns:is3way?"1fr 1fr 1fr":"1fr 1fr",gap:6}}>
-          <div>
-            <div style={labelStyle}>{oddsLabels[0]}</div>
-            <input type="text" inputMode="decimal" value={f.o1}
-              onChange={e=>setF({...f,o1:e.target.value})}
-              onBlur={e=>setF({...f,o1:formatOdds(e.target.value)})}
-              onKeyDown={e=>{if(e.key==="Enter"){(e.target as HTMLInputElement).blur();addRecord(sport);}}}
-              placeholder="1.85 또는 185" style={inputStyle}/>
-          </div>
-          {is3way && (
-            <div>
-              <div style={labelStyle}>{oddsLabels[1]}</div>
-              <input type="text" inputMode="decimal" value={f.oX}
-                onChange={e=>setF({...f,oX:e.target.value})}
-                onBlur={e=>setF({...f,oX:formatOdds(e.target.value)})}
-                onKeyDown={e=>{if(e.key==="Enter"){(e.target as HTMLInputElement).blur();addRecord(sport);}}}
-                placeholder="3.50 또는 350" style={inputStyle}/>
-            </div>
-          )}
-          <div>
-            <div style={labelStyle}>{is3way ? oddsLabels[2] : oddsLabels[1]}</div>
-            <input type="text" inputMode="decimal" value={f.o2}
-              onChange={e=>setF({...f,o2:e.target.value})}
-              onBlur={e=>setF({...f,o2:formatOdds(e.target.value)})}
-              onKeyDown={e=>{if(e.key==="Enter"){(e.target as HTMLInputElement).blur();addRecord(sport);}}}
-              placeholder={is3way?"4.20 또는 420":"1.95 또는 195"} style={inputStyle}/>
-          </div>
-        </div>
-
-        {/* 추가 버튼 (가로 풀 폭) */}
-        <button onClick={()=>addRecord(sport)}
-          style={{
-            marginTop:3,
-            padding:"9px 14px",borderRadius:5,
-            border:`1.5px solid ${accentColor}`,
-            background:`${accentColor}33`,color:accentColor,
-            cursor:"pointer",fontWeight:900,fontSize:13,
-            width:"100%",
-          }}>
-          + 추가
-        </button>
-      </div>
-    );
+  // ── UI 헬퍼 ──────────────────────────────────────────
+  const inputStyle: React.CSSProperties = {
+    padding:"7px 9px",
+    borderRadius:5,
+    border:`1px solid ${cs.border2}`,
+    background:cs.bg2,
+    color:cs.text,
+    fontSize:12,
+    fontWeight:600,
+    fontFamily:"monospace",
+    boxSizing:"border-box",
+    width:"100%",
   };
+  const labelStyle: React.CSSProperties = {
+    fontSize:9,
+    color:cs.muted,
+    fontWeight:700,
+    marginBottom:3,
+    textTransform:"uppercase",
+    letterSpacing:0.5,
+  };
+  const sportEmoji = (s: Sport마진) => s==="축구"?"⚽":s==="야구"?"⚾":"🏀";
+  const sportColor = (s: Sport마진) => s==="축구"?cs.green:s==="야구"?cs.amber:cs.orange;
 
+  // 현재 폼 종목에 따라 보여줄 리그/옵션 목록
+  const currentLeagues = meta.leaguesBySport[form.sport] || [];
+  const currentOptions = meta.optionsBySport[form.sport] || [];
+  const threeWay = is3WayOption(form.option);
+
+  // ── 렌더 ─────────────────────────────────────────────
   return (
     <div style={{flex:1,overflowY:"auto",padding:20}}>
       {/* 헤더 */}
       <div style={{display:"flex",alignItems:"center",marginBottom:14,gap:10,flexWrap:"wrap"}}>
         <div style={{fontSize:16,fontWeight:800,color:cs.pink}}>🧮 마진율 계산기 & 분석</div>
         <div style={{fontSize:11,color:cs.muted,fontWeight:600}}>
-          사이트·리그·옵션별 마진율 누적 → 가성비 분석
+          종목·리그·옵션·사이트별 마진율 누적 → 가성비 분석
         </div>
         <div style={{marginLeft:"auto",fontSize:10,color:cs.dim}}>
-          💾 메모리 저장 (새로고침 시 초기화)
+          {loading ? "⏳ 불러오는 중..." : `☁️ Supabase 동기화 (${records.length}건)`}
         </div>
       </div>
 
@@ -1221,25 +1254,383 @@ function MarginCalcTab() {
         ✅ <strong style={{color:cs.green}}>3% 이하: 매우 좋음</strong> &nbsp;·&nbsp;
         ✅ <strong style={{color:cs.green}}>3~5%: 좋음</strong> &nbsp;·&nbsp;
         🟡 <strong style={{color:cs.amber}}>5~7%: 보통~주의</strong> &nbsp;·&nbsp;
-        ❌ <strong style={{color:cs.red}}>7% 초과: 패스</strong>
+        ❌ <strong style={{color:cs.red}}>7% 초과: 통계 제외</strong>
+        <br/>
+        <span style={{fontSize:10,color:cs.dim}}>
+          💡 마진율이 낮을수록 베팅 유리(사이트 수수료 적음). 7% 이상은 노이즈로 간주해 순위/TOP 카드에서 제외됩니다.
+        </span>
       </div>
 
-      {/* ── 종목별 입력 행 (가로 3분할: 축구 / 야구 / 농구) ── */}
+      {/* ═══════════ 통합 입력 폼 ═══════════ */}
+      <div style={{
+        background:cs.bg3,
+        border:`1px solid ${cs.border}`,
+        borderTop:`4px solid ${cs.pink}`,
+        borderRadius:8,
+        padding:"14px 16px",
+        marginBottom:18,
+      }}>
+        <div style={{fontSize:13,fontWeight:800,color:cs.text,marginBottom:10,display:"flex",alignItems:"center",gap:8}}>
+          📝 배당 입력
+          <span style={{fontSize:10,color:cs.muted,fontWeight:600}}>
+            종목 → 사이트 → 리그 → 옵션 → 배당
+          </span>
+        </div>
+
+        {/* 1행: 종목 / 사이트 / 리그 / 옵션 */}
+        <div style={{display:"grid",gridTemplateColumns:"repeat(4, 1fr)",gap:10,marginBottom:10}}>
+          {/* 종목 */}
+          <div>
+            <div style={labelStyle}>종목</div>
+            <select value={form.sport}
+              onChange={e=>setForm({...form, sport: e.target.value as Sport마진})}
+              style={{...inputStyle, cursor:"pointer", color:sportColor(form.sport), fontWeight:900}}>
+              <option value="축구">⚽ 축구</option>
+              <option value="야구">⚾ 야구</option>
+              <option value="농구">🏀 농구</option>
+            </select>
+          </div>
+
+          {/* 사이트 */}
+          <div>
+            <div style={{...labelStyle, display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+              <span>사이트</span>
+              <button onClick={addSite} title="사이트 추가"
+                style={{padding:"1px 7px",borderRadius:3,border:`1px solid ${cs.teal}55`,background:`${cs.teal}11`,color:cs.teal,cursor:"pointer",fontSize:9,fontWeight:800}}>
+                + 추가
+              </button>
+            </div>
+            <div style={{display:"flex",gap:4}}>
+              <select value={form.site}
+                onChange={e=>setForm({...form, site: e.target.value})}
+                disabled={meta.sites.length===0}
+                style={{...inputStyle, cursor:"pointer", color:cs.teal, fontWeight:800}}>
+                {meta.sites.length===0
+                  ? <option value="">(우측 + 버튼으로 추가)</option>
+                  : meta.sites.map(s=><option key={s} value={s}>{s}</option>)
+                }
+              </select>
+              {form.site && (
+                <button onClick={()=>removeSite(form.site)} title="이 사이트 제거"
+                  style={{padding:"0 7px",borderRadius:5,border:`1px solid ${cs.red}44`,background:"transparent",color:cs.red,cursor:"pointer",fontSize:11,fontWeight:700,flexShrink:0}}>
+                  −
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* 리그 */}
+          <div>
+            <div style={{...labelStyle, display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+              <span>리그 <span style={{color:sportColor(form.sport),marginLeft:3}}>({form.sport})</span></span>
+              <button onClick={addLeague} title="리그 추가"
+                style={{padding:"1px 7px",borderRadius:3,border:`1px solid ${cs.purple}55`,background:`${cs.purple}11`,color:cs.purple,cursor:"pointer",fontSize:9,fontWeight:800}}>
+                + 추가
+              </button>
+            </div>
+            <div style={{display:"flex",gap:4}}>
+              <select value={form.league}
+                onChange={e=>setForm({...form, league: e.target.value})}
+                disabled={currentLeagues.length===0}
+                style={{...inputStyle, cursor:"pointer", color:cs.purple, fontWeight:800}}>
+                {currentLeagues.length===0
+                  ? <option value="">(우측 + 버튼으로 추가)</option>
+                  : currentLeagues.map(l=><option key={l} value={l}>{l}</option>)
+                }
+              </select>
+              {form.league && (
+                <button onClick={()=>removeLeague(form.league)} title="이 리그 제거"
+                  style={{padding:"0 7px",borderRadius:5,border:`1px solid ${cs.red}44`,background:"transparent",color:cs.red,cursor:"pointer",fontSize:11,fontWeight:700,flexShrink:0}}>
+                  −
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* 옵션 */}
+          <div>
+            <div style={{...labelStyle, display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+              <span>옵션</span>
+              <button onClick={addOption} title="옵션 추가"
+                style={{padding:"1px 7px",borderRadius:3,border:`1px solid ${cs.amber}55`,background:`${cs.amber}11`,color:cs.amber,cursor:"pointer",fontSize:9,fontWeight:800}}>
+                + 추가
+              </button>
+            </div>
+            <div style={{display:"flex",gap:4}}>
+              <select value={form.option}
+                onChange={e=>setForm({...form, option: e.target.value})}
+                disabled={currentOptions.length===0}
+                style={{...inputStyle, cursor:"pointer", color:cs.amber, fontWeight:800}}>
+                {currentOptions.length===0
+                  ? <option value="">(우측 + 버튼으로 추가)</option>
+                  : currentOptions.map(o=><option key={o} value={o}>{o}</option>)
+                }
+              </select>
+              {form.option && (
+                <button onClick={()=>removeOption(form.option)} title="이 옵션 제거"
+                  style={{padding:"0 7px",borderRadius:5,border:`1px solid ${cs.red}44`,background:"transparent",color:cs.red,cursor:"pointer",fontSize:11,fontWeight:700,flexShrink:0}}>
+                  −
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* 2행: 배당 입력 (3-way면 3개, 2-way면 2개) */}
+        <div style={{display:"grid",gridTemplateColumns: threeWay?"1fr 1fr 1fr 130px":"1fr 1fr 130px", gap:10, alignItems:"end"}}>
+          <div>
+            <div style={labelStyle}>{threeWay ? "홈 (1)" : "홈 / 오버 / 배당1"}</div>
+            <input type="text" inputMode="decimal" value={form.o1}
+              onChange={e=>setForm({...form, o1: e.target.value})}
+              onBlur={e=>setForm({...form, o1: formatOdds(e.target.value)})}
+              onKeyDown={e=>{ if(e.key==="Enter"){ (e.target as HTMLInputElement).blur(); addRecord(); } }}
+              placeholder="1.85 또는 185"
+              style={inputStyle}/>
+          </div>
+          {threeWay && (
+            <div>
+              <div style={labelStyle}>무 (X)</div>
+              <input type="text" inputMode="decimal" value={form.oX}
+                onChange={e=>setForm({...form, oX: e.target.value})}
+                onBlur={e=>setForm({...form, oX: formatOdds(e.target.value)})}
+                onKeyDown={e=>{ if(e.key==="Enter"){ (e.target as HTMLInputElement).blur(); addRecord(); } }}
+                placeholder="3.50 또는 350"
+                style={inputStyle}/>
+            </div>
+          )}
+          <div>
+            <div style={labelStyle}>{threeWay ? "원정 (2)" : "원정 / 언더 / 배당2"}</div>
+            <input type="text" inputMode="decimal" value={form.o2}
+              onChange={e=>setForm({...form, o2: e.target.value})}
+              onBlur={e=>setForm({...form, o2: formatOdds(e.target.value)})}
+              onKeyDown={e=>{ if(e.key==="Enter"){ (e.target as HTMLInputElement).blur(); addRecord(); } }}
+              placeholder={threeWay?"4.20 또는 420":"1.95 또는 195"}
+              style={inputStyle}/>
+          </div>
+          <button onClick={addRecord}
+            style={{
+              padding:"9px 14px",borderRadius:5,
+              border:`1.5px solid ${cs.pink}`,
+              background:`${cs.pink}33`,color:cs.pink,
+              cursor:"pointer",fontWeight:900,fontSize:13,
+            }}>
+            + 추가
+          </button>
+        </div>
+
+        {/* 옵션이 승무패/1X2일 때 안내 */}
+        {threeWay && (
+          <div style={{marginTop:8,fontSize:10,color:cs.dim}}>
+            ℹ️ 옵션이 <strong style={{color:cs.amber}}>{form.option}</strong>이라 무 배당까지 3개 입력 (3-way)
+          </div>
+        )}
+      </div>
+
+      {/* ═══════════ 종목별 TOP 카드 ═══════════ */}
       <div style={{marginBottom:18}}>
-        <div style={{fontSize:13,fontWeight:800,color:cs.text,marginBottom:8}}>📝 배당 입력</div>
-        <div style={{
-          display:"grid",
-          gridTemplateColumns:"1fr 1fr 1fr",
-          gap:12,
-          alignItems:"start",
-        }}>
-          {renderInputRow("축구","⚽",cs.green)}
-          {renderInputRow("야구","⚾",cs.amber)}
-          {renderInputRow("농구","🏀",cs.orange)}
+        <div style={{fontSize:13,fontWeight:800,color:cs.text,marginBottom:8}}>
+          🏆 종목별 최고 가성비 조합 <span style={{fontSize:10,color:cs.muted,fontWeight:600}}>(마진율 7% 미만 데이터 기준)</span>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(3, 1fr)",gap:10}}>
+          {(["축구","야구","농구"] as Sport마진[]).map(sp=>{
+            const top = topBySport[sp];
+            const c = sportColor(sp);
+            return (
+              <div key={sp} style={{
+                background:`${c}11`,
+                border:`1px solid ${c}66`,
+                borderRadius:8,
+                padding:"12px 14px",
+              }}>
+                <div style={{fontSize:11,fontWeight:900,color:c,marginBottom:6,letterSpacing:0.5}}>
+                  {sportEmoji(sp)} {sp}
+                </div>
+                {top ? (
+                  <>
+                    <div style={{fontSize:13,fontWeight:900,color:cs.text,marginBottom:2}}>
+                      {top.league} · <span style={{color:cs.amber}}>{top.option}</span>
+                    </div>
+                    <div style={{fontSize:11,color:cs.teal,fontWeight:700,marginBottom:4}}>
+                      🏪 {top.bestSite}
+                    </div>
+                    <div style={{fontSize:20,fontWeight:900,color:c,fontFamily:"monospace"}}>
+                      {top.bestMargin.toFixed(2)}%
+                    </div>
+                    <div style={{fontSize:9,color:cs.dim,marginTop:2}}>
+                      {top.bestCount}건 평균 / {top.siteCount}개 사이트
+                    </div>
+                  </>
+                ) : (
+                  <div style={{fontSize:11,color:cs.dim,padding:"6px 0"}}>
+                    데이터 없음<br/>
+                    <span style={{fontSize:9}}>(또는 모두 7% 이상)</span>
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       </div>
 
-      {/* ── 누적 기록 표 ── */}
+      {/* ═══════════ 메인 통계: 종목+리그+옵션 순위 ═══════════ */}
+      <div style={{marginBottom:18}}>
+        <div style={{display:"flex",alignItems:"center",marginBottom:10,gap:10,flexWrap:"wrap"}}>
+          <div style={{fontSize:13,fontWeight:800,color:cs.text}}>
+            📊 마진율 순위 <span style={{fontSize:10,color:cs.muted,fontWeight:600}}>(낮을수록 가성비 좋음)</span>
+          </div>
+          <div style={{display:"flex",gap:6,marginLeft:"auto"}}>
+            {(["전체","축구","야구","농구"] as const).map(s=>(
+              <button key={s} onClick={()=>setFilterSport(s)}
+                style={{
+                  padding:"5px 12px",borderRadius:5,
+                  border:filterSport===s?`1.5px solid ${cs.pink}`:`1px solid ${cs.border2}`,
+                  background:filterSport===s?`${cs.pink}22`:cs.bg2,
+                  color:filterSport===s?cs.pink:cs.muted,
+                  cursor:"pointer",fontWeight:filterSport===s?900:700,fontSize:11,
+                }}>
+                {s==="전체"?s:`${sportEmoji(s)} ${s}`}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {excludedCount > 0 && (
+          <div style={{
+            fontSize:10,color:cs.muted,marginBottom:8,
+            padding:"5px 10px",background:`${cs.red}08`,
+            border:`1px dashed ${cs.red}33`,borderRadius:5,
+          }}>
+            ⚠️ 마진율 7% 이상 <strong style={{color:cs.red}}>{excludedCount}건</strong>은 통계에서 제외됨
+            <span style={{color:cs.dim}}> (누적 기록 표에는 표시)</span>
+          </div>
+        )}
+
+        {groupRanking.length === 0 ? (
+          <div style={{textAlign:"center",color:cs.dim,padding:"30px",background:cs.bg3,borderRadius:8,border:`1px solid ${cs.border}`,fontSize:12}}>
+            아직 통계 데이터가 없습니다. (마진율 7% 미만 기록을 입력하세요)
+          </div>
+        ) : (
+          <div style={{background:cs.bg3,border:`1px solid ${cs.border}`,borderRadius:8,overflow:"hidden"}}>
+            {/* 헤더 */}
+            <div style={{
+              display:"grid",
+              gridTemplateColumns:"40px 60px 1fr 100px 120px 80px 70px 24px",
+              gap:8,padding:"10px 14px",
+              background:cs.bg2,borderBottom:`1px solid ${cs.border}`,
+              fontSize:10,color:cs.muted,fontWeight:700,letterSpacing:0.5,
+              textTransform:"uppercase",
+            }}>
+              <div>순위</div>
+              <div>종목</div>
+              <div>리그</div>
+              <div>옵션</div>
+              <div>최저 사이트</div>
+              <div style={{textAlign:"right"}}>최저 마진</div>
+              <div style={{textAlign:"center"}}>사이트수</div>
+              <div></div>
+            </div>
+            {/* 행 */}
+            {groupRanking.map((g, i)=>{
+              const k = `${g.sport}__${g.league}__${g.option}`;
+              const isExpanded = expandedKey === k;
+              const c = sportColor(g.sport);
+              const mc = evalMarginColor(g.bestMargin, cs);
+              return (
+                <div key={k}>
+                  <div
+                    onClick={()=>setExpandedKey(isExpanded ? null : k)}
+                    style={{
+                      display:"grid",
+                      gridTemplateColumns:"40px 60px 1fr 100px 120px 80px 70px 24px",
+                      gap:8,padding:"10px 14px",
+                      background: isExpanded ? `${cs.pink}10` : "transparent",
+                      borderBottom:`1px solid ${cs.border}`,
+                      fontSize:11,color:cs.text,
+                      alignItems:"center",
+                      cursor:"pointer",
+                    }}>
+                    <div style={{fontWeight:900,color:i<3?cs.amber:cs.muted,fontSize:12}}>#{i+1}</div>
+                    <div style={{fontWeight:800,color:c}}>{sportEmoji(g.sport)} {g.sport}</div>
+                    <div style={{fontWeight:700,color:cs.purple}}>{g.league}</div>
+                    <div style={{color:cs.amber,fontWeight:700}}>{g.option}</div>
+                    <div style={{color:cs.teal,fontWeight:800}}>🏪 {g.bestSite}</div>
+                    <div style={{textAlign:"right",fontWeight:900,color:mc,fontFamily:"monospace",fontSize:13}}>
+                      {g.bestMargin.toFixed(2)}%
+                    </div>
+                    <div style={{textAlign:"center",fontSize:10,color:cs.muted}}>
+                      {g.siteCount}개
+                    </div>
+                    <div style={{textAlign:"right",color:cs.muted,fontSize:11}}>
+                      {isExpanded ? "▾" : "▸"}
+                    </div>
+                  </div>
+                  {/* 드릴다운: 사이트별 마진율 순위 */}
+                  {isExpanded && (
+                    <div style={{
+                      padding:"10px 18px 14px 18px",
+                      background:cs.bg2,
+                      borderBottom:`1px solid ${cs.border}`,
+                    }}>
+                      <div style={{fontSize:11,fontWeight:800,color:cs.teal,marginBottom:8}}>
+                        🏪 {g.league} · {g.option} 사이트별 마진율 순위 <span style={{fontSize:9,color:cs.muted,fontWeight:600}}>(낮은 순)</span>
+                      </div>
+                      <div style={{display:"flex",flexDirection:"column",gap:4}}>
+                        {g.sites.map((s, j)=>{
+                          const sc = evalMarginColor(s.avgMargin, cs);
+                          return (
+                            <div key={s.site} style={{
+                              display:"grid",
+                              gridTemplateColumns:"30px 1fr 80px 60px",
+                              gap:8,padding:"6px 10px",
+                              background:cs.bg3,
+                              borderRadius:5,
+                              alignItems:"center",fontSize:11,
+                              border:j===0?`1px solid ${cs.green}55`:"1px solid transparent",
+                            }}>
+                              <div style={{fontWeight:900,color:j===0?cs.green:j<3?cs.amber:cs.muted}}>
+                                #{j+1}
+                              </div>
+                              <div style={{fontWeight:800,color:cs.teal}}>
+                                {j===0 && "🏆 "}{s.site}
+                              </div>
+                              <div style={{textAlign:"right",fontFamily:"monospace",fontWeight:900,color:sc,fontSize:12}}>
+                                {s.avgMargin.toFixed(2)}%
+                              </div>
+                              <div style={{textAlign:"right",fontSize:9,color:cs.dim}}>
+                                {s.count}건
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      {/* 사이트 비교 인사이트 */}
+                      {g.sites.length >= 2 && (() => {
+                        const best = g.sites[0];
+                        const worst = g.sites[g.sites.length - 1];
+                        const diff = worst.avgMargin - best.avgMargin;
+                        if(diff < 0.3) return null;
+                        return (
+                          <div style={{
+                            marginTop:8,padding:"6px 10px",
+                            background:cs.bg3,borderRadius:4,
+                            fontSize:10,color:cs.muted,lineHeight:1.5,
+                          }}>
+                            💡 <strong style={{color:cs.green}}>{best.site}</strong>가 <strong style={{color:cs.red}}>{worst.site}</strong>보다
+                            마진율 <strong style={{color:cs.amber}}>{diff.toFixed(2)}%p</strong> 낮음 →
+                            <strong style={{color:cs.text}}> {best.site}에서 베팅 추천</strong>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* ═══════════ 누적 기록 표 ═══════════ */}
       <div style={{marginBottom:18}}>
         <div style={{display:"flex",alignItems:"center",marginBottom:8,gap:10}}>
           <div style={{fontSize:13,fontWeight:800,color:cs.text}}>
@@ -1254,14 +1645,13 @@ function MarginCalcTab() {
         </div>
         {records.length===0 ? (
           <div style={{textAlign:"center",color:cs.dim,padding:"30px",background:cs.bg3,borderRadius:8,border:`1px solid ${cs.border}`,fontSize:12}}>
-            아직 기록이 없습니다. 위에서 배당을 입력하세요.
+            {loading ? "불러오는 중..." : "아직 기록이 없습니다. 위에서 배당을 입력하세요."}
           </div>
         ) : (
           <div style={{background:cs.bg3,border:`1px solid ${cs.border}`,borderRadius:8,overflow:"hidden"}}>
-            {/* 헤더 */}
             <div style={{
               display:"grid",
-              gridTemplateColumns:"60px 90px 110px 100px 1fr 90px 70px 50px",
+              gridTemplateColumns:"60px 90px 110px 90px 1fr 90px 70px 50px",
               gap:8,padding:"10px 14px",
               background:cs.bg2,borderBottom:`1px solid ${cs.border}`,
               fontSize:10,color:cs.muted,fontWeight:700,letterSpacing:0.5,
@@ -1276,29 +1666,32 @@ function MarginCalcTab() {
               <div style={{textAlign:"right"}}>평가</div>
               <div></div>
             </div>
-            {/* 행 */}
             {records.map(r=>{
-              const color = evalMarginColor(r.margin,cs);
+              const color = evalMarginColor(r.margin, cs);
+              const excluded = r.margin >= MARGIN_STAT_THRESHOLD;
               return (
                 <div key={r.id} style={{
                   display:"grid",
-                  gridTemplateColumns:"60px 90px 110px 100px 1fr 90px 70px 50px",
+                  gridTemplateColumns:"60px 90px 110px 90px 1fr 90px 70px 50px",
                   gap:8,padding:"9px 14px",
                   borderBottom:`1px solid ${cs.border}`,
                   fontSize:11,color:cs.text,
                   alignItems:"center",
+                  opacity: excluded ? 0.55 : 1,
+                  background: excluded ? `${cs.red}06` : "transparent",
                 }}>
-                  <div style={{fontWeight:700}}>
-                    {r.sport==="축구"?"⚽":r.sport==="야구"?"⚾":"🏀"} {r.sport}
+                  <div style={{fontWeight:700,color:sportColor(r.sport as Sport마진)}}>
+                    {sportEmoji(r.sport as Sport마진)} {r.sport}
                   </div>
                   <div style={{fontWeight:700,color:cs.teal}}>{r.site}</div>
                   <div style={{color:cs.text}}>{r.league}</div>
-                  <div style={{color:cs.muted}}>{r.option}</div>
+                  <div style={{color:cs.amber}}>{r.option}</div>
                   <div style={{fontFamily:"monospace",fontSize:11,color:cs.muted}}>
                     {r.odds.map(o=>o.toFixed(2)).join(" / ")}
                   </div>
                   <div style={{textAlign:"right",fontWeight:900,color,fontFamily:"monospace",fontSize:13}}>
                     {r.margin.toFixed(2)}%
+                    {excluded && <span title="통계 제외 (≥7%)" style={{marginLeft:4,fontSize:9,color:cs.red}}>⚠</span>}
                   </div>
                   <div style={{textAlign:"right",fontSize:9,color,fontWeight:700}}>
                     {evalMarginLabel(r.margin)}
@@ -1315,345 +1708,6 @@ function MarginCalcTab() {
           </div>
         )}
       </div>
-
-      {/* ── 분석 영역 ── */}
-      {records.length>0 && (
-        <div style={{marginBottom:18}}>
-          <div style={{fontSize:13,fontWeight:800,color:cs.text,marginBottom:10}}>📊 마진율 분석</div>
-
-          {/* ── TOP 요약 카드 (가장 좋음/나쁨 한눈에) ── */}
-          <div style={{display:"grid",gridTemplateColumns:"repeat(4, 1fr)",gap:10,marginBottom:12}}>
-            {/* 가장 좋은 리그 */}
-            <div style={{
-              background:`${cs.green}11`,border:`1px solid ${cs.green}66`,borderRadius:8,
-              padding:"12px 14px",
-            }}>
-              <div style={{fontSize:9,color:cs.green,fontWeight:800,marginBottom:5,letterSpacing:0.5}}>
-                🏆 가장 좋은 리그
-              </div>
-              {summary.bestLeague ? (
-                <>
-                  <div style={{fontSize:13,fontWeight:900,color:cs.text,marginBottom:2}}>
-                    {summary.bestLeague.sport==="축구"?"⚽":summary.bestLeague.sport==="야구"?"⚾":"🏀"} {summary.bestLeague.league}
-                  </div>
-                  <div style={{fontSize:18,fontWeight:900,color:cs.green,fontFamily:"monospace"}}>
-                    {summary.bestLeague.avgMargin.toFixed(2)}%
-                  </div>
-                  <div style={{fontSize:9,color:cs.dim,marginTop:2}}>
-                    {summary.bestLeague.count}건 / {summary.bestLeague.siteCount}개 사이트
-                  </div>
-                </>
-              ) : <div style={{fontSize:11,color:cs.dim}}>데이터 없음</div>}
-            </div>
-
-            {/* 가장 나쁜 리그 */}
-            <div style={{
-              background:`${cs.red}11`,border:`1px solid ${cs.red}66`,borderRadius:8,
-              padding:"12px 14px",
-            }}>
-              <div style={{fontSize:9,color:cs.red,fontWeight:800,marginBottom:5,letterSpacing:0.5}}>
-                🚫 가장 나쁜 리그
-              </div>
-              {summary.worstLeague ? (
-                <>
-                  <div style={{fontSize:13,fontWeight:900,color:cs.text,marginBottom:2}}>
-                    {summary.worstLeague.sport==="축구"?"⚽":summary.worstLeague.sport==="야구"?"⚾":"🏀"} {summary.worstLeague.league}
-                  </div>
-                  <div style={{fontSize:18,fontWeight:900,color:cs.red,fontFamily:"monospace"}}>
-                    {summary.worstLeague.avgMargin.toFixed(2)}%
-                  </div>
-                  <div style={{fontSize:9,color:cs.dim,marginTop:2}}>
-                    {summary.worstLeague.count}건 / {summary.worstLeague.siteCount}개 사이트
-                  </div>
-                </>
-              ) : <div style={{fontSize:11,color:cs.dim}}>데이터 없음</div>}
-            </div>
-
-            {/* 가장 좋은 사이트 */}
-            <div style={{
-              background:`${cs.teal}11`,border:`1px solid ${cs.teal}66`,borderRadius:8,
-              padding:"12px 14px",
-            }}>
-              <div style={{fontSize:9,color:cs.teal,fontWeight:800,marginBottom:5,letterSpacing:0.5}}>
-                ✅ 가장 좋은 사이트
-              </div>
-              {summary.bestSite ? (
-                <>
-                  <div style={{fontSize:13,fontWeight:900,color:cs.text,marginBottom:2}}>
-                    {summary.bestSite.site}
-                  </div>
-                  <div style={{fontSize:18,fontWeight:900,color:cs.teal,fontFamily:"monospace"}}>
-                    {summary.bestSite.avgMargin.toFixed(2)}%
-                  </div>
-                  <div style={{fontSize:9,color:cs.dim,marginTop:2}}>
-                    {summary.bestSite.count}건 / {summary.bestSite.leagueCount}개 리그
-                  </div>
-                </>
-              ) : <div style={{fontSize:11,color:cs.dim}}>데이터 없음</div>}
-            </div>
-
-            {/* 가장 나쁜 사이트 */}
-            <div style={{
-              background:`${cs.red}11`,border:`1px solid ${cs.red}66`,borderRadius:8,
-              padding:"12px 14px",
-            }}>
-              <div style={{fontSize:9,color:cs.red,fontWeight:800,marginBottom:5,letterSpacing:0.5}}>
-                ❌ 가장 나쁜 사이트
-              </div>
-              {summary.worstSite ? (
-                <>
-                  <div style={{fontSize:13,fontWeight:900,color:cs.text,marginBottom:2}}>
-                    {summary.worstSite.site}
-                  </div>
-                  <div style={{fontSize:18,fontWeight:900,color:cs.red,fontFamily:"monospace"}}>
-                    {summary.worstSite.avgMargin.toFixed(2)}%
-                  </div>
-                  <div style={{fontSize:9,color:cs.dim,marginTop:2}}>
-                    {summary.worstSite.count}건 / {summary.worstSite.leagueCount}개 리그
-                  </div>
-                </>
-              ) : <div style={{fontSize:11,color:cs.dim}}>데이터 없음</div>}
-            </div>
-          </div>
-
-          {/* 필터 */}
-          <div style={{
-            background:cs.bg3,border:`1px solid ${cs.border}`,borderRadius:7,
-            padding:"10px 14px",marginBottom:10,
-            display:"flex",alignItems:"center",gap:14,flexWrap:"wrap",
-          }}>
-            <div style={{fontSize:11,color:cs.muted,fontWeight:700}}>필터:</div>
-            <div style={{display:"flex",gap:6}}>
-              {(["전체","축구","야구","농구"] as const).map(s=>(
-                <button key={s} onClick={()=>{setFilterSport(s);setFilterLeague("전체");}}
-                  style={{
-                    padding:"5px 12px",borderRadius:5,
-                    border:filterSport===s?`1.5px solid ${cs.pink}`:`1px solid ${cs.border2}`,
-                    background:filterSport===s?`${cs.pink}22`:cs.bg2,
-                    color:filterSport===s?cs.pink:cs.muted,
-                    cursor:"pointer",fontWeight:filterSport===s?900:700,fontSize:11,
-                  }}>{s}</button>
-              ))}
-            </div>
-            <div style={{fontSize:11,color:cs.muted,fontWeight:700,marginLeft:10}}>리그:</div>
-            <select value={filterLeague} onChange={e=>setFilterLeague(e.target.value)}
-              style={{
-                padding:"5px 10px",borderRadius:5,
-                border:`1px solid ${cs.border2}`,background:cs.bg2,color:cs.text,
-                fontSize:11,fontWeight:700,cursor:"pointer",
-              }}>
-              {leagueFilterOptions.map(l=><option key={l} value={l}>{l}</option>)}
-            </select>
-          </div>
-
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-            {/* 리그별 순위 */}
-            <div style={{background:cs.bg3,border:`1px solid ${cs.border}`,borderRadius:8,padding:"12px 14px"}}>
-              <div style={{fontSize:12,fontWeight:800,color:cs.purple,marginBottom:10}}>
-                🏆 리그별 마진율 순위 <span style={{fontSize:10,color:cs.muted,fontWeight:600}}>(낮은 순)</span>
-              </div>
-              {leagueRanking.length===0 ? (
-                <div style={{color:cs.dim,fontSize:11,textAlign:"center",padding:"20px 0"}}>데이터 없음</div>
-              ) : (
-                <div style={{display:"flex",flexDirection:"column",gap:5}}>
-                  {leagueRanking.map((r,i)=>{
-                    const color = evalMarginColor(r.avgMargin,cs);
-                    const tier = evalLeagueTier(r.avgMargin);
-                    const tierColor = (cs as any)[tier.color] || cs.muted;
-                    const isJunk = tier.tier === "잡리그";
-                    const lkey = `${r.sport}__${r.league}`;
-                    const isExpanded = expandedLeague === lkey;
-                    const siteBreakdown = leagueSiteBreakdown[lkey] || [];
-                    const canExpand = siteBreakdown.length > 0;
-                    return (
-                      <div key={lkey}>
-                        {/* 리그 행 (클릭 가능) */}
-                        <div
-                          onClick={()=>canExpand && setExpandedLeague(isExpanded ? null : lkey)}
-                          style={{
-                            display:"grid",
-                            gridTemplateColumns:"18px 24px 16px 1fr 60px 70px 40px",
-                            gap:6,padding:"7px 8px",
-                            background:isExpanded ? `${cs.pink}15` : (isJunk ? `${cs.red}15` : cs.bg2),
-                            border:isExpanded ? `1px solid ${cs.pink}66` : (isJunk ? `1px solid ${cs.red}55` : "1px solid transparent"),
-                            borderRadius:5,
-                            alignItems:"center",fontSize:11,
-                            cursor:canExpand ? "pointer" : "default",
-                            transition:"all 0.12s",
-                          }}>
-                          <div style={{fontSize:10,color:canExpand ? (isExpanded ? cs.pink : cs.muted) : cs.dim,fontWeight:900,textAlign:"center"}}>
-                            {canExpand ? (isExpanded ? "▼" : "▶") : ""}
-                          </div>
-                          <div style={{fontWeight:900,color:i<3?cs.amber:cs.muted,fontSize:11}}>#{i+1}</div>
-                          <div>{r.sport==="축구"?"⚽":r.sport==="야구"?"⚾":"🏀"}</div>
-                          <div style={{
-                            fontWeight:700,
-                            color:isJunk ? cs.red : cs.text,
-                            textDecoration:isJunk ? "line-through" : "none",
-                          }}>{r.league}</div>
-                          <div style={{textAlign:"right",fontWeight:900,color,fontFamily:"monospace"}}>
-                            {r.avgMargin.toFixed(2)}%
-                          </div>
-                          <div style={{
-                            textAlign:"center",fontSize:9,fontWeight:800,
-                            padding:"3px 5px",borderRadius:3,
-                            background:`${tierColor}22`,
-                            color:tierColor,
-                            border:`1px solid ${tierColor}55`,
-                          }} title={tier.desc}>
-                            {tier.emoji} {tier.tier}
-                          </div>
-                          <div style={{textAlign:"right",fontSize:9,color:cs.dim}}>
-                            {r.count}/{r.siteCount}
-                          </div>
-                        </div>
-
-                        {/* ▼ 펼쳐지면 그 리그의 사이트별 비교 표 */}
-                        {isExpanded && siteBreakdown.length>0 && (
-                          <div style={{
-                            background:`${cs.pink}08`,
-                            border:`1px solid ${cs.pink}33`,
-                            borderRadius:5,
-                            padding:"10px 12px",
-                            marginTop:3,marginLeft:18,marginBottom:3,
-                          }}>
-                            <div style={{fontSize:10,color:cs.pink,fontWeight:800,marginBottom:8,letterSpacing:0.3}}>
-                              🏪 {r.league}에서 사이트별 마진율 (낮은 순 = 베팅 유리)
-                            </div>
-                            <div style={{display:"flex",flexDirection:"column",gap:3}}>
-                              {siteBreakdown.map((sb,si)=>{
-                                const sColor = evalMarginColor(sb.avgMargin,cs);
-                                const sVerdict = evalSiteVerdict(sb.avgMargin);
-                                const svColor = (cs as any)[sVerdict.color] || cs.muted;
-                                const isPass = sVerdict.verdict === "패스";
-                                return (
-                                  <div key={sb.site} style={{
-                                    display:"grid",
-                                    gridTemplateColumns:"22px 1fr 55px 60px 30px",
-                                    gap:5,padding:"5px 8px",
-                                    background:isPass ? `${cs.red}15` : cs.bg2,
-                                    borderRadius:4,
-                                    alignItems:"center",fontSize:10,
-                                  }}>
-                                    <div style={{fontWeight:900,color:si===0?cs.green:si===siteBreakdown.length-1?cs.red:cs.muted,fontSize:10}}>
-                                      {si===0 ? "👑" : `#${si+1}`}
-                                    </div>
-                                    <div style={{
-                                      fontWeight:700,
-                                      color:isPass ? cs.red : cs.teal,
-                                      textDecoration:isPass ? "line-through" : "none",
-                                    }}>{sb.site}</div>
-                                    <div style={{textAlign:"right",fontWeight:900,color:sColor,fontFamily:"monospace"}}>
-                                      {sb.avgMargin.toFixed(2)}%
-                                    </div>
-                                    <div style={{
-                                      textAlign:"center",fontSize:8,fontWeight:800,
-                                      padding:"2px 4px",borderRadius:3,
-                                      background:`${svColor}22`,color:svColor,
-                                      border:`1px solid ${svColor}55`,
-                                    }}>
-                                      {sVerdict.emoji} {sVerdict.verdict}
-                                    </div>
-                                    <div style={{textAlign:"right",fontSize:8,color:cs.dim}}>{sb.count}건</div>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                            {/* 비교 인사이트 */}
-                            {siteBreakdown.length>=2 && (() => {
-                              const best = siteBreakdown[0];
-                              const worst = siteBreakdown[siteBreakdown.length-1];
-                              const diff = worst.avgMargin - best.avgMargin;
-                              if(diff < 0.5) return null; // 차이 미미하면 표시 안 함
-                              return (
-                                <div style={{
-                                  marginTop:8,padding:"6px 9px",
-                                  background:cs.bg2,borderRadius:4,
-                                  fontSize:9,color:cs.muted,lineHeight:1.5,
-                                }}>
-                                  💡 <strong style={{color:cs.green}}>{best.site}</strong>가 <strong style={{color:cs.red}}>{worst.site}</strong>보다
-                                  마진율 <strong style={{color:cs.amber}}>{diff.toFixed(2)}%p</strong> 낮음 →
-                                  <strong style={{color:cs.text}}> {best.site} 추천</strong>
-                                </div>
-                              );
-                            })()}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-              {/* 등급 범례 */}
-              <div style={{marginTop:10,paddingTop:8,borderTop:`1px solid ${cs.border}`,fontSize:9,color:cs.muted,lineHeight:1.6}}>
-                🏆 메이저 (≤5%) · ⭐ 중위 (≤7%) · ⚠️ 하위 (≤10%) · 🚫 잡리그 (&gt;10%)
-                <br/>
-                <span style={{color:cs.pink}}>▶</span> 클릭하면 그 리그의 사이트별 비교가 펼쳐집니다
-              </div>
-            </div>
-
-            {/* 사이트별 순위 */}
-            <div style={{background:cs.bg3,border:`1px solid ${cs.border}`,borderRadius:8,padding:"12px 14px"}}>
-              <div style={{fontSize:12,fontWeight:800,color:cs.teal,marginBottom:10}}>
-                🏪 사이트별 마진율 순위 <span style={{fontSize:10,color:cs.muted,fontWeight:600}}>(낮은 순)</span>
-              </div>
-              <div style={{fontSize:10,color:cs.dim,marginBottom:8}}>
-                필터: {filterSport}{filterLeague!=="전체" && ` · ${filterLeague}`}
-              </div>
-              {siteRanking.length===0 ? (
-                <div style={{color:cs.dim,fontSize:11,textAlign:"center",padding:"20px 0"}}>데이터 없음</div>
-              ) : (
-                <div style={{display:"flex",flexDirection:"column",gap:5}}>
-                  {siteRanking.map((r,i)=>{
-                    const color = evalMarginColor(r.avgMargin,cs);
-                    const verdict = evalSiteVerdict(r.avgMargin);
-                    const vColor = (cs as any)[verdict.color] || cs.muted;
-                    const isPass = verdict.verdict === "패스";
-                    return (
-                      <div key={r.site} style={{
-                        display:"grid",
-                        gridTemplateColumns:"24px 1fr 60px 70px 40px",
-                        gap:6,padding:"7px 8px",
-                        background:isPass ? `${cs.red}15` : cs.bg2,
-                        border:isPass ? `1px solid ${cs.red}55` : "1px solid transparent",
-                        borderRadius:5,
-                        alignItems:"center",fontSize:11,
-                        opacity:isPass ? 0.85 : 1,
-                      }}>
-                        <div style={{fontWeight:900,color:i<3?cs.amber:cs.muted,fontSize:11}}>#{i+1}</div>
-                        <div style={{
-                          fontWeight:700,
-                          color:isPass ? cs.red : cs.teal,
-                          textDecoration:isPass ? "line-through" : "none",
-                        }}>{r.site}</div>
-                        <div style={{textAlign:"right",fontWeight:900,color,fontFamily:"monospace"}}>
-                          {r.avgMargin.toFixed(2)}%
-                        </div>
-                        <div style={{
-                          textAlign:"center",fontSize:9,fontWeight:800,
-                          padding:"3px 5px",borderRadius:3,
-                          background:`${vColor}22`,
-                          color:vColor,
-                          border:`1px solid ${vColor}55`,
-                        }} title={verdict.desc}>
-                          {verdict.emoji} {verdict.verdict}
-                        </div>
-                        <div style={{textAlign:"right",fontSize:9,color:cs.dim}}>
-                          {r.count}/{r.leagueCount}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-              {/* 판정 범례 */}
-              <div style={{marginTop:10,paddingTop:8,borderTop:`1px solid ${cs.border}`,fontSize:9,color:cs.muted,lineHeight:1.6}}>
-                ✅ 추천 (≤5%) · 🟡 보통 (≤7%) · ❌ 패스 (&gt;7%)
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -6497,7 +6551,7 @@ function AppMain() {
         <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
           {([
             // ⚠️ 요청 #1: 스포츠 (테스트) 탭(bettingComboTest) 삭제됨
-            ["home","🏠 대시보드"],["bettingCombo","🎯 스포츠"],["pending","⏳ 베팅 내역"],["stats","📊 통계"],["roi","💹 수익률"],["strategy","📋 전략"],["apiManager","🔑 API 관리"],["dataManager","🗄 데이터"],["logs","📜 로그"],["marginCalc","🧮 마진계산기"],
+            ["home","🏠 대시보드"],["bettingCombo","🎯 스포츠"],["pending","⏳ 베팅 내역"],["stats","📊 통계"],["roi","💹 수익률"],["strategy","📋 전략"],["apiManager","🔑 API 관리"],["dataManager","🗄 데이터"],["logs","📜 로그"],["marginCalc","🧮 마진"],
           ] as [string,string][]).map(([k,l])=>{
             const ac = k==="pending"?C.amber:k==="home"?C.green:k==="apiManager"?C.purple:k==="dataManager"?C.red:k==="logs"?C.teal:k==="marginCalc"?"#f068a8":C.orange;
             const active = tab===k;
