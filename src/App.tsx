@@ -2273,8 +2273,9 @@ function AppMain() {
   const [stSelCountry,setStSelCountry]=useState("");
   const [stSelLeague,setStSelLeague]=useState("");
   const [stExpandedGameId,setStExpandedGameId]=useState<number|null>(null);
-  // rev.10: "모든 경기" 모드 — 좌측 트리 선택 무시하고 우측에 모든 종목 경기를 시간순으로
-  const [stShowAllGames, setStShowAllGames] = useState<boolean>(false);
+  // rev.10: 종목별 "모든 경기" 모드 — 좌측 트리에서 종목 안의 🌐 노드를 누르면 활성화
+  // 값이 Sport이면 그 종목의 매핑된 리그 모든 경기를 시간순으로 우측에 표시. null이면 일반 모드.
+  const [stShowAllGames, setStShowAllGames] = useState<Sport | null>(null);
   // 오늘 경기 중 종료된 그룹 펼침 여부 (기본: 접힘)
   const [stShowFinished,setStShowFinished]=useState<boolean>(false);
   // ★ "진행 중인 수동 경기" (어제 또는 그 이전에 추가된 미종료 수동 경기) 펼침 여부 (기본: 접힘)
@@ -7214,34 +7215,34 @@ function AppMain() {
         const selGame = stExpandedGameId ? selectedFixtures.find(g=>g.id===stExpandedGameId) : null;
 
         // ── rev.10: "모든 경기" 모드용 데이터 ──
-        // 좌측 트리 선택 무시하고, 매핑된 모든 사용자 리그의 fixtures + 모든 미종료 수동 경기를
+        // ── rev.10: 종목별 "모든 경기" 모드용 데이터 ──
+        // stShowAllGames에 들어있는 종목의 매핑된 리그 fixtures + 그 종목의 미종료 수동 경기를
         // 시간순(곧 시작/진행중인 경기 우선)으로 정렬해서 우측에 보여줌.
+        // (전체 통합이 아니라 종목 한정 — 사용자 요청)
         const nowMs = Date.now();
-        // API fixtures 중에서 매핑된 리그의 것만 (사용자가 등록한 리그)
-        const allApiFixtures: LiveFixture[] = stShowAllGames
-          ? stFixtures.filter(f => mappedApiIds.has(String(f.league_id)))
+        const allModeSport = stShowAllGames; // null | Sport
+        const allModeSportKr = allModeSport ? (SPORT_META[allModeSport]?.kr || "") : "";
+        // API fixtures: 그 종목 + 매핑된 리그의 것만
+        const allApiFixtures: LiveFixture[] = allModeSport
+          ? stFixtures.filter(f => f.sport === allModeSport && mappedApiIds.has(String(f.league_id)))
           : [];
-        // 모든 수동 경기 (미종료) — LiveFixture로 변환
-        const allManualFixtures: LiveFixture[] = stShowAllGames
-          ? manualGames.filter(g => !g.finished).map(g => {
-              // sportCat(한글) → Sport(영문) 역변환 — 매칭 안 되면 첫 번째 종목으로 폴백
-              const sportEn = (Object.entries(SPORT_META).find(([_, meta]) => meta.kr === g.sportCat)?.[0]) as Sport | undefined;
-              return {
-                id: parseInt(g.id) || (g.createdAt % 100000000),
-                sport: (sportEn || "football") as Sport,
-                league_id: -1,
-                league_name: g.league,
-                country: g.country,
-                home_team: g.homeTeam,
-                away_team: g.awayTeam,
-                start_time: new Date(g.createdAt).toISOString(),
-                status_short: g.finished ? "FT" : "NS",
-                status_long: g.finished ? "Finished" : "Not Started",
-                elapsed: null,
-                home_score: g.homeScore ?? null,
-                away_score: g.awayScore ?? null,
-              } as LiveFixture;
-            })
+        // 수동 경기: 그 종목 + 미종료
+        const allManualFixtures: LiveFixture[] = allModeSport
+          ? manualGames.filter(g => !g.finished && g.sportCat === allModeSportKr).map(g => ({
+              id: parseInt(g.id) || (g.createdAt % 100000000),
+              sport: allModeSport,
+              league_id: -1,
+              league_name: g.league,
+              country: g.country,
+              home_team: g.homeTeam,
+              away_team: g.awayTeam,
+              start_time: new Date(g.createdAt).toISOString(),
+              status_short: g.finished ? "FT" : "NS",
+              status_long: g.finished ? "Finished" : "Not Started",
+              elapsed: null,
+              home_score: g.homeScore ?? null,
+              away_score: g.awayScore ?? null,
+            } as LiveFixture))
           : [];
         // 합치고 종료된 건 제외, 시작 시각 기준 정렬 (라이브 = 가장 위, 그 다음 곧 시작 순)
         const allGamesUnsorted: LiveFixture[] = [...allApiFixtures, ...allManualFixtures]
@@ -7358,27 +7359,6 @@ function AppMain() {
                   </div>
                 </div>
                 <div style={{display:"flex",gap:4,alignItems:"center"}}>
-                  <button onClick={()=>{
-                    // 모든 경기 모드 토글: 좌측 선택 해제 + 우측 패널을 시간순 모드로
-                    const next = !stShowAllGames;
-                    setStShowAllGames(next);
-                    if(next){
-                      setStSelSport("");
-                      setStSelCountry("");
-                      setStSelLeague("");
-                      setStExpandedGameId(null);
-                    }
-                  }}
-                    title="오늘+내일 모든 종목 경기를 시간순으로"
-                    style={{
-                      padding:"5px 9px",borderRadius:5,
-                      border:`2px solid ${stShowAllGames?C.amber:C.teal}`,
-                      background:stShowAllGames?`${C.amber}33`:`${C.teal}11`,
-                      color:stShowAllGames?C.amber:C.teal,
-                      cursor:"pointer",fontWeight:800,fontSize:11,
-                    }}>
-                    🌐 모든 경기
-                  </button>
                   <button onClick={()=>setAddSportModal(true)}
                     style={{padding:"5px 10px",borderRadius:5,border:`2px solid ${C.purple}`,background:`${C.purple}22`,color:C.purple,cursor:"pointer",fontWeight:800,fontSize:12}}>+ 종목</button>
                   <button onClick={()=>refreshFixtures({force:false})} disabled={refreshLoading||isMobile}
@@ -7452,6 +7432,38 @@ function AppMain() {
                       </div>
                       {sportOpen && (
                         <div style={{marginLeft:6,paddingLeft:6,borderLeft:`1px solid ${C.border}`}}>
+                          {/* rev.10: 종목별 모든 경기 노드 (매핑된 리그가 1개 이상일 때만 표시) */}
+                          {(()=>{
+                            const sportMappedCount = stFixtures.filter(f => f.sport===sport && mappedApiIds.has(String(f.league_id))).length;
+                            const sportManualCount = manualGames.filter(g => !g.finished && g.sportCat===sKr).length;
+                            const totalAll = sportMappedCount + sportManualCount;
+                            if(totalAll === 0) return null;
+                            const isAllSel = stShowAllGames === sport;
+                            return (
+                              <button onClick={()=>{
+                                setStShowAllGames(isAllSel ? null : sport);
+                                if(!isAllSel){
+                                  setStSelSport(sport);
+                                  setStSelCountry("");
+                                  setStSelLeague("");
+                                  setStExpandedGameId(null);
+                                }
+                              }}
+                                style={{
+                                  width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",
+                                  padding:"7px 10px",marginBottom:3,
+                                  borderRadius:5,cursor:"pointer",
+                                  border:isAllSel?`1px solid ${C.amber}`:`1px dashed ${C.amber}55`,
+                                  background:isAllSel?`${C.amber}22`:`${C.amber}08`,
+                                  color:isAllSel?C.amber:C.amber+"cc",
+                                  fontSize:12,fontWeight:isAllSel?800:700,
+                                  textAlign:"left",
+                                }}>
+                                <span>🌐 {meta.kr} 모든 경기</span>
+                                <span style={{fontSize:10,fontWeight:600,opacity:0.8}}>{totalAll}경기</span>
+                              </button>
+                            );
+                          })()}
                           {tree.countries.length===0 ? (
                             <div style={{fontSize:10,color:C.dim,padding:"6px 6px"}}>
                               국가 없음 · <span style={{color:C.teal,cursor:"pointer",textDecoration:"underline"}} onClick={()=>setAddCountryModal({sport:sKr})}>추가</span>
@@ -7483,7 +7495,7 @@ function AppMain() {
                                       const mapped = !!apiId;
                                       return (
                                         <div key={lg} style={{display:"flex",gap:1,alignItems:"stretch",marginBottom:1}}>
-                                          <button onClick={()=>{setStSelSport(sport);setStSelCountry(country);setStSelLeague(lg);setStExpandedGameId(null);setStShowFinished(false);setStShowAllGames(false);}}
+                                          <button onClick={()=>{setStSelSport(sport);setStSelCountry(country);setStSelLeague(lg);setStExpandedGameId(null);setStShowFinished(false);setStShowAllGames(null);}}
                                             style={{flex:1,display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 10px",textAlign:"left",borderRadius:4,cursor:"pointer",border:isLgSel?`1px solid ${C.amber}`:"1px solid transparent",background:isLgSel?`${C.amber}22`:"transparent",color:isLgSel?C.amber:C.muted,fontSize:12,fontWeight:isLgSel?700:400,minWidth:0}}>
                                             <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>{mapped?"⚡":"○"} {krLeague(lg)}</span>
                                             <span style={{fontSize:10,color:C.dim,marginLeft:4,flexShrink:0}}>({lgGames})</span>
@@ -7566,6 +7578,36 @@ function AppMain() {
                       </div>
                       {sportOpen && (
                         <div style={{marginLeft:6,paddingLeft:6,borderLeft:`1px solid ${C.border}`}}>
+                          {/* rev.10: 종목별 모든 경기 노드 (커스텀 종목 - 수동 경기만 대상) */}
+                          {(()=>{
+                            const totalAll = manualGames.filter(g => !g.finished && g.sportCat===sKr).length;
+                            if(totalAll === 0) return null;
+                            const isAllSel = stShowAllGames === sport;
+                            return (
+                              <button onClick={()=>{
+                                setStShowAllGames(isAllSel ? null : sport);
+                                if(!isAllSel){
+                                  setStSelSport(sport);
+                                  setStSelCountry("");
+                                  setStSelLeague("");
+                                  setStExpandedGameId(null);
+                                }
+                              }}
+                                style={{
+                                  width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",
+                                  padding:"7px 10px",marginBottom:3,
+                                  borderRadius:5,cursor:"pointer",
+                                  border:isAllSel?`1px solid ${C.amber}`:`1px dashed ${C.amber}55`,
+                                  background:isAllSel?`${C.amber}22`:`${C.amber}08`,
+                                  color:isAllSel?C.amber:C.amber+"cc",
+                                  fontSize:12,fontWeight:isAllSel?800:700,
+                                  textAlign:"left",
+                                }}>
+                                <span>🌐 {sportName} 모든 경기</span>
+                                <span style={{fontSize:10,fontWeight:600,opacity:0.8}}>{totalAll}경기</span>
+                              </button>
+                            );
+                          })()}
                           {treeCountries.length===0 ? (
                             <div style={{fontSize:10,color:C.dim,padding:"6px 6px"}}>
                               국가 없음 · <span style={{color:C.purple,cursor:"pointer",textDecoration:"underline"}} onClick={()=>setAddCountryModal({sport:sKr})}>추가</span>
@@ -7596,7 +7638,7 @@ function AppMain() {
                                       const isLgSel = stSelSport===sport && stSelCountry===country && stSelLeague===lg;
                                       return (
                                         <div key={lg} style={{display:"flex",gap:1,alignItems:"stretch",marginBottom:1}}>
-                                          <button onClick={()=>{setStSelSport(sport);setStSelCountry(country);setStSelLeague(lg);setStExpandedGameId(null);setStShowFinished(false);setStShowAllGames(false);}}
+                                          <button onClick={()=>{setStSelSport(sport);setStSelCountry(country);setStSelLeague(lg);setStExpandedGameId(null);setStShowFinished(false);setStShowAllGames(null);}}
                                             style={{flex:1,display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 10px",textAlign:"left",borderRadius:4,cursor:"pointer",border:isLgSel?`1px solid ${C.amber}`:"1px solid transparent",background:isLgSel?`${C.amber}22`:"transparent",color:isLgSel?C.amber:C.muted,fontSize:12,fontWeight:isLgSel?700:400,minWidth:0}}>
                                             <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>○ {krLeague(lg)}</span>
                                             <span style={{fontSize:10,color:C.dim,marginLeft:4,flexShrink:0}}>({lgGames})</span>
@@ -7624,7 +7666,7 @@ function AppMain() {
               <div style={{padding:"10px 12px",borderBottom:`1px solid ${C.border}`,flexShrink:0,display:"flex",justifyContent:"space-between",alignItems:"center",gap:6}}>
                 <div style={{fontSize:12,fontWeight:800,color:stShowAllGames?C.amber:C.teal,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>
                   {stShowAllGames
-                    ? "🌐 모든 경기 (시간순)"
+                    ? `🌐 ${SPORT_META[stShowAllGames]?.kr || (stShowAllGames as unknown as string)} 모든 경기`
                     : stSelSport&&stSelCountry&&stSelLeague
                       ? `${SPORT_META[stSelSport]?.icon || customSportIcon(stSelSport as unknown as string)} ${krLeague(stSelLeague)}`
                       : "← 좌측에서 리그 선택"}
@@ -7683,7 +7725,7 @@ function AppMain() {
                           setStSelCountry(g.country);
                           setStSelLeague(g.league_name);
                           setStExpandedGameId(g.id);
-                          setStShowAllGames(false);
+                          setStShowAllGames(null);
                         }}
                         style={{
                           background:C.bg3,
@@ -8059,10 +8101,13 @@ function AppMain() {
                         const isBaseball = sport==="baseball";
                         const isBasketball = sport==="basketball";
                         const isVolleyball = sport==="volleyball";
-                        const ouLinesSoccer = [1.5,2.5,3.5];
+                        // rev.10: 사용자 요청으로 일부 라인 제거
+                        // - 오버/언더 1.5 라인 제거 (저점 베팅 의미 약함)
+                        // - 핸디캡 -0.5 라인 제거 (홈승과 사실상 동일하므로 중복)
+                        const ouLinesSoccer = [2.5,3.5];
                         const ouLinesBaseball = [4.5,5.5,6.5,7.5,8.5,9.5,10.5,11.5,12.5,13.5,14.5,15.5,16.5,17.5];
                         const ouLinesBasketball = [155.5,160.5,165.5,170.5,175.5,180.5,185.5,190.5,195.5,200.5,205.5,210.5,215.5,220.5];
-                        const handiLinesSoccer = [-0.5,0.5,1.5];
+                        const handiLinesSoccer = [0.5,1.5];
                         // 농구 신규 전략: 마핸 -2.5 ~ -9.5 (8개) / 플핸 +10.5 ~ +14.5 (5개)
                         const handiMinusBasketball = Array.from({length:8}, (_,i)=>2.5+i);   // 2.5,3.5,...,9.5 (마이너스)
                         const handiPlusBasketball  = Array.from({length:5}, (_,i)=>10.5+i);  // 10.5,11.5,...,14.5 (플러스)
