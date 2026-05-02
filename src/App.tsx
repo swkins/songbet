@@ -4245,7 +4245,14 @@ function AppMain() {
       const fid=Number((bet as any).fixtureId);
       const row=fixtureMap.get(fid);
       if(!row) continue;
-      const status=row.status_short as string;
+      // rev.10: 시간 기반 폴백 — DB의 status_short이 라이브여도 시간 충분히 지났으면 "FT"로 보정
+      // (API 지연이나 갱신 누락으로 자동 판정이 안 되던 문제 해결)
+      let status = row.status_short as string;
+      if (!isFinishedRaw(status) && !isUpcoming(status) && !isPostponed(status)) {
+        if (isLikelyFinishedByTime(row.start_time, row.sport)) {
+          status = "FT";
+        }
+      }
       const hs=row.home_score as number|null;
       const as_=row.away_score as number|null;
       // ★ 원본 영문 팀명 — 한글 베팅 옵션 매칭 폴백용
