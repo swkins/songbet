@@ -951,9 +951,45 @@ function MarginCalcTab() {
   const [filterSport, setFilterSport] = useState<"전체"|Sport마진>("전체");
   const [expandedKey, setExpandedKey] = useState<string|null>(null); // 메인 순위에서 클릭한 row의 key
 
+  // ── 빠른 계산기 (DB 저장 X, 화면에서만 마진율 즉시 확인) ──
+  // 메인 입력 폼은 통계 누적용이고, 이건 그냥 잠깐 마진율만 확인하고 싶을 때 쓰는 즉석 계산기.
+  // 2-way / 3-way 모드 토글, 결과는 화면에만 표시.
+  const [quickMode, setQuickMode] = useState<"2way"|"3way">("2way");
+  const [quickO1, setQuickO1] = useState("");
+  const [quickOX, setQuickOX] = useState("");
+  const [quickO2, setQuickO2] = useState("");
+
   // ── 마진 계산 ─────────────────────────────────────────
   const calcMargin = (odds:number[]): number =>
     (odds.reduce((sum,o)=>sum + 1/o, 0) - 1) * 100;
+
+  // ── 빠른 계산기 결과 (입력값이 유효하면 즉시 마진율 반환, 아니면 null) ──
+  const quickResult = useMemo<{margin:number; odds:number[]} | null>(()=>{
+    const parse = (s:string) => {
+      const t = s.trim();
+      if(!t) return NaN;
+      // formatOdds 로직과 동일하게 자동 변환 (185 → 1.85)
+      if(t.includes(".")) return parseFloat(t);
+      const n = parseInt(t,10);
+      if(isNaN(n) || n<=0) return NaN;
+      if(t.length<=1) return n;
+      return n / 100;
+    };
+    const o1 = parse(quickO1);
+    const o2 = parse(quickO2);
+    if(quickMode==="3way"){
+      const oX = parse(quickOX);
+      if(!o1 || !oX || !o2 || o1<1 || oX<1 || o2<1) return null;
+      const odds = [o1, oX, o2];
+      return { margin: calcMargin(odds), odds };
+    } else {
+      if(!o1 || !o2 || o1<1 || o2<1) return null;
+      const odds = [o1, o2];
+      return { margin: calcMargin(odds), odds };
+    }
+  },[quickMode, quickO1, quickOX, quickO2]);
+
+  const resetQuick = () => { setQuickO1(""); setQuickOX(""); setQuickO2(""); };
 
   // ── 배당 자동 변환: "134" → "1.34" ────────────────────
   const formatOdds = (raw:string): string => {
@@ -1257,6 +1293,9 @@ function MarginCalcTab() {
         marginBottom:18,
         alignItems:"start",
       }}>
+        {/* ── 좌측 wrapper: 입력 폼 + 빠른 계산기 (세로로 쌓음) ── */}
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+
         {/* ── 좌측: 컴팩트 입력 폼 (세로로 쌓음) ── */}
         <div style={{
           background:cs.bg3,
@@ -1428,6 +1467,141 @@ function MarginCalcTab() {
             + 기록 추가
           </button>
         </div>
+
+        {/* ── 빠른 마진율 계산기 (DB 저장 X, 즉석 확인용) ── */}
+        <div style={{
+          background:cs.bg3,
+          border:`1px solid ${cs.border}`,
+          borderTop:`4px solid ${cs.teal}`,
+          borderRadius:8,
+          padding:"12px 14px",
+          display:"flex",
+          flexDirection:"column",
+          gap:8,
+        }}>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:2}}>
+            <div style={{fontSize:12,fontWeight:800,color:cs.teal}}>
+              ⚡ 빠른 계산기
+            </div>
+            <div style={{fontSize:9,color:cs.dim,fontWeight:600}}>
+              저장 안 됨, 즉석 확인용
+            </div>
+          </div>
+
+          {/* 모드 토글 (2-way / 3-way) */}
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:5}}>
+            {(["2way","3way"] as const).map(m=>{
+              const active = quickMode === m;
+              return (
+                <button key={m} onClick={()=>{ setQuickMode(m); resetQuick(); }}
+                  style={{
+                    padding:"6px 8px",borderRadius:5,
+                    border:active?`1.5px solid ${cs.teal}`:`1px solid ${cs.border2}`,
+                    background:active?`${cs.teal}22`:cs.bg2,
+                    color:active?cs.teal:cs.muted,
+                    cursor:"pointer",fontWeight:active?900:700,fontSize:11,
+                  }}>
+                  {m==="2way"?"2-way (배당 2개)":"3-way (배당 3개)"}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* 배당 입력 */}
+          <div style={{display:"grid",gridTemplateColumns: quickMode==="3way"?"1fr 1fr 1fr":"1fr 1fr", gap:5}}>
+            <div>
+              <div style={{fontSize:8,color:cs.dim,fontWeight:700,marginBottom:2,textAlign:"center"}}>
+                {quickMode==="3way" ? "홈(1)" : "배당1"}
+              </div>
+              <input type="text" inputMode="decimal" value={quickO1}
+                onChange={e=>setQuickO1(e.target.value)}
+                onBlur={e=>setQuickO1(formatOdds(e.target.value))}
+                placeholder="1.85"
+                style={{...inputStyle,textAlign:"center",padding:"6px 4px"}}/>
+            </div>
+            {quickMode==="3way" && (
+              <div>
+                <div style={{fontSize:8,color:cs.dim,fontWeight:700,marginBottom:2,textAlign:"center"}}>
+                  무(X)
+                </div>
+                <input type="text" inputMode="decimal" value={quickOX}
+                  onChange={e=>setQuickOX(e.target.value)}
+                  onBlur={e=>setQuickOX(formatOdds(e.target.value))}
+                  placeholder="3.50"
+                  style={{...inputStyle,textAlign:"center",padding:"6px 4px"}}/>
+              </div>
+            )}
+            <div>
+              <div style={{fontSize:8,color:cs.dim,fontWeight:700,marginBottom:2,textAlign:"center"}}>
+                {quickMode==="3way" ? "원정(2)" : "배당2"}
+              </div>
+              <input type="text" inputMode="decimal" value={quickO2}
+                onChange={e=>setQuickO2(e.target.value)}
+                onBlur={e=>setQuickO2(formatOdds(e.target.value))}
+                placeholder={quickMode==="3way"?"4.20":"1.95"}
+                style={{...inputStyle,textAlign:"center",padding:"6px 4px"}}/>
+            </div>
+          </div>
+
+          {/* 결과 표시 */}
+          {quickResult ? (() => {
+            const m = quickResult.margin;
+            const color = evalMarginColor(m, cs);
+            const label = evalMarginLabel(m);
+            return (
+              <div style={{
+                background:`${color}11`,
+                border:`1px solid ${color}55`,
+                borderRadius:6,
+                padding:"10px 12px",
+                display:"flex",
+                alignItems:"center",
+                justifyContent:"space-between",
+                gap:8,
+              }}>
+                <div>
+                  <div style={{fontSize:9,color:cs.muted,fontWeight:700,letterSpacing:0.5,marginBottom:2}}>마진율</div>
+                  <div style={{fontSize:22,fontWeight:900,color,fontFamily:"monospace",lineHeight:1}}>
+                    {m.toFixed(2)}%
+                  </div>
+                </div>
+                <div style={{textAlign:"right"}}>
+                  <div style={{fontSize:9,color:cs.muted,fontWeight:700,letterSpacing:0.5,marginBottom:2}}>평가</div>
+                  <div style={{fontSize:13,fontWeight:900,color}}>
+                    {label}
+                  </div>
+                </div>
+              </div>
+            );
+          })() : (
+            <div style={{
+              background:cs.bg2,
+              border:`1px dashed ${cs.border2}`,
+              borderRadius:6,
+              padding:"12px",
+              fontSize:11,
+              color:cs.dim,
+              textAlign:"center",
+            }}>
+              배당을 입력하면 마진율이 즉시 표시됩니다
+            </div>
+          )}
+
+          {/* 초기화 버튼 (입력값 있을 때만) */}
+          {(quickO1 || quickOX || quickO2) && (
+            <button onClick={resetQuick}
+              style={{
+                padding:"5px 10px",borderRadius:4,
+                border:`1px solid ${cs.border2}`,
+                background:"transparent",color:cs.muted,
+                cursor:"pointer",fontWeight:700,fontSize:10,
+              }}>
+              ✕ 초기화
+            </button>
+          )}
+        </div>
+        </div>
+        {/* ── 좌측 wrapper 끝 ── */}
 
         {/* ── 우측: 종목별 TOP 카드 + 등급 안내 ── */}
         <div style={{display:"flex",flexDirection:"column",gap:10}}>
