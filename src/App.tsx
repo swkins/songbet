@@ -7258,7 +7258,7 @@ function AppMain() {
           const d = kstDateOf(f.start_time);
           return d !== kstToday && d !== kstTomorrow;
         });
-        const selGame = stExpandedGameId ? selectedFixtures.find(g=>g.id===stExpandedGameId) : null;
+        // selGame 계산은 allGamesSorted 정의 후 아래에서 처리 (모든 경기 모드 지원).
 
         // ── rev.10: "모든 경기" 모드용 데이터 ──
         // ── rev.10: 종목별 "모든 경기" 모드용 데이터 ──
@@ -7311,6 +7311,12 @@ function AppMain() {
           const d = kstDateOf(f.start_time);
           return d !== kstToday && d !== kstTomorrow;
         });
+        // ★ selGame: 일반 모드면 selectedFixtures, 모든 경기 모드면 allGamesSorted에서 찾음
+        const selGame = stExpandedGameId
+          ? (stShowAllGames
+              ? allGamesSorted.find(g=>g.id===stExpandedGameId)
+              : selectedFixtures.find(g=>g.id===stExpandedGameId))
+          : null;
         // "남은 시간" 헬퍼 (미시작 경기용)
         const remainingTimeStr = (iso: string): string => {
           try {
@@ -7721,38 +7727,23 @@ function AppMain() {
                     return (
                       <div key={g.id}
                         onClick={()=>{
-                          // rev.10: 매핑된 리그를 클릭했을 때, fixtures의 league_id를 stLeagueMap에서
-                          // 역검색해서 사용자가 등록한 리그 이름으로 setStSel.
-                          // 새 키 형식: "종목한글____리그" (국가 자리는 빈 문자열).
-                          const apiIdStr = String(g.league_id);
-                          const matchedKey = Object.keys(stLeagueMap).find(k => stLeagueMap[k] === apiIdStr);
-                          if(matchedKey){
-                            const parts = matchedKey.split("__");
-                            // parts[0] = 종목 한글, parts[1] = "" (옛 데이터면 국가), parts[2] = 리그
-                            setStSelSport(g.sport);
-                            setStSelCountry(parts[1] || ""); // 새 구조에서 country는 빈 문자열
-                            setStSelLeague(parts[2] || g.league_name);
-                          } else {
-                            // 매핑이 없는 경우 (수동 경기 등) — fallback
-                            setStSelSport(g.sport);
-                            setStSelCountry("");
-                            setStSelLeague(g.league_name);
-                          }
-                          setStExpandedGameId(g.id);
-                          setStShowAllGames(null);
+                          // rev.10: 모든 경기 모드는 그대로 유지하고, 클릭한 경기만 확장.
+                          // 우측 베팅 패널(selGame)이 allGamesSorted에서 이 ID를 찾아 표시.
+                          // 같은 카드 다시 클릭하면 접힘.
+                          setStExpandedGameId(prev => prev === g.id ? null : g.id);
                         }}
                         style={{
-                          background:hasBet?`${C.purple}0e`:C.bg3,
-                          border:`1px solid ${live?C.red+"66":hasBet?C.purple+"55":C.border}`,
-                          borderLeft:`3px solid ${live?C.red:hasBet?C.purple:C.teal}`,
+                          background:stExpandedGameId===g.id?`${C.teal}1a`:hasBet?`${C.purple}0e`:C.bg3,
+                          border:`1px solid ${stExpandedGameId===g.id?C.teal:live?C.red+"66":hasBet?C.purple+"55":C.border}`,
+                          borderLeft:`3px solid ${stExpandedGameId===g.id?C.teal:live?C.red:hasBet?C.purple:C.teal}`,
                           borderRadius:6,
                           padding:"7px 9px",
                           marginBottom:5,
                           cursor:"pointer",
                           transition:"background 0.15s",
                         }}
-                        onMouseEnter={e=>{e.currentTarget.style.background=hasBet?`${C.purple}1a`:C.bg2;}}
-                        onMouseLeave={e=>{e.currentTarget.style.background=hasBet?`${C.purple}0e`:C.bg3;}}
+                        onMouseEnter={e=>{if(stExpandedGameId!==g.id) e.currentTarget.style.background=hasBet?`${C.purple}1a`:C.bg2;}}
+                        onMouseLeave={e=>{if(stExpandedGameId!==g.id) e.currentTarget.style.background=hasBet?`${C.purple}0e`:C.bg3;}}
                       >
                         {/* 헤더: 종목 · 국가 · 리그 + 베팅 배지 + 시각/상태 */}
                         <div style={{display:"flex",alignItems:"center",gap:4,marginBottom:5,flexWrap:"wrap",fontSize:9}}>
@@ -7808,6 +7799,24 @@ function AppMain() {
                             </span>
                           ) : null}
                         </div>
+                        {/* 내 베팅 목록 — 어떤 옵션을 걸었는지 카드에 직접 표시 */}
+                        {hasBet && (
+                          <div style={{marginTop:6,paddingTop:5,borderTop:`1px dashed ${C.purple}44`,display:"flex",flexDirection:"column",gap:3}}>
+                            {myBetsOnThisGame.map(b=>{
+                              const opt = b.betOption==="홈승" ? `${b.homeTeam||homeKr} 승`
+                                : b.betOption==="원정승" ? `${b.awayTeam||awayKr} 승`
+                                : b.betOption;
+                              return (
+                                <div key={b.id} style={{display:"flex",alignItems:"center",gap:5,fontSize:9}}>
+                                  <span style={{color:C.purple,fontWeight:700}}>▸</span>
+                                  <span style={{color:C.orange,fontWeight:800,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{opt}</span>
+                                  <span style={{...numFontInline,color:C.teal,fontWeight:700}}>@{b.odds}</span>
+                                  <span style={{color:C.muted,fontSize:9,fontWeight:700}}>{b.site}</span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
                       </div>
                     );
                   };
@@ -7904,38 +7913,104 @@ function AppMain() {
                       // 종료된 경기는 기본적으로 접혀있고, 사용자가 헤더 클릭 시 펼쳐짐.
                       const todayActive = todayGames.filter(g=>!isFinished(g.status_short));
                       const todayFinished = todayGames.filter(g=>isFinished(g.status_short));
-                      // 카드 렌더링 헬퍼 (두 그룹에서 동일 UI)
+                      // 카드 렌더링 헬퍼 — 홈/원정 두 줄 + 우측 스코어 + 베팅 표시 (모든 경기 뷰와 통일)
                       const renderGameCard = (g:LiveFixture)=>{
                         const selected = stExpandedGameId===g.id;
                         const live = isLive(g.status_short);
                         const finished = isFinished(g.status_short);
                         const postponed = isPostponed(g.status_short);
-                        // 상태별 색상: 라이브=red, 종료/연기/취소=dim, 예정=amber
-                        const statusColor = live?C.red : finished?C.dim : postponed?C.muted : C.amber;
-                        // 상태별 표시: 라이브=🔴 한글라벨 + elapsed, 종료/연기/취소=한글라벨, 예정=⏰ 시간
-                        const statusText = live
-                          ? `🔴 ${statusLabel(g.status_short)}${g.elapsed?` ${g.elapsed}'`:""}`
-                          : finished
-                          ? "⏹ 종료"
-                          : postponed
-                          ? `⚠ ${statusLabel(g.status_short)}`
-                          : `⏰ ${fmtKstTime(g.start_time)}`;
+                        const homeKr = krTeam(g.home_team);
+                        const awayKr = krTeam(g.away_team);
+                        // ── 베팅 표시 ──
+                        // 같은 fixtureId로 진행 중/대기 베팅이 있으면 어떤 옵션을 걸었는지 카드에 보여줌.
+                        // 예) "부천 (0.5) @1.85 (이지벳)" 형식.
+                        const myBets = pending.filter(b => Number((b as any).fixtureId) === g.id);
+                        const hasBet = myBets.length > 0;
+                        // 상태 라벨 (작게)
+                        const statusBadge = live ? (
+                          <span style={{fontSize:9,fontWeight:900,color:C.red,background:`${C.red}15`,border:`1px solid ${C.red}66`,padding:"1px 6px",borderRadius:3,letterSpacing:0.3}}>
+                            🔴 {statusLabel(g.status_short)}{g.elapsed?` ${g.elapsed}'`:""}
+                          </span>
+                        ) : finished ? (
+                          <span style={{fontSize:9,fontWeight:700,color:C.muted,background:`${C.dim}11`,border:`1px solid ${C.dim}44`,padding:"1px 6px",borderRadius:3}}>
+                            ✓ 종료
+                          </span>
+                        ) : postponed ? (
+                          <span style={{fontSize:9,fontWeight:800,color:C.amber,background:`${C.amber}11`,border:`1px solid ${C.amber}55`,padding:"1px 6px",borderRadius:3}}>
+                            ⊘ {statusLabel(g.status_short)}
+                          </span>
+                        ) : (
+                          <span style={{fontSize:9,fontWeight:700,color:C.muted,background:`${C.muted}11`,border:`1px solid ${C.muted}44`,padding:"1px 6px",borderRadius:3,fontFamily:'"SF Pro Display","Inter",system-ui,sans-serif',fontVariantNumeric:"tabular-nums"}}>
+                            🕘 {fmtKstTime(g.start_time)}
+                          </span>
+                        );
+                        // 스코어 표시 여부 (라이브/종료에서만 의미 있음)
+                        const showScores = (live || finished) && g.home_score!=null && g.away_score!=null;
+                        const scoreColor = live ? C.red : C.text;
+                        const numFontInline: React.CSSProperties = {
+                          fontFamily: '"SF Pro Display", "Inter", -apple-system, BlinkMacSystemFont, system-ui, sans-serif',
+                          fontVariantNumeric: "tabular-nums",
+                        };
                         return (
                           <div key={g.id} onClick={()=>setStExpandedGameId(g.id)}
-                            style={{background:selected?`${C.teal}22`:C.bg3,border:`1px solid ${selected?C.teal:C.border}`,borderRadius:7,padding:"10px 12px",marginBottom:6,cursor:"pointer",position:"relative",opacity:(postponed||finished||live)?0.7:1}}>
-                            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5,fontSize:10}}>
-                              <span style={{color:statusColor,fontWeight:800}}>
-                                {statusText}
-                              </span>
-                              {(g.home_score!==null && g.away_score!==null) && (
-                                <span style={{color:C.text,fontWeight:900}}>{g.home_score} : {g.away_score}</span>
+                            style={{
+                              background:selected?`${C.teal}1a`:hasBet?`${C.purple}0e`:C.bg3,
+                              border:`1px solid ${selected?C.teal:live?C.red+"66":hasBet?C.purple+"55":C.border}`,
+                              borderLeft:`3px solid ${selected?C.teal:live?C.red:hasBet?C.purple:C.teal}`,
+                              borderRadius:7,padding:"8px 11px",marginBottom:6,cursor:"pointer",
+                              opacity:(postponed||finished)?0.75:1,
+                              transition:"background 0.15s",
+                            }}>
+                            {/* 헤더: 상태 배지 (좌) */}
+                            <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6,flexWrap:"wrap"}}>
+                              {statusBadge}
+                              {hasBet && (
+                                <span style={{fontSize:9,fontWeight:800,color:C.purple,background:`${C.purple}22`,border:`1px solid ${C.purple}66`,padding:"1px 6px",borderRadius:3,letterSpacing:0.3}}>
+                                  ✓ 베팅 {myBets.length>1?`${myBets.length}건`:""}
+                                </span>
                               )}
                             </div>
-                            <div style={{display:"grid",gridTemplateColumns:"1fr auto 1fr",alignItems:"center",gap:6,minWidth:0}}>
-                              <div style={{fontSize:13,fontWeight:800,color:C.text,textAlign:"right",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{krTeam(g.home_team)}</div>
-                              <div style={{fontSize:10,color:C.teal,fontWeight:800}}>VS</div>
-                              <div style={{fontSize:13,fontWeight:800,color:C.text,textAlign:"left",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{krTeam(g.away_team)}</div>
+                            {/* 본문: 홈/원정 두 줄 + 우측 스코어 */}
+                            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,padding:"3px 0"}}>
+                              <span style={{fontSize:14,fontWeight:700,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>
+                                {homeKr}
+                              </span>
+                              {showScores && (
+                                <span style={{...numFontInline,fontSize:18,fontWeight:800,color:scoreColor,minWidth:24,textAlign:"right",lineHeight:1}}>
+                                  {g.home_score}
+                                </span>
+                              )}
                             </div>
+                            <div style={{height:1,background:C.border,margin:"2px 0"}}/>
+                            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,padding:"3px 0"}}>
+                              <span style={{fontSize:14,fontWeight:700,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>
+                                {awayKr}
+                              </span>
+                              {showScores && (
+                                <span style={{...numFontInline,fontSize:18,fontWeight:800,color:scoreColor,minWidth:24,textAlign:"right",lineHeight:1}}>
+                                  {g.away_score}
+                                </span>
+                              )}
+                            </div>
+                            {/* 내 베팅 목록 — 어떤 옵션을 걸었는지 카드에 직접 표시 */}
+                            {hasBet && (
+                              <div style={{marginTop:7,paddingTop:6,borderTop:`1px dashed ${C.purple}44`,display:"flex",flexDirection:"column",gap:3}}>
+                                {myBets.map(b=>{
+                                  // 옵션 표시명 — "홈승"/"원정승"이면 팀명으로 변환
+                                  const opt = b.betOption==="홈승" ? `${b.homeTeam||homeKr} 승`
+                                    : b.betOption==="원정승" ? `${b.awayTeam||awayKr} 승`
+                                    : b.betOption;
+                                  return (
+                                    <div key={b.id} style={{display:"flex",alignItems:"center",gap:5,fontSize:10}}>
+                                      <span style={{color:C.purple,fontWeight:700}}>▸</span>
+                                      <span style={{color:C.orange,fontWeight:800,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{opt}</span>
+                                      <span style={{...numFontInline,color:C.teal,fontWeight:700}}>@{b.odds}</span>
+                                      <span style={{color:C.muted,fontSize:9,fontWeight:700}}>{b.site}</span>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
                           </div>
                         );
                       };
