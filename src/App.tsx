@@ -3821,10 +3821,12 @@ function AppMain() {
       // ── rev.10: 1회 마이그레이션 - 국가 단계 제거에 따른 데이터 리셋 ──
       // 사용자 요청: 종목 → 국가 → 리그 (3단계)에서 → 종목 → 리그 (2단계)로 단순화.
       // 옛 데이터(국가/리그/매핑)는 모두 비우고 사용자가 새 형식("대한민국 K리그" 등)으로
-      // 다시 등록. localStorage 플래그로 한 번만 실행.
+      // 다시 등록.
+      // ★ 플래그를 Supabase app_settings에 저장 → 모든 기기/브라우저에서 공유.
+      //   (localStorage에 두면 다른 브라우저/시크릿/PC에서 또 실행돼서 사용자 데이터 날아감!)
       try {
-        const migrationKey = "bt_lge_v2_migrated";
-        if (!localStorage.getItem(migrationKey)) {
+        const alreadyMigrated = settings.lge_v2_migrated === true || settings.lge_v2_migrated === "true";
+        if (!alreadyMigrated) {
           // 옛 데이터 모두 비움 — DB도 즉시 정리됨 (saveMCountries/saveMLeaguesStore의 diff 로직이 처리)
           if (Object.keys(_mCountries).length > 0) {
             saveMCountries({});
@@ -3836,8 +3838,18 @@ function AppMain() {
             setStLeagueMap({});
             db.saveAppSetting("sports_test_league_map", {});
           }
-          localStorage.setItem(migrationKey, new Date().toISOString());
+          // ★ 플래그를 Supabase에 영구 저장 — 다시는 마이그레이션 실행 안 됨
+          db.saveAppSetting("lge_v2_migrated", true);
+          // localStorage에도 함께 저장 (오프라인 폴백 / 첫 로드 빠름)
+          try { localStorage.setItem("bt_lge_v2_migrated", new Date().toISOString()); } catch {}
           addLog("🔄 마이그레이션", "국가/리그/매핑 초기화 (V2: 종목→리그 2단계로 단순화)");
+        } else {
+          // 이미 마이그레이션됐는데 localStorage에 플래그가 없는 경우 (다른 브라우저 등) 보충
+          try {
+            if (!localStorage.getItem("bt_lge_v2_migrated")) {
+              localStorage.setItem("bt_lge_v2_migrated", "synced-from-db");
+            }
+          } catch {}
         }
       } catch(e) {
         console.warn("[migration v2] failed", e);
