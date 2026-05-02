@@ -2273,6 +2273,8 @@ function AppMain() {
   const [stSelCountry,setStSelCountry]=useState("");
   const [stSelLeague,setStSelLeague]=useState("");
   const [stExpandedGameId,setStExpandedGameId]=useState<number|null>(null);
+  // rev.10: "모든 경기" 모드 — 좌측 트리 선택 무시하고 우측에 모든 종목 경기를 시간순으로
+  const [stShowAllGames, setStShowAllGames] = useState<boolean>(false);
   // 오늘 경기 중 종료된 그룹 펼침 여부 (기본: 접힘)
   const [stShowFinished,setStShowFinished]=useState<boolean>(false);
   // ★ "진행 중인 수동 경기" (어제 또는 그 이전에 추가된 미종료 수동 경기) 펼침 여부 (기본: 접힘)
@@ -7211,6 +7213,72 @@ function AppMain() {
         });
         const selGame = stExpandedGameId ? selectedFixtures.find(g=>g.id===stExpandedGameId) : null;
 
+        // ── rev.10: "모든 경기" 모드용 데이터 ──
+        // 좌측 트리 선택 무시하고, 매핑된 모든 사용자 리그의 fixtures + 모든 미종료 수동 경기를
+        // 시간순(곧 시작/진행중인 경기 우선)으로 정렬해서 우측에 보여줌.
+        const nowMs = Date.now();
+        // API fixtures 중에서 매핑된 리그의 것만 (사용자가 등록한 리그)
+        const allApiFixtures: LiveFixture[] = stShowAllGames
+          ? stFixtures.filter(f => mappedApiIds.has(String(f.league_id)))
+          : [];
+        // 모든 수동 경기 (미종료) — LiveFixture로 변환
+        const allManualFixtures: LiveFixture[] = stShowAllGames
+          ? manualGames.filter(g => !g.finished).map(g => {
+              // sportCat(한글) → Sport(영문) 역변환 — 매칭 안 되면 첫 번째 종목으로 폴백
+              const sportEn = (Object.entries(SPORT_META).find(([_, meta]) => meta.kr === g.sportCat)?.[0]) as Sport | undefined;
+              return {
+                id: parseInt(g.id) || (g.createdAt % 100000000),
+                sport: (sportEn || "football") as Sport,
+                league_id: -1,
+                league_name: g.league,
+                country: g.country,
+                home_team: g.homeTeam,
+                away_team: g.awayTeam,
+                start_time: new Date(g.createdAt).toISOString(),
+                status_short: g.finished ? "FT" : "NS",
+                status_long: g.finished ? "Finished" : "Not Started",
+                elapsed: null,
+                home_score: g.homeScore ?? null,
+                away_score: g.awayScore ?? null,
+              } as LiveFixture;
+            })
+          : [];
+        // 합치고 종료된 건 제외, 시작 시각 기준 정렬 (라이브 = 가장 위, 그 다음 곧 시작 순)
+        const allGamesUnsorted: LiveFixture[] = [...allApiFixtures, ...allManualFixtures]
+          .filter(f => !isFinished(f.status_short) && !isPostponed(f.status_short));
+        // 정렬 키: 라이브면 -∞ 가까이(가장 위), 아니면 start_time
+        // 라이브끼리는 시작 시각 오래된 순서 (먼저 시작한 게 위)
+        const allGamesSorted: LiveFixture[] = [...allGamesUnsorted].sort((a, b) => {
+          const aLive = isLive(a.status_short), bLive = isLive(b.status_short);
+          if (aLive && !bLive) return -1;
+          if (!aLive && bLive) return 1;
+          return new Date(a.start_time).getTime() - new Date(b.start_time).getTime();
+        });
+        // 오늘/내일 분리
+        const allLiveGames = allGamesSorted.filter(f => isLive(f.status_short));
+        const allTodayGames = allGamesSorted.filter(f => !isLive(f.status_short) && kstDateOf(f.start_time) === kstToday);
+        const allTomorrowGames = allGamesSorted.filter(f => !isLive(f.status_short) && kstDateOf(f.start_time) === kstTomorrow);
+        // 모레 이후 (수동 경기 + 일부 API 경기에서 발생 가능)
+        const allLaterGames = allGamesSorted.filter(f => {
+          if (isLive(f.status_short)) return false;
+          const d = kstDateOf(f.start_time);
+          return d !== kstToday && d !== kstTomorrow;
+        });
+        // "남은 시간" 헬퍼 (미시작 경기용)
+        const remainingTimeStr = (iso: string): string => {
+          try {
+            const diff = new Date(iso).getTime() - nowMs;
+            if (diff < 0) return "시작됨";
+            const mins = Math.floor(diff / 60000);
+            if (mins < 60) return `${mins}분 후`;
+            const hrs = Math.floor(mins / 60);
+            const remMin = mins % 60;
+            if (hrs < 24) return remMin > 0 ? `${hrs}시간 ${remMin}분 후` : `${hrs}시간 후`;
+            const days = Math.floor(hrs / 24);
+            return `${days}일 ${hrs % 24}시간 후`;
+          } catch { return ""; }
+        };
+
         // 종목별 경기 수 (트리에 표시용) — 매핑된 사용자 리그 기준
         // API-Sports 지원 5종목 (실제 API 호출 가능)
         const apiSportsList: Sport[] = ["football","baseball","basketball","volleyball","hockey"] as Sport[];
@@ -7290,6 +7358,27 @@ function AppMain() {
                   </div>
                 </div>
                 <div style={{display:"flex",gap:4,alignItems:"center"}}>
+                  <button onClick={()=>{
+                    // 모든 경기 모드 토글: 좌측 선택 해제 + 우측 패널을 시간순 모드로
+                    const next = !stShowAllGames;
+                    setStShowAllGames(next);
+                    if(next){
+                      setStSelSport("");
+                      setStSelCountry("");
+                      setStSelLeague("");
+                      setStExpandedGameId(null);
+                    }
+                  }}
+                    title="오늘+내일 모든 종목 경기를 시간순으로"
+                    style={{
+                      padding:"5px 9px",borderRadius:5,
+                      border:`2px solid ${stShowAllGames?C.amber:C.teal}`,
+                      background:stShowAllGames?`${C.amber}33`:`${C.teal}11`,
+                      color:stShowAllGames?C.amber:C.teal,
+                      cursor:"pointer",fontWeight:800,fontSize:11,
+                    }}>
+                    🌐 모든 경기
+                  </button>
                   <button onClick={()=>setAddSportModal(true)}
                     style={{padding:"5px 10px",borderRadius:5,border:`2px solid ${C.purple}`,background:`${C.purple}22`,color:C.purple,cursor:"pointer",fontWeight:800,fontSize:12}}>+ 종목</button>
                   <button onClick={()=>refreshFixtures({force:false})} disabled={refreshLoading||isMobile}
@@ -7394,7 +7483,7 @@ function AppMain() {
                                       const mapped = !!apiId;
                                       return (
                                         <div key={lg} style={{display:"flex",gap:1,alignItems:"stretch",marginBottom:1}}>
-                                          <button onClick={()=>{setStSelSport(sport);setStSelCountry(country);setStSelLeague(lg);setStExpandedGameId(null);setStShowFinished(false);}}
+                                          <button onClick={()=>{setStSelSport(sport);setStSelCountry(country);setStSelLeague(lg);setStExpandedGameId(null);setStShowFinished(false);setStShowAllGames(false);}}
                                             style={{flex:1,display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 10px",textAlign:"left",borderRadius:4,cursor:"pointer",border:isLgSel?`1px solid ${C.amber}`:"1px solid transparent",background:isLgSel?`${C.amber}22`:"transparent",color:isLgSel?C.amber:C.muted,fontSize:12,fontWeight:isLgSel?700:400,minWidth:0}}>
                                             <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>{mapped?"⚡":"○"} {krLeague(lg)}</span>
                                             <span style={{fontSize:10,color:C.dim,marginLeft:4,flexShrink:0}}>({lgGames})</span>
@@ -7507,7 +7596,7 @@ function AppMain() {
                                       const isLgSel = stSelSport===sport && stSelCountry===country && stSelLeague===lg;
                                       return (
                                         <div key={lg} style={{display:"flex",gap:1,alignItems:"stretch",marginBottom:1}}>
-                                          <button onClick={()=>{setStSelSport(sport);setStSelCountry(country);setStSelLeague(lg);setStExpandedGameId(null);setStShowFinished(false);}}
+                                          <button onClick={()=>{setStSelSport(sport);setStSelCountry(country);setStSelLeague(lg);setStExpandedGameId(null);setStShowFinished(false);setStShowAllGames(false);}}
                                             style={{flex:1,display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 10px",textAlign:"left",borderRadius:4,cursor:"pointer",border:isLgSel?`1px solid ${C.amber}`:"1px solid transparent",background:isLgSel?`${C.amber}22`:"transparent",color:isLgSel?C.amber:C.muted,fontSize:12,fontWeight:isLgSel?700:400,minWidth:0}}>
                                             <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>○ {krLeague(lg)}</span>
                                             <span style={{fontSize:10,color:C.dim,marginLeft:4,flexShrink:0}}>({lgGames})</span>
@@ -7533,15 +7622,19 @@ function AppMain() {
             {/* ─── 2. 경기 리스트 (오늘/내일 분리) ─── */}
             <div style={{width:340,flexShrink:0,background:C.bg2,borderRight:`1px solid ${C.border2}`,display:"flex",flexDirection:"column",overflow:"hidden",minHeight:0}}>
               <div style={{padding:"10px 12px",borderBottom:`1px solid ${C.border}`,flexShrink:0,display:"flex",justifyContent:"space-between",alignItems:"center",gap:6}}>
-                <div style={{fontSize:12,fontWeight:800,color:C.teal,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>
-                  {stSelSport&&stSelCountry&&stSelLeague
-                    ? `${SPORT_META[stSelSport]?.icon || customSportIcon(stSelSport as unknown as string)} ${krLeague(stSelLeague)}`
-                    : "← 좌측에서 리그 선택"}
+                <div style={{fontSize:12,fontWeight:800,color:stShowAllGames?C.amber:C.teal,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>
+                  {stShowAllGames
+                    ? "🌐 모든 경기 (시간순)"
+                    : stSelSport&&stSelCountry&&stSelLeague
+                      ? `${SPORT_META[stSelSport]?.icon || customSportIcon(stSelSport as unknown as string)} ${krLeague(stSelLeague)}`
+                      : "← 좌측에서 리그 선택"}
                 </div>
                 <div style={{fontSize:10,color:C.dim,flexShrink:0}}>
-                  오늘 {todayGames.length} · 내일 {tomorrowGames.length}
+                  {stShowAllGames
+                    ? `🔴 ${allLiveGames.length} · 오늘 ${allTodayGames.length} · 내일 ${allTomorrowGames.length}`
+                    : `오늘 ${todayGames.length} · 내일 ${tomorrowGames.length}`}
                 </div>
-                {stSelSport&&stSelCountry&&stSelLeague && (
+                {stSelSport&&stSelCountry&&stSelLeague && !stShowAllGames && (
                   <button onClick={()=>{
                     setMSport(SPORT_META[stSelSport!]?.kr || stSelSport!);
                     setMCountry(stSelCountry);
@@ -7554,10 +7647,159 @@ function AppMain() {
                 )}
               </div>
               <div style={{flex:1,overflowY:"auto",padding:"8px 8px 20px",minHeight:0}}>
-                {!stSelSport||!stSelCountry||!stSelLeague ? (
+                {stShowAllGames ? (() => {
+                  // ── 모든 경기 모드: 진행중 → 오늘 → 내일 → 이후 순으로 그룹화 ──
+                  if(allGamesSorted.length === 0){
+                    return (
+                      <div style={{textAlign:"center",color:C.dim,padding:"40px 10px"}}>
+                        <div style={{fontSize:28,marginBottom:8}}>🌐</div>
+                        <div style={{fontSize:11,color:C.muted}}>오늘/내일 경기가 없습니다</div>
+                        <div style={{fontSize:10,color:C.dim,marginTop:6,lineHeight:1.5}}>
+                          좌측 트리에서 리그를 매핑하거나<br/>
+                          ⚡ 강제 새로고침으로 데이터를 받아오세요
+                        </div>
+                      </div>
+                    );
+                  }
+                  const renderAllGameCard = (g: LiveFixture) => {
+                    const sportIcon = SPORT_META[g.sport]?.icon || customSportIcon(g.sport as unknown as string);
+                    const sportKr = SPORT_META[g.sport]?.kr || (g.sport as unknown as string);
+                    const live = isLive(g.status_short);
+                    const startTime = fmtKstTime(g.start_time);
+                    const startDate = fmtKstDate(g.start_time);
+                    const homeKr = krTeam(g.home_team);
+                    const awayKr = krTeam(g.away_team);
+                    const ctry = krCountry(g.country);
+                    const lg = krLeague(g.league_name);
+                    const numFontInline: React.CSSProperties = {
+                      fontFamily: '"SF Pro Display", "Inter", -apple-system, BlinkMacSystemFont, system-ui, sans-serif',
+                      fontVariantNumeric: "tabular-nums",
+                    };
+                    return (
+                      <div key={g.id}
+                        onClick={()=>{
+                          // 클릭하면 이 경기가 속한 리그를 선택해서 평소 베팅 흐름으로
+                          setStSelSport(g.sport);
+                          setStSelCountry(g.country);
+                          setStSelLeague(g.league_name);
+                          setStExpandedGameId(g.id);
+                          setStShowAllGames(false);
+                        }}
+                        style={{
+                          background:C.bg3,
+                          border:`1px solid ${live?C.red+"66":C.border}`,
+                          borderLeft:`3px solid ${live?C.red:C.teal}`,
+                          borderRadius:6,
+                          padding:"7px 9px",
+                          marginBottom:5,
+                          cursor:"pointer",
+                          transition:"background 0.15s",
+                        }}
+                        onMouseEnter={e=>{e.currentTarget.style.background=C.bg2;}}
+                        onMouseLeave={e=>{e.currentTarget.style.background=C.bg3;}}
+                      >
+                        {/* 헤더: 종목 · 국가 · 리그 + 시각/상태 */}
+                        <div style={{display:"flex",alignItems:"center",gap:4,marginBottom:5,flexWrap:"wrap",fontSize:9}}>
+                          <span style={{fontSize:12}}>{sportIcon}</span>
+                          <span style={{color:C.muted,fontWeight:700}}>{sportKr}</span>
+                          <span style={{color:C.dim}}>·</span>
+                          <span style={{color:C.teal,fontWeight:700}}>{ctry}</span>
+                          <span style={{color:C.dim}}>·</span>
+                          <span style={{color:C.muted,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:120}}>{lg}</span>
+                          {/* 우측 시각/상태 */}
+                          <span style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:4}}>
+                            {live ? (
+                              <span style={{...numFontInline,color:C.red,fontWeight:900,fontSize:10,letterSpacing:0.3}}>
+                                🔴 {statusLabel(g.status_short)}
+                              </span>
+                            ) : (
+                              <>
+                                <span style={{...numFontInline,color:C.text,fontWeight:700,fontSize:10}}>
+                                  {startDate} {startTime}
+                                </span>
+                                <span style={{color:C.amber,fontWeight:700,fontSize:9}}>
+                                  · {remainingTimeStr(g.start_time)}
+                                </span>
+                              </>
+                            )}
+                          </span>
+                        </div>
+                        {/* 본문: 홈팀/원정팀 두 줄 + 우측 스코어 */}
+                        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:6,padding:"2px 0"}}>
+                          <span style={{fontSize:12,fontWeight:700,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                            {homeKr}
+                          </span>
+                          {live && g.home_score!=null ? (
+                            <span style={{...numFontInline,fontSize:14,fontWeight:800,color:C.red,minWidth:20,textAlign:"right",lineHeight:1}}>
+                              {g.home_score}
+                            </span>
+                          ) : null}
+                        </div>
+                        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:6,padding:"2px 0"}}>
+                          <span style={{fontSize:12,fontWeight:700,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                            {awayKr}
+                          </span>
+                          {live && g.away_score!=null ? (
+                            <span style={{...numFontInline,fontSize:14,fontWeight:800,color:C.red,minWidth:20,textAlign:"right",lineHeight:1}}>
+                              {g.away_score}
+                            </span>
+                          ) : null}
+                        </div>
+                      </div>
+                    );
+                  };
+                  return (
+                    <>
+                      {/* 진행중 그룹 */}
+                      {allLiveGames.length > 0 && (
+                        <>
+                          <div style={{display:"flex",alignItems:"center",gap:6,padding:"4px 2px 6px",borderBottom:`1px solid ${C.red}33`,marginBottom:6}}>
+                            <span style={{fontSize:10,fontWeight:900,color:C.red,letterSpacing:0.5}}>🔴 진행중</span>
+                            <span style={{fontSize:9,color:C.muted}}>{allLiveGames.length}경기</span>
+                          </div>
+                          {allLiveGames.map(renderAllGameCard)}
+                        </>
+                      )}
+                      {/* 오늘 그룹 */}
+                      {allTodayGames.length > 0 && (
+                        <>
+                          <div style={{display:"flex",alignItems:"center",gap:6,padding:"8px 2px 6px",borderBottom:`1px solid ${C.green}33`,marginBottom:6,marginTop:allLiveGames.length>0?8:0}}>
+                            <span style={{fontSize:10,fontWeight:900,color:C.green,letterSpacing:0.5}}>🕘 오늘</span>
+                            <span style={{fontSize:9,color:C.muted}}>{allTodayGames.length}경기</span>
+                          </div>
+                          {allTodayGames.map(renderAllGameCard)}
+                        </>
+                      )}
+                      {/* 내일 그룹 */}
+                      {allTomorrowGames.length > 0 && (
+                        <>
+                          <div style={{display:"flex",alignItems:"center",gap:6,padding:"8px 2px 6px",borderBottom:`1px solid ${C.amber}33`,marginBottom:6,marginTop:8}}>
+                            <span style={{fontSize:10,fontWeight:900,color:C.amber,letterSpacing:0.5}}>📅 내일</span>
+                            <span style={{fontSize:9,color:C.muted}}>{allTomorrowGames.length}경기</span>
+                          </div>
+                          {allTomorrowGames.map(renderAllGameCard)}
+                        </>
+                      )}
+                      {/* 모레 이후 (수동 경기 등) */}
+                      {allLaterGames.length > 0 && (
+                        <>
+                          <div style={{display:"flex",alignItems:"center",gap:6,padding:"8px 2px 6px",borderBottom:`1px solid ${C.purple}33`,marginBottom:6,marginTop:8}}>
+                            <span style={{fontSize:10,fontWeight:900,color:C.purple,letterSpacing:0.5}}>📆 이후</span>
+                            <span style={{fontSize:9,color:C.muted}}>{allLaterGames.length}경기</span>
+                          </div>
+                          {allLaterGames.map(renderAllGameCard)}
+                        </>
+                      )}
+                    </>
+                  );
+                })() : !stSelSport||!stSelCountry||!stSelLeague ? (
                   <div style={{textAlign:"center",color:C.dim,padding:"40px 10px"}}>
                     <div style={{fontSize:28,marginBottom:8}}>🎯</div>
                     <div style={{fontSize:11,color:C.muted}}>국가 → 리그 선택</div>
+                    <div style={{fontSize:9,color:C.dim,marginTop:8,lineHeight:1.5}}>
+                      또는 좌측 상단의 <span style={{color:C.amber,fontWeight:700}}>🌐 모든 경기</span><br/>
+                      버튼으로 시간순 보기
+                    </div>
                   </div>
                 ) : !selApiId && manualFixtures.length === 0 ? (
                   <div style={{textAlign:"center",color:C.dim,padding:"30px 10px"}}>
