@@ -2684,8 +2684,12 @@ function AppMain() {
     const n=newLeagueNameM.trim();if(!n)return;
     const {sport,country}=addLeagueModalM;
     const key=`${sport}__${country}`;
+    // rev.10: 중복 검사는 그 종목의 모든 키(옛/신)에서
+    const dupExists = Object.keys(mLeagues).some(k =>
+      (k === `${sport}__` || k.startsWith(`${sport}__`)) && (mLeagues[k]||[]).includes(n)
+    );
+    if(dupExists) return alert(`이미 존재하는 리그입니다: ${n}`);
     const list=mLeagues[key]||[];
-    if(list.includes(n)||allLeaguesForCountry(sport,country).includes(n))return alert(`이미 존재하는 리그입니다: "${sport} / ${country} / ${n}"`);
     saveMLeaguesStore({...mLeagues,[key]:[...list,n]});
     // 추가된 리그 자동 선택
     setMSport(sport);
@@ -2755,19 +2759,44 @@ function AppMain() {
     }
     else if(editMetaModal.type==="league"){
       const {sport,country,oldName}=editMetaModal;
-      if(!sport||!country)return;
-      const key=`${sport}__${country}`;
-      const list=mLeagues[key]||[];
-      const idx=list.indexOf(oldName);
-      if(idx>=0){
-        const newList=[...list];newList[idx]=newName;
-        saveMLeaguesStore({...mLeagues,[key]:newList});
-      } else {
-        saveMLeaguesStore({...mLeagues,[key]:[...list,newName]});
+      if(!sport)return;
+      // rev.10: country는 새 구조에서 빈 문자열 — sport와 oldName만 있으면 수정 가능
+      // mLeagues는 키 "종목__국가" — 이 종목의 모든 키에서 oldName을 newName으로 교체
+      const newLeagues = {...mLeagues};
+      for(const k of Object.keys(newLeagues)){
+        if(k === `${sport}__` || k.startsWith(`${sport}__`)){
+          const list = newLeagues[k] || [];
+          const idx = list.indexOf(oldName);
+          if(idx >= 0){
+            const newList = [...list]; newList[idx] = newName;
+            newLeagues[k] = newList;
+          }
+        }
       }
-      saveManualGames(manualGames.map(g=>g.sportCat===sport&&g.country===country&&g.league===oldName?{...g,league:newName}:g));
-      if(mLeague===oldName)setMLeague(newName);
-      addLog("✏️ 리그 수정",`${sport}/${country}/${oldName} → ${newName}`);
+      // 키가 `${sport}__${country||""}`에 oldName이 없었다면 새로 추가 (보험)
+      const targetKey = `${sport}__${country||""}`;
+      if(!(newLeagues[targetKey]||[]).includes(newName)){
+        newLeagues[targetKey] = [...(newLeagues[targetKey]||[]).filter(l=>l!==oldName), newName];
+      }
+      saveMLeaguesStore(newLeagues);
+      // 수동 경기의 league 필드도 같이 변경
+      saveManualGames(manualGames.map(g=>g.sportCat===sport&&g.league===oldName?{...g,league:newName}:g));
+      // stLeagueMap의 키도 갱신 — "종목__국가__oldName" 형태 → "종목__국가__newName"
+      const newMap = {...stLeagueMap};
+      let mapChanged = false;
+      for(const mk of Object.keys(newMap)){
+        const parts = mk.split("__");
+        if(parts[0] === sport && parts[parts.length-1] === oldName){
+          parts[parts.length-1] = newName;
+          const newKey = parts.join("__");
+          newMap[newKey] = newMap[mk];
+          delete newMap[mk];
+          mapChanged = true;
+        }
+      }
+      if(mapChanged) saveStLeagueMap(newMap);
+      if(mLeague===oldName) setMLeague(newName);
+      addLog("✏️ 리그 수정",`${sport}/${oldName} → ${newName}`);
     }
     setEditMetaModal(null);setEditMetaNewName("");
   };
@@ -2814,21 +2843,34 @@ function AppMain() {
       if(mCountry===oldName){setMCountry("");setMLeague("");}
       addLog("🗑 국가 삭제",`${sport}/${oldName}`);
     }
-    else if(type==="league" && sport && country){
-      const relatedGames = manualGames.filter(g=>g.sportCat===sport&&g.country===country&&g.league===oldName).length;
+    else if(type==="league" && sport){
+      // rev.10: country는 새 구조에서 빈 문자열 — sport와 oldName만 있으면 삭제 가능
+      const relatedGames = manualGames.filter(g=>g.sportCat===sport&&g.league===oldName).length;
       if(!window.confirm(`리그 "${oldName}" 을(를) 삭제하시겠습니까?\n이 리그의 경기 ${relatedGames}개가 함께 삭제됩니다.`)) return;
-      const key=`${sport}__${country}`;
-      saveMLeaguesStore({...mLeagues,[key]:(mLeagues[key]||[]).filter(l=>l!==oldName)});
-      saveManualGames(manualGames.filter(g=>!(g.sportCat===sport&&g.country===country&&g.league===oldName)));
-      // rev.10: stLeagueMap에서 이 리그의 매핑 제거
-      const mk = `${sport}__${country}__${oldName}`;
-      if(stLeagueMap[mk]){
-        const newMap = {...stLeagueMap};
-        delete newMap[mk];
-        saveStLeagueMap(newMap);
+      // mLeagues는 키가 "종목__국가" 형식 — 그 종목의 모든 국가 자리에서 이 리그 제거 (옛 데이터 호환)
+      const newLeagues = {...mLeagues};
+      for(const k of Object.keys(newLeagues)){
+        if(k === `${sport}__` || k.startsWith(`${sport}__`)){
+          newLeagues[k] = (newLeagues[k]||[]).filter(l => l !== oldName);
+        }
       }
-      if(mLeague===oldName)setMLeague("");
-      addLog("🗑 리그 삭제",`${sport}/${country}/${oldName}`);
+      saveMLeaguesStore(newLeagues);
+      // 관련 수동 경기도 삭제
+      saveManualGames(manualGames.filter(g=>!(g.sportCat===sport&&g.league===oldName)));
+      // stLeagueMap에서 이 리그의 매핑 제거 — 키 형식: "종목__국가__리그" 또는 "종목____리그"
+      const newMap = {...stLeagueMap};
+      let mapRemoved = false;
+      for(const mk of Object.keys(newMap)){
+        const parts = mk.split("__");
+        // parts[0]이 sport이고 마지막 부분이 oldName이면 매핑 제거
+        if(parts[0] === sport && parts[parts.length-1] === oldName){
+          delete newMap[mk];
+          mapRemoved = true;
+        }
+      }
+      if(mapRemoved) saveStLeagueMap(newMap);
+      if(mLeague===oldName) setMLeague("");
+      addLog("🗑 리그 삭제",`${sport}/${oldName}`);
     }
     setEditMetaModal(null);setEditMetaNewName("");
   };
