@@ -4665,9 +4665,9 @@ function AppMain() {
 
     // ── rev.9: 경기 상태 표시 (예정 시각 / 진행중 스코어 / 종료 결과) ──
     // 수동 베팅이거나 fixtureId 없으면 표시 안 함 (정보가 없음).
-    // autoResult(대기_*)면 도장이 이미 표시되니 status도 안 보여줘서 시각적 충돌 방지.
+    // autoResult(대기_*)인 경우에도 표시 — 도장이 떠 있어도 최종 스코어를 알고 싶음.
     let statusBadge: React.ReactElement | null = null;
-    if(hasFixtureId && !autoResult){
+    if(hasFixtureId){
       const fid = Number((b as any).fixtureId);
       const info = liveFixtureMap.get(fid);
       if(!info){
@@ -4704,13 +4704,23 @@ function AppMain() {
           );
         } else if(isFinished(st)){
           // 종료 — 회색 톤 + 최종 스코어
-          statusBadge = (
-            <div style={{display:"flex",alignItems:"center",gap:6,padding:"4px 9px",background:`${C.dim}11`,border:`1px solid ${C.dim}55`,borderRadius:5,fontSize:11,marginBottom:5}}>
-              <span style={{color:C.muted,fontWeight:700,fontSize:10}}>✓ 종료</span>
-              {scoreStr && <span style={{color:C.text,fontWeight:900,fontFamily:"monospace",fontSize:13,letterSpacing:1}}>{scoreStr}</span>}
-              <span style={{color:C.dim,fontWeight:600,fontSize:9,marginLeft:"auto"}}>{statusLabel(st)}</span>
-            </div>
-          );
+          // autoResult(대기_*)면 카드 우측 상단에 띄울 거라 컴팩트하게 (스코어만 강조)
+          if(autoResult){
+            statusBadge = (
+              <div style={{display:"flex",alignItems:"center",gap:4,padding:"2px 7px",background:C.bg2,border:`1px solid ${stampColor}66`,borderRadius:4,fontSize:10}}>
+                <span style={{color:stampColor,fontWeight:700,fontSize:9}}>최종</span>
+                {scoreStr && <span style={{color:C.text,fontWeight:900,fontFamily:"monospace",fontSize:12,letterSpacing:1}}>{scoreStr}</span>}
+              </div>
+            );
+          } else {
+            statusBadge = (
+              <div style={{display:"flex",alignItems:"center",gap:6,padding:"4px 9px",background:`${C.dim}11`,border:`1px solid ${C.dim}55`,borderRadius:5,fontSize:11,marginBottom:5}}>
+                <span style={{color:C.muted,fontWeight:700,fontSize:10}}>✓ 종료</span>
+                {scoreStr && <span style={{color:C.text,fontWeight:900,fontFamily:"monospace",fontSize:13,letterSpacing:1}}>{scoreStr}</span>}
+                <span style={{color:C.dim,fontWeight:600,fontSize:9,marginLeft:"auto"}}>{statusLabel(st)}</span>
+              </div>
+            );
+          }
         } else if(isPostponed(st)){
           // 연기/취소/중단 등
           statusBadge = (
@@ -4726,7 +4736,13 @@ function AppMain() {
       <div key={b.id} style={{position:"relative",background:autoResult?`${stampColor}0d`:C.bg3,border:`1px solid ${autoResult?stampColor+"99":C.amber+"44"}`,borderRadius:7,padding:"9px 11px",marginBottom:6,overflow:"hidden"}}>
         {autoResult && (
           <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",pointerEvents:"none",zIndex:1}}>
-            <div style={{border:`5px solid ${stampColor}`,borderRadius:10,padding:"8px 22px",transform:"rotate(-12deg)",fontSize:26,fontWeight:900,color:stampColor,letterSpacing:6,opacity:0.7,textShadow:`0 0 12px ${stampColor}`,background:`${stampColor}18`}}>{stampText}</div>
+            <div style={{border:`3px solid ${stampColor}`,borderRadius:7,padding:"4px 14px",transform:"rotate(-12deg)",fontSize:17,fontWeight:900,color:stampColor,letterSpacing:3,opacity:0.65,textShadow:`0 0 8px ${stampColor}`,background:`${stampColor}14`}}>{stampText}</div>
+          </div>
+        )}
+        {/* 자동 판정 카드면 결과 스코어를 우측 상단에 또렷이 띄움 (본문 흐림 영향 안 받음) */}
+        {autoResult && statusBadge && (
+          <div style={{position:"absolute",top:6,right:8,zIndex:3}}>
+            {statusBadge}
           </div>
         )}
         <div style={{position:"relative",zIndex:2,opacity:autoResult?0.5:1}}>
@@ -4739,7 +4755,7 @@ function AppMain() {
             <span style={{fontSize:11,color:C.orange,fontWeight:800,marginLeft:"auto"}}>{displayBetOption}</span>
           </div>
           <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:6,lineHeight:1.3,wordBreak:"break-word"}}>{title}</div>
-          {statusBadge}
+          {!autoResult && statusBadge}
           <div style={{display:"flex",alignItems:"center",gap:7,flexWrap:"wrap"}}>
             <div style={{display:"flex",gap:8,flex:1,minWidth:100}}>
               <span style={{fontSize:10,color:C.muted}}>배당 <span style={{color:C.teal,fontWeight:800,fontSize:11}}>{b.odds}</span></span>
@@ -4754,8 +4770,8 @@ function AppMain() {
           </div>
         </div>
         {autoResult && (
-          <div style={{position:"relative",zIndex:3,marginTop:8,display:"flex",justifyContent:"flex-end"}}>
-            <button onClick={()=>confirmResult(b.id)} style={{padding:"6px 20px",borderRadius:6,fontWeight:900,fontSize:13,cursor:"pointer",letterSpacing:1,background:stampColor,border:`2px solid ${stampColor}`,color:C.bg,boxShadow:`0 2px 10px ${stampColor}66`}}>
+          <div style={{position:"relative",zIndex:3,marginTop:6,display:"flex",justifyContent:"flex-end"}}>
+            <button onClick={()=>confirmResult(b.id)} style={{padding:"3px 12px",borderRadius:4,fontWeight:800,fontSize:10,cursor:"pointer",letterSpacing:0.5,background:stampColor,border:`1px solid ${stampColor}`,color:C.bg,boxShadow:`0 1px 5px ${stampColor}55`}}>
               {actualResult==="승"?"✅ 적중 확인":actualResult==="패"?"❌ 실패 확인":"✔ 확인"}
             </button>
           </div>
