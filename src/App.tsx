@@ -2534,9 +2534,10 @@ function AppMain() {
       setSiteStatesRaw(newSS);db.upsertSiteState(slipSite,newSS[slipSite]);
       addLog("➕ 베팅",`${homeKr} vs ${awayKr}/${item.optLabel}/${fmtDisp(slipAmount,dollar)}`);
     });
-    // ★ 베팅 완료 후 사이트 선택 해제 (실수 방지)
+    // ★ 베팅 완료 후 사이트 선택 + 라이브 체크 해제 (실수 방지)
     setSlip([]);
     setSlipSite("");
+    setSlipIsLive(false);
   };
 
   // 모의 베팅 (사용 안 하지만 타입 호환)
@@ -4916,8 +4917,8 @@ function AppMain() {
           {b.league && <span style={{fontSize:9,color:C.muted,background:C.bg,padding:"1px 5px",borderRadius:3}}>{leagueNameMap[b.league] || b.league}</span>}
           {isManual && <span style={{fontSize:9,color:C.purple,background:`${C.purple}22`,border:`1px solid ${C.purple}44`,padding:"1px 5px",borderRadius:3,fontWeight:700}}>수동</span>}
           <span style={{
-            fontSize:12,color:C.orange,background:`${C.orange}1f`,
-            border:`1px solid ${C.orange}88`,padding:"2px 9px",borderRadius:5,
+            fontSize:11,color:C.orange,background:`${C.orange}1f`,
+            border:`1px solid ${C.orange}88`,padding:"2px 8px",borderRadius:5,
             fontWeight:900,marginLeft:"auto",letterSpacing:0.2,
             boxShadow:`0 0 0 1px ${C.orange}11 inset`,
           }}>{displayBetOption}</span>
@@ -4939,7 +4940,7 @@ function AppMain() {
                   <span style={{fontSize:9,color:C.orange,background:`${C.orange}22`,border:`1px solid ${C.orange}66`,padding:"1px 5px",borderRadius:3,fontWeight:800,flexShrink:0}}>BET</span>
                 )}
                 <span style={{
-                  fontSize:13,fontWeight:betDirection==="home"?900:700,
+                  fontSize:12,fontWeight:betDirection==="home"?900:700,
                   color:betDirection==="home"?C.orange:C.text,
                   overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",
                 }}>{homeTeamDisp}</span>
@@ -4961,7 +4962,7 @@ function AppMain() {
                   <span style={{fontSize:9,color:C.orange,background:`${C.orange}22`,border:`1px solid ${C.orange}66`,padding:"1px 5px",borderRadius:3,fontWeight:800,flexShrink:0}}>BET</span>
                 )}
                 <span style={{
-                  fontSize:13,fontWeight:betDirection==="away"?900:700,
+                  fontSize:12,fontWeight:betDirection==="away"?900:700,
                   color:betDirection==="away"?C.orange:C.text,
                   overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",
                 }}>{awayTeamDisp}</span>
@@ -8830,10 +8831,17 @@ function AppMain() {
                       );
                     })()}
 
-                    {/* 통계 포함 */}
-                    <div style={{display:"flex",alignItems:"center",gap:7,marginBottom:11}}>
-                      <input type="checkbox" id="cbStatIncST" checked={slipInclude} onChange={e=>setSlipInclude(e.target.checked)} style={{width:15,height:15,accentColor:C.purple}}/>
-                      <label htmlFor="cbStatIncST" style={{fontSize:12,color:C.muted,cursor:"pointer"}}>통계 포함</label>
+                    {/* 통계 포함 / ⚡ 라이브 베팅 (rev.4 복구) */}
+                    <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:11,padding:"8px 10px",background:slipIsLive?`${C.red}11`:C.bg3,border:`1px solid ${slipIsLive?C.red+"55":C.border}`,borderRadius:6,transition:"background 0.15s, border-color 0.15s"}}>
+                      <div style={{display:"flex",alignItems:"center",gap:6}}>
+                        <input type="checkbox" id="cbStatIncST" checked={slipInclude} onChange={e=>setSlipInclude(e.target.checked)} style={{width:14,height:14,accentColor:C.purple,cursor:"pointer"}}/>
+                        <label htmlFor="cbStatIncST" style={{fontSize:11,color:C.muted,cursor:"pointer",userSelect:"none"}}>통계 포함</label>
+                      </div>
+                      <div style={{width:1,height:14,background:C.border}}/>
+                      <div style={{display:"flex",alignItems:"center",gap:6}}>
+                        <input type="checkbox" id="cbLiveST" checked={slipIsLive} onChange={e=>setSlipIsLive(e.target.checked)} style={{width:14,height:14,accentColor:C.red,cursor:"pointer"}}/>
+                        <label htmlFor="cbLiveST" title="진행중인 경기에 베팅. '실시간' 통계 탭에서 따로 집계됩니다." style={{fontSize:11,color:slipIsLive?C.red:C.muted,cursor:"pointer",userSelect:"none",fontWeight:slipIsLive?800:400}}>⚡ 라이브 베팅</label>
+                      </div>
                     </div>
 
                     {/* 확정 버튼 */}
