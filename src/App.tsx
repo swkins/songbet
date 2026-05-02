@@ -106,7 +106,13 @@
 //  키 미설정 시 새로고침 버튼은 안내 메시지를 띄우고 호출하지 않음.
 //
 // ─────────────────────────────────────────────────────────────
-// rev.11 변경사항 (2026-05-02):
+// rev.12 변경사항 (2026-05-02):
+//  - 농구 베팅 옵션 통합: 마핸 16개 + 플핸 10개 + 오버언더 28개 = 54개 버튼 →
+//    [마핸] [플핸] [오버] [언더] 4개 모드 버튼만. 클릭 시 라인 입력 모달 오픈.
+//  - 마핸/플핸: 팀 선택 + 숫자 입력 → "팀명 (-N)" / "팀명 (+N)"
+//  - 오버/언더: 숫자만 입력 → "오버 (N)" / "언더 (N)"
+//  - 입력 후 기존 슬립(handleSlipPick)에 합류 — 슬립/통계/자동결제 흐름 변경 없음
+// rev.11 변경사항 (이전): autoSettle 자동 결제 로직 — 팀 매칭 기반 안전한 판정
 //  - autoSettle 자동 결제 버그 수정 — 우라와 사고 (이긴 경기가 실패로 처리)
 //  - 팀 매칭 기반으로 결제 로직 재작성: fixture의 home/away와 bet.homeTeam/awayTeam을
 //    먼저 매칭한 후, 위치가 뒤바뀐 경우 점수를 swap해서 비교 (승↔패 뒤바뀜 방지)
@@ -2970,6 +2976,15 @@ function AppMain() {
   const [customHandiTeam,setCustomHandiTeam]=useState<"home"|"away">("home");
   const [customHandiLine,setCustomHandiLine]=useState<string>("");
 
+  // ★ rev.12 (2026-05-02): 일반 농구 베팅용 통합 입력 모달
+  //  - 마핸/플핸: 팀 선택 + 숫자 입력 → "팀명 (-N)" / "팀명 (+N)"
+  //  - 오버/언더: 숫자만 입력 → "오버 (N)" / "언더 (N)"
+  //  - 옵션 50개 깔아두던 UI를 4개 버튼으로 축소 (사용자 요청)
+  type LiveBetMode = "마핸"|"플핸"|"오버"|"언더";
+  const [liveBetInputModal,setLiveBetInputModal]=useState<{game:LiveFixture,mode:LiveBetMode}|null>(null);
+  const [liveBetInputTeam,setLiveBetInputTeam]=useState<"home"|"away">("home");
+  const [liveBetInputLine,setLiveBetInputLine]=useState<string>("");
+
   const manualSlipKeys = useMemo(()=>new Set(manualSlip.map(s=>s.id)),[manualSlip]);
 
   const handleManualSlipPick = (game: ManualGame, optLabel: string) => {
@@ -4165,6 +4180,7 @@ function AppMain() {
       if (e.key !== "Escape") return;
       if (quickActionMode) { setQuickActionMode(null); setQuickActionSite(""); setQuickActionAmt(0); return; }
       if (customHandiModal) { setCustomHandiModal(null); setCustomHandiLine(""); return; }
+      if (liveBetInputModal) { setLiveBetInputModal(null); setLiveBetInputLine(""); return; }
       if (addGameModal) { setAddGameModal(false); setNewGame({homeTeam:"",awayTeam:""}); return; }
       if (addSportModal) { setAddSportModal(false); setNewSportName(""); return; }
       if (addCountryModal) { setAddCountryModal(null); setNewCountryName(""); return; }
@@ -4184,7 +4200,7 @@ function AppMain() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [quickActionMode,customHandiModal,addGameModal,addSportModal,addCountryModal,addLeagueModalM,addLeagueModal,editMetaModal,closeModal,deleteModal,codeMemoOpen,newMemoText]);
+  }, [quickActionMode,customHandiModal,liveBetInputModal,addGameModal,addSportModal,addCountryModal,addLeagueModalM,addLeagueModal,editMetaModal,closeModal,deleteModal,codeMemoOpen,newMemoText]);
 
   // ── 입금 폼 ──────────────────────────────────────────────
   const [depSite,setDepSite]=useState("");
@@ -6911,6 +6927,104 @@ function AppMain() {
         );
       })()}
 
+      {/* ★ rev.12 (2026-05-02): 일반 농구 베팅 통합 입력 모달
+          마핸/플핸: 팀 선택 + 라인 입력
+          오버/언더: 라인만 입력
+          → handleSlipPick(g, opt)으로 기존 슬립 흐름에 합류 */}
+      {liveBetInputModal && (()=>{
+        const g = liveBetInputModal.game;
+        const mode = liveBetInputModal.mode;
+        const isHandi = mode==="마핸" || mode==="플핸";
+        const homeKr = teamNameMap[g.home_team] || translateTeamName(g.home_team, {}) || g.home_team;
+        const awayKr = teamNameMap[g.away_team] || translateTeamName(g.away_team, {}) || g.away_team;
+        const team = liveBetInputTeam==="home" ? homeKr : awayKr;
+        const modeColor = mode==="마핸" ? C.red : mode==="플핸" ? C.green : mode==="오버" ? "#e05a9a" : "#7ac4ff";
+
+        // 입력 라인 → 옵션 문자열 만들기
+        const buildOpt = (lineStr:string):string|null => {
+          const n = parseFloat(lineStr);
+          if(!n || n<=0) return null;
+          if(mode==="마핸") return `${team} (-${n})`;
+          if(mode==="플핸") return `${team} (+${n})`;
+          if(mode==="오버") return `오버 (${n})`;
+          if(mode==="언더") return `언더 (${n})`;
+          return null;
+        };
+        const previewOpt = buildOpt(liveBetInputLine) || `${isHandi?team+" ":""}${mode==="마핸"?"-":mode==="플핸"?"+":""}${liveBetInputLine||"?"}`;
+
+        const submit = () => {
+          const opt = buildOpt(liveBetInputLine);
+          if(!opt) { alert("유효한 숫자를 입력해주세요."); return; }
+          handleSlipPick(g, opt);
+          setLiveBetInputModal(null); setLiveBetInputLine("");
+        };
+
+        return (
+          <div onClick={()=>{setLiveBetInputModal(null);setLiveBetInputLine("");}}
+            style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+            <div onClick={e=>e.stopPropagation()}
+              style={{background:C.bg1,border:`2px solid ${modeColor}`,borderRadius:10,padding:20,minWidth:340,maxWidth:420,boxShadow:`0 8px 30px ${modeColor}33`}}>
+
+              {/* 헤더 */}
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
+                <div style={{fontSize:15,fontWeight:900,color:modeColor,letterSpacing:0.5}}>
+                  🏀 {mode} <span style={{fontSize:11,color:C.muted,fontWeight:600,marginLeft:6}}>라인 입력</span>
+                </div>
+                <button onClick={()=>{setLiveBetInputModal(null);setLiveBetInputLine("");}}
+                  style={{background:"none",border:"none",color:C.muted,fontSize:18,cursor:"pointer",padding:0,lineHeight:1}}>✕</button>
+              </div>
+
+              {/* 경기 정보 */}
+              <div style={{fontSize:11,color:C.muted,marginBottom:12,padding:"6px 10px",background:C.bg2,borderRadius:5,border:`1px solid ${C.border}`}}>
+                {homeKr} <span style={{color:C.dim}}>vs</span> {awayKr}
+              </div>
+
+              {/* 마핸/플핸일 때만 팀 선택 */}
+              {isHandi && (
+                <div style={{marginBottom:14}}>
+                  <div style={{fontSize:10,fontWeight:800,color:C.amber,marginBottom:6,letterSpacing:1}}>팀 선택</div>
+                  <div style={{display:"flex",gap:8}}>
+                    <button onClick={()=>setLiveBetInputTeam("home")}
+                      style={{flex:1,padding:"10px",borderRadius:6,cursor:"pointer",border:liveBetInputTeam==="home"?`2px solid ${C.green}`:`1px solid ${C.border}`,background:liveBetInputTeam==="home"?`${C.green}22`:C.bg2,color:liveBetInputTeam==="home"?C.green:C.muted,fontWeight:liveBetInputTeam==="home"?800:600,fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                      🏠 {homeKr}
+                    </button>
+                    <button onClick={()=>setLiveBetInputTeam("away")}
+                      style={{flex:1,padding:"10px",borderRadius:6,cursor:"pointer",border:liveBetInputTeam==="away"?`2px solid ${C.teal}`:`1px solid ${C.border}`,background:liveBetInputTeam==="away"?`${C.teal}22`:C.bg2,color:liveBetInputTeam==="away"?C.teal:C.muted,fontWeight:liveBetInputTeam==="away"?800:600,fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                      ✈ {awayKr}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* 라인 입력 */}
+              <div style={{marginBottom:14}}>
+                <div style={{fontSize:10,fontWeight:800,color:modeColor,marginBottom:6,letterSpacing:1}}>
+                  {mode==="마핸"?"마이너스 라인 (예: 5.5)":mode==="플핸"?"플러스 라인 (예: 12.5)":mode==="오버"?"오버 라인 (예: 175.5)":"언더 라인 (예: 175.5)"}
+                </div>
+                <input autoFocus type="text" inputMode="decimal" value={liveBetInputLine}
+                  onChange={e=>setLiveBetInputLine(e.target.value.replace(/[^0-9.]/g,""))}
+                  onKeyDown={e=>{ if(e.key==="Enter") submit(); }}
+                  placeholder={mode==="마핸"?"5.5":mode==="플핸"?"12.5":"175.5"}
+                  style={{width:"100%",padding:"12px 14px",fontSize:18,fontWeight:800,background:C.bg2,border:`1px solid ${C.border}`,borderRadius:6,color:modeColor,textAlign:"center",letterSpacing:1,boxSizing:"border-box"}}/>
+              </div>
+
+              {/* 미리보기 */}
+              <div style={{marginBottom:14,padding:"10px 12px",background:`${modeColor}11`,border:`1px dashed ${modeColor}66`,borderRadius:6,fontSize:13,color:C.muted,textAlign:"center"}}>
+                미리보기: <b style={{color:modeColor,fontSize:14}}>{previewOpt}</b>
+              </div>
+
+              {/* 버튼 */}
+              <div style={{display:"flex",gap:8}}>
+                <button onClick={submit}
+                  style={{flex:1,background:`${modeColor}22`,border:`1px solid ${modeColor}`,color:modeColor,padding:"10px",borderRadius:7,cursor:"pointer",fontWeight:800}}>✅ 슬립에 추가</button>
+                <button onClick={()=>{setLiveBetInputModal(null);setLiveBetInputLine("");}}
+                  style={{flex:1,background:C.bg2,border:`1px solid ${C.border}`,color:C.muted,padding:"10px",borderRadius:7,cursor:"pointer"}}>취소</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {addGameModal&&(()=>{
         // 현재 선택된 종목의 경기들에서 팀 이름 추출 (중복 제거)
         const sportTeams = Array.from(new Set(
@@ -8441,11 +8555,9 @@ function AppMain() {
                         // - 핸디캡 -0.5 라인 제거 (홈승과 사실상 동일하므로 중복)
                         const ouLinesSoccer = [2.5,3.5];
                         const ouLinesBaseball = [4.5,5.5,6.5,7.5,8.5,9.5,10.5,11.5,12.5,13.5,14.5,15.5,16.5,17.5];
-                        const ouLinesBasketball = [155.5,160.5,165.5,170.5,175.5,180.5,185.5,190.5,195.5,200.5,205.5,210.5,215.5,220.5];
                         const handiLinesSoccer = [0.5,1.5];
-                        // 농구 신규 전략: 마핸 -2.5 ~ -9.5 (8개) / 플핸 +10.5 ~ +14.5 (5개)
-                        const handiMinusBasketball = Array.from({length:8}, (_,i)=>2.5+i);   // 2.5,3.5,...,9.5 (마이너스)
-                        const handiPlusBasketball  = Array.from({length:5}, (_,i)=>10.5+i);  // 10.5,11.5,...,14.5 (플러스)
+                        // ★ rev.12: 농구 라인 상수 제거 — 마핸/플핸/오버/언더 모드 버튼 + 입력 모달로 대체
+                        //   (사용자가 임의 라인 입력 가능: 예전엔 -2.5~-9.5만 클릭 가능했는데 이제 자유)
 
                         // ⚠️ 요청 #1: 스포츠 (테스트) 탭 삭제됨.
                         // isTestTab을 false 고정하면 배당 표시 UI가 자동으로 숨겨지므로,
@@ -8603,96 +8715,37 @@ function AppMain() {
                             )}
 
                             {/* 농구: 마핸 (-2.5 ~ -9.5) — 사용자 신규 전략 */}
+                            {/* ★ rev.12: 농구 베팅 옵션 통합 — 4개 모드 버튼만 깔고 클릭 시 숫자 입력 모달 오픈
+                                기존: 마핸 16개 + 플핸 10개 + 오버언더 28개 = 54개 버튼 (어지러움)
+                                개선: [마핸] [플핸] [오버] [언더] 4개만 → 클릭 → 입력 모달 → 슬립 추가 */}
                             {isBasketball && (
                               <div style={{marginBottom:14}}>
-                                <div style={{fontSize:10,fontWeight:800,color:C.red,marginBottom:6,letterSpacing:1}}>마핸 (정배 -2.5 ~ -9.5)</div>
-                                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                                  {[
-                                    {team:krTeam(g.home_team),color:C.green},
-                                    {team:krTeam(g.away_team),color:C.teal},
-                                  ].map(({team,color})=>(
-                                    <div key={team}>
-                                      <div style={{fontSize:10,color,marginBottom:5,fontWeight:800,textAlign:"center",background:`${color}22`,borderRadius:4,padding:"2px 0",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{team}</div>
-                                      <div style={{display:"flex",flexDirection:"column",gap:3}}>
-                                        {handiMinusBasketball.map(ln=>{
-                                          const opt=`${team} (-${ln})`;
-                                          const added=inSlip(opt);
-                                          return <button key={opt} onClick={()=>handleSlipPick(g,opt)}
-                                            style={{padding:"7px 10px",borderRadius:5,cursor:"pointer",
-                                              border:added?`2px solid ${C.red}`:`1px solid ${C.border}`,
-                                              background:added?`${C.red}33`:C.bg2,color:added?C.red:C.text,
-                                              fontWeight:added?800:600,fontSize:11,
-                                              display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,textAlign:"left"}}>
-                                            <span style={{flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{team} <b>(-{ln})</b></span>
-                                            <span style={{color:added?C.red:(isTestTab && oddsFor(opt)!=="—"?C.amber:C.dim),fontSize:11,fontWeight:isTestTab?800:700,minWidth:32,textAlign:"right",flexShrink:0}}>{oddsFor(opt)}</span>
-                                          </button>;
-                                        })}
-                                      </div>
-                                    </div>
-                                  ))}
+                                <div style={{fontSize:10,fontWeight:800,color:C.amber,marginBottom:6,letterSpacing:1}}>
+                                  핸디캡 / 오버언더 <span style={{color:C.dim,fontWeight:600,fontSize:9}}>(버튼 클릭 → 라인 입력)</span>
                                 </div>
-                              </div>
-                            )}
-
-                            {/* 농구: 플핸 (+10.5 ~ +14.5) — 사용자 신규 전략 */}
-                            {isBasketball && (
-                              <div style={{marginBottom:14}}>
-                                <div style={{fontSize:10,fontWeight:800,color:C.green,marginBottom:6,letterSpacing:1}}>플핸 (역배 +10.5 ~ +14.5)</div>
-                                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                                  {[
-                                    {team:krTeam(g.home_team),color:C.green},
-                                    {team:krTeam(g.away_team),color:C.teal},
-                                  ].map(({team,color})=>(
-                                    <div key={team}>
-                                      <div style={{fontSize:10,color,marginBottom:5,fontWeight:800,textAlign:"center",background:`${color}22`,borderRadius:4,padding:"2px 0",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{team}</div>
-                                      <div style={{display:"flex",flexDirection:"column",gap:3}}>
-                                        {handiPlusBasketball.map(ln=>{
-                                          const opt=`${team} (+${ln})`;
-                                          const added=inSlip(opt);
-                                          return <button key={opt} onClick={()=>handleSlipPick(g,opt)}
-                                            style={{padding:"7px 10px",borderRadius:5,cursor:"pointer",
-                                              border:added?`2px solid ${color}`:`1px solid ${C.border}`,
-                                              background:added?`${color}33`:C.bg2,color:added?color:C.text,
-                                              fontWeight:added?800:600,fontSize:11,
-                                              display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,textAlign:"left"}}>
-                                            <span style={{flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{team} <b>(+{ln})</b></span>
-                                            <span style={{color:added?color:(isTestTab && oddsFor(opt)!=="—"?C.amber:C.dim),fontSize:11,fontWeight:isTestTab?800:700,minWidth:32,textAlign:"right",flexShrink:0}}>{oddsFor(opt)}</span>
-                                          </button>;
-                                        })}
-                                      </div>
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
-
-                            {/* 농구: 오버/언더 */}
-                            {isBasketball && (
-                              <div style={{marginBottom:14}}>
-                                <div style={{fontSize:10,fontWeight:800,color:"#e05a9a",marginBottom:6,letterSpacing:1}}>오버/언더</div>
-                                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                                  {[
-                                    {label:"오버",color:"#e05a9a"},
-                                    {label:"언더",color:"#7ac4ff"},
-                                  ].map(({label,color})=>(
-                                    <div key={label}>
-                                      <div style={{fontSize:10,color,marginBottom:5,fontWeight:800,textAlign:"center",background:`${color}22`,borderRadius:4,padding:"2px 0"}}>{label}</div>
-                                      <div style={{display:"flex",flexDirection:"column",gap:3}}>
-                                        {ouLinesBasketball.map(ln=>{
-                                          const opt=`${label} (${ln})`;
-                                          const added=inSlip(opt);
-                                          return <button key={opt} onClick={()=>handleSlipPick(g,opt)}
-                                            style={{padding:"7px 10px",borderRadius:5,cursor:"pointer",
-                                              border:added?`2px solid ${color}`:`1px solid ${C.border}`,
-                                              background:added?`${color}33`:C.bg2,color:added?color:C.text,
-                                              fontWeight:added?800:600,fontSize:11,
-                                              display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,textAlign:"left"}}>
-                                            <span style={{flex:1,minWidth:0}}>{label} <b>({ln})</b></span>
-                                            <span style={{color:added?color:(isTestTab && oddsFor(opt)!=="—"?C.amber:C.dim),fontSize:11,fontWeight:isTestTab?800:700,minWidth:32,textAlign:"right",flexShrink:0}}>{oddsFor(opt)}</span>
-                                          </button>;
-                                        })}
-                                      </div>
-                                    </div>
+                                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:6}}>
+                                  {([
+                                    {mode:"마핸" as LiveBetMode, color:C.red,    desc:"-N"},
+                                    {mode:"플핸" as LiveBetMode, color:C.green,  desc:"+N"},
+                                    {mode:"오버" as LiveBetMode, color:"#e05a9a",desc:"O"},
+                                    {mode:"언더" as LiveBetMode, color:"#7ac4ff",desc:"U"},
+                                  ]).map(({mode,color,desc})=>(
+                                    <button key={mode}
+                                      onClick={()=>{
+                                        setLiveBetInputModal({game:g, mode});
+                                        setLiveBetInputTeam("home");
+                                        setLiveBetInputLine("");
+                                      }}
+                                      style={{
+                                        padding:"11px 4px",borderRadius:7,cursor:"pointer",
+                                        border:`1px solid ${color}66`,
+                                        background:`${color}15`,
+                                        color,fontWeight:800,fontSize:13,
+                                        display:"flex",flexDirection:"column",alignItems:"center",gap:2,
+                                      }}>
+                                      <span>{mode}</span>
+                                      <span style={{fontSize:9,color:`${color}aa`,fontWeight:600}}>{desc}</span>
+                                    </button>
                                   ))}
                                 </div>
                               </div>
