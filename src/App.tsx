@@ -7216,7 +7216,8 @@ function AppMain() {
 
         // 선택된 사용자 리그의 경기 = API fixtures + 수동 경기
         const selSportKr = stSelSport ? sportToKr(stSelSport) : "";
-        const selMapKey = (stSelSport && stSelCountry && stSelLeague)
+        // rev.10: country는 이제 항상 "" 빈 문자열 — sport와 league만 체크
+        const selMapKey = (stSelSport && stSelLeague)
           ? mapKey(selSportKr, stSelCountry, stSelLeague) : "";
         const selApiId = selMapKey ? stLeagueMap[selMapKey] : "";
         // API 경기
@@ -7226,9 +7227,9 @@ function AppMain() {
         // 수동 경기 (LiveFixture 형태로 변환)
         // 기본: finished=true 경기 숨김. 토글(stShowFinishedManual)이 켜져 있으면 finished 경기도 포함.
         const showFinishedManualForSel = stSelSport ? !!stShowFinishedManual[stSelSport] : false;
-        const manualFixtures: LiveFixture[] = (stSelSport && stSelCountry && stSelLeague)
+        const manualFixtures: LiveFixture[] = (stSelSport && stSelLeague)
           ? manualGames
-              .filter(g=>g.sportCat===selSportKr && g.country===stSelCountry && g.league===stSelLeague && (showFinishedManualForSel || !g.finished))
+              .filter(g=>g.sportCat===selSportKr && g.league===stSelLeague && (showFinishedManualForSel || !g.finished))
               .map(g=>({
                 id: parseInt(g.id) || (g.createdAt % 100000000),
                 sport: stSelSport!,
@@ -7664,7 +7665,7 @@ function AppMain() {
                 <div style={{fontSize:12,fontWeight:800,color:stShowAllGames?C.amber:C.teal,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>
                   {stShowAllGames
                     ? `🌐 ${SPORT_META[stShowAllGames]?.kr || (stShowAllGames as unknown as string)} 모든 경기`
-                    : stSelSport&&stSelCountry&&stSelLeague
+                    : stSelSport&&stSelLeague
                       ? `${SPORT_META[stSelSport]?.icon || customSportIcon(stSelSport as unknown as string)} ${krLeague(stSelLeague)}`
                       : "← 좌측에서 리그 선택"}
                 </div>
@@ -7673,7 +7674,7 @@ function AppMain() {
                     ? `🔴 ${allLiveGames.length} · 오늘 ${allTodayGames.length} · 내일 ${allTomorrowGames.length}`
                     : `오늘 ${todayGames.length} · 내일 ${tomorrowGames.length}`}
                 </div>
-                {stSelSport&&stSelCountry&&stSelLeague && !stShowAllGames && (
+                {stSelSport&&stSelLeague && !stShowAllGames && (
                   <button onClick={()=>{
                     setMSport(SPORT_META[stSelSport!]?.kr || stSelSport!);
                     setMCountry(stSelCountry);
@@ -7721,24 +7722,20 @@ function AppMain() {
                       <div key={g.id}
                         onClick={()=>{
                           // rev.10: 매핑된 리그를 클릭했을 때, fixtures의 league_id를 stLeagueMap에서
-                          // 역검색해서 사용자가 등록한 국가/리그 이름으로 setStSel 해야 함.
-                          // (fixtures에 들어 있는 country/league_name은 API 원본 영문일 수 있는데,
-                          //  매핑 키는 사용자가 등록한 한글 이름으로 되어 있음 → 그대로 박으면 selApiId가
-                          //  빈 값이 돼서 "매핑이 필요해요" 안내가 다시 뜸)
+                          // 역검색해서 사용자가 등록한 리그 이름으로 setStSel.
+                          // 새 키 형식: "종목한글____리그" (국가 자리는 빈 문자열).
                           const apiIdStr = String(g.league_id);
-                          // stLeagueMap을 역검색: value가 g.league_id인 key 찾기 (key 형태: "종목한글__국가__리그")
                           const matchedKey = Object.keys(stLeagueMap).find(k => stLeagueMap[k] === apiIdStr);
                           if(matchedKey){
                             const parts = matchedKey.split("__");
-                            // parts[0] = 종목 한글, parts[1] = 사용자 국가, parts[2] = 사용자 리그
-                            // 종목은 g.sport(영문 키) 그대로 사용 (UI에서 영문 키로 트리/슬립 다룸)
+                            // parts[0] = 종목 한글, parts[1] = "" (옛 데이터면 국가), parts[2] = 리그
                             setStSelSport(g.sport);
-                            setStSelCountry(parts[1] || g.country);
+                            setStSelCountry(parts[1] || ""); // 새 구조에서 country는 빈 문자열
                             setStSelLeague(parts[2] || g.league_name);
                           } else {
-                            // 수동 경기 등 매핑이 없는 경우는 기존 fallback
+                            // 매핑이 없는 경우 (수동 경기 등) — fallback
                             setStSelSport(g.sport);
-                            setStSelCountry(g.country);
+                            setStSelCountry("");
                             setStSelLeague(g.league_name);
                           }
                           setStExpandedGameId(g.id);
@@ -7858,7 +7855,7 @@ function AppMain() {
                       )}
                     </>
                   );
-                })() : !stSelSport||!stSelCountry||!stSelLeague ? (
+                })() : !stSelSport||!stSelLeague ? (
                   <div style={{textAlign:"center",color:C.dim,padding:"40px 10px"}}>
                     <div style={{fontSize:28,marginBottom:8}}>🎯</div>
                     <div style={{fontSize:11,color:C.muted}}>국가 → 리그 선택</div>
