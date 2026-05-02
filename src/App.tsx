@@ -2621,25 +2621,26 @@ function AppMain() {
 
   const handleAddManualGame=(continueAdd=false)=>{
     const {homeTeam,awayTeam}=newGame;
-    if(!mSport||!mCountry||!mLeague)return alert("먼저 좌측에서 종목/국가/리그를 선택해주세요.");
+    // rev.10: country는 새 구조에서 빈 문자열 — sport와 league만 체크
+    if(!mSport||!mLeague)return alert("먼저 좌측에서 종목/리그를 선택해주세요.");
     if(!homeTeam.trim()||!awayTeam.trim())return alert("홈팀과 원정팀을 입력해주세요.");
     const h=homeTeam.trim(), a=awayTeam.trim();
     if (h===a) return alert("홈팀과 원정팀이 같을 수 없습니다.");
-    // 중복 체크: 같은 종목/국가/리그/홈팀/원정팀 + 미종료
+    // 중복 체크: 같은 종목/리그/홈팀/원정팀 + 미종료 (country는 무시)
     const dup = manualGames.find(x =>
-      x.sportCat===mSport && x.country===mCountry && x.league===mLeague &&
+      x.sportCat===mSport && x.league===mLeague &&
       x.homeTeam===h && x.awayTeam===a && !x.finished
     );
-    if (dup) return alert(`이미 추가된 경기입니다.\n${mCountry}/${mLeague}\n${h} vs ${a}`);
+    if (dup) return alert(`이미 추가된 경기입니다.\n${mLeague}\n${h} vs ${a}`);
     const g:ManualGame={
       id:String(Date.now()),
-      country:mCountry,league:mLeague,
+      country:mCountry||"",league:mLeague,
       homeTeam:h,awayTeam:a,
       sportCat:mSport,createdAt:Date.now(),
     };
     saveManualGames([g,...manualGames]);
     setNewGame({homeTeam:"",awayTeam:""});
-    addLog("➕ 경기 추가",`${mCountry}/${mLeague}/${h} vs ${a}`);
+    addLog("➕ 경기 추가",`${mLeague}/${h} vs ${a}`);
     if (continueAdd) {
       // 모달 유지, 홈팀 input으로 포커스 이동
       setTimeout(()=>{const el=document.getElementById("add-game-home")as HTMLInputElement|null;if(el)el.focus();},30);
