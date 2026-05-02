@@ -4670,14 +4670,9 @@ function AppMain() {
     if(hasFixtureId){
       const fid = Number((b as any).fixtureId);
       const info = liveFixtureMap.get(fid);
-      if(!info){
-        // 캐시에 정보 없음 → 살짝 흐린 안내
-        statusBadge = (
-          <div style={{display:"flex",alignItems:"center",gap:5,padding:"4px 8px",background:C.bg2,border:`1px dashed ${C.border2}`,borderRadius:5,fontSize:10,color:C.dim,marginBottom:5}}>
-            <span>⏱ 경기 정보 로딩중…</span>
-          </div>
-        );
-      } else {
+      // 캐시에 정보 없으면 아무것도 표시하지 않음 (베팅 옵션 가리지 않게).
+      // fixtures 테이블에 데이터가 들어오면 다음 폴링(30초)에서 자동으로 채워짐.
+      if(info){
         const st = info.status_short;
         const hs = info.home_score, as_ = info.away_score;
         const scoreStr = (hs!=null && as_!=null) ? `${hs} : ${as_}` : null;
@@ -4739,12 +4734,6 @@ function AppMain() {
             <div style={{border:`3px solid ${stampColor}`,borderRadius:7,padding:"4px 14px",transform:"rotate(-12deg)",fontSize:17,fontWeight:900,color:stampColor,letterSpacing:3,opacity:0.65,textShadow:`0 0 8px ${stampColor}`,background:`${stampColor}14`}}>{stampText}</div>
           </div>
         )}
-        {/* 자동 판정 카드면 결과 스코어를 우측 상단에 또렷이 띄움 (본문 흐림 영향 안 받음) */}
-        {autoResult && statusBadge && (
-          <div style={{position:"absolute",top:6,right:8,zIndex:3}}>
-            {statusBadge}
-          </div>
-        )}
         <div style={{position:"relative",zIndex:2,opacity:autoResult?0.5:1}}>
           <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:5,flexWrap:"wrap"}}>
             <span style={{fontSize:13,flexShrink:0}}>{SPORT_ICON[b.category]||"🎯"}</span>
@@ -4770,7 +4759,10 @@ function AppMain() {
           </div>
         </div>
         {autoResult && (
-          <div style={{position:"relative",zIndex:3,marginTop:6,display:"flex",justifyContent:"flex-end"}}>
+          <div style={{position:"relative",zIndex:3,marginTop:6,display:"flex",alignItems:"center",justifyContent:"space-between",gap:8}}>
+            {/* 좌: 결과 스코어 미니 배지 (도장과 색상 동일, 흐림 영향 X) */}
+            <div>{statusBadge}</div>
+            {/* 우: 적중/실패 확인 버튼 */}
             <button onClick={()=>confirmResult(b.id)} style={{padding:"3px 12px",borderRadius:4,fontWeight:800,fontSize:10,cursor:"pointer",letterSpacing:0.5,background:stampColor,border:`1px solid ${stampColor}`,color:C.bg,boxShadow:`0 1px 5px ${stampColor}55`}}>
               {actualResult==="승"?"✅ 적중 확인":actualResult==="패"?"❌ 실패 확인":"✔ 확인"}
             </button>
