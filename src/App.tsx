@@ -6963,7 +6963,7 @@ function AppMain() {
           <div onClick={()=>{setLiveBetInputModal(null);setLiveBetInputLine("");}}
             style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
             <div onClick={e=>e.stopPropagation()}
-              style={{background:C.bg1,border:`2px solid ${modeColor}`,borderRadius:10,padding:20,minWidth:340,maxWidth:420,boxShadow:`0 8px 30px ${modeColor}33`}}>
+              style={{background:C.bg3,border:`2px solid ${modeColor}`,borderRadius:10,padding:20,minWidth:340,maxWidth:420,boxShadow:`0 8px 30px ${modeColor}33`}}>
 
               {/* 헤더 */}
               <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
