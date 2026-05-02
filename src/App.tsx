@@ -4664,113 +4664,176 @@ function AppMain() {
     const autoResult = b.result.startsWith("대기_");
     const actualResult = b.result==="대기_승"?"승":b.result==="대기_패"?"패":b.result==="대기_취소"?"취소":b.result==="대기_연기"?"연기":b.result==="대기_중단"?"중단":b.result;
     const stampColor = actualResult==="승"?C.green:actualResult==="패"?C.red:C.amber;
-    const stampText = actualResult==="승"?"적중":actualResult==="패"?"실패":actualResult==="취소"?"취소":actualResult==="연기"?"연기":"중단";
 
-    // ── rev.9: 경기 상태 표시 (예정 시각 / 진행중 스코어 / 종료 결과) ──
+    // ── rev.10: 경기 상태 표시 (라벨만 — 스코어는 팀명 옆에 따로 붙임) ──
     // 수동 베팅이거나 fixtureId 없으면 표시 안 함 (정보가 없음).
-    // autoResult(대기_*)인 경우에도 표시 — 도장이 떠 있어도 최종 스코어를 알고 싶음.
+    // 스코어/시각용 모던 폰트 — 시스템 산세리프 + tabular-nums (숫자 폭 일정)
+    const numFont: React.CSSProperties = {
+      fontFamily: '"SF Pro Display", "Inter", -apple-system, BlinkMacSystemFont, system-ui, sans-serif',
+      fontVariantNumeric: "tabular-nums",
+      fontFeatureSettings: '"tnum" 1, "lnum" 1',
+    };
     let statusBadge: React.ReactElement | null = null;
-    if(hasFixtureId){
-      const fid = Number((b as any).fixtureId);
-      const info = liveFixtureMap.get(fid);
-      // 캐시에 정보 없으면 아무것도 표시하지 않음 (베팅 옵션 가리지 않게).
-      // fixtures 테이블에 데이터가 들어오면 다음 폴링(30초)에서 자동으로 채워짐.
-      if(info){
-        const st = info.status_short;
-        const hs = info.home_score, as_ = info.away_score;
-        const scoreStr = (hs!=null && as_!=null) ? `${hs} : ${as_}` : null;
+    const fixtureInfo = hasFixtureId ? liveFixtureMap.get(Number((b as any).fixtureId)) : null;
+    const liveSt = fixtureInfo?.status_short || null;
+    const liveHs = fixtureInfo?.home_score ?? null;
+    const liveAs = fixtureInfo?.away_score ?? null;
 
-        if(isUpcoming(st)){
-          // 예정 — start_time KST 시각 표시
-          const tStr = info.start_time ? fmtKstTime(info.start_time) : "";
-          const dStr = info.start_time ? fmtKstDate(info.start_time) : "";
-          statusBadge = (
-            <div style={{display:"flex",alignItems:"center",gap:6,padding:"4px 9px",background:`${C.muted}11`,border:`1px solid ${C.muted}44`,borderRadius:5,fontSize:11,marginBottom:5}}>
-              <span style={{color:C.muted,fontWeight:700,fontSize:10}}>🕘 경기전</span>
-              {tStr && <span style={{color:C.text,fontWeight:800,fontFamily:"monospace"}}>{dStr} {tStr}</span>}
-            </div>
-          );
-        } else if(isLive(st)){
-          // 진행중 — 빨간 점 + 스코어 + 진행 단계
-          const phase = statusLabel(st);
-          statusBadge = (
-            <div style={{display:"flex",alignItems:"center",gap:6,padding:"4px 9px",background:`${C.red}15`,border:`1px solid ${C.red}66`,borderRadius:5,fontSize:11,marginBottom:5,animation:"none"}}>
-              <span style={{color:C.red,fontWeight:900,fontSize:10}}>🔴 LIVE</span>
-              {scoreStr && <span style={{color:C.text,fontWeight:900,fontFamily:"monospace",fontSize:13,letterSpacing:1}}>{scoreStr}</span>}
-              <span style={{color:C.red,fontWeight:700,fontSize:10,marginLeft:"auto"}}>{phase}</span>
-            </div>
-          );
-        } else if(isFinished(st)){
-          // 종료 — 회색 톤 + 최종 스코어
-          // autoResult(대기_*)면 카드 우측 상단에 띄울 거라 컴팩트하게 (스코어만 강조)
-          if(autoResult){
-            statusBadge = (
-              <div style={{display:"flex",alignItems:"center",gap:4,padding:"2px 7px",background:C.bg2,border:`1px solid ${stampColor}66`,borderRadius:4,fontSize:10}}>
-                <span style={{color:stampColor,fontWeight:700,fontSize:9}}>최종</span>
-                {scoreStr && <span style={{color:C.text,fontWeight:900,fontFamily:"monospace",fontSize:12,letterSpacing:1}}>{scoreStr}</span>}
-              </div>
-            );
-          } else {
-            statusBadge = (
-              <div style={{display:"flex",alignItems:"center",gap:6,padding:"4px 9px",background:`${C.dim}11`,border:`1px solid ${C.dim}55`,borderRadius:5,fontSize:11,marginBottom:5}}>
-                <span style={{color:C.muted,fontWeight:700,fontSize:10}}>✓ 종료</span>
-                {scoreStr && <span style={{color:C.text,fontWeight:900,fontFamily:"monospace",fontSize:13,letterSpacing:1}}>{scoreStr}</span>}
-                <span style={{color:C.dim,fontWeight:600,fontSize:9,marginLeft:"auto"}}>{statusLabel(st)}</span>
-              </div>
-            );
-          }
-        } else if(isPostponed(st)){
-          // 연기/취소/중단 등
-          statusBadge = (
-            <div style={{display:"flex",alignItems:"center",gap:6,padding:"4px 9px",background:`${C.amber}11`,border:`1px solid ${C.amber}55`,borderRadius:5,fontSize:11,marginBottom:5}}>
-              <span style={{color:C.amber,fontWeight:800,fontSize:10}}>⊘ {statusLabel(st)}</span>
-            </div>
-          );
-        }
+    if(fixtureInfo && liveSt){
+      if(isUpcoming(liveSt)){
+        const tStr = fixtureInfo.start_time ? fmtKstTime(fixtureInfo.start_time) : "";
+        const dStr = fixtureInfo.start_time ? fmtKstDate(fixtureInfo.start_time) : "";
+        statusBadge = (
+          <div style={{display:"flex",alignItems:"center",gap:6,padding:"3px 9px",background:`${C.muted}11`,border:`1px solid ${C.muted}44`,borderRadius:5,fontSize:10,marginBottom:6,width:"fit-content"}}>
+            <span style={{color:C.muted,fontWeight:700}}>🕘 경기전</span>
+            {tStr && <span style={{...numFont,color:C.text,fontWeight:700,fontSize:11,letterSpacing:0.3}}>{dStr} {tStr}</span>}
+          </div>
+        );
+      } else if(isLive(liveSt)){
+        statusBadge = (
+          <div style={{display:"flex",alignItems:"center",gap:6,padding:"3px 9px",background:`${C.red}15`,border:`1px solid ${C.red}66`,borderRadius:5,fontSize:10,marginBottom:6,width:"fit-content"}}>
+            <span style={{color:C.red,fontWeight:900,letterSpacing:0.5}}>🔴 LIVE</span>
+            <span style={{color:C.red,fontWeight:700,fontSize:10}}>· {statusLabel(liveSt)}</span>
+          </div>
+        );
+      } else if(isFinished(liveSt)){
+        statusBadge = (
+          <div style={{display:"flex",alignItems:"center",gap:6,padding:"3px 9px",background:`${C.dim}11`,border:`1px solid ${C.dim}55`,borderRadius:5,fontSize:10,marginBottom:6,width:"fit-content"}}>
+            <span style={{color:C.muted,fontWeight:700}}>✓ {statusLabel(liveSt)}</span>
+          </div>
+        );
+      } else if(isPostponed(liveSt)){
+        statusBadge = (
+          <div style={{display:"flex",alignItems:"center",gap:6,padding:"3px 9px",background:`${C.amber}11`,border:`1px solid ${C.amber}55`,borderRadius:5,fontSize:10,marginBottom:6,width:"fit-content"}}>
+            <span style={{color:C.amber,fontWeight:800}}>⊘ {statusLabel(liveSt)}</span>
+          </div>
+        );
       }
     }
 
+    // 팀명 (한글 우선, 없으면 fixtures 원본 영문)
+    const homeTeamDisp = b.homeTeam || fixtureInfo?.home_team || "";
+    const awayTeamDisp = b.awayTeam || fixtureInfo?.away_team || "";
+    const hasTeams = !!(homeTeamDisp && awayTeamDisp);
+    // 베팅 방향 — "홈승"/"원정승"이면 해당 팀 이름을 강조
+    const betDirection: "home"|"away"|null =
+      (b.betOption==="홈승") ? "home" :
+      (b.betOption==="원정승") ? "away" :
+      null;
+    // 스코어 표시 여부 (라이브이거나 종료된 경우만 의미 있음)
+    const hasScores = liveSt && (isLive(liveSt) || isFinished(liveSt)) && liveHs!=null && liveAs!=null;
+    // 점수 색상 — 진행중은 빨강 강조, 종료면 일반 텍스트
+    const scoreColor = liveSt && isLive(liveSt) ? C.red : C.text;
+
+    // 자동 판정 카드의 확인 버튼 색상 = 적중/실패 한눈에 식별
+    // (도장 없이도 색깔로 즉시 알 수 있음)
+
     return (
-      <div key={b.id} style={{position:"relative",background:autoResult?`${stampColor}0d`:C.bg3,border:`1px solid ${autoResult?stampColor+"99":C.amber+"44"}`,borderRadius:7,padding:"9px 11px",marginBottom:6,overflow:"hidden"}}>
-        {autoResult && (
-          <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",pointerEvents:"none",zIndex:1}}>
-            <div style={{border:`3px solid ${stampColor}`,borderRadius:7,padding:"4px 14px",transform:"rotate(-12deg)",fontSize:17,fontWeight:900,color:stampColor,letterSpacing:3,opacity:0.65,textShadow:`0 0 8px ${stampColor}`,background:`${stampColor}14`}}>{stampText}</div>
-          </div>
-        )}
-        <div style={{position:"relative",zIndex:2,opacity:autoResult?0.5:1}}>
-          <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:5,flexWrap:"wrap"}}>
-            <span style={{fontSize:13,flexShrink:0}}>{SPORT_ICON[b.category]||"🎯"}</span>
-            <span style={{fontSize:9,color:dollar?C.amber:C.green,background:`${dollar?C.amber:C.green}22`,border:`1px solid ${dollar?C.amber:C.green}44`,padding:"1px 5px",borderRadius:3,fontWeight:700}}>{dollar?"$":"₩"} {b.site}</span>
-            {(b as any).country && <span style={{fontSize:9,color:C.teal,background:`${C.teal}11`,border:`1px solid ${C.teal}33`,padding:"1px 5px",borderRadius:3,fontWeight:700}}>{countryNameMap[(b as any).country] || COUNTRY_KR[(b as any).country] || (b as any).country}</span>}
-            {b.league && <span style={{fontSize:9,color:C.muted,background:C.bg,padding:"1px 5px",borderRadius:3}}>{leagueNameMap[b.league] || b.league}</span>}
-            {isManual && <span style={{fontSize:9,color:C.purple,background:`${C.purple}22`,border:`1px solid ${C.purple}44`,padding:"1px 5px",borderRadius:3,fontWeight:700}}>수동</span>}
-            <span style={{fontSize:11,color:C.orange,fontWeight:800,marginLeft:"auto"}}>{displayBetOption}</span>
-          </div>
-          <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:6,lineHeight:1.3,wordBreak:"break-word"}}>{title}</div>
-          {!autoResult && statusBadge}
-          <div style={{display:"flex",alignItems:"center",gap:7,flexWrap:"wrap"}}>
-            <div style={{display:"flex",gap:8,flex:1,minWidth:100}}>
-              <span style={{fontSize:10,color:C.muted}}>배당 <span style={{color:C.teal,fontWeight:800,fontSize:11}}>{b.odds}</span></span>
-              <span style={{fontSize:11,color:C.amber,fontWeight:800}}>{fmtDisp(b.amount,b.isDollar)}</span>
-            </div>
-            {!autoResult && (
-              <div style={{display:"flex",gap:3,flexShrink:0}}>
-                {isManual||!hasFixtureId?(<><button onClick={()=>updateResult(b.id,"승")} style={{background:`${C.green}22`,border:`1px solid ${C.green}`,color:C.green,padding:"4px 10px",borderRadius:4,cursor:"pointer",fontWeight:800,fontSize:11}}>적중</button><button onClick={()=>updateResult(b.id,"패")} style={{background:`${C.red}22`,border:`1px solid ${C.red}`,color:C.red,padding:"4px 10px",borderRadius:4,cursor:"pointer",fontWeight:800,fontSize:11}}>실패</button></>):null}
-                <button onClick={()=>cancelBet(b.id)} style={{background:C.bg,border:`1px solid ${C.border2}`,color:C.muted,padding:"4px 10px",borderRadius:4,cursor:"pointer",fontSize:11}}>취소</button>
-              </div>
-            )}
-          </div>
+      <div key={b.id} style={{position:"relative",background:autoResult?`${stampColor}0d`:C.bg3,border:`1px solid ${autoResult?stampColor+"99":C.amber+"44"}`,borderRadius:7,padding:"9px 11px",marginBottom:6}}>
+        {/* 헤더: 아이콘·사이트·국가·리그 + 베팅 옵션 강조 배지 */}
+        <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:7,flexWrap:"wrap"}}>
+          <span style={{fontSize:13,flexShrink:0}}>{SPORT_ICON[b.category]||"🎯"}</span>
+          <span style={{fontSize:9,color:dollar?C.amber:C.green,background:`${dollar?C.amber:C.green}22`,border:`1px solid ${dollar?C.amber:C.green}44`,padding:"1px 5px",borderRadius:3,fontWeight:700}}>{dollar?"$":"₩"} {b.site}</span>
+          {(b as any).country && <span style={{fontSize:9,color:C.teal,background:`${C.teal}11`,border:`1px solid ${C.teal}33`,padding:"1px 5px",borderRadius:3,fontWeight:700}}>{countryNameMap[(b as any).country] || COUNTRY_KR[(b as any).country] || (b as any).country}</span>}
+          {b.league && <span style={{fontSize:9,color:C.muted,background:C.bg,padding:"1px 5px",borderRadius:3}}>{leagueNameMap[b.league] || b.league}</span>}
+          {isManual && <span style={{fontSize:9,color:C.purple,background:`${C.purple}22`,border:`1px solid ${C.purple}44`,padding:"1px 5px",borderRadius:3,fontWeight:700}}>수동</span>}
+          <span style={{
+            fontSize:12,color:C.orange,background:`${C.orange}1f`,
+            border:`1px solid ${C.orange}88`,padding:"2px 9px",borderRadius:5,
+            fontWeight:900,marginLeft:"auto",letterSpacing:0.2,
+            boxShadow:`0 0 0 1px ${C.orange}11 inset`,
+          }}>{displayBetOption}</span>
         </div>
-        {autoResult && (
-          <div style={{position:"relative",zIndex:3,marginTop:6,display:"flex",alignItems:"center",justifyContent:"space-between",gap:8}}>
-            {/* 좌: 결과 스코어 미니 배지 (도장과 색상 동일, 흐림 영향 X) */}
-            <div>{statusBadge}</div>
-            {/* 우: 적중/실패 확인 버튼 */}
-            <button onClick={()=>confirmResult(b.id)} style={{padding:"3px 12px",borderRadius:4,fontWeight:800,fontSize:10,cursor:"pointer",letterSpacing:0.5,background:stampColor,border:`1px solid ${stampColor}`,color:C.bg,boxShadow:`0 1px 5px ${stampColor}55`}}>
-              {actualResult==="승"?"✅ 적중 확인":actualResult==="패"?"❌ 실패 확인":"✔ 확인"}
-            </button>
+
+        {/* 메인: 홈팀/원정팀 두 줄 + 우측 스코어 */}
+        {hasTeams ? (
+          <div style={{
+            background:C.bg2,
+            border:`1px solid ${C.border}`,
+            borderRadius:6,
+            padding:"7px 10px",
+            marginBottom:6,
+          }}>
+            {/* 홈팀 */}
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,padding:"3px 0"}}>
+              <div style={{display:"flex",alignItems:"center",gap:6,minWidth:0,flex:1}}>
+                {betDirection==="home" && (
+                  <span style={{fontSize:9,color:C.orange,background:`${C.orange}22`,border:`1px solid ${C.orange}66`,padding:"1px 5px",borderRadius:3,fontWeight:800,flexShrink:0}}>BET</span>
+                )}
+                <span style={{
+                  fontSize:13,fontWeight:betDirection==="home"?900:700,
+                  color:betDirection==="home"?C.orange:C.text,
+                  overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",
+                }}>{homeTeamDisp}</span>
+              </div>
+              {hasScores ? (
+                <span style={{...numFont,fontSize:18,fontWeight:800,color:scoreColor,minWidth:24,textAlign:"right",lineHeight:1}}>
+                  {liveHs}
+                </span>
+              ) : (
+                <span style={{...numFont,fontSize:14,color:C.dim,minWidth:24,textAlign:"right"}}>−</span>
+              )}
+            </div>
+            {/* 구분선 */}
+            <div style={{height:1,background:C.border,margin:"2px 0"}}/>
+            {/* 원정팀 */}
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,padding:"3px 0"}}>
+              <div style={{display:"flex",alignItems:"center",gap:6,minWidth:0,flex:1}}>
+                {betDirection==="away" && (
+                  <span style={{fontSize:9,color:C.orange,background:`${C.orange}22`,border:`1px solid ${C.orange}66`,padding:"1px 5px",borderRadius:3,fontWeight:800,flexShrink:0}}>BET</span>
+                )}
+                <span style={{
+                  fontSize:13,fontWeight:betDirection==="away"?900:700,
+                  color:betDirection==="away"?C.orange:C.text,
+                  overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",
+                }}>{awayTeamDisp}</span>
+              </div>
+              {hasScores ? (
+                <span style={{...numFont,fontSize:18,fontWeight:800,color:scoreColor,minWidth:24,textAlign:"right",lineHeight:1}}>
+                  {liveAs}
+                </span>
+              ) : (
+                <span style={{...numFont,fontSize:14,color:C.dim,minWidth:24,textAlign:"right"}}>−</span>
+              )}
+            </div>
           </div>
+        ) : (
+          // 팀명이 없는 경우(수동 베팅 등) 폴백
+          <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:6,lineHeight:1.3,wordBreak:"break-word"}}>{title}</div>
         )}
+
+        {/* 상태 라벨 (작은 한 줄 — LIVE/종료/예정/연기) */}
+        {statusBadge}
+
+        {/* 풋터: 배당·금액 + 액션 버튼 */}
+        <div style={{display:"flex",alignItems:"center",gap:7,flexWrap:"wrap"}}>
+          <div style={{display:"flex",gap:8,flex:1,minWidth:100}}>
+            <span style={{fontSize:10,color:C.muted}}>배당 <span style={{color:C.teal,fontWeight:800,fontSize:11}}>{b.odds}</span></span>
+            <span style={{fontSize:11,color:C.amber,fontWeight:800}}>{fmtDisp(b.amount,b.isDollar)}</span>
+          </div>
+          {!autoResult ? (
+            // 진행중 — 수동 처리 버튼들
+            <div style={{display:"flex",gap:3,flexShrink:0}}>
+              {(isManual||!hasFixtureId) && (
+                <>
+                  <button onClick={()=>updateResult(b.id,"승")} style={{background:`${C.green}22`,border:`1px solid ${C.green}`,color:C.green,padding:"4px 10px",borderRadius:4,cursor:"pointer",fontWeight:800,fontSize:11}}>적중</button>
+                  <button onClick={()=>updateResult(b.id,"패")} style={{background:`${C.red}22`,border:`1px solid ${C.red}`,color:C.red,padding:"4px 10px",borderRadius:4,cursor:"pointer",fontWeight:800,fontSize:11}}>실패</button>
+                </>
+              )}
+              <button onClick={()=>cancelBet(b.id)} style={{background:C.bg,border:`1px solid ${C.border2}`,color:C.muted,padding:"4px 10px",borderRadius:4,cursor:"pointer",fontSize:11}}>취소</button>
+            </div>
+          ) : (
+            // 자동 판정 — 확인 버튼이 적중/실패 색상으로 결과 표시 겸함
+            <button onClick={()=>confirmResult(b.id)} style={{
+              padding:"5px 14px",borderRadius:5,fontWeight:900,fontSize:12,
+              cursor:"pointer",letterSpacing:0.5,
+              background:stampColor,border:`1.5px solid ${stampColor}`,
+              color:C.bg,boxShadow:`0 1px 6px ${stampColor}66`,flexShrink:0,
+            }}>
+              {actualResult==="승"?"✅ 적중 확인":actualResult==="패"?"❌ 실패 확인":actualResult==="취소"?"⊘ 취소 확인":actualResult==="연기"?"⏸ 연기 확인":"✔ 확인"}
+            </button>
+          )}
+        </div>
       </div>
     );
   };
