@@ -616,19 +616,26 @@ export interface PointExchangePreset {
 //   - sites: 종목 무관 공통 (BET365 등은 모든 종목에서 공통 사용)
 //   - leaguesBySport: 종목별 리그 목록 ("축구"→["EPL","라리가",...])
 //   - optionsBySport: 종목별 옵션 목록 (축구는 "승무패" 포함, 야구/농구는 "승패")
+// rev.8 (2026-05-02): 종목 6개로 확장 (축구·야구·농구·하키·배구·LOL)
+export type MarginSport = '축구' | '야구' | '농구' | '하키' | '배구' | 'LOL'
+export const MARGIN_SPORTS: MarginSport[] = ['축구', '야구', '농구', '하키', '배구', 'LOL']
+
 export interface MarginMeta {
   sites: string[]
-  leaguesBySport: { 축구: string[]; 야구: string[]; 농구: string[] }
-  optionsBySport: { 축구: string[]; 야구: string[]; 농구: string[] }
+  leaguesBySport: Record<MarginSport, string[]>
+  optionsBySport: Record<MarginSport, string[]>
 }
 
 export const EMPTY_MARGIN_META: MarginMeta = {
   sites: [],
-  leaguesBySport: { 축구: [], 야구: [], 농구: [] },
+  leaguesBySport: { 축구: [], 야구: [], 농구: [], 하키: [], 배구: [], LOL: [] },
   optionsBySport: {
     축구: ['승무패', '언오버', '핸디캡'],
     야구: ['승패', '언오버', '핸디캡'],
     농구: ['승패', '언오버', '핸디캡'],
+    하키: ['승패', '언오버', '핸디캡'],
+    배구: ['승패', '언오버', '핸디캡'],
+    LOL: ['승패', '핸디캡'],
   },
 }
 
@@ -691,7 +698,18 @@ export async function loadAppSettingsBundle(): Promise<AppSettingsBundle> {
       fixtures_cache_meta: { ...EMPTY_FIXTURES_CACHE_META },
       point_exchange_presets: [],
       odds_api_io_key: '',
-      margin_meta: { ...EMPTY_MARGIN_META, leaguesBySport: { 축구: [], 야구: [], 농구: [] }, optionsBySport: { 축구: [...EMPTY_MARGIN_META.optionsBySport.축구], 야구: [...EMPTY_MARGIN_META.optionsBySport.야구], 농구: [...EMPTY_MARGIN_META.optionsBySport.농구] } },
+      margin_meta: {
+        sites: [],
+        leaguesBySport: { 축구: [], 야구: [], 농구: [], 하키: [], 배구: [], LOL: [] },
+        optionsBySport: {
+          축구: [...EMPTY_MARGIN_META.optionsBySport.축구],
+          야구: [...EMPTY_MARGIN_META.optionsBySport.야구],
+          농구: [...EMPTY_MARGIN_META.optionsBySport.농구],
+          하키: [...EMPTY_MARGIN_META.optionsBySport.하키],
+          배구: [...EMPTY_MARGIN_META.optionsBySport.배구],
+          LOL: [...EMPTY_MARGIN_META.optionsBySport.LOL],
+        },
+      },
     }
   }
 }
@@ -865,7 +883,7 @@ export async function saveFixturesCacheMeta(meta: FixturesCacheMeta): Promise<vo
 export interface MarginRecord {
   id: string
   ts: number
-  sport: '축구' | '야구' | '농구'
+  sport: MarginSport
   site: string
   league: string
   option: string  // "승무패" | "승패" | "언오버" | "핸디캡" 등 (사용자가 추가 가능)
@@ -884,7 +902,7 @@ export async function loadMarginRecords(): Promise<MarginRecord[]> {
     return (data ?? []).map(r => ({
       id: r.id,
       ts: Number(r.ts),
-      sport: r.sport,
+      sport: r.sport as MarginSport,
       site: r.site,
       league: r.league,
       option: r.option,
@@ -931,16 +949,36 @@ export async function clearAllMarginRecords(): Promise<void> {
   }
 }
 
+// rev.8: 마진율 임계값 이상인 기록만 영구 삭제 (노이즈 정리용)
+// 예: deleteMarginRecordsAboveThreshold(8) → 마진율이 8% 이상인 모든 기록 삭제
+export async function deleteMarginRecordsAboveThreshold(threshold: number): Promise<number> {
+  try {
+    // 먼저 삭제 대상 카운트 (선택적)
+    const { count } = await supabase
+      .from('margin_records')
+      .select('id', { count: 'exact', head: true })
+      .gte('margin', threshold)
+    await supabase.from('margin_records').delete().gte('margin', threshold)
+    return count ?? 0
+  } catch (e) {
+    logSaveError('margin_records(deleteAboveThreshold)', e)
+    return 0
+  }
+}
+
 // ── MarginMeta (사이트/리그/옵션 목록) 파싱 헬퍼 ──────────────
 // 부정 입력에 대해 안전하게 EMPTY_MARGIN_META 폴백.
 function parseMarginMeta(raw: any): MarginMeta {
   const fallback: MarginMeta = {
     sites: [],
-    leaguesBySport: { 축구: [], 야구: [], 농구: [] },
+    leaguesBySport: { 축구: [], 야구: [], 농구: [], 하키: [], 배구: [], LOL: [] },
     optionsBySport: {
       축구: [...EMPTY_MARGIN_META.optionsBySport.축구],
       야구: [...EMPTY_MARGIN_META.optionsBySport.야구],
       농구: [...EMPTY_MARGIN_META.optionsBySport.농구],
+      하키: [...EMPTY_MARGIN_META.optionsBySport.하키],
+      배구: [...EMPTY_MARGIN_META.optionsBySport.배구],
+      LOL: [...EMPTY_MARGIN_META.optionsBySport.LOL],
     },
   }
   if (!raw || typeof raw !== 'object') return fallback
@@ -958,11 +996,17 @@ function parseMarginMeta(raw: any): MarginMeta {
       축구: arr(lbs['축구']),
       야구: arr(lbs['야구']),
       농구: arr(lbs['농구']),
+      하키: arr(lbs['하키']),
+      배구: arr(lbs['배구']),
+      LOL: arr(lbs['LOL']),
     },
     optionsBySport: {
       축구: optOr(obs['축구'], EMPTY_MARGIN_META.optionsBySport.축구),
       야구: optOr(obs['야구'], EMPTY_MARGIN_META.optionsBySport.야구),
       농구: optOr(obs['농구'], EMPTY_MARGIN_META.optionsBySport.농구),
+      하키: optOr(obs['하키'], EMPTY_MARGIN_META.optionsBySport.하키),
+      배구: optOr(obs['배구'], EMPTY_MARGIN_META.optionsBySport.배구),
+      LOL: optOr(obs['LOL'], EMPTY_MARGIN_META.optionsBySport.LOL),
     },
   }
 }
