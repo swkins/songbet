@@ -1104,6 +1104,87 @@ function MarginCalcTab() {
     setForm(f=> f.option === op ? {...f, option: cur.filter(x=>x!==op)[0] || ""} : f);
   };
 
+  // ── 이름 변경 헬퍼 ─────────────────────────────────────
+  // 메타 목록의 이름을 바꿈과 동시에 누적 기록(records, DB)의 같은 이름도 일괄 갱신.
+  // 변경 즉시 화면 + DB 둘 다 새 이름으로 보임.
+
+  const renameSite = async (oldName: string) => {
+    const v = window.prompt(`사이트 "${oldName}" 의 새 이름을 입력하세요.`, oldName)?.trim();
+    if(!v || v === oldName) return;
+    if(meta.sites.includes(v)) { alert("이미 같은 이름의 사이트가 있습니다."); return; }
+    // 1) 메타 목록 갱신 (순서 유지)
+    const newSites = meta.sites.map(s => s === oldName ? v : s);
+    await saveMeta({...meta, sites: newSites});
+    // 2) 화면의 누적 기록 즉시 갱신
+    setRecords(prev => prev.map(r => r.site === oldName ? {...r, site: v} : r));
+    // 3) DB 일괄 갱신
+    const updated = await db.renameMarginField('site', oldName, v);
+    // 4) 폼 선택값 갱신
+    setForm(f => f.site === oldName ? {...f, site: v} : f);
+    if(updated > 0) console.log(`[margin] 사이트 일괄 변경: "${oldName}" → "${v}" (${updated}건)`);
+  };
+
+  const renameLeague = async (oldName: string) => {
+    const sport = form.sport;
+    const v = window.prompt(`[${sport}] 리그 "${oldName}" 의 새 이름을 입력하세요.`, oldName)?.trim();
+    if(!v || v === oldName) return;
+    const cur = meta.leaguesBySport[sport] || [];
+    if(cur.includes(v)) { alert("이미 같은 이름의 리그가 있습니다."); return; }
+    // 1) 메타 갱신
+    const newCur = cur.map(x => x === oldName ? v : x);
+    const next: db.MarginMeta = {
+      ...meta,
+      leaguesBySport: {...meta.leaguesBySport, [sport]: newCur},
+    };
+    await saveMeta(next);
+    // 2) 화면의 누적 기록 갱신 (해당 종목만)
+    setRecords(prev => prev.map(r =>
+      (r.sport === sport && r.league === oldName) ? {...r, league: v} : r
+    ));
+    // 3) DB 갱신 (해당 종목 한정)
+    const updated = await db.renameMarginField('league', oldName, v, sport);
+    // 4) 폼 선택값
+    setForm(f => f.league === oldName ? {...f, league: v} : f);
+    if(updated > 0) console.log(`[margin] [${sport}] 리그 일괄 변경: "${oldName}" → "${v}" (${updated}건)`);
+  };
+
+  const renameOption = async (oldName: string) => {
+    const sport = form.sport;
+    const v = window.prompt(
+      `[${sport}] 옵션 "${oldName}" 의 새 이름을 입력하세요.\n` +
+      `(주의: 옵션 이름이 "승무패" 또는 "1X2"이면 3-way 입력 모드가 됩니다)`,
+      oldName
+    )?.trim();
+    if(!v || v === oldName) return;
+    const cur = meta.optionsBySport[sport] || [];
+    if(cur.includes(v)) { alert("이미 같은 이름의 옵션이 있습니다."); return; }
+    // 3-way 여부가 바뀌면 기존에 입력된 배당 개수와 안 맞을 수 있음 → 경고만 표시
+    if(is3WayOption(oldName) !== is3WayOption(v)){
+      const ok = window.confirm(
+        `⚠ 주의: 이 변경으로 옵션의 입력 모드가 바뀝니다.\n` +
+        `(기존 ${is3WayOption(oldName)?"3-way":"2-way"} → 새 ${is3WayOption(v)?"3-way":"2-way"})\n` +
+        `이미 입력된 누적 기록의 배당 개수는 그대로 유지됩니다. 계속하시겠습니까?`
+      );
+      if(!ok) return;
+    }
+    // 1) 메타 갱신
+    const newCur = cur.map(x => x === oldName ? v : x);
+    const next: db.MarginMeta = {
+      ...meta,
+      optionsBySport: {...meta.optionsBySport, [sport]: newCur},
+    };
+    await saveMeta(next);
+    // 2) 화면의 누적 기록 갱신 (해당 종목만)
+    setRecords(prev => prev.map(r =>
+      (r.sport === sport && r.option === oldName) ? {...r, option: v} : r
+    ));
+    // 3) DB 갱신 (해당 종목 한정)
+    const updated = await db.renameMarginField('option', oldName, v, sport);
+    // 4) 폼 선택값
+    setForm(f => f.option === oldName ? {...f, option: v} : f);
+    if(updated > 0) console.log(`[margin] [${sport}] 옵션 일괄 변경: "${oldName}" → "${v}" (${updated}건)`);
+  };
+
   // ── 폼 필드 변경 헬퍼 (변경 시 lastAdded 자동 클리어) ──
   const setFormField = (patch: Partial<FormState>) => {
     setForm(f=>({...f, ...patch}));
@@ -1375,12 +1456,20 @@ function MarginCalcTab() {
 
               {/* 사이트 */}
               <div>
-                <div style={{...labelStyle, display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                <div style={{...labelStyle, display:"flex",alignItems:"center",justifyContent:"space-between",gap:4}}>
                   <span>사이트</span>
-                  <button onClick={addSite} title="사이트 추가"
-                    style={{padding:"1px 7px",borderRadius:3,border:`1px solid ${cs.teal}55`,background:`${cs.teal}11`,color:cs.teal,cursor:"pointer",fontSize:9,fontWeight:800}}>
-                    + 추가
-                  </button>
+                  <div style={{display:"flex",gap:4}}>
+                    {form.site && (
+                      <button onClick={()=>renameSite(form.site)} title="이 사이트 이름 변경 (누적 기록도 함께 갱신)"
+                        style={{padding:"1px 6px",borderRadius:3,border:`1px solid ${cs.blue}55`,background:`${cs.blue}11`,color:cs.blue,cursor:"pointer",fontSize:9,fontWeight:800}}>
+                        ✏ 이름변경
+                      </button>
+                    )}
+                    <button onClick={addSite} title="사이트 추가"
+                      style={{padding:"1px 7px",borderRadius:3,border:`1px solid ${cs.teal}55`,background:`${cs.teal}11`,color:cs.teal,cursor:"pointer",fontSize:9,fontWeight:800}}>
+                      + 추가
+                    </button>
+                  </div>
                 </div>
                 <div style={{display:"flex",gap:4}}>
                   <select value={form.site}
@@ -1403,12 +1492,20 @@ function MarginCalcTab() {
 
               {/* 리그 */}
               <div>
-                <div style={{...labelStyle, display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                <div style={{...labelStyle, display:"flex",alignItems:"center",justifyContent:"space-between",gap:4}}>
                   <span>리그 <span style={{color:sportColor(form.sport),marginLeft:3}}>({form.sport})</span></span>
-                  <button onClick={addLeague} title="리그 추가"
-                    style={{padding:"1px 7px",borderRadius:3,border:`1px solid ${cs.purple}55`,background:`${cs.purple}11`,color:cs.purple,cursor:"pointer",fontSize:9,fontWeight:800}}>
-                    + 추가
-                  </button>
+                  <div style={{display:"flex",gap:4}}>
+                    {form.league && (
+                      <button onClick={()=>renameLeague(form.league)} title="이 리그 이름 변경 (누적 기록도 함께 갱신)"
+                        style={{padding:"1px 6px",borderRadius:3,border:`1px solid ${cs.blue}55`,background:`${cs.blue}11`,color:cs.blue,cursor:"pointer",fontSize:9,fontWeight:800}}>
+                        ✏ 이름변경
+                      </button>
+                    )}
+                    <button onClick={addLeague} title="리그 추가"
+                      style={{padding:"1px 7px",borderRadius:3,border:`1px solid ${cs.purple}55`,background:`${cs.purple}11`,color:cs.purple,cursor:"pointer",fontSize:9,fontWeight:800}}>
+                      + 추가
+                    </button>
+                  </div>
                 </div>
                 <div style={{display:"flex",gap:4}}>
                   <select value={form.league}
@@ -1431,12 +1528,20 @@ function MarginCalcTab() {
 
               {/* 옵션 */}
               <div>
-                <div style={{...labelStyle, display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                <div style={{...labelStyle, display:"flex",alignItems:"center",justifyContent:"space-between",gap:4}}>
                   <span>옵션</span>
-                  <button onClick={addOption} title="옵션 추가"
-                    style={{padding:"1px 7px",borderRadius:3,border:`1px solid ${cs.amber}55`,background:`${cs.amber}11`,color:cs.amber,cursor:"pointer",fontSize:9,fontWeight:800}}>
-                    + 추가
-                  </button>
+                  <div style={{display:"flex",gap:4}}>
+                    {form.option && (
+                      <button onClick={()=>renameOption(form.option)} title="이 옵션 이름 변경 (누적 기록도 함께 갱신)"
+                        style={{padding:"1px 6px",borderRadius:3,border:`1px solid ${cs.blue}55`,background:`${cs.blue}11`,color:cs.blue,cursor:"pointer",fontSize:9,fontWeight:800}}>
+                        ✏ 이름변경
+                      </button>
+                    )}
+                    <button onClick={addOption} title="옵션 추가"
+                      style={{padding:"1px 7px",borderRadius:3,border:`1px solid ${cs.amber}55`,background:`${cs.amber}11`,color:cs.amber,cursor:"pointer",fontSize:9,fontWeight:800}}>
+                      + 추가
+                    </button>
+                  </div>
                 </div>
                 <div style={{display:"flex",gap:4}}>
                   <select value={form.option}

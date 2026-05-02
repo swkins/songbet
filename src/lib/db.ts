@@ -966,6 +966,32 @@ export async function deleteMarginRecordsAboveThreshold(threshold: number): Prom
   }
 }
 
+// rev.9 (2026-05-02): 사이트/리그/옵션 이름 일괄 변경
+//   사용자가 메타 목록에서 이름을 바꾸면, 이미 입력된 누적 기록도 같은 이름으로 갱신해야
+//   통계가 깨지지 않음. PostgREST의 update + eq 필터로 일괄 처리.
+//   - field: 'site' | 'league' | 'option'
+//   - 추가 필터: site/option은 종목 무관 전체 변경, league는 sport도 일치해야 변경
+//     (다른 종목에 같은 리그명이 있을 가능성을 막기 위해)
+
+export async function renameMarginField(
+  field: 'site' | 'league' | 'option',
+  oldName: string,
+  newName: string,
+  sport?: MarginSport,  // league/option 변경 시 종목 한정용 (선택)
+): Promise<number> {
+  try {
+    let q = supabase.from('margin_records').update({ [field]: newName }).eq(field, oldName)
+    if (sport) q = q.eq('sport', sport)
+    // PostgREST는 update 후 select()로 반환 행을 받을 수 있음
+    const { data, error } = await q.select('id')
+    if (error) throw error
+    return data?.length ?? 0
+  } catch (e) {
+    logSaveError(`margin_records(rename ${field})`, e)
+    return 0
+  }
+}
+
 // ── MarginMeta (사이트/리그/옵션 목록) 파싱 헬퍼 ──────────────
 // 부정 입력에 대해 안전하게 EMPTY_MARGIN_META 폴백.
 function parseMarginMeta(raw: any): MarginMeta {
