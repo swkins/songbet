@@ -1612,7 +1612,7 @@ function MarginCalcTab() {
                     <div style={{fontSize:8,color:cs.dim,fontWeight:700,marginBottom:2,textAlign:"center"}}>
                       {threeWay ? "홈(1)" : "홈/오버"}
                     </div>
-                    <input type="text" inputMode="decimal" value={form.o1}
+                    <input type="text" inputMode="decimal" autoComplete="off" name="margin-o1" value={form.o1}
                       onChange={e=>setFormField({o1: e.target.value})}
                       onBlur={e=>setFormField({o1: formatOdds(e.target.value)})}
                       onKeyDown={e=>{ if(e.key==="Enter"){ (e.target as HTMLInputElement).blur(); addRecord(); } }}
@@ -1624,7 +1624,7 @@ function MarginCalcTab() {
                       <div style={{fontSize:8,color:cs.dim,fontWeight:700,marginBottom:2,textAlign:"center"}}>
                         무(X)
                       </div>
-                      <input type="text" inputMode="decimal" value={form.oX}
+                      <input type="text" inputMode="decimal" autoComplete="off" name="margin-oX" value={form.oX}
                         onChange={e=>setFormField({oX: e.target.value})}
                         onBlur={e=>setFormField({oX: formatOdds(e.target.value)})}
                         onKeyDown={e=>{ if(e.key==="Enter"){ (e.target as HTMLInputElement).blur(); addRecord(); } }}
@@ -1636,7 +1636,7 @@ function MarginCalcTab() {
                     <div style={{fontSize:8,color:cs.dim,fontWeight:700,marginBottom:2,textAlign:"center"}}>
                       {threeWay ? "원정(2)" : "원정/언더"}
                     </div>
-                    <input type="text" inputMode="decimal" value={form.o2}
+                    <input type="text" inputMode="decimal" autoComplete="off" name="margin-o2" value={form.o2}
                       onChange={e=>setFormField({o2: e.target.value})}
                       onBlur={e=>setFormField({o2: formatOdds(e.target.value)})}
                       onKeyDown={e=>{ if(e.key==="Enter"){ (e.target as HTMLInputElement).blur(); addRecord(); } }}
@@ -1733,7 +1733,7 @@ function MarginCalcTab() {
                   <div style={{fontSize:8,color:cs.dim,fontWeight:700,marginBottom:2,textAlign:"center"}}>
                     {quickMode==="3way" ? "홈(1)" : "배당1"}
                   </div>
-                  <input type="text" inputMode="decimal" value={quickO1}
+                  <input type="text" inputMode="decimal" autoComplete="off" name="quick-o1" value={quickO1}
                     onChange={e=>setQuickO1(e.target.value)}
                     onBlur={e=>setQuickO1(formatOdds(e.target.value))}
                     placeholder="1.85"
@@ -1744,7 +1744,7 @@ function MarginCalcTab() {
                     <div style={{fontSize:8,color:cs.dim,fontWeight:700,marginBottom:2,textAlign:"center"}}>
                       무(X)
                     </div>
-                    <input type="text" inputMode="decimal" value={quickOX}
+                    <input type="text" inputMode="decimal" autoComplete="off" name="quick-oX" value={quickOX}
                       onChange={e=>setQuickOX(e.target.value)}
                       onBlur={e=>setQuickOX(formatOdds(e.target.value))}
                       placeholder="3.50"
@@ -1755,7 +1755,7 @@ function MarginCalcTab() {
                   <div style={{fontSize:8,color:cs.dim,fontWeight:700,marginBottom:2,textAlign:"center"}}>
                     {quickMode==="3way" ? "원정(2)" : "배당2"}
                   </div>
-                  <input type="text" inputMode="decimal" value={quickO2}
+                  <input type="text" inputMode="decimal" autoComplete="off" name="quick-o2" value={quickO2}
                     onChange={e=>setQuickO2(e.target.value)}
                     onBlur={e=>setQuickO2(formatOdds(e.target.value))}
                     placeholder={quickMode==="3way"?"4.20":"1.95"}
@@ -4897,7 +4897,17 @@ function AppMain() {
     // (도장 없이도 색깔로 즉시 알 수 있음)
 
     return (
-      <div key={b.id} style={{position:"relative",background:autoResult?`${stampColor}0d`:C.bg3,border:`1px solid ${autoResult?stampColor+"99":C.amber+"44"}`,borderRadius:7,padding:"9px 11px",marginBottom:6}}>
+      <div key={b.id} style={{
+        position:"relative",
+        // rev.10: 자동 판정 카드는 결과 색상을 더 강하게 — 배경 진하게 + 좌측 보더 두껍게
+        background:autoResult?`${stampColor}18`:C.bg3,
+        border:`1px solid ${autoResult?stampColor:C.amber+"44"}`,
+        borderLeft:autoResult?`5px solid ${stampColor}`:`1px solid ${C.amber+"44"}`,
+        borderRadius:7,
+        padding:"9px 11px",
+        marginBottom:6,
+        boxShadow:autoResult?`0 0 0 1px ${stampColor}33 inset`:"none",
+      }}>
         {/* 헤더: 아이콘·사이트·국가·리그 + 베팅 옵션 강조 배지 */}
         <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:7,flexWrap:"wrap"}}>
           <span style={{fontSize:13,flexShrink:0}}>{SPORT_ICON[b.category]||"🎯"}</span>
@@ -7460,10 +7470,11 @@ function AppMain() {
 
         // 사용자가 + 종목 버튼으로 추가한 커스텀 종목 (API 미지원, 표시 + 수동 등록만)
         // DEFAULT_SPORTS의 한글 이름과 중복되는 건 제외 (이미 위에서 영문으로 표시됨)
+        // rev.10: "기타" 종목은 표시 안 함 (사용자 요청 — 종목+리그만 보임)
         const defaultSportKrSet = new Set(apiSportsList.map(s => SPORT_META[s].kr));
         // E스포츠는 SPORT_META에 있지만 sportsList에 없으므로 별도 추가 (한글 키)
         defaultSportKrSet.add("E스포츠");
-        const customOnlySports = customSports.filter(s => !defaultSportKrSet.has(s));
+        const customOnlySports = customSports.filter(s => !defaultSportKrSet.has(s) && s !== "기타");
 
         // 커스텀 종목용 메타 fallback (SPORT_META에 없는 종목)
         // 종목 이름별 아이콘 매핑 (LOL, 미식축구, 크리켓 등)
@@ -8038,34 +8049,20 @@ function AppMain() {
                       // 카드 렌더링 헬퍼 — 홈/원정 두 줄 + 우측 스코어 + 베팅 표시 (모든 경기 뷰와 통일)
                       const renderGameCard = (g:LiveFixture)=>{
                         const selected = stExpandedGameId===g.id;
+                        const sportIcon = SPORT_META[g.sport]?.icon || customSportIcon(g.sport as unknown as string);
+                        const sportKr = SPORT_META[g.sport]?.kr || (g.sport as unknown as string);
                         const live = isLive(g.status_short);
                         const finished = isFinished(g.status_short);
                         const postponed = isPostponed(g.status_short);
                         const homeKr = krTeam(g.home_team);
                         const awayKr = krTeam(g.away_team);
-                        // ── 베팅 표시 ──
-                        // 같은 fixtureId로 진행 중/대기 베팅이 있으면 어떤 옵션을 걸었는지 카드에 보여줌.
-                        // 예) "부천 (0.5) @1.85 (이지벳)" 형식.
+                        const ctry = krCountry(g.country);
+                        const lg = krLeague(g.league_name);
+                        const startTime = fmtKstTime(g.start_time);
+                        const startDate = fmtKstDate(g.start_time);
+                        // 베팅 표시 — 같은 fixtureId로 진행중/대기 베팅 있으면 어느 옵션 걸었는지 표시
                         const myBets = pending.filter(b => Number((b as any).fixtureId) === g.id);
                         const hasBet = myBets.length > 0;
-                        // 상태 라벨 (작게)
-                        const statusBadge = live ? (
-                          <span style={{fontSize:9,fontWeight:900,color:C.red,background:`${C.red}15`,border:`1px solid ${C.red}66`,padding:"1px 6px",borderRadius:3,letterSpacing:0.3}}>
-                            🔴 {statusLabel(g.status_short)}{g.elapsed?` ${g.elapsed}'`:""}
-                          </span>
-                        ) : finished ? (
-                          <span style={{fontSize:9,fontWeight:700,color:C.muted,background:`${C.dim}11`,border:`1px solid ${C.dim}44`,padding:"1px 6px",borderRadius:3}}>
-                            ✓ 종료
-                          </span>
-                        ) : postponed ? (
-                          <span style={{fontSize:9,fontWeight:800,color:C.amber,background:`${C.amber}11`,border:`1px solid ${C.amber}55`,padding:"1px 6px",borderRadius:3}}>
-                            ⊘ {statusLabel(g.status_short)}
-                          </span>
-                        ) : (
-                          <span style={{fontSize:9,fontWeight:700,color:C.muted,background:`${C.muted}11`,border:`1px solid ${C.muted}44`,padding:"1px 6px",borderRadius:3,fontFamily:'"SF Pro Display","Inter",system-ui,sans-serif',fontVariantNumeric:"tabular-nums"}}>
-                            🕘 {fmtKstTime(g.start_time)}
-                          </span>
-                        );
                         // 스코어 표시 여부 (라이브/종료에서만 의미 있음)
                         const showScores = (live || finished) && g.home_score!=null && g.away_score!=null;
                         const scoreColor = live ? C.red : C.text;
@@ -8073,57 +8070,100 @@ function AppMain() {
                           fontFamily: '"SF Pro Display", "Inter", -apple-system, BlinkMacSystemFont, system-ui, sans-serif',
                           fontVariantNumeric: "tabular-nums",
                         };
+                        // 남은 시간 헬퍼 (예정 경기에만 표시)
+                        const remainStr = (() => {
+                          try {
+                            const diff = new Date(g.start_time).getTime() - Date.now();
+                            if (diff < 0) return "시작됨";
+                            const mins = Math.floor(diff / 60000);
+                            if (mins < 60) return `${mins}분 후`;
+                            const hrs = Math.floor(mins / 60);
+                            const remMin = mins % 60;
+                            if (hrs < 24) return remMin > 0 ? `${hrs}시간 ${remMin}분 후` : `${hrs}시간 후`;
+                            return `${Math.floor(hrs/24)}일 후`;
+                          } catch { return ""; }
+                        })();
                         return (
                           <div key={g.id} onClick={()=>setStExpandedGameId(g.id)}
                             style={{
                               background:selected?`${C.teal}1a`:hasBet?`${C.purple}0e`:C.bg3,
                               border:`1px solid ${selected?C.teal:live?C.red+"66":hasBet?C.purple+"55":C.border}`,
                               borderLeft:`3px solid ${selected?C.teal:live?C.red:hasBet?C.purple:C.teal}`,
-                              borderRadius:7,padding:"8px 11px",marginBottom:6,cursor:"pointer",
+                              borderRadius:6,padding:"7px 9px",marginBottom:5,cursor:"pointer",
                               opacity:(postponed||finished)?0.75:1,
                               transition:"background 0.15s",
-                            }}>
-                            {/* 헤더: 상태 배지 (좌) */}
-                            <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6,flexWrap:"wrap"}}>
-                              {statusBadge}
+                            }}
+                            onMouseEnter={e=>{if(!selected) e.currentTarget.style.background=hasBet?`${C.purple}1a`:C.bg2;}}
+                            onMouseLeave={e=>{if(!selected) e.currentTarget.style.background=hasBet?`${C.purple}0e`:C.bg3;}}
+                          >
+                            {/* 헤더: 종목 · 국가 · 리그 + 베팅 배지 + 시각/상태 (모든 경기 카드와 동일) */}
+                            <div style={{display:"flex",alignItems:"center",gap:4,marginBottom:5,flexWrap:"wrap",fontSize:9}}>
+                              <span style={{fontSize:12}}>{sportIcon}</span>
+                              <span style={{color:C.muted,fontWeight:700}}>{sportKr}</span>
+                              {ctry && (<>
+                                <span style={{color:C.dim}}>·</span>
+                                <span style={{color:C.teal,fontWeight:700}}>{ctry}</span>
+                              </>)}
+                              <span style={{color:C.dim}}>·</span>
+                              <span style={{color:C.muted,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:110}}>{lg}</span>
                               {hasBet && (
-                                <span style={{fontSize:9,fontWeight:800,color:C.purple,background:`${C.purple}22`,border:`1px solid ${C.purple}66`,padding:"1px 6px",borderRadius:3,letterSpacing:0.3}}>
-                                  ✓ 베팅 {myBets.length>1?`${myBets.length}건`:""}
+                                <span title={myBets.map(b=>`${b.site}: ${b.betOption} @${b.odds}`).join("\n")}
+                                  style={{fontSize:9,color:C.purple,background:`${C.purple}22`,border:`1px solid ${C.purple}66`,padding:"1px 6px",borderRadius:3,fontWeight:800,letterSpacing:0.3}}>
+                                  ✓ 베팅 {myBets.length>1 ? `${myBets.length}건` : ""}
                                 </span>
                               )}
+                              {/* 우측 시각/상태 */}
+                              <span style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:4}}>
+                                {live ? (
+                                  <span style={{...numFontInline,color:C.red,fontWeight:900,fontSize:10,letterSpacing:0.3}}>
+                                    🔴 {statusLabel(g.status_short)}{g.elapsed?` ${g.elapsed}'`:""}
+                                  </span>
+                                ) : finished ? (
+                                  <span style={{color:C.muted,fontWeight:700,fontSize:10}}>✓ 종료</span>
+                                ) : postponed ? (
+                                  <span style={{color:C.amber,fontWeight:800,fontSize:10}}>⊘ {statusLabel(g.status_short)}</span>
+                                ) : (
+                                  <>
+                                    <span style={{...numFontInline,color:C.text,fontWeight:700,fontSize:10}}>
+                                      {startDate} {startTime}
+                                    </span>
+                                    <span style={{color:C.amber,fontWeight:700,fontSize:9}}>
+                                      · {remainStr}
+                                    </span>
+                                  </>
+                                )}
+                              </span>
                             </div>
                             {/* 본문: 홈/원정 두 줄 + 우측 스코어 */}
-                            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,padding:"3px 0"}}>
-                              <span style={{fontSize:14,fontWeight:700,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>
+                            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:6,padding:"2px 0"}}>
+                              <span style={{fontSize:12,fontWeight:700,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>
                                 {homeKr}
                               </span>
-                              {showScores && (
-                                <span style={{...numFontInline,fontSize:18,fontWeight:800,color:scoreColor,minWidth:24,textAlign:"right",lineHeight:1}}>
+                              {showScores ? (
+                                <span style={{...numFontInline,fontSize:14,fontWeight:800,color:scoreColor,minWidth:20,textAlign:"right",lineHeight:1}}>
                                   {g.home_score}
                                 </span>
-                              )}
+                              ) : null}
                             </div>
-                            <div style={{height:1,background:C.border,margin:"2px 0"}}/>
-                            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,padding:"3px 0"}}>
-                              <span style={{fontSize:14,fontWeight:700,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>
+                            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:6,padding:"2px 0"}}>
+                              <span style={{fontSize:12,fontWeight:700,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>
                                 {awayKr}
                               </span>
-                              {showScores && (
-                                <span style={{...numFontInline,fontSize:18,fontWeight:800,color:scoreColor,minWidth:24,textAlign:"right",lineHeight:1}}>
+                              {showScores ? (
+                                <span style={{...numFontInline,fontSize:14,fontWeight:800,color:scoreColor,minWidth:20,textAlign:"right",lineHeight:1}}>
                                   {g.away_score}
                                 </span>
-                              )}
+                              ) : null}
                             </div>
-                            {/* 내 베팅 목록 — 어떤 옵션을 걸었는지 카드에 직접 표시 */}
+                            {/* 내 베팅 목록 — 어떤 옵션을 걸었는지 카드에 직접 표시 (모든 경기 카드와 동일) */}
                             {hasBet && (
-                              <div style={{marginTop:7,paddingTop:6,borderTop:`1px dashed ${C.purple}44`,display:"flex",flexDirection:"column",gap:3}}>
+                              <div style={{marginTop:6,paddingTop:5,borderTop:`1px dashed ${C.purple}44`,display:"flex",flexDirection:"column",gap:3}}>
                                 {myBets.map(b=>{
-                                  // 옵션 표시명 — "홈승"/"원정승"이면 팀명으로 변환
                                   const opt = b.betOption==="홈승" ? `${b.homeTeam||homeKr} 승`
                                     : b.betOption==="원정승" ? `${b.awayTeam||awayKr} 승`
                                     : b.betOption;
                                   return (
-                                    <div key={b.id} style={{display:"flex",alignItems:"center",gap:5,fontSize:10}}>
+                                    <div key={b.id} style={{display:"flex",alignItems:"center",gap:5,fontSize:9}}>
                                       <span style={{color:C.purple,fontWeight:700}}>▸</span>
                                       <span style={{color:C.orange,fontWeight:800,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{opt}</span>
                                       <span style={{...numFontInline,color:C.teal,fontWeight:700}}>@{b.odds}</span>
@@ -8590,7 +8630,6 @@ function AppMain() {
                             {(sport as unknown as string) === "LOL" && (()=>{
                               const homeKr = krTeam(g.home_team);
                               const awayKr = krTeam(g.away_team);
-                              const setHandiLines = [1.5, 2.5];
                               return (
                                 <>
                                   {/* 세트 핸디캡 */}
@@ -8603,10 +8642,13 @@ function AppMain() {
                                       ].map(({team,color})=>(
                                         <div key={team}>
                                           <div style={{fontSize:10,color,marginBottom:5,fontWeight:800,textAlign:"center",background:`${color}22`,borderRadius:4,padding:"2px 0"}}>{team}</div>
-                                          {setHandiLines.flatMap(ln => [
-                                            { sign: "-", val: ln },
-                                            { sign: "+", val: ln },
-                                          ]).map(({sign,val})=>{
+                                          {/* rev.10: 순서 -2.5 / -1.5 / +1.5 / +2.5 (세로) */}
+                                          {[
+                                            { sign: "-", val: 2.5 },
+                                            { sign: "-", val: 1.5 },
+                                            { sign: "+", val: 1.5 },
+                                            { sign: "+", val: 2.5 },
+                                          ].map(({sign,val})=>{
                                             const opt = `${team} (${sign}${val})`;
                                             const added = inSlip(opt);
                                             return <button key={opt} onClick={()=>handleSlipPick(g,opt)}
@@ -8737,6 +8779,8 @@ function AppMain() {
                           <div style={{...L,fontSize:12,marginBottom:5}}>2️⃣ 배당 <span style={{fontSize:10,color:C.dim,fontWeight:400}}>(180 → 1.80 자동변환)</span></div>
                           <input id="st-slip-odds-input" type="text" inputMode="decimal" placeholder="배당 입력"
                             tabIndex={1}
+                            autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}
+                            name={`st-odds-${item.id||"new"}`}
                             value={displayValue}
                             onFocus={()=>{if(item.odds>0)setSlipOddsInputStr(item.odds.toFixed(2));}}
                             onChange={e=>{
