@@ -106,6 +106,14 @@
 //  키 미설정 시 새로고침 버튼은 안내 메시지를 띄우고 호출하지 않음.
 //
 // ─────────────────────────────────────────────────────────────
+// rev.11 변경사항 (2026-05-02):
+//  - autoSettle 자동 결제 버그 수정 — 우라와 사고 (이긴 경기가 실패로 처리)
+//  - 팀 매칭 기반으로 결제 로직 재작성: fixture의 home/away와 bet.homeTeam/awayTeam을
+//    먼저 매칭한 후, 위치가 뒤바뀐 경우 점수를 swap해서 비교 (승↔패 뒤바뀜 방지)
+//  - 매칭 실패 시 자동 결제 보류 (잘못 판정하느니 진행중 유지, 콘솔 경고)
+//  - "팀명 승" / "팀명승" 형식(수동 베팅에서 변환되는 형식) 자동 결제 추가
+//  - 오버/언더 정수 라인(push) 시 "취소" 처리 추가
+// rev.10 변경사항 (이전): 시간 기반 폴백, 농구 연장 종료(AOT/AP) 인식
 // rev.7 변경사항 (2026-04-25):
 //  - Edge Function 폐기, 클라이언트 직접 호출로 회귀
 //    (다만 결과는 Supabase fixtures에 그대로 저장 — 캐시 모델)
@@ -4266,12 +4274,67 @@ function AppMain() {
           status = "FT";
         }
       }
-      const hs=row.home_score as number|null;
-      const as_=row.away_score as number|null;
-      // ★ 원본 영문 팀명 — 한글 베팅 옵션 매칭 폴백용
+      const rawHs=row.home_score as number|null;
+      const rawAs=row.away_score as number|null;
+      // ★ 원본 영문 팀명
       const fixtureHomeTeam = (row.home_team as string|null) || "";
       const fixtureAwayTeam = (row.away_team as string|null) || "";
       let newResult:string|null=null;
+
+      // ════════════════════════════════════════════════════════
+      // ★ rev.11 (2026-05-02): 팀 매칭 기반 안전한 자동 결제
+      // ────────────────────────────────────────────────────────
+      // 핵심 원칙:
+      //  1) fixture의 home/away와 bet.homeTeam/awayTeam이 같은 위치인지 먼저 확인.
+      //  2) 만약 위치가 뒤바뀌어 들어왔다면 score를 swap해서 사용.
+      //  3) 매칭 자체가 안 되면 자동 결제 보류 (콘솔 경고만 남기고 진행중 유지).
+      //  4) 모든 점수 비교는 "내가 베팅한 시점의 home/away"(bet.homeTeam/awayTeam) 기준.
+      //
+      // 종전 버그: opt이 "팀명 승"(수동 베팅 형식) 형태일 때 자동 판정이 작동 안 했고,
+      //          또 fixture의 home/away가 베팅 시점과 달라지면 점수가 정반대로
+      //          매칭되어 승↔패가 뒤바뀜. → 우라와 베팅 같은 사고 발생.
+      // ════════════════════════════════════════════════════════
+      // 1) fixture home/away를 한글 변환 (teamNameMap 적용)
+      const fxHomeKr = fixtureHomeTeam ? translateTeamName(fixtureHomeTeam, teamNameMap) : "";
+      const fxAwayKr = fixtureAwayTeam ? translateTeamName(fixtureAwayTeam, teamNameMap) : "";
+
+      // 2) bet.homeTeam이 fixture의 home인지 away인지 판정
+      //    (정확 일치 → 부분 일치 순으로 폴백)
+      const eq = (a:string, b:string) => a && b && a.trim() === b.trim();
+      const inc = (a:string, b:string) => a && b && (a.includes(b) || b.includes(a));
+      let teamsAligned: boolean | null = null;  // true=일치(swap 불필요), false=뒤바뀜(swap 필요), null=알 수 없음
+      if (bet.homeTeam && bet.awayTeam) {
+        // 정확 일치 우선
+        if (eq(bet.homeTeam, fxHomeKr) && eq(bet.awayTeam, fxAwayKr)) teamsAligned = true;
+        else if (eq(bet.homeTeam, fxAwayKr) && eq(bet.awayTeam, fxHomeKr)) teamsAligned = false;
+        // 영문 원본과도 비교
+        else if (eq(bet.homeTeam, fixtureHomeTeam) && eq(bet.awayTeam, fixtureAwayTeam)) teamsAligned = true;
+        else if (eq(bet.homeTeam, fixtureAwayTeam) && eq(bet.awayTeam, fixtureHomeTeam)) teamsAligned = false;
+        // 부분 일치 폴백 (한글 매핑이 살짝 다를 때)
+        else if (inc(bet.homeTeam, fxHomeKr) && inc(bet.awayTeam, fxAwayKr)) teamsAligned = true;
+        else if (inc(bet.homeTeam, fxAwayKr) && inc(bet.awayTeam, fxHomeKr)) teamsAligned = false;
+      }
+
+      // 3) 팀 매칭 실패 → 자동 결제 보류 (잘못 판정하느니 진행중 유지)
+      if (teamsAligned === null && (status==='FT'||status==='AET'||status==='PEN'||status==='FT_PEN'||status==='AOT'||status==='AP')) {
+        // 팀명이 없는 베팅(구 데이터)이거나 매칭 실패 — 종전 동작(home/away 기준) 유지
+        // 단, bet.homeTeam이 있는데도 매칭 실패한 경우는 경고
+        if (bet.homeTeam) {
+          console.warn(`[autoSettle] 팀 매칭 실패 — 자동 결제 보류:`, {
+            betId: bet.id, betHome: bet.homeTeam, betAway: bet.awayTeam,
+            fxHome: fixtureHomeTeam, fxAway: fixtureAwayTeam, fxHomeKr, fxAwayKr,
+          });
+          continue; // 자동 결제 안 함
+        }
+        teamsAligned = true; // 구 데이터(homeTeam 없음)는 종전대로 진행
+      }
+
+      // 4) bet 시점 기준의 home/away score
+      //    teamsAligned=true면 fixture의 home_score가 곧 betHomeScore.
+      //    teamsAligned=false면 swap (fixture에서 home/away가 베팅 시점과 반대로 들어옴)
+      const betHomeScore = teamsAligned === false ? rawAs : rawHs;
+      const betAwayScore = teamsAligned === false ? rawHs : rawAs;
+
       // ★ 종료 상태 확장 (이전엔 FT/AET/PEN만 봐서 농구 연장 종료가 누락됨)
       //   FT      = Full Time (정규 시간 종료)
       //   AET     = After Extra Time (축구 연장 종료 = 농구의 OT 종료에 해당)
@@ -4279,40 +4342,48 @@ function AppMain() {
       //   AOT     = After Over Time (농구 연장 종료) ★ 신규 추가
       //   AP      = After Penalty (드물게 농구 등에서 사용) ★ 신규 추가
       if(status==='FT'||status==='AET'||status==='PEN'||status==='FT_PEN'||status==='AOT'||status==='AP'){
-        if(hs===null||as_===null) continue;
-        const opt=bet.betOption, total=hs+as_;
+        if(betHomeScore===null||betAwayScore===null) continue;
+        const hs = betHomeScore;        // 베팅 시점 기준 home (=bet.homeTeam)의 점수
+        const as_ = betAwayScore;       // 베팅 시점 기준 away (=bet.awayTeam)의 점수
+        const opt = bet.betOption, total = hs + as_;
+
+        // ── 4-a) 승패 판정 ────────────────────────────
+        // "홈승" / "원정승" / "무승부" (구 데이터, 일반 스포츠 베팅)
+        // 또는 "팀명 승" / "팀명승" (수동 베팅, 변환 저장됨)
         if(opt==="홈승") newResult=hs>as_?"승":"패";
         else if(opt==="원정승") newResult=as_>hs?"승":"패";
         else if(opt==="무승부") newResult=hs===as_?"승":"패";
-        else if(opt.startsWith("오버")){const l=parseFloat(opt.replace(/[^0-9.]/g,""));if(!isNaN(l))newResult=total>l?"승":"패";}
-        else if(opt.startsWith("언더")){const l=parseFloat(opt.replace(/[^0-9.]/g,""));if(!isNaN(l))newResult=total<l?"승":"패";}
+        else if(bet.homeTeam && (opt===`${bet.homeTeam} 승` || opt===`${bet.homeTeam}승`)) newResult=hs>as_?"승":"패";
+        else if(bet.awayTeam && (opt===`${bet.awayTeam} 승` || opt===`${bet.awayTeam}승`)) newResult=as_>hs?"승":"패";
+        // ── 4-b) 오버/언더 ────────────────────────────
+        else if(opt.startsWith("오버")){const l=parseFloat(opt.replace(/[^0-9.]/g,""));if(!isNaN(l))newResult=total>l?"승":total<l?"패":"취소";}
+        else if(opt.startsWith("언더")){const l=parseFloat(opt.replace(/[^0-9.]/g,""));if(!isNaN(l))newResult=total<l?"승":total>l?"패":"취소";}
+        // ── 4-c) 핸디캡 "팀명 (+1.5)" / "팀명 (-3.5)" ────
         else if(opt.includes("(")){
-          // 핸디캡 옵션 — "팀명 (+11.5)" / "팀명 (-3.5)" 형태
           const m=opt.match(/\(([+-]?[\d.]+)\)/);
           if(m){
             const line=parseFloat(m[1]);
-            // ★ 팀 매칭 강화 — 우선순위:
-            //   1) bet.homeTeam/awayTeam (저장 시점에 매칭한 한글) 직접 포함
-            //   2) fixture의 home_team/away_team (API 원본, 보통 영문) 직접 포함
-            //   3) "홈"/"원정" 키워드 (한글 단순 표기)
-            //   4) "Home"/"Away" 키워드 (영문 단순 표기)
-            //   ※ 한글/영문 팀명 불일치(API는 영문, 옵션은 한글 등) 케이스 폴백
+            // ★ 팀 매칭 우선순위:
+            //   1) bet.homeTeam/awayTeam (저장 시점 한글) 직접 포함
+            //   2) fixture의 home_team/away_team (API 원본 영문) 직접 포함
+            //   3) fxHomeKr/fxAwayKr (영문→한글 변환) 직접 포함
+            //   4) 부분 매칭 폴백
+            //   5) "홈"/"원정"/"home"/"away" 키워드
             let isHome:boolean|null = null;
-            const optBeforeParen = opt.split("(")[0].trim();  // "(" 앞부분만
+            const optBeforeParen = opt.split("(")[0].trim();
             if(bet.homeTeam && optBeforeParen.includes(bet.homeTeam)) isHome = true;
             else if(bet.awayTeam && optBeforeParen.includes(bet.awayTeam)) isHome = false;
             else if(fixtureHomeTeam && optBeforeParen.includes(fixtureHomeTeam)) isHome = true;
             else if(fixtureAwayTeam && optBeforeParen.includes(fixtureAwayTeam)) isHome = false;
-            // 부분 매칭 폴백 (팀명의 핵심 단어만 추출)
+            else if(fxHomeKr && optBeforeParen.includes(fxHomeKr)) isHome = true;
+            else if(fxAwayKr && optBeforeParen.includes(fxAwayKr)) isHome = false;
             else if(fixtureHomeTeam) {
-              // 옵션 앞부분에 fixture 팀명의 첫 단어가 들어있는지
               const hWord = fixtureHomeTeam.split(/\s+/)[0];
               const aWord = fixtureAwayTeam.split(/\s+/)[0];
               if(hWord && optBeforeParen.toLowerCase().includes(hWord.toLowerCase())) isHome = true;
               else if(aWord && optBeforeParen.toLowerCase().includes(aWord.toLowerCase())) isHome = false;
             }
             if(isHome === null) {
-              // 마지막 폴백: 단순 키워드
               if(/^홈/.test(optBeforeParen) || /\bhome\b/i.test(optBeforeParen)) isHome = true;
               else if(/^원정/.test(optBeforeParen) || /\baway\b/i.test(optBeforeParen)) isHome = false;
             }
@@ -4321,10 +4392,14 @@ function AppMain() {
               const handi=myScore+line-oppScore;
               if(handi>0) newResult="승";
               else if(handi<0) newResult="패";
-              else newResult="취소"; // 정확히 0 → 적중특례 (push)
+              else newResult="취소"; // 정확히 0 → 푸시
+            } else {
+              console.warn(`[autoSettle] 핸디캡 팀 매칭 실패 — 자동 결제 보류:`, {betId:bet.id, opt, betHome:bet.homeTeam, betAway:bet.awayTeam});
             }
           }
         }
+        // ── 4-d) 매칭 안 된 옵션은 자동 결제 안 함 (안전) ──
+        // newResult가 null이면 아래 if(newResult)에서 통과 못 함 → 진행중 유지
       } else if(status==='CANC') newResult="취소";
       else if(status==='PST') newResult="연기";
       else if(status==='ABD') newResult="중단";
@@ -4336,8 +4411,9 @@ function AppMain() {
       }
     }
     if(updatedBets.length>0) setBetsRaw(prev=>prev.map(b=>{const u=updatedBets.find(u=>u.id===b.id);return u??b;}));
+  // ★ rev.11: 팀 매칭에 teamNameMap을 사용하므로 의존성 추가 (stale closure 방지)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [teamNameMap]);
 
   // ── 진행중 탭 라이브 폴링 (rev.9) ────────────────────────────
   // 진행중 탭이 활성일 때만 30초마다 fixtures DB를 다시 읽어 liveFixtureMap을 갱신.
