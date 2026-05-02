@@ -621,13 +621,53 @@ type TeamNameMap = Record<string,string>;
 // NS=Not Started, FT=Full Time(종료), PST=Postponed(연기), CANC=Cancelled(취소)
 // ABD=Abandoned(중단), TBD=To Be Defined(미정), 그 외(1H, 2H, HT, LIVE 등)=라이브
 function isUpcoming(s:string){ return s==="NS" || s==="TBD"; }
-function isLive(s:string){ return !["NS","FT","AET","FT_PEN","CANC","PST","ABD","AWD","WO","TBD","AOT","AP"].includes(s); }
-function isFinished(s:string){ return ["FT","AET","FT_PEN","AOT","AP"].includes(s); }
+function isFinishedRaw(s:string){ return ["FT","AET","FT_PEN","AOT","AP"].includes(s); }
 function isPostponed(s:string){ return ["PST","CANC","ABD","AWD","WO"].includes(s); }
+
+// rev.10: 시간 기반 폴백 — API가 종료 status를 보내지 않아도 충분한 시간이 지났으면 종료로 간주.
+// 종목별 추정 경기 시간 + 여유 = 이 시간 지난 경기는 사실상 끝난 것.
+// (API 지연이나 갱신 누락으로 라이브로 잘못 표시되는 문제 방지)
+function sportMaxDurationMs(sport?: string): number {
+  // 종목별 최대 경기 시간 (시간 단위)
+  const HOURS: Record<string, number> = {
+    football: 4,    // 축구: 2시간 + 연장 + 여유 = 4시간
+    baseball: 5,    // 야구: 평균 3시간 + 연장 + 여유 = 5시간
+    basketball: 4,  // 농구: 2~2.5시간 + 여유 = 4시간
+    hockey: 4,      // 하키
+    volleyball: 4,  // 배구
+  };
+  return (HOURS[sport || ""] || 4) * 3600 * 1000; // 기본 4시간
+}
+function isLikelyFinishedByTime(startTimeIso: string | null | undefined, sport?: string): boolean {
+  if (!startTimeIso) return false;
+  try {
+    const startMs = new Date(startTimeIso).getTime();
+    if (isNaN(startMs)) return false;
+    return (Date.now() - startMs) > sportMaxDurationMs(sport);
+  } catch { return false; }
+}
+
+// status 기반 + 시간 기반 폴백 합쳐서 라이브 / 종료 판정
+function isLive(s:string, startTimeIso?: string | null, sport?: string){
+  // 명시적으로 끝났거나 시작 안 했거나 연기/취소/예정인 코드는 라이브 아님
+  if (["NS","FT","AET","FT_PEN","CANC","PST","ABD","AWD","WO","TBD","AOT","AP"].includes(s)) return false;
+  // 그 외(1H, 2H, HT, LIVE 등) = API 기준 라이브
+  // 단, start_time이 충분히 지났으면 시간 기반 폴백으로 종료로 간주 (API 지연 보정)
+  if (startTimeIso && isLikelyFinishedByTime(startTimeIso, sport)) return false;
+  return true;
+}
+function isFinished(s:string, startTimeIso?: string | null, sport?: string){
+  if (isFinishedRaw(s)) return true;
+  // 시간 기반 폴백: status는 라이브인데 충분한 시간 지났으면 종료로 간주
+  // (단, 명시적 예정/연기/취소는 제외)
+  if (isUpcoming(s) || isPostponed(s)) return false;
+  if (startTimeIso && isLikelyFinishedByTime(startTimeIso, sport)) return true;
+  return false;
+}
 // 한글 라벨 (status_short 기반 - status_long의 영문 그대로 노출 방지)
-function statusLabel(s:string):string {
+function statusLabel(s:string, startTimeIso?: string | null, sport?: string):string {
   if (s==="NS"||s==="TBD") return "예정";
-  if (isFinished(s)) return "종료";
+  if (isFinished(s, startTimeIso, sport)) return "종료";
   if (s==="PST") return "연기됨";
   if (s==="CANC") return "취소됨";
   if (s==="ABD") return "중단됨";
@@ -638,7 +678,7 @@ function statusLabel(s:string):string {
   if (s==="2H") return "후반";
   if (s==="ET") return "연장";
   if (s==="P"||s==="PEN") return "승부차기";
-  if (isLive(s)) return "진행중";
+  if (isLive(s, startTimeIso, sport)) return "진행중";
   return s;
 }
 function fmtKstTime(iso:string){ try{return new Date(iso).toLocaleTimeString("ko-KR",{timeZone:"Asia/Seoul",hour:"2-digit",minute:"2-digit",hour12:false});}catch{return "";} }
@@ -2292,7 +2332,19 @@ function AppMain() {
     setStLoading(true); setStError("");
     try {
       const data = await fetchAllFixturesUntilTomorrowKst();
-      setStFixtures(data);
+      // rev.10: 시간 기반 폴백 적용 — API가 종료 status를 보내지 않은 경기(라이브로 잘못 표시)
+      // 충분한 시간이 지났으면 status_short을 "FT"로 강제 변환. 사용자가 "끝난 경기가 진행중으로
+      // 표시됨" 신고로 추가됨. (예: 3시간 전에 끝난 축구가 1H로 응답되는 경우)
+      const normalized = data.map(f => {
+        if (!isFinishedRaw(f.status_short) && !isUpcoming(f.status_short) && !isPostponed(f.status_short)) {
+          // 라이브 상태인데 시간이 충분히 지났으면 종료로 보정
+          if (isLikelyFinishedByTime(f.start_time, f.sport)) {
+            return { ...f, status_short: "FT", status_long: f.status_long || "Match Finished (auto)", elapsed: null };
+          }
+        }
+        return f;
+      });
+      setStFixtures(normalized);
       setStFetchedAt(Date.now());
       if (data.length === 0) setStError("어제+오늘+내일 경기 데이터가 없습니다");
     } catch(e:any) {
@@ -4168,10 +4220,18 @@ function AppMain() {
     for(const r of rows) fixtureMap.set(Number(r.fixture_id),r);
 
     // ★ 진행중/대기 베팅용 fixture 정보 화면 state 갱신 (PendingCard가 이걸로 status 표시)
+    // rev.10: 시간 기반 폴백 — 시간 충분히 지난 경기는 status를 "FT"로 강제
     const liveMap = new Map<number, LiveFixtureInfo>();
     for(const r of rows){
+      let st = r.status_short || "NS";
+      // 라이브로 보이는데 시간이 충분히 지났으면 종료로 보정
+      if (!isFinishedRaw(st) && !isUpcoming(st) && !isPostponed(st)) {
+        if (isLikelyFinishedByTime(r.start_time, r.sport)) {
+          st = "FT";
+        }
+      }
       liveMap.set(Number(r.fixture_id), {
-        status_short: r.status_short || "NS",
+        status_short: st,
         home_score: r.home_score ?? null,
         away_score: r.away_score ?? null,
         start_time: r.start_time ?? null,
