@@ -3547,6 +3547,21 @@ function AppMain() {
   const [profitExtras,setProfitExtrasRaw]=useState<(ProfitExtra & {subSubCategory?:string})[]>([]);
   const [logs,setLogs]=useState<Log[]>([]);
 
+  // ── 진행중 베팅용 fixtures 정보 (rev.9 - 2026-05-02) ──────
+  // 키: fixture_id, 값: { status_short, home_score, away_score, start_time, home_team, away_team }
+  // PendingCard에서 베팅 카드별 경기 상태(예정/진행중/종료) 표시에 사용.
+  // autoSettle가 fixtures를 조회할 때 같은 데이터를 여기에도 채움.
+  // 라이브 경기는 빠르게 변하므로 30초마다 DB만 다시 읽어 갱신.
+  type LiveFixtureInfo = {
+    status_short: string;
+    home_score: number | null;
+    away_score: number | null;
+    start_time: string | null;
+    home_team: string | null;
+    away_team: string | null;
+  };
+  const [liveFixtureMap, setLiveFixtureMap] = useState<Map<number, LiveFixtureInfo>>(new Map());
+
   // 🔒 DB(app_settings 테이블의 pext_sites/pext_cats/pext_subcats 키)에 저장됨.
   //    빈 배열로 시작, useEffect에서 로드.
   const [pextSiteList,setPextSiteList]=useState<string[]>([]);
@@ -4056,10 +4071,25 @@ function AppMain() {
     if (targets.length===0) return;
     const fixtureIds=[...new Set(targets.map(b=>Number((b as any).fixtureId)))].filter(n=>!isNaN(n)&&n>0);
     if (fixtureIds.length===0) return;
-    const {data:rows,error}=await supabase.from('fixtures').select('fixture_id,sport,status_short,home_score,away_score,home_team,away_team').in('fixture_id',fixtureIds);
+    // ★ start_time 추가 select — 진행중 탭 PendingCard에서 "예정 18:30" 표시용
+    const {data:rows,error}=await supabase.from('fixtures').select('fixture_id,sport,status_short,home_score,away_score,home_team,away_team,start_time').in('fixture_id',fixtureIds);
     if (error||!rows) return;
     const fixtureMap=new Map<number,any>();
     for(const r of rows) fixtureMap.set(Number(r.fixture_id),r);
+
+    // ★ 진행중 베팅용 fixture 정보 화면 state 갱신 (PendingCard가 이걸로 status 표시)
+    const liveMap = new Map<number, LiveFixtureInfo>();
+    for(const r of rows){
+      liveMap.set(Number(r.fixture_id), {
+        status_short: r.status_short || "NS",
+        home_score: r.home_score ?? null,
+        away_score: r.away_score ?? null,
+        start_time: r.start_time ?? null,
+        home_team: r.home_team ?? null,
+        away_team: r.away_team ?? null,
+      });
+    }
+    setLiveFixtureMap(liveMap);
     const updatedBets:Bet[]=[];
     for(const bet of targets){
       const fid=Number((bet as any).fixtureId);
@@ -4138,6 +4168,19 @@ function AppMain() {
     if(updatedBets.length>0) setBetsRaw(prev=>prev.map(b=>{const u=updatedBets.find(u=>u.id===b.id);return u??b;}));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // ── 진행중 탭 라이브 폴링 (rev.9) ────────────────────────────
+  // 진행중 탭이 활성일 때만 30초마다 fixtures DB를 다시 읽어 liveFixtureMap을 갱신.
+  // API 호출이 아니라 DB만 읽으므로 비용 0. (실제 점수 갱신은 ⚡ 새로고침 또는
+  // refreshFixtures 자동 트리거에서 fixtures 테이블이 업데이트되어야 함.)
+  // 탭에서 벗어나면 자동으로 인터벌 정리.
+  useEffect(()=>{
+    if(tab !== "pending") return;
+    // 즉시 1회 + 이후 30초 간격
+    autoSettle();
+    const id = setInterval(()=>{ autoSettle(); }, 30_000);
+    return ()=>clearInterval(id);
+  }, [tab, autoSettle]);
 
 
   // ── 새로고침 메인 함수 ───────────────────────────────────────
@@ -4620,6 +4663,65 @@ function AppMain() {
     const stampColor = actualResult==="승"?C.green:actualResult==="패"?C.red:C.amber;
     const stampText = actualResult==="승"?"적중":actualResult==="패"?"실패":actualResult==="취소"?"취소":actualResult==="연기"?"연기":"중단";
 
+    // ── rev.9: 경기 상태 표시 (예정 시각 / 진행중 스코어 / 종료 결과) ──
+    // 수동 베팅이거나 fixtureId 없으면 표시 안 함 (정보가 없음).
+    // autoResult(대기_*)면 도장이 이미 표시되니 status도 안 보여줘서 시각적 충돌 방지.
+    let statusBadge: React.ReactElement | null = null;
+    if(hasFixtureId && !autoResult){
+      const fid = Number((b as any).fixtureId);
+      const info = liveFixtureMap.get(fid);
+      if(!info){
+        // 캐시에 정보 없음 → 살짝 흐린 안내
+        statusBadge = (
+          <div style={{display:"flex",alignItems:"center",gap:5,padding:"4px 8px",background:C.bg2,border:`1px dashed ${C.border2}`,borderRadius:5,fontSize:10,color:C.dim,marginBottom:5}}>
+            <span>⏱ 경기 정보 로딩중…</span>
+          </div>
+        );
+      } else {
+        const st = info.status_short;
+        const hs = info.home_score, as_ = info.away_score;
+        const scoreStr = (hs!=null && as_!=null) ? `${hs} : ${as_}` : null;
+
+        if(isUpcoming(st)){
+          // 예정 — start_time KST 시각 표시
+          const tStr = info.start_time ? fmtKstTime(info.start_time) : "";
+          const dStr = info.start_time ? fmtKstDate(info.start_time) : "";
+          statusBadge = (
+            <div style={{display:"flex",alignItems:"center",gap:6,padding:"4px 9px",background:`${C.muted}11`,border:`1px solid ${C.muted}44`,borderRadius:5,fontSize:11,marginBottom:5}}>
+              <span style={{color:C.muted,fontWeight:700,fontSize:10}}>🕘 경기전</span>
+              {tStr && <span style={{color:C.text,fontWeight:800,fontFamily:"monospace"}}>{dStr} {tStr}</span>}
+            </div>
+          );
+        } else if(isLive(st)){
+          // 진행중 — 빨간 점 + 스코어 + 진행 단계
+          const phase = statusLabel(st);
+          statusBadge = (
+            <div style={{display:"flex",alignItems:"center",gap:6,padding:"4px 9px",background:`${C.red}15`,border:`1px solid ${C.red}66`,borderRadius:5,fontSize:11,marginBottom:5,animation:"none"}}>
+              <span style={{color:C.red,fontWeight:900,fontSize:10}}>🔴 LIVE</span>
+              {scoreStr && <span style={{color:C.text,fontWeight:900,fontFamily:"monospace",fontSize:13,letterSpacing:1}}>{scoreStr}</span>}
+              <span style={{color:C.red,fontWeight:700,fontSize:10,marginLeft:"auto"}}>{phase}</span>
+            </div>
+          );
+        } else if(isFinished(st)){
+          // 종료 — 회색 톤 + 최종 스코어
+          statusBadge = (
+            <div style={{display:"flex",alignItems:"center",gap:6,padding:"4px 9px",background:`${C.dim}11`,border:`1px solid ${C.dim}55`,borderRadius:5,fontSize:11,marginBottom:5}}>
+              <span style={{color:C.muted,fontWeight:700,fontSize:10}}>✓ 종료</span>
+              {scoreStr && <span style={{color:C.text,fontWeight:900,fontFamily:"monospace",fontSize:13,letterSpacing:1}}>{scoreStr}</span>}
+              <span style={{color:C.dim,fontWeight:600,fontSize:9,marginLeft:"auto"}}>{statusLabel(st)}</span>
+            </div>
+          );
+        } else if(isPostponed(st)){
+          // 연기/취소/중단 등
+          statusBadge = (
+            <div style={{display:"flex",alignItems:"center",gap:6,padding:"4px 9px",background:`${C.amber}11`,border:`1px solid ${C.amber}55`,borderRadius:5,fontSize:11,marginBottom:5}}>
+              <span style={{color:C.amber,fontWeight:800,fontSize:10}}>⊘ {statusLabel(st)}</span>
+            </div>
+          );
+        }
+      }
+    }
+
     return (
       <div key={b.id} style={{position:"relative",background:autoResult?`${stampColor}0d`:C.bg3,border:`1px solid ${autoResult?stampColor+"99":C.amber+"44"}`,borderRadius:7,padding:"9px 11px",marginBottom:6,overflow:"hidden"}}>
         {autoResult && (
@@ -4637,6 +4739,7 @@ function AppMain() {
             <span style={{fontSize:11,color:C.orange,fontWeight:800,marginLeft:"auto"}}>{displayBetOption}</span>
           </div>
           <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:6,lineHeight:1.3,wordBreak:"break-word"}}>{title}</div>
+          {statusBadge}
           <div style={{display:"flex",alignItems:"center",gap:7,flexWrap:"wrap"}}>
             <div style={{display:"flex",gap:8,flex:1,minWidth:100}}>
               <span style={{fontSize:10,color:C.muted}}>배당 <span style={{color:C.teal,fontWeight:800,fontSize:11}}>{b.odds}</span></span>
