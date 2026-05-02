@@ -4067,9 +4067,12 @@ function AppMain() {
 
   const autoSettle = useCallback(async () => {
     const freshBets = await db.loadBets();
-    const targets = freshBets.filter(b=>b.result==="진행중"&&(b as any).fixtureId!=null&&!(b as any).isManual);
-    if (targets.length===0) return;
-    const fixtureIds=[...new Set(targets.map(b=>Number((b as any).fixtureId)))].filter(n=>!isNaN(n)&&n>0);
+    // 결제 처리 대상: 진행중 베팅만 (이미 대기_*인 건 자동 판정 끝났으니 또 처리 안 함)
+    const settleTargets = freshBets.filter(b=>b.result==="진행중"&&(b as any).fixtureId!=null&&!(b as any).isManual);
+    // fixtures 조회 대상: 진행중 + 대기_* 모두 (대기_* 카드에도 결과 스코어 표시 위해)
+    const displayTargets = freshBets.filter(b=>(b.result==="진행중"||b.result.startsWith("대기_"))&&(b as any).fixtureId!=null&&!(b as any).isManual);
+    if (displayTargets.length===0) return;
+    const fixtureIds=[...new Set(displayTargets.map(b=>Number((b as any).fixtureId)))].filter(n=>!isNaN(n)&&n>0);
     if (fixtureIds.length===0) return;
     // ★ start_time 추가 select — 진행중 탭 PendingCard에서 "예정 18:30" 표시용
     const {data:rows,error}=await supabase.from('fixtures').select('fixture_id,sport,status_short,home_score,away_score,home_team,away_team,start_time').in('fixture_id',fixtureIds);
@@ -4077,7 +4080,7 @@ function AppMain() {
     const fixtureMap=new Map<number,any>();
     for(const r of rows) fixtureMap.set(Number(r.fixture_id),r);
 
-    // ★ 진행중 베팅용 fixture 정보 화면 state 갱신 (PendingCard가 이걸로 status 표시)
+    // ★ 진행중/대기 베팅용 fixture 정보 화면 state 갱신 (PendingCard가 이걸로 status 표시)
     const liveMap = new Map<number, LiveFixtureInfo>();
     for(const r of rows){
       liveMap.set(Number(r.fixture_id), {
@@ -4091,7 +4094,7 @@ function AppMain() {
     }
     setLiveFixtureMap(liveMap);
     const updatedBets:Bet[]=[];
-    for(const bet of targets){
+    for(const bet of settleTargets){
       const fid=Number((bet as any).fixtureId);
       const row=fixtureMap.get(fid);
       if(!row) continue;
