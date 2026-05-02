@@ -654,6 +654,8 @@ export interface AppSettingsBundle {
   odds_api_io_key: string
   // rev.7: 마진계산기 메타 (종목별 사이트/리그/옵션 목록)
   margin_meta: MarginMeta
+  // rev.10: 1회 마이그레이션 플래그 (국가→리그 2단계 단순화) — Supabase에 저장돼서 모든 기기에서 공유
+  lge_v2_migrated?: boolean | string
 }
 export async function loadAppSettingsBundle(): Promise<AppSettingsBundle> {
   try {
@@ -686,6 +688,8 @@ export async function loadAppSettingsBundle(): Promise<AppSettingsBundle> {
       point_exchange_presets: Array.isArray(map.point_exchange_presets) ? map.point_exchange_presets : [],
       odds_api_io_key: typeof map.odds_api_io_key === 'string' ? map.odds_api_io_key : '',
       margin_meta: parseMarginMeta(map.margin_meta),
+      // rev.10: 마이그레이션 플래그 (true 면 1회 마이그레이션 완료)
+      lge_v2_migrated: map.lge_v2_migrated === true || map.lge_v2_migrated === 'true' || map.lge_v2_migrated === 1,
     }
   } catch (e) {
     logLoadError('app_settings', e)
@@ -710,6 +714,8 @@ export async function loadAppSettingsBundle(): Promise<AppSettingsBundle> {
           LOL: [...EMPTY_MARGIN_META.optionsBySport.LOL],
         },
       },
+      // rev.10: 마이그레이션 플래그 (catch 분기 — 로드 실패 시 기본값 false)
+      lge_v2_migrated: false,
     }
   }
 }
