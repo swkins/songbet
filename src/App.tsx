@@ -106,6 +106,12 @@
 //  키 미설정 시 새로고침 버튼은 안내 메시지를 띄우고 호출하지 않음.
 //
 // ─────────────────────────────────────────────────────────────
+// rev.13 변경사항 (2026-05-03): 야구 연장전 자동결제 버그 수정
+//  - 야구는 9회 동점이면 연장이닝(extra innings)에 들어가는데, API-Sports의 status_short은
+//    IN9에 머물거나 갱신이 늦을 수 있음. 그 상태에서 시작 후 5시간이 지나면 시간 기반 폴백이
+//    status를 강제로 "FT"로 바꿔, 9회까지의 동점 점수로 자동결제(대기_*) 처리되던 버그.
+//  - 수정: 시간 기반 폴백 적용 시 "야구 + 동점" 조건이면 폴백을 건너뛰고 라이브 상태 유지.
+//    API의 명시적 FT만 신뢰. (autoSettle, sports test 화면 둘 다 적용)
 // rev.12 변경사항 (2026-05-02):
 //  - 농구 베팅 옵션 통합: 마핸 16개 + 플핸 10개 + 오버언더 28개 = 54개 버튼 →
 //    [마핸] [플핸] [오버] [언더] 4개 모드 버튼만. 클릭 시 라인 입력 모달 오픈.
@@ -2351,8 +2357,14 @@ function AppMain() {
       // 표시됨" 신고로 추가됨. (예: 3시간 전에 끝난 축구가 1H로 응답되는 경우)
       const normalized = data.map(f => {
         if (!isFinishedRaw(f.status_short) && !isUpcoming(f.status_short) && !isPostponed(f.status_short)) {
-          // 라이브 상태인데 시간이 충분히 지났으면 종료로 보정
-          if (isLikelyFinishedByTime(f.start_time, f.sport)) {
+          // ★ rev.13 (2026-05-03): 야구 연장전 보호
+          //   야구는 9회 동점이면 연장에 들어가므로, 점수가 동점인 상태에서는
+          //   시간 기반 폴백을 적용하지 않음 (실제로 진행중일 가능성 높음).
+          const isBaseballTied = f.sport === "baseball"
+            && f.home_score != null && f.away_score != null
+            && Number(f.home_score) === Number(f.away_score);
+          // 라이브 상태인데 시간이 충분히 지났으면 종료로 보정 (단, 야구 동점 제외)
+          if (!isBaseballTied && isLikelyFinishedByTime(f.start_time, f.sport)) {
             return { ...f, status_short: "FT", status_long: f.status_long || "Match Finished (auto)", elapsed: null };
           }
         }
@@ -4263,7 +4275,14 @@ function AppMain() {
       let st = r.status_short || "NS";
       // 라이브로 보이는데 시간이 충분히 지났으면 종료로 보정
       if (!isFinishedRaw(st) && !isUpcoming(st) && !isPostponed(st)) {
-        if (isLikelyFinishedByTime(r.start_time, r.sport)) {
+        // ★ rev.13 (2026-05-03): 야구 연장전 보호
+        //   야구는 9회 동점이면 연장에 들어가므로, 점수가 동점인 상태에서는
+        //   시간 기반 폴백(5시간 경과 → FT)을 적용하지 않음. API의 명시적 FT만 신뢰.
+        //   (예: 5시간 넘게 진행된 연장 경기를 9회 동점 스코어로 잘못 자동결제하던 버그 수정)
+        const isBaseballTied = r.sport === "baseball"
+          && r.home_score != null && r.away_score != null
+          && Number(r.home_score) === Number(r.away_score);
+        if (!isBaseballTied && isLikelyFinishedByTime(r.start_time, r.sport)) {
           st = "FT";
         }
       }
@@ -4286,7 +4305,13 @@ function AppMain() {
       // (API 지연이나 갱신 누락으로 자동 판정이 안 되던 문제 해결)
       let status = row.status_short as string;
       if (!isFinishedRaw(status) && !isUpcoming(status) && !isPostponed(status)) {
-        if (isLikelyFinishedByTime(row.start_time, row.sport)) {
+        // ★ rev.13 (2026-05-03): 야구 연장전 보호
+        //   야구는 9회 동점이면 연장에 들어가므로, 점수가 동점인 상태에서는
+        //   시간 기반 폴백을 적용하지 않음. API의 명시적 FT만 신뢰하여 잘못된 자동결제 방지.
+        const isBaseballTied = row.sport === "baseball"
+          && row.home_score != null && row.away_score != null
+          && Number(row.home_score) === Number(row.away_score);
+        if (!isBaseballTied && isLikelyFinishedByTime(row.start_time, row.sport)) {
           status = "FT";
         }
       }
