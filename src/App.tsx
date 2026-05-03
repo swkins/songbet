@@ -106,12 +106,21 @@
 //  키 미설정 시 새로고침 버튼은 안내 메시지를 띄우고 호출하지 않음.
 //
 // ─────────────────────────────────────────────────────────────
-// rev.13 변경사항 (2026-05-03): 야구 연장전 자동결제 버그 수정
-//  - 야구는 9회 동점이면 연장이닝(extra innings)에 들어가는데, API-Sports의 status_short은
-//    IN9에 머물거나 갱신이 늦을 수 있음. 그 상태에서 시작 후 5시간이 지나면 시간 기반 폴백이
-//    status를 강제로 "FT"로 바꿔, 9회까지의 동점 점수로 자동결제(대기_*) 처리되던 버그.
-//  - 수정: 시간 기반 폴백 적용 시 "야구 + 동점" 조건이면 폴백을 건너뛰고 라이브 상태 유지.
-//    API의 명시적 FT만 신뢰. (autoSettle, sports test 화면 둘 다 적용)
+// rev.13 변경사항 (2026-05-03): 야구 연장이닝 자동결제 버그 수정
+//  [문제]
+//   - 야구는 9회 동점이면 연장이닝(extra innings)에 들어가는데, 연장이 6시간 이상
+//     걸릴 수 있고 사용자 새로고침이 없으면 fixtures DB가 9회까지의 점수에 머무름.
+//   - 시간 기반 폴백(rev.10)이 5시간 경과 시 status를 "FT"로 강제 → 9회까지의
+//     동점/잘못된 점수로 자동결제(대기_*) 처리되던 사고 발생.
+//   - 한 번 잘못 대기_* 처리되면 진행중이 아니라 자동결제 대상 제외 → 사용자가
+//     수동 처리취소 해도 같은 잘못된 판정이 반복.
+//  [수정]
+//   1. 야구는 시간 기반 폴백을 사용하지 않음. API의 명시적 status="FT"만 신뢰.
+//      (FT 시점에는 연장 포함 최종 점수가 정확히 들어옴)
+//   2. 야구의 "대기_*" 베팅도 자동결제 재판정 대상에 포함 → 점수가 갱신되면 새로 판정.
+//   3. 자동판정 결과가 없는데(=경기 진행중) 기존이 대기_* 야구 베팅이면 → 진행중으로
+//      자동 복원. 시간 폴백 버그로 잘못 처리된 베팅을 사용자 개입 없이 자동 복구.
+//   4. 동일한 판정이면 DB 쓰기 스킵 (불필요한 갱신 방지).
 // rev.12 변경사항 (2026-05-02):
 //  - 농구 베팅 옵션 통합: 마핸 16개 + 플핸 10개 + 오버언더 28개 = 54개 버튼 →
 //    [마핸] [플핸] [오버] [언더] 4개 모드 버튼만. 클릭 시 라인 입력 모달 오픈.
@@ -2357,14 +2366,10 @@ function AppMain() {
       // 표시됨" 신고로 추가됨. (예: 3시간 전에 끝난 축구가 1H로 응답되는 경우)
       const normalized = data.map(f => {
         if (!isFinishedRaw(f.status_short) && !isUpcoming(f.status_short) && !isPostponed(f.status_short)) {
-          // ★ rev.13 (2026-05-03): 야구 연장전 보호
-          //   야구는 9회 동점이면 연장에 들어가므로, 점수가 동점인 상태에서는
-          //   시간 기반 폴백을 적용하지 않음 (실제로 진행중일 가능성 높음).
-          const isBaseballTied = f.sport === "baseball"
-            && f.home_score != null && f.away_score != null
-            && Number(f.home_score) === Number(f.away_score);
-          // 라이브 상태인데 시간이 충분히 지났으면 종료로 보정 (단, 야구 동점 제외)
-          if (!isBaseballTied && isLikelyFinishedByTime(f.start_time, f.sport)) {
+          // ★ rev.13 (2026-05-03): 야구는 시간 기반 폴백을 사용하지 않음 (연장이닝 보호)
+          //   야구 연장이닝은 6시간 이상 갈 수 있어 시간 폴백으로 FT 강제 시 잘못된 점수로
+          //   자동결제 사고 발생. API의 명시적 FT만 신뢰.
+          if (f.sport !== "baseball" && isLikelyFinishedByTime(f.start_time, f.sport)) {
             return { ...f, status_short: "FT", status_long: f.status_long || "Match Finished (auto)", elapsed: null };
           }
         }
@@ -4256,7 +4261,17 @@ function AppMain() {
   const autoSettle = useCallback(async () => {
     const freshBets = await db.loadBets();
     // 결제 처리 대상: 진행중 베팅만 (이미 대기_*인 건 자동 판정 끝났으니 또 처리 안 함)
-    const settleTargets = freshBets.filter(b=>b.result==="진행중"&&(b as any).fixtureId!=null&&!(b as any).isManual);
+    // ★ rev.13 (2026-05-03): 야구는 "대기_*" 상태도 재판정 대상에 포함
+    //   기존 시간 폴백 버그로 9회 동점/잘못된 점수로 자동결제(대기_*)된 야구 베팅이
+    //   누적되어 있을 수 있음. 이런 베팅은 fixtures의 점수가 갱신되면 다시 판정해야 함.
+    //   안전 가드: 자동결제 분기에서 status가 명시적 FT일 때만 재판정 진행됨.
+    const settleTargets = freshBets.filter(b => {
+      if ((b as any).fixtureId == null || (b as any).isManual) return false;
+      if (b.result === "진행중") return true;
+      // 야구의 "대기_*" 베팅도 재판정 대상 (rev.13 버그 복구용)
+      if ((b as any).fixtureSport === "baseball" && b.result.startsWith("대기_")) return true;
+      return false;
+    });
     // fixtures 조회 대상: 진행중 + 대기_* 모두 (대기_* 카드에도 결과 스코어 표시 위해)
     const displayTargets = freshBets.filter(b=>(b.result==="진행중"||b.result.startsWith("대기_"))&&(b as any).fixtureId!=null&&!(b as any).isManual);
     if (displayTargets.length===0) return;
@@ -4275,14 +4290,10 @@ function AppMain() {
       let st = r.status_short || "NS";
       // 라이브로 보이는데 시간이 충분히 지났으면 종료로 보정
       if (!isFinishedRaw(st) && !isUpcoming(st) && !isPostponed(st)) {
-        // ★ rev.13 (2026-05-03): 야구 연장전 보호
-        //   야구는 9회 동점이면 연장에 들어가므로, 점수가 동점인 상태에서는
-        //   시간 기반 폴백(5시간 경과 → FT)을 적용하지 않음. API의 명시적 FT만 신뢰.
-        //   (예: 5시간 넘게 진행된 연장 경기를 9회 동점 스코어로 잘못 자동결제하던 버그 수정)
-        const isBaseballTied = r.sport === "baseball"
-          && r.home_score != null && r.away_score != null
-          && Number(r.home_score) === Number(r.away_score);
-        if (!isBaseballTied && isLikelyFinishedByTime(r.start_time, r.sport)) {
+        // ★ rev.13 (2026-05-03): 야구는 시간 기반 폴백을 사용하지 않음 (연장이닝 보호)
+        //   야구 연장이닝은 6시간 이상 갈 수 있어서 시간 폴백으로 FT 강제하면
+        //   잘못된 점수(9회까지)로 자동결제되는 사고 발생. API의 명시적 FT만 신뢰.
+        if (r.sport !== "baseball" && isLikelyFinishedByTime(r.start_time, r.sport)) {
           st = "FT";
         }
       }
@@ -4305,13 +4316,13 @@ function AppMain() {
       // (API 지연이나 갱신 누락으로 자동 판정이 안 되던 문제 해결)
       let status = row.status_short as string;
       if (!isFinishedRaw(status) && !isUpcoming(status) && !isPostponed(status)) {
-        // ★ rev.13 (2026-05-03): 야구 연장전 보호
-        //   야구는 9회 동점이면 연장에 들어가므로, 점수가 동점인 상태에서는
-        //   시간 기반 폴백을 적용하지 않음. API의 명시적 FT만 신뢰하여 잘못된 자동결제 방지.
-        const isBaseballTied = row.sport === "baseball"
-          && row.home_score != null && row.away_score != null
-          && Number(row.home_score) === Number(row.away_score);
-        if (!isBaseballTied && isLikelyFinishedByTime(row.start_time, row.sport)) {
+        // ★ rev.13 (2026-05-03): 야구는 시간 기반 폴백을 사용하지 않음 (연장이닝 보호)
+        //   야구 연장이닝은 6시간 이상 갈 수 있고, 사용자 새로고침이 없으면
+        //   fixtures DB는 9회까지의 점수 상태로 머물 수 있음. 이때 시간 폴백으로
+        //   FT 강제 → 9회 동점/잘못된 점수로 자동결제되는 사고 발생.
+        //   따라서 야구는 API가 명시적으로 status="FT"를 보낼 때만 자동결제.
+        //   (연장 포함 최종 점수는 API의 FT 응답 시점에 정확히 들어옴)
+        if (row.sport !== "baseball" && isLikelyFinishedByTime(row.start_time, row.sport)) {
           status = "FT";
         }
       }
@@ -4447,8 +4458,18 @@ function AppMain() {
       if(newResult){
         // 바로 확정 안 함 — 대기_* 저장. 사용자 확인 버튼 누를 때 최종 확정
         const pr=newResult==="승"?"대기_승":newResult==="패"?"대기_패":newResult==="취소"?"대기_취소":newResult==="연기"?"대기_연기":"대기_중단";
-        const updated={...bet,result:pr,profit:null} as Bet;
-        updatedBets.push(updated); db.upsertBet(updated);
+        // ★ rev.13: 기존과 동일한 판정이면 DB 쓰기 스킵 (불필요한 갱신 방지)
+        if (bet.result !== pr) {
+          const updated={...bet,result:pr,profit:null} as Bet;
+          updatedBets.push(updated); db.upsertBet(updated);
+        }
+      } else if (bet.result.startsWith("대기_") && (bet as any).fixtureSport === "baseball") {
+        // ★ rev.13 (2026-05-03): 야구 대기_* 베팅인데 자동판정 결과가 없음
+        //   = status가 라이브/IN9/연장 진행중 = 실제로는 아직 진행중인 경기.
+        //   기존 시간 폴백 버그로 잘못 대기_* 처리된 베팅을 진행중으로 자동 복원.
+        const reverted = {...bet, result: "진행중", profit: null} as Bet;
+        updatedBets.push(reverted); db.upsertBet(reverted);
+        console.log(`[autoSettle] 야구 대기_* → 진행중 복원 (경기 미종료):`, {betId: bet.id, prev: bet.result, status});
       }
     }
     if(updatedBets.length>0) setBetsRaw(prev=>prev.map(b=>{const u=updatedBets.find(u=>u.id===b.id);return u??b;}));
