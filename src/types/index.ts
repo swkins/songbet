@@ -3,6 +3,15 @@ export type Market = 'handicap' | 'over_under' | 'moneyline' | 'correct_score' |
 export type BetResult = 'win' | 'loss' | 'push' | 'pending'
 export type CashflowType = 'income' | 'expense'
 
+export interface Site {
+  id: string
+  created_at: string
+  name: string
+  balance: number
+  active: boolean
+  sort_order: number
+}
+
 export interface Bet {
   id: string
   created_at: string
@@ -17,6 +26,7 @@ export interface Bet {
   result: BetResult
   profit: number
   memo: string
+  site_id: string | null
 }
 
 export interface Todo {
@@ -25,6 +35,8 @@ export interface Todo {
   todo_date: string
   content: string
   done: boolean
+  check_count: number
+  check_dates: string[]
 }
 
 export interface Cashflow {

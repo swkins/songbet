@@ -2,7 +2,68 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import type { Todo, Cashflow } from '../types'
 import dayjs from 'dayjs'
-import { Check, Plus, Trash2, TrendingUp, TrendingDown } from 'lucide-react'
+import { Check, Plus, Trash2, TrendingUp, TrendingDown, ChevronLeft, ChevronRight, RotateCcw, Calendar } from 'lucide-react'
+
+function MiniCalendar({
+  checkedDates,
+  onToggle,
+}: {
+  checkedDates: string[]
+  onToggle: (date: string) => void
+}) {
+  const [viewMonth, setViewMonth] = useState(dayjs().startOf('month'))
+  const today = dayjs().format('YYYY-MM-DD')
+
+  const startDay = viewMonth.startOf('month').day() // 0=일
+  const daysInMonth = viewMonth.daysInMonth()
+  const cells: (string | null)[] = [
+    ...Array(startDay).fill(null),
+    ...Array.from({ length: daysInMonth }, (_, i) =>
+      viewMonth.date(i + 1).format('YYYY-MM-DD')
+    ),
+  ]
+  // 6행 맞추기
+  while (cells.length % 7 !== 0) cells.push(null)
+
+  return (
+    <div className="mini-cal">
+      <div className="mini-cal-header">
+        <button
+          style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 2 }}
+          onClick={() => setViewMonth(p => p.subtract(1, 'month'))}
+        >
+          <ChevronLeft size={13} />
+        </button>
+        <span>{viewMonth.format('YYYY.MM')}</span>
+        <button
+          style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 2 }}
+          onClick={() => setViewMonth(p => p.add(1, 'month'))}
+        >
+          <ChevronRight size={13} />
+        </button>
+      </div>
+      <div className="mini-cal-grid">
+        {['일','월','화','수','목','금','토'].map(d => (
+          <div key={d} className="mini-cal-dow">{d}</div>
+        ))}
+        {cells.map((date, i) =>
+          date ? (
+            <div
+              key={i}
+              className={`mini-cal-day ${checkedDates.includes(date) ? 'checked' : ''} ${date === today ? 'today' : ''}`}
+              onClick={() => onToggle(date)}
+              title={date}
+            >
+              {dayjs(date).date()}
+            </div>
+          ) : (
+            <div key={i} />
+          )
+        )}
+      </div>
+    </div>
+  )
+}
 
 export default function Dashboard() {
   const today = dayjs().format('YYYY-MM-DD')
@@ -11,6 +72,7 @@ export default function Dashboard() {
   const [cashflows, setCashflows] = useState<Cashflow[]>([])
   const [newTodo, setNewTodo] = useState('')
   const [showCashModal, setShowCashModal] = useState(false)
+  const [calOpenId, setCalOpenId] = useState<string | null>(null)
   const [cashForm, setCashForm] = useState({
     flow_date: today,
     type: 'income' as 'income' | 'expense',
@@ -19,16 +81,12 @@ export default function Dashboard() {
     amount: '',
   })
 
-  useEffect(() => {
-    loadTodos()
-    loadCashflows()
-  }, [])
+  useEffect(() => { loadTodos(); loadCashflows() }, [])
 
   async function loadTodos() {
     const { data } = await supabase
       .from('todos')
       .select('*')
-      .eq('todo_date', today)
       .order('created_at')
     if (data) setTodos(data)
   }
@@ -46,15 +104,54 @@ export default function Dashboard() {
     if (!newTodo.trim()) return
     const { data } = await supabase
       .from('todos')
-      .insert({ todo_date: today, content: newTodo.trim(), done: false })
-      .select()
-      .single()
+      .insert({ todo_date: today, content: newTodo.trim(), done: false, check_count: 0, check_dates: [] })
+      .select().single()
     if (data) { setTodos(p => [...p, data]); setNewTodo('') }
   }
 
-  async function toggleTodo(id: string, done: boolean) {
-    await supabase.from('todos').update({ done: !done }).eq('id', id)
-    setTodos(p => p.map(t => t.id === id ? { ...t, done: !done } : t))
+  async function toggleTodo(todo: Todo) {
+    const todayStr = today
+    const alreadyCheckedToday = todo.check_dates.includes(todayStr)
+    // done 토글 + 오늘 날짜 체크날짜에 추가(한번만)
+    const newDone = !todo.done
+    const newDates = alreadyCheckedToday
+      ? todo.check_dates
+      : newDone ? [...todo.check_dates, todayStr] : todo.check_dates
+    const newCount = newDates.length
+
+    const { data } = await supabase
+      .from('todos')
+      .update({ done: newDone, check_dates: newDates, check_count: newCount })
+      .eq('id', todo.id)
+      .select().single()
+    if (data) setTodos(p => p.map(t => t.id === todo.id ? data : t))
+  }
+
+  async function toggleCalDate(todo: Todo, date: string) {
+    const has = todo.check_dates.includes(date)
+    const newDates = has
+      ? todo.check_dates.filter(d => d !== date)
+      : [...todo.check_dates, date]
+    const newCount = newDates.length
+    // done: 오늘 날짜가 체크되어있으면 done=true
+    const newDone = newDates.includes(today)
+
+    const { data } = await supabase
+      .from('todos')
+      .update({ check_dates: newDates, check_count: newCount, done: newDone })
+      .eq('id', todo.id)
+      .select().single()
+    if (data) setTodos(p => p.map(t => t.id === todo.id ? data : t))
+  }
+
+  async function resetTodo(todo: Todo) {
+    if (!confirm(`"${todo.content}" 출석 기록을 초기화할까요?`)) return
+    const { data } = await supabase
+      .from('todos')
+      .update({ check_dates: [], check_count: 0, done: false })
+      .eq('id', todo.id)
+      .select().single()
+    if (data) setTodos(p => p.map(t => t.id === todo.id ? data : t))
   }
 
   async function deleteTodo(id: string) {
@@ -73,8 +170,7 @@ export default function Dashboard() {
         description: cashForm.description,
         amount: Number(cashForm.amount),
       })
-      .select()
-      .single()
+      .select().single()
     if (data) {
       setCashflows(p => [data, ...p])
       setShowCashModal(false)
@@ -90,8 +186,7 @@ export default function Dashboard() {
   const totalIncome = cashflows.filter(c => c.type === 'income').reduce((s, c) => s + c.amount, 0)
   const totalExpense = cashflows.filter(c => c.type === 'expense').reduce((s, c) => s + c.amount, 0)
   const balance = totalIncome - totalExpense
-  const doneTodos = todos.filter(t => t.done).length
-
+  const todayTodos = todos.filter(t => t.check_dates.includes(today))
   const fmt = (n: number) => n.toLocaleString('ko-KR') + '원'
 
   return (
@@ -99,7 +194,7 @@ export default function Dashboard() {
       <div className="flex-between mb-24">
         <h1 className="page-title">대시보드</h1>
         <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>
-          {dayjs().format('YYYY년 MM월 DD일 dddd')}
+          {dayjs().format('YYYY년 MM월 DD일')}
         </span>
       </div>
 
@@ -124,55 +219,79 @@ export default function Dashboard() {
       <div className="grid-2" style={{ gap: 20 }}>
         {/* 오늘 할 일 */}
         <div className="card">
-          <div className="flex-between mb-16">
-            <div className="card-title" style={{ marginBottom: 0 }}>
-              오늘 할 일
-              {todos.length > 0 && (
-                <span style={{ marginLeft: 8, fontSize: 11, color: 'var(--accent)', fontWeight: 600 }}>
-                  {doneTodos}/{todos.length}
-                </span>
-              )}
-            </div>
+          <div className="flex-between mb-12">
+            <div className="card-title" style={{ marginBottom: 0 }}>오늘 할 일</div>
+            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+              오늘 완료 {todayTodos.length}/{todos.length}
+            </span>
           </div>
-
-          {/* 진행바 */}
-          {todos.length > 0 && (
-            <div style={{
-              height: 4, background: 'var(--border)', borderRadius: 2,
-              marginBottom: 16, overflow: 'hidden'
-            }}>
-              <div style={{
-                height: '100%', background: 'var(--green)',
-                width: `${(doneTodos / todos.length) * 100}%`,
-                borderRadius: 2, transition: 'width 0.3s'
-              }} />
-            </div>
-          )}
 
           {todos.length === 0 && (
             <div className="empty">
               <div className="empty-icon">📋</div>
-              오늘 할 일을 추가하세요
+              할 일을 추가하세요
             </div>
           )}
 
-          {todos.map(t => (
-            <div key={t.id} className="todo-item">
-              <div
-                className={`todo-check ${t.done ? 'done' : ''}`}
-                onClick={() => toggleTodo(t.id, t.done)}
-              >
-                {t.done && <Check size={11} color="#fff" strokeWidth={3} />}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+            {todos.map(t => (
+              <div key={t.id}>
+                <div className="todo-item">
+                  {/* 체크박스 */}
+                  <div
+                    className={`todo-check ${t.check_dates.includes(today) ? 'done' : ''}`}
+                    onClick={() => toggleTodo(t)}
+                  >
+                    {t.check_dates.includes(today) && <Check size={11} color="#fff" strokeWidth={3} />}
+                  </div>
+
+                  {/* 내용 */}
+                  <span className={`todo-text ${t.check_dates.includes(today) ? 'done' : ''}`}>
+                    {t.content}
+                  </span>
+
+                  {/* 누적 횟수 */}
+                  <span style={{
+                    fontSize: 11, fontWeight: 700, color: 'var(--accent)',
+                    background: 'var(--accent-light)', padding: '2px 7px',
+                    borderRadius: 10, flexShrink: 0
+                  }}>
+                    {t.check_count}회
+                  </span>
+
+                  {/* 달력 토글 */}
+                  <button
+                    className={`btn btn-icon btn-ghost btn-sm`}
+                    style={calOpenId === t.id ? { background: 'var(--accent-light)', color: 'var(--accent)' } : {}}
+                    onClick={() => setCalOpenId(calOpenId === t.id ? null : t.id)}
+                    title="출석 달력"
+                  >
+                    <Calendar size={13} />
+                  </button>
+
+                  {/* 초기화 */}
+                  <button className="btn btn-icon btn-ghost btn-sm" onClick={() => resetTodo(t)} title="초기화">
+                    <RotateCcw size={13} color="var(--text-muted)" />
+                  </button>
+
+                  {/* 삭제 */}
+                  <button className="btn btn-icon btn-ghost btn-sm" onClick={() => deleteTodo(t.id)}>
+                    <Trash2 size={13} color="var(--text-muted)" />
+                  </button>
+                </div>
+
+                {/* 달력 펼치기 */}
+                {calOpenId === t.id && (
+                  <div style={{ paddingLeft: 28, paddingBottom: 12 }}>
+                    <MiniCalendar
+                      checkedDates={t.check_dates}
+                      onToggle={(date) => toggleCalDate(t, date)}
+                    />
+                  </div>
+                )}
               </div>
-              <span className={`todo-text ${t.done ? 'done' : ''}`}>{t.content}</span>
-              <button
-                className="btn btn-icon btn-ghost btn-sm"
-                onClick={() => deleteTodo(t.id)}
-              >
-                <Trash2 size={13} color="var(--text-muted)" />
-              </button>
-            </div>
-          ))}
+            ))}
+          </div>
 
           {/* 할일 입력 */}
           <div className="flex-center gap-8 mt-16">
@@ -205,28 +324,25 @@ export default function Dashboard() {
             </div>
           )}
 
-          <div style={{ maxHeight: 340, overflowY: 'auto' }}>
+          <div style={{ maxHeight: 380, overflowY: 'auto' }}>
             {cashflows.map(c => (
               <div key={c.id} className="flex-between" style={{
-                padding: '10px 0',
-                borderBottom: '1px solid var(--border-light)'
+                padding: '10px 0', borderBottom: '1px solid var(--border-light)'
               }}>
                 <div className="flex-center gap-8">
                   <div style={{
                     width: 28, height: 28, borderRadius: 6,
                     background: c.type === 'income' ? 'var(--green-bg)' : 'var(--red-bg)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    flexShrink: 0
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0
                   }}>
                     {c.type === 'income'
                       ? <TrendingUp size={13} color="var(--green)" />
-                      : <TrendingDown size={13} color="var(--red)" />
-                    }
+                      : <TrendingDown size={13} color="var(--red)" />}
                   </div>
                   <div>
                     <div style={{ fontSize: 13, fontWeight: 500 }}>{c.description}</div>
                     <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                      {c.flow_date} {c.category && `· ${c.category}`}
+                      {c.flow_date}{c.category && ` · ${c.category}`}
                     </div>
                   </div>
                 </div>
@@ -250,20 +366,16 @@ export default function Dashboard() {
         <div className="modal-overlay" onClick={() => setShowCashModal(false)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
             <div className="modal-title">수입 / 지출 추가</div>
-
             <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
               {(['income', 'expense'] as const).map(t => (
-                <button
-                  key={t}
+                <button key={t}
                   className={`btn ${cashForm.type === t ? 'btn-primary' : 'btn-ghost'}`}
                   onClick={() => setCashForm(p => ({ ...p, type: t }))}
-                  style={{ flex: 1 }}
-                >
+                  style={{ flex: 1 }}>
                   {t === 'income' ? '수입' : '지출'}
                 </button>
               ))}
             </div>
-
             <div className="form-row form-row-2 mb-12">
               <div className="form-group">
                 <label className="form-label">날짜</label>
@@ -290,7 +402,6 @@ export default function Dashboard() {
                 value={cashForm.amount}
                 onChange={e => setCashForm(p => ({ ...p, amount: e.target.value }))} />
             </div>
-
             <div className="modal-actions">
               <button className="btn btn-ghost" onClick={() => setShowCashModal(false)}>취소</button>
               <button className="btn btn-primary" onClick={saveCashflow}>저장</button>

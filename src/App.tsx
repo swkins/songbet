@@ -16,17 +16,19 @@ export default function App() {
   return (
     <div className="app">
       <nav className="nav">
-        <div className="nav-logo">SongBet</div>
-        <div className="nav-tabs">
-          {TABS.map(t => (
-            <button
-              key={t.id}
-              className={`nav-tab ${tab === t.id ? 'active' : ''}`}
-              onClick={() => setTab(t.id)}
-            >
-              {t.label}
-            </button>
-          ))}
+        <div className="nav-inner">
+          <div className="nav-logo">SongBet</div>
+          <div className="nav-tabs">
+            {TABS.map(t => (
+              <button
+                key={t.id}
+                className={`nav-tab ${tab === t.id ? 'active' : ''}`}
+                onClick={() => setTab(t.id)}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
         </div>
       </nav>
       {tab === 'dashboard' && <Dashboard />}
