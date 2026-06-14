@@ -10,6 +10,8 @@ export interface Site {
   balance: number
   active: boolean
   sort_order: number
+  rolling_target: number
+  rolling_done: number
 }
 
 export interface Bet {
@@ -47,6 +49,18 @@ export interface Cashflow {
   category: string
   description: string
   amount: number
+  site_id: string | null
+}
+
+export interface ActionLog {
+  id: string
+  created_at: string
+  action_type: 'insert' | 'update' | 'delete'
+  table_name: string
+  record_id: string | null
+  before_data: Record<string, unknown> | null
+  after_data: Record<string, unknown> | null
+  description: string
 }
 
 export type Tab = 'dashboard' | 'bets' | 'stats'
