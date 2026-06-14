@@ -49,22 +49,6 @@ html, body, #root {
   -webkit-font-smoothing: antialiased;
 }
 
-.app { display: flex; min-height: 100vh; }
-
-/* ── 사이드 로그 포함한 앱 레이아웃 ── */
-.app-layout {
-  display: flex;
-  width: 100%;
-  min-height: 100vh;
-}
-
-.app-main {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
 /* ── NAV ── */
 .nav {
   background: var(--bg-card);
@@ -73,9 +57,9 @@ html, body, #root {
   position: sticky; top: 0; z-index: 100;
 }
 .nav-inner {
-  max-width: 960px;
+  max-width: 1400px;
   margin: 0 auto;
-  padding: 0 24px;
+  padding: 0 40px;
   height: 100%;
   display: flex; align-items: center; gap: 20px;
 }
@@ -100,15 +84,12 @@ html, body, #root {
 
 /* ── PAGE ── */
 .page {
-  padding: 24px;
-  max-width: 960px;
+  padding: 24px 40px;
+  max-width: 1400px;
   margin: 0 auto;
   width: 100%;
 }
-.page-title {
-  font-size: 17px; font-weight: 700;
-  color: var(--text-primary); letter-spacing: -0.3px;
-}
+.page-title { font-size: 17px; font-weight: 700; color: var(--text-primary); letter-spacing: -0.3px; }
 
 /* ── CARD ── */
 .card {
@@ -130,15 +111,8 @@ html, body, #root {
 
 /* ── STAT TILE ── */
 .stat-tile { text-align: center; padding: 16px 12px; }
-.stat-value {
-  font-size: 21px; font-weight: 700;
-  font-family: var(--font-mono); letter-spacing: -1px;
-  color: var(--text-primary);
-}
-.stat-label {
-  font-size: 10px; color: var(--text-secondary);
-  margin-top: 4px; letter-spacing: 0.6px; text-transform: uppercase;
-}
+.stat-value { font-size: 21px; font-weight: 700; font-family: var(--font-mono); letter-spacing: -1px; color: var(--text-primary); }
+.stat-label { font-size: 10px; color: var(--text-secondary); margin-top: 4px; letter-spacing: 0.6px; text-transform: uppercase; }
 
 /* ── BUTTONS ── */
 .btn {
@@ -150,18 +124,13 @@ html, body, #root {
 }
 .btn-primary { background: var(--gold); color: #000; }
 .btn-primary:hover { background: var(--gold-dim); }
-.btn-ghost {
-  background: transparent;
-  border: 1px solid var(--border);
-  color: var(--text-secondary);
-}
+.btn-ghost { background: transparent; border: 1px solid var(--border); color: var(--text-secondary); }
 .btn-ghost:hover { background: var(--bg-hover); color: var(--text-primary); border-color: var(--blue); }
 .btn-green { background: var(--green-bg); color: var(--green); border: 1px solid var(--green-border); }
 .btn-green:hover { background: #002A14; }
 .btn-danger { background: var(--red-bg); color: var(--red); border: 1px solid var(--red-border); }
 .btn-danger:hover { background: #2A000F; }
 .btn-blue { background: var(--blue-bg); color: var(--blue); border: 1px solid var(--blue-border); }
-.btn-blue:hover { background: #0D1E40; }
 .btn-sm { padding: 4px 10px; font-size: 11px; }
 .btn-icon { padding: 5px; border-radius: var(--radius-sm); }
 .btn-xs { padding: 3px 8px; font-size: 10px; }
@@ -179,10 +148,7 @@ html, body, #root {
 
 /* ── FORMS ── */
 .form-group { display: flex; flex-direction: column; gap: 5px; }
-.form-label {
-  font-size: 10px; font-weight: 700; letter-spacing: 0.8px;
-  text-transform: uppercase; color: var(--text-secondary);
-}
+.form-label { font-size: 10px; font-weight: 700; letter-spacing: 0.8px; text-transform: uppercase; color: var(--text-secondary); }
 .form-input, .form-select, .form-textarea {
   padding: 8px 11px; border: 1px solid var(--border);
   border-radius: var(--radius-sm); font-size: 13px;
@@ -192,8 +158,7 @@ html, body, #root {
 }
 .form-input::placeholder { color: var(--text-muted); }
 .form-input:focus, .form-select:focus, .form-textarea:focus {
-  border-color: var(--gold); box-shadow: 0 0 0 2px rgba(245,166,35,0.12);
-  background: var(--bg-card);
+  border-color: var(--gold); box-shadow: 0 0 0 2px rgba(245,166,35,0.12); background: var(--bg-card);
 }
 .form-select option { background: var(--bg-elevated); color: var(--text-primary); }
 .form-textarea { resize: vertical; min-height: 60px; }
@@ -233,17 +198,9 @@ tr:hover td { background: var(--bg-hover); }
 .td-right { text-align: right; }
 
 /* ── TODO ── */
-.todo-item {
-  display: flex; align-items: center; gap: 8px;
-  padding: 8px 0; border-bottom: 1px solid var(--border-light);
-}
+.todo-item { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--border-light); }
 .todo-item:last-child { border-bottom: none; }
-.todo-check {
-  width: 16px; height: 16px; border-radius: 3px;
-  border: 1.5px solid var(--border); flex-shrink: 0;
-  display: flex; align-items: center; justify-content: center;
-  cursor: pointer; transition: all 0.15s;
-}
+.todo-check { width: 16px; height: 16px; border-radius: 3px; border: 1.5px solid var(--border); flex-shrink: 0; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.15s; }
 .todo-check.done { background: var(--green); border-color: var(--green); }
 .todo-text { flex: 1; font-size: 13px; color: var(--text-primary); }
 .todo-text.done { text-decoration: line-through; color: var(--text-secondary); }
@@ -264,134 +221,128 @@ tr:hover td { background: var(--bg-hover); }
 
 /* ── FILTER CHIPS ── */
 .filter-bar { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
-.filter-chip {
-  padding: 3px 10px; border-radius: 20px;
-  border: 1px solid var(--border); font-size: 11px; font-weight: 500;
-  background: var(--bg-card); color: var(--text-secondary); cursor: pointer; transition: all 0.15s;
-}
+.filter-chip { padding: 3px 10px; border-radius: 20px; border: 1px solid var(--border); font-size: 11px; font-weight: 500; background: var(--bg-card); color: var(--text-secondary); cursor: pointer; transition: all 0.15s; }
 .filter-chip:hover { border-color: var(--gold); color: var(--gold); }
 .filter-chip.active { background: var(--gold); border-color: var(--gold); color: #000; font-weight: 700; }
 
-/* ── FLOATING BET BUTTON ── */
+/* ── SITE GRID (엑셀 스타일) ── */
+.site-grid {
+  display: grid;
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  margin-bottom: 20px;
+}
+.site-grid-header {
+  display: contents;
+}
+.site-col-head {
+  background: var(--bg-elevated);
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  padding: 10px 8px;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-primary);
+  position: relative;
+}
+.site-col-head:last-child { border-right: none; }
+
+.site-balance-row {
+  display: contents;
+}
+.site-balance-cell {
+  background: var(--bg-card);
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  padding: 8px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+.site-balance-cell:last-child { border-right: none; }
+.site-balance-num {
+  font-family: var(--font-mono);
+  font-size: 16px;
+  font-weight: 700;
+}
+.site-balance-arrows {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.site-arrow-btn {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  width: 20px;
+  height: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  transition: all 0.1s;
+  padding: 0;
+}
+.site-arrow-btn:hover { background: var(--gold-bg); color: var(--gold); border-color: var(--gold-border); }
+
+.site-bets-col {
+  background: var(--bg-card);
+  border-right: 1px solid var(--border);
+  vertical-align: top;
+  min-height: 60px;
+}
+.site-bets-col:last-child { border-right: none; }
+.site-bet-entry {
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border-light);
+  font-size: 11px;
+  line-height: 1.4;
+  cursor: default;
+  transition: background 0.1s;
+}
+.site-bet-entry:hover { background: var(--bg-hover); }
+.site-bet-entry:last-child { border-bottom: none; }
+.site-bet-entry.win { color: var(--red); }
+.site-bet-entry.pending { color: var(--text-primary); }
+.site-bet-match { font-weight: 600; font-size: 11px; }
+.site-bet-odds { font-size: 10px; color: var(--text-secondary); font-family: var(--font-mono); }
+
+/* ── FAB ── */
 .fab-bet {
-  position: fixed;
-  bottom: 32px; right: 32px;
-  width: 52px; height: 52px;
-  border-radius: 50%;
-  background: var(--gold);
-  color: #000;
+  position: fixed; bottom: 32px; right: 32px;
+  width: 52px; height: 52px; border-radius: 50%;
+  background: var(--gold); color: #000;
   border: none; cursor: pointer;
   display: flex; align-items: center; justify-content: center;
   box-shadow: 0 4px 20px rgba(245,166,35,0.4);
-  transition: all 0.2s;
-  z-index: 90;
-  font-size: 22px; font-weight: 700;
+  transition: all 0.2s; z-index: 90; font-size: 22px;
   animation: float 3s ease-in-out infinite;
 }
-.fab-bet:hover {
-  transform: scale(1.1);
-  box-shadow: 0 6px 28px rgba(245,166,35,0.6);
-  animation: none;
-}
-@keyframes float {
-  0%, 100% { transform: translateY(0); }
-  50%       { transform: translateY(-6px); }
-}
+.fab-bet:hover { transform: scale(1.1); box-shadow: 0 6px 28px rgba(245,166,35,0.6); animation: none; }
+@keyframes float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-6px)} }
 
-/* ── BET SLIP MODAL ── */
-.betslip-modal {
-  background: var(--bg-card); border: 1px solid var(--border);
-  border-radius: var(--radius-lg); padding: 0;
-  width: 100%; max-width: 620px;
-  box-shadow: 0 20px 60px rgba(0,0,0,0.7);
-  max-height: 92vh; overflow-y: auto;
-}
-.betslip-modal-header {
-  display: flex; align-items: center; gap: 0;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-elevated);
-  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
-  overflow: hidden;
-}
-.betslip-modal-title {
-  padding: 12px 16px;
-  font-size: 10px; font-weight: 700; letter-spacing: 2px;
-  text-transform: uppercase; color: var(--gold);
-  border-right: 1px solid var(--border);
-  white-space: nowrap; flex-shrink: 0;
-}
-.betslip-sites { display: flex; gap: 0; flex: 1; overflow-x: auto; }
-.betslip-site-tab {
-  padding: 12px 14px; cursor: pointer;
-  font-size: 12px; font-weight: 600;
-  color: var(--text-secondary);
-  border-right: 1px solid var(--border);
-  transition: all 0.15s; white-space: nowrap;
-  display: flex; align-items: center; gap: 6px;
-  border-top: none; border-bottom: none; border-left: none;
-  background: none; font-family: var(--font-body);
-}
-.betslip-site-tab:hover { background: var(--bg-hover); color: var(--text-primary); }
-.betslip-site-tab.active { background: var(--gold-bg); color: var(--gold); border-bottom: 2px solid var(--gold); }
-.betslip-site-tab .site-bal { font-family: var(--font-mono); font-size: 10px; color: var(--text-secondary); font-weight: 400; }
-.betslip-site-tab.active .site-bal { color: var(--gold-dim); }
-.betslip-add-site {
-  padding: 12px 14px; cursor: pointer;
-  font-size: 11px; color: var(--text-secondary);
-  border: none; background: none; font-family: var(--font-body);
-  transition: color 0.15s; display: flex; align-items: center; gap: 4px;
-}
-.betslip-add-site:hover { color: var(--gold); }
-
-.betslip-body { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
-.betslip-form-grid {
-  display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 8px;
-}
-.betslip-row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.betslip-row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
-
-.betslip-info-bar {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 10px 14px;
-  background: var(--bg-elevated); border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-}
-.betslip-action-row { display: flex; gap: 8px; align-items: center; }
-
-/* 롤링 바 */
+/* ── ROLLING BAR ── */
 .rolling-bar { height: 3px; background: var(--bg-elevated); border-radius: 2px; overflow: hidden; margin-top: 4px; }
 .rolling-fill { height: 100%; background: linear-gradient(90deg, var(--gold), #FFD166); border-radius: 2px; transition: width 0.4s ease; }
 
-/* ── SITE SECTION ── */
-.site-section { margin-bottom: 16px; }
-.site-section-header {
-  display: flex; align-items: center; gap: 10px;
-  padding: 10px 14px;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  border-radius: var(--radius) var(--radius) 0 0;
-}
+/* ── SITE SECTION (기존 테이블 아래용) ── */
+.site-section { margin-bottom: 14px; }
+.site-section-header { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius) var(--radius) 0 0; }
 .site-section-name { font-size: 13px; font-weight: 700; color: var(--text-primary); }
-.site-section-table {
-  border: 1px solid var(--border); border-top: none;
-  border-radius: 0 0 var(--radius) var(--radius); overflow: hidden;
-}
+.site-section-table { border: 1px solid var(--border); border-top: none; border-radius: 0 0 var(--radius) var(--radius); overflow: hidden; }
 
 /* ── MINI CALENDAR ── */
-.mini-cal {
-  background: var(--bg-elevated); border: 1px solid var(--border);
-  border-radius: var(--radius); padding: 10px; min-width: 200px;
-}
-.mini-cal-header {
-  display: flex; align-items: center; justify-content: space-between;
-  margin-bottom: 6px; font-size: 11px; font-weight: 600; color: var(--text-primary);
-}
+.mini-cal { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px; min-width: 200px; }
+.mini-cal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; font-size: 11px; font-weight: 600; color: var(--text-primary); }
 .mini-cal-grid { display: grid; grid-template-columns: repeat(7,1fr); gap: 2px; }
-.mini-cal-day {
-  aspect-ratio: 1; display: flex; align-items: center; justify-content: center;
-  font-size: 10px; border-radius: 3px; cursor: pointer; transition: all 0.1s;
-  color: var(--text-secondary);
-}
+.mini-cal-day { aspect-ratio: 1; display: flex; align-items: center; justify-content: center; font-size: 10px; border-radius: 3px; cursor: pointer; transition: all 0.1s; color: var(--text-secondary); }
 .mini-cal-day:hover { background: var(--bg-hover); color: var(--text-primary); }
 .mini-cal-day.checked { background: var(--green); color: #000; font-weight: 700; }
 .mini-cal-day.today { outline: 1px solid var(--gold); color: var(--gold); }
@@ -406,11 +357,8 @@ tr:hover td { background: var(--bg-hover); }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 
-@media (max-width: 1100px) {
-  .log-panel { width: 220px; }
-}
 @media (max-width: 900px) {
-  .log-panel { display: none; }
-  .page { padding: 14px; }
+  .page { padding: 14px 16px; }
+  .nav-inner { padding: 0 16px; }
   .grid-3 { grid-template-columns: 1fr 1fr; }
 }
