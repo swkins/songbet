@@ -6,6 +6,8 @@ export type CashflowType = 'income' | 'expense'
 export interface Site {
   id: string; created_at: string; name: string; balance: number
   active: boolean; sort_order: number; rolling_target: number; rolling_done: number
+  last_deposit: number;    // 최근 입금액
+  deposit_bet_done: number // 입금 후 베팅된 누적액
 }
 export interface Bet {
   id: string; created_at: string; bet_date: string; sport: Sport
@@ -25,4 +27,4 @@ export interface ActionLog {
   table_name: string; record_id: string | null
   before_data: Record<string, unknown> | null; after_data: Record<string, unknown> | null; description: string
 }
-export type Tab = 'dashboard' | 'settlement' | 'stats'
+export type Tab = 'dashboard' | 'stats' | 'settlement'

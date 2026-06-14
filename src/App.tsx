@@ -10,8 +10,8 @@ import { RotateCcw, ClipboardList, X } from 'lucide-react'
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'dashboard', label: '대시보드' },
-  { id: 'settlement', label: '결산' },
   { id: 'stats', label: '통계' },
+  { id: 'settlement', label: '결산' },
 ]
 
 export default function App() {
@@ -86,8 +86,8 @@ export default function App() {
 
       <div style={{ flex: 1 }}>
         {tab === 'dashboard' && <Dashboard />}
-        {tab === 'settlement' && <Settlement />}
         {tab === 'stats' && <Stats />}
+        {tab === 'settlement' && <Settlement />}
       </div>
 
       {showLog && (
