@@ -5,7 +5,7 @@ import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, BarChart, Bar, R
 import dayjs from 'dayjs'
 
 const SPORT_LABELS: Record<Sport, string> = { soccer: '축구', baseball: '야구', basketball: '농구', volleyball: '배구', esports: 'e스포츠', other: '기타' }
-const MARKET_LABELS: Record<Market, string> = { handicap: '핸디캡', over_under: '오버/언더', moneyline: '승패', correct_score: '정확한스코어', other: '기타' }
+const MARKET_LABELS: Record<Market, string> = { handicap: '핸디캡', over: '오버', under: '언더', moneyline: '승패', correct_score: '정확한스코어', other: '기타' }
 
 export default function Stats() {
   const [bets, setBets] = useState<Bet[]>([])
