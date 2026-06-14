@@ -6,8 +6,10 @@ export type CashflowType = 'income' | 'expense'
 export interface Site {
   id: string; created_at: string; name: string; balance: number
   active: boolean; sort_order: number; rolling_target: number; rolling_done: number
-  last_deposit: number;    // 최근 입금액
-  deposit_bet_done: number // 입금 후 베팅된 누적액
+  last_deposit: number       // 누적 입금액 (결산 반영)
+  deposit_bet_done: number   // 입금 후 베팅된 누적액
+  point_deposit: number      // 포인트 누적 (롤링 전용, 결산 미반영)
+  total_withdrawal: number   // 누적 출금액
 }
 export interface Bet {
   id: string; created_at: string; bet_date: string; sport: Sport
