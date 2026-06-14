@@ -178,13 +178,13 @@ export default function Stats() {
                     <stop offset="95%" stopColor={totalProfit >= 0 ? '#2E7D52' : '#B94040'} stopOpacity={0} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--border-light)" />
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                 <XAxis dataKey="date" tick={{ fontSize: 11, fill: 'var(--text-muted)' }}
                   tickFormatter={d => dayjs(d).format('MM/DD')} />
                 <YAxis tick={{ fontSize: 11, fill: 'var(--text-muted)' }}
                   tickFormatter={v => (v / 1000).toFixed(0) + 'K'} />
                 <Tooltip
-                  contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }}
+                  contentStyle={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }}
                   formatter={(v: number) => [`${v.toLocaleString()}원`, '누적손익']}
                   labelFormatter={l => dayjs(l).format('YYYY-MM-DD')} />
                 <Area type="monotone" dataKey="profit"
@@ -236,7 +236,7 @@ export default function Stats() {
                           <XAxis dataKey="label" tick={{ fontSize: 11, fill: 'var(--text-muted)' }} />
                           <YAxis hide />
                           <Tooltip
-                            contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }}
+                            contentStyle={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }}
                             formatter={(v: number) => [`${v}%`, '승률']} />
                           <Bar dataKey="winRate" radius={[4, 4, 0, 0]}>
                             {bySport.map((entry, i) => (
@@ -291,7 +291,7 @@ export default function Stats() {
                           <XAxis dataKey="label" tick={{ fontSize: 11, fill: 'var(--text-muted)' }} />
                           <YAxis hide />
                           <Tooltip
-                            contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }}
+                            contentStyle={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }}
                             formatter={(v: number) => [`${v}%`, '승률']} />
                           <Bar dataKey="winRate" radius={[4, 4, 0, 0]}>
                             {byMarket.map((entry, i) => (
