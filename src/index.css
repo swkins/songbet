@@ -377,42 +377,6 @@ tr:hover td { background: var(--bg-hover); }
   border-radius: 0 0 var(--radius) var(--radius); overflow: hidden;
 }
 
-/* ── LOG PANEL (사이드) ── */
-.log-panel {
-  width: 260px;
-  flex-shrink: 0;
-  background: var(--bg-card);
-  border-left: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  position: sticky;
-  top: 52px;
-  height: calc(100vh - 52px);
-  overflow: hidden;
-}
-.log-panel-header {
-  padding: 14px 16px;
-  border-bottom: 1px solid var(--border);
-  font-size: 10px; font-weight: 700; letter-spacing: 1.2px;
-  text-transform: uppercase; color: var(--text-secondary);
-  flex-shrink: 0;
-}
-.log-list { flex: 1; overflow-y: auto; }
-.log-item {
-  padding: 10px 14px; border-bottom: 1px solid var(--border-light);
-  transition: background 0.1s;
-}
-.log-item:hover { background: var(--bg-hover); }
-.log-desc { font-size: 11px; color: var(--text-primary); line-height: 1.4; }
-.log-time { font-size: 10px; color: var(--text-secondary); margin-top: 3px; }
-.log-undo {
-  margin-top: 5px; font-size: 10px; font-weight: 700;
-  color: var(--gold); cursor: pointer; background: none; border: none;
-  font-family: var(--font-body); padding: 0; display: flex; align-items: center; gap: 3px;
-}
-.log-undo:hover { text-decoration: underline; }
-.log-undo:disabled { color: var(--text-secondary); cursor: not-allowed; }
-
 /* ── MINI CALENDAR ── */
 .mini-cal {
   background: var(--bg-elevated); border: 1px solid var(--border);
