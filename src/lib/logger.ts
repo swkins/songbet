@@ -1,4 +1,3 @@
-// 모든 중요 액션을 action_logs에 기록하고 되돌리기를 지원하는 유틸리티
 import { supabase } from './supabase'
 
 export async function logAction(params: {
@@ -17,9 +16,10 @@ export async function logAction(params: {
     after_data: params.after_data ?? null,
     description: params.description,
   })
+  // App에 로그 갱신 이벤트 발송
+  window.dispatchEvent(new Event('log-updated'))
 }
 
-// 3일 지난 로그 삭제
 export async function purgeOldLogs() {
   const cutoff = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString()
   await supabase.from('action_logs').delete().lt('created_at', cutoff)
