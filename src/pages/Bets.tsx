@@ -13,12 +13,12 @@ const SPORTS: { value: Sport; label: string }[] = [
 
 // 마켓 정의 (픽 입력 방식 포함)
 const MARKETS = [
-  { value: 'moneyline',     label: '승패',       pickType: 'none' },
+  { value: 'moneyline',     label: '승패',       pickType: 'none',   hint: '' },
   { value: 'handicap',      label: '핸디캡',      pickType: 'number', hint: '예: 2.5 또는 -1.5' },
   { value: 'over',          label: '오버',        pickType: 'number', hint: '예: 2.5' },
   { value: 'under',         label: '언더',        pickType: 'number', hint: '예: 2.5' },
-  { value: 'correct_score', label: '정확한스코어', pickType: 'text' },
-  { value: 'other',         label: '기타',        pickType: 'text' },
+  { value: 'correct_score', label: '정확한스코어', pickType: 'text',   hint: '예: 2-1' },
+  { value: 'other',         label: '기타',        pickType: 'text',   hint: '' },
 ] as const
 
 type MarketValue = typeof MARKETS[number]['value']
