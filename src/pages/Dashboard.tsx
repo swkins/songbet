@@ -1,330 +1,494 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { logAction } from '../lib/logger'
-import type { Todo, Cashflow, Site } from '../types'
+import type { Bet, Site, Todo, Sport, Market, BetResult } from '../types'
 import dayjs from 'dayjs'
-import { Check, Plus, Trash2, TrendingUp, TrendingDown, ChevronLeft, ChevronRight, RotateCcw, Calendar, X } from 'lucide-react'
+import { Plus, Trash2, Check, X, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, RotateCcw, Calendar } from 'lucide-react'
 
-function MiniCalendar({checkedDates,onToggle}:{checkedDates:string[];onToggle:(d:string)=>void}){
-  const[viewMonth,setViewMonth]=useState(dayjs().startOf('month'))
-  const today=dayjs().format('YYYY-MM-DD')
-  const startDay=viewMonth.startOf('month').day()
-  const cells:(string|null)[]=[
+/* ── 마켓 정의 ── */
+const SPORTS = [
+  { value: 'soccer', label: '축구' }, { value: 'baseball', label: '야구' },
+  { value: 'basketball', label: '농구' }, { value: 'volleyball', label: '배구' },
+  { value: 'esports', label: 'e스포츠' }, { value: 'other', label: '기타' },
+] as const
+
+const MARKETS = [
+  { value: 'moneyline',     label: '승패',        pickType: 'none',   hint: '' },
+  { value: 'handicap',      label: '핸디캡',       pickType: 'number', hint: '예: 2.5 또는 -1.5' },
+  { value: 'over',          label: '오버',         pickType: 'number', hint: '예: 2.5' },
+  { value: 'under',         label: '언더',         pickType: 'number', hint: '예: 2.5' },
+  { value: 'correct_score', label: '정확한스코어',  pickType: 'text',   hint: '예: 2-1' },
+  { value: 'other',         label: '기타',         pickType: 'text',   hint: '' },
+] as const
+type MarketValue = typeof MARKETS[number]['value']
+
+function parseOdds(raw: string): number {
+  const n = Number(raw.trim())
+  if (isNaN(n) || n <= 0) return 0
+  if (Number.isInteger(n) && n >= 100) return n / 100
+  return n
+}
+
+function buildPickLabel(market: MarketValue, pick: string): string {
+  if (!pick) return ''
+  if (market === 'over') return `${pick} 오버`
+  if (market === 'under') return `${pick} 언더`
+  if (market === 'handicap') {
+    const n = Number(pick)
+    if (!isNaN(n)) return n < 0 ? `마이너스 핸디 ${Math.abs(n)}` : `핸디 ${n}`
+  }
+  return pick
+}
+
+interface SlipForm { sport: string; content: string; market: MarketValue; pick: string; odds: string }
+const emptySlip = (): SlipForm => ({ sport: 'soccer', content: '', market: 'moneyline', pick: '', odds: '' })
+
+/* ── 미니 달력 ── */
+function MiniCalendar({ checkedDates, onToggle }: { checkedDates: string[]; onToggle: (d: string) => void }) {
+  const [viewMonth, setViewMonth] = useState(dayjs().startOf('month'))
+  const today = dayjs().format('YYYY-MM-DD')
+  const startDay = viewMonth.startOf('month').day()
+  const cells: (string | null)[] = [
     ...Array(startDay).fill(null),
-    ...Array.from({length:viewMonth.daysInMonth()},(_,i)=>viewMonth.date(i+1).format('YYYY-MM-DD')),
+    ...Array.from({ length: viewMonth.daysInMonth() }, (_, i) => viewMonth.date(i + 1).format('YYYY-MM-DD')),
   ]
-  while(cells.length%7!==0)cells.push(null)
-  return(
+  while (cells.length % 7 !== 0) cells.push(null)
+  return (
     <div className="mini-cal">
       <div className="mini-cal-header">
-        <button style={{background:'none',border:'none',cursor:'pointer',color:'var(--text-secondary)',display:'flex'}}
-          onClick={()=>setViewMonth(p=>p.subtract(1,'month'))}><ChevronLeft size={13}/></button>
-        <span>{viewMonth.format('YYYY.MM')}</span>
-        <button style={{background:'none',border:'none',cursor:'pointer',color:'var(--text-secondary)',display:'flex'}}
-          onClick={()=>setViewMonth(p=>p.add(1,'month'))}><ChevronRight size={13}/></button>
+        <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex' }} onClick={() => setViewMonth(p => p.subtract(1, 'month'))}><ChevronLeft size={11} /></button>
+        <span style={{ fontSize: 10 }}>{viewMonth.format('YYYY.MM')}</span>
+        <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex' }} onClick={() => setViewMonth(p => p.add(1, 'month'))}><ChevronRight size={11} /></button>
       </div>
       <div className="mini-cal-grid">
-        {['일','월','화','수','목','금','토'].map(d=><div key={d} className="mini-cal-dow">{d}</div>)}
-        {cells.map((date,i)=>date
-          ?<div key={i} className={`mini-cal-day ${checkedDates.includes(date)?'checked':''} ${date===today?'today':''}`}
-              onClick={()=>onToggle(date)}>{dayjs(date).date()}</div>
-          :<div key={i}/>
+        {['일','월','화','수','목','금','토'].map(d => <div key={d} className="mini-cal-dow">{d}</div>)}
+        {cells.map((date, i) => date
+          ? <div key={i} className={`mini-cal-day ${checkedDates.includes(date) ? 'checked' : ''} ${date === today ? 'today' : ''}`} onClick={() => onToggle(date)}>{dayjs(date).date()}</div>
+          : <div key={i} />
         )}
       </div>
     </div>
   )
 }
 
-const DEFAULT_CATS=['베팅수익','베팅손실','급여','식비','교통','쇼핑','기타']
+export default function Dashboard() {
+  const today = dayjs().format('YYYY-MM-DD')
 
-export default function Dashboard(){
-  const today=dayjs().format('YYYY-MM-DD')
-  const[todos,setTodos]=useState<Todo[]>([])
-  const[cashflows,setCashflows]=useState<Cashflow[]>([])
-  const[sites,setSites]=useState<Site[]>([])
-  const[newTodo,setNewTodo]=useState('')
-  const[calOpenId,setCalOpenId]=useState<string|null>(null)
-  const[categories,setCategories]=useState<string[]>(()=>{
-    try{return JSON.parse(localStorage.getItem('cf_cats')||'null')||DEFAULT_CATS}catch{return DEFAULT_CATS}
-  })
-  const[newCat,setNewCat]=useState('')
-  const[showCatMgr,setShowCatMgr]=useState(false)
-  const[showCashModal,setShowCashModal]=useState(false)
-  const[cashForm,setCashForm]=useState({
-    flow_date:today,type:'income' as 'income'|'expense',
-    site_id:'',category:'',amount:'',
-  })
+  /* 베팅 상태 */
+  const [sites, setSites] = useState<Site[]>([])
+  const [bets, setBets] = useState<Bet[]>([])
+  const [activeSiteId, setActiveSiteId] = useState<string | null>(null)
+  const [slipForm, setSlipForm] = useState<SlipForm>(emptySlip())
+  const [slipAmount, setSlipAmount] = useState('')
+  const [showAddSite, setShowAddSite] = useState(false)
+  const [newSiteName, setNewSiteName] = useState('')
+  const [resultTarget, setResultTarget] = useState<Bet | null>(null)
+  const [resultValue, setResultValue] = useState<BetResult>('win')
 
-  useEffect(()=>{loadTodos();loadCashflows();loadSites()},[])
+  /* 할일 상태 */
+  const [todos, setTodos] = useState<Todo[]>([])
+  const [newTodo, setNewTodo] = useState('')
+  const [calOpenId, setCalOpenId] = useState<string | null>(null)
 
-  async function loadSites(){const{data}=await supabase.from('sites').select('*').order('sort_order');if(data)setSites(data)}
-  async function loadTodos(){const{data}=await supabase.from('todos').select('*').order('created_at');if(data)setTodos(data)}
-  async function loadCashflows(){
-    const{data}=await supabase.from('cashflows').select('*').order('flow_date',{ascending:false}).limit(50)
-    if(data)setCashflows(data)
+  useEffect(() => { loadSites(); loadBets(); loadTodos() }, [])
+
+  async function loadSites() {
+    const { data } = await supabase.from('sites').select('*').order('sort_order')
+    if (data) { setSites(data); if (data.length > 0 && !activeSiteId) setActiveSiteId(data[0].id) }
+  }
+  async function loadBets() {
+    const { data } = await supabase.from('bets').select('*').order('bet_date', { ascending: false }).order('created_at', { ascending: false })
+    if (data) setBets(data)
+  }
+  async function loadTodos() {
+    const { data } = await supabase.from('todos').select('*').order('created_at')
+    if (data) setTodos(data)
   }
 
-  function saveCats(cats:string[]){setCategories(cats);localStorage.setItem('cf_cats',JSON.stringify(cats))}
-  function addCat(){if(!newCat.trim()||categories.includes(newCat.trim()))return;saveCats([...categories,newCat.trim()]);setNewCat('')}
-  function removeCat(cat:string){saveCats(categories.filter(c=>c!==cat))}
+  const activeSite = sites.find(s => s.id === activeSiteId) ?? null
+  const currentMarket = MARKETS.find(m => m.value === slipForm.market)
+  const oddsVal = parseOdds(slipForm.odds)
 
-  async function addTodo(){
-    if(!newTodo.trim())return
-    const{data}=await supabase.from('todos')
-      .insert({todo_date:today,content:newTodo.trim(),done:false,check_count:0,check_dates:[]})
-      .select().single()
-    if(data){
-      await logAction({action_type:'insert',table_name:'todos',record_id:data.id,after_data:data,description:`할일 추가: ${data.content}`})
-      setTodos(p=>[...p,data]);setNewTodo('')
+  function handleOddsChange(raw: string) {
+    const clean = raw.replace(/[^0-9.]/g, '')
+    if (/^\d{3}$/.test(clean)) setSlipForm(p => ({ ...p, odds: (Number(clean) / 100).toFixed(2) }))
+    else setSlipForm(p => ({ ...p, odds: clean }))
+  }
+
+  /* 사이트 */
+  async function addSite() {
+    if (!newSiteName.trim()) return
+    const { data } = await supabase.from('sites').insert({ name: newSiteName.trim(), balance: 0, active: false, sort_order: sites.length, rolling_target: 0, rolling_done: 0 }).select().single()
+    if (data) { await logAction({ action_type: 'insert', table_name: 'sites', record_id: data.id, after_data: data, description: `사이트 추가: ${data.name}` }); setSites(p => [...p, data]); setActiveSiteId(data.id); setNewSiteName(''); setShowAddSite(false) }
+  }
+  async function deleteSite(id: string) {
+    const site = sites.find(s => s.id === id)
+    if (!site || !confirm(`${site.name} 삭제?`)) return
+    await logAction({ action_type: 'delete', table_name: 'sites', record_id: id, before_data: site as never, description: `사이트 삭제: ${site.name}` })
+    await supabase.from('sites').delete().eq('id', id)
+    setSites(p => p.filter(s => s.id !== id))
+    if (activeSiteId === id) setActiveSiteId(sites.find(s => s.id !== id)?.id ?? null)
+  }
+
+  /* 입금 */
+  async function doDeposit() {
+    if (!activeSite || !slipAmount || !Number(slipAmount)) return
+    const amount = Number(slipAmount)
+    const before = { ...activeSite }
+    const { data } = await supabase.from('sites').update({ balance: activeSite.balance + amount, active: true }).eq('id', activeSite.id).select().single()
+    if (data) { await logAction({ action_type: 'update', table_name: 'sites', record_id: data.id, before_data: before as never, after_data: data as never, description: `${activeSite.name} 입금 +${amount.toLocaleString()}원` }); setSites(p => p.map(s => s.id === data.id ? data : s)); setSlipAmount('') }
+  }
+
+  /* 베팅 */
+  async function doBet() {
+    if (!activeSite || !slipForm.content || !slipForm.odds || !slipAmount) return
+    const stake = Number(slipAmount); if (!stake) return
+    if (stake > activeSite.balance) { alert('잔액이 부족합니다'); return }
+    const finalOdds = parseOdds(slipForm.odds); if (finalOdds <= 0) { alert('배당을 올바르게 입력하세요'); return }
+    const pickLabel = buildPickLabel(slipForm.market, slipForm.pick)
+    const { data: betData } = await supabase.from('bets').insert({ bet_date: today, sport: slipForm.sport as Sport, league: '', match: slipForm.content, market: slipForm.market as Market, pick: pickLabel, odds: finalOdds, stake, result: 'pending' as BetResult, profit: 0, memo: '', site_id: activeSite.id }).select().single()
+    if (!betData) return
+    const siteBefore = { ...activeSite }
+    const { data: siteData } = await supabase.from('sites').update({ balance: activeSite.balance - stake, rolling_done: activeSite.rolling_done + stake }).eq('id', activeSite.id).select().single()
+    if (siteData) {
+      await logAction({ action_type: 'insert', table_name: 'bets', record_id: betData.id, after_data: betData as never, description: `[${activeSite.name}] ${slipForm.content} / ${pickLabel} / ${stake.toLocaleString()}원` })
+      await logAction({ action_type: 'update', table_name: 'sites', record_id: siteData.id, before_data: siteBefore as never, after_data: siteData as never, description: `[${activeSite.name}] 잔액 -${stake.toLocaleString()}원` })
+      setBets(p => [betData, ...p]); setSites(p => p.map(s => s.id === siteData.id ? siteData : s))
+      setSlipForm(emptySlip()); setSlipAmount('')
     }
   }
 
-  async function toggleTodo(todo:Todo){
-    const isChecked=todo.check_dates.includes(today)
-    const newDates=isChecked?todo.check_dates.filter(d=>d!==today):[...todo.check_dates,today]
-    const{data}=await supabase.from('todos')
-      .update({done:!isChecked,check_dates:newDates,check_count:newDates.length})
-      .eq('id',todo.id).select().single()
-    if(data)setTodos(p=>p.map(t=>t.id===todo.id?data:t))
-  }
-
-  async function toggleCalDate(todo:Todo,date:string){
-    const has=todo.check_dates.includes(date)
-    const newDates=has?todo.check_dates.filter(d=>d!==date):[...todo.check_dates,date]
-    const{data}=await supabase.from('todos')
-      .update({check_dates:newDates,check_count:newDates.length,done:newDates.includes(today)})
-      .eq('id',todo.id).select().single()
-    if(data)setTodos(p=>p.map(t=>t.id===todo.id?data:t))
-  }
-
-  async function resetTodo(todo:Todo){
-    if(!confirm(`"${todo.content}" 초기화?`))return
-    const before={...todo}
-    const{data}=await supabase.from('todos')
-      .update({check_dates:[],check_count:0,done:false}).eq('id',todo.id).select().single()
-    if(data){
-      await logAction({action_type:'update',table_name:'todos',record_id:data.id,before_data:before as never,after_data:data as never,description:`할일 초기화: ${todo.content}`})
-      setTodos(p=>p.map(t=>t.id===todo.id?data:t))
+  /* 결과 처리 */
+  async function saveResult() {
+    if (!resultTarget) return
+    const { stake, odds: bOdds, site_id } = resultTarget
+    const profit = resultValue === 'win' ? Math.round(stake * (bOdds - 1)) : resultValue === 'loss' ? -stake : 0
+    const before = { ...resultTarget }
+    const { data } = await supabase.from('bets').update({ result: resultValue, profit }).eq('id', resultTarget.id).select().single()
+    if (data) {
+      await logAction({ action_type: 'update', table_name: 'bets', record_id: data.id, before_data: before as never, after_data: data as never, description: `결과: ${resultTarget.match} → ${resultValue === 'win' ? '적중' : resultValue === 'loss' ? '실패' : '적특'}` })
+      setBets(p => p.map(b => b.id === resultTarget.id ? data : b))
+      const site = sites.find(s => s.id === site_id)
+      if (site) {
+        const delta = resultValue === 'win' ? stake + profit : resultValue === 'push' ? stake : 0
+        if (delta) { const { data: sd } = await supabase.from('sites').update({ balance: site.balance + delta }).eq('id', site.id).select().single(); if (sd) setSites(p => p.map(s => s.id === site.id ? sd : s)) }
+      }
     }
+    setResultTarget(null)
   }
 
-  async function deleteTodo(todo:Todo){
-    await logAction({action_type:'delete',table_name:'todos',record_id:todo.id,before_data:todo as never,description:`할일 삭제: ${todo.content}`})
-    await supabase.from('todos').delete().eq('id',todo.id)
-    setTodos(p=>p.filter(t=>t.id!==todo.id))
+  async function deleteBet(bet: Bet) {
+    if (!confirm('삭제?')) return
+    await logAction({ action_type: 'delete', table_name: 'bets', record_id: bet.id, before_data: bet as never, description: `베팅 삭제: ${bet.match}` })
+    await supabase.from('bets').delete().eq('id', bet.id); setBets(p => p.filter(b => b.id !== bet.id))
   }
 
-  async function saveCashflow(){
-    if(!cashForm.amount)return
-    const siteName=sites.find(s=>s.id===cashForm.site_id)?.name??''
-    const desc=siteName?`${siteName} / ${cashForm.category}`:cashForm.category
-    const{data}=await supabase.from('cashflows').insert({
-      flow_date:cashForm.flow_date,type:cashForm.type,
-      category:cashForm.category,description:desc,
-      amount:Number(cashForm.amount),
-      site_id:cashForm.site_id||null,
-    }).select().single()
-    if(data){
-      await logAction({action_type:'insert',table_name:'cashflows',record_id:data.id,after_data:data as never,description:`수입/지출 추가: ${desc} ${Number(cashForm.amount).toLocaleString()}원`})
-      setCashflows(p=>[data,...p])
-      setShowCashModal(false)
-      setCashForm({flow_date:today,type:'income',site_id:'',category:'',amount:''})
-    }
+  /* 할일 */
+  async function addTodo() {
+    if (!newTodo.trim()) return
+    const { data } = await supabase.from('todos').insert({ todo_date: today, content: newTodo.trim(), done: false, check_count: 0, check_dates: [] }).select().single()
+    if (data) { await logAction({ action_type: 'insert', table_name: 'todos', record_id: data.id, after_data: data, description: `할일 추가: ${data.content}` }); setTodos(p => [...p, data]); setNewTodo('') }
+  }
+  async function toggleTodo(todo: Todo) {
+    const isChecked = todo.check_dates.includes(today)
+    const newDates = isChecked ? todo.check_dates.filter(d => d !== today) : [...todo.check_dates, today]
+    const { data } = await supabase.from('todos').update({ done: !isChecked, check_dates: newDates, check_count: newDates.length }).eq('id', todo.id).select().single()
+    if (data) setTodos(p => p.map(t => t.id === todo.id ? data : t))
+  }
+  async function toggleCalDate(todo: Todo, date: string) {
+    const has = todo.check_dates.includes(date)
+    const newDates = has ? todo.check_dates.filter(d => d !== date) : [...todo.check_dates, date]
+    const { data } = await supabase.from('todos').update({ check_dates: newDates, check_count: newDates.length, done: newDates.includes(today) }).eq('id', todo.id).select().single()
+    if (data) setTodos(p => p.map(t => t.id === todo.id ? data : t))
+  }
+  async function resetTodo(todo: Todo) {
+    if (!confirm(`"${todo.content}" 초기화?`)) return
+    const { data } = await supabase.from('todos').update({ check_dates: [], check_count: 0, done: false }).eq('id', todo.id).select().single()
+    if (data) { await logAction({ action_type: 'update', table_name: 'todos', record_id: data.id, before_data: todo as never, after_data: data as never, description: `할일 초기화: ${todo.content}` }); setTodos(p => p.map(t => t.id === todo.id ? data : t)) }
+  }
+  async function deleteTodo(todo: Todo) {
+    await logAction({ action_type: 'delete', table_name: 'todos', record_id: todo.id, before_data: todo as never, description: `할일 삭제: ${todo.content}` })
+    await supabase.from('todos').delete().eq('id', todo.id); setTodos(p => p.filter(t => t.id !== todo.id))
   }
 
-  async function deleteCashflow(cf:Cashflow){
-    await logAction({action_type:'delete',table_name:'cashflows',record_id:cf.id,before_data:cf as never,description:`수입/지출 삭제: ${cf.description}`})
-    await supabase.from('cashflows').delete().eq('id',cf.id)
-    setCashflows(p=>p.filter(c=>c.id!==cf.id))
-  }
+  const rollingPct = (s: Site) => s.rolling_target > 0 ? Math.min(100, Math.round(s.rolling_done / s.rolling_target * 100)) : 0
+  const rollingLeft = (s: Site) => Math.max(0, s.rolling_target - s.rolling_done)
+  const betsBySite = (id: string) => bets.filter(b => b.site_id === id)
+  const colCount = sites.length || 1
+  const todayChecked = todos.filter(t => t.check_dates.includes(today)).length
 
-  const totalIncome=cashflows.filter(c=>c.type==='income').reduce((s,c)=>s+c.amount,0)
-  const totalExpense=cashflows.filter(c=>c.type==='expense').reduce((s,c)=>s+c.amount,0)
-  const balance=totalIncome-totalExpense
-  const todayChecked=todos.filter(t=>t.check_dates.includes(today)).length
-  const fmt=(n:number)=>n.toLocaleString('ko-KR')+'원'
-
-  return(
+  return (
     <div className="page">
-      <div className="flex-between mb-20">
-        <h1 className="page-title">대시보드</h1>
-        <span style={{fontSize:11,color:'var(--text-muted)'}}>{dayjs().format('YYYY.MM.DD')}</span>
-      </div>
+      <div className="dashboard-layout">
 
-      <div className="grid-3 mb-16">
-        <div className="card stat-tile">
-          <div className="stat-value profit-pos">{fmt(totalIncome)}</div>
-          <div className="stat-label">총 수입</div>
-        </div>
-        <div className="card stat-tile">
-          <div className="stat-value profit-neg">{fmt(totalExpense)}</div>
-          <div className="stat-label">총 지출</div>
-        </div>
-        <div className="card stat-tile">
-          <div className={`stat-value ${balance>=0?'profit-pos':'profit-neg'}`}>{balance>=0?'+':''}{fmt(balance)}</div>
-          <div className="stat-label">순 수지</div>
-        </div>
-      </div>
-
-      <div style={{display:'grid',gridTemplateColumns:'340px 1fr',gap:14}}>
-        {/* 오늘 할 일 */}
-        <div className="card" style={{alignSelf:'start'}}>
-          <div className="flex-between mb-12">
-            <span className="card-title" style={{marginBottom:0}}>오늘 할 일</span>
-            <span style={{fontSize:10,color:'var(--text-muted)'}}>{todayChecked}/{todos.length}</span>
-          </div>
-          {todos.length===0&&<div className="empty" style={{padding:'16px 0'}}><div className="empty-icon">📋</div>추가하세요</div>}
-          {todos.map(t=>{
-            const isChecked=t.check_dates.includes(today)
-            return(
-              <div key={t.id}>
-                <div className="todo-item">
-                  <div className={`todo-check ${isChecked?'done':''}`} onClick={()=>toggleTodo(t)}>
-                    {isChecked&&<Check size={9} color="#000" strokeWidth={3}/>}
-                  </div>
-                  <span className={`todo-text ${isChecked?'done':''}`}>{t.content}</span>
-                  <span style={{fontSize:9,fontWeight:700,color:'var(--gold)',background:'var(--gold-bg)',border:'1px solid var(--gold-border)',padding:'1px 5px',borderRadius:6,flexShrink:0}}>
-                    {t.check_count}회
-                  </span>
-                  <button className="btn btn-icon btn-ghost btn-sm"
-                    style={calOpenId===t.id?{background:'var(--gold-bg)',border:'1px solid var(--gold-border)'}:{}}
-                    onClick={()=>setCalOpenId(calOpenId===t.id?null:t.id)}>
-                    <Calendar size={11} color={calOpenId===t.id?'var(--gold)':'var(--text-muted)'}/>
-                  </button>
-                  <button className="btn btn-icon btn-ghost btn-sm" onClick={()=>resetTodo(t)}>
-                    <RotateCcw size={11} color="var(--text-muted)"/>
-                  </button>
-                  <button className="btn btn-icon btn-ghost btn-sm" onClick={()=>deleteTodo(t)}>
-                    <Trash2 size={11} color="var(--text-muted)"/>
-                  </button>
-                </div>
-                {calOpenId===t.id&&(
-                  <div style={{paddingLeft:24,paddingTop:4,paddingBottom:10}}>
-                    <MiniCalendar checkedDates={t.check_dates} onToggle={d=>toggleCalDate(t,d)}/>
-                  </div>
-                )}
-              </div>
-            )
-          })}
-          <div className="flex-center gap-8 mt-12">
-            <input className="form-input" placeholder="할 일 추가..." style={{fontSize:12}}
-              value={newTodo} onChange={e=>setNewTodo(e.target.value)}
-              onKeyDown={e=>e.key==='Enter'&&addTodo()}/>
-            <button className="btn btn-primary btn-sm" onClick={addTodo} style={{flexShrink:0}}><Plus size={12}/></button>
-          </div>
-        </div>
-
-        {/* 수입/지출 */}
-        <div className="card">
-          <div className="flex-between mb-14">
-            <span className="card-title" style={{marginBottom:0}}>수입 / 지출</span>
-            <button className="btn btn-primary btn-sm" onClick={()=>setShowCashModal(true)}><Plus size={12}/> 추가</button>
-          </div>
-          {cashflows.length===0&&<div className="empty"><div className="empty-icon">💰</div>내역이 없습니다</div>}
-          <div style={{overflowY:'auto',maxHeight:480}}>
-            {cashflows.map(c=>(
-              <div key={c.id} className="flex-between" style={{padding:'9px 0',borderBottom:'1px solid var(--border-light)'}}>
-                <div className="flex-center gap-8">
-                  <div style={{width:26,height:26,borderRadius:6,flexShrink:0,
-                    background:c.type==='income'?'var(--green-bg)':'var(--red-bg)',
-                    border:`1px solid ${c.type==='income'?'var(--green-border)':'var(--red-border)'}`,
-                    display:'flex',alignItems:'center',justifyContent:'center'}}>
-                    {c.type==='income'?<TrendingUp size={12} color="var(--green)"/>:<TrendingDown size={12} color="var(--red)"/>}
-                  </div>
-                  <div>
-                    <div style={{fontSize:12,fontWeight:600,color:'var(--text-primary)'}}>{c.description}</div>
-                    <div style={{fontSize:10,color:'var(--text-muted)'}}>{c.flow_date}</div>
-                  </div>
-                </div>
-                <div className="flex-center gap-8">
-                  <span className={c.type==='income'?'profit-pos':'profit-neg'} style={{fontFamily:'var(--font-mono)',fontSize:13}}>
-                    {c.type==='income'?'+':'-'}{c.amount.toLocaleString()}
-                  </span>
-                  <button className="btn btn-icon btn-ghost btn-sm" onClick={()=>deleteCashflow(c)}>
-                    <Trash2 size={11} color="var(--text-muted)"/>
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* 수입/지출 추가 모달 */}
-      {showCashModal&&(
-        <div className="modal-overlay" onClick={()=>setShowCashModal(false)}>
-          <div className="modal" style={{maxWidth:420}} onClick={e=>e.stopPropagation()}>
-            <div className="flex-between mb-16">
-              <div className="modal-title" style={{marginBottom:0}}>수입 / 지출 추가</div>
-              <button className="btn btn-ghost btn-sm" style={{fontSize:10}} onClick={()=>setShowCatMgr(p=>!p)}>카테고리 관리</button>
+        {/* ── 좌: 베팅 슬립 ── */}
+        <div className="betslip-panel">
+          <div className="betslip-panel-header">BET SLIP</div>
+          <div className="betslip-panel-body">
+            {/* 사이트 선택 */}
+            <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+              {sites.map(s => (
+                <button key={s.id} onClick={() => setActiveSiteId(s.id)} style={{
+                  padding: '3px 10px', borderRadius: 20,
+                  border: `1px solid ${activeSiteId === s.id ? 'var(--gold)' : 'var(--border)'}`,
+                  background: activeSiteId === s.id ? 'var(--gold-bg)' : 'transparent',
+                  color: activeSiteId === s.id ? 'var(--gold)' : 'var(--text-secondary)',
+                  fontSize: 11, fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font-body)', transition: 'all 0.15s',
+                }}>{s.name}</button>
+              ))}
+              <button onClick={() => setShowAddSite(true)} style={{ padding: '3px 8px', borderRadius: 20, border: '1px dashed var(--border)', background: 'transparent', color: 'var(--text-secondary)', fontSize: 10, cursor: 'pointer', fontFamily: 'var(--font-body)', display: 'flex', alignItems: 'center', gap: 3 }}>
+                <Plus size={9} /> 사이트
+              </button>
             </div>
 
-            {/* 카테고리 관리 */}
-            {showCatMgr&&(
-              <div style={{background:'var(--bg-elevated)',border:'1px solid var(--border)',borderRadius:'var(--radius-sm)',padding:12,marginBottom:14}}>
-                <div style={{fontSize:10,fontWeight:700,color:'var(--text-muted)',marginBottom:8,letterSpacing:'0.5px'}}>카테고리</div>
-                <div style={{display:'flex',flexWrap:'wrap',gap:6,marginBottom:10}}>
-                  {categories.map(cat=>(
-                    <span key={cat} style={{display:'inline-flex',alignItems:'center',gap:4,padding:'2px 8px',borderRadius:4,background:'var(--bg-card)',border:'1px solid var(--border)',fontSize:11,color:'var(--text-primary)'}}>
-                      {cat}
-                      <button style={{background:'none',border:'none',cursor:'pointer',color:'var(--text-muted)',display:'flex',padding:0}} onClick={()=>removeCat(cat)}><X size={10}/></button>
-                    </span>
-                  ))}
+            {/* 선택된 사이트 잔액/롤링 */}
+            {activeSite && (
+              <div style={{ padding: '8px 10px', background: 'var(--bg-elevated)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div>
+                    <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.6px', textTransform: 'uppercase', color: 'var(--text-secondary)', marginBottom: 1 }}>잔액</div>
+                    <div className={activeSite.balance >= 0 ? 'profit-pos' : 'profit-neg'} style={{ fontFamily: 'var(--font-mono)', fontSize: 15, fontWeight: 700 }}>
+                      {activeSite.balance.toLocaleString()}원
+                    </div>
+                  </div>
+                  {activeSite.rolling_target > 0 && (
+                    <div style={{ textAlign: 'right' }}>
+                      <div style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-secondary)', marginBottom: 1 }}>남은 롤링</div>
+                      <div style={{ fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 700, color: 'var(--gold)' }}>{rollingLeft(activeSite).toLocaleString()}원</div>
+                    </div>
+                  )}
                 </div>
-                <div className="flex-center gap-6">
-                  <input className="form-input" placeholder="추가..." style={{fontSize:11,padding:'5px 8px'}}
-                    value={newCat} onChange={e=>setNewCat(e.target.value)} onKeyDown={e=>e.key==='Enter'&&addCat()}/>
-                  <button className="btn btn-primary btn-sm" onClick={addCat} style={{flexShrink:0}}>추가</button>
-                </div>
+                {activeSite.rolling_target > 0 && (
+                  <>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, color: 'var(--text-secondary)', marginTop: 6, marginBottom: 2 }}>
+                      <span>롤링 진행률</span>
+                      <span style={{ color: 'var(--gold)', fontWeight: 700 }}>{rollingPct(activeSite)}%</span>
+                    </div>
+                    <div className="rolling-bar"><div className="rolling-fill" style={{ width: `${rollingPct(activeSite)}%` }} /></div>
+                  </>
+                )}
               </div>
             )}
 
-            {/* 수입/지출 */}
-            <div style={{display:'flex',gap:8,marginBottom:14}}>
-              {(['income','expense'] as const).map(t=>(
-                <button key={t} className={`btn ${cashForm.type===t?'btn-primary':'btn-ghost'}`}
-                  onClick={()=>setCashForm(p=>({...p,type:t}))} style={{flex:1}}>
-                  {t==='income'?'💰 수입':'💸 지출'}
-                </button>
-              ))}
+            {/* 폼: 종목 + 내용 */}
+            <div style={{ display: 'grid', gridTemplateColumns: '90px 1fr', gap: 6 }}>
+              <div className="form-group">
+                <label className="form-label">종목</label>
+                <select className="form-select" style={{ fontSize: 12 }} value={slipForm.sport} onChange={e => setSlipForm(p => ({ ...p, sport: e.target.value }))}>
+                  {SPORTS.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+                </select>
+              </div>
+              <div className="form-group">
+                <label className="form-label">내용</label>
+                <input className="form-input" style={{ fontSize: 12 }} placeholder="맨시티 vs 아스날" value={slipForm.content} onChange={e => setSlipForm(p => ({ ...p, content: e.target.value }))} />
+              </div>
             </div>
 
-            <div className="form-row form-row-2 mb-12">
+            {/* 폼: 마켓 + 픽 */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
               <div className="form-group">
-                <label className="form-label">날짜</label>
-                <input type="date" className="form-input" value={cashForm.flow_date}
-                  onChange={e=>setCashForm(p=>({...p,flow_date:e.target.value}))}/>
+                <label className="form-label">마켓</label>
+                <select className="form-select" style={{ fontSize: 12 }} value={slipForm.market} onChange={e => setSlipForm(p => ({ ...p, market: e.target.value as MarketValue, pick: '' }))}>
+                  {MARKETS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+                </select>
+              </div>
+              <div className="form-group">
+                <label className="form-label">픽 <span style={{ fontWeight: 400, textTransform: 'none', fontSize: 9, color: 'var(--text-muted)' }}>{currentMarket?.pickType === 'none' ? '(없음)' : '(선택)'}</span></label>
+                {currentMarket?.pickType === 'none'
+                  ? <input className="form-input" disabled style={{ opacity: 0.3, fontSize: 12 }} value="" readOnly />
+                  : <input className="form-input" style={{ fontSize: 12 }} placeholder={currentMarket?.hint} type={currentMarket?.pickType === 'number' ? 'number' : 'text'} step="0.5" value={slipForm.pick} onChange={e => setSlipForm(p => ({ ...p, pick: e.target.value }))} />
+                }
+              </div>
+            </div>
+
+            {/* 픽 미리보기 */}
+            {slipForm.pick && currentMarket?.pickType !== 'none' && (
+              <div style={{ fontSize: 10, color: 'var(--gold)', padding: '3px 7px', background: 'var(--gold-bg)', borderRadius: 4, border: '1px solid var(--gold-border)' }}>
+                ↳ {buildPickLabel(slipForm.market, slipForm.pick)}
+              </div>
+            )}
+
+            {/* 폼: 배당 + 금액 */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+              <div className="form-group">
+                <label className="form-label">배당 {slipForm.odds && oddsVal > 0 && <span style={{ color: 'var(--gold)', fontWeight: 700 }}>→ {oddsVal.toFixed(2)}</span>}</label>
+                <input className="form-input" style={{ fontSize: 12 }} placeholder="125 = 1.25" value={slipForm.odds}
+                  onChange={e => handleOddsChange(e.target.value)}
+                  onBlur={e => { const n = parseOdds(e.target.value); if (n > 0) setSlipForm(p => ({ ...p, odds: n.toFixed(2) })) }} />
               </div>
               <div className="form-group">
                 <label className="form-label">금액 (원)</label>
-                <input type="number" className="form-input" placeholder="0" value={cashForm.amount}
-                  onChange={e=>setCashForm(p=>({...p,amount:e.target.value}))}/>
+                <input className="form-input" style={{ fontSize: 12 }} type="number" placeholder="베팅액" value={slipAmount} onChange={e => setSlipAmount(e.target.value)} onKeyDown={e => e.key === 'Enter' && doBet()} />
               </div>
             </div>
 
-            {/* 사이트 먼저 */}
-            <div className="form-group mb-12">
-              <label className="form-label">사이트</label>
-              <select className="form-select" value={cashForm.site_id}
-                onChange={e=>setCashForm(p=>({...p,site_id:e.target.value}))}>
-                <option value="">없음</option>
-                {sites.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
-              </select>
-            </div>
+            {/* 예상 수익 */}
+            {oddsVal > 0 && slipAmount && Number(slipAmount) > 0 && (
+              <div style={{ padding: '6px 10px', background: 'var(--green-bg)', border: '1px solid var(--green-border)', borderRadius: 'var(--radius-sm)', fontSize: 11 }}>
+                수익 <strong className="profit-pos">+{Math.round(Number(slipAmount) * (oddsVal - 1)).toLocaleString()}</strong>
+                <span style={{ color: 'var(--text-secondary)', marginLeft: 6 }}>반환 {Math.round(Number(slipAmount) * oddsVal).toLocaleString()}</span>
+              </div>
+            )}
 
-            {/* 카테고리 */}
-            <div className="form-group">
-              <label className="form-label">카테고리</label>
-              <select className="form-select" value={cashForm.category}
-                onChange={e=>setCashForm(p=>({...p,category:e.target.value}))}>
-                <option value="">선택 안 함</option>
-                {categories.map(cat=><option key={cat} value={cat}>{cat}</option>)}
-              </select>
+            {/* 입금 / 베팅 */}
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button className="btn btn-green" style={{ flex: 1, fontSize: 12 }} onClick={doDeposit}>입금</button>
+              <button className="btn btn-primary" style={{ flex: 2, fontSize: 12 }} onClick={doBet}><Check size={12} /> 베팅</button>
             </div>
+            <div style={{ fontSize: 9, color: 'var(--text-secondary)', textAlign: 'center' }}>입금: 잔액 충전 · 베팅: 등록 후 잔액 차감</div>
+          </div>
+        </div>
 
+        {/* ── 가운데: 사이트 그리드 + 베팅현황 ── */}
+        <div>
+          <div className="flex-between mb-10">
+            <span className="card-title" style={{ margin: 0 }}>베팅 현황</span>
+            <button className="btn btn-ghost btn-sm" onClick={() => setShowAddSite(true)}><Plus size={11} /> 사이트</button>
+          </div>
+
+          {sites.length === 0 ? (
+            <div className="card"><div className="empty"><div className="empty-icon">🎯</div>사이트를 추가하세요</div></div>
+          ) : (
+            <div className="site-grid" style={{ gridTemplateColumns: `repeat(${colCount}, minmax(130px, 1fr))` }}>
+              {/* 헤더 */}
+              {sites.map(site => (
+                <div key={site.id} className="site-col-head">
+                  {site.name}
+                  <button onClick={() => deleteSite(site.id)} style={{ position: 'absolute', top: 3, right: 3, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', opacity: 0.4, padding: 1, display: 'flex' }} title="삭제"><X size={9} /></button>
+                </div>
+              ))}
+              {/* 잔액 */}
+              {sites.map(site => (
+                <div key={site.id} className="site-balance-cell">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                    <div className={`site-balance-num ${site.balance >= 0 ? 'profit-pos' : 'profit-neg'}`}>{site.balance.toLocaleString()}</div>
+                    <div className="site-balance-arrows">
+                      <button className="site-arrow-btn" title="입금/베팅" onClick={() => setActiveSiteId(site.id)}><ChevronUp size={8} /></button>
+                      <button className="site-arrow-btn" title="입금/베팅" onClick={() => setActiveSiteId(site.id)}><ChevronDown size={8} /></button>
+                    </div>
+                  </div>
+                  {site.rolling_target > 0 && (
+                    <div style={{ width: '100%', marginTop: 3 }}>
+                      <div className="rolling-bar"><div className="rolling-fill" style={{ width: `${rollingPct(site)}%` }} /></div>
+                      <div style={{ fontSize: 9, color: 'var(--gold)', textAlign: 'center', marginTop: 1 }}>{rollingPct(site)}%</div>
+                    </div>
+                  )}
+                </div>
+              ))}
+              {/* 베팅 목록 */}
+              {(() => {
+                const maxRows = Math.max(...sites.map(s => betsBySite(s.id).length), 1)
+                return Array.from({ length: maxRows }).map((_, rowIdx) =>
+                  sites.map(site => {
+                    const bet = betsBySite(site.id)[rowIdx]
+                    return (
+                      <div key={`${site.id}-${rowIdx}`} className="site-bets-col">
+                        {bet ? (
+                          <div className={`site-bet-entry ${bet.result === 'win' ? 'win-entry' : ''}`}>
+                            <div className="site-bet-match">
+                              {bet.match}{bet.pick && <span style={{ color: 'var(--text-secondary)', fontWeight: 400 }}> {bet.pick}</span>}
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 1 }}>
+                              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-secondary)' }}>{bet.odds.toFixed(2)}</span>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+                                <span className={`badge badge-${bet.result}`} style={{ fontSize: 9, padding: '1px 4px' }}>
+                                  {bet.result === 'pending' ? '대기' : bet.result === 'win' ? '적중' : bet.result === 'loss' ? '실패' : '적특'}
+                                </span>
+                                {bet.result === 'pending' && <button className="btn btn-xs btn-ghost" style={{ fontSize: 9, padding: '1px 4px' }} onClick={() => { setResultTarget(bet); setResultValue('win') }}>결과</button>}
+                                <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red)', opacity: 0.5, padding: 1, display: 'flex' }} onClick={() => deleteBet(bet)}><X size={9} /></button>
+                              </div>
+                            </div>
+                            {bet.result !== 'pending' && (
+                              <div style={{ fontSize: 9, marginTop: 1 }} className={bet.profit >= 0 ? 'profit-pos' : 'profit-neg'}>
+                                {bet.profit >= 0 ? '+' : ''}{bet.profit.toLocaleString()}원
+                              </div>
+                            )}
+                          </div>
+                        ) : <div style={{ height: 16 }} />}
+                      </div>
+                    )
+                  })
+                )
+              })()}
+            </div>
+          )}
+        </div>
+
+        {/* ── 우: 오늘 할 일 ── */}
+        <div className="card" style={{ alignSelf: 'start' }}>
+          <div className="flex-between mb-10">
+            <span className="card-title" style={{ margin: 0 }}>오늘 할 일</span>
+            <span style={{ fontSize: 10, color: 'var(--text-secondary)' }}>{todayChecked}/{todos.length}</span>
+          </div>
+
+          {todos.length === 0 && <div className="empty" style={{ padding: '14px 0' }}><div className="empty-icon">📋</div>추가하세요</div>}
+
+          {todos.map(t => {
+            const isChecked = t.check_dates.includes(today)
+            return (
+              <div key={t.id}>
+                <div className="todo-item">
+                  <div className={`todo-check ${isChecked ? 'done' : ''}`} onClick={() => toggleTodo(t)}>
+                    {isChecked && <Check size={8} color="#000" strokeWidth={3} />}
+                  </div>
+                  <span className={`todo-text ${isChecked ? 'done' : ''}`}>{t.content}</span>
+                  <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--gold)', background: 'var(--gold-bg)', border: '1px solid var(--gold-border)', padding: '0 5px', borderRadius: 6, flexShrink: 0 }}>{t.check_count}회</span>
+                  <button className="btn btn-icon btn-ghost btn-sm" style={calOpenId === t.id ? { background: 'var(--gold-bg)', border: '1px solid var(--gold-border)' } : {}} onClick={() => setCalOpenId(calOpenId === t.id ? null : t.id)}>
+                    <Calendar size={10} color={calOpenId === t.id ? 'var(--gold)' : 'var(--text-secondary)'} />
+                  </button>
+                  <button className="btn btn-icon btn-ghost btn-sm" onClick={() => resetTodo(t)}><RotateCcw size={10} color="var(--text-secondary)" /></button>
+                  <button className="btn btn-icon btn-ghost btn-sm" onClick={() => deleteTodo(t)}><Trash2 size={10} color="var(--text-secondary)" /></button>
+                </div>
+                {calOpenId === t.id && <div style={{ paddingLeft: 22, paddingBottom: 8, paddingTop: 4 }}><MiniCalendar checkedDates={t.check_dates} onToggle={d => toggleCalDate(t, d)} /></div>}
+              </div>
+            )
+          })}
+
+          <div className="flex-center gap-6 mt-10">
+            <input className="form-input" style={{ fontSize: 12 }} placeholder="할 일 추가..." value={newTodo} onChange={e => setNewTodo(e.target.value)} onKeyDown={e => e.key === 'Enter' && addTodo()} />
+            <button className="btn btn-primary btn-sm" onClick={addTodo} style={{ flexShrink: 0 }}><Plus size={11} /></button>
+          </div>
+        </div>
+      </div>
+
+      {/* 사이트 추가 모달 */}
+      {showAddSite && (
+        <div className="modal-overlay" onClick={() => setShowAddSite(false)}>
+          <div className="modal" style={{ maxWidth: 320 }} onClick={e => e.stopPropagation()}>
+            <div className="modal-title">사이트 추가</div>
+            <div className="form-group" style={{ marginBottom: 14 }}>
+              <label className="form-label">이름</label>
+              <input className="form-input" placeholder="예: 1xBet" value={newSiteName} onChange={e => setNewSiteName(e.target.value)} onKeyDown={e => e.key === 'Enter' && addSite()} autoFocus />
+            </div>
             <div className="modal-actions">
-              <button className="btn btn-ghost" onClick={()=>setShowCashModal(false)}>취소</button>
-              <button className="btn btn-primary" onClick={saveCashflow}>저장</button>
+              <button className="btn btn-ghost" onClick={() => setShowAddSite(false)}>취소</button>
+              <button className="btn btn-primary" onClick={addSite}>추가</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 결과 처리 모달 */}
+      {resultTarget && (
+        <div className="modal-overlay" onClick={() => setResultTarget(null)}>
+          <div className="modal" style={{ maxWidth: 380 }} onClick={e => e.stopPropagation()}>
+            <div className="modal-title">결과 처리</div>
+            <div style={{ padding: '10px 12px', background: 'var(--bg-elevated)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', marginBottom: 12 }}>
+              <div style={{ fontWeight: 700, marginBottom: 3 }}>{resultTarget.match}</div>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-secondary)' }}>{resultTarget.pick} · {resultTarget.odds.toFixed(2)} · {resultTarget.stake.toLocaleString()}원</div>
+            </div>
+            <div style={{ display: 'flex', gap: 7, marginBottom: 12 }}>
+              {(['win', 'loss', 'push'] as const).map(r => (
+                <button key={r} className={`btn ${resultValue === r ? 'btn-primary' : 'btn-ghost'}`} style={{ flex: 1 }} onClick={() => setResultValue(r)}>
+                  {r === 'win' ? '✅ 적중' : r === 'loss' ? '❌ 실패' : '↩️ 적특'}
+                </button>
+              ))}
+            </div>
+            {resultValue === 'win' && <div style={{ background: 'var(--green-bg)', border: '1px solid var(--green-border)', padding: '8px 12px', borderRadius: 'var(--radius-sm)', fontSize: 12, marginBottom: 12 }}>수익: <strong className="profit-pos">+{Math.round(resultTarget.stake * (resultTarget.odds - 1)).toLocaleString()}원</strong></div>}
+            {resultValue === 'loss' && <div style={{ background: 'var(--red-bg)', border: '1px solid var(--red-border)', padding: '8px 12px', borderRadius: 'var(--radius-sm)', fontSize: 12, marginBottom: 12 }}>손실: <strong className="profit-neg">-{resultTarget.stake.toLocaleString()}원</strong></div>}
+            <div className="modal-actions">
+              <button className="btn btn-ghost" onClick={() => setResultTarget(null)}>취소</button>
+              <button className="btn btn-primary" onClick={saveResult}><Check size={12} /> 확인</button>
             </div>
           </div>
         </div>
