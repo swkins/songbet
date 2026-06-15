@@ -194,11 +194,20 @@ tr:hover td { background: var(--bg-hover); }
 /* ── SITE GRID: 사이트 수만큼 자동 균등분할, 글씨도 clamp로 자동조절 ── */
 .site-grid { display: grid; gap: 0; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; width: 100%; }
 
+/* 각 사이트 컬럼 래퍼 (헤더행 제외 베팅+버튼을 컬럼 단위로) */
+.site-col-bets-wrapper {
+  background: var(--bg-card);
+  border-right: 1px solid var(--border);
+  min-width: 0;
+  display: flex; flex-direction: column;
+}
+.site-col-bets-wrapper:last-child { border-right: none; }
+
 .site-col-head {
   background: var(--bg-elevated);
   border-right: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
-  padding: 8px 70px 10px 8px;   /* 우측 70px: 입금/출금 버튼 공간 */
+  padding: 10px 52px 10px 52px; /* 좌우 대칭 패딩 — 입금/출금 버튼 공간 확보 */
   text-align: center;
   font-size: clamp(10px, 1.1vw, 13px);
   font-weight: 700;
@@ -293,22 +302,18 @@ tr:hover td { background: var(--bg-hover); }
 .bet-result-icon.loss:hover { background: var(--red-bg); }
 .bet-result-icon.cancel:hover { background: var(--bg-elevated); }
 
-/* ── 입금/출금 텍스트 버튼 ── */
-.site-txn-btn {
-  border-radius: 3px; font-size: 9px; font-weight: 700;
-  cursor: pointer; padding: 2px 5px; flex-shrink: 0;
-  transition: all 0.15s; font-family: var(--font-body);
-  line-height: 1.4; white-space: nowrap;
+/* ── 입금/출금 아이콘 버튼 (배경 없음, 깔끔) ── */
+.site-icon-btn {
+  background: none; border: none; cursor: pointer; padding: 3px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 4px; transition: all 0.15s; opacity: 0.45;
 }
-.site-txn-deposit {
-  background: var(--orange-bg); border: 1px solid var(--orange-border); color: var(--orange);
-}
-.site-txn-deposit:hover { background: #2A1400; border-color: var(--orange); }
-.site-txn-deposit.has-deposit { background: var(--orange); border-color: var(--orange); color: #000; }
-.site-txn-withdraw {
-  background: var(--cyan-bg); border: 1px solid var(--cyan-border); color: var(--cyan);
-}
-.site-txn-withdraw:hover { background: #042530; border-color: var(--cyan); }
+.site-icon-btn:hover { opacity: 1; background: var(--bg-hover); }
+.site-icon-deposit { color: var(--orange); }
+.site-icon-deposit.active { opacity: 0.85; color: var(--orange); }
+.site-icon-deposit:hover { color: var(--orange); }
+.site-icon-withdraw { color: var(--cyan); }
+.site-icon-withdraw:hover { color: var(--cyan); }
 
 /* 빈 베팅셀 hover 힌트 */
 .site-bets-empty-cell {
@@ -354,7 +359,7 @@ tr:hover td { background: var(--bg-hover); }
 .hotkey-btn {
   flex: 1; background: var(--bg-elevated); border: 1px solid var(--border);
   border-radius: 4px; color: var(--text-secondary); cursor: pointer;
-  font-size: 10px; font-weight: 700; padding: 4px 0;
+  font-size: 11px; font-weight: 700; padding: 6px 0;
   font-family: var(--font-body); transition: all 0.15s;
 }
 .hotkey-btn:hover { background: var(--gold-bg); border-color: var(--gold-border); color: var(--gold); }
@@ -397,3 +402,16 @@ tr:hover td { background: var(--bg-hover); }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+/* ── 통계 종목 탭 가로 그리드 ── */
+.stats-sport-grid {
+  display: flex; flex-wrap: wrap; gap: 8px; width: 100%;
+}
+.stats-sport-card {
+  flex: 0 0 calc(20% - 7px); min-width: 160px;
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 12px 14px; cursor: pointer;
+  transition: all 0.15s;
+}
+.stats-sport-card:hover { border-color: var(--gold-border); }
+.stats-sport-card.active { border-color: var(--gold); background: var(--gold-bg); }

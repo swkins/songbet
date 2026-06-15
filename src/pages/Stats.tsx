@@ -302,25 +302,25 @@ export default function Stats() {
           {activeSport === 'all' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               {/* 요약 타일 */}
-              <div className="grid-4">
-                <div className="card stat-tile">
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                <div className="card stat-tile" style={{ flex: '1 0 140px', minWidth: 130, maxWidth: 200 }}>
                   <div className={`stat-value ${stats.winRate >= 50 ? 'profit-pos' : 'profit-neg'}`}>{stats.winRate.toFixed(1)}%</div>
                   <div className="stat-label">승률</div>
                   <div style={{ fontSize: 10, color: 'var(--text-secondary)', marginTop: 4 }}>{stats.wins.length}W {stats.losses.length}L {stats.pushes.length}P</div>
                 </div>
-                <div className="card stat-tile">
+                <div className="card stat-tile" style={{ flex: '1 0 140px', minWidth: 130, maxWidth: 200 }}>
                   <div className={`stat-value ${stats.profit >= 0 ? 'profit-pos' : 'profit-neg'}`}>
                     {stats.profit >= 0 ? '+' : ''}{stats.profit.toLocaleString()}
                   </div>
                   <div className="stat-label">총 손익</div>
                   <div style={{ fontSize: 10, color: 'var(--text-secondary)', marginTop: 4 }}>베팅 {stats.total}건</div>
                 </div>
-                <div className="card stat-tile">
+                <div className="card stat-tile" style={{ flex: '1 0 140px', minWidth: 130, maxWidth: 200 }}>
                   <div className={`stat-value ${stats.roi >= 0 ? 'profit-pos' : 'profit-neg'}`}>{stats.roi >= 0 ? '+' : ''}{stats.roi.toFixed(1)}%</div>
                   <div className="stat-label">ROI</div>
                   <div style={{ fontSize: 10, color: 'var(--text-secondary)', marginTop: 4 }}>총 {stats.stake.toLocaleString()}</div>
                 </div>
-                <div className="card stat-tile">
+                <div className="card stat-tile" style={{ flex: '1 0 140px', minWidth: 130, maxWidth: 200 }}>
                   <div className="stat-value" style={{ color: 'var(--gold)' }}>{stats.avgOdds.toFixed(2)}</div>
                   <div className="stat-label">평균 배당</div>
                 </div>
