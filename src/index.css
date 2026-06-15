@@ -369,7 +369,7 @@ tr:hover td { background: var(--bg-hover); }
 .parlay-entry { border-left: 2px solid var(--purple) !important; }
 
 /* ── 진행 바 ── */
-.deposit-progress-bar { height: 4px; background: var(--bg-elevated); border-radius: 2px; overflow: hidden; margin-top: 4px; width: 100%; }
+.deposit-progress-bar { height: 7px; background: var(--bg-elevated); border-radius: 2px; overflow: hidden; margin-top: 4px; width: 100%; }
 .deposit-progress-fill { height: 100%; background: linear-gradient(90deg, var(--orange), #FFAD42); border-radius: 2px; transition: width 0.4s ease; }
 
 .rolling-bar { height: 3px; background: var(--bg-elevated); border-radius: 2px; overflow: hidden; margin-top: 3px; }
