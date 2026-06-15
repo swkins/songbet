@@ -9,7 +9,7 @@ import {
   Plus, Trash2, Check, X, ChevronLeft, ChevronRight,
   RotateCcw, Calendar, Settings,
   CheckCircle, XCircle, MinusCircle, Gift, GripVertical, DollarSign,
-  TrendingUp, TrendingDown, ArrowDownToLine, DoorOpen, Clock,
+  TrendingUp, TrendingDown, ArrowDownToLine, LogOut, Clock,
 } from 'lucide-react'
 
 const SPORTS: { value: Sport; label: string }[] = [
@@ -100,7 +100,7 @@ function DepositModal({ site, onClose, onDeposit, onPoint }: {
   const isusd = site.currency === 'usd'
   const dep = site.last_deposit ?? 0; const pt = site.point_deposit ?? 0
   const tot = dep + pt; const done = site.deposit_bet_done ?? 0
-  const rem = Math.max(0, tot - done); const pct = tot > 0 ? Math.min(100, Math.round(done / tot * 100)) : 0
+  const rem = Math.max(0, tot - done); const pct = tot > 0 ? Math.round(done / tot * 100) : 0
   const unit = isusd ? '$' : '원'
 
   return (
@@ -113,9 +113,9 @@ function DepositModal({ site, onClose, onDeposit, onPoint }: {
           {isusd && <span style={{ marginLeft: 6, fontSize: 10, background: 'var(--blue-bg)', color: 'var(--blue)', border: '1px solid var(--blue-border)', borderRadius: 4, padding: '1px 6px', fontWeight: 700 }}>USD</span>}
           <button onClick={onClose} style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex', padding: 2, borderRadius: 4 }}><X size={15} /></button>
         </div>
-        <div style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
-          <button onClick={() => setTab('deposit')} className={tab === 'deposit' ? 'btn btn-primary btn-sm' : 'btn btn-ghost btn-sm'} style={{ flex: 1 }}>입금</button>
-          <button onClick={() => setTab('point')} className={tab === 'point' ? 'btn btn-primary btn-sm' : 'btn btn-ghost btn-sm'} style={{ flex: 1 }}><Gift size={12} /> 포인트</button>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+          <button onClick={() => setTab('deposit')} className={tab === 'deposit' ? 'btn btn-primary' : 'btn btn-ghost'} style={{ flex: 1, fontSize: 14, padding: '9px 0' }}>입금</button>
+          <button onClick={() => setTab('point')} className={tab === 'point' ? 'btn btn-primary' : 'btn btn-ghost'} style={{ flex: 1, fontSize: 14, padding: '9px 0' }}><Gift size={14} /> 포인트</button>
         </div>
         {(dep > 0 || pt > 0) && (
           <div style={{ padding: '10px 12px', background: 'var(--bg-elevated)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', marginBottom: 14 }}>
@@ -126,15 +126,11 @@ function DepositModal({ site, onClose, onDeposit, onPoint }: {
               {pt > 0 && <div style={{ fontSize: 9, color: 'var(--text-secondary)' }}>포인트 <span style={{ fontFamily: 'var(--font-num)', fontWeight: 700, color: 'var(--purple)' }}>+{pt.toLocaleString()}P</span></div>}
               <div style={{ fontSize: 9, color: 'var(--text-secondary)' }}>남은 롤링 <span style={{ fontFamily: 'var(--font-num)', fontWeight: 700, color: 'var(--gold)' }}>{isusd ? '$' : ''}{rem.toLocaleString()}{isusd ? '' : '원'}</span></div>
             </div>
-            <div className="deposit-progress-bar"><div className="deposit-progress-fill" style={{ width: `${pct}%` }} /></div>
+            <div className="deposit-progress-bar"><div className="deposit-progress-fill" style={{ width: `${Math.min(100,pct)}%` }} /></div>
             <div style={{ fontSize: 9, textAlign: 'right', marginTop: 2, color: pct >= 100 ? 'var(--green)' : 'var(--orange)', fontWeight: 700 }}>{pct}%</div>
           </div>
         )}
-        {tab === 'point' && (
-          <div style={{ fontSize: 10, color: 'var(--purple)', marginBottom: 6, padding: '4px 8px', background: 'var(--purple-bg)', border: '1px solid var(--purple-border)', borderRadius: 'var(--radius-sm)' }}>
-            포인트는 롤링 총액에만 합산됩니다
-          </div>
-        )}
+
         <div style={{ fontSize: 9, color: 'var(--text-secondary)', marginBottom: 6, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.8px' }}>
           {tab === 'deposit' ? `입금액 (${unit})` : `포인트 추가`}
         </div>
@@ -166,7 +162,7 @@ function WithdrawModal({ site, onClose, onWithdraw }: {
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" style={{ maxWidth: 340 }} onClick={e => e.stopPropagation()}>
         <div className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-          <DoorOpen size={16} color="var(--cyan)" />
+          <LogOut size={16} color="var(--cyan)" />
           {site.name} 출금 / 마감
         </div>
         <div style={{ padding: '10px 12px', background: 'var(--bg-elevated)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', marginBottom: 14, fontSize: 12 }}>
@@ -482,7 +478,7 @@ export default function Dashboard() {
   /* ── 계산 헬퍼 ── */
   const totalRolling     = (s: Site) => (s.last_deposit ?? 0) + (s.point_deposit ?? 0)
   const depositRemaining = (s: Site) => Math.max(0, totalRolling(s) - (s.deposit_bet_done ?? 0))
-  const depositPct       = (s: Site) => totalRolling(s) > 0 ? Math.min(100, Math.round((s.deposit_bet_done ?? 0) / totalRolling(s) * 100)) : 0
+  const depositPct       = (s: Site) => totalRolling(s) > 0 ? Math.round((s.deposit_bet_done ?? 0) / totalRolling(s) * 100) : 0
   const betsBySite       = (id: string) => bets.filter(b => b.site_id === id)
   const pendingBySite    = (id: string) => betsBySite(id).filter(b => b.result === 'pending')
   const settledBySite    = (id: string) => betsBySite(id).filter(b => b.result !== 'pending')
@@ -578,7 +574,6 @@ export default function Dashboard() {
 
   /* ── 베팅 제출 ── */
   async function submitBet(site: Site, sport: string, content: string, odds: number, stake: number): Promise<boolean> {
-    if (stake > site.balance) { alert('잔액이 부족합니다'); return false }
     const { market, pick } = autoMarket(content)
     const { data: betData } = await supabase.from('bets').insert({ bet_date: today, sport: sport as Sport, league: '', match: content, market, pick, odds, stake, result: 'pending' as BetResult, profit: 0, memo: '', site_id: site.id, parlay_group: null, parlay_leg: 1 }).select().single()
     if (!betData) return false
@@ -590,7 +585,6 @@ export default function Dashboard() {
     return false
   }
   async function submitDoubleBet(site: Site, c1: string, c2: string, odds: number, stake: number): Promise<boolean> {
-    if (stake > site.balance) { alert('잔액이 부족합니다'); return false }
     const groupId = crypto.randomUUID()
     const { market: m1, pick: p1 } = autoMarket(c1); const { market: m2, pick: p2 } = autoMarket(c2)
     const { data: betsData } = await supabase.from('bets').insert([
@@ -760,7 +754,7 @@ export default function Dashboard() {
                       </button>
                       <button className="site-icon-btn site-icon-withdraw"
                         onClick={e => { e.stopPropagation(); setWithdrawSite(site) }} title="출금">
-                        <DoorOpen size={13} />
+                        <LogOut size={13} />
                       </button>
                     </div>
                   </div>
@@ -777,22 +771,24 @@ export default function Dashboard() {
                   <div key={site.id} className={`site-balance-cell ${site.active ? 'site-bal-active' : ''}`} style={{ alignItems: 'stretch', padding: '7px 8px' }}>
                     {dep > 0 || pt > 0 ? (
                       <>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
+                        {/* 진행률 바 + % 먼저 */}
+                        <div className="deposit-progress-bar" style={{ marginBottom: 2 }}><div className="deposit-progress-fill" style={{ width: `${Math.min(100,pct)}%` }} /></div>
+                        <div style={{ fontSize: 'clamp(8px,0.75vw,10px)', color: pct >= 100 ? 'var(--green)' : 'var(--orange)', fontWeight: 700, textAlign: 'right', marginBottom: 4 }}>{pct}%</div>
+                        {/* 입금/포인트/남은롤링 아래 */}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 1 }}>
                           <span style={{ fontSize: 'clamp(8px,0.8vw,10px)', color: 'var(--text-muted)' }}>입금</span>
                           <span style={{ fontFamily: 'var(--font-num)', fontSize: fs, fontWeight: 700, color: '#E2E8F0' }}>{pfx}{dep.toLocaleString()}{sfx}</span>
                         </div>
                         {pt > 0 && (
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 1 }}>
                             <span style={{ fontSize: 'clamp(8px,0.8vw,10px)', color: 'var(--text-muted)' }}>포인트</span>
                             <span style={{ fontFamily: 'var(--font-num)', fontSize: fs, fontWeight: 700, color: 'var(--purple)' }}>+{pt.toLocaleString()}P</span>
                           </div>
                         )}
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                           <span style={{ fontSize: 'clamp(8px,0.8vw,10px)', color: 'var(--text-muted)' }}>남은 롤링</span>
                           <span style={{ fontFamily: 'var(--font-num)', fontSize: fs, fontWeight: 700, color: rem > 0 ? 'var(--gold)' : 'var(--green)' }}>{pfx}{rem.toLocaleString()}{sfx}</span>
                         </div>
-                        <div className="deposit-progress-bar"><div className="deposit-progress-fill" style={{ width: `${pct}%` }} /></div>
-                        <div style={{ fontSize: 'clamp(8px,0.75vw,10px)', color: pct >= 100 ? 'var(--green)' : 'var(--orange)', fontWeight: 700, marginTop: 2, textAlign: 'right' }}>{pct}%</div>
                       </>
                     ) : <div style={{ height: 16 }} />}
                   </div>

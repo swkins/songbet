@@ -74,11 +74,11 @@ html, body, #root {
 }
 
 /* ── NAV ── */
-.nav { background: var(--bg-card); border-bottom: 1px solid var(--border); height: 52px; position: sticky; top: 0; z-index: 100; }
+.nav { background: var(--bg-card); border-bottom: 1px solid var(--border); height: 58px; position: sticky; top: 0; z-index: 100; }
 .nav-inner { width: 100%; padding: 0 20px; height: 100%; display: flex; align-items: center; gap: 16px; }
 .nav-logo { font-size: 13px; font-weight: 800; letter-spacing: 3px; text-transform: uppercase; background: linear-gradient(90deg, #F5A623, #FFD166); -webkit-background-clip: text; -webkit-text-fill-color: transparent; flex-shrink: 0; }
 .nav-tabs { display: flex; gap: 2px; }
-.nav-tab { padding: 5px 13px; border-radius: var(--radius-sm); border: none; background: none; font-size: 12px; font-weight: 500; font-family: var(--font-body); color: var(--text-secondary); cursor: pointer; transition: all 0.15s; }
+.nav-tab { padding: 7px 20px; border-radius: var(--radius-sm); border: none; background: none; font-size: 14px; font-weight: 600; font-family: var(--font-body); color: var(--text-secondary); cursor: pointer; transition: all 0.15s; }
 .nav-tab:hover { background: var(--bg-hover); color: var(--text-primary); }
 .nav-tab.active { background: var(--gold-bg); color: var(--gold); border: 1px solid var(--gold-border); font-weight: 600; }
 
