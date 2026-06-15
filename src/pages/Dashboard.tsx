@@ -588,6 +588,7 @@ export default function Dashboard() {
     if (withdrawSite) {
       setBets(p => p.filter(b => !(b.site_id === withdrawSite.id && b.result !== 'pending')))
     }
+    await loadSites()  // point_deposit 등 초기화 확실히 반영
     setWithdrawSite(null)
   }
 
@@ -617,6 +618,49 @@ export default function Dashboard() {
       setBets(p => [...p, ...betsData]); setSites(p => p.map(s => s.id === siteData.id ? siteData : s)); return true
     }
     return false
+  }
+
+  /* ── 두폴 결과 처리 (두 leg 동시) ── */
+  async function applyParlayResult(groupBets: Bet[], result: BetResult | 'cancel') {
+    if (!groupBets.length) return
+    const site = sites.find(s => s.id === groupBets[0].site_id)
+
+    if (result === 'cancel') {
+      if (!confirm('베팅을 취소하고 잔액/롤링을 복원할까요?')) return
+      for (const gb of groupBets) await supabase.from('bets').delete().eq('id', gb.id)
+      setBets(p => p.filter(b => !groupBets.some(gb => gb.id === b.id)))
+      if (site) {
+        const { data: sd } = await supabase.from('sites').update({
+          balance: site.balance + groupBets[0].stake,
+          rolling_done: Math.max(0, site.rolling_done - groupBets[0].stake),
+          deposit_bet_done: Math.max(0, (site.deposit_bet_done ?? 0) - groupBets[0].stake),
+        }).eq('id', site.id).select().single()
+        if (sd) setSites(p => p.map(s => s.id === sd.id ? sd : s))
+      }
+      return
+    }
+
+    // 두 leg 모두 동일 결과로 업데이트
+    const profit = result === 'win'
+      ? Math.round(groupBets[0].stake * (groupBets[0].odds - 1))
+      : result === 'loss' ? -groupBets[0].stake : 0
+
+    const updatedBetsList: Bet[] = []
+    for (const gb of groupBets) {
+      const { data } = await supabase.from('bets').update({ result, profit: result === 'win' ? profit : result === 'loss' ? -gb.stake : 0 }).eq('id', gb.id).select().single()
+      if (data) updatedBetsList.push(data)
+    }
+    if (!updatedBetsList.length) return
+
+    setBets(p => p.map(b => {
+      const updated = updatedBetsList.find(u => u.id === b.id)
+      return updated ?? b
+    }))
+
+    if (site && result === 'win') {
+      const { data: sd } = await supabase.from('sites').update({ balance: site.balance + groupBets[0].stake + profit }).eq('id', site.id).select().single()
+      if (sd) setSites(p => p.map(s => s.id === sd.id ? sd : s))
+    }
   }
 
   /* ── 결과 처리 ── */
@@ -852,9 +896,9 @@ export default function Dashboard() {
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                                   {isHover ? (
                                     <>
-                                      <button className="bet-result-icon win"    onClick={() => applyResult(groupBets[0], 'win')}><CheckCircle  size={15} /></button>
-                                      <button className="bet-result-icon loss"   onClick={() => applyResult(groupBets[0], 'loss')}><XCircle      size={15} /></button>
-                                      <button className="bet-result-icon cancel" onClick={() => applyResult(groupBets[0], 'cancel')}><MinusCircle size={15} /></button>
+                                      <button className="bet-result-icon win"    onClick={() => applyParlayResult(groupBets, 'win')}><CheckCircle  size={15} /></button>
+                                      <button className="bet-result-icon loss"   onClick={() => applyParlayResult(groupBets, 'loss')}><XCircle      size={15} /></button>
+                                      <button className="bet-result-icon cancel" onClick={() => applyParlayResult(groupBets, 'cancel')}><MinusCircle size={15} /></button>
                                     </>
                                   ) : (
                                     <Clock size={8} color="var(--text-muted)" />
@@ -930,9 +974,6 @@ export default function Dashboard() {
                               </div>
                               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 4, paddingLeft: 23 }}>
                                 <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'clamp(9px,0.85vw,11px)', color: 'var(--text-secondary)' }}>{bet.odds.toFixed(2)}</span>
-                                <span style={{ fontFamily: 'var(--font-num)', fontSize: 'clamp(9px,0.85vw,11px)', fontWeight: 700, color: isusd ? 'var(--blue)' : 'var(--text-secondary)' }}>
-                                  {isusd ? '$' : ''}{bet.stake.toLocaleString()}{isusd ? '' : '원'}
-                                </span>
                                 <span className={`badge badge-${bet.result}`} style={{ fontSize: 'clamp(8px,0.75vw,10px)', padding: '1px 4px', flexShrink: 0 }}>
                                   {bet.result === 'win' ? '적중' : bet.result === 'loss' ? '실패' : '적특'}
                                   {bet.profit !== 0 && <span style={{ marginLeft: 3 }}>{bet.profit > 0 ? '+' : ''}{bet.profit.toLocaleString()}</span>}
