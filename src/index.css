@@ -263,7 +263,7 @@ tr:hover td { background: var(--bg-hover); }
 
 /* 개별 베팅 카드 */
 .site-bet-entry {
-  padding: 7px 8px;
+  padding: 5px 8px;
   border-bottom: 1px solid var(--border-light);
   font-size: clamp(10px, 1.0vw, 13px);
   line-height: 1.4;
@@ -277,10 +277,11 @@ tr:hover td { background: var(--bg-hover); }
 
 .site-bet-match {
   font-weight: 700;
-  font-size: clamp(11px, 1.05vw, 14px);
+  font-size: clamp(10px, 1.0vw, 13px);
   color: var(--text-primary);
   word-break: keep-all;
-  margin-bottom: 3px;
+  margin-bottom: 0;
+  line-height: 1.3;
 }
 
 /* 결과 아이콘 (hover 시 표시) */

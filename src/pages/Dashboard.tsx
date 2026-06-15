@@ -9,7 +9,7 @@ import {
   Plus, Trash2, Check, X, ChevronLeft, ChevronRight,
   RotateCcw, Calendar, Settings,
   CheckCircle, XCircle, MinusCircle, Gift, GripVertical, DollarSign,
-  TrendingUp, TrendingDown, ArrowDownToLine, ArrowUpFromLine,
+  TrendingUp, TrendingDown, ArrowDownToLine, DoorOpen, Clock,
 } from 'lucide-react'
 
 const SPORTS: { value: Sport; label: string }[] = [
@@ -110,7 +110,8 @@ function DepositModal({ site, onClose, onDeposit, onPoint }: {
         <div className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
           <ArrowDownToLine size={16} color="var(--orange)" />
           {site.name} 입금 / 포인트
-          {isusd && <span style={{ marginLeft: 'auto', fontSize: 10, background: 'var(--blue-bg)', color: 'var(--blue)', border: '1px solid var(--blue-border)', borderRadius: 4, padding: '1px 6px', fontWeight: 700 }}>USD</span>}
+          {isusd && <span style={{ marginLeft: 6, fontSize: 10, background: 'var(--blue-bg)', color: 'var(--blue)', border: '1px solid var(--blue-border)', borderRadius: 4, padding: '1px 6px', fontWeight: 700 }}>USD</span>}
+          <button onClick={onClose} style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex', padding: 2, borderRadius: 4 }}><X size={15} /></button>
         </div>
         <div style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
           <button onClick={() => setTab('deposit')} className={tab === 'deposit' ? 'btn btn-primary btn-sm' : 'btn btn-ghost btn-sm'} style={{ flex: 1 }}>입금</button>
@@ -120,7 +121,7 @@ function DepositModal({ site, onClose, onDeposit, onPoint }: {
           <div style={{ padding: '10px 12px', background: 'var(--bg-elevated)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', marginBottom: 14 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
               <div style={{ fontSize: 9, color: 'var(--text-secondary)' }}>
-                입금 <span style={{ fontFamily: 'var(--font-num)', fontWeight: 700, color: 'var(--orange)' }}>{isusd ? '$' : ''}{dep.toLocaleString()}{isusd ? '' : '원'}</span>
+                입금 <span style={{ fontFamily: 'var(--font-num)', fontWeight: 700, color: 'var(--text-primary)' }}>{isusd ? '$' : ''}{dep.toLocaleString()}{isusd ? '' : '원'}</span>
               </div>
               {pt > 0 && <div style={{ fontSize: 9, color: 'var(--text-secondary)' }}>포인트 <span style={{ fontFamily: 'var(--font-num)', fontWeight: 700, color: 'var(--purple)' }}>+{pt.toLocaleString()}P</span></div>}
               <div style={{ fontSize: 9, color: 'var(--text-secondary)' }}>남은 롤링 <span style={{ fontFamily: 'var(--font-num)', fontWeight: 700, color: 'var(--gold)' }}>{isusd ? '$' : ''}{rem.toLocaleString()}{isusd ? '' : '원'}</span></div>
@@ -146,9 +147,7 @@ function DepositModal({ site, onClose, onDeposit, onPoint }: {
             <Check size={12} /> {tab === 'deposit' ? '입금' : '추가'}
           </button>
         </div>
-        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-          <button className="btn btn-ghost btn-sm" onClick={onClose}>닫기</button>
-        </div>
+
       </div>
     </div>
   )
@@ -167,7 +166,7 @@ function WithdrawModal({ site, onClose, onWithdraw }: {
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" style={{ maxWidth: 340 }} onClick={e => e.stopPropagation()}>
         <div className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-          <ArrowUpFromLine size={16} color="var(--cyan)" />
+          <DoorOpen size={16} color="var(--cyan)" />
           {site.name} 출금 / 마감
         </div>
         <div style={{ padding: '10px 12px', background: 'var(--bg-elevated)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', marginBottom: 14, fontSize: 12 }}>
@@ -391,6 +390,53 @@ function DoubleBetForm({ site, lastLeg1, onClose, onBet }: {
 }
 
 /* ════════════════════════════════ DASHBOARD ════════════════════════════════ */
+
+/* ── 이번주 / 한달 입금 패널 ── */
+function WeekMonthDeposit({ sites, cashflows, weekStart, weekEnd }: {
+  sites: { id: string; name: string; currency: string }[]
+  cashflows: { flow_date: string; type: string; amount: number; site_id: string | null }[]
+  weekStart: string; weekEnd: string
+}) {
+  const [mode, setMode] = useState<'week' | 'month'>('week')
+  const monthStart = dayjs().startOf('month').format('YYYY-MM-DD')
+  const monthEnd   = dayjs().endOf('month').format('YYYY-MM-DD')
+  const from = mode === 'week' ? weekStart : monthStart
+  const to   = mode === 'week' ? weekEnd   : monthEnd
+
+  const filtered = cashflows.filter(c => c.type === 'expense' && c.flow_date >= from && c.flow_date <= to)
+  const total = filtered.reduce((a, c) => a + c.amount, 0)
+
+  const krwSites = sites.filter(s => s.currency === 'krw')
+
+  return (
+    <div className="card" style={{ padding: '10px 12px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+        <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.8px' }}>
+          입금 현황
+        </div>
+        <div style={{ display: 'flex', gap: 4 }}>
+          <button onClick={() => setMode('week')} style={{ fontSize: 9, fontWeight: 700, padding: '2px 7px', borderRadius: 4, border: '1px solid', cursor: 'pointer', background: mode === 'week' ? 'var(--gold-bg)' : 'none', borderColor: mode === 'week' ? 'var(--gold-border)' : 'var(--border)', color: mode === 'week' ? 'var(--gold)' : 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>이번주</button>
+          <button onClick={() => setMode('month')} style={{ fontSize: 9, fontWeight: 700, padding: '2px 7px', borderRadius: 4, border: '1px solid', cursor: 'pointer', background: mode === 'month' ? 'var(--gold-bg)' : 'none', borderColor: mode === 'month' ? 'var(--gold-border)' : 'var(--border)', color: mode === 'month' ? 'var(--gold)' : 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>한달</button>
+        </div>
+      </div>
+      {krwSites.map(s => {
+        const siteTotal = filtered.filter(c => c.site_id === s.id).reduce((a, c) => a + c.amount, 0)
+        if (siteTotal === 0) return null
+        return (
+          <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
+            <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{s.name}</span>
+            <span style={{ fontFamily: 'var(--font-num)', fontSize: 12, fontWeight: 700, color: 'var(--orange)' }}>{siteTotal.toLocaleString()}원</span>
+          </div>
+        )
+      })}
+      <div style={{ borderTop: '1px solid var(--border)', paddingTop: 7, marginTop: 5, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)' }}>합계</span>
+        <span style={{ fontFamily: 'var(--font-num)', fontSize: 14, fontWeight: 800, color: 'var(--orange)' }}>{total.toLocaleString()}원</span>
+      </div>
+    </div>
+  )
+}
+
 export default function Dashboard() {
   const today = dayjs().format('YYYY-MM-DD')
   const weekStart = dayjs().startOf('isoWeek').format('YYYY-MM-DD')  // 월요일
@@ -523,6 +569,10 @@ export default function Dashboard() {
       if (isusd) { usdKrwRate = await getUsdKrwRate(); amountKrw = Math.round(Math.abs(netProfit) * usdKrwRate) }
       await supabase.from('cashflows').insert({ flow_date: today, type: netProfit >= 0 ? 'income' : 'expense', category: netProfit >= 0 ? '베팅수익' : '베팅손실', description: `${withdrawSite.name} 마감`, amount: Math.abs(netProfit), site_id: withdrawSite.id, currency: withdrawSite.currency, usd_krw_rate: usdKrwRate, amount_krw: isusd ? amountKrw : Math.abs(netProfit) })
     }
+    /* 마감 시: 해당 사이트 완료 베팅 화면에서 제거 (DB는 유지) */
+    if (withdrawSite) {
+      setBets(p => p.filter(b => !(b.site_id === withdrawSite.id && b.result !== 'pending')))
+    }
     setWithdrawSite(null)
   }
 
@@ -591,13 +641,7 @@ export default function Dashboard() {
           }
         }
       }
-      /* 하루 지난 완료 베팅 자동 삭제 */
-      const yesterday = dayjs().subtract(1, 'day').format('YYYY-MM-DD')
-      const expired = updatedBets.filter(b => b.result !== 'pending' && b.bet_date <= yesterday)
-      if (expired.length > 0) {
-        for (const eb of expired) await supabase.from('bets').delete().eq('id', eb.id)
-        setBets(p => p.filter(b => !expired.some(eb => eb.id === b.id)))
-      }
+      /* 완료된 베팅은 마감(withdraw) 시에 화면에서 제거됨 */
     }
   }
 
@@ -670,27 +714,8 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* 이번주 입금 현황 */}
-          <div className="card" style={{ padding: '10px 12px' }}>
-            <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.8px', marginBottom: 10 }}>
-              이번주 입금 <span style={{ fontSize: 9, fontWeight: 400, textTransform: 'none', color: 'var(--text-muted)' }}>(월~일)</span>
-            </div>
-            {sites.filter(s => s.currency === 'krw').map(s => {
-              const siteDeps = cashflows.filter(c => c.site_id === s.id && c.type === 'expense')
-              const siteTotal = siteDeps.reduce((a, c) => a + c.amount, 0)
-              if (siteTotal === 0) return null
-              return (
-                <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
-                  <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{s.name}</span>
-                  <span style={{ fontFamily: 'var(--font-num)', fontSize: 12, fontWeight: 700, color: 'var(--orange)' }}>{siteTotal.toLocaleString()}원</span>
-                </div>
-              )
-            })}
-            <div style={{ borderTop: '1px solid var(--border)', paddingTop: 7, marginTop: 5, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)' }}>합계</span>
-              <span style={{ fontFamily: 'var(--font-num)', fontSize: 14, fontWeight: 800, color: 'var(--orange)' }}>{weekDepositsKRW.toLocaleString()}원</span>
-            </div>
-          </div>
+          {/* 이번주/한달 입금 현황 */}
+          <WeekMonthDeposit sites={sites} cashflows={cashflows} weekStart={weekStart} weekEnd={weekEnd} />
         </div>
 
         {/* ── 우: 베팅 현황 (flex-1) ── */}
@@ -735,7 +760,7 @@ export default function Dashboard() {
                       </button>
                       <button className="site-icon-btn site-icon-withdraw"
                         onClick={e => { e.stopPropagation(); setWithdrawSite(site) }} title="출금">
-                        <ArrowUpFromLine size={13} />
+                        <DoorOpen size={13} />
                       </button>
                     </div>
                   </div>
@@ -754,7 +779,7 @@ export default function Dashboard() {
                       <>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
                           <span style={{ fontSize: 'clamp(8px,0.8vw,10px)', color: 'var(--text-muted)' }}>입금</span>
-                          <span style={{ fontFamily: 'var(--font-num)', fontSize: fs, fontWeight: 700, color: 'var(--orange)' }}>{pfx}{dep.toLocaleString()}{sfx}</span>
+                          <span style={{ fontFamily: 'var(--font-num)', fontSize: fs, fontWeight: 700, color: '#E2E8F0' }}>{pfx}{dep.toLocaleString()}{sfx}</span>
                         </div>
                         {pt > 0 && (
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
@@ -789,17 +814,17 @@ export default function Dashboard() {
                       return (
                         <div key={bet.id} className={`site-bet-entry ${isParlay ? 'parlay-entry' : ''}`}
                           onMouseEnter={() => setHoverBetId(bet.id)} onMouseLeave={() => setHoverBetId(null)}>
-                          {/* 1행: 종목 | 내용 | 금액 */}
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2 }}>
-                            <span style={{ fontSize: 13, lineHeight: 1, flexShrink: 0 }}>{SPORT_SHORT[bet.sport] ?? '📋'}</span>
+                          {/* 1행: 종목 이모지 | 경기 내용 */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 2 }}>
+                            <span style={{ fontSize: 14, lineHeight: 1, flexShrink: 0, display: 'inline-block', width: 18, textAlign: 'center' }}>{SPORT_SHORT[bet.sport] ?? '📋'}</span>
                             <span className="site-bet-match" style={{ flex: 1, marginBottom: 0 }}>{bet.match}</span>
-                            <span style={{ fontFamily: 'var(--font-num)', fontSize: 'clamp(9px,0.85vw,11px)', fontWeight: 700, color: isusd ? 'var(--blue)' : 'var(--text-secondary)', flexShrink: 0 }}>
+                          </div>
+                          {/* 2행: 배당 | 금액 | 결과버튼 */}
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingLeft: 23 }}>
+                            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'clamp(9px,0.85vw,11px)', color: 'var(--text-secondary)' }}>{bet.odds.toFixed(2)}</span>
+                            <span style={{ fontFamily: 'var(--font-num)', fontSize: 'clamp(9px,0.85vw,11px)', fontWeight: 700, color: isusd ? 'var(--blue)' : 'var(--text-secondary)' }}>
                               {isusd ? '$' : ''}{bet.stake.toLocaleString()}{isusd ? '' : '원'}
                             </span>
-                          </div>
-                          {/* 2행: 배당 | 결과버튼/뱃지 */}
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingLeft: 17 }}>
-                            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'clamp(9px,0.85vw,11px)', color: 'var(--text-secondary)' }}>{bet.odds.toFixed(2)}</span>
                             <div className="bet-result-icons">
                               {isHover ? (
                                 <>
@@ -808,7 +833,7 @@ export default function Dashboard() {
                                   <button className="bet-result-icon cancel" onClick={() => applyResult(bet, 'cancel')}><MinusCircle size={15} /></button>
                                 </>
                               ) : (
-                                <span className="badge badge-pending" style={{ fontSize: 'clamp(8px,0.75vw,10px)', padding: '1px 4px' }}>대기</span>
+                                <Clock size={11} color="var(--text-muted)" />
                               )}
                             </div>
                           </div>
@@ -838,15 +863,16 @@ export default function Dashboard() {
                             <div key={bet.id}
                               className={`site-bet-entry ${bet.result === 'win' ? 'win-entry' : 'loss-entry'} ${isParlay ? 'parlay-entry' : ''}`}
                               onMouseEnter={() => setHoverBetId(bet.id)} onMouseLeave={() => setHoverBetId(null)}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2 }}>
-                                <span style={{ fontSize: 13, lineHeight: 1, flexShrink: 0 }}>{SPORT_SHORT[bet.sport] ?? '📋'}</span>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 2 }}>
+                                <span style={{ fontSize: 14, lineHeight: 1, flexShrink: 0, display: 'inline-block', width: 18, textAlign: 'center' }}>{SPORT_SHORT[bet.sport] ?? '📋'}</span>
                                 <span className="site-bet-match" style={{ flex: 1, marginBottom: 0 }}>{bet.match}</span>
-                                <span style={{ fontFamily: 'var(--font-num)', fontSize: 'clamp(9px,0.85vw,11px)', fontWeight: 700, color: isusd ? 'var(--blue)' : 'var(--text-secondary)', flexShrink: 0 }}>
+                              </div>
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 4, paddingLeft: 23 }}>
+                                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'clamp(9px,0.85vw,11px)', color: 'var(--text-secondary)' }}>{bet.odds.toFixed(2)}</span>
+                                <span style={{ fontFamily: 'var(--font-num)', fontSize: 'clamp(9px,0.85vw,11px)', fontWeight: 700, color: isusd ? 'var(--blue)' : 'var(--text-secondary)' }}>
                                   {isusd ? '$' : ''}{bet.stake.toLocaleString()}{isusd ? '' : '원'}
                                 </span>
-                              </div>
-                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingLeft: 17 }}>
-                                <span className={`badge badge-${bet.result}`} style={{ fontSize: 'clamp(8px,0.75vw,10px)', padding: '1px 4px' }}>
+                                <span className={`badge badge-${bet.result}`} style={{ fontSize: 'clamp(8px,0.75vw,10px)', padding: '1px 4px', flexShrink: 0 }}>
                                   {bet.result === 'win' ? '적중' : bet.result === 'loss' ? '실패' : '적특'}
                                   {bet.profit !== 0 && <span style={{ marginLeft: 3 }}>{bet.profit > 0 ? '+' : ''}{bet.profit.toLocaleString()}</span>}
                                 </span>
