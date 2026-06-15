@@ -87,7 +87,7 @@ html, body, #root {
 .page-title { font-size: 16px; font-weight: 700; color: var(--text-primary); }
 
 /* ── DASHBOARD 레이아웃: 슬립 260px 고정, 베팅현황 나머지 ── */
-.dashboard-layout { display: grid; grid-template-columns: 260px 1fr; gap: 12px; align-items: start; width: 100%; }
+.dashboard-layout { display: grid; grid-template-columns: 1fr 260px; gap: 12px; align-items: start; width: 100%; }
 
 /* ── CARD ── */
 .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; }
@@ -197,7 +197,7 @@ tr:hover td { background: var(--bg-hover); }
   background: var(--bg-elevated);
   border-right: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
-  padding: 9px 6px 8px;
+  padding: 6px 6px 8px;
   text-align: center;
   font-size: clamp(10px, 1.1vw, 13px);
   font-weight: 700;
@@ -208,6 +208,7 @@ tr:hover td { background: var(--bg-hover); }
 .site-col-head:last-child { border-right: none; }
 .site-col-head.site-col-active {
   background: rgba(0,232,122,0.07);
+.site-col-head.site-col-selected { outline: 2px solid var(--gold); outline-offset: -2px; }
   border-bottom-color: var(--green-border);
 }
 
@@ -285,8 +286,8 @@ tr:hover td { background: var(--bg-hover); }
 
 /* ── 입금/출금 버튼 (헤더용) ── */
 .site-action-btns {
-  display: flex; gap: 3px;
-  position: absolute; top: 4px; left: 4px;
+  display: flex; gap: 3px; align-items: center;
+
 }
 .site-deposit-btn {
   background: var(--orange-bg); border: 1px solid var(--orange-border);

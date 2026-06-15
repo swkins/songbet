@@ -10,6 +10,7 @@ export interface Site {
   deposit_bet_done: number   // 입금 후 베팅된 누적액
   point_deposit: number      // 포인트 누적 (롤링 전용, 결산 미반영)
   total_withdrawal: number   // 누적 출금액
+  currency: 'krw' | 'usd'   // 사이트 통화 타입
 }
 export interface Bet {
   id: string; created_at: string; bet_date: string; sport: Sport
@@ -23,6 +24,9 @@ export interface Todo {
 export interface Cashflow {
   id: string; created_at: string; flow_date: string; type: CashflowType
   category: string; description: string; amount: number; site_id: string | null
+  currency: 'krw' | 'usd'
+  usd_krw_rate: number | null
+  amount_krw: number | null
 }
 export interface ActionLog {
   id: string; created_at: string; action_type: 'insert' | 'update' | 'delete'
