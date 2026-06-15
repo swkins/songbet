@@ -627,12 +627,12 @@ export default function Dashboard() {
       return
     }
 
-    // 두 leg 동일 결과로 업데이트
+    // leg1에만 실제 profit 기록, leg2는 0 → sitePnL 중복 합산 방지
     const profit = result === 'win' ? Math.round(stake * (groupBets[0].odds - 1)) : result === 'loss' ? -stake : 0
     const updatedList: Bet[] = []
-    for (const gb of groupBets) {
-      const legProfit = result === 'win' ? profit : result === 'loss' ? -stake : 0
-      const { data } = await supabase.from('bets').update({ result, profit: legProfit }).eq('id', gb.id).select().single()
+    for (let i = 0; i < groupBets.length; i++) {
+      const legProfit = i === 0 ? profit : 0  // leg1만 profit, 나머지 0
+      const { data } = await supabase.from('bets').update({ result, profit: legProfit }).eq('id', groupBets[i].id).select().single()
       if (data) updatedList.push(data)
     }
     if (!updatedList.length) return
@@ -642,6 +642,28 @@ export default function Dashboard() {
     if (site && result === 'win') {
       // stake 한 번만 반환 + profit
       const { data: sd } = await supabase.from('sites').update({ balance: site.balance + stake + profit }).eq('id', site.id).select().single()
+      if (sd) setSites(p => p.map(s => s.id === sd.id ? sd : s))
+    }
+  }
+
+  /* ── 두폴 처리취소: 완료→pending 복원 ── */
+  async function applyParlayRevert(groupBets: Bet[]) {
+    if (!confirm('두폴 결과 처리를 취소하고 대기 목록으로 되돌릴까요?')) return
+    const site = sites.find(s => s.id === groupBets[0].site_id)
+    const wasWin = groupBets[0].result === 'win'
+    const updatedList: Bet[] = []
+    for (const gb of groupBets) {
+      const { data } = await supabase.from('bets').update({ result: 'pending', profit: 0 }).eq('id', gb.id).select().single()
+      if (data) updatedList.push(data)
+    }
+    if (!updatedList.length) return
+    setBets(p => p.map(b => updatedList.find(u => u.id === b.id) ?? b))
+    if (site && wasWin) {
+      const stake = groupBets[0].stake
+      const profit = groupBets[0].profit  // leg1에만 저장된 profit
+      const { data: sd } = await supabase.from('sites').update({
+        balance: Math.max(0, site.balance - stake - profit),
+      }).eq('id', site.id).select().single()
       if (sd) setSites(p => p.map(s => s.id === sd.id ? sd : s))
     }
   }
@@ -840,13 +862,13 @@ export default function Dashboard() {
                           <span style={{ fontSize: 'clamp(8px,0.8vw,10px)', color: 'var(--text-muted)' }}>입금</span>
                           <span style={{ fontFamily: 'var(--font-num)', fontSize: fs, fontWeight: 700, color: '#E2E8F0' }}>{pfx}{dep.toLocaleString()}{sfx}</span>
                         </div>
-                        {/* 포인트 */}
-                        {pt > 0 && (
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 1 }}>
-                            <span style={{ fontSize: 'clamp(8px,0.8vw,10px)', color: 'var(--text-muted)' }}>포인트</span>
-                            <span style={{ fontFamily: 'var(--font-num)', fontSize: fs, fontWeight: 700, color: 'var(--purple)' }}>+{pt.toLocaleString()}P</span>
-                          </div>
-                        )}
+                        {/* 포인트 — 항상 표시 */}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 1 }}>
+                          <span style={{ fontSize: 'clamp(8px,0.8vw,10px)', color: 'var(--text-muted)' }}>포인트</span>
+                          <span style={{ fontFamily: 'var(--font-num)', fontSize: fs, fontWeight: 700, color: pt > 0 ? 'var(--purple)' : 'var(--text-muted)' }}>
+                            {pt > 0 ? `+${pt.toLocaleString()}P` : '—'}
+                          </span>
+                        </div>
                         {/* 남은 롤링 */}
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
                           <span style={{ fontSize: 'clamp(8px,0.8vw,10px)', color: 'var(--text-muted)' }}>남은 롤링</span>
@@ -969,38 +991,73 @@ export default function Dashboard() {
                       )}
                     </div>
 
-                    {/* 완료 베팅 */}
+                    {/* 완료 베팅 — 두폴은 그룹으로 묶어 한 박스 렌더 */}
                     {settled.length > 0 && (
                       <div style={{ borderTop: '2px dashed var(--border)', marginTop: 4 }}>
                         <div style={{ fontSize: 8, color: 'var(--text-muted)', padding: '3px 8px', fontWeight: 600, letterSpacing: '0.5px' }}>완료</div>
-                        {settled.map(bet => {
-                          const isHover  = hoverBetId === bet.id
-                          const isParlay = !!bet.parlay_group
-                          return (
-                            <div key={bet.id}
-                              className={`site-bet-entry ${bet.result === 'win' ? 'win-entry' : 'loss-entry'} ${isParlay ? 'parlay-entry' : ''}`}
-                              style={{ position: 'relative' }}
-                              onMouseEnter={() => setHoverBetId(bet.id)} onMouseLeave={() => setHoverBetId(null)}>
-                              {/* hover 시 우상단 X: 처리 취소 */}
-                              {isHover && (
-                                <button className="bet-result-icon cancel" title="처리 취소"
-                                  style={{ position: 'absolute', top: 4, right: 4 }}
-                                  onClick={() => applyResult(bet, 'revert')}><X size={13} /></button>
-                              )}
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 2 }}>
-                                <span style={{ fontSize: 14, lineHeight: 1, flexShrink: 0, display: 'inline-block', width: 18, textAlign: 'center' }}>{SPORT_SHORT[bet.sport] ?? '📋'}</span>
-                                <span className="site-bet-match" style={{ flex: 1, marginBottom: 0 }}>{bet.match}</span>
+                        {(() => {
+                          const renderedGroups = new Set<string>()
+                          return settled.map(bet => {
+                            if (bet.parlay_group) {
+                              if (renderedGroups.has(bet.parlay_group)) return null
+                              renderedGroups.add(bet.parlay_group)
+                              const groupBets = settled.filter(b => b.parlay_group === bet.parlay_group).sort((a,b) => a.parlay_leg - b.parlay_leg)
+                              const rep = groupBets[0]  // leg1 기준으로 profit/result 표시
+                              const isHover = groupBets.some(b => hoverBetId === b.id)
+                              return (
+                                <div key={bet.parlay_group}
+                                  className={`site-bet-entry parlay-entry ${rep.result === 'win' ? 'win-entry' : 'loss-entry'}`}
+                                  style={{ position: 'relative' }}
+                                  onMouseEnter={() => setHoverBetId(rep.id)} onMouseLeave={() => setHoverBetId(null)}>
+                                  {isHover && (
+                                    <button className="bet-result-icon cancel" title="처리 취소"
+                                      style={{ position: 'absolute', top: 4, right: 4 }}
+                                      onClick={() => applyParlayRevert(groupBets)}><X size={13} /></button>
+                                  )}
+                                  <div style={{ fontSize: 8, color: 'var(--purple)', fontWeight: 700, marginBottom: 3, letterSpacing: '0.5px' }}>◈ 두폴</div>
+                                  {groupBets.map((gb, idx) => (
+                                    <div key={gb.id} style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 2 }}>
+                                      <span style={{ fontSize: 9, color: 'var(--text-muted)', flexShrink: 0, width: 18, textAlign: 'center' }}>{idx===0 ? '①' : '②'}</span>
+                                      <span className="site-bet-match" style={{ flex: 1, marginBottom: 0 }}>{gb.match}</span>
+                                    </div>
+                                  ))}
+                                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 4, paddingLeft: 23 }}>
+                                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'clamp(9px,0.85vw,11px)', color: 'var(--text-secondary)' }}>{rep.odds.toFixed(2)}</span>
+                                    <span className={`badge badge-${rep.result}`} style={{ fontSize: 'clamp(8px,0.75vw,10px)', padding: '1px 4px', flexShrink: 0 }}>
+                                      {rep.result === 'win' ? '적중' : rep.result === 'loss' ? '실패' : '적특'}
+                                      {rep.profit !== 0 && <span style={{ marginLeft: 3 }}>{rep.profit > 0 ? '+' : ''}{rep.profit.toLocaleString()}</span>}
+                                    </span>
+                                  </div>
+                                </div>
+                              )
+                            }
+                            // 단폴
+                            const isHover = hoverBetId === bet.id
+                            return (
+                              <div key={bet.id}
+                                className={`site-bet-entry ${bet.result === 'win' ? 'win-entry' : 'loss-entry'}`}
+                                style={{ position: 'relative' }}
+                                onMouseEnter={() => setHoverBetId(bet.id)} onMouseLeave={() => setHoverBetId(null)}>
+                                {isHover && (
+                                  <button className="bet-result-icon cancel" title="처리 취소"
+                                    style={{ position: 'absolute', top: 4, right: 4 }}
+                                    onClick={() => applyResult(bet, 'revert')}><X size={13} /></button>
+                                )}
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 2 }}>
+                                  <span style={{ fontSize: 14, lineHeight: 1, flexShrink: 0, display: 'inline-block', width: 18, textAlign: 'center' }}>{SPORT_SHORT[bet.sport] ?? '📋'}</span>
+                                  <span className="site-bet-match" style={{ flex: 1, marginBottom: 0 }}>{bet.match}</span>
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 4, paddingLeft: 23 }}>
+                                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'clamp(9px,0.85vw,11px)', color: 'var(--text-secondary)' }}>{bet.odds.toFixed(2)}</span>
+                                  <span className={`badge badge-${bet.result}`} style={{ fontSize: 'clamp(8px,0.75vw,10px)', padding: '1px 4px', flexShrink: 0 }}>
+                                    {bet.result === 'win' ? '적중' : bet.result === 'loss' ? '실패' : '적특'}
+                                    {bet.profit !== 0 && <span style={{ marginLeft: 3 }}>{bet.profit > 0 ? '+' : ''}{bet.profit.toLocaleString()}</span>}
+                                  </span>
+                                </div>
                               </div>
-                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 4, paddingLeft: 23 }}>
-                                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'clamp(9px,0.85vw,11px)', color: 'var(--text-secondary)' }}>{bet.odds.toFixed(2)}</span>
-                                <span className={`badge badge-${bet.result}`} style={{ fontSize: 'clamp(8px,0.75vw,10px)', padding: '1px 4px', flexShrink: 0 }}>
-                                  {bet.result === 'win' ? '적중' : bet.result === 'loss' ? '실패' : '적특'}
-                                  {bet.profit !== 0 && <span style={{ marginLeft: 3 }}>{bet.profit > 0 ? '+' : ''}{bet.profit.toLocaleString()}</span>}
-                                </span>
-                              </div>
-                            </div>
-                          )
-                        })}
+                            )
+                          })
+                        })()}
                       </div>
                     )}
                   </div>

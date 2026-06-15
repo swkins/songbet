@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase'
 import type { Bet, Sport, Market } from '../types'
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, BarChart, Bar, ResponsiveContainer, Cell } from 'recharts'
 import dayjs from 'dayjs'
+import { Trash2, X } from 'lucide-react'
 
 const SPORTS: { value: Sport; label: string; emoji: string }[] = [
   { value: 'soccer',     label: '축구', emoji: '⚽' },
@@ -17,11 +18,9 @@ const MARKET_LABELS: Record<Market, string> = {
   moneyline:'승패', handicap:'핸디캡', over:'오버', under:'언더', correct_score:'정확한스코어', other:'기타',
 }
 
-/* 0.1 단위 배당 버킷: 1.7 ~ 2.6 기본 고정, 그 외는 동적으로 추가 */
 const BASE_ODDS_STEPS = [1.7,1.8,1.9,2.0,2.1,2.2,2.3,2.4,2.5,2.6]
 
 function getOddsBucket(odds: number): string {
-  // 소수점 1자리 버킷 (예: 2.43 → "2.4")
   return (Math.floor(odds * 10) / 10).toFixed(1)
 }
 
@@ -39,15 +38,11 @@ function calcStats(bets: Bet[]) {
   return { settled, wins, losses, pushes, total, winRate, stake, profit, roi, avgOdds }
 }
 
-/* ── 세로 배당별 테이블: 배당 구간이 행(row) ── */
 function OddsTableVertical({ title, bets }: { title: string; bets: Bet[] }) {
   const settled = bets.filter(b => b.result !== 'pending')
-
-  // 실제 데이터에서 버킷 수집
   const dataBuckets = Array.from(new Set(settled.map(b => getOddsBucket(b.odds))))
     .filter(b => !BASE_ODDS_STEPS.map(s => s.toFixed(1)).includes(b))
     .sort()
-
   const allBuckets = [...BASE_ODDS_STEPS.map(s => s.toFixed(1)), ...dataBuckets]
     .sort((a, b) => parseFloat(a) - parseFloat(b))
 
@@ -66,11 +61,7 @@ function OddsTableVertical({ title, bets }: { title: string; bets: Bet[] }) {
         <tbody>
           {allBuckets.map(bucket => {
             const lo = parseFloat(bucket)
-            const hi = lo + 0.1
-            const bucketBets = settled.filter(b => {
-              const bb = getOddsBucket(b.odds)
-              return bb === bucket
-            })
+            const bucketBets = settled.filter(b => getOddsBucket(b.odds) === bucket)
             if (!bucketBets.length) return (
               <tr key={bucket} style={{ opacity: 0.35 }}>
                 <td style={{ padding: '2px 6px', fontFamily: 'var(--font-num)', fontWeight: 700, color: 'var(--text-secondary)', fontSize: 11 }}>{lo.toFixed(1)}</td>
@@ -82,7 +73,7 @@ function OddsTableVertical({ title, bets }: { title: string; bets: Bet[] }) {
             const s = calcStats(bucketBets)
             return (
               <tr key={bucket}>
-                <td style={{ padding: '2px 6px', fontFamily: 'var(--font-num)', fontWeight: 700, color: 'var(--text-primary)', fontSize: 11 }}>{lo.toFixed(1)}</td>
+                <td style={{ padding: '2px 6px', fontFamily: 'var(--font-num)', fontWeight: 700, color: 'var(--text-secondary)', fontSize: 11 }}>{lo.toFixed(1)}</td>
                 <td style={{ textAlign: 'center', padding: '2px 4px' }}>
                   <span style={{ fontSize: 11, fontWeight: 700 }} className={s.winRate >= 50 ? 'profit-pos' : 'profit-neg'}>{s.winRate.toFixed(0)}%</span>
                 </td>
@@ -99,7 +90,6 @@ function OddsTableVertical({ title, bets }: { title: string; bets: Bet[] }) {
   )
 }
 
-/* ── 라인별 세로 테이블 ── */
 function LineTableVertical({ title, rows }: {
   title: string
   rows: { label: string; bets: Bet[]; filterFn: (b: Bet) => boolean }[]
@@ -147,7 +137,6 @@ function LineTableVertical({ title, rows }: {
 
 function pickHasLine(pick: string, line: string): boolean { return pick?.includes(line) ?? false }
 
-/* ── 종목별 세부 분석 ── */
 function SportDetailPanel({ sport, bets }: { sport: Sport; bets: Bet[] }) {
   const sb = bets.filter(b => b.sport === sport && b.result !== 'pending')
   const moneyline = sb.filter(b => b.market === 'moneyline')
@@ -165,7 +154,6 @@ function SportDetailPanel({ sport, bets }: { sport: Sport; bets: Bet[] }) {
       <OddsTableVertical title="2.5 언더 배당별" bets={under.filter(b => pickHasLine(b.pick, '2.5'))} />
     </div>
   )
-
   if (sport === 'baseball') return (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
       <OddsTableVertical title="승패 배당별" bets={moneyline} />
@@ -174,7 +162,6 @@ function SportDetailPanel({ sport, bets }: { sport: Sport; bets: Bet[] }) {
       <LineTableVertical title="언더 라인별" rows={['6.5','7.5','8.5','9.5'].map(l => ({ label: `${l} 언더`, bets: under, filterFn: (b: Bet) => pickHasLine(b.pick, l) }))} />
     </div>
   )
-
   if (sport === 'basketball') return (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
       <OddsTableVertical title="승패 배당별" bets={moneyline} />
@@ -184,7 +171,6 @@ function SportDetailPanel({ sport, bets }: { sport: Sport; bets: Bet[] }) {
       <OddsTableVertical title="언더 배당별" bets={under} />
     </div>
   )
-
   if (sport === 'esports') return (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
       <OddsTableVertical title="승패 배당별" bets={moneyline} />
@@ -194,7 +180,6 @@ function SportDetailPanel({ sport, bets }: { sport: Sport; bets: Bet[] }) {
       <OddsTableVertical title="+2.5 핸디 배당별" bets={handicap.filter(b => pickHasLine(b.pick, '2.5') && !pickHasLine(b.pick, '-2.5'))} />
     </div>
   )
-
   if (sport === 'volleyball') return (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
       <OddsTableVertical title="승패 배당별" bets={moneyline} />
@@ -203,7 +188,6 @@ function SportDetailPanel({ sport, bets }: { sport: Sport; bets: Bet[] }) {
       <OddsTableVertical title="언더 배당별" bets={under} />
     </div>
   )
-
   if (sport === 'hockey') return (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
       <OddsTableVertical title="승패 배당별" bets={moneyline} />
@@ -212,7 +196,6 @@ function SportDetailPanel({ sport, bets }: { sport: Sport; bets: Bet[] }) {
       <OddsTableVertical title="언더 배당별" bets={under} />
     </div>
   )
-
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
       <OddsTableVertical title="승패 배당별" bets={moneyline} />
@@ -221,7 +204,67 @@ function SportDetailPanel({ sport, bets }: { sport: Sport; bets: Bet[] }) {
   )
 }
 
-function SportPanel({ bets, sport }: { bets: Bet[]; sport: typeof SPORTS[0] }) {
+/* ── 종목별 데이터 삭제 모달 ── */
+function DeleteBetsModal({ sport, bets, onClose, onDeleted }: {
+  sport: typeof SPORTS[0]; bets: Bet[]; onClose: () => void; onDeleted: () => void
+}) {
+  const [confirm, setConfirm] = useState('')
+  const [deleting, setDeleting] = useState(false)
+  const sportBets = bets.filter(b => b.sport === sport.value)
+  const CONFIRM_WORD = sport.label
+
+  async function doDelete() {
+    if (confirm !== CONFIRM_WORD) return
+    setDeleting(true)
+    const ids = sportBets.map(b => b.id)
+    // 배치 삭제 (in 조건)
+    const { error } = await supabase.from('bets').delete().in('id', ids)
+    setDeleting(false)
+    if (!error) { onDeleted(); onClose() }
+    else alert('삭제 실패: ' + error.message)
+  }
+
+  return (
+    <div className="modal-overlay">
+      <div className="modal" style={{ maxWidth: 360 }} onClick={e => e.stopPropagation()}>
+        <div className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+          <Trash2 size={16} color="var(--red)" />
+          {sport.emoji} {sport.label} 데이터 삭제
+          <button onClick={onClose} style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex', padding: 2 }}><X size={15} /></button>
+        </div>
+        <div style={{ padding: '10px 12px', background: 'var(--red-bg)', border: '1px solid var(--red-border)', borderRadius: 'var(--radius-sm)', marginBottom: 14, fontSize: 12, color: 'var(--red)' }}>
+          ⚠️ <strong>{sport.label}</strong> 베팅 데이터 <strong>{sportBets.length}건</strong>이 영구 삭제됩니다.<br />
+          <span style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 4, display: 'block' }}>이 작업은 되돌릴 수 없습니다.</span>
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 6 }}>
+          확인을 위해 <strong style={{ color: 'var(--text-primary)' }}>"{CONFIRM_WORD}"</strong> 를 입력하세요
+        </div>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <input
+            className="form-input"
+            placeholder={CONFIRM_WORD}
+            value={confirm}
+            onChange={e => setConfirm(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && confirm === CONFIRM_WORD && doDelete()}
+            autoFocus
+          />
+          <button
+            className="btn"
+            style={{ background: 'var(--red)', color: '#fff', border: 'none', flexShrink: 0, opacity: confirm !== CONFIRM_WORD ? 0.4 : 1 }}
+            disabled={confirm !== CONFIRM_WORD || deleting}
+            onClick={doDelete}
+          >
+            {deleting ? '삭제중...' : '삭제'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function SportPanel({ bets, sport, onDeleteRequest }: {
+  bets: Bet[]; sport: typeof SPORTS[0]; onDeleteRequest: () => void
+}) {
   const sb    = bets.filter(b => b.sport === sport.value)
   const stats = calcStats(sb)
   const byMarket = (['moneyline', 'handicap', 'over', 'under'] as Market[]).map(mkt => {
@@ -232,7 +275,14 @@ function SportPanel({ bets, sport }: { bets: Bet[]; sport: typeof SPORTS[0] }) {
   }).filter(Boolean) as ({ mkt: Market; label: string } & ReturnType<typeof calcStats>)[]
 
   if (stats.total === 0) return (
-    <div style={{ padding: '24px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>결과 처리된 베팅이 없습니다</div>
+    <div>
+      <div style={{ padding: '24px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>결과 처리된 베팅이 없습니다</div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
+        <button onClick={onDeleteRequest} className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--red)', borderColor: 'var(--red-border)', display: 'flex', alignItems: 'center', gap: 4 }}>
+          <Trash2 size={11} /> 데이터 삭제
+        </button>
+      </div>
+    </div>
   )
 
   const profitCurve = (() => {
@@ -242,7 +292,7 @@ function SportPanel({ bets, sport }: { bets: Bet[]; sport: typeof SPORTS[0] }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'flex-start' }}>
         {[
           { label: '승률', value: `${stats.winRate.toFixed(1)}%`, sub: `${stats.wins.length}W ${stats.losses.length}L`, cls: stats.winRate >= 50 ? 'profit-pos' : 'profit-neg' },
           { label: '총 손익', value: `${stats.profit >= 0 ? '+' : ''}${stats.profit.toLocaleString()}`, sub: `${stats.total}건`, cls: stats.profit >= 0 ? 'profit-pos' : 'profit-neg' },
@@ -255,6 +305,10 @@ function SportPanel({ bets, sport }: { bets: Bet[]; sport: typeof SPORTS[0] }) {
             {t.sub && <div style={{ fontSize: 9, color: 'var(--text-secondary)', marginTop: 2 }}>{t.sub}</div>}
           </div>
         ))}
+        {/* 삭제 버튼 */}
+        <button onClick={onDeleteRequest} className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--red)', borderColor: 'var(--red-border)', alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: 4, padding: '6px 10px' }}>
+          <Trash2 size={11} /> 데이터 삭제
+        </button>
       </div>
 
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-start' }}>
@@ -308,6 +362,7 @@ export default function Stats() {
   const [bets, setBets]       = useState<Bet[]>([])
   const [period, setPeriod]   = useState<'all' | '7d' | '30d' | '90d'>('all')
   const [activeSport, setActiveSport] = useState<Sport | 'all'>('all')
+  const [deleteTarget, setDeleteTarget] = useState<typeof SPORTS[0] | null>(null)
 
   useEffect(() => { loadBets() }, [])
   async function loadBets() {
@@ -419,9 +474,23 @@ export default function Stats() {
             </div>
           )}
           {activeSport !== 'all' && (
-            <SportPanel bets={periodFiltered} sport={SPORTS.find(s => s.value === activeSport)!} />
+            <SportPanel
+              bets={periodFiltered}
+              sport={SPORTS.find(s => s.value === activeSport)!}
+              onDeleteRequest={() => setDeleteTarget(SPORTS.find(s => s.value === activeSport)!)}
+            />
           )}
         </>
+      )}
+
+      {/* 종목 데이터 삭제 모달 */}
+      {deleteTarget && (
+        <DeleteBetsModal
+          sport={deleteTarget}
+          bets={bets}
+          onClose={() => setDeleteTarget(null)}
+          onDeleted={() => { loadBets(); setActiveSport('all') }}
+        />
       )}
     </div>
   )
