@@ -9,52 +9,49 @@ import {
   CheckCircle, XCircle, MinusCircle, Gift, GripVertical, DollarSign,
 } from 'lucide-react'
 
-const SPORTS = [
-  { value: 'soccer',     label: '축구' },
-  { value: 'baseball',   label: '야구' },
-  { value: 'basketball', label: '농구' },
-  { value: 'volleyball', label: '배구' },
-  { value: 'esports',    label: 'e스포츠' },
-  { value: 'other',      label: '기타' },
-] as const
+const SPORTS: { value: Sport; label: string }[] = [
+  { value: 'soccer',     label: '축구'   },
+  { value: 'baseball',   label: '야구'   },
+  { value: 'basketball', label: '농구'   },
+  { value: 'volleyball', label: '배구'   },
+  { value: 'hockey',     label: '하키'   },
+  { value: 'esports',    label: 'LOL'    },
+  { value: 'other',      label: '기타'   },
+]
 
-const MARKETS = [
-  { value: 'moneyline',     label: '승',         pickType: 'none',   hint: '' },
-  { value: 'handicap',      label: '핸디캡',      pickType: 'number', hint: '예: 2.5 또는 -1.5' },
-  { value: 'over',          label: '오버',        pickType: 'number', hint: '예: 2.5' },
-  { value: 'under',         label: '언더',        pickType: 'number', hint: '예: 2.5' },
-  { value: 'correct_score', label: '정확한스코어', pickType: 'text',   hint: '예: 2-1' },
-  { value: 'other',         label: '기타',        pickType: 'text',   hint: '' },
-] as const
-type MarketValue = typeof MARKETS[number]['value']
-
+/* ── 배당 파싱 ── */
 function parseOdds(raw: string): number {
   const n = Number(raw.trim())
   if (isNaN(n) || n <= 0) return 0
   if (Number.isInteger(n) && n >= 100) return n / 100
   return n
 }
-function buildPickLabel(market: MarketValue, pick: string): string {
-  if (!pick) return ''
-  if (market === 'over') return `${pick} 오버`
-  if (market === 'under') return `${pick} 언더`
-  if (market === 'handicap') {
-    const n = Number(pick)
-    if (!isNaN(n)) return n < 0 ? `마이너스 핸디 ${Math.abs(n)}` : `핸디 ${n}`
+
+/* ── 내용 문자열에서 마켓 자동 분류 ──
+   "팀A"               → moneyline, pick="팀A"
+   "팀A -1.5"          → handicap,  pick="팀A -1.5"
+   "팀A +2.5" / "3.5"  → handicap(+), pick=그대로
+   "2.5 오버" "오버 2.5" "언더 3.5" → over/under
+*/
+function autoMarket(content: string): { market: Market; pick: string } {
+  const s = content.trim()
+  // 오버/언더
+  if (/오버/i.test(s) || /over/i.test(s)) {
+    return { market: 'over', pick: s }
   }
-  return pick
-}
-
-interface SlipForm { sport: string; content: string; market: MarketValue; pick: string; odds: string }
-const emptySlip = (): SlipForm => ({ sport: 'soccer', content: '', market: 'moneyline', pick: '', odds: '' })
-
-/* ── 인라인 빠른베팅 폼 상태 ── */
-interface QuickBetState {
-  siteId: string
-  sport: string
-  content: string
-  odds: string
-  amount: string
+  if (/언더/i.test(s) || /under/i.test(s)) {
+    return { market: 'under', pick: s }
+  }
+  // 마이너스 핸디캡: "팀A -1.5"
+  if (/-\s*\d/.test(s)) {
+    return { market: 'handicap', pick: s }
+  }
+  // 플러스 핸디캡: "팀A +2.5" 또는 숫자만 "3.5"
+  if (/\+\s*\d/.test(s) || /^\d+(\.\d+)?$/.test(s)) {
+    return { market: 'handicap', pick: s }
+  }
+  // 기본: 승패
+  return { market: 'moneyline', pick: s }
 }
 
 /* ── 환율 fetch (하루 1회 캐시) ── */
@@ -103,20 +100,16 @@ function MiniCalendar({ checkedDates, onToggle }: { checkedDates: string[]; onTo
 /* ── 입금 모달 ── */
 function DepositModal({ site, onClose, onDeposit, onPoint }: {
   site: Site; onClose: () => void
-  onDeposit: (amount: number) => void
-  onPoint: (amount: number) => void
+  onDeposit: (amount: number) => void; onPoint: (amount: number) => void
 }) {
   const [tab, setTab] = useState<'deposit' | 'point'>('deposit')
   const [amount, setAmount] = useState('')
   const num = Number(amount)
   const isusd = site.currency === 'usd'
-  const totalDeposit = site.last_deposit ?? 0
-  const totalPoint   = site.point_deposit ?? 0
-  const totalRolling = totalDeposit + totalPoint
-  const betDone      = site.deposit_bet_done ?? 0
-  const remaining    = Math.max(0, totalRolling - betDone)
-  const pct          = totalRolling > 0 ? Math.min(100, Math.round(betDone / totalRolling * 100)) : 0
-  const unit         = isusd ? '$' : '원'
+  const dep = site.last_deposit ?? 0; const pt = site.point_deposit ?? 0
+  const tot = dep + pt; const done = site.deposit_bet_done ?? 0
+  const rem = Math.max(0, tot - done); const pct = tot > 0 ? Math.min(100, Math.round(done / tot * 100)) : 0
+  const unit = isusd ? '$' : '원'
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -130,21 +123,19 @@ function DepositModal({ site, onClose, onDeposit, onPoint }: {
           <button onClick={() => setTab('deposit')} className={tab === 'deposit' ? 'btn btn-primary btn-sm' : 'btn btn-ghost btn-sm'} style={{ flex: 1 }}><Banknote size={12} /> 입금</button>
           <button onClick={() => setTab('point')} className={tab === 'point' ? 'btn btn-primary btn-sm' : 'btn btn-ghost btn-sm'} style={{ flex: 1 }}><Gift size={12} /> 포인트</button>
         </div>
-        {(totalDeposit > 0 || totalPoint > 0) && (
+        {(dep > 0 || pt > 0) && (
           <div style={{ padding: '10px 12px', background: 'var(--bg-elevated)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', marginBottom: 14 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
               <div>
                 <div style={{ fontSize: 9, color: 'var(--text-secondary)', marginBottom: 2 }}>입금 / 포인트</div>
                 <div style={{ display: 'flex', gap: 6, alignItems: 'baseline' }}>
-                  <span style={{ fontFamily: 'var(--font-num)', fontSize: 14, fontWeight: 700, color: 'var(--orange)' }}>{isusd ? '$' : ''}{totalDeposit.toLocaleString()}{isusd ? '' : '원'}</span>
-                  {totalPoint > 0 && <span style={{ fontFamily: 'var(--font-num)', fontSize: 12, fontWeight: 700, color: 'var(--purple)' }}>+{totalPoint.toLocaleString()}P</span>}
+                  <span style={{ fontFamily: 'var(--font-num)', fontSize: 14, fontWeight: 700, color: 'var(--orange)' }}>{isusd ? '$' : ''}{dep.toLocaleString()}{isusd ? '' : '원'}</span>
+                  {pt > 0 && <span style={{ fontFamily: 'var(--font-num)', fontSize: 12, fontWeight: 700, color: 'var(--purple)' }}>+{pt.toLocaleString()}P</span>}
                 </div>
               </div>
               <div style={{ textAlign: 'right' }}>
                 <div style={{ fontSize: 9, color: 'var(--text-secondary)', marginBottom: 2 }}>남은 롤링</div>
-                <div style={{ fontFamily: 'var(--font-num)', fontSize: 14, fontWeight: 700, color: remaining > 0 ? 'var(--orange)' : 'var(--text-muted)' }}>
-                  {isusd ? '$' : ''}{remaining.toLocaleString()}{isusd ? '' : '원'}
-                </div>
+                <div style={{ fontFamily: 'var(--font-num)', fontSize: 14, fontWeight: 700, color: rem > 0 ? 'var(--orange)' : 'var(--text-muted)' }}>{isusd ? '$' : ''}{rem.toLocaleString()}{isusd ? '' : '원'}</div>
               </div>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, color: 'var(--text-secondary)', marginBottom: 4 }}>
@@ -159,19 +150,20 @@ function DepositModal({ site, onClose, onDeposit, onPoint }: {
         </div>
         {tab === 'point' && (
           <div style={{ fontSize: 10, color: 'var(--purple)', marginBottom: 6, padding: '4px 8px', background: 'var(--purple-bg)', border: '1px solid var(--purple-border)', borderRadius: 'var(--radius-sm)' }}>
-            포인트는 롤링 총액에만 합산됩니다 (결산 지출 미포함)
+            포인트는 롤링 총액에만 합산됩니다
           </div>
         )}
         <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
-          <input className="form-input" type="number" placeholder="0" value={amount} onChange={e => setAmount(e.target.value)}
+          <input className="form-input" type="number" placeholder="0" value={amount}
+            onChange={e => setAmount(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter' && num > 0) { tab === 'deposit' ? onDeposit(num) : onPoint(num) }}} autoFocus />
           <button className="btn btn-primary" disabled={!num || num <= 0} onClick={() => { if (num > 0) { tab === 'deposit' ? onDeposit(num) : onPoint(num) }}} style={{ flexShrink: 0 }}>
             <Check size={12} /> {tab === 'deposit' ? '입금' : '추가'}
           </button>
         </div>
-        {num > 0 && tab === 'deposit' && totalDeposit > 0 && (
+        {num > 0 && tab === 'deposit' && dep > 0 && (
           <div style={{ fontSize: 11, color: 'var(--text-secondary)', padding: '5px 10px', background: 'var(--bg-elevated)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', marginBottom: 10 }}>
-            추가 후 총 입금 → <span style={{ color: 'var(--orange)', fontWeight: 700, fontFamily: 'var(--font-num)' }}>{isusd ? '$' : ''}{(totalDeposit + num).toLocaleString()}{isusd ? '' : '원'}</span>
+            추가 후 총 입금 → <span style={{ color: 'var(--orange)', fontWeight: 700, fontFamily: 'var(--font-num)' }}>{isusd ? '$' : ''}{(dep + num).toLocaleString()}{isusd ? '' : '원'}</span>
           </div>
         )}
         <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
@@ -182,13 +174,12 @@ function DepositModal({ site, onClose, onDeposit, onPoint }: {
   )
 }
 
-/* ── 출금(마감) 모달 ── */
+/* ── 출금 모달 ── */
 function WithdrawModal({ site, onClose, onWithdraw }: {
   site: Site; onClose: () => void; onWithdraw: (amount: number) => void
 }) {
   const [amount, setAmount] = useState('')
-  const num = Number(amount)
-  const isusd = site.currency === 'usd'
+  const num = Number(amount); const isusd = site.currency === 'usd'
   const unit = isusd ? '$' : '원'
   const totalIn = (site.last_deposit ?? 0) + (site.point_deposit ?? 0)
   const netProfit = num > 0 ? num - totalIn : null
@@ -225,20 +216,13 @@ function WithdrawModal({ site, onClose, onWithdraw }: {
           </button>
         </div>
         {netProfit !== null && (
-          <div style={{
-            padding: '8px 12px', borderRadius: 'var(--radius-sm)', fontSize: 12, marginBottom: 12,
-            background: netProfit >= 0 ? 'var(--green-bg)' : 'var(--red-bg)',
-            border: `1px solid ${netProfit >= 0 ? 'var(--green-border)' : 'var(--red-border)'}`,
-          }}>
+          <div style={{ padding: '8px 12px', borderRadius: 'var(--radius-sm)', fontSize: 12, marginBottom: 12, background: netProfit >= 0 ? 'var(--green-bg)' : 'var(--red-bg)', border: `1px solid ${netProfit >= 0 ? 'var(--green-border)' : 'var(--red-border)'}` }}>
             수익: <span className={netProfit >= 0 ? 'profit-pos' : 'profit-neg'}>
               {netProfit >= 0 ? '+' : ''}{isusd ? '$' : ''}{netProfit.toLocaleString()}{isusd ? '' : '원'}
             </span>
-            {isusd && <span style={{ color: 'var(--blue)', fontSize: 10, marginLeft: 8 }}>결산 시 당일 환율 자동 환산</span>}
           </div>
         )}
-        <div style={{ fontSize: 10, color: 'var(--text-secondary)', marginBottom: 12 }}>
-          출금 후 사이트는 <strong style={{ color: 'var(--red)' }}>비활성화</strong>됩니다
-        </div>
+        <div style={{ fontSize: 10, color: 'var(--text-secondary)', marginBottom: 12 }}>출금 후 사이트는 <strong style={{ color: 'var(--red)' }}>비활성화</strong>됩니다</div>
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
           <button className="btn btn-ghost" onClick={onClose}>취소</button>
         </div>
@@ -248,114 +232,73 @@ function WithdrawModal({ site, onClose, onWithdraw }: {
 }
 
 /* ── 사이트 관리 모달 ── */
-function SiteMgrModal({ sites, onClose, onAdd, onDelete, onToggleCurrency, onReorder }: {
-  sites: Site[]
-  onClose: () => void
-  onAdd: (name: string, currency: 'krw' | 'usd') => void
+function SiteMgrModal({ sites, onClose, onAdd, onDelete, onToggleCurrency, onToggleBetType, onReorder }: {
+  sites: Site[]; onClose: () => void
+  onAdd: (name: string, currency: 'krw' | 'usd', betType: 'single' | 'double') => void
   onDelete: (id: string) => void
   onToggleCurrency: (site: Site) => void
+  onToggleBetType: (site: Site) => void
   onReorder: (from: string, to: string) => void
 }) {
   const [newName, setNewName] = useState('')
   const [newCurrency, setNewCurrency] = useState<'krw' | 'usd'>('krw')
-  const dragId = useRef<string | null>(null)
-  const overId = useRef<string | null>(null)
+  const [newBetType, setNewBetType] = useState<'single' | 'double'>('single')
+  const dragId = useRef<string | null>(null); const overId = useRef<string | null>(null)
 
   function handleAdd() {
     if (!newName.trim()) return
-    onAdd(newName.trim(), newCurrency)
-    setNewName('')
+    onAdd(newName.trim(), newCurrency, newBetType); setNewName('')
   }
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" style={{ maxWidth: 400 }} onClick={e => e.stopPropagation()}>
+      <div className="modal" style={{ maxWidth: 420 }} onClick={e => e.stopPropagation()}>
         <div className="modal-title" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Settings size={16} color="var(--gold)" />
-            사이트 관리
-          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Settings size={16} color="var(--gold)" /> 사이트 관리</div>
           <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex' }}><X size={16} /></button>
         </div>
-
         <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.8px', textTransform: 'uppercase', color: 'var(--text-secondary)', marginBottom: 8 }}>
           사이트 목록 <span style={{ fontWeight: 400, textTransform: 'none', fontSize: 9 }}>(드래그로 순서 변경)</span>
         </div>
-
         <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginBottom: 16 }}>
           {sites.map(s => (
-            <div
-              key={s.id}
-              className="site-mgr-row"
+            <div key={s.id} className="site-mgr-row"
               draggable
               onDragStart={() => { dragId.current = s.id }}
               onDragOver={e => { e.preventDefault(); overId.current = s.id }}
               onDrop={() => {
-                if (dragId.current && overId.current && dragId.current !== overId.current)
-                  onReorder(dragId.current, overId.current)
+                if (dragId.current && overId.current && dragId.current !== overId.current) onReorder(dragId.current, overId.current)
                 dragId.current = null; overId.current = null
               }}
               style={{ cursor: 'grab' }}
             >
               <GripVertical size={12} color="var(--text-muted)" style={{ flexShrink: 0 }} />
-              <span style={{
-                width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
-                background: s.active ? 'var(--green)' : 'var(--border)',
-                boxShadow: s.active ? '0 0 5px var(--green)' : 'none',
-              }} />
+              <span style={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0, background: s.active ? 'var(--green)' : 'var(--border)', boxShadow: s.active ? '0 0 5px var(--green)' : 'none' }} />
               <span className="site-mgr-name">{s.name}</span>
               {/* KRW / USD 토글 */}
-              <button
-                onClick={() => onToggleCurrency(s)}
-                title="클릭해서 KRW/USD 전환"
-                style={{
-                  background: s.currency === 'usd' ? 'var(--blue-bg)' : 'var(--bg-elevated)',
-                  border: `1px solid ${s.currency === 'usd' ? 'var(--blue-border)' : 'var(--border)'}`,
-                  borderRadius: 4, color: s.currency === 'usd' ? 'var(--blue)' : 'var(--text-muted)',
-                  cursor: 'pointer', padding: '2px 8px', fontSize: 10, fontWeight: 700,
-                  display: 'flex', alignItems: 'center', gap: 3, flexShrink: 0,
-                  transition: 'all 0.15s',
-                }}
-              >
+              <button onClick={() => onToggleCurrency(s)} title="KRW/USD 전환" style={{ background: s.currency === 'usd' ? 'var(--blue-bg)' : 'var(--bg-elevated)', border: `1px solid ${s.currency === 'usd' ? 'var(--blue-border)' : 'var(--border)'}`, borderRadius: 4, color: s.currency === 'usd' ? 'var(--blue)' : 'var(--text-muted)', cursor: 'pointer', padding: '2px 7px', fontSize: 10, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 3, flexShrink: 0, transition: 'all 0.15s' }}>
                 {s.currency === 'usd' ? <><DollarSign size={10} /> USD</> : '₩ KRW'}
+              </button>
+              {/* 단폴 / 두폴 토글 */}
+              <button onClick={() => onToggleBetType(s)} title="단폴/두폴 전환" style={{ background: s.bet_type === 'double' ? 'var(--purple-bg)' : 'var(--bg-elevated)', border: `1px solid ${s.bet_type === 'double' ? 'var(--purple-border)' : 'var(--border)'}`, borderRadius: 4, color: s.bet_type === 'double' ? 'var(--purple)' : 'var(--text-muted)', cursor: 'pointer', padding: '2px 7px', fontSize: 10, fontWeight: 700, flexShrink: 0, transition: 'all 0.15s' }}>
+                {s.bet_type === 'double' ? '두폴' : '단폴'}
               </button>
               <button onClick={() => onDelete(s.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red)', opacity: 0.6, padding: 3, display: 'flex', flexShrink: 0 }}><Trash2 size={12} /></button>
             </div>
           ))}
-          {sites.length === 0 && (
-            <div style={{ textAlign: 'center', padding: '16px 0', color: 'var(--text-muted)', fontSize: 12 }}>사이트가 없습니다</div>
-          )}
+          {sites.length === 0 && <div style={{ textAlign: 'center', padding: '16px 0', color: 'var(--text-muted)', fontSize: 12 }}>사이트가 없습니다</div>}
         </div>
-
-        {/* 사이트 추가 */}
         <div style={{ borderTop: '1px solid var(--border)', paddingTop: 14 }}>
           <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.8px', textTransform: 'uppercase', color: 'var(--text-secondary)', marginBottom: 8 }}>새 사이트 추가</div>
           <div style={{ display: 'flex', gap: 6 }}>
-            <input
-              className="form-input"
-              style={{ fontSize: 12 }}
-              placeholder="사이트 이름"
-              value={newName}
-              onChange={e => setNewName(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && handleAdd()}
-              autoFocus
-            />
-            {/* 통화 토글 */}
-            <button
-              onClick={() => setNewCurrency(p => p === 'krw' ? 'usd' : 'krw')}
-              style={{
-                background: newCurrency === 'usd' ? 'var(--blue-bg)' : 'var(--bg-elevated)',
-                border: `1px solid ${newCurrency === 'usd' ? 'var(--blue-border)' : 'var(--border)'}`,
-                borderRadius: 4, color: newCurrency === 'usd' ? 'var(--blue)' : 'var(--text-muted)',
-                cursor: 'pointer', padding: '0 10px', fontSize: 11, fontWeight: 700, flexShrink: 0,
-                transition: 'all 0.15s',
-              }}
-            >
+            <input className="form-input" style={{ fontSize: 12 }} placeholder="사이트 이름" value={newName} onChange={e => setNewName(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAdd()} autoFocus />
+            <button onClick={() => setNewCurrency(p => p === 'krw' ? 'usd' : 'krw')} style={{ background: newCurrency === 'usd' ? 'var(--blue-bg)' : 'var(--bg-elevated)', border: `1px solid ${newCurrency === 'usd' ? 'var(--blue-border)' : 'var(--border)'}`, borderRadius: 4, color: newCurrency === 'usd' ? 'var(--blue)' : 'var(--text-muted)', cursor: 'pointer', padding: '0 10px', fontSize: 11, fontWeight: 700, flexShrink: 0, transition: 'all 0.15s' }}>
               {newCurrency === 'usd' ? '$' : '₩'}
             </button>
-            <button className="btn btn-primary" onClick={handleAdd} style={{ flexShrink: 0 }}>
-              <Plus size={12} /> 추가
+            <button onClick={() => setNewBetType(p => p === 'single' ? 'double' : 'single')} style={{ background: newBetType === 'double' ? 'var(--purple-bg)' : 'var(--bg-elevated)', border: `1px solid ${newBetType === 'double' ? 'var(--purple-border)' : 'var(--border)'}`, borderRadius: 4, color: newBetType === 'double' ? 'var(--purple)' : 'var(--text-muted)', cursor: 'pointer', padding: '0 8px', fontSize: 10, fontWeight: 700, flexShrink: 0, transition: 'all 0.15s' }}>
+              {newBetType === 'double' ? '두폴' : '단폴'}
             </button>
+            <button className="btn btn-primary" onClick={handleAdd} style={{ flexShrink: 0 }}><Plus size={12} /> 추가</button>
           </div>
         </div>
       </div>
@@ -363,42 +306,204 @@ function SiteMgrModal({ sites, onClose, onAdd, onDelete, onToggleCurrency, onReo
   )
 }
 
+/* ── 인라인 베팅폼 (단폴) ── */
+function SingleBetForm({ site, onClose, onBet }: {
+  site: Site; onClose: () => void
+  onBet: (sport: string, content: string, odds: number, amount: number) => Promise<boolean>
+}) {
+  const [sport, setSport]   = useState('soccer')
+  const [content, setContent] = useState('')
+  const [oddsRaw, setOddsRaw] = useState('')
+  const [amount, setAmount]   = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const isusd = site.currency === 'usd'
+  const unit  = isusd ? '$' : '원'
+  const oddsV = parseOdds(oddsRaw)
+  const stakeN = Number(amount)
+  const hotkeys = isusd ? [5, 10] : [5000, 10000]
+
+  function handleOdds(raw: string) {
+    const clean = raw.replace(/[^0-9.]/g, '')
+    if (/^\d{3}$/.test(clean)) setOddsRaw((Number(clean) / 100).toFixed(2))
+    else setOddsRaw(clean)
+  }
+
+  async function submit() {
+    if (!content || oddsV <= 0 || stakeN <= 0) return
+    setSubmitting(true)
+    const ok = await onBet(sport, content, oddsV, stakeN)
+    setSubmitting(false)
+    if (ok) onClose()
+  }
+
+  return (
+    <div className="inline-bet-form">
+      {/* 종목 */}
+      <select className="form-select inline-bet-input" value={sport} onChange={e => setSport(e.target.value)}>
+        {SPORTS.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+      </select>
+      {/* 내용 */}
+      <input className="form-input inline-bet-input" placeholder="경기 내용" value={content} onChange={e => setContent(e.target.value)} autoFocus />
+      {/* 배당 */}
+      <input className="form-input inline-bet-input" placeholder="배당 (125=1.25)" value={oddsRaw}
+        onChange={e => handleOdds(e.target.value)}
+        onBlur={e => { const n = parseOdds(e.target.value); if (n > 0) setOddsRaw(n.toFixed(2)) }} />
+      {oddsV > 0 && <div style={{ fontSize: 9, color: 'var(--gold)', fontWeight: 700, textAlign: 'right' }}>→ {oddsV.toFixed(2)}</div>}
+      {/* 금액 */}
+      <input className="form-input inline-bet-input" type="number" placeholder={`금액 (${unit})`} value={amount}
+        onChange={e => setAmount(e.target.value)}
+        onKeyDown={e => e.key === 'Enter' && submit()} />
+      {/* 핫키 */}
+      <div style={{ display: 'flex', gap: 4 }}>
+        {hotkeys.map(hk => (
+          <button key={hk} className="hotkey-btn" onClick={() => setAmount(p => String(Number(p || 0) + hk))}>
+            +{isusd ? `$${hk}` : `${hk.toLocaleString()}`}
+          </button>
+        ))}
+      </div>
+      {/* 예상 수익 */}
+      {oddsV > 0 && stakeN > 0 && (
+        <div style={{ fontSize: 9, color: 'var(--green)', fontWeight: 700, textAlign: 'right' }}>
+          +{isusd ? '$' : ''}{Math.round(stakeN * (oddsV - 1)).toLocaleString()}{isusd ? '' : '원'}
+        </div>
+      )}
+      {/* 버튼 */}
+      <div style={{ display: 'flex', gap: 4 }}>
+        <button className="btn btn-primary btn-sm" style={{ flex: 1, fontSize: 10 }}
+          onClick={submit} disabled={!content || oddsV <= 0 || stakeN <= 0 || submitting}>
+          <Check size={10} /> 등록
+        </button>
+        <button className="btn btn-ghost btn-sm" style={{ padding: '3px 7px' }} onClick={onClose}><X size={10} /></button>
+      </div>
+    </div>
+  )
+}
+
+/* ── 인라인 베팅폼 (두폴) ── */
+/* 두폴: leg1(축베팅)은 사이트 마지막 두폴 bet에서 자동 채움, leg2는 신규 */
+function DoubleBetForm({ site, lastLeg1, onClose, onBet }: {
+  site: Site
+  lastLeg1: { content: string; odds: string } | null
+  onClose: () => void
+  /* onBet: 내용1, 배당1, 내용2, 배당2, 금액 */
+  onBet: (c1: string, o1: number, c2: string, o2: number, amount: number) => Promise<boolean>
+}) {
+  const [c1, setC1] = useState(lastLeg1?.content ?? '')
+  const [o1Raw, setO1Raw] = useState(lastLeg1?.odds ?? '')
+  const [c2, setC2] = useState('')
+  const [o2Raw, setO2Raw] = useState('')
+  const [amount, setAmount] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+
+  const isusd = site.currency === 'usd'
+  const unit   = isusd ? '$' : '원'
+  const o1V    = parseOdds(o1Raw); const o2V = parseOdds(o2Raw)
+  const stakeN = Number(amount)
+  const comboOdds = o1V > 0 && o2V > 0 ? o1V * o2V : 0
+  const hotkeys = isusd ? [5, 10] : [5000, 10000]
+
+  function handleOdds(raw: string, set: (v: string) => void) {
+    const clean = raw.replace(/[^0-9.]/g, '')
+    if (/^\d{3}$/.test(clean)) set((Number(clean) / 100).toFixed(2))
+    else set(clean)
+  }
+
+  async function submit() {
+    if (!c1 || !c2 || o1V <= 0 || o2V <= 0 || stakeN <= 0) return
+    setSubmitting(true)
+    const ok = await onBet(c1, o1V, c2, o2V, stakeN)
+    setSubmitting(false)
+    if (ok) onClose()
+  }
+
+  const labelStyle = { fontSize: 9, fontWeight: 700, textTransform: 'uppercase' as const, letterSpacing: '0.6px', color: 'var(--text-muted)', marginBottom: 3 }
+
+  return (
+    <div className="inline-bet-form">
+      {/* Leg 1 (축베팅) */}
+      <div style={{ ...labelStyle }}>① 축베팅 (자동 채움)</div>
+      <input className="form-input inline-bet-input" placeholder="경기 내용 ①" value={c1} onChange={e => setC1(e.target.value)} />
+      <input className="form-input inline-bet-input" placeholder="배당 ①" value={o1Raw}
+        onChange={e => handleOdds(e.target.value, setO1Raw)}
+        onBlur={e => { const n = parseOdds(e.target.value); if (n > 0) setO1Raw(n.toFixed(2)) }} />
+      {o1V > 0 && <div style={{ fontSize: 9, color: 'var(--gold)', textAlign: 'right' }}>① → {o1V.toFixed(2)}</div>}
+
+      {/* Leg 2 */}
+      <div style={{ ...labelStyle, marginTop: 4 }}>② 추가 베팅</div>
+      <input className="form-input inline-bet-input" placeholder="경기 내용 ②" value={c2} onChange={e => setC2(e.target.value)} autoFocus={!lastLeg1} />
+      <input className="form-input inline-bet-input" placeholder="배당 ②" value={o2Raw}
+        onChange={e => handleOdds(e.target.value, setO2Raw)}
+        onBlur={e => { const n = parseOdds(e.target.value); if (n > 0) setO2Raw(n.toFixed(2)) }} />
+      {o2V > 0 && <div style={{ fontSize: 9, color: 'var(--gold)', textAlign: 'right' }}>② → {o2V.toFixed(2)}</div>}
+
+      {/* 콤보 배당 */}
+      {comboOdds > 0 && (
+        <div style={{ fontSize: 10, color: 'var(--purple)', fontWeight: 700, textAlign: 'center', padding: '3px 0', borderRadius: 4, background: 'var(--purple-bg)', border: '1px solid var(--purple-border)' }}>
+          콤보 배당 {comboOdds.toFixed(2)}
+        </div>
+      )}
+
+      {/* 금액 */}
+      <input className="form-input inline-bet-input" type="number" placeholder={`금액 (${unit})`} value={amount}
+        onChange={e => setAmount(e.target.value)}
+        onKeyDown={e => e.key === 'Enter' && submit()} />
+      {/* 핫키 */}
+      <div style={{ display: 'flex', gap: 4 }}>
+        {hotkeys.map(hk => (
+          <button key={hk} className="hotkey-btn" onClick={() => setAmount(p => String(Number(p || 0) + hk))}>
+            +{isusd ? `$${hk}` : `${hk.toLocaleString()}`}
+          </button>
+        ))}
+      </div>
+      {/* 예상 수익 */}
+      {comboOdds > 0 && stakeN > 0 && (
+        <div style={{ fontSize: 9, color: 'var(--green)', fontWeight: 700, textAlign: 'right' }}>
+          +{isusd ? '$' : ''}{Math.round(stakeN * (comboOdds - 1)).toLocaleString()}{isusd ? '' : '원'}
+        </div>
+      )}
+      {/* 버튼 */}
+      <div style={{ display: 'flex', gap: 4 }}>
+        <button className="btn btn-primary btn-sm" style={{ flex: 1, fontSize: 10 }}
+          onClick={submit} disabled={!c1 || !c2 || o1V <= 0 || o2V <= 0 || stakeN <= 0 || submitting}>
+          <Check size={10} /> 등록
+        </button>
+        <button className="btn btn-ghost btn-sm" style={{ padding: '3px 7px' }} onClick={onClose}><X size={10} /></button>
+      </div>
+    </div>
+  )
+}
+
+/* ════════════════════════════════
+   DASHBOARD
+════════════════════════════════ */
 export default function Dashboard() {
   const today = dayjs().format('YYYY-MM-DD')
 
   const [sites, setSites]               = useState<Site[]>([])
   const [bets, setBets]                 = useState<Bet[]>([])
-  const [activeSiteId, setActiveSiteId] = useState<string | null>(null)
-  const [slipForm, setSlipForm]         = useState<SlipForm>(emptySlip())
-  const [slipAmount, setSlipAmount]     = useState('')
 
   const [showSiteMgr, setShowSiteMgr]   = useState(false)
   const [depositSite, setDepositSite]   = useState<Site | null>(null)
   const [withdrawSite, setWithdrawSite] = useState<Site | null>(null)
 
-  /* 인라인 베팅폼: 각 사이트 컬럼 하단 + 버튼 */
-  const [inlineBetSiteId, setInlineBetSiteId] = useState<string | null>(null)
-  const [inlineSport, setInlineSport]         = useState('soccer')
-  const [inlineContent, setInlineContent]     = useState('')
-  const [inlineOdds, setInlineOdds]           = useState('')
-  const [inlineAmount, setInlineAmount]       = useState('')
-  const [inlineSubmitting, setInlineSubmitting] = useState(false)
+  /* 인라인 폼: 열린 사이트 ID */
+  const [openFormSiteId, setOpenFormSiteId] = useState<string | null>(null)
 
+  const [hoverBetId, setHoverBetId]     = useState<string | null>(null)
 
-  const [hoverBetId, setHoverBetId] = useState<string | null>(null)
-
-  const [todos, setTodos]         = useState<Todo[]>([])
-  const [newTodo, setNewTodo]     = useState('')
+  const [todos, setTodos]       = useState<Todo[]>([])
+  const [newTodo, setNewTodo]   = useState('')
   const [calOpenId, setCalOpenId] = useState<string | null>(null)
 
   useEffect(() => { loadSites(); loadBets(); loadTodos() }, [])
 
   async function loadSites() {
     const { data } = await supabase.from('sites').select('*').order('sort_order')
-    if (data) { setSites(data); if (data.length > 0 && !activeSiteId) setActiveSiteId(data[0].id) }
+    if (data) setSites(data)
   }
   async function loadBets() {
-    const { data } = await supabase.from('bets').select('*').order('bet_date', { ascending: false }).order('created_at', { ascending: false })
+    /* 오래된 것 먼저 = 위에, 최신 = 아래 */
+    const { data } = await supabase.from('bets').select('*').order('bet_date', { ascending: true }).order('created_at', { ascending: true })
     if (data) setBets(data)
   }
   async function loadTodos() {
@@ -406,27 +511,32 @@ export default function Dashboard() {
     if (data) setTodos(data)
   }
 
-  const activeSite    = sites.find(s => s.id === activeSiteId) ?? null
-  const currentMarket = MARKETS.find(m => m.value === slipForm.market)
-  const oddsVal       = parseOdds(slipForm.odds)
-  const isUsd         = activeSite?.currency === 'usd'
+  /* ── 계산 헬퍼 ── */
+  const totalRolling     = (s: Site) => (s.last_deposit ?? 0) + (s.point_deposit ?? 0)
+  const depositRemaining = (s: Site) => Math.max(0, totalRolling(s) - (s.deposit_bet_done ?? 0))
+  const depositPct       = (s: Site) => totalRolling(s) > 0 ? Math.min(100, Math.round((s.deposit_bet_done ?? 0) / totalRolling(s) * 100)) : 0
+  const betsBySite       = (id: string) => bets.filter(b => b.site_id === id)
+  const colCount         = Math.max(1, sites.length)
+  const todayChecked     = todos.filter(t => t.check_dates.includes(today)).length
 
-  function handleOddsChange(raw: string) {
-    const clean = raw.replace(/[^0-9.]/g, '')
-    if (/^\d{3}$/.test(clean)) setSlipForm(p => ({ ...p, odds: (Number(clean) / 100).toFixed(2) }))
-    else setSlipForm(p => ({ ...p, odds: clean }))
+  /* 두폴 사이트의 마지막 leg1 찾기 (축베팅 자동 채움) */
+  function getLastLeg1(siteId: string): { content: string; odds: string } | null {
+    const siteBets = betsBySite(siteId).filter(b => b.parlay_leg === 1 && b.result === 'pending')
+    if (!siteBets.length) return null
+    const last = siteBets[siteBets.length - 1]
+    return { content: last.match, odds: last.odds.toFixed(2) }
   }
 
   /* ── 사이트 관리 ── */
-  async function addSite(name: string, currency: 'krw' | 'usd') {
+  async function addSite(name: string, currency: 'krw' | 'usd', betType: 'single' | 'double') {
     const { data } = await supabase.from('sites').insert({
       name, balance: 0, active: false, sort_order: sites.length,
       rolling_target: 0, rolling_done: 0, last_deposit: 0, deposit_bet_done: 0,
-      point_deposit: 0, total_withdrawal: 0, currency,
+      point_deposit: 0, total_withdrawal: 0, currency, bet_type: betType,
     }).select().single()
     if (data) {
-      await logAction({ action_type: 'insert', table_name: 'sites', record_id: data.id, after_data: data, description: `사이트 추가: ${data.name} (${currency.toUpperCase()})` })
-      setSites(p => [...p, data]); setActiveSiteId(data.id)
+      await logAction({ action_type: 'insert', table_name: 'sites', record_id: data.id, after_data: data, description: `사이트 추가: ${data.name}` })
+      setSites(p => [...p, data])
     }
   }
   async function deleteSite(id: string) {
@@ -435,19 +545,21 @@ export default function Dashboard() {
     await logAction({ action_type: 'delete', table_name: 'sites', record_id: id, before_data: site as never, description: `사이트 삭제: ${site.name}` })
     await supabase.from('sites').delete().eq('id', id)
     setSites(p => p.filter(s => s.id !== id))
-    if (activeSiteId === id) setActiveSiteId(sites.find(s => s.id !== id)?.id ?? null)
   }
   async function toggleCurrency(site: Site) {
     const next = site.currency === 'krw' ? 'usd' : 'krw'
     const { data } = await supabase.from('sites').update({ currency: next }).eq('id', site.id).select().single()
     if (data) setSites(p => p.map(s => s.id === site.id ? data : s))
   }
+  async function toggleBetType(site: Site) {
+    const next = site.bet_type === 'single' ? 'double' : 'single'
+    const { data } = await supabase.from('sites').update({ bet_type: next }).eq('id', site.id).select().single()
+    if (data) setSites(p => p.map(s => s.id === site.id ? data : s))
+  }
   async function reorderSites(fromId: string, toId: string) {
     const reordered = [...sites]
-    const fi = reordered.findIndex(s => s.id === fromId)
-    const ti = reordered.findIndex(s => s.id === toId)
-    const [moved] = reordered.splice(fi, 1)
-    reordered.splice(ti, 0, moved)
+    const fi = reordered.findIndex(s => s.id === fromId); const ti = reordered.findIndex(s => s.id === toId)
+    const [moved] = reordered.splice(fi, 1); reordered.splice(ti, 0, moved)
     const updated = reordered.map((s, i) => ({ ...s, sort_order: i }))
     setSites(updated)
     for (const s of updated) await supabase.from('sites').update({ sort_order: s.sort_order }).eq('id', s.id)
@@ -456,123 +568,88 @@ export default function Dashboard() {
   /* ── 입금 ── */
   async function doDeposit(amount: number) {
     if (!depositSite) return
-    const before = { ...depositSite }
+    const before = { ...depositSite }; const isusd = depositSite.currency === 'usd'
     const newTotal = (depositSite.last_deposit ?? 0) + amount
-    const isusd = depositSite.currency === 'usd'
-    const { data } = await supabase.from('sites').update({
-      balance: depositSite.balance + amount, active: true, last_deposit: newTotal,
-    }).eq('id', depositSite.id).select().single()
+    const { data } = await supabase.from('sites').update({ balance: depositSite.balance + amount, active: true, last_deposit: newTotal }).eq('id', depositSite.id).select().single()
     if (data) {
       await logAction({ action_type: 'update', table_name: 'sites', record_id: data.id, before_data: before as never, after_data: data as never, description: `${depositSite.name} 입금 +${amount.toLocaleString()}` })
       setSites(p => p.map(s => s.id === data.id ? data : s))
-      setActiveSiteId(depositSite.id)
       let usdKrwRate: number | null = null; let amountKrw: number | null = null
       if (isusd) { usdKrwRate = await getUsdKrwRate(); amountKrw = Math.round(amount * usdKrwRate) }
-      await supabase.from('cashflows').insert({
-        flow_date: today, type: 'expense', category: '베팅입금',
-        description: `${depositSite.name} 입금`, amount, site_id: depositSite.id,
-        currency: depositSite.currency, usd_krw_rate: usdKrwRate, amount_krw: isusd ? amountKrw : amount,
-      })
+      await supabase.from('cashflows').insert({ flow_date: today, type: 'expense', category: '베팅입금', description: `${depositSite.name} 입금`, amount, site_id: depositSite.id, currency: depositSite.currency, usd_krw_rate: usdKrwRate, amount_krw: isusd ? amountKrw : amount })
     }
     setDepositSite(null)
   }
-
-  /* ── 포인트 ── */
   async function doPoint(amount: number) {
     if (!depositSite) return
-    const before = { ...depositSite }
-    const newPoint = (depositSite.point_deposit ?? 0) + amount
-    const { data } = await supabase.from('sites').update({
-      balance: depositSite.balance + amount, point_deposit: newPoint,
-    }).eq('id', depositSite.id).select().single()
-    if (data) {
-      await logAction({ action_type: 'update', table_name: 'sites', record_id: data.id, before_data: before as never, after_data: data as never, description: `${depositSite.name} 포인트 +${amount.toLocaleString()}P` })
-      setSites(p => p.map(s => s.id === data.id ? data : s))
-    }
+    const before = { ...depositSite }; const newPoint = (depositSite.point_deposit ?? 0) + amount
+    const { data } = await supabase.from('sites').update({ balance: depositSite.balance + amount, point_deposit: newPoint }).eq('id', depositSite.id).select().single()
+    if (data) { await logAction({ action_type: 'update', table_name: 'sites', record_id: data.id, before_data: before as never, after_data: data as never, description: `${depositSite.name} 포인트 +${amount.toLocaleString()}P` }); setSites(p => p.map(s => s.id === data.id ? data : s)) }
     setDepositSite(null)
   }
 
-  /* ── 출금(마감) ── */
+  /* ── 출금 ── */
   async function doWithdraw(amount: number) {
     if (!withdrawSite) return
-    const before = { ...withdrawSite }
-    const isusd = withdrawSite.currency === 'usd'
+    const before = { ...withdrawSite }; const isusd = withdrawSite.currency === 'usd'
     const totalIn = (withdrawSite.last_deposit ?? 0) + (withdrawSite.point_deposit ?? 0)
     const netProfit = amount - totalIn
     const newWithdrawal = (withdrawSite.total_withdrawal ?? 0) + amount
-    const { data } = await supabase.from('sites').update({
-      active: false, total_withdrawal: newWithdrawal,
-      balance: 0, last_deposit: 0, deposit_bet_done: 0, point_deposit: 0,
-    }).eq('id', withdrawSite.id).select().single()
+    const { data } = await supabase.from('sites').update({ active: false, total_withdrawal: newWithdrawal, balance: 0, last_deposit: 0, deposit_bet_done: 0, point_deposit: 0 }).eq('id', withdrawSite.id).select().single()
     if (data) {
       await logAction({ action_type: 'update', table_name: 'sites', record_id: data.id, before_data: before as never, after_data: data as never, description: `${withdrawSite.name} 출금 ${amount.toLocaleString()}` })
       setSites(p => p.map(s => s.id === data.id ? data : s))
       let usdKrwRate: number | null = null; let amountKrw: number | null = null
       if (isusd) { usdKrwRate = await getUsdKrwRate(); amountKrw = Math.round(Math.abs(netProfit) * usdKrwRate) }
-      await supabase.from('cashflows').insert({
-        flow_date: today, type: netProfit >= 0 ? 'income' : 'expense',
-        category: netProfit >= 0 ? '베팅수익' : '베팅손실',
-        description: `${withdrawSite.name} 마감 (출금 ${amount.toLocaleString()})`,
-        amount: Math.abs(netProfit), site_id: withdrawSite.id,
-        currency: withdrawSite.currency, usd_krw_rate: usdKrwRate,
-        amount_krw: isusd ? amountKrw : Math.abs(netProfit),
-      })
+      await supabase.from('cashflows').insert({ flow_date: today, type: netProfit >= 0 ? 'income' : 'expense', category: netProfit >= 0 ? '베팅수익' : '베팅손실', description: `${withdrawSite.name} 마감 (출금 ${amount.toLocaleString()})`, amount: Math.abs(netProfit), site_id: withdrawSite.id, currency: withdrawSite.currency, usd_krw_rate: usdKrwRate, amount_krw: isusd ? amountKrw : Math.abs(netProfit) })
     }
     setWithdrawSite(null)
   }
 
-  /* ── 베팅 등록 (우측 슬립) ── */
-  async function doBet() {
-    if (!activeSite || !slipForm.content || !slipForm.odds || !slipAmount) return
-    const stake = Number(slipAmount); if (!stake) return
-    if (stake > activeSite.balance) { alert('잔액이 부족합니다'); return }
-    const finalOdds = parseOdds(slipForm.odds); if (finalOdds <= 0) { alert('배당을 올바르게 입력하세요'); return }
-    const pickLabel = buildPickLabel(slipForm.market, slipForm.pick)
-    await submitBet(activeSite, slipForm.sport, slipForm.content, finalOdds, stake, pickLabel, slipForm.market as Market)
-    setSlipForm(emptySlip()); setSlipAmount('')
-  }
-
-  /* ── 인라인 빠른베팅 제출 ── */
-  function openInlineBet(siteId: string) {
-    setInlineBetSiteId(siteId)
-    setInlineSport('soccer'); setInlineContent(''); setInlineOdds(''); setInlineAmount('')
-  }
-  function closeInlineBet() { setInlineBetSiteId(null) }
-  function handleInlineOdds(raw: string) {
-    const clean = raw.replace(/[^0-9.]/g, '')
-    if (/^\d{3}$/.test(clean)) setInlineOdds((Number(clean) / 100).toFixed(2))
-    else setInlineOdds(clean)
-  }
-  async function doInlineBet(site: Site) {
-    const odds = parseOdds(inlineOdds); const stake = Number(inlineAmount)
-    if (!inlineContent || odds <= 0 || stake <= 0) return
-    if (stake > site.balance) { alert('잔액이 부족합니다'); return }
-    setInlineSubmitting(true)
-    const ok = await submitBet(site, inlineSport, inlineContent, odds, stake, '', 'moneyline')
-    setInlineSubmitting(false)
-    if (ok) closeInlineBet()
-  }
-
-  /* ── 공통 베팅 제출 ── */
-  async function submitBet(site: Site, sport: string, content: string, odds: number, stake: number, pick: string, market: Market): Promise<boolean> {
+  /* ── 공통 베팅 제출 (단폴) ── */
+  async function submitBet(site: Site, sport: string, content: string, odds: number, stake: number): Promise<boolean> {
+    if (stake > site.balance) { alert('잔액이 부족합니다'); return false }
+    const { market, pick } = autoMarket(content)
     const { data: betData } = await supabase.from('bets').insert({
       bet_date: today, sport: sport as Sport, league: '', match: content,
       market, pick, odds, stake,
       result: 'pending' as BetResult, profit: 0, memo: '', site_id: site.id,
+      parlay_group: null, parlay_leg: 1,
     }).select().single()
     if (!betData) return false
-    const siteBefore = { ...site }
-    const newBetDone = (site.deposit_bet_done ?? 0) + stake
-    const { data: siteData } = await supabase.from('sites').update({
-      balance: site.balance - stake,
-      rolling_done: site.rolling_done + stake,
-      deposit_bet_done: newBetDone,
-    }).eq('id', site.id).select().single()
+    const siteBefore = { ...site }; const newBetDone = (site.deposit_bet_done ?? 0) + stake
+    const { data: siteData } = await supabase.from('sites').update({ balance: site.balance - stake, rolling_done: site.rolling_done + stake, deposit_bet_done: newBetDone }).eq('id', site.id).select().single()
     if (siteData) {
-      await logAction({ action_type: 'insert', table_name: 'bets', record_id: betData.id, after_data: betData as never, description: `[${site.name}] ${content} / ${pick || '-'} / ${stake.toLocaleString()}` })
+      await logAction({ action_type: 'insert', table_name: 'bets', record_id: betData.id, after_data: betData as never, description: `[${site.name}] ${content} / ${pick} / ${stake.toLocaleString()}` })
       await logAction({ action_type: 'update', table_name: 'sites', record_id: siteData.id, before_data: siteBefore as never, after_data: siteData as never, description: `[${site.name}] 잔액 -${stake.toLocaleString()}` })
-      setBets(p => [betData, ...p])
-      setSites(p => p.map(s => s.id === siteData.id ? siteData : s))
+      setBets(p => [...p, betData]); setSites(p => p.map(s => s.id === siteData.id ? siteData : s))
+      return true
+    }
+    return false
+  }
+
+  /* ── 두폴 베팅 제출 ── */
+  async function submitDoubleBet(site: Site, c1: string, o1: number, c2: string, o2: number, stake: number): Promise<boolean> {
+    if (stake > site.balance) { alert('잔액이 부족합니다'); return false }
+    const groupId = crypto.randomUUID()
+    const { market: m1, pick: p1 } = autoMarket(c1)
+    const { market: m2, pick: p2 } = autoMarket(c2)
+    const comboOdds = Math.round(o1 * o2 * 100) / 100
+
+    /* 두 개의 bet 레코드 (같은 stake, 같은 group) */
+    const inserts = [
+      { bet_date: today, sport: 'soccer' as Sport, league: '', match: c1, market: m1, pick: p1, odds: o1, stake, result: 'pending' as BetResult, profit: 0, memo: '', site_id: site.id, parlay_group: groupId, parlay_leg: 1 },
+      { bet_date: today, sport: 'soccer' as Sport, league: '', match: c2, market: m2, pick: p2, odds: o2, stake, result: 'pending' as BetResult, profit: 0, memo: '', site_id: site.id, parlay_group: groupId, parlay_leg: 2 },
+    ]
+    const { data: betsData } = await supabase.from('bets').insert(inserts).select()
+    if (!betsData || betsData.length < 2) return false
+
+    const siteBefore = { ...site }; const newBetDone = (site.deposit_bet_done ?? 0) + stake
+    const { data: siteData } = await supabase.from('sites').update({ balance: site.balance - stake, rolling_done: site.rolling_done + stake, deposit_bet_done: newBetDone }).eq('id', site.id).select().single()
+    if (siteData) {
+      await logAction({ action_type: 'insert', table_name: 'bets', record_id: betsData[0].id, after_data: betsData[0] as never, description: `[${site.name}] 두폴 ${c1} × ${c2} / 콤보${comboOdds} / ${stake.toLocaleString()}` })
+      await logAction({ action_type: 'update', table_name: 'sites', record_id: siteData.id, before_data: siteBefore as never, after_data: siteData as never, description: `[${site.name}] 잔액 -${stake.toLocaleString()}` })
+      setBets(p => [...p, ...betsData]); setSites(p => p.map(s => s.id === siteData.id ? siteData : s))
       return true
     }
     return false
@@ -580,12 +657,16 @@ export default function Dashboard() {
 
   /* ── 결과처리 ── */
   async function applyResult(bet: Bet, result: BetResult | 'cancel') {
+    const site = sites.find(s => s.id === bet.site_id)
     if (result === 'cancel') {
       if (!confirm('베팅을 취소하고 잔액/롤링을 복원할까요?')) return
-      const site = sites.find(s => s.id === bet.site_id)
-      await logAction({ action_type: 'delete', table_name: 'bets', record_id: bet.id, before_data: bet as never, description: `베팅 취소: ${bet.match}` })
-      await supabase.from('bets').delete().eq('id', bet.id)
-      setBets(p => p.filter(b => b.id !== bet.id))
+      /* 두폴이면 같은 그룹 모두 취소 */
+      const groupBets = bet.parlay_group ? bets.filter(b => b.parlay_group === bet.parlay_group) : [bet]
+      for (const gb of groupBets) {
+        await logAction({ action_type: 'delete', table_name: 'bets', record_id: gb.id, before_data: gb as never, description: `베팅 취소: ${gb.match}` })
+        await supabase.from('bets').delete().eq('id', gb.id)
+      }
+      setBets(p => p.filter(b => !groupBets.some(gb => gb.id === b.id)))
       if (site) {
         const siteBefore = { ...site }
         const { data: sd } = await supabase.from('sites').update({
@@ -593,20 +674,42 @@ export default function Dashboard() {
           rolling_done: Math.max(0, site.rolling_done - bet.stake),
           deposit_bet_done: Math.max(0, (site.deposit_bet_done ?? 0) - bet.stake),
         }).eq('id', site.id).select().single()
-        if (sd) {
-          await logAction({ action_type: 'update', table_name: 'sites', record_id: sd.id, before_data: siteBefore as never, after_data: sd as never, description: `[${site.name}] 취소 복원 +${bet.stake.toLocaleString()}` })
-          setSites(p => p.map(s => s.id === sd.id ? sd : s))
+        if (sd) { await logAction({ action_type: 'update', table_name: 'sites', record_id: sd.id, before_data: siteBefore as never, after_data: sd as never, description: `[${site.name}] 취소 복원 +${bet.stake.toLocaleString()}` }); setSites(p => p.map(s => s.id === sd.id ? sd : s)) }
+      }
+      return
+    }
+
+    /* 두폴: leg1과 leg2 결과가 모두 있어야 정산 */
+    if (bet.parlay_group) {
+      const profit = result === 'win' ? Math.round(bet.stake * (bet.odds - 1)) : result === 'loss' ? -bet.stake : 0
+      const before = { ...bet }
+      const { data } = await supabase.from('bets').update({ result, profit }).eq('id', bet.id).select().single()
+      if (data) {
+        await logAction({ action_type: 'update', table_name: 'bets', record_id: data.id, before_data: before as never, after_data: data as never, description: `결과: ${bet.match} → ${result}` })
+        setBets(p => p.map(b => b.id === data.id ? data : b))
+        /* 두 leg 모두 결과가 있으면 잔액 반영 */
+        const updatedBets = bets.map(b => b.id === data.id ? data : b)
+        const groupBets = updatedBets.filter(b => b.parlay_group === bet.parlay_group)
+        if (groupBets.every(b => b.result !== 'pending') && site) {
+          const allWin = groupBets.every(b => b.result === 'win')
+          if (allWin) {
+            const comboOdds = groupBets.reduce((a, b) => a * b.odds, 1)
+            const delta = bet.stake + Math.round(bet.stake * (comboOdds - 1))
+            const { data: sd } = await supabase.from('sites').update({ balance: site.balance + delta }).eq('id', site.id).select().single()
+            if (sd) setSites(p => p.map(s => s.id === sd.id ? sd : s))
+          }
         }
       }
       return
     }
+
+    /* 단폴 */
     const profit = result === 'win' ? Math.round(bet.stake * (bet.odds - 1)) : result === 'loss' ? -bet.stake : 0
     const before = { ...bet }
     const { data } = await supabase.from('bets').update({ result, profit }).eq('id', bet.id).select().single()
     if (data) {
       await logAction({ action_type: 'update', table_name: 'bets', record_id: data.id, before_data: before as never, after_data: data as never, description: `결과: ${bet.match} → ${result === 'win' ? '적중' : result === 'loss' ? '실패' : '적특'}` })
       setBets(p => p.map(b => b.id === data.id ? data : b))
-      const site = sites.find(s => s.id === bet.site_id)
       if (site && result === 'win') {
         const delta = bet.stake + profit
         const { data: sd } = await supabase.from('sites').update({ balance: site.balance + delta }).eq('id', site.id).select().single()
@@ -643,33 +746,19 @@ export default function Dashboard() {
     await supabase.from('todos').delete().eq('id', todo.id); setTodos(p => p.filter(t => t.id !== todo.id))
   }
 
-  /* ── 계산 헬퍼 ── */
-  const totalRolling     = (s: Site) => (s.last_deposit ?? 0) + (s.point_deposit ?? 0)
-  const depositRemaining = (s: Site) => Math.max(0, totalRolling(s) - (s.deposit_bet_done ?? 0))
-  const depositPct       = (s: Site) => totalRolling(s) > 0 ? Math.min(100, Math.round((s.deposit_bet_done ?? 0) / totalRolling(s) * 100)) : 0
-  const betsBySite       = (id: string) => bets.filter(b => b.site_id === id)
-  const colCount         = Math.max(1, sites.length)
-  const todayChecked     = todos.filter(t => t.check_dates.includes(today)).length
-
+  /* ════════════ RENDER ════════════ */
   return (
     <div className="page">
-      <div className="dashboard-layout">
+      {/* fullwidth 레이아웃: 베팅현황 + 할일 나란히 */}
+      <div className="dashboard-layout-full">
 
-        {/* ── 좌: 베팅 현황 ── */}
-        <div style={{ minWidth: 0 }}>
-          {/* 헤더 */}
+        {/* ── 베팅 현황 (fullwidth) ── */}
+        <div style={{ flex: 1, minWidth: 0 }}>
           <div className="flex-between mb-10">
             <span className="card-title" style={{ margin: 0 }}>베팅 현황</span>
             <button
               onClick={() => setShowSiteMgr(true)}
-              style={{
-                background: 'none', border: '1px solid var(--border)', borderRadius: 4,
-                color: 'var(--text-secondary)', cursor: 'pointer', padding: '3px 8px',
-                display: 'flex', alignItems: 'center', gap: 4,
-                fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-body)', transition: 'all 0.15s',
-              }}
-              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--gold)'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--gold)' }}
-              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--border)'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-secondary)' }}
+              style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-secondary)', cursor: 'pointer', padding: '3px 8px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-body)', transition: 'all 0.15s' }}
             >
               <Settings size={11} /> 사이트관리
             </button>
@@ -680,74 +769,53 @@ export default function Dashboard() {
           ) : (
             <div className="site-grid" style={{ gridTemplateColumns: `repeat(${colCount}, 1fr)` }}>
 
-              {/* ── 헤더 행: 사이트명 + 입금/출금 버튼, 잔액 제거 ── */}
+              {/* 헤더 행 */}
               {sites.map(site => {
-                const dep   = site.last_deposit ?? 0
-                const isusd = site.currency === 'usd'
+                const dep = site.last_deposit ?? 0; const isusd = site.currency === 'usd'
                 return (
-                  <div
-                    key={site.id}
-                    className={`site-col-head ${site.active ? 'site-col-active' : ''} ${activeSiteId === site.id ? 'site-col-selected' : ''}`}
-                    onClick={() => setActiveSiteId(site.id)}
-                    style={{ cursor: 'pointer' }}
-                    title="클릭: 슬립 선택"
-                  >
-                    {/* 사이트명 + USD 뱃지 */}
+                  <div key={site.id} className={`site-col-head ${site.active ? 'site-col-active' : ''}`}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, marginBottom: 4 }}>
                       <span style={{ fontWeight: 700, fontSize: 'clamp(10px,1.1vw,13px)' }}>{site.name}</span>
-                      {isusd && <span style={{ fontSize: 8, background: 'var(--blue-bg)', color: 'var(--blue)', border: '1px solid var(--blue-border)', borderRadius: 3, padding: '0 3px', fontWeight: 700, flexShrink: 0 }}>$</span>}
+                      {isusd && <span style={{ fontSize: 8, background: 'var(--blue-bg)', color: 'var(--blue)', border: '1px solid var(--blue-border)', borderRadius: 3, padding: '0 3px', fontWeight: 700 }}>$</span>}
+                      {site.bet_type === 'double' && <span style={{ fontSize: 8, background: 'var(--purple-bg)', color: 'var(--purple)', border: '1px solid var(--purple-border)', borderRadius: 3, padding: '0 3px', fontWeight: 700 }}>두폴</span>}
                       {site.active && <span className="site-active-dot" />}
                     </div>
-                    {/* 입금/출금 버튼 */}
-                    <div style={{ display: 'flex', gap: 4, justifyContent: 'center' }}>
-                      <button
-                        className={`site-txn-btn site-txn-deposit ${dep > 0 ? 'has-deposit' : ''}`}
-                        onClick={e => { e.stopPropagation(); setDepositSite(site) }}
-                      >입금</button>
-                      <button
-                        className="site-txn-btn site-txn-withdraw"
-                        onClick={e => { e.stopPropagation(); setWithdrawSite(site) }}
-                      >출금</button>
+                    {/* 입금(위) / 출금(아래) — 우측 끝 */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 3, position: 'absolute', top: 6, right: 6 }}>
+                      <button className={`site-txn-btn site-txn-deposit ${dep > 0 ? 'has-deposit' : ''}`}
+                        onClick={e => { e.stopPropagation(); setDepositSite(site) }}>입금</button>
+                      <button className="site-txn-btn site-txn-withdraw"
+                        onClick={e => { e.stopPropagation(); setWithdrawSite(site) }}>출금</button>
                     </div>
                   </div>
                 )
               })}
 
-              {/* ── 롤링 진행 행: 입금/포인트/남은롤링 3줄 상세 ── */}
+              {/* 롤링 진행 행 */}
               {sites.map(site => {
-                const pct    = depositPct(site)
-                const rem    = depositRemaining(site)
-                const dep    = site.last_deposit ?? 0
-                const pt     = site.point_deposit ?? 0
-                const isusd  = site.currency === 'usd'
-                const pfx    = isusd ? '$' : ''
-                const sfx    = isusd ? '' : '원'
-                const fs     = 'clamp(9px,0.9vw,11px)'
+                const pct = depositPct(site); const rem = depositRemaining(site)
+                const dep = site.last_deposit ?? 0; const pt = site.point_deposit ?? 0
+                const isusd = site.currency === 'usd'; const pfx = isusd ? '$' : ''; const sfx = isusd ? '' : '원'
+                const fs = 'clamp(9px,0.9vw,11px)'
                 return (
                   <div key={site.id} className={`site-balance-cell ${site.active ? 'site-bal-active' : ''}`} style={{ alignItems: 'stretch', padding: '7px 8px' }}>
                     {dep > 0 || pt > 0 ? (
                       <>
-                        {/* 입금액 */}
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
-                          <span style={{ fontSize: 'clamp(8px,0.8vw,10px)', color: 'var(--text-muted)', letterSpacing: '0.3px' }}>입금</span>
+                          <span style={{ fontSize: 'clamp(8px,0.8vw,10px)', color: 'var(--text-muted)' }}>입금</span>
                           <span style={{ fontFamily: 'var(--font-num)', fontSize: fs, fontWeight: 700, color: 'var(--orange)' }}>{pfx}{dep.toLocaleString()}{sfx}</span>
                         </div>
-                        {/* 포인트 */}
                         {pt > 0 && (
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
-                            <span style={{ fontSize: 'clamp(8px,0.8vw,10px)', color: 'var(--text-muted)', letterSpacing: '0.3px' }}>포인트</span>
+                            <span style={{ fontSize: 'clamp(8px,0.8vw,10px)', color: 'var(--text-muted)' }}>포인트</span>
                             <span style={{ fontFamily: 'var(--font-num)', fontSize: fs, fontWeight: 700, color: 'var(--purple)' }}>+{pt.toLocaleString()}P</span>
                           </div>
                         )}
-                        {/* 남은 롤링 */}
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                          <span style={{ fontSize: 'clamp(8px,0.8vw,10px)', color: 'var(--text-muted)', letterSpacing: '0.3px' }}>남은 롤링</span>
+                          <span style={{ fontSize: 'clamp(8px,0.8vw,10px)', color: 'var(--text-muted)' }}>남은 롤링</span>
                           <span style={{ fontFamily: 'var(--font-num)', fontSize: fs, fontWeight: 700, color: rem > 0 ? 'var(--gold)' : 'var(--green)' }}>{pfx}{rem.toLocaleString()}{sfx}</span>
                         </div>
-                        {/* 진행률 바 */}
-                        <div className="deposit-progress-bar">
-                          <div className="deposit-progress-fill" style={{ width: `${pct}%` }} />
-                        </div>
+                        <div className="deposit-progress-bar"><div className="deposit-progress-fill" style={{ width: `${pct}%` }} /></div>
                         <div style={{ fontSize: 'clamp(8px,0.75vw,10px)', color: pct >= 100 ? 'var(--green)' : 'var(--orange)', fontWeight: 700, marginTop: 2, textAlign: 'right' }}>{pct}%</div>
                       </>
                     ) : <div style={{ height: 16 }} />}
@@ -755,35 +823,39 @@ export default function Dashboard() {
                 )
               })}
 
-              {/* ── 베팅 목록 ── */}
+              {/* 베팅 목록 (아래쪽에 최신 베팅 쌓임) */}
               {(() => {
                 const maxRows = Math.max(...sites.map(s => betsBySite(s.id).length), 1)
                 return Array.from({ length: maxRows }).map((_, rowIdx) =>
                   sites.map(site => {
-                    const bet     = betsBySite(site.id)[rowIdx]
+                    const siteBets = betsBySite(site.id)
+                    const bet = siteBets[rowIdx]
                     const isHover = hoverBetId === bet?.id
-                    const isusd   = site.currency === 'usd'
+                    const isusd = site.currency === 'usd'
+                    const isParlay = !!bet?.parlay_group
                     return (
                       <div key={`${site.id}-${rowIdx}`} className="site-bets-col">
                         {bet ? (
                           <div
-                            className={`site-bet-entry ${bet.result === 'win' ? 'win-entry' : bet.result === 'loss' ? 'loss-entry' : ''}`}
+                            className={`site-bet-entry ${bet.result === 'win' ? 'win-entry' : bet.result === 'loss' ? 'loss-entry' : ''} ${isParlay ? 'parlay-entry' : ''}`}
                             onMouseEnter={() => setHoverBetId(bet.id)}
                             onMouseLeave={() => setHoverBetId(null)}
                           >
-                            <div className="site-bet-match">
-                              {bet.match}
-                              {bet.pick && <span style={{ color: 'var(--text-secondary)', fontWeight: 400 }}> {bet.pick}</span>}
-                            </div>
+                            {isParlay && (
+                              <span style={{ fontSize: 8, background: 'var(--purple-bg)', color: 'var(--purple)', border: '1px solid var(--purple-border)', borderRadius: 3, padding: '0 4px', fontWeight: 700, marginBottom: 2, display: 'inline-block' }}>
+                                LEG {bet.parlay_leg}
+                              </span>
+                            )}
+                            <div className="site-bet-match">{bet.match}</div>
                             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                               <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'clamp(9px,0.85vw,11px)', color: 'var(--text-secondary)' }}>{bet.odds.toFixed(2)}</span>
                               <div className="bet-result-icons">
                                 {bet.result === 'pending' ? (
                                   isHover ? (
                                     <>
-                                      <button className="bet-result-icon win"    title="적중"          onClick={() => applyResult(bet, 'win')}><CheckCircle  size={16} /></button>
-                                      <button className="bet-result-icon loss"   title="실패"          onClick={() => applyResult(bet, 'loss')}><XCircle      size={16} /></button>
-                                      <button className="bet-result-icon cancel" title="취소(롤링복원)" onClick={() => applyResult(bet, 'cancel')}><MinusCircle size={16} /></button>
+                                      <button className="bet-result-icon win"    title="적중"          onClick={() => applyResult(bet, 'win')}><CheckCircle  size={15} /></button>
+                                      <button className="bet-result-icon loss"   title="실패"          onClick={() => applyResult(bet, 'loss')}><XCircle      size={15} /></button>
+                                      <button className="bet-result-icon cancel" title="취소(롤링복원)" onClick={() => applyResult(bet, 'cancel')}><MinusCircle size={15} /></button>
                                     </>
                                   ) : (
                                     <span className="badge badge-pending" style={{ fontSize: 'clamp(8px,0.75vw,10px)', padding: '1px 4px' }}>대기</span>
@@ -795,11 +867,6 @@ export default function Dashboard() {
                                 )}
                               </div>
                             </div>
-                            {bet.result !== 'pending' && (
-                              <div style={{ fontSize: 'clamp(9px,0.85vw,11px)', marginTop: 2, fontFamily: 'var(--font-num)', fontWeight: 700 }} className={bet.profit >= 0 ? 'profit-pos' : 'profit-neg'}>
-                                {bet.profit >= 0 ? '+' : ''}{isusd ? '$' : ''}{bet.profit.toLocaleString()}{isusd ? '' : '원'}
-                              </div>
-                            )}
                           </div>
                         ) : <div style={{ height: 8 }} />}
                       </div>
@@ -808,84 +875,28 @@ export default function Dashboard() {
                 )
               })()}
 
-              {/* ── + 버튼 행 + 인라인 베팅 폼 (각 사이트별 컬럼) ── */}
+              {/* + 버튼 / 인라인 폼 행 */}
               {sites.map(site => {
-                const isOpen = inlineBetSiteId === site.id
-                const isusd  = site.currency === 'usd'
-                const oddsV  = parseOdds(inlineOdds)
-                const stakeN = Number(inlineAmount)
+                const isOpen = openFormSiteId === site.id
                 return (
                   <div key={`add-${site.id}`} className="site-add-col">
                     {!isOpen ? (
-                      /* + 버튼 */
-                      <button
-                        className="site-add-btn"
-                        onClick={e => { e.stopPropagation(); openInlineBet(site.id) }}
-                        title="베팅 추가"
-                      >
-                        <Plus size={11} />
+                      <button className="site-add-btn" onClick={() => setOpenFormSiteId(site.id)} title="베팅 추가">
+                        <Plus size={14} />
                       </button>
+                    ) : site.bet_type === 'double' ? (
+                      <DoubleBetForm
+                        site={site}
+                        lastLeg1={getLastLeg1(site.id)}
+                        onClose={() => setOpenFormSiteId(null)}
+                        onBet={(c1, o1, c2, o2, amount) => submitDoubleBet(site, c1, o1, c2, o2, amount)}
+                      />
                     ) : (
-                      /* 인라인 베팅 폼 */
-                      <div className="inline-bet-form">
-                        {/* 종목 */}
-                        <select
-                          className="form-select inline-bet-input"
-                          value={inlineSport}
-                          onChange={e => setInlineSport(e.target.value)}
-                        >
-                          {SPORTS.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
-                        </select>
-                        {/* 내용 */}
-                        <input
-                          className="form-input inline-bet-input"
-                          placeholder="경기 내용"
-                          value={inlineContent}
-                          onChange={e => setInlineContent(e.target.value)}
-                          autoFocus
-                        />
-                        {/* 배당 */}
-                        <input
-                          className="form-input inline-bet-input"
-                          placeholder="배당 (125=1.25)"
-                          value={inlineOdds}
-                          onChange={e => handleInlineOdds(e.target.value)}
-                          onBlur={e => { const n = parseOdds(e.target.value); if (n > 0) setInlineOdds(n.toFixed(2)) }}
-                        />
-                        {/* 금액 */}
-                        <input
-                          className="form-input inline-bet-input"
-                          type="number"
-                          placeholder={`금액 (${isusd ? '$' : '원'})`}
-                          value={inlineAmount}
-                          onChange={e => setInlineAmount(e.target.value)}
-                          onKeyDown={e => e.key === 'Enter' && doInlineBet(site)}
-                        />
-                        {/* 예상 수익 미리보기 */}
-                        {oddsV > 0 && stakeN > 0 && (
-                          <div style={{ fontSize: 9, color: 'var(--green)', fontWeight: 700, textAlign: 'right', padding: '1px 2px' }}>
-                            +{isusd ? '$' : ''}{Math.round(stakeN * (oddsV - 1)).toLocaleString()}{isusd ? '' : '원'}
-                          </div>
-                        )}
-                        {/* 버튼 */}
-                        <div style={{ display: 'flex', gap: 4 }}>
-                          <button
-                            className="btn btn-primary btn-sm"
-                            style={{ flex: 1, fontSize: 10 }}
-                            onClick={() => doInlineBet(site)}
-                            disabled={!inlineContent || oddsV <= 0 || stakeN <= 0 || inlineSubmitting}
-                          >
-                            <Check size={10} /> 등록
-                          </button>
-                          <button
-                            className="btn btn-ghost btn-sm"
-                            style={{ padding: '3px 6px' }}
-                            onClick={closeInlineBet}
-                          >
-                            <X size={10} />
-                          </button>
-                        </div>
-                      </div>
+                      <SingleBetForm
+                        site={site}
+                        onClose={() => setOpenFormSiteId(null)}
+                        onBet={(sport, content, odds, amount) => submitBet(site, sport, content, odds, amount)}
+                      />
                     )}
                   </div>
                 )
@@ -894,119 +905,8 @@ export default function Dashboard() {
           )}
         </div>
 
-        {/* ── 우: 베팅 슬립 + 할일 ── */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-
-          {/* 베팅 슬립 */}
-          <div className="betslip-panel">
-            <div className="betslip-panel-header">
-              BET SLIP
-              {activeSite && (
-                <span style={{ marginLeft: 8, fontSize: 9, fontWeight: 600, color: activeSite.currency === 'usd' ? 'var(--blue)' : 'var(--gold-dim)', textTransform: 'none', letterSpacing: 0 }}>
-                  — {activeSite.name} {activeSite.currency === 'usd' ? '(USD)' : '(KRW)'}
-                </span>
-              )}
-            </div>
-            <div className="betslip-panel-body">
-
-              {/* 잔액 표시 */}
-              {activeSite ? (
-                <div style={{ padding: '8px 10px', background: 'var(--bg-elevated)', borderRadius: 'var(--radius-sm)', border: `1px solid ${activeSite.active ? 'var(--orange-border)' : 'var(--border)'}` }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                    <div>
-                      <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.6px', textTransform: 'uppercase', color: 'var(--text-secondary)', marginBottom: 1 }}>잔액</div>
-                      <div className="col-balance" style={{ fontSize: 15 }}>{isUsd ? '$' : ''}{activeSite.balance.toLocaleString()}{isUsd ? '' : '원'}</div>
-                    </div>
-                    {totalRolling(activeSite) > 0 && (
-                      <div style={{ textAlign: 'right' }}>
-                        <div style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-secondary)', marginBottom: 1 }}>남은 롤링</div>
-                        <div className="col-balance" style={{ fontSize: 13 }}>{isUsd ? '$' : ''}{depositRemaining(activeSite).toLocaleString()}{isUsd ? '' : '원'}</div>
-                      </div>
-                    )}
-                  </div>
-                  {totalRolling(activeSite) > 0 && (
-                    <>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, color: 'var(--text-secondary)', marginTop: 6, marginBottom: 3 }}>
-                        <span>베팅 진행률</span>
-                        <span style={{ color: depositPct(activeSite) >= 100 ? 'var(--green)' : 'var(--orange)', fontWeight: 700 }}>{depositPct(activeSite)}%</span>
-                      </div>
-                      <div className="deposit-progress-bar"><div className="deposit-progress-fill" style={{ width: `${depositPct(activeSite)}%` }} /></div>
-                    </>
-                  )}
-                </div>
-              ) : (
-                <div style={{ padding: '10px', textAlign: 'center', fontSize: 11, color: 'var(--text-muted)', background: 'var(--bg-elevated)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)' }}>
-                  베팅현황에서 사이트를 선택하세요
-                </div>
-              )}
-
-              {/* 종목 + 내용 */}
-              <div style={{ display: 'grid', gridTemplateColumns: '90px 1fr', gap: 6 }}>
-                <div className="form-group">
-                  <label className="form-label">종목</label>
-                  <select className="form-select" style={{ fontSize: 12 }} value={slipForm.sport} onChange={e => setSlipForm(p => ({ ...p, sport: e.target.value }))}>
-                    {SPORTS.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
-                  </select>
-                </div>
-                <div className="form-group">
-                  <label className="form-label">내용</label>
-                  <input className="form-input" style={{ fontSize: 12 }} placeholder="맨시티 vs 아스날" value={slipForm.content} onChange={e => setSlipForm(p => ({ ...p, content: e.target.value }))} />
-                </div>
-              </div>
-
-              {/* 마켓 + 픽 */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
-                <div className="form-group">
-                  <label className="form-label">마켓</label>
-                  <select className="form-select" style={{ fontSize: 12 }} value={slipForm.market} onChange={e => setSlipForm(p => ({ ...p, market: e.target.value as MarketValue, pick: '' }))}>
-                    {MARKETS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
-                  </select>
-                </div>
-                <div className="form-group">
-                  <label className="form-label">픽 <span style={{ fontWeight: 400, textTransform: 'none', fontSize: 9, color: 'var(--text-muted)' }}>{currentMarket?.pickType === 'none' ? '(없음)' : '(선택)'}</span></label>
-                  {currentMarket?.pickType === 'none'
-                    ? <input className="form-input" disabled style={{ opacity: 0.3, fontSize: 12 }} value="" readOnly />
-                    : <input className="form-input" style={{ fontSize: 12 }} placeholder={currentMarket?.hint} type={currentMarket?.pickType === 'number' ? 'number' : 'text'} step="0.5" value={slipForm.pick} onChange={e => setSlipForm(p => ({ ...p, pick: e.target.value }))} />
-                  }
-                </div>
-              </div>
-
-              {slipForm.pick && currentMarket?.pickType !== 'none' && (
-                <div style={{ fontSize: 10, color: 'var(--gold)', padding: '3px 7px', background: 'var(--gold-bg)', borderRadius: 4, border: '1px solid var(--gold-border)' }}>
-                  ↳ {buildPickLabel(slipForm.market, slipForm.pick)}
-                </div>
-              )}
-
-              {/* 배당 */}
-              <div className="form-group">
-                <label className="form-label">배당 {slipForm.odds && oddsVal > 0 && <span style={{ color: 'var(--gold)', fontWeight: 700 }}>→ {oddsVal.toFixed(2)}</span>}</label>
-                <input className="form-input" style={{ fontSize: 12 }} placeholder="125 = 1.25" value={slipForm.odds}
-                  onChange={e => handleOddsChange(e.target.value)}
-                  onBlur={e => { const n = parseOdds(e.target.value); if (n > 0) setSlipForm(p => ({ ...p, odds: n.toFixed(2) })) }} />
-              </div>
-
-              {/* 금액 + 베팅 */}
-              <div className="form-group">
-                <label className="form-label">금액 ({isUsd ? '$' : '원'})</label>
-                <div style={{ display: 'flex', gap: 5 }}>
-                  <input className="form-input" style={{ fontSize: 12 }} type="number" placeholder="베팅액" value={slipAmount}
-                    onChange={e => setSlipAmount(e.target.value)} onKeyDown={e => e.key === 'Enter' && doBet()} />
-                  <button className="btn btn-primary" style={{ flexShrink: 0, padding: '0 10px' }} onClick={doBet} disabled={!activeSite}>
-                    <Check size={12} />
-                  </button>
-                </div>
-              </div>
-
-              {oddsVal > 0 && slipAmount && Number(slipAmount) > 0 && (
-                <div style={{ padding: '6px 10px', background: 'var(--green-bg)', border: '1px solid var(--green-border)', borderRadius: 'var(--radius-sm)', fontSize: 11 }}>
-                  수익 <strong className="profit-pos">+{isUsd ? '$' : ''}{Math.round(Number(slipAmount) * (oddsVal - 1)).toLocaleString()}{isUsd ? '' : '원'}</strong>
-                  <span style={{ color: 'var(--text-secondary)', marginLeft: 6 }}>반환 {isUsd ? '$' : ''}{Math.round(Number(slipAmount) * oddsVal).toLocaleString()}{isUsd ? '' : '원'}</span>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* 오늘 할 일 */}
+        {/* ── 우: 할일 (고정 240px) ── */}
+        <div style={{ width: 230, flexShrink: 0 }}>
           <div className="card">
             <div className="flex-between mb-10">
               <span className="card-title" style={{ margin: 0 }}>오늘 할 일</span>
@@ -1039,24 +939,12 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* ── 모달들 ── */}
+      {/* 모달들 */}
       {showSiteMgr && (
-        <SiteMgrModal
-          sites={sites}
-          onClose={() => setShowSiteMgr(false)}
-          onAdd={addSite}
-          onDelete={deleteSite}
-          onToggleCurrency={toggleCurrency}
-          onReorder={reorderSites}
-        />
+        <SiteMgrModal sites={sites} onClose={() => setShowSiteMgr(false)} onAdd={addSite} onDelete={deleteSite} onToggleCurrency={toggleCurrency} onToggleBetType={toggleBetType} onReorder={reorderSites} />
       )}
-      {depositSite && (
-        <DepositModal site={depositSite} onClose={() => setDepositSite(null)} onDeposit={doDeposit} onPoint={doPoint} />
-      )}
-      {withdrawSite && (
-        <WithdrawModal site={withdrawSite} onClose={() => setWithdrawSite(null)} onWithdraw={doWithdraw} />
-      )}
-
+      {depositSite && <DepositModal site={depositSite} onClose={() => setDepositSite(null)} onDeposit={doDeposit} onPoint={doPoint} />}
+      {withdrawSite && <WithdrawModal site={withdrawSite} onClose={() => setWithdrawSite(null)} onWithdraw={doWithdraw} />}
     </div>
   )
 }

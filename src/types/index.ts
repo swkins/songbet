@@ -1,4 +1,4 @@
-export type Sport = 'soccer' | 'baseball' | 'basketball' | 'volleyball' | 'esports' | 'other'
+export type Sport = 'soccer' | 'baseball' | 'basketball' | 'volleyball' | 'hockey' | 'esports' | 'other'
 export type Market = 'moneyline' | 'handicap' | 'over' | 'under' | 'correct_score' | 'other'
 export type BetResult = 'win' | 'loss' | 'push' | 'pending'
 export type CashflowType = 'income' | 'expense'
@@ -6,16 +6,20 @@ export type CashflowType = 'income' | 'expense'
 export interface Site {
   id: string; created_at: string; name: string; balance: number
   active: boolean; sort_order: number; rolling_target: number; rolling_done: number
-  last_deposit: number       // 누적 입금액 (결산 반영)
-  deposit_bet_done: number   // 입금 후 베팅된 누적액
-  point_deposit: number      // 포인트 누적 (롤링 전용, 결산 미반영)
-  total_withdrawal: number   // 누적 출금액
-  currency: 'krw' | 'usd'   // 사이트 통화 타입
+  last_deposit: number
+  deposit_bet_done: number
+  point_deposit: number
+  total_withdrawal: number
+  currency: 'krw' | 'usd'
+  bet_type: 'single' | 'double'   // 단폴 or 두폴
 }
 export interface Bet {
   id: string; created_at: string; bet_date: string; sport: Sport
   league: string; match: string; market: Market; pick: string
-  odds: number; stake: number; result: BetResult; profit: number; memo: string; site_id: string | null
+  odds: number; stake: number; result: BetResult; profit: number; memo: string
+  site_id: string | null
+  parlay_group: string | null   // 두폴 그룹 uuid
+  parlay_leg: number            // 1 or 2
 }
 export interface Todo {
   id: string; created_at: string; todo_date: string; content: string
