@@ -431,3 +431,40 @@ tr:hover td { background: var(--bg-hover); }
   .form-row-2 { grid-template-columns: 1fr; }
   .form-row-3 { grid-template-columns: 1fr; }
 }
+
+/* ── 사이트 카드 그리드 (모바일: 세로, 데스크탑: 가로) ── */
+.site-cards-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+}
+@media (min-width: 641px) {
+  .site-cards-wrap {
+    display: grid;
+    grid-template-columns: repeat(var(--site-cols, 1), 1fr);
+    gap: 0;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+  .site-cards-wrap .card {
+    border-radius: 0;
+    border: none;
+    border-right: 1px solid var(--border);
+  }
+  .site-cards-wrap .card:last-child {
+    border-right: none;
+  }
+}
+
+/* ── 대시보드 메인 레이아웃 ── */
+.dashboard-main { display: flex; flex-direction: column; gap: 10px; width: 100%; }
+.dashboard-side { display: flex; flex-direction: column; gap: 10px; width: 100%; }
+.dashboard-bets { width: 100%; }
+
+@media (min-width: 641px) {
+  .dashboard-main { flex-direction: row; align-items: start; }
+  .dashboard-side { width: 260px; flex-shrink: 0; }
+  .dashboard-bets { flex: 1; min-width: 0; }
+}
