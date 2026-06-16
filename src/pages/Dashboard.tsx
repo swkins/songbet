@@ -570,6 +570,7 @@ export default function Dashboard() {
       await supabase.from('cashflows').insert({ flow_date: today, type: netProfit >= 0 ? 'income' : 'expense', category: netProfit >= 0 ? '베팅수익' : '베팅손실', description: `${withdrawSite.name} 마감`, amount: Math.abs(netProfit), site_id: withdrawSite.id, currency: withdrawSite.currency, usd_krw_rate: usdKrwRate, amount_krw: isusd ? amountKrw : Math.abs(netProfit) })
     }
     if (withdrawSite) {
+      await supabase.from('bets').delete().eq('site_id', withdrawSite.id).neq('result', 'pending')
       setBets(p => p.filter(b => !(b.site_id === withdrawSite.id && b.result !== 'pending')))
     }
     await loadSites()
