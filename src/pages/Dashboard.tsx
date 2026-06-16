@@ -461,7 +461,7 @@ export default function Dashboard() {
     if (data) setSites(data)
   }
   async function loadBets() {
-    const { data } = await supabase.from('bets').select('*').eq('result', 'pending').order('bet_date', { ascending: true }).order('created_at', { ascending: true })
+    const { data } = await supabase.from('bets').select('*').order('bet_date', { ascending: true }).order('created_at', { ascending: true })
     if (data) setBets(data)
   }
   async function loadTodos() {
@@ -637,7 +637,7 @@ export default function Dashboard() {
     }
     if (!updatedList.length) return
 
-    setBets(p => p.map(b => updatedList.find(u => u.id === b.id) ?? b))
+    setBets(p => p.filter(b => !updatedList.some(u => u.id === b.id)))
 
     if (site && result === 'win') {
       // stake 한 번만 반환 + profit
@@ -657,7 +657,7 @@ export default function Dashboard() {
       if (data) updatedList.push(data)
     }
     if (!updatedList.length) return
-    setBets(p => p.map(b => updatedList.find(u => u.id === b.id) ?? b))
+    setBets(p => p.filter(b => !updatedList.some(u => u.id === b.id)))
     if (site && wasWin) {
       const stake = groupBets[0].stake
       const profit = groupBets[0].profit  // leg1에만 저장된 profit
@@ -707,8 +707,7 @@ export default function Dashboard() {
     const { data } = await supabase.from('bets').update({ result, profit }).eq('id', bet.id).select().single()
     if (data) {
       await logAction({ action_type: 'update', table_name: 'bets', record_id: data.id, before_data: bet as never, after_data: data as never, description: `결과: ${bet.match} → ${result}` })
-      const updatedBets = bets.map(b => b.id === data.id ? data : b)
-      setBets(updatedBets)
+      setBets(p => p.filter(b => b.id !== data.id))
       if (site && result === 'win') {
         const { data: sd } = await supabase.from('sites').update({ balance: site.balance + bet.stake + profit }).eq('id', site.id).select().single()
         if (sd) setSites(p => p.map(s => s.id === sd.id ? sd : s))
