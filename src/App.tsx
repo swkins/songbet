@@ -6,7 +6,7 @@ import Stats from './pages/Stats'
 import { supabase } from './lib/supabase'
 import { purgeOldLogs } from './lib/logger'
 import dayjs from 'dayjs'
-import { RotateCcw, ClipboardList, X } from 'lucide-react'
+import { RotateCcw, ClipboardList, X, LayoutTemplate } from 'lucide-react'
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'dashboard', label: '대시보드' },
@@ -14,11 +14,20 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'settlement', label: '결산' },
 ]
 
+const WIDTH_OPTIONS: { label: string; value: string }[] = [
+  { label: '전체', value: '100%' },
+  { label: '1600', value: '1600px' },
+  { label: '1280', value: '1280px' },
+  { label: '1024', value: '1024px' },
+]
+
 export default function App() {
   const [tab, setTab] = useState<Tab>('dashboard')
   const [logs, setLogs] = useState<ActionLog[]>([])
   const [showLog, setShowLog] = useState(false)
+  const [showWidthMenu, setShowWidthMenu] = useState(false)
   const [undoing, setUndoing] = useState<string | null>(null)
+  const [maxWidth, setMaxWidth] = useState<string>(() => localStorage.getItem('sb_width') ?? '100%')
 
   useEffect(() => {
     loadLogs(); purgeOldLogs()
@@ -31,6 +40,12 @@ export default function App() {
     window.addEventListener('log-updated', h)
     return () => window.removeEventListener('log-updated', h)
   }, [])
+
+  function setWidth(w: string) {
+    setMaxWidth(w)
+    localStorage.setItem('sb_width', w)
+    setShowWidthMenu(false)
+  }
 
   async function loadLogs() {
     const { data } = await supabase.from('action_logs').select('*')
@@ -54,10 +69,12 @@ export default function App() {
     setUndoing(null)
   }
 
+  const currentLabel = WIDTH_OPTIONS.find(o => o.value === maxWidth)?.label ?? '전체'
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
       <nav className="nav">
-        <div className="nav-inner">
+        <div className="nav-inner" style={{ maxWidth, margin: '0 auto', width: '100%' }}>
           <div className="nav-logo">SongBet</div>
           <div className="nav-tabs">
             {TABS.map(t => (
@@ -65,7 +82,42 @@ export default function App() {
                 onClick={() => setTab(t.id)}>{t.label}</button>
             ))}
           </div>
-          <div style={{ marginLeft: 'auto' }}>
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
+
+            {/* 화면폭 설정 */}
+            <div style={{ position: 'relative' }}>
+              <button onClick={() => setShowWidthMenu(p => !p)} style={{
+                background: showWidthMenu ? 'var(--gold-bg)' : 'transparent',
+                border: `1px solid ${showWidthMenu ? 'var(--gold-border)' : 'var(--border)'}`,
+                borderRadius: 'var(--radius-sm)', color: showWidthMenu ? 'var(--gold)' : 'var(--text-secondary)',
+                cursor: 'pointer', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 5,
+                fontSize: 11, fontWeight: 600, fontFamily: 'var(--font-body)', transition: 'all 0.15s',
+              }}>
+                <LayoutTemplate size={13} />{currentLabel}
+              </button>
+              {showWidthMenu && (
+                <>
+                  <div style={{ position: 'fixed', inset: 0, zIndex: 150 }} onClick={() => setShowWidthMenu(false)} />
+                  <div style={{ position: 'absolute', top: 32, right: 0, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', boxShadow: '0 8px 32px rgba(0,0,0,0.5)', zIndex: 160, overflow: 'hidden', minWidth: 110 }}>
+                    {WIDTH_OPTIONS.map(o => (
+                      <button key={o.value} onClick={() => setWidth(o.value)} style={{
+                        display: 'block', width: '100%', padding: '9px 14px', textAlign: 'left',
+                        background: maxWidth === o.value ? 'var(--gold-bg)' : 'none',
+                        border: 'none', borderBottom: '1px solid var(--border-light)',
+                        color: maxWidth === o.value ? 'var(--gold)' : 'var(--text-primary)',
+                        cursor: 'pointer', fontSize: 12, fontWeight: maxWidth === o.value ? 700 : 400,
+                        fontFamily: 'var(--font-body)',
+                      }}>
+                        {o.label}
+                        {maxWidth === o.value && <span style={{ marginLeft: 6, fontSize: 10 }}>✓</span>}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* LOG 버튼 */}
             <button onClick={() => setShowLog(p => !p)} style={{
               background: showLog ? 'var(--gold-bg)' : 'transparent',
               border: `1px solid ${showLog ? 'var(--gold-border)' : 'var(--border)'}`,
@@ -84,10 +136,12 @@ export default function App() {
         </div>
       </nav>
 
-      <div style={{ flex: 1 }}>
-        {tab === 'dashboard' && <Dashboard />}
-        {tab === 'stats' && <Stats />}
-        {tab === 'settlement' && <Settlement />}
+      <div style={{ flex: 1, display: 'flex', justifyContent: 'center' }}>
+        <div style={{ width: '100%', maxWidth, minWidth: 0 }}>
+          {tab === 'dashboard' && <Dashboard />}
+          {tab === 'stats' && <Stats />}
+          {tab === 'settlement' && <Settlement />}
+        </div>
       </div>
 
       {showLog && (
