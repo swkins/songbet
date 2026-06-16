@@ -749,10 +749,10 @@ export default function Dashboard() {
   /* ════════════ RENDER ════════════ */
   return (
     <div className="page">
-      <div className="dashboard-layout-full">
+      <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: 10, alignItems: 'start', width: '100%' }}>
 
         {/* ── 좌: 할일 + 주간 입금 (260px) ── */}
-        <div style={{ width: 260, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={{ width: isMobile ? '100%' : 260, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
 
           {/* 오늘 할 일 — 타이틀을 card 안에 포함해 베팅현황 타이틀과 시각적 높이 맞춤 */}
           <div className="card" style={{ padding: '10px 12px' }}>
