@@ -441,27 +441,7 @@ export default function Stats() {
                   </div>
                 ))}
               </div>
-              {profitCurve.length > 1 && (
-                <div className="card">
-                  <div className="card-title">누적 손익 곡선</div>
-                  <ResponsiveContainer width="100%" height={170}>
-                    <AreaChart data={profitCurve} margin={{ top: 4, right: 4, left: 4, bottom: 4 }}>
-                      <defs>
-                        <linearGradient id="pg-all" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor={stats.profit >= 0 ? '#00E87A' : '#FF4D6D'} stopOpacity={0.2} />
-                          <stop offset="95%" stopColor={stats.profit >= 0 ? '#00E87A' : '#FF4D6D'} stopOpacity={0} />
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                      <XAxis dataKey="date" tick={{ fontSize: 10, fill: 'var(--text-secondary)' }} tickFormatter={d => dayjs(d).format('MM/DD')} />
-                      <YAxis tick={{ fontSize: 10, fill: 'var(--text-secondary)' }} tickFormatter={v => (v/1000).toFixed(0)+'K'} />
-                      <Tooltip contentStyle={{ background:'var(--bg-elevated)', border:'1px solid var(--border)', borderRadius:6, fontSize:11 }}
-                        formatter={(v: number) => [`${v.toLocaleString()}`, '누적손익']} labelFormatter={l => dayjs(l).format('MM/DD')} />
-                      <Area type="monotone" dataKey="profit" stroke={stats.profit >= 0 ? '#00E87A' : '#FF4D6D'} strokeWidth={2} fill="url(#pg-all)" />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                </div>
-              )}
+
               <div>
                 <div className="card-title" style={{ marginBottom: 8 }}>종목별 수익률</div>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -474,13 +454,12 @@ export default function Stats() {
                     { value: 'esports', label: 'LOL', emoji: '🎮' },
                   ]).map(s => {
                     const sb = settled.filter(b => b.sport === s.value)
-                    if (sb.length === 0) return null
                     const wins = sb.filter(b => b.result === 'win').length
                     const wr = Math.round(wins / sb.length * 100)
                     const profit = sb.reduce((acc, b) => acc + b.profit, 0)
                     const stake = sb.reduce((acc, b) => acc + b.stake, 0)
                     const roi = stake > 0 ? profit / stake * 100 : 0
-                    const isPos = profit >= 0
+                    const isPos = profit > 0
                     return (
                       <div key={s.value}
                         onClick={() => setActiveSport(s.value as Sport)}

@@ -138,7 +138,7 @@ function DepositModal({ site, onClose, onDeposit, onPoint }: {
           {tab === 'deposit' ? `입금액 (${unit})` : `포인트 추가`}
         </div>
         <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
-          <input className="form-input" type="number" placeholder="0" value={amount}
+          <input className="form-input" type="text" inputMode="numeric" placeholder="0" value={amount}
             onChange={e => setAmount(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter' && num > 0) { tab === 'deposit' ? onDeposit(num) : onPoint(num) }}} autoFocus />
           <button className="btn btn-primary" disabled={!num || num <= 0}
@@ -183,7 +183,7 @@ function WithdrawModal({ site, onClose, onWithdraw }: {
         </div>
         <div style={{ fontSize: 9, color: 'var(--text-secondary)', marginBottom: 6, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.8px' }}>출금액 ({unit})</div>
         <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
-          <input className="form-input" type="number" placeholder="0" value={amount}
+          <input className="form-input" type="text" inputMode="numeric" placeholder="0" value={amount}
             onChange={e => setAmount(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && num > 0 && onWithdraw(num)} autoFocus />
           <button className="btn btn-cyan" disabled={!num || num <= 0} onClick={() => num > 0 && onWithdraw(num)} style={{ flexShrink: 0 }}>
@@ -216,8 +216,8 @@ function SiteMgrModal({ sites, onClose, onAdd, onDelete, onToggleCurrency, onTog
   const dragId = { current: '' }; const overId = { current: '' }
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" style={{ maxWidth: 420 }} onClick={e => e.stopPropagation()}>
+    <div className="modal-overlay">
+      <div className="modal" style={{ maxWidth: 420 }}>
         <div className="modal-title" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Settings size={16} color="var(--gold)" /> 사이트 관리</div>
           <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex' }}><X size={16} /></button>
@@ -801,7 +801,7 @@ export default function Dashboard() {
             </>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2 }}>
+              <div className="card" style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <span className="card-title" style={{ margin: 0 }}>베팅 현황</span>
                 <button onClick={() => setShowSiteMgr(true)} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-secondary)', cursor: 'pointer', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-body)' }}>
                   <Settings size={12} /> 사이트관리
@@ -864,8 +864,7 @@ export default function Dashboard() {
                             return (
                               <div key={bet.parlay_group} className="site-bet-entry parlay-entry" style={{ marginBottom: 6 }}
                               onMouseEnter={() => setHoverBetId(bet.parlay_group)} onMouseLeave={() => setHoverBetId(null)}>
-                                <div style={{ fontSize: 9, color: 'var(--purple)', fontWeight: 700, marginBottom: 3 }}>◈ 두폴</div>
-                                {groupBets.map((gb, idx) => (
+                                                                {groupBets.map((gb, idx) => (
                                   <div key={gb.id} style={{ display: 'flex', gap: 5, marginBottom: 2 }}>
                                     <span style={{ fontSize: 10, color: 'var(--text-muted)', width: 18, textAlign: 'center', flexShrink: 0 }}>{idx===0?'①':'②'}</span>
                                     <span className="site-bet-match" style={{ flex: 1, marginBottom: 0, fontSize: 13 }}>{gb.match}</span>

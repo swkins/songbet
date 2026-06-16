@@ -176,38 +176,40 @@ export default function Settlement() {
         </div>
       </div>
 
-      {/* 필터 */}
-      <div style={s.filterRow}>
-        {(['all', 'income', 'expense'] as const).map(f => (
-          <button key={f} style={{ ...s.filterBtn, ...(filter === f ? s.filterBtnActive : {}) }} onClick={() => setFilter(f)}>
-            {f === 'all' ? '전체' : f === 'income' ? '수입' : '지출'}
-          </button>
-        ))}
-      </div>
-
-      {/* 내역 리스트 */}
-      <div style={s.list}>
-        {filtered.length === 0 && (
-          <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--text-muted)', fontSize: 13 }}>내역이 없습니다</div>
-        )}
-        {filtered.map(c => (
-          <div key={c.id} style={s.listItem}>
-            <div style={{ ...s.listIcon, background: c.type === 'income' ? 'var(--green-bg)' : 'var(--red-bg)', border: `1px solid ${c.type === 'income' ? 'var(--green-border)' : 'var(--red-border)'}` }}>
-              {c.type === 'income'
-                ? <TrendingUp size={15} color="var(--green)" />
-                : <TrendingDown size={15} color="var(--red)" />
-              }
+      {/* 3컬럼 리스트 */}
+      <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, padding: '0 14px', minHeight: 0, overflow: 'hidden' }}>
+        {(['expense', 'income', 'all'] as const).map(col => {
+          const colLabel = col === 'expense' ? '지출' : col === 'income' ? '수입' : '추가'
+          const colItems = col === 'all'
+            ? cashflows.filter(c => !['베팅입금','베팅수익','베팅손실'].includes(c.category))
+            : cashflows.filter(c => c.type === col)
+          const colColor = col === 'expense' ? 'var(--red)' : col === 'income' ? 'var(--green)' : 'var(--gold)'
+          return (
+            <div key={col} style={{ display: 'flex', flexDirection: 'column', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden' }}>
+              <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: colColor }}>{colLabel}</span>
+                <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{colItems.length}건</span>
+              </div>
+              <div style={{ flex: 1, overflowY: 'auto' }}>
+                {colItems.length === 0 && <div style={{ textAlign: 'center', padding: '20px 0', color: 'var(--text-muted)', fontSize: 12 }}>내역 없음</div>}
+                {colItems.map(c => (
+                  <div key={c.id} style={{ padding: '8px 10px', borderBottom: '1px solid var(--border-light)', display: 'flex', flexDirection: 'column', gap: 2 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.description}</span>
+                      <button style={s.listDel} onClick={() => deleteCashflow(c)}><Trash2 size={11} /></button>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{c.flow_date}</span>
+                      <span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-num)', color: c.type === 'income' ? 'var(--green)' : 'var(--red)' }}>
+                        {c.type === 'income' ? '+' : '-'}{fmt(c.amount)}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
-            <div style={s.listMeta}>
-              <div style={s.listTitle}>{c.description}</div>
-              <div style={s.listDate}>{c.flow_date}</div>
-            </div>
-            <span style={{ ...s.listAmount, color: c.type === 'income' ? 'var(--green)' : 'var(--red)' }}>
-              {c.type === 'income' ? '+' : '-'}{fmt(c.amount)}
-            </span>
-            <button style={s.listDel} onClick={() => deleteCashflow(c)}><Trash2 size={13} /></button>
-          </div>
-        ))}
+          )
+        })}
       </div>
 
       {/* FAB */}
