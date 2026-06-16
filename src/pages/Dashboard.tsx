@@ -461,7 +461,7 @@ export default function Dashboard() {
     if (data) setSites(data)
   }
   async function loadBets() {
-    const { data } = await supabase.from('bets').select('*').order('bet_date', { ascending: true }).order('created_at', { ascending: true })
+    const { data } = await supabase.from('bets').select('*').eq('is_hidden', false).order('bet_date', { ascending: true }).order('created_at', { ascending: true })
     if (data) setBets(data)
   }
   async function loadTodos() {
@@ -570,7 +570,7 @@ export default function Dashboard() {
       await supabase.from('cashflows').insert({ flow_date: today, type: 'income', category: '베팅수익', description: `${withdrawSite.name} 마감`, amount: amount, site_id: withdrawSite.id, currency: withdrawSite.currency, usd_krw_rate: usdKrwRate, amount_krw: isusd ? amountKrw : amount })
     }
     if (withdrawSite) {
-      await supabase.from('bets').delete().eq('site_id', withdrawSite.id).neq('result', 'pending')
+      await supabase.from('bets').update({ is_hidden: true }).eq('site_id', withdrawSite.id).neq('result', 'pending')
       setBets(p => p.filter(b => !(b.site_id === withdrawSite.id && b.result !== 'pending')))
     }
     await loadSites()

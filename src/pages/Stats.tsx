@@ -407,13 +407,20 @@ export default function Stats() {
         <div className="card"><div className="empty"><div className="empty-icon">📊</div>결과 처리된 베팅이 없습니다</div></div>
       ) : (
         <>
-          <div style={{ display: 'flex', gap: 4, marginBottom: 14, flexWrap: 'wrap' }}>
-            <button className={`filter-chip ${activeSport === 'all' ? 'active' : ''}`} onClick={() => setActiveSport('all')}>
-              📊 전체 <span style={{ opacity: 0.7, fontSize: 10 }}>({settled.length})</span>
-            </button>
-            {sportCounts.filter(s => s.count > 0).map(s => (
-              <button key={s.value} className={`filter-chip ${activeSport === s.value ? 'active' : ''}`} onClick={() => setActiveSport(s.value)}>
-                {s.emoji} {s.label} <span style={{ opacity: 0.7, fontSize: 10 }}>({s.count})</span>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+            {([
+              { value: 'all' as const, label: '전체', emoji: '📊', cnt: settled.length },
+              { value: 'soccer' as const, label: '축구', emoji: '⚽', cnt: settled.filter(b => b.sport === 'soccer').length },
+              { value: 'baseball' as const, label: '야구', emoji: '⚾', cnt: settled.filter(b => b.sport === 'baseball').length },
+              { value: 'basketball' as const, label: '농구', emoji: '🏀', cnt: settled.filter(b => b.sport === 'basketball').length },
+              { value: 'volleyball' as const, label: '배구', emoji: '🏐', cnt: settled.filter(b => b.sport === 'volleyball').length },
+              { value: 'hockey' as const, label: '하키', emoji: '🏒', cnt: settled.filter(b => b.sport === 'hockey').length },
+              { value: 'esports' as const, label: 'LOL', emoji: '🎮', cnt: settled.filter(b => b.sport === 'esports').length },
+            ]).map(s => (
+              <button key={s.value}
+                onClick={() => setActiveSport(s.value)}
+                style={{ padding: '10px 20px', borderRadius: 8, border: activeSport === s.value ? '2px solid var(--gold)' : '1px solid var(--border)', background: activeSport === s.value ? 'var(--gold-bg)' : 'var(--bg-card)', color: activeSport === s.value ? 'var(--gold)' : 'var(--text-secondary)', fontWeight: 700, fontSize: 14, cursor: 'pointer', fontFamily: 'var(--font-body)', transition: 'all 0.15s' }}>
+                {s.emoji} {s.label} <span style={{ opacity: 0.7, fontSize: 12 }}>({s.cnt})</span>
               </button>
             ))}
           </div>
@@ -455,22 +462,43 @@ export default function Stats() {
                   </ResponsiveContainer>
                 </div>
               )}
-              {bySport.length > 0 && (
-                <div className="card">
-                  <div className="card-title">종목별 승률</div>
-                  <ResponsiveContainer width="100%" height={110}>
-                    <BarChart data={bySport} margin={{ top: 4, right: 4, left: -20, bottom: 4 }}>
-                      <XAxis dataKey="label" tick={{ fontSize: 11, fill: 'var(--text-secondary)' }} />
-                      <YAxis hide domain={[0, 100]} />
-                      <Tooltip contentStyle={{ background:'var(--bg-elevated)', border:'1px solid var(--border)', borderRadius:6, fontSize:11 }}
-                        formatter={(v: number, _: string, props: { payload?: { count?: number } }) => [`${v}% (${props.payload?.count ?? 0}건)`, '승률']} />
-                      <Bar dataKey="winRate" radius={[4,4,0,0]}>
-                        {bySport.map((e, i) => <Cell key={i} fill={e.winRate >= 50 ? '#00E87A' : '#FF4D6D'} fillOpacity={0.75} />)}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
+              <div>
+                <div className="card-title" style={{ marginBottom: 8 }}>종목별 수익률</div>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  {([
+                    { value: 'soccer', label: '축구', emoji: '⚽' },
+                    { value: 'baseball', label: '야구', emoji: '⚾' },
+                    { value: 'basketball', label: '농구', emoji: '🏀' },
+                    { value: 'volleyball', label: '배구', emoji: '🏐' },
+                    { value: 'hockey', label: '하키', emoji: '🏒' },
+                    { value: 'esports', label: 'LOL', emoji: '🎮' },
+                  ]).map(s => {
+                    const sb = settled.filter(b => b.sport === s.value)
+                    if (sb.length === 0) return null
+                    const wins = sb.filter(b => b.result === 'win').length
+                    const wr = Math.round(wins / sb.length * 100)
+                    const profit = sb.reduce((acc, b) => acc + b.profit, 0)
+                    const stake = sb.reduce((acc, b) => acc + b.stake, 0)
+                    const roi = stake > 0 ? profit / stake * 100 : 0
+                    const isPos = profit >= 0
+                    return (
+                      <div key={s.value}
+                        onClick={() => setActiveSport(s.value as Sport)}
+                        style={{ flex: '1 0 140px', background: 'var(--bg-card)', border: `1px solid ${isPos ? 'var(--green-border)' : 'var(--red-border)'}`, borderRadius: 10, padding: '12px 14px', cursor: 'pointer', transition: 'all 0.15s' }}>
+                        <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6 }}>{s.emoji} {s.label}</div>
+                        <div style={{ fontSize: 18, fontWeight: 800, fontFamily: 'var(--font-num)', color: isPos ? 'var(--green)' : 'var(--red)', marginBottom: 2 }}>
+                          {isPos ? '+' : ''}{profit.toLocaleString()}원
+                        </div>
+                        <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
+                          <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>승률 <span style={{ color: wr >= 50 ? 'var(--green)' : 'var(--red)', fontWeight: 700 }}>{wr}%</span></span>
+                          <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>ROI <span style={{ color: isPos ? 'var(--green)' : 'var(--red)', fontWeight: 700 }}>{roi >= 0 ? '+' : ''}{roi.toFixed(1)}%</span></span>
+                          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{sb.length}건</span>
+                        </div>
+                      </div>
+                    )
+                  })}
                 </div>
-              )}
+              </div>
             </div>
           )}
           {activeSport !== 'all' && (
