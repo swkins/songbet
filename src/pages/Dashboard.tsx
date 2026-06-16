@@ -457,11 +457,11 @@ export default function Dashboard() {
   useEffect(() => { loadSites(); loadBets(); loadTodos(); loadCashflows() }, [])
 
   async function loadSites() {
-    const { data } = await supabase.from('sites').select('*').eq('active', true).order('sort_order')
+    const { data } = await supabase.from('sites').select('*').order('sort_order')
     if (data) setSites(data)
   }
   async function loadBets() {
-    const { data } = await supabase.from('bets').select('*').order('bet_date', { ascending: true }).order('created_at', { ascending: true })
+    const { data } = await supabase.from('bets').select('*').eq('result', 'pending').order('bet_date', { ascending: true }).order('created_at', { ascending: true })
     if (data) setBets(data)
   }
   async function loadTodos() {
