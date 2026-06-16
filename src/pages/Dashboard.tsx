@@ -479,7 +479,9 @@ export default function Dashboard() {
   const betsBySite       = (id: string) => bets.filter(b => b.site_id === id)
   const pendingBySite    = (id: string) => betsBySite(id).filter(b => b.result === 'pending')
   const settledBySite    = (id: string) => betsBySite(id).filter(b => b.result !== 'pending')
-  const colCount         = Math.max(1, sites.length)
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth <= 640)
+  useEffect(() => { const fn = () => setIsMobile(window.innerWidth <= 640); window.addEventListener('resize', fn); return () => window.removeEventListener('resize', fn) }, [])
+  const colCount = isMobile ? 1 : Math.max(1, sites.length)
   const todayChecked     = todos.filter(t => t.check_dates.includes(today)).length
 
   function sitePnL(site: Site) {

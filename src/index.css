@@ -416,3 +416,18 @@ tr:hover td { background: var(--bg-hover); }
 }
 .stats-sport-card:hover { border-color: var(--gold-border); }
 .stats-sport-card.active { border-color: var(--gold); background: var(--gold-bg); }
+
+/* ── MOBILE ── */
+@media (max-width: 640px) {
+  .dashboard-layout { grid-template-columns: 1fr; }
+  .dashboard-layout-full { flex-direction: column; }
+  .grid-2 { grid-template-columns: 1fr; }
+  .grid-3 { grid-template-columns: 1fr; }
+  .grid-4 { grid-template-columns: 1fr 1fr; }
+  .site-grid { grid-template-columns: 1fr !important; }
+  .page { padding: 12px 12px; }
+  .nav-inner { padding: 0 12px; gap: 8px; }
+  .nav-tab { padding: 6px 12px; font-size: 13px; }
+  .form-row-2 { grid-template-columns: 1fr; }
+  .form-row-3 { grid-template-columns: 1fr; }
+}
