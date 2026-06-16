@@ -866,7 +866,8 @@ export default function Dashboard() {
                             renderedGroups.add(bet.parlay_group)
                             const groupBets = pending.filter(b => b.parlay_group === bet.parlay_group).sort((a,b) => a.parlay_leg - b.parlay_leg)
                             return (
-                              <div key={bet.parlay_group} className="site-bet-entry parlay-entry" style={{ marginBottom: 6 }}>
+                              <div key={bet.parlay_group} className="site-bet-entry parlay-entry" style={{ marginBottom: 6 }}
+                              onMouseEnter={() => setHoverBetId(bet.parlay_group)} onMouseLeave={() => setHoverBetId(null)}>
                                 <div style={{ fontSize: 9, color: 'var(--purple)', fontWeight: 700, marginBottom: 3 }}>◈ 두폴</div>
                                 {groupBets.map((gb, idx) => (
                                   <div key={gb.id} style={{ display: 'flex', gap: 5, marginBottom: 2 }}>
@@ -876,28 +877,33 @@ export default function Dashboard() {
                                 ))}
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingLeft: 23, marginTop: 6 }}>
                                   <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-secondary)' }}>{bet.odds.toFixed(2)} / {pfx}{bet.stake.toLocaleString()}{sfx}</span>
-                                  <div style={{ display: 'flex', gap: 8 }}>
-                                    <button className="bet-result-icon win" onClick={() => applyParlayResult(groupBets, 'win')}><CheckCircle size={20} /></button>
-                                    <button className="bet-result-icon loss" onClick={() => applyParlayResult(groupBets, 'loss')}><XCircle size={20} /></button>
-                                    <button className="bet-result-icon cancel" onClick={() => applyParlayResult(groupBets, 'cancel')}><X size={20} /></button>
-                                  </div>
+                                  {hoverBetId === bet.parlay_group && (
+                                    <div style={{ display: 'flex', gap: 8 }}>
+                                      <button className="bet-result-icon win" onClick={() => applyParlayResult(groupBets, 'win')}><CheckCircle size={20} /></button>
+                                      <button className="bet-result-icon loss" onClick={() => applyParlayResult(groupBets, 'loss')}><XCircle size={20} /></button>
+                                      <button className="bet-result-icon cancel" onClick={() => applyParlayResult(groupBets, 'cancel')}><X size={20} /></button>
+                                    </div>
+                                  )}
                                 </div>
                               </div>
                             )
                           }
                           return (
-                            <div key={bet.id} className="site-bet-entry" style={{ marginBottom: 6 }}>
+                            <div key={bet.id} className="site-bet-entry" style={{ marginBottom: 6 }}
+                              onMouseEnter={() => setHoverBetId(bet.id)} onMouseLeave={() => setHoverBetId(null)}>
                               <div style={{ display: 'flex', gap: 5, marginBottom: 4 }}>
                                 <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0, width: 20, textAlign: 'center' }}>{SPORT_SHORT[bet.sport] ?? '📋'}</span>
                                 <span className="site-bet-match" style={{ flex: 1, marginBottom: 0, fontSize: 13 }}>{bet.match}</span>
                               </div>
                               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingLeft: 25 }}>
                                 <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-secondary)' }}>{bet.odds.toFixed(2)} / {pfx}{bet.stake.toLocaleString()}{sfx}</span>
-                                <div style={{ display: 'flex', gap: 8 }}>
-                                  <button className="bet-result-icon win" onClick={() => applyResult(bet, 'win')}><CheckCircle size={20} /></button>
-                                  <button className="bet-result-icon loss" onClick={() => applyResult(bet, 'loss')}><XCircle size={20} /></button>
-                                  <button className="bet-result-icon cancel" onClick={() => applyResult(bet, 'cancel')}><X size={20} /></button>
-                                </div>
+                                {hoverBetId === bet.id && (
+                                  <div style={{ display: 'flex', gap: 8 }}>
+                                    <button className="bet-result-icon win" onClick={() => applyResult(bet, 'win')}><CheckCircle size={20} /></button>
+                                    <button className="bet-result-icon loss" onClick={() => applyResult(bet, 'loss')}><XCircle size={20} /></button>
+                                    <button className="bet-result-icon cancel" onClick={() => applyResult(bet, 'cancel')}><X size={20} /></button>
+                                  </div>
+                                )}
                               </div>
                             </div>
                           )
