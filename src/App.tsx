@@ -6,7 +6,7 @@ import Stats from './pages/Stats'
 import { supabase } from './lib/supabase'
 import { purgeOldLogs } from './lib/logger'
 import dayjs from 'dayjs'
-import { RotateCcw, ClipboardList, X, LayoutTemplate, Code2, Check, ChevronDown, ChevronUp } from 'lucide-react'
+import { RotateCcw, ClipboardList, X, LayoutTemplate, Code2, Check, ChevronDown, ChevronUp, Save } from 'lucide-react'
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'dashboard', label: '대시보드' },
@@ -31,6 +31,39 @@ interface CodeNote {
   applied_content: string | null
 }
 
+// 엔터 시 다음 번호 자동 삽입
+function handleNumberedEnter(
+  e: React.KeyboardEvent<HTMLTextAreaElement>,
+  value: string,
+  onChange: (v: string) => void
+) {
+  if (e.key !== 'Enter') return
+  e.preventDefault()
+  const el = e.currentTarget
+  const pos = el.selectionStart
+  const before = value.slice(0, pos)
+  const after = value.slice(pos)
+  const lines = before.split('\n')
+  const curLine = lines[lines.length - 1]
+  const match = curLine.match(/^(\d+)\.\s?/)
+  if (match) {
+    const nextNum = parseInt(match[1]) + 1
+    const insert = `\n${nextNum}. `
+    const newVal = before + insert + after
+    onChange(newVal)
+    requestAnimationFrame(() => {
+      el.selectionStart = el.selectionEnd = pos + insert.length
+    })
+  } else {
+    const insert = '\n'
+    const newVal = before + insert + after
+    onChange(newVal)
+    requestAnimationFrame(() => {
+      el.selectionStart = el.selectionEnd = pos + 1
+    })
+  }
+}
+
 export default function App() {
   const [tab, setTab] = useState<Tab>('dashboard')
   const [logs, setLogs] = useState<ActionLog[]>([])
@@ -43,8 +76,10 @@ export default function App() {
   const [showCode, setShowCode] = useState(false)
   const [codeNotes, setCodeNotes] = useState<CodeNote[]>([])
   const [draftContent, setDraftContent] = useState('')
-  const [draftId, setDraftId] = useState<string | null>(null)   // 현재 편집 중인 미반영 note id (null = 새 항목)
-  const [applying, setApplying] = useState<string | null>(null)
+  const [draftId, setDraftId] = useState<string | null>(null)
+  const [applying, setApplying] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [savedFlash, setSavedFlash] = useState(false)
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const [collapsedApplied, setCollapsedApplied] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -66,7 +101,7 @@ export default function App() {
     if (showCode) loadCodeNotes()
   }, [showCode])
 
-  // 패널 열릴 때 미반영 draft 복원
+  // 패널 열릴 때 미반영 draft 복원 + 커서 맨 끝으로
   useEffect(() => {
     if (!showCode) return
     const pending = codeNotes.find(n => !n.applied_at)
@@ -75,9 +110,27 @@ export default function App() {
       setDraftContent(pending.content)
     } else {
       setDraftId(null)
-      setDraftContent('')
+      setDraftContent('1. ')
     }
-  }, [showCode, codeNotes.length])
+    // 다음 프레임에 포커스 + 커서 끝
+    requestAnimationFrame(() => {
+      const el = textareaRef.current
+      if (!el) return
+      el.focus()
+      el.selectionStart = el.selectionEnd = el.value.length
+    })
+  }, [showCode])
+
+  // draft 복원 후 커서 끝 맞추기 (codeNotes 로딩 완료 시점)
+  useEffect(() => {
+    if (!showCode) return
+    requestAnimationFrame(() => {
+      const el = textareaRef.current
+      if (!el) return
+      el.focus()
+      el.selectionStart = el.selectionEnd = el.value.length
+    })
+  }, [codeNotes.length, showCode])
 
   function setWidth(w: string) {
     setMaxWidth(w)
@@ -113,9 +166,9 @@ export default function App() {
     if (data) setCodeNotes(data as CodeNote[])
   }
 
-  // draft 자동저장 (blur or 타이머)
-  async function saveDraft(content: string) {
+  async function saveDraft(content: string, quiet = false) {
     if (!content.trim()) return
+    if (!quiet) setSaving(true)
     if (draftId) {
       const { data } = await supabase.from('code_notes').update({ content }).eq('id', draftId).select().single()
       if (data) setCodeNotes(p => p.map(n => n.id === draftId ? data as CodeNote : n))
@@ -126,28 +179,31 @@ export default function App() {
         setCodeNotes(p => [data as CodeNote, ...p])
       }
     }
+    if (!quiet) {
+      setSaving(false)
+      setSavedFlash(true)
+      setTimeout(() => setSavedFlash(false), 1500)
+    }
   }
 
   function handleDraftChange(v: string) {
     setDraftContent(v)
     if (saveTimer.current) clearTimeout(saveTimer.current)
-    saveTimer.current = setTimeout(() => saveDraft(v), 1500)
+    saveTimer.current = setTimeout(() => saveDraft(v, true), 1500)
   }
 
   function handleDraftBlur() {
     if (saveTimer.current) clearTimeout(saveTimer.current)
-    saveDraft(draftContent)
+    saveDraft(draftContent, true)
   }
 
-  // 반영 버튼
   async function applyNote() {
     if (!draftContent.trim()) return
-    setApplying('applying')
+    setApplying(true)
     let noteId = draftId
-    // 없으면 먼저 저장
     if (!noteId) {
       const { data } = await supabase.from('code_notes').insert({ content: draftContent }).select().single()
-      if (!data) { setApplying(null); return }
+      if (!data) { setApplying(false); return }
       noteId = (data as CodeNote).id
     }
     const now = new Date().toISOString()
@@ -155,16 +211,18 @@ export default function App() {
       .update({ applied_at: now, applied_content: draftContent })
       .eq('id', noteId).select().single()
     if (data) {
-      // 클립보드 복사
       try { await navigator.clipboard.writeText(draftContent) } catch { /* 무시 */ }
       setCopiedId(noteId)
       setTimeout(() => setCopiedId(null), 2000)
       setCodeNotes(p => p.map(n => n.id === noteId ? data as CodeNote : n))
-      // draft 초기화 (다음 항목 새로 작성)
       setDraftId(null)
-      setDraftContent('')
+      setDraftContent('1. ')
+      requestAnimationFrame(() => {
+        const el = textareaRef.current
+        if (el) { el.focus(); el.selectionStart = el.selectionEnd = el.value.length }
+      })
     }
-    setApplying(null)
+    setApplying(false)
   }
 
   const pending = codeNotes.find(n => !n.applied_at)
@@ -228,20 +286,15 @@ export default function App() {
               <Code2 size={13} />코드수정
             </button>
 
-            {/* LOG 버튼 */}
+            {/* LOG 버튼 — 숫자 뱃지 제거 */}
             <button onClick={() => { setShowLog(p => !p); if (showCode) setShowCode(false) }} style={{
               background: showLog ? 'var(--gold-bg)' : 'transparent',
               border: `1px solid ${showLog ? 'var(--gold-border)' : 'var(--border)'}`,
               borderRadius: 'var(--radius-sm)', color: showLog ? 'var(--gold)' : 'var(--text-secondary)',
               cursor: 'pointer', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 5,
-              fontSize: 11, fontWeight: 600, fontFamily: 'var(--font-body)', transition: 'all 0.15s', position: 'relative',
+              fontSize: 11, fontWeight: 600, fontFamily: 'var(--font-body)', transition: 'all 0.15s',
             }}>
               <ClipboardList size={13} />LOG
-              {logs.length > 0 && (
-                <span style={{ position: 'absolute', top: -5, right: -5, background: 'var(--gold)', color: '#000', borderRadius: '50%', width: 15, height: 15, fontSize: 9, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  {logs.length > 99 ? '99' : logs.length}
-                </span>
-              )}
             </button>
           </div>
         </div>
@@ -275,44 +328,59 @@ export default function App() {
             <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column' }}>
               {/* 편집 영역 */}
               <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
-                <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.8px', marginBottom: 6, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <span>수정 내용</span>
-                  {pending && draftId === pending.id && (
-                    <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>자동저장됨</span>
-                  )}
-                </div>
                 <textarea
                   ref={textareaRef}
                   value={draftContent}
                   onChange={e => handleDraftChange(e.target.value)}
                   onBlur={handleDraftBlur}
-                  placeholder={'수정할 내용을 입력하세요.\n\n예시:\n- Dashboard.tsx: 베팅 추가 버튼 색상 변경\n- App.tsx: 기본 폭 1920px로 수정'}
+                  onKeyDown={e => handleNumberedEnter(e, draftContent, handleDraftChange)}
+                  placeholder={'1. 수정할 내용 입력\n2. 엔터 시 번호 자동 증가'}
                   style={{
-                    width: '100%', minHeight: 160, resize: 'vertical',
+                    width: '100%', minHeight: 180, resize: 'vertical',
                     background: 'var(--bg)', border: '1px solid var(--border)',
                     borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)',
-                    fontFamily: 'var(--font-body)', fontSize: 12, lineHeight: 1.6,
+                    fontFamily: 'var(--font-body)', fontSize: 12, lineHeight: 1.7,
                     padding: '8px 10px', outline: 'none', boxSizing: 'border-box',
                     transition: 'border-color 0.15s',
                   }}
                   onFocus={e => { e.currentTarget.style.borderColor = 'var(--cyan)' }}
                   onBlurCapture={e => { e.currentTarget.style.borderColor = 'var(--border)' }}
                 />
-                <button
-                  onClick={applyNote}
-                  disabled={!draftContent.trim() || applying === 'applying'}
-                  style={{
-                    marginTop: 8, width: '100%', padding: '8px 0',
-                    background: draftContent.trim() ? 'var(--cyan-bg)' : 'var(--bg-elevated)',
-                    border: `1px solid ${draftContent.trim() ? 'var(--cyan-border)' : 'var(--border)'}`,
-                    borderRadius: 'var(--radius-sm)', color: draftContent.trim() ? 'var(--cyan)' : 'var(--text-muted)',
-                    cursor: draftContent.trim() ? 'pointer' : 'not-allowed',
-                    fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-body)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
-                    transition: 'all 0.15s',
-                  }}>
-                  {applying === 'applying' ? '처리중...' : copiedId && copiedId === draftId ? <><Check size={12} /> 복사됨!</> : '반영'}
-                </button>
+                {/* 저장 / 반영 버튼 행 */}
+                <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                  <button
+                    onClick={() => saveDraft(draftContent)}
+                    disabled={!draftContent.trim() || saving}
+                    style={{
+                      flex: 1, padding: '7px 0',
+                      background: savedFlash ? 'var(--green-bg)' : (draftContent.trim() ? 'var(--bg-elevated)' : 'var(--bg-elevated)'),
+                      border: `1px solid ${savedFlash ? 'var(--green-border)' : 'var(--border)'}`,
+                      borderRadius: 'var(--radius-sm)',
+                      color: savedFlash ? 'var(--green)' : (draftContent.trim() ? 'var(--text-secondary)' : 'var(--text-muted)'),
+                      cursor: draftContent.trim() ? 'pointer' : 'not-allowed',
+                      fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-body)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
+                      transition: 'all 0.15s',
+                    }}>
+                    {savedFlash ? <><Check size={11} />저장됨</> : saving ? '저장중...' : <><Save size={11} />저장</>}
+                  </button>
+                  <button
+                    onClick={applyNote}
+                    disabled={!draftContent.trim() || applying}
+                    style={{
+                      flex: 1, padding: '7px 0',
+                      background: draftContent.trim() ? 'var(--cyan-bg)' : 'var(--bg-elevated)',
+                      border: `1px solid ${draftContent.trim() ? 'var(--cyan-border)' : 'var(--border)'}`,
+                      borderRadius: 'var(--radius-sm)',
+                      color: draftContent.trim() ? 'var(--cyan)' : 'var(--text-muted)',
+                      cursor: draftContent.trim() ? 'pointer' : 'not-allowed',
+                      fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-body)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
+                      transition: 'all 0.15s',
+                    }}>
+                    {applying ? '처리중...' : copiedId === (draftId ?? '_') ? <><Check size={11} />복사됨!</> : '반영'}
+                  </button>
+                </div>
               </div>
 
               {/* 반영 목록 */}

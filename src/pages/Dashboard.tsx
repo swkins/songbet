@@ -943,7 +943,7 @@ export default function Dashboard() {
                                     {groupBets.map((gb, idx) => (
                                       <div key={gb.id} style={{ display: 'flex', gap: 5, marginBottom: 2 }}>
                                         <span style={{ fontSize: 10, color: 'var(--text-muted)', width: 18, textAlign: 'center', flexShrink: 0 }}>{idx===0?'①':'②'}</span>
-                                        <span className="site-bet-match" style={{ flex: 1, marginBottom: 0, fontSize: 12, textDecoration: isLoss ? 'line-through' : 'none', color: isWin ? 'var(--green)' : isLoss ? 'var(--red)' : 'var(--text-secondary)' }}>{gb.match}</span>
+                                        <span className="site-bet-match" style={{ flex: 1, marginBottom: 0, fontSize: 12, color: isWin ? 'var(--green)' : isLoss ? 'var(--red)' : 'var(--text-secondary)' }}>{gb.match}</span>
                                       </div>
                                     ))}
                                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingLeft: 23, marginTop: 4 }}>
@@ -964,7 +964,7 @@ export default function Dashboard() {
                                   onMouseEnter={() => setHoverBetId('s_' + bet.id)} onMouseLeave={() => setHoverBetId(null)}>
                                   <div style={{ display: 'flex', gap: 5, marginBottom: 3 }}>
                                     <span style={{ fontSize: 14, lineHeight: 1, flexShrink: 0, width: 20, textAlign: 'center' }}>{SPORT_SHORT[bet.sport] ?? '📋'}</span>
-                                    <span className="site-bet-match" style={{ flex: 1, marginBottom: 0, fontSize: 12, textDecoration: bet.result === 'loss' ? 'line-through' : 'none', color: bet.result === 'win' ? 'var(--green)' : bet.result === 'loss' ? 'var(--red)' : 'var(--text-secondary)' }}>{bet.match}</span>
+                                    <span className="site-bet-match" style={{ flex: 1, marginBottom: 0, fontSize: 12, color: bet.result === 'win' ? 'var(--green)' : bet.result === 'loss' ? 'var(--red)' : 'var(--text-secondary)' }}>{bet.match}</span>
                                   </div>
                                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingLeft: 25 }}>
                                     <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-muted)' }}>{bet.odds.toFixed(2)} / {pfx}{bet.stake.toLocaleString()}{sfx}</span>
