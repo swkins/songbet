@@ -449,6 +449,7 @@ export default function Dashboard() {
   const [withdrawSite, setWithdrawSite] = useState<Site | null>(null)
   const [openFormSiteId, setOpenFormSiteId] = useState<string | null>(null)
   const [hoverBetId, setHoverBetId]     = useState<string | null>(null)
+  const [collapsedSettled, setCollapsedSettled] = useState<Set<string>>(new Set())
 
   const [todos, setTodos]       = useState<Todo[]>([])
   const [newTodo, setNewTodo]   = useState('')
@@ -914,6 +915,73 @@ export default function Dashboard() {
                           <SingleBetForm site={site} defaultSport={pending.slice(-1)[0]?.sport ?? 'soccer'} onClose={() => setOpenFormSiteId(null)} onBet={(sp,ct,od,amt) => submitBet(site,sp,ct,od,amt)} />
                         )}
                       </div>
+                      {/* 완료된 목록 — 마감(비활성) 사이트에선 숨김 */}
+                      {site.active && settled.length > 0 && (() => {
+                        const isCollapsed = collapsedSettled.has(site.id)
+                        const toggleCollapsed = () => setCollapsedSettled(prev => {
+                          const next = new Set(prev)
+                          isCollapsed ? next.delete(site.id) : next.add(site.id)
+                          return next
+                        })
+                        const renderedSettledGroups = new Set<string>()
+                        return (
+                          <div style={{ marginTop: 8, borderTop: '1px solid var(--border-light)', paddingTop: 6 }}>
+                            <button onClick={toggleCollapsed} style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '3px 2px', marginBottom: isCollapsed ? 0 : 4 }}>
+                              <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.8px' }}>완료된 목록 ({settled.length})</span>
+                              <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{isCollapsed ? '▼' : '▲'}</span>
+                            </button>
+                            {!isCollapsed && settled.map(bet => {
+                              if (bet.parlay_group) {
+                                if (renderedSettledGroups.has(bet.parlay_group)) return null
+                                renderedSettledGroups.add(bet.parlay_group)
+                                const groupBets = settled.filter(b => b.parlay_group === bet.parlay_group).sort((a,b) => a.parlay_leg - b.parlay_leg)
+                                const isWin = groupBets[0].result === 'win'
+                                const isLoss = groupBets[0].result === 'loss'
+                                return (
+                                  <div key={bet.parlay_group} className="site-bet-entry parlay-entry" style={{ marginBottom: 5, opacity: 0.7 }}
+                                    onMouseEnter={() => setHoverBetId('s_' + bet.parlay_group)} onMouseLeave={() => setHoverBetId(null)}>
+                                    {groupBets.map((gb, idx) => (
+                                      <div key={gb.id} style={{ display: 'flex', gap: 5, marginBottom: 2 }}>
+                                        <span style={{ fontSize: 10, color: 'var(--text-muted)', width: 18, textAlign: 'center', flexShrink: 0 }}>{idx===0?'①':'②'}</span>
+                                        <span className="site-bet-match" style={{ flex: 1, marginBottom: 0, fontSize: 12, textDecoration: isLoss ? 'line-through' : 'none', color: isWin ? 'var(--green)' : isLoss ? 'var(--red)' : 'var(--text-secondary)' }}>{gb.match}</span>
+                                      </div>
+                                    ))}
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingLeft: 23, marginTop: 4 }}>
+                                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-muted)' }}>{bet.odds.toFixed(2)} / {pfx}{bet.stake.toLocaleString()}{sfx}</span>
+                                      {hoverBetId === 's_' + bet.parlay_group ? (
+                                        <button className="btn btn-ghost btn-xs" style={{ fontSize: 10 }} onClick={() => applyParlayRevert(groupBets)}><RotateCcw size={9} /> 되돌리기</button>
+                                      ) : (
+                                        <span style={{ fontSize: 10, fontWeight: 700, color: isWin ? 'var(--green)' : isLoss ? 'var(--red)' : 'var(--blue)' }}>
+                                          {isWin ? `+${pfx}${groupBets[0].profit.toLocaleString()}${sfx}` : isLoss ? `-${pfx}${bet.stake.toLocaleString()}${sfx}` : 'PUSH'}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                )
+                              }
+                              return (
+                                <div key={bet.id} className="site-bet-entry" style={{ marginBottom: 5, opacity: 0.7 }}
+                                  onMouseEnter={() => setHoverBetId('s_' + bet.id)} onMouseLeave={() => setHoverBetId(null)}>
+                                  <div style={{ display: 'flex', gap: 5, marginBottom: 3 }}>
+                                    <span style={{ fontSize: 14, lineHeight: 1, flexShrink: 0, width: 20, textAlign: 'center' }}>{SPORT_SHORT[bet.sport] ?? '📋'}</span>
+                                    <span className="site-bet-match" style={{ flex: 1, marginBottom: 0, fontSize: 12, textDecoration: bet.result === 'loss' ? 'line-through' : 'none', color: bet.result === 'win' ? 'var(--green)' : bet.result === 'loss' ? 'var(--red)' : 'var(--text-secondary)' }}>{bet.match}</span>
+                                  </div>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingLeft: 25 }}>
+                                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-muted)' }}>{bet.odds.toFixed(2)} / {pfx}{bet.stake.toLocaleString()}{sfx}</span>
+                                    {hoverBetId === 's_' + bet.id ? (
+                                      <button className="btn btn-ghost btn-xs" style={{ fontSize: 10 }} onClick={() => applyResult(bet, 'revert')}><RotateCcw size={9} /> 되돌리기</button>
+                                    ) : (
+                                      <span style={{ fontSize: 10, fontWeight: 700, color: bet.result === 'win' ? 'var(--green)' : bet.result === 'loss' ? 'var(--red)' : 'var(--blue)' }}>
+                                        {bet.result === 'win' ? `+${pfx}${bet.profit.toLocaleString()}${sfx}` : bet.result === 'loss' ? `-${pfx}${bet.stake.toLocaleString()}${sfx}` : 'PUSH'}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        )
+                      })()}
                     </div>
                   </div>
                 )

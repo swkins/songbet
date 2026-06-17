@@ -29,7 +29,7 @@ export default function App() {
   const [showLog, setShowLog] = useState(false)
   const [showWidthMenu, setShowWidthMenu] = useState(false)
   const [undoing, setUndoing] = useState<string | null>(null)
-  const [maxWidth, setMaxWidth] = useState<string>(() => localStorage.getItem('sb_width') ?? '100%')
+  const [maxWidth, setMaxWidth] = useState<string>(() => localStorage.getItem('sb_width') ?? '1920px')
 
   useEffect(() => {
     loadLogs(); purgeOldLogs()
