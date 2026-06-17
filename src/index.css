@@ -465,6 +465,6 @@ tr:hover td { background: var(--bg-hover); }
 
 @media (min-width: 641px) {
   .dashboard-main { flex-direction: row; align-items: start; }
-  .dashboard-side { width: 260px; flex-shrink: 0; }
+  .dashboard-side { width: 320px; flex-shrink: 0; }
   .dashboard-bets { flex: 1; min-width: 0; }
 }
