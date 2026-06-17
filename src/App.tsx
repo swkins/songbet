@@ -16,6 +16,8 @@ const TABS: { id: Tab; label: string }[] = [
 
 const WIDTH_OPTIONS: { label: string; value: string }[] = [
   { label: '전체', value: '100%' },
+  { label: '1920', value: '1920px' },
+  { label: '1760', value: '1760px' },
   { label: '1600', value: '1600px' },
   { label: '1280', value: '1280px' },
   { label: '1024', value: '1024px' },
