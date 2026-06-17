@@ -92,7 +92,7 @@ function DepositModal({ site, onClose, onDeposit, onPoint }: {
 }) {
   const [tab, setTab] = useState<'deposit' | 'point'>('deposit')
   const [amount, setAmount] = useState('')
-  const num = Number(amount)
+  const num = Number(amount.replace(/,/g, ""))
   const isusd = site.currency === 'usd'
   const dep = site.last_deposit ?? 0; const pt = site.point_deposit ?? 0
   const tot = dep + pt; const done = site.deposit_bet_done ?? 0
@@ -275,7 +275,7 @@ function SingleBetForm({ site, onClose, onBet, defaultSport }: {
   const [amount, setAmount]   = useState('')
   const [submitting, setSubmitting] = useState(false)
   const isusd = site.currency === 'usd'; const unit = isusd ? '$' : '원'
-  const oddsV = parseOdds(oddsRaw); const stakeN = Number(amount)
+  const oddsV = parseOdds(oddsRaw); const stakeN = Number(amount.replace(/,/g, ""))
   const hotkeys = isusd ? [5, 10] : [5000, 10000]
 
   function handleOdds(raw: string) {
@@ -337,7 +337,7 @@ function DoubleBetForm({ site, lastLeg1, onClose, onBet }: {
   const [amount, setAmount] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const isusd = site.currency === 'usd'; const unit = isusd ? '$' : '원'
-  const oddsV = parseOdds(oddsRaw); const stakeN = Number(amount)
+  const oddsV = parseOdds(oddsRaw); const stakeN = Number(amount.replace(/,/g, ""))
   const hotkeys = isusd ? [5, 10] : [5000, 10000]
   const labelStyle: React.CSSProperties = { fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.6px', color: 'var(--text-muted)', marginBottom: 2 }
 
