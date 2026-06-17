@@ -97,13 +97,19 @@ export default function App() {
     return () => window.removeEventListener('log-updated', h)
   }, [])
 
+  const justOpenedCode = useRef(false)
+
   useEffect(() => {
-    if (showCode) loadCodeNotes()
+    if (showCode) {
+      justOpenedCode.current = true
+      loadCodeNotes()
+    }
   }, [showCode])
 
-  // 패널 열릴 때 미반영 draft 복원 + 커서 맨 끝으로
+  // codeNotes 로딩 완료 후 draft 복원 (패널 열릴 때만)
   useEffect(() => {
-    if (!showCode) return
+    if (!showCode || !justOpenedCode.current) return
+    justOpenedCode.current = false
     const pending = codeNotes.find(n => !n.applied_at)
     if (pending) {
       setDraftId(pending.id)
@@ -112,25 +118,13 @@ export default function App() {
       setDraftId(null)
       setDraftContent('1. ')
     }
-    // 다음 프레임에 포커스 + 커서 끝
     requestAnimationFrame(() => {
       const el = textareaRef.current
       if (!el) return
       el.focus()
       el.selectionStart = el.selectionEnd = el.value.length
     })
-  }, [showCode])
-
-  // draft 복원 후 커서 끝 맞추기 (codeNotes 로딩 완료 시점)
-  useEffect(() => {
-    if (!showCode) return
-    requestAnimationFrame(() => {
-      const el = textareaRef.current
-      if (!el) return
-      el.focus()
-      el.selectionStart = el.selectionEnd = el.value.length
-    })
-  }, [codeNotes.length, showCode])
+  }, [codeNotes])
 
   function setWidth(w: string) {
     setMaxWidth(w)
