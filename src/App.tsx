@@ -147,6 +147,9 @@ export default function App() {
         await supabase.from(log.table_name).insert(log.before_data)
       else if (log.action_type === 'update' && log.before_data && log.record_id)
         await supabase.from(log.table_name).update(log.before_data).eq('id', log.record_id)
+      // 입금/출금과 함께 생성된 cashflow도 같이 삭제
+      if (log.cashflow_id)
+        await supabase.from('cashflows').delete().eq('id', log.cashflow_id)
       await supabase.from('action_logs').delete().eq('id', log.id)
       setLogs(p => p.filter(l => l.id !== log.id))
       window.location.reload()

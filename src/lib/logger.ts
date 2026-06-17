@@ -7,6 +7,7 @@ export async function logAction(params: {
   before_data?: Record<string, unknown> | null
   after_data?: Record<string, unknown> | null
   description: string
+  cashflow_id?: string | null
 }) {
   await supabase.from('action_logs').insert({
     action_type: params.action_type,
@@ -15,6 +16,7 @@ export async function logAction(params: {
     before_data: params.before_data ?? null,
     after_data: params.after_data ?? null,
     description: params.description,
+    cashflow_id: params.cashflow_id ?? null,
   })
   // App에 로그 갱신 이벤트 발송
   window.dispatchEvent(new Event('log-updated'))

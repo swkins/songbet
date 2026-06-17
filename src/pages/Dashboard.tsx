@@ -541,11 +541,11 @@ export default function Dashboard() {
       deposit_bet_done: Math.max(0, newDone),
     }).eq('id', depositSite.id).select().single()
     if (data) {
-      await logAction({ action_type: 'update', table_name: 'sites', record_id: data.id, before_data: before as never, after_data: data as never, description: `${depositSite.name} 입금 +${amount.toLocaleString()}` })
-      setSites(p => p.map(s => s.id === data.id ? data : s))
       let usdKrwRate: number | null = null; let amountKrw: number | null = null
       if (isusd) { usdKrwRate = await getUsdKrwRate(); amountKrw = Math.round(amount * usdKrwRate) }
-      await supabase.from('cashflows').insert({ flow_date: today, type: 'expense', category: '베팅입금', description: `${depositSite.name} 입금`, amount, site_id: depositSite.id, currency: depositSite.currency, usd_krw_rate: usdKrwRate, amount_krw: isusd ? amountKrw : amount })
+      const { data: cf } = await supabase.from('cashflows').insert({ flow_date: today, type: 'expense', category: '베팅입금', description: `${depositSite.name} 입금`, amount, site_id: depositSite.id, currency: depositSite.currency, usd_krw_rate: usdKrwRate, amount_krw: isusd ? amountKrw : amount }).select().single()
+      await logAction({ action_type: 'update', table_name: 'sites', record_id: data.id, before_data: before as never, after_data: data as never, description: `${depositSite.name} 입금 +${amount.toLocaleString()}`, cashflow_id: cf?.id ?? null })
+      setSites(p => p.map(s => s.id === data.id ? data : s))
       loadCashflows()
     }
     setDepositSite(null)
@@ -564,11 +564,11 @@ export default function Dashboard() {
     const netProfit = amount - totalIn
     const { data } = await supabase.from('sites').update({ active: false, total_withdrawal: (withdrawSite.total_withdrawal ?? 0) + amount, balance: 0, last_deposit: 0, deposit_bet_done: 0, point_deposit: 0 }).eq('id', withdrawSite.id).select().single()
     if (data) {
-      await logAction({ action_type: 'update', table_name: 'sites', record_id: data.id, before_data: before as never, after_data: data as never, description: `${withdrawSite.name} 출금 ${amount.toLocaleString()}` })
       setSites(p => p.map(s => s.id === data.id ? data : s))
       let usdKrwRate: number | null = null; let amountKrw: number | null = null
       if (isusd) { usdKrwRate = await getUsdKrwRate(); amountKrw = Math.round(Math.abs(netProfit) * usdKrwRate) }
-      await supabase.from('cashflows').insert({ flow_date: today, type: 'income', category: '베팅수익', description: `${withdrawSite.name} 마감`, amount: amount, site_id: withdrawSite.id, currency: withdrawSite.currency, usd_krw_rate: usdKrwRate, amount_krw: isusd ? amountKrw : amount })
+      const { data: cf } = await supabase.from('cashflows').insert({ flow_date: today, type: 'income', category: '베팅수익', description: `${withdrawSite.name} 마감`, amount: amount, site_id: withdrawSite.id, currency: withdrawSite.currency, usd_krw_rate: usdKrwRate, amount_krw: isusd ? amountKrw : amount }).select().single()
+      await logAction({ action_type: 'update', table_name: 'sites', record_id: data.id, before_data: before as never, after_data: data as never, description: `${withdrawSite.name} 출금 ${amount.toLocaleString()}`, cashflow_id: cf?.id ?? null })
     }
     if (withdrawSite) {
       await supabase.from('bets').update({ is_hidden: true }).eq('site_id', withdrawSite.id).neq('result', 'pending')

@@ -36,5 +36,6 @@ export interface ActionLog {
   id: string; created_at: string; action_type: 'insert' | 'update' | 'delete'
   table_name: string; record_id: string | null
   before_data: Record<string, unknown> | null; after_data: Record<string, unknown> | null; description: string
+  cashflow_id: string | null
 }
 export type Tab = 'dashboard' | 'stats' | 'settlement'
