@@ -53,6 +53,8 @@ function handleNumberedEnter(
     onChange(newVal)
     requestAnimationFrame(() => {
       el.selectionStart = el.selectionEnd = pos + insert.length
+      // 6. 새 행이 보이도록 스크롤 맨 아래로
+      el.scrollTop = el.scrollHeight
     })
   } else {
     const insert = '\n'
@@ -60,6 +62,8 @@ function handleNumberedEnter(
     onChange(newVal)
     requestAnimationFrame(() => {
       el.selectionStart = el.selectionEnd = pos + 1
+      // 6. 새 행이 보이도록 스크롤 맨 아래로
+      el.scrollTop = el.scrollHeight
     })
   }
 }
@@ -103,6 +107,7 @@ export default function App() {
     if (showCode) {
       justOpenedCode.current = true
       loadCodeNotes()
+      purgeOldApplied()
     }
   }, [showCode])
 
@@ -180,6 +185,22 @@ export default function App() {
       setSaving(false)
       setSavedFlash(true)
       setTimeout(() => setSavedFlash(false), 1500)
+      // 3. 저장 버튼 클릭 시 패널 자동 닫기
+      setShowCode(false)
+    }
+  }
+
+  // 2. 반영목록 하루 지난 항목 자동 삭제
+  async function purgeOldApplied() {
+    const cutoff = dayjs().subtract(1, 'day').toISOString()
+    const { data } = await supabase.from('code_notes')
+      .select('id')
+      .not('applied_at', 'is', null)
+      .lt('applied_at', cutoff)
+    if (data && data.length > 0) {
+      const ids = data.map((r: { id: string }) => r.id)
+      await supabase.from('code_notes').delete().in('id', ids)
+      setCodeNotes(p => p.filter(n => !ids.includes(n.id)))
     }
   }
 
@@ -333,7 +354,7 @@ export default function App() {
                   onKeyDown={e => handleNumberedEnter(e, draftContent, handleDraftChange)}
                   placeholder={'1. 수정할 내용 입력\n2. 엔터 시 번호 자동 증가'}
                   style={{
-                    width: '100%', minHeight: 180, resize: 'vertical',
+                    width: '100%', minHeight: 260, resize: 'vertical',
                     background: 'var(--bg)', border: '1px solid var(--border)',
                     borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)',
                     fontFamily: 'var(--font-body)', fontSize: 12, lineHeight: 1.7,

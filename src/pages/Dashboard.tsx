@@ -453,7 +453,7 @@ export default function Dashboard() {
 
   const [todos, setTodos]       = useState<Todo[]>([])
   const [newTodo, setNewTodo]   = useState('')
-  const [calOpenId, setCalOpenId] = useState<string | null>(null)
+  const [settingsOpenId, setSettingsOpenId] = useState<string | null>(null)
 
   useEffect(() => { loadSites(); loadBets(); loadTodos(); loadCashflows() }, [])
 
@@ -762,19 +762,58 @@ export default function Dashboard() {
             {todos.length === 0 && <div className="empty" style={{ padding: '10px 0' }}><div className="empty-icon">📋</div>추가하세요</div>}
             {todos.map(t => {
               const isChecked = t.check_dates.includes(today)
+              const isSettingsOpen = settingsOpenId === t.id
               return (
-                <div key={t.id}>
+                <div key={t.id} style={{ position: 'relative' }}>
                   <div className="todo-item">
                     <div className={`todo-check ${isChecked ? 'done' : ''}`} onClick={() => toggleTodo(t)}>{isChecked && <Check size={8} color="#000" strokeWidth={3} />}</div>
                     <span className={`todo-text ${isChecked ? 'done' : ''}`}>{t.content}</span>
                     <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--gold)', background: 'var(--gold-bg)', border: '1px solid var(--gold-border)', padding: '0 4px', borderRadius: 5, flexShrink: 0 }}>{t.check_count}회</span>
-                    <button className="btn btn-icon btn-ghost btn-sm" style={calOpenId === t.id ? { background: 'var(--gold-bg)' } : {}} onClick={() => setCalOpenId(calOpenId === t.id ? null : t.id)}>
-                      <Calendar size={10} color={calOpenId === t.id ? 'var(--gold)' : 'var(--text-secondary)'} />
+                    <button
+                      className="btn btn-icon btn-ghost btn-sm"
+                      style={isSettingsOpen ? { background: 'var(--bg-elevated)' } : {}}
+                      onClick={() => setSettingsOpenId(isSettingsOpen ? null : t.id)}
+                    >
+                      <Settings size={10} color={isSettingsOpen ? 'var(--text-primary)' : 'var(--text-secondary)'} />
                     </button>
-                    <button className="btn btn-icon btn-ghost btn-sm" onClick={() => resetTodo(t)}><RotateCcw size={10} color="var(--text-secondary)" /></button>
-                    <button className="btn btn-icon btn-ghost btn-sm" onClick={() => deleteTodo(t)}><Trash2 size={10} color="var(--text-secondary)" /></button>
                   </div>
-                  {calOpenId === t.id && <div style={{ paddingLeft: 20, paddingBottom: 6, paddingTop: 3 }}><MiniCalendar checkedDates={t.check_dates} onToggle={d => toggleCalDate(t, d)} /></div>}
+                  {/* 설정 팝업 */}
+                  {isSettingsOpen && (
+                    <>
+                      <div style={{ position: 'fixed', inset: 0, zIndex: 200 }} onClick={() => setSettingsOpenId(null)} />
+                      <div style={{
+                        position: 'absolute', right: 0, top: '100%', zIndex: 210,
+                        background: 'var(--bg-card)', border: '1px solid var(--border)',
+                        borderRadius: 'var(--radius)', boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+                        minWidth: 200, padding: '8px 0',
+                      }} onClick={e => e.stopPropagation()}>
+                        {/* 달력 */}
+                        <div style={{ padding: '4px 12px 8px' }}>
+                          <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.6px', marginBottom: 6 }}>달력</div>
+                          <MiniCalendar checkedDates={t.check_dates} onToggle={d => toggleCalDate(t, d)} />
+                        </div>
+                        <div style={{ borderTop: '1px solid var(--border-light)', margin: '4px 0' }} />
+                        {/* 초기화 */}
+                        <button
+                          onClick={() => { resetTodo(t); setSettingsOpenId(null) }}
+                          style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', padding: '8px 14px', display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-secondary)', fontSize: 12, fontFamily: 'var(--font-body)', textAlign: 'left' }}
+                          onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-elevated)')}
+                          onMouseLeave={e => (e.currentTarget.style.background = 'none')}
+                        >
+                          <RotateCcw size={12} color="var(--gold)" /> 초기화
+                        </button>
+                        {/* 삭제 */}
+                        <button
+                          onClick={() => { deleteTodo(t); setSettingsOpenId(null) }}
+                          style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', padding: '8px 14px', display: 'flex', alignItems: 'center', gap: 8, color: 'var(--red)', fontSize: 12, fontFamily: 'var(--font-body)', textAlign: 'left' }}
+                          onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-elevated)')}
+                          onMouseLeave={e => (e.currentTarget.style.background = 'none')}
+                        >
+                          <Trash2 size={12} /> 삭제
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </div>
               )
             })}
@@ -905,9 +944,9 @@ export default function Dashboard() {
                           )
                         })
                       })()}
-                      {/* 베팅 추가 */}
+                      {/* 베팅 추가 — 사이트 활성(입금) 상태일 때만 표시 */}
                       <div style={{ marginTop: 4 }}>
-                        {openFormSiteId !== site.id ? (
+                        {!site.active ? null : openFormSiteId !== site.id ? (
                           <button className="site-add-btn" style={{ width: '100%', borderRadius: 8, padding: '12px 0', fontSize: 14 }} onClick={() => setOpenFormSiteId(site.id)}><Plus size={16} /> 베팅 추가</button>
                         ) : site.bet_type === 'double' ? (
                           <DoubleBetForm site={site} lastLeg1={getLastLeg1(site.id)} onClose={() => setOpenFormSiteId(null)} onBet={(c1,c2,odds,amt) => submitDoubleBet(site,c1,c2,odds,amt)} />
