@@ -157,7 +157,7 @@ function WithdrawModal({ site, onClose, onWithdraw }: {
   site: Site; onClose: () => void; onWithdraw: (amount: number) => void
 }) {
   const [amount, setAmount] = useState('')
-  const num = Number(amount); const isusd = site.currency === 'usd'; const unit = isusd ? '$' : '원'
+  const num = Number(amount.replace(/,/g, '')); const isusd = site.currency === 'usd'; const unit = isusd ? '$' : '원'
   const totalIn = (site.last_deposit ?? 0) + (site.point_deposit ?? 0)
   const netProfit = num > 0 ? num - totalIn : null
 
