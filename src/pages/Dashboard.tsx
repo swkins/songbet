@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { logAction } from '../lib/logger'
 import type { Bet, Site, Todo, Sport, Market, BetResult } from '../types'
@@ -269,12 +269,13 @@ function SingleBetForm({ site, onClose, onBet, defaultSport }: {
   site: Site; onClose: () => void; defaultSport: string
   onBet: (sport: string, content: string, odds: number, amount: number) => Promise<boolean>
 }) {
+  const isusd = site.currency === 'usd'; const unit = isusd ? '$' : '원'
+  const defaultAmount = isusd ? '5' : '10000'
   const [sport, setSport]     = useState(defaultSport || 'soccer')
   const [content, setContent] = useState('')
   const [oddsRaw, setOddsRaw] = useState('')
-  const [amount, setAmount]   = useState('')
+  const [amount, setAmount]   = useState(defaultAmount)
   const [submitting, setSubmitting] = useState(false)
-  const isusd = site.currency === 'usd'; const unit = isusd ? '$' : '원'
   const oddsV = parseOdds(oddsRaw); const stakeN = Number(amount.replace(/,/g, ""))
   const hotkeys = isusd ? [5, 10] : [5000, 10000]
 
@@ -331,12 +332,13 @@ function DoubleBetForm({ site, lastLeg1, onClose, onBet }: {
   site: Site; lastLeg1: { content: string } | null; onClose: () => void
   onBet: (c1: string, c2: string, odds: number, amount: number) => Promise<boolean>
 }) {
+  const isusd = site.currency === 'usd'; const unit = isusd ? '$' : '원'
+  const defaultAmount = isusd ? '5' : '10000'
   const [c1, setC1] = useState(lastLeg1?.content ?? '')
   const [c2, setC2] = useState('')
   const [oddsRaw, setOddsRaw] = useState('')
-  const [amount, setAmount] = useState('')
+  const [amount, setAmount] = useState(defaultAmount)
   const [submitting, setSubmitting] = useState(false)
-  const isusd = site.currency === 'usd'; const unit = isusd ? '$' : '원'
   const oddsV = parseOdds(oddsRaw); const stakeN = Number(amount.replace(/,/g, ""))
   const hotkeys = isusd ? [5, 10] : [5000, 10000]
   const labelStyle: React.CSSProperties = { fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.6px', color: 'var(--text-muted)', marginBottom: 2 }
@@ -454,8 +456,10 @@ export default function Dashboard() {
   const [todos, setTodos]       = useState<Todo[]>([])
   const [newTodo, setNewTodo]   = useState('')
   const [settingsOpenId, setSettingsOpenId] = useState<string | null>(null)
+  const [sidebarMemo, setSidebarMemo] = useState('')
+  const memoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  useEffect(() => { loadSites(); loadBets(); loadTodos(); loadCashflows() }, [])
+  useEffect(() => { loadSites(); loadBets(); loadTodos(); loadCashflows(); loadSidebarMemo() }, [])
 
   async function loadSites() {
     const { data } = await supabase.from('sites').select('*').order('sort_order')
@@ -468,6 +472,18 @@ export default function Dashboard() {
   async function loadTodos() {
     const { data } = await supabase.from('todos').select('*').order('created_at')
     if (data) setTodos(data)
+  }
+  async function loadSidebarMemo() {
+    const { data } = await supabase.from('sidebar_memo').select('content').eq('id', 'singleton').single()
+    if (data) setSidebarMemo(data.content ?? '')
+  }
+  async function saveSidebarMemo(content: string) {
+    await supabase.from('sidebar_memo').update({ content, updated_at: new Date().toISOString() }).eq('id', 'singleton')
+  }
+  function handleMemoChange(v: string) {
+    setSidebarMemo(v)
+    if (memoSaveTimer.current) clearTimeout(memoSaveTimer.current)
+    memoSaveTimer.current = setTimeout(() => saveSidebarMemo(v), 1000)
   }
   async function loadCashflows() {
     const { data } = await supabase.from('cashflows').select('flow_date,type,amount,site_id').gte('flow_date', weekStart).lte('flow_date', weekEnd)
@@ -823,6 +839,27 @@ export default function Dashboard() {
             </div>
           </div>
 
+          {/* 메모장 */}
+          <div className="card" style={{ padding: '10px 12px' }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.8px', marginBottom: 8 }}>메모</div>
+            <textarea
+              value={sidebarMemo}
+              onChange={e => handleMemoChange(e.target.value)}
+              onBlur={() => saveSidebarMemo(sidebarMemo)}
+              placeholder="자유롭게 메모하세요..."
+              style={{
+                width: '100%', minHeight: 160, resize: 'vertical',
+                background: 'var(--bg)', border: '1px solid var(--border)',
+                borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)',
+                fontFamily: 'var(--font-body)', fontSize: 12, lineHeight: 1.7,
+                padding: '8px 10px', outline: 'none', boxSizing: 'border-box',
+                transition: 'border-color 0.15s',
+              }}
+              onFocus={e => { e.currentTarget.style.borderColor = 'var(--cyan)' }}
+              onBlurCapture={e => { e.currentTarget.style.borderColor = 'var(--border)' }}
+            />
+          </div>
+
           {/* 이번주/한달 입금 현황 */}
           <WeekMonthDeposit sites={sites} cashflows={cashflows} weekStart={weekStart} weekEnd={weekEnd} />
         </div>
@@ -830,18 +867,18 @@ export default function Dashboard() {
         {/* ── 우: 베팅 현황 (flex-1) — site-grid 위에 타이틀 행 없이, site-grid border 위에 오버레이 */}
         <div className="dashboard-bets">
           {sites.length === 0 ? (
-            <>
+            <div className="card" style={{ padding: '10px 14px' }}>
               <div className="flex-between mb-10">
                 <span className="card-title" style={{ margin: 0 }}>베팅 현황</span>
                 <button onClick={() => setShowSiteMgr(true)} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-secondary)', cursor: 'pointer', padding: '3px 8px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-body)' }}>
                   <Settings size={11} /> 사이트관리
                 </button>
               </div>
-              <div className="card"><div className="empty"><div className="empty-icon">🎯</div>사이트를 추가하세요</div></div>
-            </>
+              <div className="empty"><div className="empty-icon">🎯</div>사이트를 추가하세요</div>
+            </div>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <div className="card" style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div className="card" style={{ padding: '10px 14px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
                 <span className="card-title" style={{ margin: 0 }}>베팅 현황</span>
                 <button onClick={() => setShowSiteMgr(true)} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-secondary)', cursor: 'pointer', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-body)' }}>
                   <Settings size={12} /> 사이트관리
@@ -1029,6 +1066,7 @@ export default function Dashboard() {
             </div>
           )}
         </div>
+
       </div>
 
       {/* 모달 */}
