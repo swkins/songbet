@@ -3,6 +3,7 @@ import type { Tab, ActionLog } from './types'
 import Dashboard from './pages/Dashboard'
 import Settlement from './pages/Settlement'
 import Stats from './pages/Stats'
+import Simul from './pages/Simul'
 import { supabase } from './lib/supabase'
 import { purgeOldLogs } from './lib/logger'
 import dayjs from 'dayjs'
@@ -12,6 +13,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'dashboard', label: '대시보드' },
   { id: 'stats', label: '통계' },
   { id: 'settlement', label: '결산' },
+  { id: 'simul', label: '모의' },
 ]
 
 const WIDTH_OPTIONS: { label: string; value: string }[] = [
@@ -323,6 +325,7 @@ export default function App() {
           {tab === 'dashboard' && <Dashboard />}
           {tab === 'stats' && <Stats />}
           {tab === 'settlement' && <Settlement />}
+          {tab === 'simul' && <Simul />}
         </div>
       </div>
 
