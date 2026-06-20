@@ -191,6 +191,7 @@ export default function Simul() {
   const [ouLine, setOuLine] = useState('')
   const [homeHandicap, setHomeHandicap] = useState<'마핸'|'플핸'>('마핸')
   const [handicapLine, setHandicapLine] = useState('')
+  const [statLeague, setStatLeague] = useState<'전체'|League>('전체')
 
   const BB: League[] = ['MLB','KBO','NPB']
   const BK: League[] = ['NBA','WNBA']
@@ -230,16 +231,26 @@ export default function Simul() {
   function removeBet(id: string) { setBets(prev => prev.filter(b => b.id!==id)) }
 
   // ─── 통계 ────────────────────────────────────────────────────
+  const STAKE = 10000 // 만원 기준
   const settled = bets.filter(b => b.result!=='pending')
+  // 리그 필터 적용
+  const filteredSettled = statLeague==='전체' ? settled : settled.filter(b=>b.league===statLeague)
+  const filteredWins = filteredSettled.filter(b => b.result==='win')
+  const filteredLosses = filteredSettled.filter(b => b.result==='loss')
   const wins = settled.filter(b => b.result==='win')
   const losses = settled.filter(b => b.result==='loss')
-  const winRate = settled.length>0 ? wins.length/settled.length*100 : 0
-  const avgOdds = settled.length>0 ? settled.reduce((s,b)=>s+b.odds,0)/settled.length : 0
-  const roi = settled.length>0 ? (wins.reduce((s,b)=>s+(b.odds-1),0)-losses.length)/settled.length*100 : 0
+  const winRate = filteredSettled.length>0 ? filteredWins.length/filteredSettled.length*100 : 0
+  const avgOdds = filteredSettled.length>0 ? filteredSettled.reduce((s,b)=>s+b.odds,0)/filteredSettled.length : 0
+  const roi = filteredSettled.length>0 ? (filteredWins.reduce((s,b)=>s+(b.odds-1),0)-filteredLosses.length)/filteredSettled.length*100 : 0
+  const totalProfit = Math.round(filteredWins.reduce((s,b)=>s+STAKE*(b.odds-1),0) - filteredLosses.length*STAKE)
   const tierStats = ['S','A','B','C','D'].map(t => {
-    const tb=settled.filter(b=>b.tier===t), tw=tb.filter(b=>b.result==='win')
-    return { tier:t, total:tb.length, wins:tw.length, rate:tb.length>0?tw.length/tb.length*100:0 }
+    const tb=filteredSettled.filter(b=>b.tier===t), tw=tb.filter(b=>b.result==='win'), tl=tb.filter(b=>b.result==='loss')
+    const tRoi = tb.length>0 ? (tw.reduce((s,b)=>s+(b.odds-1),0)-tl.length)/tb.length*100 : 0
+    const tProfit = Math.round(tw.reduce((s,b)=>s+STAKE*(b.odds-1),0) - tl.length*STAKE)
+    return { tier:t, total:tb.length, wins:tw.length, rate:tb.length>0?tw.length/tb.length*100:0, roi:tRoi, profit:tProfit }
   }).filter(t=>t.total>0)
+  // 리그 목록 (결과 있는 것만)
+  const availLeagues = ['전체', ...Array.from(new Set(settled.map(b=>b.league)))] as ('전체'|League)[]
 
   // ══════════════════════════════════════════════════════════════
   // 렌더
@@ -468,14 +479,35 @@ export default function Simul() {
       {/* ── 우측: 통계 ── */}
       <div>
         <div style={card}>
-          <div style={secT}>모의 통계</div>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10 }}>
+            <div style={secT}>모의 통계</div>
+          </div>
+
+          {/* 리그 탭 */}
+          {settled.length > 0 && (
+            <div style={{ display:'flex', gap:5, flexWrap:'wrap', marginBottom:12 }}>
+              {availLeagues.map(lg => (
+                <button key={lg} onClick={() => setStatLeague(lg)} style={{
+                  padding:'4px 10px', borderRadius:6, fontSize:11, fontWeight:700, cursor:'pointer',
+                  border:`1px solid ${statLeague===lg?'var(--cyan-border)':'var(--border)'}`,
+                  background:statLeague===lg?'var(--cyan-bg)':'var(--bg-elevated)',
+                  color:statLeague===lg?'var(--cyan)':'var(--text-secondary)',
+                  fontFamily:'var(--font-body)',
+                }}>{lg}</button>
+              ))}
+            </div>
+          )}
+
           {settled.length === 0
             ? <div style={{ fontSize:12, color:'var(--text-secondary)', textAlign:'center', padding:'24px 0' }}>결과 처리 후 통계 표시</div>
+            : filteredSettled.length === 0
+            ? <div style={{ fontSize:12, color:'var(--text-secondary)', textAlign:'center', padding:'16px 0' }}>{statLeague} 결과 없음</div>
             : (
               <>
+                {/* 요약 카드 */}
                 <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:12 }}>
                   {[
-                    { label:'총 베팅', val:settled.length+'건', color:'' },
+                    { label:'총 베팅', val:filteredSettled.length+'건', color:'' },
                     { label:'적중률', val:winRate.toFixed(1)+'%', color:winRate>=50?'#4ade80':'#f87171' },
                     { label:'평균 배당', val:avgOdds.toFixed(2), color:'' },
                     { label:'모의 ROI', val:(roi>=0?'+':'')+roi.toFixed(1)+'%', color:roi>=0?'#4ade80':'#f87171' },
@@ -486,36 +518,61 @@ export default function Simul() {
                     </div>
                   ))}
                 </div>
-                <div style={{ display:'flex', gap:8, marginBottom:12 }}>
-                  <div style={{ flex:1, background:'rgba(74,222,128,0.08)', borderRadius:7, padding:'8px 12px', textAlign:'center', border:'1px solid rgba(74,222,128,0.2)' }}>
+
+                {/* 적중/실패 + 총수익 */}
+                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8, marginBottom:12 }}>
+                  <div style={{ background:'rgba(74,222,128,0.08)', borderRadius:7, padding:'8px 10px', textAlign:'center', border:'1px solid rgba(74,222,128,0.2)' }}>
                     <div style={{ fontSize:10, color:'var(--text-secondary)' }}>적중</div>
-                    <div style={{ fontSize:20, fontWeight:700, color:'#4ade80' }}>{wins.length}</div>
+                    <div style={{ fontSize:18, fontWeight:700, color:'#4ade80' }}>{filteredWins.length}</div>
                   </div>
-                  <div style={{ flex:1, background:'rgba(248,113,113,0.08)', borderRadius:7, padding:'8px 12px', textAlign:'center', border:'1px solid rgba(248,113,113,0.2)' }}>
+                  <div style={{ background:'rgba(248,113,113,0.08)', borderRadius:7, padding:'8px 10px', textAlign:'center', border:'1px solid rgba(248,113,113,0.2)' }}>
                     <div style={{ fontSize:10, color:'var(--text-secondary)' }}>실패</div>
-                    <div style={{ fontSize:20, fontWeight:700, color:'#f87171' }}>{losses.length}</div>
+                    <div style={{ fontSize:18, fontWeight:700, color:'#f87171' }}>{filteredLosses.length}</div>
+                  </div>
+                  <div style={{ background:totalProfit>=0?'rgba(74,222,128,0.08)':'rgba(248,113,113,0.08)', borderRadius:7, padding:'8px 10px', textAlign:'center', border:`1px solid ${totalProfit>=0?'rgba(74,222,128,0.2)':'rgba(248,113,113,0.2)'}` }}>
+                    <div style={{ fontSize:10, color:'var(--text-secondary)' }}>총수익</div>
+                    <div style={{ fontSize:13, fontWeight:700, color:totalProfit>=0?'#4ade80':'#f87171' }}>
+                      {totalProfit>=0?'+':''}{totalProfit.toLocaleString()}
+                    </div>
                   </div>
                 </div>
-                <div style={{ marginBottom:14 }}>
-                  <div style={{ fontSize:10, color:'var(--text-secondary)', marginBottom:5 }}>적중률 바</div>
+
+                {/* 적중률 바 */}
+                <div style={{ marginBottom:16 }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', marginBottom:5 }}>
+                    <span style={{ fontSize:10, color:'var(--text-secondary)' }}>적중률</span>
+                    <span style={{ fontSize:10, fontWeight:700, color:winRate>=50?'#4ade80':'#f87171' }}>{winRate.toFixed(1)}%</span>
+                  </div>
                   <div style={{ height:8, background:'var(--bg-elevated)', borderRadius:4, overflow:'hidden' }}>
                     <div style={{ height:'100%', width:`${winRate}%`, background:winRate>=50?'#4ade80':'#f87171', borderRadius:4, transition:'width 0.3s' }} />
                   </div>
                 </div>
+
+                {/* 티어별 통계 */}
                 {tierStats.length > 0 && (
                   <div>
-                    <div style={{ fontSize:10, color:'var(--text-secondary)', marginBottom:8, fontWeight:700 }}>티어별 적중률</div>
-                    {tierStats.map(({tier,total,wins:tw,rate}) => (
-                      <div key={tier} style={{ display:'flex', alignItems:'center', gap:8, marginBottom:7 }}>
-                        <TierBadge tier={tier} size={22} />
-                        <div style={{ flex:1 }}>
-                          <div style={{ display:'flex', justifyContent:'space-between', marginBottom:3 }}>
-                            <span style={{ fontSize:10, color:'var(--text-secondary)' }}>{tw}/{total}건</span>
-                            <span style={{ fontSize:10, fontWeight:700, color:rate>=50?'#4ade80':'#f87171' }}>{rate.toFixed(0)}%</span>
+                    <div style={{ fontSize:10, color:'var(--text-secondary)', marginBottom:10, fontWeight:700, letterSpacing:'0.5px' }}>티어별 상세</div>
+                    {tierStats.map(({tier,total,wins:tw,rate,roi:tRoi,profit:tProfit}) => (
+                      <div key={tier} style={{ background:'var(--bg-elevated)', borderRadius:8, padding:'10px 12px', marginBottom:8 }}>
+                        <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:7 }}>
+                          <TierBadge tier={tier} size={24} />
+                          <div style={{ flex:1 }}>
+                            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                              <span style={{ fontSize:12, fontWeight:700, color:'var(--text-primary)' }}>{tw}/{total}건</span>
+                              <span style={{ fontSize:13, fontWeight:700, color:rate>=50?'#4ade80':'#f87171' }}>{rate.toFixed(0)}%</span>
+                            </div>
                           </div>
-                          <div style={{ height:4, background:'var(--bg-elevated)', borderRadius:2, overflow:'hidden' }}>
-                            <div style={{ height:'100%', width:`${rate}%`, background:rate>=50?'#4ade80':'#f87171', borderRadius:2 }} />
-                          </div>
+                        </div>
+                        <div style={{ height:4, background:'var(--bg)', borderRadius:2, overflow:'hidden', marginBottom:8 }}>
+                          <div style={{ height:'100%', width:`${Math.min(rate,100)}%`, background:rate>=50?'#4ade80':'#f87171', borderRadius:2, transition:'width 0.3s' }} />
+                        </div>
+                        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                          <span style={{ fontSize:10, color:'var(--text-secondary)' }}>
+                            ROI <span style={{ fontWeight:700, color:tRoi>=0?'#4ade80':'#f87171' }}>{tRoi>=0?'+':''}{tRoi.toFixed(1)}%</span>
+                          </span>
+                          <span style={{ fontSize:10, color:'var(--text-secondary)' }}>
+                            만원 기준 <span style={{ fontWeight:700, color:tProfit>=0?'#4ade80':'#f87171' }}>{tProfit>=0?'+':''}{tProfit.toLocaleString()}원</span>
+                          </span>
                         </div>
                       </div>
                     ))}
