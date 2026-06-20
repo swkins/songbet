@@ -91,9 +91,9 @@ type SportTab = 'soccer' | 'baseball' | 'basketball' | 'volleyball' | 'hockey' |
 type BetResult = 'pending' | 'win' | 'loss'
 
 interface SportMeta { id: SportTab; label: string; emoji: string }
-interface NavCountry { id: string; sportId: SportTab; name: string }
-interface NavLeague  { id: string; countryId: string; sportId: SportTab; name: string }
-interface GameEntry  { id: string; leagueId: string; home: string; away: string }
+interface NavCountry { id: string; sport_id: SportTab; name: string }
+interface NavLeague  { id: string; country_id: string; sport_id: SportTab; name: string }
+interface GameEntry  { id: string; league_id: string; home: string; away: string }
 interface SimulBet   { id: string; mode: string; league: string; pick: string; odds: number; tier: string; tierColor: string; result: BetResult; createdAt: string; gameId?: string }
 
 // ─── 상수 ──────────────────────────────────────────────────────────
@@ -453,7 +453,7 @@ export default function Simul() {
   // ─── 국가 관리 ───────────────────────────────────────────────
   async function addCountry(name: string) {
     const id = Date.now().toString()
-    const row: NavCountry = { id, sportId:sportTab, name }
+    const row: NavCountry = { id, sport_id:sportTab, name }
     const { data } = await supabase.from('simul_countries').insert(row).select().single()
     if (data) setCountries(prev => [...prev, data as NavCountry])
   }
@@ -467,7 +467,7 @@ export default function Simul() {
   async function addLeague(name: string) {
     if (!selCountry) return
     const id = Date.now().toString()
-    const row: NavLeague = { id, countryId:selCountry.id, sportId:sportTab, name }
+    const row: NavLeague = { id, country_id:selCountry.id, sport_id:sportTab, name }
     const { data } = await supabase.from('simul_leagues').insert(row).select().single()
     if (data) setLeagues(prev => [...prev, data as NavLeague])
   }
@@ -480,7 +480,7 @@ export default function Simul() {
   // ─── 경기 관리 ───────────────────────────────────────────────
   async function addGames(list: { home:string; away:string }[]) {
     if (!selLeague) return
-    const rows = list.map(g => ({ id:Date.now().toString()+Math.random().toString(36).slice(2), leagueId:selLeague.id, home:g.home, away:g.away }))
+    const rows = list.map(g => ({ id:Date.now().toString()+Math.random().toString(36).slice(2), league_id:selLeague.id, home:g.home, away:g.away }))
     const { data } = await supabase.from('simul_games').insert(rows).select()
     if (data) setGames(prev => [...prev, ...data as GameEntry[]])
   }
@@ -528,9 +528,9 @@ export default function Simul() {
   const availLeagues=['전체',...Array.from(new Set(settled.map(b=>b.league)))]
 
   // ─── 파생 ────────────────────────────────────────────────────
-  const sportCountries = countries.filter(c => c.sportId === sportTab)
-  const countryLeagues = selCountry ? leagues.filter(l => l.countryId === selCountry.id) : []
-  const leagueGames    = selLeague  ? games.filter(g => g.leagueId === selLeague.id)     : []
+  const sportCountries = countries.filter(c => c.sport_id === sportTab)
+  const countryLeagues = selCountry ? leagues.filter(l => l.country_id === selCountry.id) : []
+  const leagueGames    = selLeague  ? games.filter(g => g.league_id === selLeague.id)     : []
 
   if (loading) return <div style={{ padding:'40px', textAlign:'center', color:'var(--text-secondary)', fontSize:13 }}>불러오는 중...</div>
 
@@ -549,50 +549,67 @@ export default function Simul() {
   return (
     <div style={{ display:'grid', gridTemplateColumns:'200px 180px 360px 280px 1fr', gap:10, padding:'12px', minHeight:'100vh', background:'var(--bg)', alignItems:'start' }}>
 
-      {/* ── 1열: 종목 / 국가 / 리그 ── */}
+      {/* ── 1열: 트리 네비 (종목→국가→리그) ── */}
       <div>
-        {/* 종목 */}
-        <div style={card}>
-          <div style={secT}>종목</div>
-          {SPORT_TABS.map(s => (
-            <button key={s.id} onClick={() => { setSportTab(s.id); setSelCountry(null); setSelLeague(null); setSelGame(null) }}
-              style={navBtn(sportTab===s.id)}>
-              {s.emoji} {s.label}
-            </button>
-          ))}
-        </div>
-        {/* 국가 */}
-        <div style={card}>
-          <div style={secT}>국가</div>
-          {sportCountries.map(c => (
-            <div key={c.id} style={{ display:'flex', alignItems:'center', gap:4, marginBottom:4 }}>
-              <button onClick={() => { setSelCountry(c); setSelLeague(null); setSelGame(null) }}
-                style={{ ...navBtn(selCountry?.id===c.id), flex:1, marginBottom:0 }}>
-                {c.name}
-              </button>
-              <button onClick={() => removeCountry(c.id)} style={{ background:'none', border:'none', cursor:'pointer', color:'var(--text-secondary)', fontSize:11, flexShrink:0 }}>✕</button>
-            </div>
-          ))}
-          {addBtn(() => setModal('country'), '+ 국가 추가')}
-        </div>
-        {/* 리그 */}
-        {selCountry && (
-          <div style={card}>
-            <div style={secT}>리그 — {selCountry.name}</div>
-            {countryLeagues.map(l => (
-              <div key={l.id} style={{ display:'flex', alignItems:'center', gap:4, marginBottom:4 }}>
-                <button onClick={() => { setSelLeague(l); setSelGame(null) }}
-                  style={{ ...navBtn(selLeague?.id===l.id), flex:1, marginBottom:0 }}>
-                  {l.name}
-                </button>
-                <button onClick={() => removeLeague(l.id)} style={{ background:'none', border:'none', cursor:'pointer', color:'var(--text-secondary)', fontSize:11, flexShrink:0 }}>✕</button>
+        <div style={{ background:'var(--bg-card)', border:'1px solid var(--border)', borderRadius:'var(--radius-lg)', padding:'12px', marginBottom:8 }}>
+          <div style={secT}>리그 선택</div>
+          {SPORT_TABS.map(s => {
+            const isSportOpen = sportTab === s.id
+            const sCountries  = countries.filter(c => c.sport_id === s.id)
+            return (
+              <div key={s.id}>
+                {/* 종목 행 */}
+                <div style={{ display:'flex', alignItems:'center', gap:4, marginBottom:3 }}>
+                  <button onClick={() => { setSportTab(s.id); setSelCountry(null); setSelLeague(null); setSelGame(null) }}
+                    style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'space-between', padding:'7px 9px', borderRadius:7, border:`1px solid ${isSportOpen?'var(--cyan-border)':'var(--border)'}`, background:isSportOpen?'var(--cyan-bg)':'var(--bg-elevated)', color:isSportOpen?'var(--cyan)':'var(--text-secondary)', fontFamily:'var(--font-body)', fontSize:12, fontWeight:700, cursor:'pointer' }}>
+                    <span>{s.emoji} {s.label}</span>
+                    <span style={{ fontSize:9 }}>{isSportOpen?'▲':'▼'}</span>
+                  </button>
+                </div>
+                {/* 국가 목록 */}
+                {isSportOpen && (
+                  <div style={{ marginLeft:10, marginBottom:4 }}>
+                    {sCountries.map(c => {
+                      const isCountryOpen = selCountry?.id === c.id
+                      const cLeagues = leagues.filter(l => l.country_id === c.id)
+                      return (
+                        <div key={c.id}>
+                          {/* 국가 행 */}
+                          <div style={{ display:'flex', alignItems:'center', gap:3, marginBottom:2 }}>
+                            <button onClick={() => { setSelCountry(isCountryOpen?null:c); setSelLeague(null); setSelGame(null) }}
+                              style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'space-between', padding:'6px 8px', borderRadius:6, border:`1px solid ${isCountryOpen?'var(--border)':'var(--border)'}`, background:isCountryOpen?'var(--bg-elevated)':'transparent', color:'var(--text-secondary)', fontFamily:'var(--font-body)', fontSize:11, fontWeight:700, cursor:'pointer' }}>
+                              <span>🌐 {c.name}</span>
+                              <span style={{ fontSize:9 }}>{isCountryOpen?'▲':'▼'}</span>
+                            </button>
+                            <button onClick={() => removeCountry(c.id)} style={{ background:'none', border:'none', cursor:'pointer', color:'var(--text-secondary)', fontSize:10, flexShrink:0, padding:'2px 4px' }}>✕</button>
+                          </div>
+                          {/* 리그 목록 */}
+                          {isCountryOpen && (
+                            <div style={{ marginLeft:10, marginBottom:4 }}>
+                              {cLeagues.map(l => (
+                                <div key={l.id} style={{ display:'flex', alignItems:'center', gap:3, marginBottom:2 }}>
+                                  <button onClick={() => { setSelLeague(selLeague?.id===l.id?null:l); setSelGame(null) }}
+                                    style={{ flex:1, padding:'5px 8px', borderRadius:5, border:`1px solid ${selLeague?.id===l.id?'var(--cyan-border)':'var(--border)'}`, background:selLeague?.id===l.id?'var(--cyan-bg)':'transparent', color:selLeague?.id===l.id?'var(--cyan)':'var(--text-secondary)', fontFamily:'var(--font-body)', fontSize:11, fontWeight:600, cursor:'pointer', textAlign:'left' }}>
+                                    {l.name}
+                                  </button>
+                                  <button onClick={() => removeLeague(l.id)} style={{ background:'none', border:'none', cursor:'pointer', color:'var(--text-secondary)', fontSize:10, flexShrink:0, padding:'2px 4px' }}>✕</button>
+                                </div>
+                              ))}
+                              <button onClick={() => setModal('league')} style={{ width:'100%', padding:'4px 0', borderRadius:5, border:'1px dashed var(--border)', background:'none', color:'var(--text-secondary)', fontFamily:'var(--font-body)', fontSize:10, cursor:'pointer', marginTop:2 }}>+ 리그 추가</button>
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                    <button onClick={() => setModal('country')} style={{ width:'100%', padding:'4px 0', borderRadius:5, border:'1px dashed var(--border)', background:'none', color:'var(--text-secondary)', fontFamily:'var(--font-body)', fontSize:10, cursor:'pointer', marginTop:2 }}>+ 국가 추가</button>
+                  </div>
+                )}
               </div>
-            ))}
-            {addBtn(() => setModal('league'), '+ 리그 추가')}
-          </div>
-        )}
+            )
+          })}
+        </div>
         {/* 티어 기준 */}
-        <div style={card}>
+        <div style={{ background:'var(--bg-card)', border:'1px solid var(--border)', borderRadius:'var(--radius-lg)', padding:'12px' }}>
           <div style={secT}>티어</div>
           {[{tier:'S',desc:'+3~+5%'},{tier:'A',desc:'+1~+3%'},{tier:'B',desc:'±1%'},{tier:'C',desc:'-2~-4%'},{tier:'D',desc:'-4% 이하'}].map(({tier,desc}) => (
             <div key={tier} style={{ display:'flex', alignItems:'center', gap:6, marginBottom:5 }}>
