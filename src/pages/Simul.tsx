@@ -1,5 +1,6 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import type React from 'react'
+import { supabase } from '../lib/supabase'
 
 // ─── 티어 계산 ────────────────────────────────────────────────────
 function getBaseballTier(odds: number, isHome: boolean) {
@@ -180,6 +181,34 @@ export default function Simul() {
   const [mode, setMode] = useState<Mode>('baseball_ml')
   const [league, setLeague] = useState<League>('MLB')
   const [bets, setBets] = useState<SimulBet[]>([])
+  const [loading, setLoading] = useState(true)
+
+  // ─── Supabase 로드 ────────────────────────────────────────────
+  useEffect(() => {
+    loadBets()
+  }, [])
+
+  async function loadBets() {
+    setLoading(true)
+    const { data } = await supabase
+      .from('simul_bets')
+      .select('*')
+      .order('created_at', { ascending: false })
+    if (data) {
+      setBets(data.map((b: Record<string,unknown>) => ({
+        id: b.id as string,
+        mode: b.mode as Mode,
+        league: b.league as League,
+        pick: b.pick as string,
+        odds: Number(b.odds),
+        tier: b.tier as string,
+        tierColor: b.tier_color as string,
+        result: b.result as BetResult,
+        createdAt: new Date(b.created_at as string).toLocaleTimeString('ko-KR', { hour:'2-digit', minute:'2-digit' }),
+      })))
+    }
+    setLoading(false)
+  }
 
   // 배당 입력 훅들
   const homeOdds = useOddsInput()
@@ -225,11 +254,31 @@ export default function Simul() {
   const bktResult = bktValid ? getBasketballTier(hl, homeHandicap==='마핸', bho, bao, bktMargin) : null
 
   // ─── 베팅 관리 ───────────────────────────────────────────────
-  function addBet(pick: string, odds: number, tier: string, tierColor: string) {
-    setBets(prev => [{ id:Date.now().toString(), mode, league, pick, odds, tier, tierColor, result:'pending', createdAt:new Date().toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'}) }, ...prev])
+  async function addBet(pick: string, odds: number, tier: string, tierColor: string) {
+    const id = Date.now().toString()
+    const createdAt = new Date().toLocaleTimeString('ko-KR', { hour:'2-digit', minute:'2-digit' })
+    const newBet: SimulBet = { id, mode, league, pick, odds, tier, tierColor, result:'pending', createdAt }
+    setBets(prev => [newBet, ...prev])
+    await supabase.from('simul_bets').insert({
+      id, mode, league, pick, odds, tier,
+      tier_color: tierColor, result: 'pending',
+    })
   }
-  function setResult(id: string, result: BetResult) { setBets(prev => prev.map(b => b.id===id?{...b,result}:b)) }
-  function removeBet(id: string) { setBets(prev => prev.filter(b => b.id!==id)) }
+
+  async function setResult(id: string, result: BetResult) {
+    setBets(prev => prev.map(b => b.id===id ? {...b, result} : b))
+    await supabase.from('simul_bets').update({ result }).eq('id', id)
+  }
+
+  async function removeBet(id: string) {
+    setBets(prev => prev.filter(b => b.id!==id))
+    await supabase.from('simul_bets').delete().eq('id', id)
+  }
+
+  async function clearAllBets() {
+    setBets([])
+    await supabase.from('simul_bets').delete().neq('id', '')
+  }
 
   // ─── 통계 ────────────────────────────────────────────────────
   const STAKE = 10000 // 만원 기준
@@ -256,6 +305,10 @@ export default function Simul() {
   // ══════════════════════════════════════════════════════════════
   // 렌더
   // ══════════════════════════════════════════════════════════════
+  if (loading) return (
+    <div style={{ padding:'40px', textAlign:'center', color:'var(--text-secondary)', fontSize:13 }}>불러오는 중...</div>
+  )
+
   return (
     <div style={{ display:'grid', gridTemplateColumns:'320px 320px 1fr', gap:12, padding:'14px', minHeight:'100vh', background:'var(--bg)', alignItems:'start' }}>
 
@@ -413,7 +466,7 @@ export default function Simul() {
         <div style={card}>
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10 }}>
             <div style={secT}>베팅 목록 ({bets.length})</div>
-            {bets.length>0 && <button onClick={() => setBets([])} style={{ fontSize:10, color:'var(--text-secondary)', background:'none', border:'none', cursor:'pointer', fontFamily:'var(--font-body)' }}>전체삭제</button>}
+            {bets.length>0 && <button onClick={clearAllBets} style={{ fontSize:10, color:'var(--text-secondary)', background:'none', border:'none', cursor:'pointer', fontFamily:'var(--font-body)' }}>전체삭제</button>}
           </div>
 
           {bets.length===0 && <div style={{ fontSize:12, color:'var(--text-secondary)', textAlign:'center', padding:'24px 0' }}>베팅 없음</div>}
