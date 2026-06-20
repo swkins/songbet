@@ -1,16 +1,17 @@
 import { useState } from 'react'
 import type React from 'react'
 
-function getBaseballTier(odds: number, isHome: boolean): { tier: string; roi: string; color: string; bg: string; label: string } {
+// ─── 티어 계산 함수들 ──────────────────────────────────────────────
+function getBaseballTier(odds: number, isHome: boolean) {
   if (isHome) {
-    if (odds >= 2.3 && odds <= 2.6)  return { tier: 'S', roi: '+3.5~+5.5%', color: '#4ade80', bg: 'rgba(74,222,128,0.12)', label: '핵심 구간' }
+    if (odds >= 2.3 && odds <= 2.6)  return { tier: 'S', roi: '+3.5~+5.5%', color: '#4ade80', bg: 'rgba(74,222,128,0.12)', label: '핵심' }
     if (odds >= 2.2 && odds < 2.3)   return { tier: 'A', roi: '+2.0~+3.5%', color: '#60a5fa', bg: 'rgba(96,165,250,0.12)', label: '밸류' }
     if (odds > 2.6 && odds <= 3.1)   return { tier: 'A', roi: '+1.0~+3.7%', color: '#60a5fa', bg: 'rgba(96,165,250,0.12)', label: '밸류' }
     if (odds >= 2.0 && odds < 2.2)   return { tier: 'B', roi: '-0.8~+0.5%', color: '#fbbf24', bg: 'rgba(251,191,36,0.12)', label: '중립' }
     if (odds > 3.1 && odds <= 3.2)   return { tier: 'B', roi: '+0.3~+0.5%', color: '#fbbf24', bg: 'rgba(251,191,36,0.12)', label: '중립' }
     if (odds >= 1.7 && odds < 2.0)   return { tier: 'C', roi: '-2.0~-4.0%', color: '#fb923c', bg: 'rgba(251,146,60,0.12)', label: '약손실' }
     if (odds > 3.2 && odds <= 3.85)  return { tier: 'C', roi: '-0.3~-2.5%', color: '#fb923c', bg: 'rgba(251,146,60,0.12)', label: '약손실' }
-    return { tier: 'D', roi: '-5.0% 이하', color: '#f87171', bg: 'rgba(248,113,113,0.12)', label: '손실' }
+    return { tier: 'D', roi: '-5% 이하', color: '#f87171', bg: 'rgba(248,113,113,0.12)', label: '손실' }
   } else {
     if (odds >= 2.4 && odds <= 2.6)  return { tier: 'A', roi: '+1.5~+2.5%', color: '#60a5fa', bg: 'rgba(96,165,250,0.12)', label: '밸류' }
     if (odds > 2.6 && odds <= 2.8)   return { tier: 'A', roi: '+1.0~+2.0%', color: '#60a5fa', bg: 'rgba(96,165,250,0.12)', label: '밸류' }
@@ -18,403 +19,565 @@ function getBaseballTier(odds: number, isHome: boolean): { tier: string; roi: st
     if (odds > 2.8 && odds <= 3.2)   return { tier: 'B', roi: '-0.8~+1.0%', color: '#fbbf24', bg: 'rgba(251,191,36,0.12)', label: '중립' }
     if (odds > 3.2 && odds <= 3.5)   return { tier: 'C', roi: '-0.3~-2.0%', color: '#fb923c', bg: 'rgba(251,146,60,0.12)', label: '약손실' }
     if (odds >= 2.0 && odds < 2.2)   return { tier: 'C', roi: '-2.0~-3.2%', color: '#fb923c', bg: 'rgba(251,146,60,0.12)', label: '약손실' }
-    return { tier: 'D', roi: '-4.0% 이하', color: '#f87171', bg: 'rgba(248,113,113,0.12)', label: '손실' }
+    return { tier: 'D', roi: '-4% 이하', color: '#f87171', bg: 'rgba(248,113,113,0.12)', label: '손실' }
   }
 }
 
-function getBaseballOUTier(line: number, overOdds: number, underOdds: number): {
-  pick: 'over' | 'under'; tier: string; roi: string; color: string; bg: string; label: string; reason: string
-} {
+function getBaseballOUTier(line: number, overOdds: number, underOdds: number) {
   const overFavored = overOdds < underOdds
   const underFavored = underOdds < overOdds
-
   if (line >= 10.0) {
-    if (!underFavored) return { pick: 'under', tier: 'S', roi: '+3~+5%', color: '#4ade80', bg: 'rgba(74,222,128,0.12)', label: '핵심', reason: '라인 높음+언더 배당 유리' }
-    return { pick: 'under', tier: 'A', roi: '+1~+3%', color: '#60a5fa', bg: 'rgba(96,165,250,0.12)', label: '밸류', reason: '라인 높음, 구조적 언더 유리' }
+    if (!underFavored) return { pick: 'over' as const, tier: 'S', roi: '+3~+5%', color: '#4ade80', bg: 'rgba(74,222,128,0.12)', label: '핵심', reason: '라인 높음+언더 배당 유리', betPick: 'under' as const }
+    return { pick: 'under' as const, tier: 'A', roi: '+1~+3%', color: '#60a5fa', bg: 'rgba(96,165,250,0.12)', label: '밸류', reason: '라인 높음, 구조적 언더 유리', betPick: 'under' as const }
   }
   if (line >= 9.0) {
-    if (!underFavored) return { pick: 'under', tier: 'A', roi: '+1~+3%', color: '#60a5fa', bg: 'rgba(96,165,250,0.12)', label: '밸류', reason: '평균 이상 라인+언더 배당 유리' }
-    if (overFavored) return { pick: 'over', tier: 'B', roi: '±1%', color: '#fbbf24', bg: 'rgba(251,191,36,0.12)', label: '중립', reason: '언더 쏠림, 오버 역발상' }
-    return { pick: 'under', tier: 'B', roi: '±1%', color: '#fbbf24', bg: 'rgba(251,191,36,0.12)', label: '중립', reason: '라인 평균 이상, 배당 대칭' }
+    if (!underFavored) return { pick: 'under' as const, tier: 'A', roi: '+1~+3%', color: '#60a5fa', bg: 'rgba(96,165,250,0.12)', label: '밸류', reason: '평균 이상+언더 배당 유리', betPick: 'under' as const }
+    if (overFavored) return { pick: 'over' as const, tier: 'B', roi: '±1%', color: '#fbbf24', bg: 'rgba(251,191,36,0.12)', label: '중립', reason: '언더 쏠림, 오버 역발상', betPick: 'over' as const }
+    return { pick: 'under' as const, tier: 'B', roi: '±1%', color: '#fbbf24', bg: 'rgba(251,191,36,0.12)', label: '중립', reason: '라인 평균 이상, 배당 대칭', betPick: 'under' as const }
   }
   if (line >= 8.0) {
-    if (underFavored) return { pick: 'over', tier: 'B', roi: '±1%', color: '#fbbf24', bg: 'rgba(251,191,36,0.12)', label: '중립', reason: '언더 쏠림→오버 배당 비대칭 밸류' }
-    if (overFavored) return { pick: 'under', tier: 'B', roi: '±1%', color: '#fbbf24', bg: 'rgba(251,191,36,0.12)', label: '중립', reason: '오버 쏠림→언더 배당 비대칭 밸류' }
-    return { pick: 'under', tier: 'C', roi: '-2~-3%', color: '#fb923c', bg: 'rgba(251,146,60,0.12)', label: '약손실', reason: '평균 구간, 배당 대칭 판단 어려움' }
+    if (underFavored) return { pick: 'over' as const, tier: 'B', roi: '±1%', color: '#fbbf24', bg: 'rgba(251,191,36,0.12)', label: '중립', reason: '언더 쏠림→오버 밸류', betPick: 'over' as const }
+    if (overFavored) return { pick: 'under' as const, tier: 'B', roi: '±1%', color: '#fbbf24', bg: 'rgba(251,191,36,0.12)', label: '중립', reason: '오버 쏠림→언더 밸류', betPick: 'under' as const }
+    return { pick: 'under' as const, tier: 'C', roi: '-2~-3%', color: '#fb923c', bg: 'rgba(251,146,60,0.12)', label: '약손실', reason: '평균 구간, 배당 대칭', betPick: 'under' as const }
   }
-  if (underFavored) return { pick: 'over', tier: 'C', roi: '-1~-3%', color: '#fb923c', bg: 'rgba(251,146,60,0.12)', label: '약손실', reason: '언더 쏠림→오버 배당, 낮은 라인 데이터 불확실' }
-  return { pick: 'over', tier: 'C', roi: '-2~-4%', color: '#fb923c', bg: 'rgba(251,146,60,0.12)', label: '약손실', reason: '낮은 라인 구간, 데이터 근거 부족' }
+  if (underFavored) return { pick: 'over' as const, tier: 'C', roi: '-1~-3%', color: '#fb923c', bg: 'rgba(251,146,60,0.12)', label: '약손실', reason: '낮은 라인, 데이터 불확실', betPick: 'over' as const }
+  return { pick: 'over' as const, tier: 'C', roi: '-2~-4%', color: '#fb923c', bg: 'rgba(251,146,60,0.12)', label: '약손실', reason: '낮은 라인, 근거 부족', betPick: 'over' as const }
 }
 
-function getBasketballTier(
-  homeLine: number, homeIsNegative: boolean, homeOdds: number, awayOdds: number, margin: number
-): { pick: 'home' | 'away'; tier: string; roi: string; color: string; bg: string; label: string; reason: string } {
+function getBasketballTier(homeLine: number, homeIsNegative: boolean, homeOdds: number, awayOdds: number, margin: number) {
   const spread = homeIsNegative ? -homeLine : homeLine
   const homeOddsLower = homeOdds < awayOdds
-  const marginHigh = margin > 7
-
   let tier = 'C', roi = '-2~-4%', pick: 'home' | 'away' = 'away'
   let label = '약손실', color = '#fb923c', bg = 'rgba(251,146,60,0.12)', reason = ''
-
   if (spread > 0) {
     const s = Math.abs(spread)
     if (s >= 6.5 && s <= 11.5) {
-      if (!homeOddsLower) { tier = 'S'; roi = '+3~+5%'; color = '#4ade80'; bg = 'rgba(74,222,128,0.12)'; label = '핵심'; reason = '홈 플핸 핵심구간 + 홈 배당 유리' }
-      else { tier = 'A'; roi = '+1~+3%'; color = '#60a5fa'; bg = 'rgba(96,165,250,0.12)'; label = '밸류'; reason = '홈 플핸 핵심구간, 대중 원정 쏠림' }
+      if (!homeOddsLower) { tier = 'S'; roi = '+3~+5%'; color = '#4ade80'; bg = 'rgba(74,222,128,0.12)'; label = '핵심'; reason = '홈 플핸 핵심+홈 배당 유리' }
+      else { tier = 'A'; roi = '+1~+3%'; color = '#60a5fa'; bg = 'rgba(96,165,250,0.12)'; label = '밸류'; reason = '홈 플핸 핵심, 원정 쏠림' }
       pick = 'home'
     } else if (s >= 3.5 && s < 6.5) {
-      tier = 'B'; roi = '±1%'; color = '#fbbf24'; bg = 'rgba(251,191,36,0.12)'; label = '중립'; reason = '홈 플핸 중간 구간'
+      tier = 'B'; roi = '±1%'; color = '#fbbf24'; bg = 'rgba(251,191,36,0.12)'; label = '중립'; reason = '홈 플핸 중간'
       pick = homeOddsLower ? 'away' : 'home'
     } else if (s > 11.5) {
-      tier = 'C'; roi = '-1~-3%'; color = '#fb923c'; bg = 'rgba(251,146,60,0.12)'; label = '약손실'; reason = '홈 플핸 과대, 실력차 너무 큼'; pick = 'away'
+      tier = 'C'; roi = '-1~-3%'; color = '#fb923c'; bg = 'rgba(251,146,60,0.12)'; label = '약손실'; reason = '플핸 과대'; pick = 'away'
     } else {
-      tier = 'B'; roi = '±1%'; color = '#fbbf24'; bg = 'rgba(251,191,36,0.12)'; label = '중립'; reason = '소폭 플핸, 배당으로 판단'
+      tier = 'B'; roi = '±1%'; color = '#fbbf24'; bg = 'rgba(251,191,36,0.12)'; label = '중립'; reason = '소폭 플핸'
       pick = homeOddsLower ? 'away' : 'home'
     }
   } else {
     const s = Math.abs(spread)
     if (s >= 1.5 && s <= 5.5) {
-      tier = 'A'; roi = '+1~+3%'; color = '#60a5fa'; bg = 'rgba(96,165,250,0.12)'; label = '밸류'; reason = '자연스러운 홈 어드밴티지 구간'
+      tier = 'A'; roi = '+1~+3%'; color = '#60a5fa'; bg = 'rgba(96,165,250,0.12)'; label = '밸류'; reason = '홈 어드밴티지 자연 구간'
       pick = homeOddsLower ? 'away' : 'home'
     } else if (s >= 6.5 && s <= 9.5) {
-      tier = 'B'; roi = '±1%'; color = '#fbbf24'; bg = 'rgba(251,191,36,0.12)'; label = '중립'; reason = '홈 마핸 중간, 대중 쏠림 시작'; pick = 'away'
+      tier = 'B'; roi = '±1%'; color = '#fbbf24'; bg = 'rgba(251,191,36,0.12)'; label = '중립'; reason = '홈 마핸 중간'; pick = 'away'
     } else if (s >= 10.5 && s <= 13.5) {
-      tier = 'C'; roi = '-2~-4%'; color = '#fb923c'; bg = 'rgba(251,146,60,0.12)'; label = '약손실'; reason = '대중 홈 쏠림 구간'; pick = 'away'
+      tier = 'C'; roi = '-2~-4%'; color = '#fb923c'; bg = 'rgba(251,146,60,0.12)'; label = '약손실'; reason = '홈 쏠림 구간'; pick = 'away'
     } else if (s >= 14.5) {
-      tier = 'D'; roi = '-4% 이하'; color = '#f87171'; bg = 'rgba(248,113,113,0.12)'; label = '손실'; reason = '압도적 홈 정배, 이중 불리'; pick = 'away'
+      tier = 'D'; roi = '-4% 이하'; color = '#f87171'; bg = 'rgba(248,113,113,0.12)'; label = '손실'; reason = '압도적 홈 정배'; pick = 'away'
     } else {
-      tier = 'B'; roi = '±1%'; color = '#fbbf24'; bg = 'rgba(251,191,36,0.12)'; label = '중립'; reason = '소폭 마핸 구간'
+      tier = 'B'; roi = '±1%'; color = '#fbbf24'; bg = 'rgba(251,191,36,0.12)'; label = '중립'; reason = '소폭 마핸'
       pick = homeOddsLower ? 'away' : 'home'
     }
   }
-
-  if (marginHigh && tier !== 'D') {
-    const order = ['S', 'A', 'B', 'C', 'D']
-    const idx = order.indexOf(tier)
-    const newTier = order[Math.min(idx + 1, 4)]
-    if (newTier !== tier) {
-      tier = newTier
-      if (tier === 'A') { roi = '+1~+3%'; color = '#60a5fa'; bg = 'rgba(96,165,250,0.12)'; label = '밸류' }
-      else if (tier === 'B') { roi = '±1%'; color = '#fbbf24'; bg = 'rgba(251,191,36,0.12)'; label = '중립' }
-      else if (tier === 'C') { roi = '-2~-4%'; color = '#fb923c'; bg = 'rgba(251,146,60,0.12)'; label = '약손실' }
-      else if (tier === 'D') { roi = '-4% 이하'; color = '#f87171'; bg = 'rgba(248,113,113,0.12)'; label = '손실' }
-      reason += ` (마진 ${margin.toFixed(1)}% 높아 한 단계 하락)`
+  if (margin > 7 && tier !== 'D') {
+    const order = ['S','A','B','C','D']; const idx = order.indexOf(tier); const nt = order[Math.min(idx+1,4)]
+    if (nt !== tier) {
+      tier = nt
+      if (tier==='A'){roi='+1~+3%';color='#60a5fa';bg='rgba(96,165,250,0.12)';label='밸류'}
+      else if(tier==='B'){roi='±1%';color='#fbbf24';bg='rgba(251,191,36,0.12)';label='중립'}
+      else if(tier==='C'){roi='-2~-4%';color='#fb923c';bg='rgba(251,146,60,0.12)';label='약손실'}
+      else{roi='-4% 이하';color='#f87171';bg='rgba(248,113,113,0.12)';label='손실'}
+      reason += ` (마진 ${margin.toFixed(1)}% 높아 하락)`
     }
   }
-
   return { pick, tier, roi, color, bg, label, reason }
 }
 
-const TIER_COLOR: Record<string, string> = {
-  S: '#4ade80', A: '#60a5fa', B: '#fbbf24', C: '#fb923c', D: '#f87171'
-}
-const TIER_BG: Record<string, string> = {
-  S: 'rgba(74,222,128,0.12)', A: 'rgba(96,165,250,0.12)', B: 'rgba(251,191,36,0.12)', C: 'rgba(251,146,60,0.12)', D: 'rgba(248,113,113,0.12)'
-}
-
-function marginBadgeStyle(m: number): React.CSSProperties {
-  return {
-    display: 'inline-block', fontSize: 13, fontWeight: 700,
-    color: m > 7 ? '#f87171' : m > 5 ? '#fbbf24' : '#4ade80',
-    background: m > 7 ? 'rgba(248,113,113,0.1)' : m > 5 ? 'rgba(251,191,36,0.1)' : 'rgba(74,222,128,0.1)',
-    border: `1px solid ${m > 7 ? '#f87171' : m > 5 ? '#fbbf24' : '#4ade80'}`,
-    borderRadius: 6, padding: '2px 10px',
-  }
+// ─── 배당 입력 포맷 (343 → 3.43) ─────────────────────────────────
+function formatOddsInput(raw: string): string {
+  const digits = raw.replace(/\D/g, '')
+  if (digits.length === 0) return ''
+  if (digits.length <= 2) return digits
+  return digits.slice(0, digits.length - 2) + '.' + digits.slice(digits.length - 2)
 }
 
-const card: React.CSSProperties = { background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', padding: '16px', marginBottom: 14 }
-const labelSt: React.CSSProperties = { fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', letterSpacing: '0.6px', marginBottom: 6, display: 'block' }
-const inputSt: React.CSSProperties = { background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)', fontFamily: 'var(--font-body)', fontSize: 18, fontWeight: 700, textAlign: 'center', padding: '8px 10px', width: '100%', boxSizing: 'border-box', outline: 'none' }
-const selectSt: React.CSSProperties = { background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)', fontFamily: 'var(--font-body)', fontSize: 13, fontWeight: 600, padding: '7px 10px', width: '100%', boxSizing: 'border-box', outline: 'none', cursor: 'pointer' }
-const row2: React.CSSProperties = { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }
-const sectionTitle: React.CSSProperties = { fontSize: 10, fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase', color: 'var(--text-secondary)', marginBottom: 10 }
-
+// ─── 타입 ──────────────────────────────────────────────────────────
 type Mode = 'baseball_ml' | 'baseball_ou' | 'basketball'
 type League = 'MLB' | 'KBO' | 'NPB' | 'NBA' | 'WNBA'
+type BetResult = 'pending' | 'win' | 'loss'
 
-function TierBadge({ tier }: { tier: string }) {
-  return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, borderRadius: 8, fontWeight: 700, fontSize: 16, background: TIER_BG[tier], color: TIER_COLOR[tier], border: `1px solid ${TIER_COLOR[tier]}` }}>{tier}</span>
-  )
+interface SimulBet {
+  id: string
+  mode: Mode
+  league: League
+  pick: string
+  odds: number
+  tier: string
+  tierColor: string
+  result: BetResult
+  createdAt: string
 }
 
+// ─── 상수 ──────────────────────────────────────────────────────────
+const TIER_COLOR: Record<string, string> = { S:'#4ade80', A:'#60a5fa', B:'#fbbf24', C:'#fb923c', D:'#f87171' }
+const TIER_BG: Record<string, string> = { S:'rgba(74,222,128,0.12)', A:'rgba(96,165,250,0.12)', B:'rgba(251,191,36,0.12)', C:'rgba(251,146,60,0.12)', D:'rgba(248,113,113,0.12)' }
+
+function mbStyle(m: number): React.CSSProperties {
+  return { display:'inline-block', fontSize:11, fontWeight:700, color: m>7?'#f87171':m>5?'#fbbf24':'#4ade80', background: m>7?'rgba(248,113,113,0.1)':m>5?'rgba(251,191,36,0.1)':'rgba(74,222,128,0.1)', border:`1px solid ${m>7?'#f87171':m>5?'#fbbf24':'#4ade80'}`, borderRadius:4, padding:'1px 6px' }
+}
+
+function TierBadge({ tier, size=28 }: { tier: string; size?: number }) {
+  return <span style={{ display:'inline-flex', alignItems:'center', justifyContent:'center', width:size, height:size, borderRadius:6, fontWeight:700, fontSize:size*0.5, flexShrink:0, background:TIER_BG[tier]??'#333', color:TIER_COLOR[tier]??'#fff', border:`1px solid ${TIER_COLOR[tier]??'#fff'}` }}>{tier}</span>
+}
+
+// ─── 스타일 상수 ───────────────────────────────────────────────────
+const card: React.CSSProperties = { background:'var(--bg-card)', border:'1px solid var(--border)', borderRadius:'var(--radius-lg)', padding:'12px', marginBottom:10 }
+const lbSt: React.CSSProperties = { fontSize:10, fontWeight:700, color:'var(--text-secondary)', letterSpacing:'0.5px', marginBottom:4, display:'block' }
+const inSt: React.CSSProperties = { background:'var(--bg)', border:'1px solid var(--border)', borderRadius:'var(--radius-sm)', color:'var(--text-primary)', fontFamily:'var(--font-body)', fontSize:16, fontWeight:700, textAlign:'center', padding:'6px 8px', width:'100%', boxSizing:'border-box', outline:'none' }
+const selSt: React.CSSProperties = { background:'var(--bg)', border:'1px solid var(--border)', borderRadius:'var(--radius-sm)', color:'var(--text-primary)', fontFamily:'var(--font-body)', fontSize:12, fontWeight:600, padding:'5px 8px', width:'100%', boxSizing:'border-box', outline:'none', cursor:'pointer' }
+const secT: React.CSSProperties = { fontSize:9, fontWeight:700, letterSpacing:'1px', textTransform:'uppercase', color:'var(--text-secondary)', marginBottom:8 }
+const r2: React.CSSProperties = { display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }
+
+// ─── 메인 컴포넌트 ─────────────────────────────────────────────────
 export default function Simul() {
   const [mode, setMode] = useState<Mode>('baseball_ml')
   const [league, setLeague] = useState<League>('MLB')
+  const [bets, setBets] = useState<SimulBet[]>([])
 
-  const [homeOdds, setHomeOdds] = useState('')
-  const [awayOdds, setAwayOdds] = useState('')
-
+  // 야구 ML
+  const [homeOddsRaw, setHomeOddsRaw] = useState('')
+  const [awayOddsRaw, setAwayOddsRaw] = useState('')
+  // 야구 OU
   const [ouLine, setOuLine] = useState('')
-  const [overOdds, setOverOdds] = useState('')
-  const [underOdds, setUnderOdds] = useState('')
-
-  const [homeHandicap, setHomeHandicap] = useState<'마핸' | '플핸'>('마핸')
+  const [overOddsRaw, setOverOddsRaw] = useState('')
+  const [underOddsRaw, setUnderOddsRaw] = useState('')
+  // 농구
+  const [homeHandicap, setHomeHandicap] = useState<'마핸'|'플핸'>('마핸')
   const [handicapLine, setHandicapLine] = useState('')
-  const [bktHomeOdds, setBktHomeOdds] = useState('')
-  const [bktAwayOdds, setBktAwayOdds] = useState('')
+  const [bktHomeRaw, setBktHomeRaw] = useState('')
+  const [bktAwayRaw, setBktAwayRaw] = useState('')
 
-  const BASEBALL_LEAGUES: League[] = ['MLB', 'KBO', 'NPB']
-  const BASKETBALL_LEAGUES: League[] = ['NBA', 'WNBA']
+  const BB = ['MLB','KBO','NPB'] as League[]
+  const BK = ['NBA','WNBA'] as League[]
 
-  function handleModeChange(m: Mode) {
+  function switchMode(m: Mode) {
     setMode(m)
-    if (m === 'basketball') setLeague('NBA')
-    else setLeague('MLB')
+    setLeague(m === 'basketball' ? 'NBA' : 'MLB')
   }
 
-  const ho = parseFloat(homeOdds), ao = parseFloat(awayOdds)
+  // 파싱
+  const ho = parseFloat(formatOddsInput(homeOddsRaw).replace(',','.'))
+  const ao = parseFloat(formatOddsInput(awayOddsRaw).replace(',','.'))
   const mlValid = !isNaN(ho) && !isNaN(ao) && ho > 1 && ao > 1
-  const mlMargin = mlValid ? ((1 / ho + 1 / ao - 1) * 100) : 0
+  const mlMargin = mlValid ? (1/ho + 1/ao - 1)*100 : 0
   const homeTier = mlValid ? getBaseballTier(ho, true) : null
   const awayTier = mlValid ? getBaseballTier(ao, false) : null
-  const tierOrder = ['S', 'A', 'B', 'C', 'D']
+  const TO = ['S','A','B','C','D']
   const mlPick = mlValid && homeTier && awayTier
-    ? tierOrder.indexOf(homeTier.tier) < tierOrder.indexOf(awayTier.tier) ? 'home'
-      : tierOrder.indexOf(homeTier.tier) > tierOrder.indexOf(awayTier.tier) ? 'away'
+    ? TO.indexOf(homeTier.tier) < TO.indexOf(awayTier.tier) ? 'home'
+      : TO.indexOf(homeTier.tier) > TO.indexOf(awayTier.tier) ? 'away'
       : ho >= ao ? 'home' : 'away'
     : null
 
-  const line = parseFloat(ouLine), ov = parseFloat(overOdds), un = parseFloat(underOdds)
-  const ouValid = !isNaN(line) && !isNaN(ov) && !isNaN(un) && line > 0 && ov > 1 && un > 1
-  const ouMargin = ouValid ? ((1 / ov + 1 / un - 1) * 100) : 0
-  const ouResult = ouValid ? getBaseballOUTier(line, ov, un) : null
+  const ln = parseFloat(ouLine), ov = parseFloat(formatOddsInput(overOddsRaw)), un = parseFloat(formatOddsInput(underOddsRaw))
+  const ouValid = !isNaN(ln) && !isNaN(ov) && !isNaN(un) && ln > 0 && ov > 1 && un > 1
+  const ouMargin = ouValid ? (1/ov + 1/un - 1)*100 : 0
+  const ouResult = ouValid ? getBaseballOUTier(ln, ov, un) : null
 
-  const hl = parseFloat(handicapLine), bho = parseFloat(bktHomeOdds), bao = parseFloat(bktAwayOdds)
+  const hl = parseFloat(handicapLine), bho = parseFloat(formatOddsInput(bktHomeRaw)), bao = parseFloat(formatOddsInput(bktAwayRaw))
   const bktValid = !isNaN(hl) && !isNaN(bho) && !isNaN(bao) && hl > 0 && bho > 1 && bao > 1
-  const bktMargin = bktValid ? ((1 / bho + 1 / bao - 1) * 100) : 0
-  const bktResult = bktValid ? getBasketballTier(hl, homeHandicap === '마핸', bho, bao, bktMargin) : null
+  const bktMargin = bktValid ? (1/bho + 1/bao - 1)*100 : 0
+  const bktResult = bktValid ? getBasketballTier(hl, homeHandicap==='마핸', bho, bao, bktMargin) : null
 
-  return (
-    <div style={{ padding: '16px 12px', minHeight: '100vh', background: 'var(--bg)', color: 'var(--text-primary)', fontFamily: 'var(--font-body)' }}>
+  // 베팅 추가
+  function addBet(pick: string, odds: number, tier: string, tierColor: string) {
+    setBets(prev => [{
+      id: Date.now().toString(), mode, league, pick, odds, tier, tierColor, result: 'pending',
+      createdAt: new Date().toLocaleTimeString('ko-KR', { hour:'2-digit', minute:'2-digit' })
+    }, ...prev])
+  }
 
-      {/* 모드 선택 */}
-      <div style={card}>
-        <div style={sectionTitle}>종목 선택</div>
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          {([
-            { id: 'baseball_ml' as Mode, label: '⚾ 야구 승패' },
-            { id: 'baseball_ou' as Mode, label: '⚾ 야구 언오버' },
-            { id: 'basketball' as Mode, label: '🏀 농구 핸디캡' },
-          ]).map(m => (
-            <button key={m.id} onClick={() => handleModeChange(m.id)} style={{
-              padding: '7px 14px', borderRadius: 8, border: `1px solid ${mode === m.id ? 'var(--cyan-border)' : 'var(--border)'}`,
-              background: mode === m.id ? 'var(--cyan-bg)' : 'var(--bg-elevated)',
-              color: mode === m.id ? 'var(--cyan)' : 'var(--text-secondary)',
-              fontFamily: 'var(--font-body)', fontSize: 13, fontWeight: 700, cursor: 'pointer',
-            }}>{m.label}</button>
+  function setResult(id: string, result: BetResult) {
+    setBets(prev => prev.map(b => b.id === id ? { ...b, result } : b))
+  }
+
+  function removeBet(id: string) {
+    setBets(prev => prev.filter(b => b.id !== id))
+  }
+
+  // 통계
+  const settled = bets.filter(b => b.result !== 'pending')
+  const wins = settled.filter(b => b.result === 'win')
+  const losses = settled.filter(b => b.result === 'loss')
+  const winRate = settled.length > 0 ? (wins.length / settled.length * 100) : 0
+  const avgOdds = settled.length > 0 ? settled.reduce((s,b) => s+b.odds, 0)/settled.length : 0
+  const roi = settled.length > 0
+    ? ((wins.reduce((s,b) => s + (b.odds - 1), 0) - losses.length) / settled.length * 100)
+    : 0
+  const tierStats = ['S','A','B','C','D'].map(t => {
+    const tb = settled.filter(b => b.tier === t)
+    const tw = tb.filter(b => b.result === 'win')
+    return { tier: t, total: tb.length, wins: tw.length, rate: tb.length > 0 ? (tw.length/tb.length*100) : 0 }
+  }).filter(t => t.total > 0)
+
+  // 배당 입력 핸들러
+  function handleOddsInput(raw: string, setter: (v: string) => void) {
+    const digits = raw.replace(/\D/g, '').slice(0, 5)
+    setter(digits)
+  }
+
+  function displayOdds(raw: string): string {
+    return formatOddsInput(raw) || ''
+  }
+
+  // ─── 좌측 패널: 입력 ───────────────────────────────────────────
+  function LeftPanel() {
+    return (
+      <div style={{ display:'flex', flexDirection:'column', gap:0 }}>
+        {/* 모드 선택 */}
+        <div style={card}>
+          <div style={secT}>종목</div>
+          <div style={{ display:'flex', flexDirection:'column', gap:5 }}>
+            {([
+              { id:'baseball_ml' as Mode, label:'⚾ 야구 승패' },
+              { id:'baseball_ou' as Mode, label:'⚾ 야구 언오버' },
+              { id:'basketball' as Mode, label:'🏀 농구 핸디캡' },
+            ]).map(m => (
+              <button key={m.id} onClick={() => switchMode(m.id)} style={{
+                padding:'6px 10px', borderRadius:6, textAlign:'left',
+                border:`1px solid ${mode===m.id ? 'var(--cyan-border)' : 'var(--border)'}`,
+                background: mode===m.id ? 'var(--cyan-bg)' : 'var(--bg-elevated)',
+                color: mode===m.id ? 'var(--cyan)' : 'var(--text-secondary)',
+                fontFamily:'var(--font-body)', fontSize:12, fontWeight:700, cursor:'pointer',
+              }}>{m.label}</button>
+            ))}
+          </div>
+        </div>
+
+        {/* 리그 */}
+        <div style={card}>
+          <span style={lbSt}>리그</span>
+          <select style={selSt} value={league} onChange={e => setLeague(e.target.value as League)}>
+            {(mode==='basketball' ? BK : BB).map(l => <option key={l} value={l}>{l}</option>)}
+          </select>
+        </div>
+
+        {/* 야구 승패 입력 */}
+        {mode === 'baseball_ml' && (
+          <div style={card}>
+            <div style={secT}>배당 입력</div>
+            <div style={r2}>
+              <div>
+                <span style={lbSt}>홈</span>
+                <input style={inSt} inputMode="numeric" placeholder="예: 245" value={homeOddsRaw} onChange={e => handleOddsInput(e.target.value, setHomeOddsRaw)} />
+                {homeOddsRaw && <div style={{ fontSize:10, color:'var(--text-secondary)', textAlign:'center', marginTop:2 }}>{displayOdds(homeOddsRaw)}</div>}
+              </div>
+              <div>
+                <span style={lbSt}>원정</span>
+                <input style={inSt} inputMode="numeric" placeholder="예: 196" value={awayOddsRaw} onChange={e => handleOddsInput(e.target.value, setAwayOddsRaw)} />
+                {awayOddsRaw && <div style={{ fontSize:10, color:'var(--text-secondary)', textAlign:'center', marginTop:2 }}>{displayOdds(awayOddsRaw)}</div>}
+              </div>
+            </div>
+            {mlValid && homeTier && awayTier && (
+              <>
+                <div style={{ marginTop:10, display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                  <span style={{ fontSize:10, color:'var(--text-secondary)' }}>마진</span>
+                  <span style={mbStyle(mlMargin)}>{mlMargin.toFixed(1)}%</span>
+                </div>
+                <div style={{ ...r2, marginTop:8 }}>
+                  {([{label:'홈', odds:ho, tier:homeTier, side:'home'},{label:'원정', odds:ao, tier:awayTier, side:'away'}] as const).map(({label, odds, tier, side}) => (
+                    <div key={side} style={{ background: mlPick===side ? tier.bg : 'var(--bg-elevated)', border:`${mlPick===side?2:1}px solid ${mlPick===side?tier.color:'var(--border)'}`, borderRadius:8, padding:'8px', textAlign:'center' }}>
+                      <div style={{ fontSize:10, color:'var(--text-secondary)', marginBottom:4 }}>{label} {odds.toFixed(2)}</div>
+                      <TierBadge tier={tier.tier} size={24} />
+                      <div style={{ fontSize:10, color:tier.color, marginTop:3 }}>{tier.label}</div>
+                      <button onClick={() => addBet(`${label} ${odds.toFixed(2)}`, odds, tier.tier, tier.color)} style={{
+                        marginTop:6, width:'100%', padding:'4px 0', borderRadius:5, fontSize:10, fontWeight:700, cursor:'pointer',
+                        background: tier.bg, border:`1px solid ${tier.color}`, color:tier.color, fontFamily:'var(--font-body)'
+                      }}>베팅</button>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* 야구 언오버 입력 */}
+        {mode === 'baseball_ou' && (
+          <div style={card}>
+            <div style={secT}>기준점 / 배당</div>
+            <div style={{ marginBottom:8 }}>
+              <span style={lbSt}>기준점</span>
+              <input style={inSt} type="number" step="0.5" placeholder="9.5" value={ouLine} onChange={e => setOuLine(e.target.value)} />
+            </div>
+            <div style={r2}>
+              <div>
+                <span style={lbSt}>오버</span>
+                <input style={inSt} inputMode="numeric" placeholder="195" value={overOddsRaw} onChange={e => handleOddsInput(e.target.value, setOverOddsRaw)} />
+                {overOddsRaw && <div style={{ fontSize:10, color:'var(--text-secondary)', textAlign:'center', marginTop:2 }}>{displayOdds(overOddsRaw)}</div>}
+              </div>
+              <div>
+                <span style={lbSt}>언더</span>
+                <input style={inSt} inputMode="numeric" placeholder="188" value={underOddsRaw} onChange={e => handleOddsInput(e.target.value, setUnderOddsRaw)} />
+                {underOddsRaw && <div style={{ fontSize:10, color:'var(--text-secondary)', textAlign:'center', marginTop:2 }}>{displayOdds(underOddsRaw)}</div>}
+              </div>
+            </div>
+            {ouValid && ouResult && (
+              <>
+                <div style={{ marginTop:10, display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                  <span style={{ fontSize:10, color:'var(--text-secondary)' }}>마진</span>
+                  <span style={mbStyle(ouMargin)}>{ouMargin.toFixed(1)}%</span>
+                </div>
+                <div style={{ marginTop:8, background: ouResult.bg, border:`1px solid ${ouResult.color}`, borderRadius:8, padding:'8px', textAlign:'center' }}>
+                  <div style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:6, marginBottom:4 }}>
+                    <TierBadge tier={ouResult.tier} size={24} />
+                    <span style={{ fontSize:13, fontWeight:700, color:ouResult.color }}>{ouResult.pick==='over'?'오버':'언더'} {(ouResult.pick==='over'?ov:un).toFixed(2)}</span>
+                  </div>
+                  <div style={{ fontSize:10, color:'var(--text-secondary)', marginBottom:6 }}>{ouResult.reason}</div>
+                  <button onClick={() => addBet(`${ouResult.pick==='over'?'오버':'언더'} ${(ouResult.pick==='over'?ov:un).toFixed(2)}`, ouResult.pick==='over'?ov:un, ouResult.tier, ouResult.color)} style={{
+                    width:'100%', padding:'4px 0', borderRadius:5, fontSize:10, fontWeight:700, cursor:'pointer',
+                    background: ouResult.bg, border:`1px solid ${ouResult.color}`, color:ouResult.color, fontFamily:'var(--font-body)'
+                  }}>베팅</button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* 농구 핸디캡 입력 */}
+        {mode === 'basketball' && (
+          <div style={card}>
+            <div style={secT}>핸디캡 입력</div>
+            <div style={{ display:'flex', gap:6, marginBottom:8 }}>
+              {(['마핸','플핸'] as const).map(h => (
+                <button key={h} onClick={() => setHomeHandicap(h)} style={{
+                  flex:1, padding:'5px', borderRadius:6,
+                  border:`1px solid ${homeHandicap===h?'var(--cyan-border)':'var(--border)'}`,
+                  background: homeHandicap===h ? 'var(--cyan-bg)' : 'var(--bg-elevated)',
+                  color: homeHandicap===h ? 'var(--cyan)' : 'var(--text-secondary)',
+                  fontFamily:'var(--font-body)', fontSize:11, fontWeight:700, cursor:'pointer',
+                }}>{h==='마핸'?'홈 마핸(-)':'홈 플핸(+)'}</button>
+              ))}
+            </div>
+            <div style={{ marginBottom:8 }}>
+              <span style={lbSt}>기준점</span>
+              <input style={inSt} type="number" step="0.5" placeholder="7.5" value={handicapLine} onChange={e => setHandicapLine(e.target.value)} />
+            </div>
+            <div style={r2}>
+              <div>
+                <span style={lbSt}>홈({homeHandicap})</span>
+                <input style={inSt} inputMode="numeric" placeholder="187" value={bktHomeRaw} onChange={e => handleOddsInput(e.target.value, setBktHomeRaw)} />
+                {bktHomeRaw && <div style={{ fontSize:10, color:'var(--text-secondary)', textAlign:'center', marginTop:2 }}>{displayOdds(bktHomeRaw)}</div>}
+              </div>
+              <div>
+                <span style={lbSt}>원정({homeHandicap==='마핸'?'플핸':'마핸'})</span>
+                <input style={inSt} inputMode="numeric" placeholder="195" value={bktAwayRaw} onChange={e => handleOddsInput(e.target.value, setBktAwayRaw)} />
+                {bktAwayRaw && <div style={{ fontSize:10, color:'var(--text-secondary)', textAlign:'center', marginTop:2 }}>{displayOdds(bktAwayRaw)}</div>}
+              </div>
+            </div>
+            {bktValid && bktResult && (
+              <>
+                <div style={{ marginTop:10, display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                  <span style={{ fontSize:10, color:'var(--text-secondary)' }}>마진</span>
+                  <span style={mbStyle(bktMargin)}>{bktMargin.toFixed(1)}%</span>
+                </div>
+                <div style={{ marginTop:8, background:bktResult.bg, border:`1px solid ${bktResult.color}`, borderRadius:8, padding:'8px', textAlign:'center' }}>
+                  <div style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:6, marginBottom:4 }}>
+                    <TierBadge tier={bktResult.tier} size={24} />
+                    <span style={{ fontSize:12, fontWeight:700, color:bktResult.color }}>
+                      {bktResult.pick==='home'
+                        ? `홈 ${homeHandicap} ${homeHandicap==='마핸'?'-':'+'}${hl.toFixed(1)} / ${bho.toFixed(2)}`
+                        : `원정 ${homeHandicap==='마핸'?'플핸':'마핸'} ${homeHandicap==='마핸'?'+':'-'}${hl.toFixed(1)} / ${bao.toFixed(2)}`}
+                    </span>
+                  </div>
+                  <div style={{ fontSize:10, color:'var(--text-secondary)', marginBottom:6 }}>{bktResult.reason}</div>
+                  <div style={{ display:'flex', gap:6 }}>
+                    <button onClick={() => addBet(`홈 ${homeHandicap} ${homeHandicap==='마핸'?'-':'+'}${hl.toFixed(1)}`, bho, bktResult.tier, bktResult.color)} style={{
+                      flex:1, padding:'4px 0', borderRadius:5, fontSize:10, fontWeight:700, cursor:'pointer',
+                      background:'var(--bg-elevated)', border:'1px solid var(--border)', color:'var(--text-secondary)', fontFamily:'var(--font-body)'
+                    }}>홈 베팅</button>
+                    <button onClick={() => addBet(`원정 ${homeHandicap==='마핸'?'플핸':'마핸'} ${homeHandicap==='마핸'?'+':'-'}${hl.toFixed(1)}`, bao, bktResult.tier, bktResult.color)} style={{
+                      flex:1, padding:'4px 0', borderRadius:5, fontSize:10, fontWeight:700, cursor:'pointer',
+                      background:'var(--bg-elevated)', border:'1px solid var(--border)', color:'var(--text-secondary)', fontFamily:'var(--font-body)'
+                    }}>원정 베팅</button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* 티어 기준 */}
+        <div style={card}>
+          <div style={secT}>티어 기준</div>
+          {[
+            { tier:'S', desc:'핵심 · +3~+5%' },
+            { tier:'A', desc:'밸류 · +1~+3%' },
+            { tier:'B', desc:'중립 · ±1%' },
+            { tier:'C', desc:'약손실 · -2~-4%' },
+            { tier:'D', desc:'손실 · -4% 이하' },
+          ].map(({tier, desc}) => (
+            <div key={tier} style={{ display:'flex', alignItems:'center', gap:6, marginBottom:5 }}>
+              <TierBadge tier={tier} size={20} />
+              <span style={{ fontSize:10, color:'var(--text-secondary)' }}>{desc}</span>
+            </div>
           ))}
         </div>
       </div>
+    )
+  }
 
-      {/* 야구 승패 */}
-      {mode === 'baseball_ml' && (
-        <>
-          <div style={card}>
-            <div style={sectionTitle}>리그 / 배당 입력</div>
-            <div style={{ marginBottom: 10 }}>
-              <span style={labelSt}>리그</span>
-              <select style={selectSt} value={league} onChange={e => setLeague(e.target.value as League)}>
-                {BASEBALL_LEAGUES.map(l => <option key={l} value={l}>{l}</option>)}
-              </select>
-            </div>
-            <div style={row2}>
-              <div>
-                <span style={labelSt}>홈 배당</span>
-                <input style={inputSt} type="number" step="0.01" placeholder="예: 2.45" value={homeOdds} onChange={e => setHomeOdds(e.target.value)} />
-              </div>
-              <div>
-                <span style={labelSt}>원정 배당</span>
-                <input style={inputSt} type="number" step="0.01" placeholder="예: 1.72" value={awayOdds} onChange={e => setAwayOdds(e.target.value)} />
-              </div>
-            </div>
+  // ─── 중앙 패널: 베팅 목록 ──────────────────────────────────────
+  function MidPanel() {
+    const pending = bets.filter(b => b.result === 'pending')
+    const done = bets.filter(b => b.result !== 'pending')
+    return (
+      <div style={{ display:'flex', flexDirection:'column', gap:0 }}>
+        <div style={{ ...card, marginBottom:10 }}>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
+            <div style={secT}>베팅 목록 ({bets.length})</div>
+            {bets.length > 0 && <button onClick={() => setBets([])} style={{ fontSize:9, color:'var(--text-secondary)', background:'none', border:'none', cursor:'pointer', fontFamily:'var(--font-body)' }}>전체삭제</button>}
           </div>
+          {bets.length === 0 && <div style={{ fontSize:11, color:'var(--text-secondary)', textAlign:'center', padding:'16px 0' }}>베팅 없음</div>}
 
-          {mlValid && homeTier && awayTier && (
-            <div style={card}>
-              <div style={sectionTitle}>분석 결과</div>
-              <div style={row2}>
-                {([
-                  { label: '홈', odds: ho, tier: homeTier, side: 'home' },
-                  { label: '원정', odds: ao, tier: awayTier, side: 'away' },
-                ] as const).map(({ label, odds, tier, side }) => (
-                  <div key={side} style={{ background: mlPick === side ? tier.bg : 'var(--bg-elevated)', border: `${mlPick === side ? 2 : 1}px solid ${mlPick === side ? tier.color : 'var(--border)'}`, borderRadius: 10, padding: '12px', position: 'relative' }}>
-                    {mlPick === side && <div style={{ position: 'absolute', top: -10, left: '50%', transform: 'translateX(-50%)', background: tier.color, color: '#000', fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 5, whiteSpace: 'nowrap' }}>✓ 선택</div>}
-                    <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 6 }}>{label} {odds.toFixed(2)}</div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                      <TierBadge tier={tier.tier} />
-                      <span style={{ fontSize: 13, fontWeight: 700, color: tier.color }}>{tier.label}</span>
+          {pending.length > 0 && (
+            <>
+              <div style={{ fontSize:9, color:'var(--text-secondary)', marginBottom:5, fontWeight:700 }}>미결 ({pending.length})</div>
+              {pending.map(b => (
+                <div key={b.id} style={{ background:'var(--bg-elevated)', border:'1px solid var(--border)', borderRadius:8, padding:'8px 10px', marginBottom:6 }}>
+                  <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:5 }}>
+                    <div style={{ display:'flex', alignItems:'center', gap:5 }}>
+                      <TierBadge tier={b.tier} size={20} />
+                      <div>
+                        <div style={{ fontSize:11, fontWeight:700, color:'var(--text-primary)' }}>{b.pick}</div>
+                        <div style={{ fontSize:9, color:'var(--text-secondary)' }}>{b.league} · {b.createdAt}</div>
+                      </div>
                     </div>
-                    <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>ROI {tier.roi}</div>
-                    <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 2 }}>내포확률 {(1 / odds * 100).toFixed(1)}%</div>
+                    <div style={{ display:'flex', alignItems:'center', gap:4 }}>
+                      <span style={{ fontSize:12, fontWeight:700, color:b.tierColor }}>{b.odds.toFixed(2)}</span>
+                      <button onClick={() => removeBet(b.id)} style={{ fontSize:9, color:'var(--text-secondary)', background:'none', border:'none', cursor:'pointer', fontFamily:'var(--font-body)', padding:'0 2px' }}>✕</button>
+                    </div>
                   </div>
-                ))}
-              </div>
-              <div style={{ marginTop: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-elevated)', borderRadius: 8, padding: '10px 14px' }}>
-                <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>북메이커 마진</span>
-                <span style={marginBadgeStyle(mlMargin)}>{mlMargin.toFixed(1)}%</span>
-              </div>
-            </div>
-          )}
-        </>
-      )}
-
-      {/* 야구 언오버 */}
-      {mode === 'baseball_ou' && (
-        <>
-          <div style={card}>
-            <div style={sectionTitle}>리그 / 기준점 / 배당 입력</div>
-            <div style={{ marginBottom: 10 }}>
-              <span style={labelSt}>리그</span>
-              <select style={selectSt} value={league} onChange={e => setLeague(e.target.value as League)}>
-                {BASEBALL_LEAGUES.map(l => <option key={l} value={l}>{l}</option>)}
-              </select>
-            </div>
-            <div style={{ marginBottom: 10 }}>
-              <span style={labelSt}>기준점 (총점 라인)</span>
-              <input style={inputSt} type="number" step="0.5" placeholder="예: 9.5" value={ouLine} onChange={e => setOuLine(e.target.value)} />
-            </div>
-            <div style={row2}>
-              <div>
-                <span style={labelSt}>오버 배당</span>
-                <input style={inputSt} type="number" step="0.01" placeholder="예: 1.95" value={overOdds} onChange={e => setOverOdds(e.target.value)} />
-              </div>
-              <div>
-                <span style={labelSt}>언더 배당</span>
-                <input style={inputSt} type="number" step="0.01" placeholder="예: 1.88" value={underOdds} onChange={e => setUnderOdds(e.target.value)} />
-              </div>
-            </div>
-          </div>
-
-          {ouValid && ouResult && (
-            <div style={card}>
-              <div style={sectionTitle}>분석 결과</div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-                <TierBadge tier={ouResult.tier} />
-                <div>
-                  <div style={{ fontSize: 15, fontWeight: 700, color: ouResult.color }}>
-                    {ouResult.pick === 'over' ? '오버' : '언더'} {(ouResult.pick === 'over' ? ov : un).toFixed(2)}
+                  <div style={{ display:'flex', gap:5 }}>
+                    <button onClick={() => setResult(b.id, 'win')} style={{
+                      flex:1, padding:'4px 0', borderRadius:5, fontSize:10, fontWeight:700, cursor:'pointer',
+                      background:'rgba(74,222,128,0.1)', border:'1px solid #4ade80', color:'#4ade80', fontFamily:'var(--font-body)'
+                    }}>✓ 적중</button>
+                    <button onClick={() => setResult(b.id, 'loss')} style={{
+                      flex:1, padding:'4px 0', borderRadius:5, fontSize:10, fontWeight:700, cursor:'pointer',
+                      background:'rgba(248,113,113,0.1)', border:'1px solid #f87171', color:'#f87171', fontFamily:'var(--font-body)'
+                    }}>✕ 실패</button>
                   </div>
-                  <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2 }}>{ouResult.label} · ROI {ouResult.roi}</div>
                 </div>
-              </div>
-              <div style={{ fontSize: 12, color: 'var(--text-secondary)', background: 'var(--bg-elevated)', borderRadius: 8, padding: '8px 12px', marginBottom: 10 }}>
-                {ouResult.reason}
-              </div>
-              <div style={row2}>
-                {([{ label: '오버', odds: ov }, { label: '언더', odds: un }]).map(({ label, odds }) => (
-                  <div key={label} style={{ background: 'var(--bg-elevated)', borderRadius: 8, padding: '10px', border: '1px solid var(--border)' }}>
-                    <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 4 }}>{label} {odds.toFixed(2)}</div>
-                    <div style={{ fontSize: 12, color: 'var(--text-primary)' }}>내포확률 {(1 / odds * 100).toFixed(1)}%</div>
-                  </div>
-                ))}
-              </div>
-              <div style={{ marginTop: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-elevated)', borderRadius: 8, padding: '10px 14px' }}>
-                <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>북메이커 마진</span>
-                <span style={marginBadgeStyle(ouMargin)}>{ouMargin.toFixed(1)}%</span>
-              </div>
-            </div>
+              ))}
+            </>
           )}
-        </>
-      )}
 
-      {/* 농구 핸디캡 */}
-      {mode === 'basketball' && (
-        <>
-          <div style={card}>
-            <div style={sectionTitle}>리그 / 핸디캡 입력</div>
-            <div style={{ marginBottom: 10 }}>
-              <span style={labelSt}>리그</span>
-              <select style={selectSt} value={league} onChange={e => setLeague(e.target.value as League)}>
-                {BASKETBALL_LEAGUES.map(l => <option key={l} value={l}>{l}</option>)}
-              </select>
-            </div>
-            <div style={{ marginBottom: 10 }}>
-              <span style={labelSt}>홈팀 핸디캡 유형</span>
-              <div style={{ display: 'flex', gap: 8 }}>
-                {(['마핸', '플핸'] as const).map(h => (
-                  <button key={h} onClick={() => setHomeHandicap(h)} style={{
-                    flex: 1, padding: '8px', borderRadius: 8,
-                    border: `1px solid ${homeHandicap === h ? 'var(--cyan-border)' : 'var(--border)'}`,
-                    background: homeHandicap === h ? 'var(--cyan-bg)' : 'var(--bg-elevated)',
-                    color: homeHandicap === h ? 'var(--cyan)' : 'var(--text-secondary)',
-                    fontFamily: 'var(--font-body)', fontSize: 14, fontWeight: 700, cursor: 'pointer',
-                  }}>{h === '마핸' ? '홈 마핸 (-)' : '홈 플핸 (+)'}</button>
-                ))}
-              </div>
-              <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 6 }}>
-                원정은 자동으로 {homeHandicap === '마핸' ? '플핸 (+)' : '마핸 (-)'}
-              </div>
-            </div>
-            <div style={{ marginBottom: 10 }}>
-              <span style={labelSt}>핸디캡 기준점 (절대값)</span>
-              <input style={inputSt} type="number" step="0.5" placeholder="예: 7.5" value={handicapLine} onChange={e => setHandicapLine(e.target.value)} />
-            </div>
-            <div style={row2}>
-              <div>
-                <span style={labelSt}>홈 배당 ({homeHandicap})</span>
-                <input style={inputSt} type="number" step="0.01" placeholder="예: 1.87" value={bktHomeOdds} onChange={e => setBktHomeOdds(e.target.value)} />
-              </div>
-              <div>
-                <span style={labelSt}>원정 배당 ({homeHandicap === '마핸' ? '플핸' : '마핸'})</span>
-                <input style={inputSt} type="number" step="0.01" placeholder="예: 1.95" value={bktAwayOdds} onChange={e => setBktAwayOdds(e.target.value)} />
-              </div>
-            </div>
-          </div>
-
-          {bktValid && bktResult && (
-            <div style={card}>
-              <div style={sectionTitle}>분석 결과</div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-                <TierBadge tier={bktResult.tier} />
-                <div>
-                  <div style={{ fontSize: 15, fontWeight: 700, color: bktResult.color }}>
-                    {bktResult.pick === 'home'
-                      ? `홈 ${homeHandicap} ${homeHandicap === '마핸' ? '-' : '+'}${hl.toFixed(1)} / ${bho.toFixed(2)}`
-                      : `원정 ${homeHandicap === '마핸' ? '플핸' : '마핸'} ${homeHandicap === '마핸' ? '+' : '-'}${hl.toFixed(1)} / ${bao.toFixed(2)}`}
+          {done.length > 0 && (
+            <>
+              <div style={{ fontSize:9, color:'var(--text-secondary)', marginTop:8, marginBottom:5, fontWeight:700 }}>결과 ({done.length})</div>
+              {done.map(b => (
+                <div key={b.id} style={{ background: b.result==='win' ? 'rgba(74,222,128,0.06)' : 'rgba(248,113,113,0.06)', border:`1px solid ${b.result==='win'?'rgba(74,222,128,0.3)':'rgba(248,113,113,0.3)'}`, borderRadius:8, padding:'7px 10px', marginBottom:5 }}>
+                  <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+                    <div style={{ display:'flex', alignItems:'center', gap:5 }}>
+                      <TierBadge tier={b.tier} size={18} />
+                      <div>
+                        <div style={{ fontSize:10, fontWeight:700, color:'var(--text-primary)' }}>{b.pick}</div>
+                        <div style={{ fontSize:9, color:'var(--text-secondary)' }}>{b.league} · {b.createdAt}</div>
+                      </div>
+                    </div>
+                    <div style={{ display:'flex', alignItems:'center', gap:4 }}>
+                      <span style={{ fontSize:11, fontWeight:700, color:b.result==='win'?'#4ade80':'#f87171' }}>{b.result==='win'?'✓ 적중':'✕ 실패'}</span>
+                      <button onClick={() => setResult(b.id, 'pending')} style={{ fontSize:8, color:'var(--text-secondary)', background:'none', border:'none', cursor:'pointer', fontFamily:'var(--font-body)' }}>되돌리기</button>
+                      <button onClick={() => removeBet(b.id)} style={{ fontSize:9, color:'var(--text-secondary)', background:'none', border:'none', cursor:'pointer', fontFamily:'var(--font-body)' }}>✕</button>
+                    </div>
                   </div>
-                  <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2 }}>{bktResult.label} · ROI {bktResult.roi}</div>
                 </div>
-              </div>
-              <div style={{ fontSize: 12, color: 'var(--text-secondary)', background: 'var(--bg-elevated)', borderRadius: 8, padding: '8px 12px', marginBottom: 10 }}>
-                {bktResult.reason}
-              </div>
-              <div style={row2}>
-                {([
-                  { label: `홈 ${homeHandicap}`, odds: bho },
-                  { label: `원정 ${homeHandicap === '마핸' ? '플핸' : '마핸'}`, odds: bao },
-                ]).map(({ label, odds }) => (
-                  <div key={label} style={{ background: 'var(--bg-elevated)', borderRadius: 8, padding: '10px', border: '1px solid var(--border)' }}>
-                    <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 4 }}>{label} {odds.toFixed(2)}</div>
-                    <div style={{ fontSize: 12, color: 'var(--text-primary)' }}>내포확률 {(1 / odds * 100).toFixed(1)}%</div>
-                  </div>
-                ))}
-              </div>
-              <div style={{ marginTop: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-elevated)', borderRadius: 8, padding: '10px 14px' }}>
-                <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>북메이커 마진</span>
-                <span style={marginBadgeStyle(bktMargin)}>{bktMargin.toFixed(1)}%</span>
-              </div>
-            </div>
+              ))}
+            </>
           )}
-        </>
-      )}
-
-      {/* 티어 기준 */}
-      <div style={card}>
-        <div style={sectionTitle}>티어 기준</div>
-        {([
-          { tier: 'S', desc: '최고 밸류 구간 · ROI +3~+5%' },
-          { tier: 'A', desc: '밸류 구간 · ROI +1~+3%' },
-          { tier: 'B', desc: '중립 구간 · ROI ±1%' },
-          { tier: 'C', desc: '약손실 구간 · ROI -2~-4%' },
-          { tier: 'D', desc: '손실 구간 · ROI -4% 이하' },
-        ]).map(({ tier, desc }) => (
-          <div key={tier} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-            <TierBadge tier={tier} />
-            <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{desc}</span>
-          </div>
-        ))}
+        </div>
       </div>
+    )
+  }
+
+  // ─── 우측 패널: 통계 ──────────────────────────────────────────
+  function RightPanel() {
+    if (settled.length === 0) {
+      return (
+        <div style={card}>
+          <div style={secT}>모의 통계</div>
+          <div style={{ fontSize:11, color:'var(--text-secondary)', textAlign:'center', padding:'20px 0' }}>결과 처리 후 통계가 표시됩니다</div>
+        </div>
+      )
+    }
+    return (
+      <div style={{ display:'flex', flexDirection:'column', gap:0 }}>
+        <div style={card}>
+          <div style={secT}>모의 통계</div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:6, marginBottom:10 }}>
+            {[
+              { label:'총 베팅', val: settled.length+'건' },
+              { label:'적중률', val: winRate.toFixed(1)+'%', color: winRate>=50?'#4ade80':'#f87171' },
+              { label:'평균 배당', val: avgOdds.toFixed(2) },
+              { label:'모의 ROI', val: roi.toFixed(1)+'%', color: roi>=0?'#4ade80':'#f87171' },
+            ].map(({label, val, color}) => (
+              <div key={label} style={{ background:'var(--bg-elevated)', borderRadius:6, padding:'8px 10px' }}>
+                <div style={{ fontSize:9, color:'var(--text-secondary)', marginBottom:3 }}>{label}</div>
+                <div style={{ fontSize:15, fontWeight:700, color: color ?? 'var(--text-primary)' }}>{val}</div>
+              </div>
+            ))}
+          </div>
+          <div style={{ display:'flex', gap:8, marginBottom:10 }}>
+            <div style={{ flex:1, background:'rgba(74,222,128,0.08)', borderRadius:6, padding:'6px 10px', textAlign:'center', border:'1px solid rgba(74,222,128,0.2)' }}>
+              <div style={{ fontSize:9, color:'var(--text-secondary)' }}>적중</div>
+              <div style={{ fontSize:16, fontWeight:700, color:'#4ade80' }}>{wins.length}</div>
+            </div>
+            <div style={{ flex:1, background:'rgba(248,113,113,0.08)', borderRadius:6, padding:'6px 10px', textAlign:'center', border:'1px solid rgba(248,113,113,0.2)' }}>
+              <div style={{ fontSize:9, color:'var(--text-secondary)' }}>실패</div>
+              <div style={{ fontSize:16, fontWeight:700, color:'#f87171' }}>{losses.length}</div>
+            </div>
+          </div>
+
+          {/* 적중률 바 */}
+          <div style={{ marginBottom:10 }}>
+            <div style={{ fontSize:9, color:'var(--text-secondary)', marginBottom:4 }}>적중률</div>
+            <div style={{ height:6, background:'var(--bg-elevated)', borderRadius:3, overflow:'hidden' }}>
+              <div style={{ height:'100%', width:`${winRate}%`, background: winRate>=50?'#4ade80':'#f87171', borderRadius:3, transition:'width 0.3s' }} />
+            </div>
+          </div>
+
+          {/* 티어별 통계 */}
+          {tierStats.length > 0 && (
+            <div>
+              <div style={{ fontSize:9, color:'var(--text-secondary)', marginBottom:6, fontWeight:700 }}>티어별 적중률</div>
+              {tierStats.map(({tier, total, wins: tw, rate}) => (
+                <div key={tier} style={{ display:'flex', alignItems:'center', gap:6, marginBottom:5 }}>
+                  <TierBadge tier={tier} size={18} />
+                  <div style={{ flex:1 }}>
+                    <div style={{ display:'flex', justifyContent:'space-between', marginBottom:2 }}>
+                      <span style={{ fontSize:9, color:'var(--text-secondary)' }}>{tw}/{total}건</span>
+                      <span style={{ fontSize:9, fontWeight:700, color: rate>=50?'#4ade80':'#f87171' }}>{rate.toFixed(0)}%</span>
+                    </div>
+                    <div style={{ height:3, background:'var(--bg-elevated)', borderRadius:2, overflow:'hidden' }}>
+                      <div style={{ height:'100%', width:`${rate}%`, background: rate>=50?'#4ade80':'#f87171', borderRadius:2 }} />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ display:'grid', gridTemplateColumns:'220px 220px 1fr', gap:10, padding:'12px', minHeight:'100vh', background:'var(--bg)', alignItems:'start' }}>
+      <LeftPanel />
+      <MidPanel />
+      <RightPanel />
     </div>
   )
 }
