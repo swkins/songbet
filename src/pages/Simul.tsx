@@ -131,6 +131,37 @@ function TierBadge({ tier, size=28 }: { tier:string; size?:number }) {
   return <span style={{ display:'inline-flex', alignItems:'center', justifyContent:'center', width:size, height:size, borderRadius:6, fontWeight:700, fontSize:size*0.5, flexShrink:0, background:TIER_BG[tier]??'#333', color:TIER_COLOR[tier]??'#fff', border:`1px solid ${TIER_COLOR[tier]??'#fff'}` }}>{tier}</span>
 }
 
+// ─── 배당 입력 컴포넌트 (최상위 - 리마운트 방지) ─────────────────
+function OddsInput({ label, hook }: { label: string; hook: ReturnType<typeof useOddsInput> }) {
+  return (
+    <div>
+      <span style={lbSt}>{label}</span>
+      <input
+        ref={hook.ref}
+        style={{ ...inSt, color: hook.digits.length===3 ? 'var(--text-primary)' : 'var(--text-secondary)' }}
+        inputMode="numeric"
+        placeholder="예: 245"
+        value={hook.display}
+        onChange={hook.onChange}
+      />
+      {hook.digits.length > 0 && hook.digits.length < 3 && (
+        <div style={{ fontSize:10, color:'#fbbf24', textAlign:'center', marginTop:3 }}>
+          숫자 {3 - hook.digits.length}개 더 입력
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── 베팅 버튼 (최상위) ───────────────────────────────────────────
+function BetBtn({ label, odds, tier, color, bg, onBet }: { label:string; odds:number; tier:string; color:string; bg:string; onBet:(pick:string,odds:number,tier:string,color:string)=>void }) {
+  return (
+    <button onClick={() => onBet(label, odds, tier, color)} style={btnSt(color, bg)}>
+      {label} 베팅
+    </button>
+  )
+}
+
 // ─── 스타일 ────────────────────────────────────────────────────────
 const card: React.CSSProperties = { background:'var(--bg-card)', border:'1px solid var(--border)', borderRadius:'var(--radius-lg)', padding:'14px', marginBottom:10 }
 const lbSt: React.CSSProperties = { fontSize:11, fontWeight:700, color:'var(--text-secondary)', letterSpacing:'0.5px', marginBottom:5, display:'block' }
@@ -210,39 +241,8 @@ export default function Simul() {
     return { tier:t, total:tb.length, wins:tw.length, rate:tb.length>0?tw.length/tb.length*100:0 }
   }).filter(t=>t.total>0)
 
-  // ─── 배당 입력 컴포넌트 ──────────────────────────────────────
-  function OddsInput({ label, hook }: { label: string; hook: ReturnType<typeof useOddsInput> }) {
-    return (
-      <div>
-        <span style={lbSt}>{label}</span>
-        <input
-          ref={hook.ref}
-          style={{ ...inSt, color: hook.digits.length===3 ? 'var(--text-primary)' : 'var(--text-secondary)' }}
-          inputMode="numeric"
-          placeholder="예: 245"
-          value={hook.display}
-          onChange={hook.onChange}
-        />
-        {hook.digits.length > 0 && hook.digits.length < 3 && (
-          <div style={{ fontSize:10, color:'var(--text-secondary)', textAlign:'center', marginTop:3 }}>
-            숫자 {3 - hook.digits.length}개 더 입력
-          </div>
-        )}
-      </div>
-    )
-  }
-
-  // ─── 베팅 버튼 ───────────────────────────────────────────────
-  function BetBtn({ label, odds, tier, color, bg }: { label:string; odds:number; tier:string; color:string; bg:string }) {
-    return (
-      <button onClick={() => addBet(label, odds, tier, color)} style={btnSt(color, bg)}>
-        {label} 베팅
-      </button>
-    )
-  }
-
   // ══════════════════════════════════════════════════════════════
-  // 좌측 패널
+  // 렌더
   // ══════════════════════════════════════════════════════════════
   return (
     <div style={{ display:'grid', gridTemplateColumns:'320px 320px 1fr', gap:12, padding:'14px', minHeight:'100vh', background:'var(--bg)', alignItems:'start' }}>
@@ -293,7 +293,7 @@ export default function Simul() {
                       <div style={{ fontSize:11, color:'var(--text-secondary)', marginBottom:5 }}>{label} {odds.toFixed(2)}</div>
                       <TierBadge tier={tier.tier} size={28} />
                       <div style={{ fontSize:11, color:tier.color, marginTop:4, marginBottom:8 }}>{tier.label} · {tier.roi}</div>
-                      <BetBtn label={label} odds={odds} tier={tier.tier} color={tier.color} bg={tier.bg} />
+                      <BetBtn label={label} odds={odds} tier={tier.tier} color={tier.color} bg={tier.bg} onBet={addBet} />
                     </div>
                   ))}
                 </div>
@@ -326,7 +326,7 @@ export default function Simul() {
                     <span style={{ fontSize:15, fontWeight:700, color:ouResult.color }}>{ouResult.pick==='over'?'오버':'언더'} {(ouResult.pick==='over'?ov:un).toFixed(2)}</span>
                   </div>
                   <div style={{ fontSize:11, color:'var(--text-secondary)', marginBottom:10 }}>{ouResult.reason}</div>
-                  <BetBtn label={ouResult.pick==='over'?'오버':'언더'} odds={ouResult.pick==='over'?ov:un} tier={ouResult.tier} color={ouResult.color} bg={ouResult.bg} />
+                  <BetBtn label={ouResult.pick==='over'?'오버':'언더'} odds={ouResult.pick==='over'?ov:un} tier={ouResult.tier} color={ouResult.color} bg={ouResult.bg} onBet={addBet} />
                 </div>
               </>
             )}
