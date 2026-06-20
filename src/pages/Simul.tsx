@@ -143,6 +143,7 @@ function OddsInput({ label, hook }: { label: string; hook: ReturnType<typeof use
         placeholder="예: 245"
         value={hook.display}
         onChange={hook.onChange}
+        onClick={hook.reset}
       />
       {hook.digits.length > 0 && hook.digits.length < 3 && (
         <div style={{ fontSize:10, color:'#fbbf24', textAlign:'center', marginTop:3 }}>

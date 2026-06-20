@@ -137,6 +137,75 @@ function LineTableVertical({ title, rows }: {
 
 function pickHasLine(pick: string, line: string): boolean { return pick?.includes(line) ?? false }
 
+function ParlayPanel({ bets }: { bets: Bet[] }) {
+  // parlay_group이 있는 베팅만 필터
+  const parlayBets = bets.filter(b => b.parlay_group !== null && b.result !== 'pending')
+  // 그룹별로 묶기 (parlay_leg=1 기준으로 대표)
+  const groups = Array.from(new Set(parlayBets.map(b => b.parlay_group))).map(g => {
+    const legs = parlayBets.filter(b => b.parlay_group === g).sort((a,b) => a.parlay_leg - b.parlay_leg)
+    const rep = legs[0]
+    return { group: g, legs, result: rep?.result ?? 'pending', odds: rep?.odds ?? 0, stake: rep?.stake ?? 0, profit: rep?.profit ?? 0 }
+  })
+  const wins = groups.filter(g => g.result === 'win')
+  const losses = groups.filter(g => g.result === 'loss')
+  const total = groups.length
+  const winRate = total > 0 ? wins.length / total * 100 : 0
+  const totalStake = groups.reduce((s,g) => s + g.stake, 0)
+  const totalProfit = groups.reduce((s,g) => s + g.profit, 0)
+  const roi = totalStake > 0 ? totalProfit / totalStake * 100 : 0
+  const avgOdds = total > 0 ? groups.reduce((s,g) => s + g.odds, 0) / total : 0
+
+  if (total === 0) return (
+    <div className="card"><div className="empty"><div className="empty-icon">2️⃣</div>두폴 베팅 기록이 없습니다</div></div>
+  )
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      {/* 요약 */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+        {[
+          { label: '승률', value: `${winRate.toFixed(1)}%`, sub: `${wins.length}W ${losses.length}L`, cls: winRate >= 50 ? 'profit-pos' : 'profit-neg' },
+          { label: '총 손익', value: `${totalProfit >= 0 ? '+' : ''}${totalProfit.toLocaleString()}`, sub: `${total}건`, cls: totalProfit >= 0 ? 'profit-pos' : 'profit-neg' },
+          { label: 'ROI', value: `${roi >= 0 ? '+' : ''}${roi.toFixed(1)}%`, sub: `투자 ${totalStake.toLocaleString()}`, cls: roi >= 0 ? 'profit-pos' : 'profit-neg' },
+          { label: '평균 배당', value: avgOdds.toFixed(2), sub: '', cls: '' },
+        ].map(t => (
+          <div key={t.label} className="card stat-tile" style={{ flex: '1 0 120px', maxWidth: 180 }}>
+            <div className={`stat-value ${t.cls}`}>{t.value}</div>
+            <div className="stat-label">{t.label}</div>
+            {t.sub && <div style={{ fontSize: 10, color: 'var(--text-secondary)', marginTop: 4 }}>{t.sub}</div>}
+          </div>
+        ))}
+      </div>
+
+      {/* 두폴 목록 */}
+      <div className="card">
+        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 10 }}>두폴 베팅 목록 ({total}건)</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {groups.map(g => {
+            const isWin = g.result === 'win', isLoss = g.result === 'loss'
+            return (
+              <div key={g.group} style={{ background: 'var(--bg-elevated)', border: `1px solid ${isWin ? 'var(--green-border)' : isLoss ? 'var(--red-border)' : 'var(--border)'}`, borderRadius: 8, padding: '10px 12px' }}>
+                {g.legs.map((leg, idx) => (
+                  <div key={leg.id} style={{ display: 'flex', gap: 6, marginBottom: idx < g.legs.length - 1 ? 4 : 0 }}>
+                    <span style={{ fontSize: 10, color: 'var(--text-muted)', width: 18, flexShrink: 0 }}>{idx===0?'①':'②'}</span>
+                    <span style={{ fontSize: 12, color: isWin ? 'var(--green)' : isLoss ? 'var(--red)' : 'var(--text-primary)', flex: 1 }}>{leg.match}</span>
+                  </div>
+                ))}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--border-light)' }}>
+                  <span style={{ fontSize: 11, color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>배당 {g.odds.toFixed(2)} / {g.stake.toLocaleString()}원</span>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: isWin ? 'var(--green)' : isLoss ? 'var(--red)' : 'var(--text-muted)' }}>
+                    {isWin ? `+${g.profit.toLocaleString()}원` : isLoss ? `-${g.stake.toLocaleString()}원` : 'PUSH'}
+                  </span>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function SportDetailPanel({ sport, bets }: { sport: Sport; bets: Bet[] }) {
   const sb = bets.filter(b => b.sport === sport && b.result !== 'pending')
   const moneyline = sb.filter(b => b.market === 'moneyline')
@@ -361,7 +430,7 @@ function SportPanel({ bets, sport, onDeleteRequest }: {
 export default function Stats() {
   const [bets, setBets]       = useState<Bet[]>([])
   const [period, setPeriod]   = useState<'all' | '7d' | '30d' | '90d'>('all')
-  const [activeSport, setActiveSport] = useState<Sport | 'all'>('all')
+  const [activeSport, setActiveSport] = useState<Sport | 'all' | 'parlay'>('all')
   const [deleteTarget, setDeleteTarget] = useState<typeof SPORTS[0] | null>(null)
 
   useEffect(() => { loadBets() }, [])
@@ -416,6 +485,7 @@ export default function Stats() {
               { value: 'volleyball' as const, label: '배구', emoji: '🏐', cnt: settled.filter(b => b.sport === 'volleyball').length },
               { value: 'hockey' as const, label: '하키', emoji: '🏒', cnt: settled.filter(b => b.sport === 'hockey').length },
               { value: 'esports' as const, label: 'LOL', emoji: '🎮', cnt: settled.filter(b => b.sport === 'esports').length },
+            { value: 'parlay' as const, label: '두폴', emoji: '2️⃣', cnt: settled.filter(b => b.parlay_group !== null).length },
             ]).map(s => (
               <button key={s.value}
                 onClick={() => setActiveSport(s.value)}
@@ -480,12 +550,15 @@ export default function Stats() {
               </div>
             </div>
           )}
-          {activeSport !== 'all' && (
+          {activeSport !== 'all' && activeSport !== 'parlay' && (
             <SportPanel
               bets={periodFiltered}
               sport={SPORTS.find(s => s.value === activeSport)!}
               onDeleteRequest={() => setDeleteTarget(SPORTS.find(s => s.value === activeSport)!)}
             />
+          )}
+          {activeSport === 'parlay' && (
+            <ParlayPanel bets={periodFiltered} />
           )}
         </>
       )}
