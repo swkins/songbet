@@ -105,7 +105,8 @@ export default function App() {
   const [showTodo, setShowTodo] = useState(false)
   const [showWidthMenu, setShowWidthMenu] = useState(false)
   const [pinCode, setPinCode] = useState(false)       // 코드수정 고정
-  const [todoSettingsId, setTodoSettingsId] = useState<string | null>(null)  // 할 일 설정 팝업
+  const [todoSettingsId, setTodoSettingsId] = useState<string | null>(null)
+  const [todoSettingsPos, setTodoSettingsPos] = useState<{top: number; right: number}>({ top: 0, right: 0 })
   const [undoing, setUndoing] = useState<string | null>(null)
   const [maxWidth, setMaxWidth] = useState<string>(() => localStorage.getItem('sb_width') ?? '1920px')
 
@@ -621,20 +622,25 @@ export default function App() {
                         {todo.check_count}회
                       </span>
                       <button
-                        onClick={() => setTodoSettingsId(isSettingsOpen ? null : todo.id)}
+                        onClick={e => {
+                          if (isSettingsOpen) { setTodoSettingsId(null); return }
+                          const rect = e.currentTarget.getBoundingClientRect()
+                          setTodoSettingsPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right })
+                          setTodoSettingsId(todo.id)
+                        }}
                         style={{ background: isSettingsOpen ? 'var(--bg-elevated)' : 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex', padding: 3, borderRadius: 4, flexShrink: 0 }}>
                         <Settings size={11} />
                       </button>
                     </div>
-                    {/* 설정 팝업 */}
+                    {/* 설정 팝업 — fixed로 화면 기준 위치 */}
                     {isSettingsOpen && (
                       <>
-                        <div style={{ position: 'fixed', inset: 0, zIndex: 200 }} onClick={() => setTodoSettingsId(null)} />
+                        <div style={{ position: 'fixed', inset: 0, zIndex: 300 }} onClick={() => setTodoSettingsId(null)} />
                         <div style={{
-                          position: 'absolute', right: 8, top: '100%', zIndex: 210,
+                          position: 'fixed', top: todoSettingsPos.top, right: todoSettingsPos.right, zIndex: 310,
                           background: 'var(--bg-card)', border: '1px solid var(--border)',
-                          borderRadius: 'var(--radius)', boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
-                          minWidth: 210, padding: '8px 0',
+                          borderRadius: 'var(--radius)', boxShadow: '0 8px 24px rgba(0,0,0,0.6)',
+                          minWidth: 220, padding: '8px 0',
                         }} onClick={e => e.stopPropagation()}>
                           {/* 달력 */}
                           <div style={{ padding: '4px 12px 8px' }}>

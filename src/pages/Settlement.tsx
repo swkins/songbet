@@ -5,7 +5,7 @@ import type { Cashflow, Site } from '../types'
 import dayjs from 'dayjs'
 import {
   Plus, Trash2, X, TrendingUp, TrendingDown,
-  ChevronLeft, ChevronRight, Tag, Globe, Pencil, Check,
+  ChevronLeft, ChevronRight, ChevronDown, Pencil, Check, ArrowUp, ArrowDown,
 } from 'lucide-react'
 
 // 베팅손실 제거, 베팅입금은 대시보드 전용이라 잠금만
@@ -93,8 +93,10 @@ export default function Settlement() {
   /* 목록 월 필터 */
   const [viewMonth, setViewMonth] = useState(dayjs().startOf('month'))
 
-  /* 관리 패널 */
-  const [mgmtTab, setMgmtTab]     = useState<'none' | 'category' | 'site'>('none')
+  /* 드롭다운 열림 상태 */
+  const [catDropOpen, setCatDropOpen] = useState(false)
+  const [siteDropOpen, setSiteDropOpen] = useState(false)
+
   const [newCat, setNewCat]       = useState('')
   const [editCat, setEditCat]     = useState<string | null>(null)
   const [editCatVal, setEditCatVal] = useState('')
@@ -307,21 +309,138 @@ export default function Settlement() {
           </div>
 
           {/* 사이트 */}
-          <div>
+          <div style={{ position: 'relative' }}>
             <div style={labelSt}>사이트</div>
-            <select style={inputSt} value={formSiteId} onChange={e => setFormSiteId(e.target.value)}>
-              <option value="">없음</option>
-              {sites.map(st => <option key={st.id} value={st.id}>{st.name}</option>)}
-            </select>
+            <button
+              onClick={() => { setSiteDropOpen(p => !p); setCatDropOpen(false) }}
+              style={{ ...inputSt, display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', textAlign: 'left' }}>
+              <span style={{ color: formSiteId ? 'var(--text-primary)' : 'var(--text-muted)' }}>
+                {formSiteId ? (sites.find(s => s.id === formSiteId)?.name ?? '없음') : '없음'}
+              </span>
+              <ChevronDown size={14} style={{ color: 'var(--text-muted)', flexShrink: 0, transform: siteDropOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }} />
+            </button>
+            {siteDropOpen && (
+              <>
+                <div style={{ position: 'fixed', inset: 0, zIndex: 50 }} onClick={() => setSiteDropOpen(false)} />
+                <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 60, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.5)', overflow: 'hidden', maxHeight: 240, overflowY: 'auto' }}>
+                  {/* 없음 */}
+                  <div onClick={() => { setFormSiteId(''); setSiteDropOpen(false) }}
+                    style={{ padding: '9px 12px', cursor: 'pointer', fontSize: 13, color: !formSiteId ? 'var(--gold)' : 'var(--text-muted)', background: !formSiteId ? 'var(--gold-bg)' : 'none' }}
+                    onMouseEnter={e => { if (formSiteId) e.currentTarget.style.background = 'var(--bg-elevated)' }}
+                    onMouseLeave={e => { if (formSiteId) e.currentTarget.style.background = 'none' }}>
+                    없음
+                  </div>
+                  {sites.map((st, i) => (
+                    <div key={st.id} style={{ display: 'flex', alignItems: 'center', borderTop: '1px solid var(--border-light)' }}>
+                      <div onClick={() => { setFormSiteId(st.id); setSiteDropOpen(false) }}
+                        style={{ flex: 1, padding: '9px 12px', cursor: 'pointer', fontSize: 13, color: formSiteId === st.id ? 'var(--gold)' : 'var(--text-primary)', background: formSiteId === st.id ? 'var(--gold-bg)' : 'none' }}
+                        onMouseEnter={e => { if (formSiteId !== st.id) e.currentTarget.style.background = 'var(--bg-elevated)' }}
+                        onMouseLeave={e => { if (formSiteId !== st.id) e.currentTarget.style.background = 'none' }}>
+                        {editSite?.id === st.id ? (
+                          <input value={editSiteVal} onChange={e => setEditSiteVal(e.target.value)}
+                            onKeyDown={e => { e.stopPropagation(); if (e.key === 'Enter') confirmEditSite() }}
+                            onClick={e => e.stopPropagation()}
+                            style={{ background: 'none', border: 'none', outline: 'none', color: 'var(--text-primary)', fontSize: 13, width: '100%' }} autoFocus />
+                        ) : st.name}
+                      </div>
+                      {!st.settlement_only && <span style={{ fontSize: 9, color: 'var(--text-muted)', padding: '0 4px', flexShrink: 0 }}>대시보드</span>}
+                      <div style={{ display: 'flex', gap: 2, padding: '0 6px', flexShrink: 0 }} onClick={e => e.stopPropagation()}>
+                        {editSite?.id === st.id ? (
+                          <>
+                            <button onClick={confirmEditSite} style={iconBtnSt}><Check size={11} color="var(--green)" /></button>
+                            <button onClick={() => setEditSite(null)} style={iconBtnSt}><X size={11} /></button>
+                          </>
+                        ) : (
+                          <>
+                            <button onClick={() => { setEditSite(st); setEditSiteVal(st.name) }} style={iconBtnSt}><Pencil size={11} /></button>
+                            {i > 0 && <button onClick={() => reorderSettlementSite(st.id, sites.filter(s => !s.settlement_only === st.settlement_only ? true : s.settlement_only)[i - 1]?.id ?? '')} style={iconBtnSt}><ArrowUp size={11} /></button>}
+                            {i < sites.length - 1 && <button onClick={() => reorderSettlementSite(st.id, sites[i + 1]?.id ?? '')} style={iconBtnSt}><ArrowDown size={11} /></button>}
+                            {st.settlement_only && <button onClick={() => deleteSettlementSite(st)} style={iconBtnSt}><Trash2 size={11} color="var(--red)" /></button>}
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                  {/* 하단 추가 */}
+                  <div style={{ borderTop: '1px solid var(--border)', padding: '6px 8px', display: 'flex', gap: 6, background: 'var(--bg-elevated)' }}>
+                    <input style={{ flex: 1, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 8px', fontSize: 12, color: 'var(--text-primary)', fontFamily: 'var(--font-body)', outline: 'none' }}
+                      placeholder="결산 전용 사이트 추가..." value={newSiteName}
+                      onChange={e => setNewSiteName(e.target.value)}
+                      onKeyDown={e => { e.stopPropagation(); if (e.key === 'Enter') addSettlementSite() }}
+                      onClick={e => e.stopPropagation()} />
+                    <button onClick={e => { e.stopPropagation(); addSettlementSite() }} style={{ background: 'var(--gold)', border: 'none', borderRadius: 6, padding: '0 10px', cursor: 'pointer', color: '#000', fontWeight: 700, fontSize: 12, fontFamily: 'var(--font-body)', flexShrink: 0 }}>추가</button>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
 
           {/* 카테고리 */}
-          <div>
+          <div style={{ position: 'relative' }}>
             <div style={labelSt}>카테고리</div>
-            <select style={inputSt} value={formCat} onChange={e => setFormCat(e.target.value)}>
-              <option value="">선택 안 함</option>
-              {categories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
-            </select>
+            <button
+              onClick={() => { setCatDropOpen(p => !p); setSiteDropOpen(false) }}
+              style={{ ...inputSt, display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', textAlign: 'left' }}>
+              <span style={{ color: formCat ? 'var(--text-primary)' : 'var(--text-muted)' }}>
+                {formCat || '선택 안 함'}
+              </span>
+              <ChevronDown size={14} style={{ color: 'var(--text-muted)', flexShrink: 0, transform: catDropOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }} />
+            </button>
+            {catDropOpen && (
+              <>
+                <div style={{ position: 'fixed', inset: 0, zIndex: 50 }} onClick={() => setCatDropOpen(false)} />
+                <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 60, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.5)', overflow: 'hidden', maxHeight: 280, overflowY: 'auto' }}>
+                  {/* 선택 안 함 */}
+                  <div onClick={() => { setFormCat(''); setCatDropOpen(false) }}
+                    style={{ padding: '9px 12px', cursor: 'pointer', fontSize: 13, color: !formCat ? 'var(--gold)' : 'var(--text-muted)', background: !formCat ? 'var(--gold-bg)' : 'none' }}
+                    onMouseEnter={e => { if (formCat) e.currentTarget.style.background = 'var(--bg-elevated)' }}
+                    onMouseLeave={e => { if (formCat) e.currentTarget.style.background = 'none' }}>
+                    선택 안 함
+                  </div>
+                  {categories.map((cat, i) => (
+                    <div key={cat} style={{ display: 'flex', alignItems: 'center', borderTop: '1px solid var(--border-light)' }}>
+                      <div onClick={() => { if (editCat !== cat) { setFormCat(cat); setCatDropOpen(false) } }}
+                        style={{ flex: 1, padding: '9px 12px', cursor: 'pointer', fontSize: 13, color: formCat === cat ? 'var(--gold)' : 'var(--text-primary)', background: formCat === cat ? 'var(--gold-bg)' : 'none' }}
+                        onMouseEnter={e => { if (formCat !== cat) e.currentTarget.style.background = 'var(--bg-elevated)' }}
+                        onMouseLeave={e => { if (formCat !== cat) e.currentTarget.style.background = 'none' }}>
+                        {editCat === cat ? (
+                          <input value={editCatVal} onChange={e => setEditCatVal(e.target.value)}
+                            onKeyDown={e => { e.stopPropagation(); if (e.key === 'Enter') confirmEditCat(cat) }}
+                            onClick={e => e.stopPropagation()}
+                            style={{ background: 'none', border: 'none', outline: 'none', color: 'var(--text-primary)', fontSize: 13, width: '100%' }} autoFocus />
+                        ) : cat}
+                      </div>
+                      <div style={{ display: 'flex', gap: 2, padding: '0 6px', flexShrink: 0 }} onClick={e => e.stopPropagation()}>
+                        {LOCKED_CATS.includes(cat) ? (
+                          <span style={{ fontSize: 9, color: 'var(--text-muted)', padding: '0 2px' }}>잠금</span>
+                        ) : editCat === cat ? (
+                          <>
+                            <button onClick={() => confirmEditCat(cat)} style={iconBtnSt}><Check size={11} color="var(--green)" /></button>
+                            <button onClick={() => setEditCat(null)} style={iconBtnSt}><X size={11} /></button>
+                          </>
+                        ) : (
+                          <>
+                            <button onClick={() => { setEditCat(cat); setEditCatVal(cat) }} style={iconBtnSt}><Pencil size={11} /></button>
+                            {i > 0 && <button onClick={() => reorderCat(cat, categories[i - 1])} style={iconBtnSt}><ArrowUp size={11} /></button>}
+                            {i < categories.length - 1 && <button onClick={() => reorderCat(cat, categories[i + 1])} style={iconBtnSt}><ArrowDown size={11} /></button>}
+                            <button onClick={() => removeCat(cat)} style={iconBtnSt}><Trash2 size={11} color="var(--red)" /></button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                  {/* 하단 추가 */}
+                  <div style={{ borderTop: '1px solid var(--border)', padding: '6px 8px', display: 'flex', gap: 6, background: 'var(--bg-elevated)' }}>
+                    <input style={{ flex: 1, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 8px', fontSize: 12, color: 'var(--text-primary)', fontFamily: 'var(--font-body)', outline: 'none' }}
+                      placeholder="새 카테고리..." value={newCat}
+                      onChange={e => setNewCat(e.target.value)}
+                      onKeyDown={e => { e.stopPropagation(); if (e.key === 'Enter') addCat() }}
+                      onClick={e => e.stopPropagation()} />
+                    <button onClick={e => { e.stopPropagation(); addCat() }} style={{ background: 'var(--gold)', border: 'none', borderRadius: 6, padding: '0 10px', cursor: 'pointer', color: '#000', fontWeight: 700, fontSize: 12, fontFamily: 'var(--font-body)', flexShrink: 0 }}>추가</button>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
 
           {/* 저장 */}
@@ -334,107 +453,6 @@ export default function Settlement() {
           }}>
             <Plus size={16} /> 저장
           </button>
-        </div>
-
-        {/* 관리 탭 */}
-        <div style={{ borderTop: '1px solid var(--border)', padding: '8px 12px' }}>
-          <div style={{ display: 'flex', gap: 6 }}>
-            {([['category', '카테고리', <Tag size={11} />], ['site', '사이트', <Globe size={11} />]] as const).map(([t, label, icon]) => (
-              <button key={t} onClick={() => setMgmtTab(prev => prev === t ? 'none' : t)} style={{
-                flex: 1, padding: '6px 0', borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: 'pointer',
-                fontFamily: 'var(--font-body)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
-                background: mgmtTab === t ? 'var(--gold-bg)' : 'var(--bg-elevated)',
-                border: `1px solid ${mgmtTab === t ? 'var(--gold-border)' : 'var(--border)'}`,
-                color: mgmtTab === t ? 'var(--gold)' : 'var(--text-muted)',
-              }}>{icon}{label}</button>
-            ))}
-          </div>
-
-          {/* 카테고리 관리 */}
-          {mgmtTab === 'category' && (
-            <div style={{ marginTop: 10 }}>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 8 }}>
-                {categories.map(cat => (
-                  <div key={cat}
-                    draggable={!LOCKED_CATS.includes(cat)}
-                    onDragStart={() => { dragCat.current = cat }}
-                    onDragOver={e => { e.preventDefault(); overCat.current = cat }}
-                    onDrop={() => { reorderCat(dragCat.current, overCat.current); dragCat.current = ''; overCat.current = '' }}
-                    style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 8px', borderRadius: 6, background: 'var(--bg-elevated)', border: '1px solid var(--border)', fontSize: 11, opacity: LOCKED_CATS.includes(cat) ? 0.5 : 1, cursor: LOCKED_CATS.includes(cat) ? 'default' : 'grab' }}>
-                    {editCat === cat ? (
-                      <>
-                        <input value={editCatVal} onChange={e => setEditCatVal(e.target.value)}
-                          onKeyDown={e => e.key === 'Enter' && confirmEditCat(cat)}
-                          style={{ background: 'none', border: 'none', outline: 'none', color: 'var(--text-primary)', fontSize: 11, width: 60 }} autoFocus />
-                        <button onClick={() => confirmEditCat(cat)} style={iconBtnSt}><Check size={10} color="var(--green)" /></button>
-                        <button onClick={() => setEditCat(null)} style={iconBtnSt}><X size={10} /></button>
-                      </>
-                    ) : (
-                      <>
-                        <span style={{ color: 'var(--text-primary)' }}>{cat}</span>
-                        {!LOCKED_CATS.includes(cat) && (
-                          <>
-                            <button onClick={() => { setEditCat(cat); setEditCatVal(cat) }} style={iconBtnSt}><Pencil size={9} /></button>
-                            <button onClick={() => removeCat(cat)} style={iconBtnSt}><X size={9} /></button>
-                          </>
-                        )}
-                      </>
-                    )}
-                  </div>
-                ))}
-              </div>
-              <div style={{ display: 'flex', gap: 6 }}>
-                <input style={{ ...inputSt, flex: 1 }} placeholder="새 카테고리..." value={newCat}
-                  onChange={e => setNewCat(e.target.value)} onKeyDown={e => e.key === 'Enter' && addCat()} />
-                <button onClick={addCat} style={mgmtAddBtnSt}>추가</button>
-              </div>
-            </div>
-          )}
-
-          {/* 사이트 관리 */}
-          {mgmtTab === 'site' && (
-            <div style={{ marginTop: 10 }}>
-              {dashboardSites.length > 0 && (
-                <div style={{ marginBottom: 10 }}>
-                  <div style={sectionLabelSt}>대시보드 사이트</div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                    {dashboardSites.map(st => <span key={st.id} style={{ fontSize: 11, padding: '3px 8px', borderRadius: 5, background: 'var(--bg-elevated)', border: '1px solid var(--border)', color: 'var(--text-muted)', opacity: 0.6 }}>{st.name}</span>)}
-                  </div>
-                </div>
-              )}
-              <div style={sectionLabelSt}>결산 전용 사이트</div>
-              {settlementSites.map(st => (
-                <div key={st.id}
-                  draggable
-                  onDragStart={() => { dragSite.current = st.id }}
-                  onDragOver={e => { e.preventDefault(); overSite.current = st.id }}
-                  onDrop={() => { reorderSettlementSite(dragSite.current, overSite.current); dragSite.current = ''; overSite.current = '' }}
-                  style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px', borderRadius: 7, background: 'var(--bg-elevated)', border: '1px solid var(--border)', marginBottom: 5, cursor: 'grab' }}>
-                  {editSite?.id === st.id ? (
-                    <>
-                      <input value={editSiteVal} onChange={e => setEditSiteVal(e.target.value)}
-                        onKeyDown={e => e.key === 'Enter' && confirmEditSite()}
-                        style={{ flex: 1, background: 'none', border: 'none', outline: 'none', color: 'var(--text-primary)', fontSize: 12 }} autoFocus />
-                      <button onClick={confirmEditSite} style={iconBtnSt}><Check size={12} color="var(--green)" /></button>
-                      <button onClick={() => setEditSite(null)} style={iconBtnSt}><X size={12} /></button>
-                    </>
-                  ) : (
-                    <>
-                      <span style={{ flex: 1, fontSize: 12, color: 'var(--text-primary)' }}>{st.name}</span>
-                      <button onClick={() => { setEditSite(st); setEditSiteVal(st.name) }} style={iconBtnSt}><Pencil size={11} /></button>
-                      <button onClick={() => deleteSettlementSite(st)} style={iconBtnSt}><Trash2 size={11} color="var(--red)" /></button>
-                    </>
-                  )}
-                </div>
-              ))}
-              {settlementSites.length === 0 && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8 }}>없음</div>}
-              <div style={{ display: 'flex', gap: 6 }}>
-                <input style={{ ...inputSt, flex: 1 }} placeholder="새 사이트..." value={newSiteName}
-                  onChange={e => setNewSiteName(e.target.value)} onKeyDown={e => e.key === 'Enter' && addSettlementSite()} />
-                <button onClick={addSettlementSite} style={mgmtAddBtnSt}>추가</button>
-              </div>
-            </div>
-          )}
         </div>
 
         {/* 이번주/한달 입금 현황 */}
@@ -629,13 +647,4 @@ const navBtnSt: React.CSSProperties = {
 const miniSummSt: React.CSSProperties = {
   flex: 1, background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 7,
   padding: '5px 8px', display: 'flex', flexDirection: 'column', gap: 2,
-}
-const sectionLabelSt: React.CSSProperties = {
-  fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase',
-  letterSpacing: '0.7px', marginBottom: 6,
-}
-const mgmtAddBtnSt: React.CSSProperties = {
-  padding: '0 12px', borderRadius: 7, border: 'none', background: 'var(--gold)',
-  color: '#000', fontWeight: 700, cursor: 'pointer', fontSize: 12,
-  fontFamily: 'var(--font-body)', flexShrink: 0,
 }
