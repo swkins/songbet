@@ -88,8 +88,21 @@ export default function App() {
   const [savedFlash, setSavedFlash] = useState(false)
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const [collapsedApplied, setCollapsedApplied] = useState(false)
+  const [expandedNoteId, setExpandedNoteId] = useState<string | null>(null)  // 펼쳐진 반영 항목
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Ctrl+S 저장 단축키
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault()
+        if (showCode && draftContent.trim()) saveDraft(draftContent)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [showCode, draftContent])
 
   useEffect(() => {
     loadLogs(); purgeOldLogs()
@@ -125,6 +138,9 @@ export default function App() {
       setDraftId(null)
       setDraftContent('1. ')
     }
+    // 가장 최근 반영 항목만 자동 펼치기
+    const latestApplied = codeNotes.filter(n => !!n.applied_at)[0]
+    if (latestApplied) setExpandedNoteId(latestApplied.id)
     requestAnimationFrame(() => {
       const el = textareaRef.current
       if (!el) return
@@ -413,25 +429,48 @@ export default function App() {
                     <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.8px' }}>반영 목록 ({applied.length})</span>
                     {collapsedApplied ? <ChevronDown size={11} color="var(--text-muted)" /> : <ChevronUp size={11} color="var(--text-muted)" />}
                   </button>
-                  {!collapsedApplied && applied.map(note => (
-                    <div key={note.id} style={{ padding: '10px 14px', borderBottom: '1px solid var(--border-light)' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 5 }}>
-                        <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>{dayjs(note.applied_at!).format('MM/DD HH:mm')}</span>
+                  {!collapsedApplied && applied.map(note => {
+                    const isExpanded = expandedNoteId === note.id
+                    return (
+                      <div key={note.id} style={{ borderBottom: '1px solid var(--border-light)' }}>
+                        {/* 항목 헤더 — 클릭으로 펼치기/접기 */}
                         <button
-                          onClick={async () => {
-                            try { await navigator.clipboard.writeText(note.applied_content ?? '') } catch { /* 무시 */ }
-                            setCopiedId(note.id)
-                            setTimeout(() => setCopiedId(null), 2000)
-                          }}
-                          style={{ fontSize: 9, fontWeight: 700, color: copiedId === note.id ? 'var(--green)' : 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-body)', display: 'flex', alignItems: 'center', gap: 3, padding: 0 }}>
-                          {copiedId === note.id ? <><Check size={9} />복사됨</> : '복사'}
+                          onClick={() => setExpandedNoteId(isExpanded ? null : note.id)}
+                          style={{ width: '100%', background: isExpanded ? 'var(--bg-elevated)' : 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 14px', gap: 8 }}>
+                          <span style={{ fontSize: 9, color: 'var(--text-muted)', flexShrink: 0 }}>{dayjs(note.applied_at!).format('MM/DD HH:mm')}</span>
+                          <span style={{
+                            flex: 1, fontSize: 11, color: 'var(--text-secondary)', textAlign: 'left',
+                            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                          }}>
+                            {(note.applied_content ?? '').split('\n')[0]}
+                          </span>
+                          {isExpanded ? <ChevronUp size={10} color="var(--text-muted)" /> : <ChevronDown size={10} color="var(--text-muted)" />}
                         </button>
+                        {/* 펼쳐진 내용 */}
+                        {isExpanded && (
+                          <div style={{ padding: '0 14px 10px' }}>
+                            <pre style={{
+                              fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.6,
+                              whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0,
+                              fontFamily: 'var(--font-body)',
+                            }}>
+                              {note.applied_content}
+                            </pre>
+                            <button
+                              onClick={async (e) => {
+                                e.stopPropagation()
+                                try { await navigator.clipboard.writeText(note.applied_content ?? '') } catch { /* 무시 */ }
+                                setCopiedId(note.id)
+                                setTimeout(() => setCopiedId(null), 2000)
+                              }}
+                              style={{ marginTop: 6, fontSize: 9, fontWeight: 700, color: copiedId === note.id ? 'var(--green)' : 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-body)', display: 'flex', alignItems: 'center', gap: 3, padding: 0 }}>
+                              {copiedId === note.id ? <><Check size={9} />복사됨</> : '복사'}
+                            </button>
+                          </div>
+                        )}
                       </div>
-                      <div style={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 80, overflow: 'hidden', maskImage: 'linear-gradient(to bottom, black 60%, transparent 100%)' }}>
-                        {note.applied_content}
-                      </div>
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
               )}
             </div>

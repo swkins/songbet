@@ -85,6 +85,7 @@ export default function Settlement() {
   }
 
   /* ── 카테고리 관리 ── */
+  const dragCat = { current: '' }; const overCat = { current: '' }
   function saveCats(cats: string[]) { setCategories(cats); localStorage.setItem('cf_cats', JSON.stringify(cats)) }
   function addCat() { if (!newCat.trim() || categories.includes(newCat.trim())) return; saveCats([...categories, newCat.trim()]); setNewCat('') }
   function removeCat(cat: string) { if (LOCKED_CATS.includes(cat)) return; saveCats(categories.filter(c => c !== cat)) }
@@ -92,10 +93,28 @@ export default function Settlement() {
     if (!editCatVal.trim() || editCatVal === cat) { setEditCat(null); return }
     saveCats(categories.map(c => c === cat ? editCatVal.trim() : c)); setEditCat(null)
   }
+  function reorderCat(from: string, to: string) {
+    if (from === to) return
+    const arr = [...categories]
+    const fi = arr.indexOf(from); const ti = arr.indexOf(to)
+    const [moved] = arr.splice(fi, 1); arr.splice(ti, 0, moved)
+    saveCats(arr)
+  }
 
   /* ── 사이트 관리 ── */
+  const dragSite = { current: '' }; const overSite = { current: '' }
   const settlementSites = sites.filter(s => s.settlement_only)
   const dashboardSites  = sites.filter(s => !s.settlement_only)
+
+  async function reorderSettlementSite(fromId: string, toId: string) {
+    if (fromId === toId) return
+    const arr = [...settlementSites]
+    const fi = arr.findIndex(s => s.id === fromId); const ti = arr.findIndex(s => s.id === toId)
+    const [moved] = arr.splice(fi, 1); arr.splice(ti, 0, moved)
+    const updated = arr.map((s, i) => ({ ...s, sort_order: i + dashboardSites.length }))
+    setSites(p => p.map(s => updated.find(u => u.id === s.id) ?? s))
+    for (const s of updated) await supabase.from('sites').update({ sort_order: s.sort_order }).eq('id', s.id)
+  }
 
   async function addSettlementSite() {
     if (!newSiteName.trim()) return
@@ -197,24 +216,20 @@ export default function Settlement() {
 
         {/* 수입/지출 토글 */}
         <div style={{ padding: '0 12px' }}>
-          <div style={{ display: 'flex' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
             <button onClick={() => setFormType('income')} style={{
-              flex: 1, padding: '10px 0', borderRadius: '8px 0 0 8px',
-              border: '2px solid', borderRight: formType === 'income' ? '2px solid var(--green)' : '1px solid var(--border)',
-              borderColor: formType === 'income' ? 'var(--green)' : 'var(--border)',
+              padding: '10px 0', borderRadius: 8,
+              border: `2px solid ${formType === 'income' ? 'var(--green)' : 'var(--border)'}`,
               background: formType === 'income' ? 'var(--green-bg)' : 'var(--bg-elevated)',
               color: formType === 'income' ? 'var(--green)' : 'var(--text-muted)',
               fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'var(--font-body)',
-              boxShadow: formType === 'income' ? '0 0 0 1px var(--green)' : 'none',
             }}>💰 수입</button>
             <button onClick={() => setFormType('expense')} style={{
-              flex: 1, padding: '10px 0', borderRadius: '0 8px 8px 0',
-              border: '2px solid', borderLeft: 'none',
-              borderColor: formType === 'expense' ? 'var(--red)' : 'var(--border)',
+              padding: '10px 0', borderRadius: 8,
+              border: `2px solid ${formType === 'expense' ? 'var(--red)' : 'var(--border)'}`,
               background: formType === 'expense' ? 'var(--red-bg)' : 'var(--bg-elevated)',
               color: formType === 'expense' ? 'var(--red)' : 'var(--text-muted)',
               fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'var(--font-body)',
-              boxShadow: formType === 'expense' ? '0 0 0 1px var(--red)' : 'none',
             }}>💸 지출</button>
           </div>
         </div>
@@ -287,7 +302,12 @@ export default function Settlement() {
             <div style={{ marginTop: 10 }}>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 8 }}>
                 {categories.map(cat => (
-                  <div key={cat} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 8px', borderRadius: 6, background: 'var(--bg-elevated)', border: '1px solid var(--border)', fontSize: 11, opacity: LOCKED_CATS.includes(cat) ? 0.5 : 1 }}>
+                  <div key={cat}
+                    draggable={!LOCKED_CATS.includes(cat)}
+                    onDragStart={() => { dragCat.current = cat }}
+                    onDragOver={e => { e.preventDefault(); overCat.current = cat }}
+                    onDrop={() => { reorderCat(dragCat.current, overCat.current); dragCat.current = ''; overCat.current = '' }}
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 8px', borderRadius: 6, background: 'var(--bg-elevated)', border: '1px solid var(--border)', fontSize: 11, opacity: LOCKED_CATS.includes(cat) ? 0.5 : 1, cursor: LOCKED_CATS.includes(cat) ? 'default' : 'grab' }}>
                     {editCat === cat ? (
                       <>
                         <input value={editCatVal} onChange={e => setEditCatVal(e.target.value)}
@@ -331,7 +351,12 @@ export default function Settlement() {
               )}
               <div style={sectionLabelSt}>결산 전용 사이트</div>
               {settlementSites.map(st => (
-                <div key={st.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px', borderRadius: 7, background: 'var(--bg-elevated)', border: '1px solid var(--border)', marginBottom: 5 }}>
+                <div key={st.id}
+                  draggable
+                  onDragStart={() => { dragSite.current = st.id }}
+                  onDragOver={e => { e.preventDefault(); overSite.current = st.id }}
+                  onDrop={() => { reorderSettlementSite(dragSite.current, overSite.current); dragSite.current = ''; overSite.current = '' }}
+                  style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px', borderRadius: 7, background: 'var(--bg-elevated)', border: '1px solid var(--border)', marginBottom: 5, cursor: 'grab' }}>
                   {editSite?.id === st.id ? (
                     <>
                       <input value={editSiteVal} onChange={e => setEditSiteVal(e.target.value)}
