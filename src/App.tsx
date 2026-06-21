@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import type { Tab, ActionLog } from './types'
+import type { Tab, ActionLog, Todo } from './types'
 import Dashboard from './pages/Dashboard'
 import Settlement from './pages/Settlement'
 import Stats from './pages/Stats'
@@ -7,7 +7,7 @@ import Simul from './pages/Simul'
 import { supabase } from './lib/supabase'
 import { purgeOldLogs } from './lib/logger'
 import dayjs from 'dayjs'
-import { RotateCcw, ClipboardList, X, LayoutTemplate, Code2, Check, ChevronDown, ChevronUp, Save } from 'lucide-react'
+import { RotateCcw, ClipboardList, X, LayoutTemplate, Code2, Check, ChevronDown, ChevronUp, Save, CheckSquare, Plus, Trash2, Settings, RotateCcw as Reset } from 'lucide-react'
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'dashboard', label: '대시보드' },
@@ -74,6 +74,7 @@ export default function App() {
   const [tab, setTab] = useState<Tab>('dashboard')
   const [logs, setLogs] = useState<ActionLog[]>([])
   const [showLog, setShowLog] = useState(false)
+  const [showTodo, setShowTodo] = useState(false)
   const [showWidthMenu, setShowWidthMenu] = useState(false)
   const [undoing, setUndoing] = useState<string | null>(null)
   const [maxWidth, setMaxWidth] = useState<string>(() => localStorage.getItem('sb_width') ?? '1920px')
@@ -117,6 +118,33 @@ export default function App() {
   }, [])
 
   const justOpenedCode = useRef(false)
+
+  // 오늘 할 일 (Nav 패널용)
+  const [todos, setTodos] = useState<Todo[]>([])
+  const [newTodoText, setNewTodoText] = useState('')
+  const todayStr = dayjs().format('YYYY-MM-DD')
+  const uncheckedCount = todos.filter(t => !t.check_dates.includes(todayStr)).length
+
+  useEffect(() => { loadTodos() }, [])
+  async function loadTodos() {
+    const { data } = await supabase.from('todos').select('*').order('created_at')
+    if (data) setTodos(data as Todo[])
+  }
+  async function toggleTodoApp(todo: Todo) {
+    const isChecked = todo.check_dates.includes(todayStr)
+    const newDates = isChecked ? todo.check_dates.filter((d: string) => d !== todayStr) : [...todo.check_dates, todayStr]
+    const { data } = await supabase.from('todos').update({ done: !isChecked, check_dates: newDates, check_count: newDates.length }).eq('id', todo.id).select().single()
+    if (data) setTodos(p => p.map(t => t.id === todo.id ? data as Todo : t))
+  }
+  async function addTodoApp() {
+    if (!newTodoText.trim()) return
+    const { data } = await supabase.from('todos').insert({ todo_date: todayStr, content: newTodoText.trim(), done: false, check_count: 0, check_dates: [] }).select().single()
+    if (data) { setTodos(p => [...p, data as Todo]); setNewTodoText('') }
+  }
+  async function deleteTodoApp(id: string) {
+    await supabase.from('todos').delete().eq('id', id)
+    setTodos(p => p.filter(t => t.id !== id))
+  }
 
   useEffect(() => {
     if (showCode) {
@@ -278,7 +306,27 @@ export default function App() {
           </div>
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
 
-            {/* 화면폭 설정 */}
+            {/* 오늘 할 일 버튼 */}
+            <button onClick={() => { setShowTodo(p => !p); if (showCode) setShowCode(false); if (showLog) setShowLog(false) }} style={{
+              background: showTodo ? 'rgba(245,166,35,0.15)' : 'transparent',
+              border: `1px solid ${showTodo ? 'var(--gold-border)' : 'var(--border)'}`,
+              borderRadius: 'var(--radius-sm)', cursor: 'pointer',
+              padding: '4px 8px', display: 'flex', alignItems: 'center', gap: 5,
+              fontSize: 11, fontWeight: 600, fontFamily: 'var(--font-body)', transition: 'all 0.15s',
+              color: showTodo ? 'var(--gold)' : 'var(--text-secondary)',
+              position: 'relative',
+            }}>
+              <CheckSquare size={13} />
+              {uncheckedCount > 0 && (
+                <span style={{
+                  position: 'absolute', top: -5, right: -5,
+                  background: 'var(--red)', color: '#fff',
+                  borderRadius: '50%', fontSize: 9, fontWeight: 800,
+                  width: 15, height: 15, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  lineHeight: 1,
+                }}>{uncheckedCount}</span>
+              )}
+            </button>
             <div style={{ position: 'relative' }}>
               <button onClick={() => setShowWidthMenu(p => !p)} style={{
                 background: showWidthMenu ? 'var(--gold-bg)' : 'transparent',
@@ -312,7 +360,7 @@ export default function App() {
             </div>
 
             {/* 코드 수정 버튼 */}
-            <button onClick={() => { setShowCode(p => !p); if (showLog) setShowLog(false) }} style={{
+            <button onClick={() => { setShowCode(p => !p); if (showLog) setShowLog(false); if (showTodo) setShowTodo(false) }} style={{
               background: showCode ? 'var(--cyan-bg)' : 'transparent',
               border: `1px solid ${showCode ? 'var(--cyan-border)' : 'var(--border)'}`,
               borderRadius: 'var(--radius-sm)', color: showCode ? 'var(--cyan)' : 'var(--text-secondary)',
@@ -323,7 +371,7 @@ export default function App() {
             </button>
 
             {/* LOG 버튼 — 숫자 뱃지 제거 */}
-            <button onClick={() => { setShowLog(p => !p); if (showCode) setShowCode(false) }} style={{
+            <button onClick={() => { setShowLog(p => !p); if (showCode) setShowCode(false); if (showTodo) setShowTodo(false) }} style={{
               background: showLog ? 'var(--gold-bg)' : 'transparent',
               border: `1px solid ${showLog ? 'var(--gold-border)' : 'var(--border)'}`,
               borderRadius: 'var(--radius-sm)', color: showLog ? 'var(--gold)' : 'var(--text-secondary)',
@@ -437,13 +485,7 @@ export default function App() {
                         <button
                           onClick={() => setExpandedNoteId(isExpanded ? null : note.id)}
                           style={{ width: '100%', background: isExpanded ? 'var(--bg-elevated)' : 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 14px', gap: 8 }}>
-                          <span style={{ fontSize: 9, color: 'var(--text-muted)', flexShrink: 0 }}>{dayjs(note.applied_at!).format('MM/DD HH:mm')}</span>
-                          <span style={{
-                            flex: 1, fontSize: 11, color: 'var(--text-secondary)', textAlign: 'left',
-                            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                          }}>
-                            {(note.applied_content ?? '').split('\n')[0]}
-                          </span>
+                          <span style={{ fontSize: 10, color: 'var(--text-muted)', flexShrink: 0 }}>{dayjs(note.applied_at!).format('MM/DD HH:mm')}</span>
                           {isExpanded ? <ChevronUp size={10} color="var(--text-muted)" /> : <ChevronDown size={10} color="var(--text-muted)" />}
                         </button>
                         {/* 펼쳐진 내용 */}
@@ -473,6 +515,74 @@ export default function App() {
                   })}
                 </div>
               )}
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* 오늘 할 일 패널 */}
+      {showTodo && (
+        <>
+          <div style={{ position: 'fixed', inset: 0, zIndex: 150 }} onClick={() => setShowTodo(false)} />
+          <div style={{
+            position: 'fixed', top: 56, right: 16, width: 300,
+            maxHeight: 'calc(100vh - 72px)',
+            background: 'var(--bg-card)', border: '1px solid var(--gold-border)',
+            borderRadius: 'var(--radius-lg)', boxShadow: '0 16px 48px rgba(0,0,0,0.6)',
+            zIndex: 160, display: 'flex', flexDirection: 'column', overflow: 'hidden',
+          }} onClick={e => e.stopPropagation()}>
+            <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--bg-elevated)', flexShrink: 0 }}>
+              <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '1.2px', textTransform: 'uppercase', color: 'var(--gold)' }}>오늘 할 일</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: 10, color: 'var(--text-secondary)' }}>
+                  {todos.filter(t => t.check_dates.includes(todayStr)).length}/{todos.length}
+                </span>
+                <button onClick={() => setShowTodo(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex' }}><X size={12} /></button>
+              </div>
+            </div>
+            <div style={{ flex: 1, overflowY: 'auto', padding: '8px 0' }}>
+              {todos.length === 0 && (
+                <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>할 일이 없습니다</div>
+              )}
+              {todos.map(todo => {
+                const isChecked = todo.check_dates.includes(todayStr)
+                return (
+                  <div key={todo.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 14px', borderBottom: '1px solid var(--border-light)' }}>
+                    <button
+                      onClick={() => toggleTodoApp(todo)}
+                      style={{
+                        width: 18, height: 18, borderRadius: 4, flexShrink: 0, cursor: 'pointer',
+                        background: isChecked ? 'var(--green)' : 'transparent',
+                        border: `2px solid ${isChecked ? 'var(--green)' : 'var(--border)'}`,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0,
+                      }}>
+                      {isChecked && <Check size={10} color="#000" strokeWidth={3} />}
+                    </button>
+                    <span style={{ flex: 1, fontSize: 13, color: isChecked ? 'var(--text-muted)' : 'var(--text-primary)', textDecoration: isChecked ? 'line-through' : 'none' }}>
+                      {todo.content}
+                    </span>
+                    <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--gold)', background: 'var(--gold-bg)', border: '1px solid var(--gold-border)', padding: '1px 5px', borderRadius: 4, flexShrink: 0 }}>
+                      {todo.check_count}회
+                    </span>
+                    <button onClick={() => deleteTodoApp(todo.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', padding: 2, flexShrink: 0 }}>
+                      <Trash2 size={12} />
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
+            {/* 추가 입력 */}
+            <div style={{ padding: '10px 14px', borderTop: '1px solid var(--border)', flexShrink: 0, display: 'flex', gap: 6 }}>
+              <input
+                style={{ flex: 1, background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 7, padding: '8px 10px', fontSize: 12, color: 'var(--text-primary)', fontFamily: 'var(--font-body)', outline: 'none' }}
+                placeholder="할 일 추가..."
+                value={newTodoText}
+                onChange={e => setNewTodoText(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && addTodoApp()}
+              />
+              <button onClick={addTodoApp} style={{ background: 'var(--gold)', border: 'none', borderRadius: 7, padding: '0 12px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
+                <Plus size={14} color="#000" />
+              </button>
             </div>
           </div>
         </>

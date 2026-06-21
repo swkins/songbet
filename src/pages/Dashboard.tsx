@@ -1,15 +1,15 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { logAction } from '../lib/logger'
-import type { Bet, Site, Todo, Sport, Market, BetResult } from '../types'
+import type { Bet, Site, Sport, Market, BetResult } from '../types'
 import dayjs from 'dayjs'
 import isoWeek from 'dayjs/plugin/isoWeek'
 dayjs.extend(isoWeek)
 import {
   Plus, Trash2, Check, X, ChevronLeft, ChevronRight,
-  RotateCcw, Calendar, Settings,
+  RotateCcw, Settings,
   CheckCircle, XCircle, Ban, Gift, GripVertical, DollarSign,
-  TrendingUp, TrendingDown, ArrowDownToLine, LogOut, Clock,
+  TrendingUp, TrendingDown, ArrowDownToLine, LogOut,
 } from 'lucide-react'
 
 const SPORTS: { value: Sport; label: string }[] = [
@@ -472,11 +472,7 @@ export default function Dashboard() {
   const [openFormSiteId, setOpenFormSiteId] = useState<string | null>(null)
   const [hoverBetId, setHoverBetId]     = useState<string | null>(null)
 
-  const [todos, setTodos]       = useState<Todo[]>([])
-  const [newTodo, setNewTodo]   = useState('')
-  const [showAddTodo, setShowAddTodo] = useState(false)
-  const [settingsOpenId, setSettingsOpenId] = useState<string | null>(null)
-  useEffect(() => { loadSites(); loadBets(); loadTodos(); loadCashflows() }, [])
+  const [hoverBetId, setHoverBetId]     = useState<string | null>(null)  useEffect(() => { loadSites(); loadBets(); loadCashflows() }, [])
 
   async function loadSites() {
     const { data } = await supabase.from('sites').select('*').eq('settlement_only', false).order('sort_order')
@@ -485,10 +481,6 @@ export default function Dashboard() {
   async function loadBets() {
     const { data } = await supabase.from('bets').select('*').eq('is_hidden', false).order('bet_date', { ascending: true }).order('created_at', { ascending: true })
     if (data) setBets(data)
-  }
-  async function loadTodos() {
-    const { data } = await supabase.from('todos').select('*').order('created_at')
-    if (data) setTodos(data)
   }
   async function loadCashflows() {
     const { data } = await supabase.from('cashflows').select('flow_date,type,amount,site_id').gte('flow_date', weekStart).lte('flow_date', weekEnd)
@@ -502,7 +494,6 @@ export default function Dashboard() {
   const pendingBySite    = (id: string) => betsBySite(id).filter(b => b.result === 'pending')
   const settledBySite    = (id: string) => betsBySite(id).filter(b => b.result !== 'pending')
   const colCount = Math.max(1, sites.length)
-  const todayChecked     = todos.filter(t => t.check_dates.includes(today)).length
 
   function sitePnL(site: Site) {
     if (!site.active || (site.last_deposit ?? 0) === 0) return null
@@ -740,119 +731,18 @@ export default function Dashboard() {
   }
 
   /* ── 할일 ── */
-  async function addTodo() {
-    if (!newTodo.trim()) return
-    const { data } = await supabase.from('todos').insert({ todo_date: today, content: newTodo.trim(), done: false, check_count: 0, check_dates: [] }).select().single()
-    if (data) { setTodos(p => [...p, data]); setNewTodo('') }
-  }
-  async function toggleTodo(todo: Todo) {
-    const isChecked = todo.check_dates.includes(today)
-    const newDates = isChecked ? todo.check_dates.filter(d => d !== today) : [...todo.check_dates, today]
-    const { data } = await supabase.from('todos').update({ done: !isChecked, check_dates: newDates, check_count: newDates.length }).eq('id', todo.id).select().single()
-    if (data) setTodos(p => p.map(t => t.id === todo.id ? data : t))
-  }
-  async function toggleCalDate(todo: Todo, date: string) {
-    const has = todo.check_dates.includes(date)
-    const newDates = has ? todo.check_dates.filter(d => d !== date) : [...todo.check_dates, date]
-    const { data } = await supabase.from('todos').update({ check_dates: newDates, check_count: newDates.length, done: newDates.includes(today) }).eq('id', todo.id).select().single()
-    if (data) setTodos(p => p.map(t => t.id === todo.id ? data : t))
-  }
-  async function resetTodo(todo: Todo) {
-    if (!confirm(`"${todo.content}" 초기화?`)) return
-    const { data } = await supabase.from('todos').update({ check_dates: [], check_count: 0, done: false }).eq('id', todo.id).select().single()
-    if (data) setTodos(p => p.map(t => t.id === todo.id ? data : t))
-  }
-  async function deleteTodo(todo: Todo) {
-    await supabase.from('todos').delete().eq('id', todo.id); setTodos(p => p.filter(t => t.id !== todo.id))
-  }
-
   /* ════════════ RENDER ════════════ */
   return (
     <div className="page">
       <div className="dashboard-main">
 
-        {/* ── 좌: 할일 + 주간 입금 (260px) ── */}
+        {/* ── 좌: 입금 현황 (260px) ── */}
         <div className="dashboard-side">
-
-          {/* 오늘 할 일 */}
-          <div className="card" style={{ padding: '10px 12px' }}>
-            <div className="flex-between mb-10">
-              <span className="card-title" style={{ margin: 0 }}>오늘 할 일</span>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span style={{ fontSize: 10, color: 'var(--text-secondary)' }}>{todayChecked}/{todos.length}</span>
-                <button
-                  onClick={() => { setNewTodo(''); setShowAddTodo(true) }}
-                  style={{ background: 'var(--gold-bg)', border: '1px solid var(--gold-border)', borderRadius: 6, cursor: 'pointer', color: 'var(--gold)', display: 'flex', alignItems: 'center', padding: '3px 6px' }}
-                >
-                  <Plus size={13} />
-                </button>
-              </div>
-            </div>
-            {todos.length === 0 && <div className="empty" style={{ padding: '10px 0' }}><div className="empty-icon">📋</div>추가하세요</div>}
-            {todos.map(t => {
-              const isChecked = t.check_dates.includes(today)
-              const isSettingsOpen = settingsOpenId === t.id
-              return (
-                <div key={t.id} style={{ position: 'relative' }}>
-                  <div className="todo-item">
-                    <div className={`todo-check ${isChecked ? 'done' : ''}`} onClick={() => toggleTodo(t)}>{isChecked && <Check size={8} color="#000" strokeWidth={3} />}</div>
-                    <span className={`todo-text ${isChecked ? 'done' : ''}`}>{t.content}</span>
-                    <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--gold)', background: 'var(--gold-bg)', border: '1px solid var(--gold-border)', padding: '0 4px', borderRadius: 5, flexShrink: 0 }}>{t.check_count}회</span>
-                    <button
-                      className="btn btn-icon btn-ghost btn-sm"
-                      style={isSettingsOpen ? { background: 'var(--bg-elevated)' } : {}}
-                      onClick={() => setSettingsOpenId(isSettingsOpen ? null : t.id)}
-                    >
-                      <Settings size={10} color={isSettingsOpen ? 'var(--text-primary)' : 'var(--text-secondary)'} />
-                    </button>
-                  </div>
-                  {/* 설정 팝업 */}
-                  {isSettingsOpen && (
-                    <>
-                      <div style={{ position: 'fixed', inset: 0, zIndex: 200 }} onClick={() => setSettingsOpenId(null)} />
-                      <div style={{
-                        position: 'absolute', right: 0, top: '100%', zIndex: 210,
-                        background: 'var(--bg-card)', border: '1px solid var(--border)',
-                        borderRadius: 'var(--radius)', boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
-                        minWidth: 200, padding: '8px 0',
-                      }} onClick={e => e.stopPropagation()}>
-                        {/* 달력 */}
-                        <div style={{ padding: '4px 12px 8px' }}>
-                          <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.6px', marginBottom: 6 }}>달력</div>
-                          <MiniCalendar checkedDates={t.check_dates} onToggle={d => toggleCalDate(t, d)} />
-                        </div>
-                        <div style={{ borderTop: '1px solid var(--border-light)', margin: '4px 0' }} />
-                        {/* 초기화 */}
-                        <button
-                          onClick={() => { resetTodo(t); setSettingsOpenId(null) }}
-                          style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', padding: '8px 14px', display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-secondary)', fontSize: 12, fontFamily: 'var(--font-body)', textAlign: 'left' }}
-                          onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-elevated)')}
-                          onMouseLeave={e => (e.currentTarget.style.background = 'none')}
-                        >
-                          <RotateCcw size={12} color="var(--gold)" /> 초기화
-                        </button>
-                        {/* 삭제 */}
-                        <button
-                          onClick={() => { deleteTodo(t); setSettingsOpenId(null) }}
-                          style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', padding: '8px 14px', display: 'flex', alignItems: 'center', gap: 8, color: 'var(--red)', fontSize: 12, fontFamily: 'var(--font-body)', textAlign: 'left' }}
-                          onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-elevated)')}
-                          onMouseLeave={e => (e.currentTarget.style.background = 'none')}
-                        >
-                          <Trash2 size={12} /> 삭제
-                        </button>
-                      </div>
-                    </>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-
           {/* 이번주/한달 입금 현황 */}
           <WeekMonthDeposit sites={sites} cashflows={cashflows} weekStart={weekStart} weekEnd={weekEnd} />
         </div>
 
-        {/* ── 우: 베팅 현황 (flex-1) — site-grid 위에 타이틀 행 없이, site-grid border 위에 오버레이 */}
+        {/* ── 우: 베팅 현황 (flex-1) */}
         <div className="dashboard-bets">
           {sites.length === 0 ? (
             <div className="card" style={{ padding: '10px 14px' }}>
@@ -1059,34 +949,6 @@ export default function Dashboard() {
         </div>
 
       </div>
-
-      {/* 할 일 추가 모달 */}
-      {showAddTodo && (
-        <div className="modal-overlay" onClick={() => setShowAddTodo(false)}>
-          <div className="modal" style={{ maxWidth: 340 }} onClick={e => e.stopPropagation()}>
-            <div className="modal-title" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><Plus size={15} color="var(--gold)" /> 할 일 추가</span>
-              <button onClick={() => setShowAddTodo(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex' }}><X size={15} /></button>
-            </div>
-            <input
-              className="form-input"
-              style={{ fontSize: 14, marginBottom: 12 }}
-              placeholder="할 일을 입력하세요..."
-              value={newTodo}
-              onChange={e => setNewTodo(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter' && newTodo.trim()) { addTodo(); setShowAddTodo(false) } }}
-              autoFocus
-            />
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button className="btn btn-ghost" style={{ flex: 1 }} onClick={() => setShowAddTodo(false)}>취소</button>
-              <button className="btn btn-primary" style={{ flex: 2 }} disabled={!newTodo.trim()}
-                onClick={() => { addTodo(); setShowAddTodo(false) }}>
-                <Check size={13} /> 추가
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* 모달 */}
       {showSiteMgr && (

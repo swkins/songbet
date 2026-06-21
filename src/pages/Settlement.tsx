@@ -386,7 +386,7 @@ export default function Settlement() {
       </div>
 
       {/* ═══ 중: 날짜별 목록 (340px) ═══ */}
-      <div style={{ width: 340, flexShrink: 0, borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div style={{ width: 400, flexShrink: 0, borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
         {/* 월 네비 */}
         <div style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
