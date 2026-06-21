@@ -472,7 +472,7 @@ export default function Dashboard() {
   const [openFormSiteId, setOpenFormSiteId] = useState<string | null>(null)
   const [hoverBetId, setHoverBetId]     = useState<string | null>(null)
 
-  const [hoverBetId, setHoverBetId]     = useState<string | null>(null)  useEffect(() => { loadSites(); loadBets(); loadCashflows() }, [])
+  useEffect(() => { loadSites(); loadBets(); loadCashflows() }, [])
 
   async function loadSites() {
     const { data } = await supabase.from('sites').select('*').eq('settlement_only', false).order('sort_order')
