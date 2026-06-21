@@ -96,10 +96,16 @@ function getBasketballTier(homeLine: number, homeIsNegative: boolean, homeOdds: 
 
 // ─── 배당 입력 포맷 (343 → 3.43) ─────────────────────────────────
 function formatOddsInput(raw: string): string {
-  const digits = raw.replace(/\D/g, '')
+  const digits = raw.replace(/\D/g, '').slice(0, 3)
   if (digits.length === 0) return ''
-  if (digits.length <= 2) return digits
-  return digits.slice(0, digits.length - 2) + '.' + digits.slice(digits.length - 2)
+  if (digits.length < 3) return digits   // 3자리 미만: 그냥 숫자 표시
+  return digits[0] + '.' + digits.slice(1) // 정확히 3자리: x.xx
+}
+
+function parseOdds(raw: string): number {
+  const fmt = formatOddsInput(raw)
+  if (fmt.length < 3) return NaN
+  return parseFloat(fmt)
 }
 
 // ─── 타입 ──────────────────────────────────────────────────────────
@@ -167,8 +173,8 @@ export default function Simul() {
   }
 
   // 파싱
-  const ho = parseFloat(formatOddsInput(homeOddsRaw).replace(',','.'))
-  const ao = parseFloat(formatOddsInput(awayOddsRaw).replace(',','.'))
+  const ho = parseOdds(homeOddsRaw)
+  const ao = parseOdds(awayOddsRaw)
   const mlValid = !isNaN(ho) && !isNaN(ao) && ho > 1 && ao > 1
   const mlMargin = mlValid ? (1/ho + 1/ao - 1)*100 : 0
   const homeTier = mlValid ? getBaseballTier(ho, true) : null
@@ -180,12 +186,12 @@ export default function Simul() {
       : ho >= ao ? 'home' : 'away'
     : null
 
-  const ln = parseFloat(ouLine), ov = parseFloat(formatOddsInput(overOddsRaw)), un = parseFloat(formatOddsInput(underOddsRaw))
+  const ln = parseFloat(ouLine), ov = parseOdds(overOddsRaw), un = parseOdds(underOddsRaw)
   const ouValid = !isNaN(ln) && !isNaN(ov) && !isNaN(un) && ln > 0 && ov > 1 && un > 1
   const ouMargin = ouValid ? (1/ov + 1/un - 1)*100 : 0
   const ouResult = ouValid ? getBaseballOUTier(ln, ov, un) : null
 
-  const hl = parseFloat(handicapLine), bho = parseFloat(formatOddsInput(bktHomeRaw)), bao = parseFloat(formatOddsInput(bktAwayRaw))
+  const hl = parseFloat(handicapLine), bho = parseOdds(bktHomeRaw), bao = parseOdds(bktAwayRaw)
   const bktValid = !isNaN(hl) && !isNaN(bho) && !isNaN(bao) && hl > 0 && bho > 1 && bao > 1
   const bktMargin = bktValid ? (1/bho + 1/bao - 1)*100 : 0
   const bktResult = bktValid ? getBasketballTier(hl, homeHandicap==='마핸', bho, bao, bktMargin) : null
@@ -231,9 +237,8 @@ export default function Simul() {
     return formatOddsInput(raw) || ''
   }
 
-  // ─── 좌측 패널: 입력 ───────────────────────────────────────────
-  function LeftPanel() {
-    return (
+  // ─── 좌측 패널 JSX ───────────────────────────────────────────
+  const leftPanel = (
       <div style={{ display:'flex', flexDirection:'column', gap:0 }}>
         {/* 모드 선택 */}
         <div style={card}>
@@ -270,13 +275,19 @@ export default function Simul() {
             <div style={r2}>
               <div>
                 <span style={lbSt}>홈</span>
-                <input style={inSt} inputMode="numeric" placeholder="예: 245" value={homeOddsRaw} onChange={e => handleOddsInput(e.target.value, setHomeOddsRaw)} />
-                {homeOddsRaw && <div style={{ fontSize:10, color:'var(--text-secondary)', textAlign:'center', marginTop:2 }}>{displayOdds(homeOddsRaw)}</div>}
+                <input style={inSt} inputMode="numeric" placeholder="예: 245"
+                  value={formatOddsInput(homeOddsRaw)}
+                  onChange={e => handleOddsInput(e.target.value, setHomeOddsRaw)}
+                  onClick={() => setHomeOddsRaw('')} />
+                {homeOddsRaw.length > 0 && homeOddsRaw.length < 3 && <div style={{ fontSize:10, color:'#fbbf24', textAlign:'center', marginTop:2 }}>숫자 {3-homeOddsRaw.length}개 더</div>}
               </div>
               <div>
                 <span style={lbSt}>원정</span>
-                <input style={inSt} inputMode="numeric" placeholder="예: 196" value={awayOddsRaw} onChange={e => handleOddsInput(e.target.value, setAwayOddsRaw)} />
-                {awayOddsRaw && <div style={{ fontSize:10, color:'var(--text-secondary)', textAlign:'center', marginTop:2 }}>{displayOdds(awayOddsRaw)}</div>}
+                <input style={inSt} inputMode="numeric" placeholder="예: 196"
+                  value={formatOddsInput(awayOddsRaw)}
+                  onChange={e => handleOddsInput(e.target.value, setAwayOddsRaw)}
+                  onClick={() => setAwayOddsRaw('')} />
+                {awayOddsRaw.length > 0 && awayOddsRaw.length < 3 && <div style={{ fontSize:10, color:'#fbbf24', textAlign:'center', marginTop:2 }}>숫자 {3-awayOddsRaw.length}개 더</div>}
               </div>
             </div>
             {mlValid && homeTier && awayTier && (
@@ -425,14 +436,12 @@ export default function Simul() {
           ))}
         </div>
       </div>
-    )
-  }
+  )
 
   // ─── 중앙 패널: 베팅 목록 ──────────────────────────────────────
-  function MidPanel() {
-    const pending = bets.filter(b => b.result === 'pending')
-    const done = bets.filter(b => b.result !== 'pending')
-    return (
+  const pending = bets.filter(b => b.result === 'pending')
+  const done = bets.filter(b => b.result !== 'pending')
+  const midPanel = (
       <div style={{ display:'flex', flexDirection:'column', gap:0 }}>
         <div style={{ ...card, marginBottom:10 }}>
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
@@ -499,20 +508,15 @@ export default function Simul() {
           )}
         </div>
       </div>
-    )
-  }
+  )
 
   // ─── 우측 패널: 통계 ──────────────────────────────────────────
-  function RightPanel() {
-    if (settled.length === 0) {
-      return (
+  const rightPanel = settled.length === 0 ? (
         <div style={card}>
           <div style={secT}>모의 통계</div>
           <div style={{ fontSize:11, color:'var(--text-secondary)', textAlign:'center', padding:'20px 0' }}>결과 처리 후 통계가 표시됩니다</div>
         </div>
-      )
-    }
-    return (
+  ) : (
       <div style={{ display:'flex', flexDirection:'column', gap:0 }}>
         <div style={card}>
           <div style={secT}>모의 통계</div>
@@ -570,14 +574,13 @@ export default function Simul() {
           )}
         </div>
       </div>
-    )
-  }
+  )
 
   return (
     <div style={{ display:'grid', gridTemplateColumns:'220px 220px 1fr', gap:10, padding:'12px', minHeight:'100vh', background:'var(--bg)', alignItems:'start' }}>
-      <LeftPanel />
-      <MidPanel />
-      <RightPanel />
+      {leftPanel}
+      {midPanel}
+      {rightPanel}
     </div>
   )
 }
