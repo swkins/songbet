@@ -12,6 +12,7 @@ export interface Site {
   total_withdrawal: number
   currency: 'krw' | 'usd'
   bet_type: 'single' | 'double'   // 단폴 or 두폴
+  settlement_only: boolean          // 결산 전용 사이트 (대시보드 베팅현황에 미표시)
 }
 export interface Bet {
   id: string; created_at: string; bet_date: string; sport: Sport

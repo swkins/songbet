@@ -104,12 +104,12 @@ export default function Settlement() {
   }
 
   /* ── 사이트 관리 ── */
-  const settlementSites = sites.filter(s => !s.active && (s.last_deposit ?? 0) === 0 && (s.total_withdrawal ?? 0) === 0)
-  const dashboardSites = sites.filter(s => !settlementSites.some(ss => ss.id === s.id))
+  const settlementSites = sites.filter(s => s.settlement_only)
+  const dashboardSites  = sites.filter(s => !s.settlement_only)
 
   async function addSettlementSite() {
     if (!newSiteName.trim()) return
-    const { data } = await supabase.from('sites').insert({ name: newSiteName.trim(), balance: 0, active: false, sort_order: sites.length, rolling_target: 0, rolling_done: 0, last_deposit: 0, deposit_bet_done: 0, point_deposit: 0, total_withdrawal: 0, currency: 'krw', bet_type: 'single' }).select().single()
+    const { data } = await supabase.from('sites').insert({ name: newSiteName.trim(), balance: 0, active: false, sort_order: sites.length, rolling_target: 0, rolling_done: 0, last_deposit: 0, deposit_bet_done: 0, point_deposit: 0, total_withdrawal: 0, currency: 'krw', bet_type: 'single', settlement_only: true }).select().single()
     if (data) { setSites(p => [...p, data]); setNewSiteName('') }
   }
   async function deleteSettlementSite(site: Site) {
