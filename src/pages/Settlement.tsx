@@ -20,6 +20,59 @@ const COLORS = [
   '#1ABC9C','#E67E22','#34495E','#F39C12','#16A085',
 ]
 
+/* ── 입금 현황 (이번주/한달) ── */
+function DepositSummary({ sites, cashflows }: {
+  sites: { id: string; name: string; currency: string }[]
+  cashflows: { flow_date: string; type: string; amount: number; site_id: string | null }[]
+}) {
+  const [mode, setMode] = useState<'week' | 'month'>('week')
+  const weekStart  = dayjs().startOf('isoWeek').format('YYYY-MM-DD')
+  const weekEnd    = dayjs().endOf('isoWeek').format('YYYY-MM-DD')
+  const monthStart = dayjs().startOf('month').format('YYYY-MM-DD')
+  const monthEnd   = dayjs().endOf('month').format('YYYY-MM-DD')
+  const from = mode === 'week' ? weekStart : monthStart
+  const to   = mode === 'week' ? weekEnd   : monthEnd
+
+  const filtered = cashflows.filter(c => c.type === 'expense' && c.flow_date >= from && c.flow_date <= to)
+  const total = filtered.reduce((a, c) => a + c.amount, 0)
+  const krwSites = sites.filter(s => s.currency === 'krw')
+
+  return (
+    <div style={{ borderTop: '1px solid var(--border)', padding: '10px 12px', flexShrink: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+        <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.8px' }}>
+          입금 현황
+        </div>
+        <div style={{ display: 'flex', gap: 4 }}>
+          {(['week', 'month'] as const).map(m => (
+            <button key={m} onClick={() => setMode(m)} style={{
+              fontSize: 9, fontWeight: 700, padding: '2px 7px', borderRadius: 4, border: '1px solid', cursor: 'pointer',
+              fontFamily: 'var(--font-body)',
+              background: mode === m ? 'var(--gold-bg)' : 'none',
+              borderColor: mode === m ? 'var(--gold-border)' : 'var(--border)',
+              color: mode === m ? 'var(--gold)' : 'var(--text-muted)',
+            }}>{m === 'week' ? '이번주' : '한달'}</button>
+          ))}
+        </div>
+      </div>
+      {krwSites.map(s => {
+        const amt = filtered.filter(c => c.site_id === s.id).reduce((a, c) => a + c.amount, 0)
+        if (amt === 0) return null
+        return (
+          <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
+            <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{s.name}</span>
+            <span style={{ fontFamily: 'var(--font-num)', fontSize: 12, fontWeight: 700, color: 'var(--orange)' }}>{amt.toLocaleString()}원</span>
+          </div>
+        )
+      })}
+      <div style={{ borderTop: '1px solid var(--border)', paddingTop: 7, marginTop: 5, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)' }}>합계</span>
+        <span style={{ fontFamily: 'var(--font-num)', fontSize: 14, fontWeight: 800, color: 'var(--orange)' }}>{total.toLocaleString()}원</span>
+      </div>
+    </div>
+  )
+}
+
 export default function Settlement() {
   const today = dayjs().format('YYYY-MM-DD')
 
@@ -383,6 +436,10 @@ export default function Settlement() {
             </div>
           )}
         </div>
+
+        {/* 이번주/한달 입금 현황 */}
+        <DepositSummary sites={sites} cashflows={cashflows} />
+
       </div>
 
       {/* ═══ 중: 날짜별 목록 (340px) ═══ */}

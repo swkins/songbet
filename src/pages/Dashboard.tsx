@@ -459,12 +459,9 @@ function WeekMonthDeposit({ sites, cashflows, weekStart, weekEnd }: {
 
 export default function Dashboard() {
   const today = dayjs().format('YYYY-MM-DD')
-  const weekStart = dayjs().startOf('isoWeek').format('YYYY-MM-DD')
-  const weekEnd   = dayjs().endOf('isoWeek').format('YYYY-MM-DD')
 
   const [sites, setSites]     = useState<Site[]>([])
   const [bets, setBets]       = useState<Bet[]>([])
-  const [cashflows, setCashflows] = useState<{ flow_date: string; type: string; amount: number; site_id: string | null }[]>([])
 
   const [showSiteMgr, setShowSiteMgr]   = useState(false)
   const [depositSite, setDepositSite]   = useState<Site | null>(null)
@@ -472,7 +469,7 @@ export default function Dashboard() {
   const [openFormSiteId, setOpenFormSiteId] = useState<string | null>(null)
   const [hoverBetId, setHoverBetId]     = useState<string | null>(null)
 
-  useEffect(() => { loadSites(); loadBets(); loadCashflows() }, [])
+  useEffect(() => { loadSites(); loadBets() }, [])
 
   async function loadSites() {
     const { data } = await supabase.from('sites').select('*').eq('settlement_only', false).order('sort_order')
@@ -482,11 +479,6 @@ export default function Dashboard() {
     const { data } = await supabase.from('bets').select('*').eq('is_hidden', false).order('bet_date', { ascending: true }).order('created_at', { ascending: true })
     if (data) setBets(data)
   }
-  async function loadCashflows() {
-    const { data } = await supabase.from('cashflows').select('flow_date,type,amount,site_id').gte('flow_date', weekStart).lte('flow_date', weekEnd)
-    if (data) setCashflows(data)
-  }
-
   const totalRolling     = (s: Site) => (s.last_deposit ?? 0) + (s.point_deposit ?? 0)
   const depositRemaining = (s: Site) => Math.max(0, totalRolling(s) - (s.deposit_bet_done ?? 0))
   const depositPct       = (s: Site) => totalRolling(s) > 0 ? Math.round((s.deposit_bet_done ?? 0) / totalRolling(s) * 100) : 0
@@ -558,7 +550,6 @@ export default function Dashboard() {
       const { data: cf } = await supabase.from('cashflows').insert({ flow_date: today, type: 'expense', category: '베팅입금', description: `${depositSite.name} 입금`, amount, site_id: depositSite.id, currency: depositSite.currency, usd_krw_rate: usdKrwRate, amount_krw: isusd ? amountKrw : amount }).select().single()
       await logAction({ action_type: 'update', table_name: 'sites', record_id: data.id, before_data: before as never, after_data: data as never, description: `${depositSite.name} 입금 +${amount.toLocaleString()}`, cashflow_id: cf?.id ?? null })
       setSites(p => p.map(s => s.id === data.id ? data : s))
-      loadCashflows()
     }
     setDepositSite(null)
   }
@@ -736,13 +727,7 @@ export default function Dashboard() {
     <div className="page">
       <div className="dashboard-main">
 
-        {/* ── 좌: 입금 현황 (260px) ── */}
-        <div className="dashboard-side">
-          {/* 이번주/한달 입금 현황 */}
-          <WeekMonthDeposit sites={sites} cashflows={cashflows} weekStart={weekStart} weekEnd={weekEnd} />
-        </div>
-
-        {/* ── 우: 베팅 현황 (flex-1) */}
+        {/* ── 베팅 현황 (전체) */}
         <div className="dashboard-bets">
           {sites.length === 0 ? (
             <div className="card" style={{ padding: '10px 14px' }}>

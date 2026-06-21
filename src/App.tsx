@@ -7,7 +7,7 @@ import Simul from './pages/Simul'
 import { supabase } from './lib/supabase'
 import { purgeOldLogs } from './lib/logger'
 import dayjs from 'dayjs'
-import { RotateCcw, ClipboardList, X, LayoutTemplate, Code2, Check, ChevronDown, ChevronUp, Save, CheckSquare, Plus, Trash2, Settings, RotateCcw as Reset } from 'lucide-react'
+import { RotateCcw, ClipboardList, X, LayoutTemplate, Code2, Check, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Save, CheckSquare, Plus, Trash2, Settings, Pin } from 'lucide-react'
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'dashboard', label: '대시보드' },
@@ -70,12 +70,42 @@ function handleNumberedEnter(
   }
 }
 
+/* ── 미니 달력 (할 일 패널용) ── */
+function MiniCalendarApp({ checkedDates, onToggle }: { checkedDates: string[]; onToggle: (d: string) => void }) {
+  const [viewMonth, setViewMonth] = useState(dayjs().startOf('month'))
+  const today = dayjs().format('YYYY-MM-DD')
+  const startDay = viewMonth.startOf('month').day()
+  const cells: (string | null)[] = [
+    ...Array(startDay).fill(null),
+    ...Array.from({ length: viewMonth.daysInMonth() }, (_, i) => viewMonth.date(i + 1).format('YYYY-MM-DD')),
+  ]
+  while (cells.length % 7 !== 0) cells.push(null)
+  return (
+    <div className="mini-cal">
+      <div className="mini-cal-header">
+        <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex' }} onClick={() => setViewMonth(p => p.subtract(1, 'month'))}><ChevronLeft size={11} /></button>
+        <span style={{ fontSize: 10 }}>{viewMonth.format('YYYY.MM')}</span>
+        <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex' }} onClick={() => setViewMonth(p => p.add(1, 'month'))}><ChevronRight size={11} /></button>
+      </div>
+      <div className="mini-cal-grid">
+        {['일','월','화','수','목','금','토'].map(d => <div key={d} className="mini-cal-dow">{d}</div>)}
+        {cells.map((date, i) => date
+          ? <div key={i} className={`mini-cal-day ${checkedDates.includes(date) ? 'checked' : ''} ${date === today ? 'today' : ''}`} onClick={() => onToggle(date)}>{dayjs(date).date()}</div>
+          : <div key={i} />
+        )}
+      </div>
+    </div>
+  )
+}
+
 export default function App() {
   const [tab, setTab] = useState<Tab>('dashboard')
   const [logs, setLogs] = useState<ActionLog[]>([])
   const [showLog, setShowLog] = useState(false)
   const [showTodo, setShowTodo] = useState(false)
   const [showWidthMenu, setShowWidthMenu] = useState(false)
+  const [pinCode, setPinCode] = useState(false)       // 코드수정 고정
+  const [todoSettingsId, setTodoSettingsId] = useState<string | null>(null)  // 할 일 설정 팝업
   const [undoing, setUndoing] = useState<string | null>(null)
   const [maxWidth, setMaxWidth] = useState<string>(() => localStorage.getItem('sb_width') ?? '1920px')
 
@@ -144,6 +174,16 @@ export default function App() {
   async function deleteTodoApp(id: string) {
     await supabase.from('todos').delete().eq('id', id)
     setTodos(p => p.filter(t => t.id !== id))
+  }
+  async function resetTodoApp(todo: Todo) {
+    const { data } = await supabase.from('todos').update({ check_dates: [], check_count: 0, done: false }).eq('id', todo.id).select().single()
+    if (data) setTodos(p => p.map(t => t.id === todo.id ? data as Todo : t))
+  }
+  async function toggleCalDateApp(todo: Todo, date: string) {
+    const has = todo.check_dates.includes(date)
+    const newDates = has ? todo.check_dates.filter((d: string) => d !== date) : [...todo.check_dates, date]
+    const { data } = await supabase.from('todos').update({ check_dates: newDates, check_count: newDates.length, done: newDates.includes(todayStr) }).eq('id', todo.id).select().single()
+    if (data) setTodos(p => p.map(t => t.id === todo.id ? data as Todo : t))
   }
 
   useEffect(() => {
@@ -396,7 +436,7 @@ export default function App() {
       {/* 코드 수정 패널 */}
       {showCode && (
         <>
-          <div style={{ position: 'fixed', inset: 0, zIndex: 150 }} onClick={() => setShowCode(false)} />
+          {!pinCode && <div style={{ position: 'fixed', inset: 0, zIndex: 150 }} onClick={() => setShowCode(false)} />}
           <div style={{
             position: 'fixed', top: 56, right: 16, width: 340,
             maxHeight: 'calc(100vh - 72px)',
@@ -407,7 +447,21 @@ export default function App() {
             {/* 헤더 */}
             <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--bg-elevated)', flexShrink: 0 }}>
               <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '1.2px', textTransform: 'uppercase', color: 'var(--cyan)' }}>코드 수정 메모</span>
-              <button onClick={() => setShowCode(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex' }}><X size={12} /></button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <button
+                  onClick={() => setPinCode(p => !p)}
+                  title={pinCode ? '고정 해제' : '항상 위에 고정'}
+                  style={{
+                    background: pinCode ? 'var(--cyan-bg)' : 'none',
+                    border: `1px solid ${pinCode ? 'var(--cyan-border)' : 'var(--border)'}`,
+                    borderRadius: 4, cursor: 'pointer', color: pinCode ? 'var(--cyan)' : 'var(--text-muted)',
+                    display: 'flex', alignItems: 'center', padding: '2px 5px', gap: 3,
+                    fontSize: 9, fontWeight: 700, fontFamily: 'var(--font-body)',
+                  }}>
+                  <Pin size={10} /> {pinCode ? '고정중' : '고정'}
+                </button>
+                <button onClick={() => { setShowCode(false); setPinCode(false) }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex' }}><X size={12} /></button>
+              </div>
             </div>
 
             <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column' }}>
@@ -546,27 +600,69 @@ export default function App() {
               )}
               {todos.map(todo => {
                 const isChecked = todo.check_dates.includes(todayStr)
+                const isSettingsOpen = todoSettingsId === todo.id
                 return (
-                  <div key={todo.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 14px', borderBottom: '1px solid var(--border-light)' }}>
-                    <button
-                      onClick={() => toggleTodoApp(todo)}
-                      style={{
-                        width: 18, height: 18, borderRadius: 4, flexShrink: 0, cursor: 'pointer',
-                        background: isChecked ? 'var(--green)' : 'transparent',
-                        border: `2px solid ${isChecked ? 'var(--green)' : 'var(--border)'}`,
-                        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0,
-                      }}>
-                      {isChecked && <Check size={10} color="#000" strokeWidth={3} />}
-                    </button>
-                    <span style={{ flex: 1, fontSize: 13, color: isChecked ? 'var(--text-muted)' : 'var(--text-primary)', textDecoration: isChecked ? 'line-through' : 'none' }}>
-                      {todo.content}
-                    </span>
-                    <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--gold)', background: 'var(--gold-bg)', border: '1px solid var(--gold-border)', padding: '1px 5px', borderRadius: 4, flexShrink: 0 }}>
-                      {todo.check_count}회
-                    </span>
-                    <button onClick={() => deleteTodoApp(todo.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', padding: 2, flexShrink: 0 }}>
-                      <Trash2 size={12} />
-                    </button>
+                  <div key={todo.id} style={{ position: 'relative' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 14px', borderBottom: '1px solid var(--border-light)' }}>
+                      <button
+                        onClick={() => toggleTodoApp(todo)}
+                        style={{
+                          width: 18, height: 18, borderRadius: 4, flexShrink: 0, cursor: 'pointer',
+                          background: isChecked ? 'var(--green)' : 'transparent',
+                          border: `2px solid ${isChecked ? 'var(--green)' : 'var(--border)'}`,
+                          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0,
+                        }}>
+                        {isChecked && <Check size={10} color="#000" strokeWidth={3} />}
+                      </button>
+                      <span style={{ flex: 1, fontSize: 13, color: isChecked ? 'var(--text-muted)' : 'var(--text-primary)', textDecoration: isChecked ? 'line-through' : 'none' }}>
+                        {todo.content}
+                      </span>
+                      <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--gold)', background: 'var(--gold-bg)', border: '1px solid var(--gold-border)', padding: '1px 5px', borderRadius: 4, flexShrink: 0 }}>
+                        {todo.check_count}회
+                      </span>
+                      <button
+                        onClick={() => setTodoSettingsId(isSettingsOpen ? null : todo.id)}
+                        style={{ background: isSettingsOpen ? 'var(--bg-elevated)' : 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex', padding: 3, borderRadius: 4, flexShrink: 0 }}>
+                        <Settings size={11} />
+                      </button>
+                    </div>
+                    {/* 설정 팝업 */}
+                    {isSettingsOpen && (
+                      <>
+                        <div style={{ position: 'fixed', inset: 0, zIndex: 200 }} onClick={() => setTodoSettingsId(null)} />
+                        <div style={{
+                          position: 'absolute', right: 8, top: '100%', zIndex: 210,
+                          background: 'var(--bg-card)', border: '1px solid var(--border)',
+                          borderRadius: 'var(--radius)', boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+                          minWidth: 210, padding: '8px 0',
+                        }} onClick={e => e.stopPropagation()}>
+                          {/* 달력 */}
+                          <div style={{ padding: '4px 12px 8px' }}>
+                            <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.6px', marginBottom: 6 }}>달력</div>
+                            <MiniCalendarApp checkedDates={todo.check_dates} onToggle={d => toggleCalDateApp(todo, d)} />
+                          </div>
+                          <div style={{ borderTop: '1px solid var(--border-light)', margin: '4px 0' }} />
+                          {/* 초기화 */}
+                          <button
+                            onClick={() => { resetTodoApp(todo); setTodoSettingsId(null) }}
+                            style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', padding: '8px 14px', display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-secondary)', fontSize: 12, fontFamily: 'var(--font-body)', textAlign: 'left' }}
+                            onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-elevated)')}
+                            onMouseLeave={e => (e.currentTarget.style.background = 'none')}
+                          >
+                            <RotateCcw size={12} color="var(--gold)" /> 초기화
+                          </button>
+                          {/* 삭제 */}
+                          <button
+                            onClick={() => { deleteTodoApp(todo.id); setTodoSettingsId(null) }}
+                            style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', padding: '8px 14px', display: 'flex', alignItems: 'center', gap: 8, color: 'var(--red)', fontSize: 12, fontFamily: 'var(--font-body)', textAlign: 'left' }}
+                            onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-elevated)')}
+                            onMouseLeave={e => (e.currentTarget.style.background = 'none')}
+                          >
+                            <Trash2 size={12} /> 삭제
+                          </button>
+                        </div>
+                      </>
+                    )}
                   </div>
                 )
               })}
