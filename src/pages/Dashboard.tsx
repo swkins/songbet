@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { logAction } from '../lib/logger'
 import type { Bet, Site, Todo, Sport, Market, BetResult } from '../types'
@@ -476,10 +476,7 @@ export default function Dashboard() {
   const [todos, setTodos]       = useState<Todo[]>([])
   const [newTodo, setNewTodo]   = useState('')
   const [settingsOpenId, setSettingsOpenId] = useState<string | null>(null)
-  const [sidebarMemo, setSidebarMemo] = useState('')
-  const memoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  useEffect(() => { loadSites(); loadBets(); loadTodos(); loadCashflows(); loadSidebarMemo() }, [])
+  useEffect(() => { loadSites(); loadBets(); loadTodos(); loadCashflows() }, [])
 
   async function loadSites() {
     const { data } = await supabase.from('sites').select('*').order('sort_order')
@@ -492,18 +489,6 @@ export default function Dashboard() {
   async function loadTodos() {
     const { data } = await supabase.from('todos').select('*').order('created_at')
     if (data) setTodos(data)
-  }
-  async function loadSidebarMemo() {
-    const { data } = await supabase.from('sidebar_memo').select('content').eq('id', 'singleton').single()
-    if (data) setSidebarMemo(data.content ?? '')
-  }
-  async function saveSidebarMemo(content: string) {
-    await supabase.from('sidebar_memo').update({ content, updated_at: new Date().toISOString() }).eq('id', 'singleton')
-  }
-  function handleMemoChange(v: string) {
-    setSidebarMemo(v)
-    if (memoSaveTimer.current) clearTimeout(memoSaveTimer.current)
-    memoSaveTimer.current = setTimeout(() => saveSidebarMemo(v), 1000)
   }
   async function loadCashflows() {
     const { data } = await supabase.from('cashflows').select('flow_date,type,amount,site_id').gte('flow_date', weekStart).lte('flow_date', weekEnd)
@@ -857,27 +842,6 @@ export default function Dashboard() {
               <input className="form-input" style={{ fontSize: 12 }} placeholder="할 일 추가..." value={newTodo} onChange={e => setNewTodo(e.target.value)} onKeyDown={e => e.key === 'Enter' && addTodo()} />
               <button className="btn btn-primary btn-sm" onClick={addTodo} style={{ flexShrink: 0 }}><Plus size={11} /></button>
             </div>
-          </div>
-
-          {/* 메모장 */}
-          <div className="card" style={{ padding: '10px 12px' }}>
-            <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.8px', marginBottom: 8 }}>메모</div>
-            <textarea
-              value={sidebarMemo}
-              onChange={e => handleMemoChange(e.target.value)}
-              onBlur={() => saveSidebarMemo(sidebarMemo)}
-              placeholder="자유롭게 메모하세요..."
-              style={{
-                width: '100%', minHeight: 160, resize: 'vertical',
-                background: 'var(--bg)', border: '1px solid var(--border)',
-                borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)',
-                fontFamily: 'var(--font-body)', fontSize: 12, lineHeight: 1.7,
-                padding: '8px 10px', outline: 'none', boxSizing: 'border-box',
-                transition: 'border-color 0.15s',
-              }}
-              onFocus={e => { e.currentTarget.style.borderColor = 'var(--cyan)' }}
-              onBlurCapture={e => { e.currentTarget.style.borderColor = 'var(--border)' }}
-            />
           </div>
 
           {/* 이번주/한달 입금 현황 */}
