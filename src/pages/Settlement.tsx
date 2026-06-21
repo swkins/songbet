@@ -8,21 +8,12 @@ import {
   ChevronLeft, ChevronRight, Tag, Globe, Pencil, Check,
 } from 'lucide-react'
 
-const DEFAULT_CATS = ['베팅수익', '베팅손실', '급여', '식비', '교통', '쇼핑', '기타']
-const DASHBOARD_CATS = ['베팅수익', '베팅손실', '베팅입금']
+// 베팅손실 제거, 베팅입금은 대시보드 전용이라 잠금만
+const DEFAULT_CATS = ['베팅수익', '급여', '식비', '교통', '쇼핑', '기타']
+const LOCKED_CATS  = ['베팅수익', '베팅입금']  // 삭제/편집 불가
 
 /* ────────── helpers ────────── */
 function fmt(n: number) { return n.toLocaleString('ko-KR') }
-
-function CategoryPill({ color, label, amount }: { color: string; label: string; amount: number }) {
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}>
-      <span style={{ width: 10, height: 10, borderRadius: '50%', background: color, flexShrink: 0 }} />
-      <span style={{ flex: 1, fontSize: 12, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
-      <span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-num)', color }}>{fmt(amount)}</span>
-    </div>
-  )
-}
 
 const COLORS = [
   '#F5A623','#E74C3C','#2ECC71','#3498DB','#9B59B6',
@@ -39,24 +30,23 @@ export default function Settlement() {
   })
 
   /* 폼 상태 */
-  const [formType, setFormType] = useState<'income' | 'expense'>('income')
-  const [formDate, setFormDate] = useState(today)
+  const [formType, setFormType]   = useState<'income' | 'expense'>('income')
+  const [formDate, setFormDate]   = useState(today)
   const [formAmount, setFormAmount] = useState('')
   const [formSiteId, setFormSiteId] = useState('')
-  const [formCat, setFormCat] = useState('')
-  const [formDesc, setFormDesc] = useState('')
-  const [saving, setSaving] = useState(false)
+  const [formCat, setFormCat]     = useState('')
+  const [saving, setSaving]       = useState(false)
 
   /* 목록 월 필터 */
   const [viewMonth, setViewMonth] = useState(dayjs().startOf('month'))
 
   /* 관리 패널 */
-  const [mgmtTab, setMgmtTab] = useState<'none' | 'category' | 'site'>('none')
-  const [newCat, setNewCat] = useState('')
-  const [editCat, setEditCat] = useState<string | null>(null)
+  const [mgmtTab, setMgmtTab]     = useState<'none' | 'category' | 'site'>('none')
+  const [newCat, setNewCat]       = useState('')
+  const [editCat, setEditCat]     = useState<string | null>(null)
   const [editCatVal, setEditCatVal] = useState('')
   const [newSiteName, setNewSiteName] = useState('')
-  const [editSite, setEditSite] = useState<Site | null>(null)
+  const [editSite, setEditSite]   = useState<Site | null>(null)
   const [editSiteVal, setEditSiteVal] = useState('')
 
   useEffect(() => { loadCashflows(); loadSites() }, [])
@@ -75,7 +65,7 @@ export default function Settlement() {
     if (!formAmount || saving) return
     setSaving(true)
     const siteName = sites.find(s => s.id === formSiteId)?.name ?? ''
-    const desc = formDesc.trim() || (siteName ? `${siteName} / ${formCat || '기타'}` : formCat || '기타')
+    const desc = siteName ? `${siteName} / ${formCat || '기타'}` : formCat || '기타'
     const { data } = await supabase.from('cashflows').insert({
       flow_date: formDate, type: formType, category: formCat || '기타',
       description: desc, amount: Number(formAmount), site_id: formSiteId || null,
@@ -83,7 +73,7 @@ export default function Settlement() {
     if (data) {
       await logAction({ action_type: 'insert', table_name: 'cashflows', record_id: data.id, after_data: data as never, description: `수입/지출 추가: ${desc} ${Number(formAmount).toLocaleString()}원` })
       setCashflows(p => [data, ...p])
-      setFormAmount(''); setFormDesc(''); setFormSiteId(''); setFormCat('')
+      setFormAmount(''); setFormSiteId(''); setFormCat('')
     }
     setSaving(false)
   }
@@ -97,7 +87,7 @@ export default function Settlement() {
   /* ── 카테고리 관리 ── */
   function saveCats(cats: string[]) { setCategories(cats); localStorage.setItem('cf_cats', JSON.stringify(cats)) }
   function addCat() { if (!newCat.trim() || categories.includes(newCat.trim())) return; saveCats([...categories, newCat.trim()]); setNewCat('') }
-  function removeCat(cat: string) { if (DASHBOARD_CATS.includes(cat)) return; saveCats(categories.filter(c => c !== cat)) }
+  function removeCat(cat: string) { if (LOCKED_CATS.includes(cat)) return; saveCats(categories.filter(c => c !== cat)) }
   function confirmEditCat(cat: string) {
     if (!editCatVal.trim() || editCatVal === cat) { setEditCat(null); return }
     saveCats(categories.map(c => c === cat ? editCatVal.trim() : c)); setEditCat(null)
@@ -109,7 +99,12 @@ export default function Settlement() {
 
   async function addSettlementSite() {
     if (!newSiteName.trim()) return
-    const { data } = await supabase.from('sites').insert({ name: newSiteName.trim(), balance: 0, active: false, sort_order: sites.length, rolling_target: 0, rolling_done: 0, last_deposit: 0, deposit_bet_done: 0, point_deposit: 0, total_withdrawal: 0, currency: 'krw', bet_type: 'single', settlement_only: true }).select().single()
+    const { data } = await supabase.from('sites').insert({
+      name: newSiteName.trim(), balance: 0, active: false, sort_order: sites.length,
+      rolling_target: 0, rolling_done: 0, last_deposit: 0, deposit_bet_done: 0,
+      point_deposit: 0, total_withdrawal: 0, currency: 'krw', bet_type: 'single',
+      settlement_only: true,
+    }).select().single()
     if (data) { setSites(p => [...p, data]); setNewSiteName('') }
   }
   async function deleteSettlementSite(site: Site) {
@@ -123,24 +118,36 @@ export default function Settlement() {
     setEditSite(null)
   }
 
-  /* ── 통계 계산 ── */
+  /* ── 전체 합계 ── */
   const allIncome  = cashflows.filter(c => c.type === 'income').reduce((s, c) => s + c.amount, 0)
   const allExpense = cashflows.filter(c => c.type === 'expense').reduce((s, c) => s + c.amount, 0)
   const allBalance = allIncome - allExpense
 
-  // 카테고리별 집계 (전체 기간)
-  const byCatIncome = useMemo(() => {
-    const map: Record<string, number> = {}
-    cashflows.filter(c => c.type === 'income').forEach(c => { map[c.category] = (map[c.category] ?? 0) + c.amount })
-    return Object.entries(map).sort((a, b) => b[1] - a[1])
-  }, [cashflows])
-  const byCatExpense = useMemo(() => {
-    const map: Record<string, number> = {}
-    cashflows.filter(c => c.type === 'expense').forEach(c => { map[c.category] = (map[c.category] ?? 0) + c.amount })
-    return Object.entries(map).sort((a, b) => b[1] - a[1])
-  }, [cashflows])
+  /* ── 이번달 사이트별 합계 ── */
+  const thisMonthStart = dayjs().startOf('month').format('YYYY-MM-DD')
+  const thisMonthEnd   = dayjs().endOf('month').format('YYYY-MM-DD')
 
-  // 월별 순수지 (최근 6개월)
+  const monthSiteExpense = useMemo(() => {
+    const map: Record<string, number> = {}
+    cashflows
+      .filter(c => c.type === 'expense' && c.flow_date >= thisMonthStart && c.flow_date <= thisMonthEnd && c.site_id)
+      .forEach(c => { map[c.site_id!] = (map[c.site_id!] ?? 0) + c.amount })
+    return Object.entries(map)
+      .map(([siteId, amt]) => ({ name: sites.find(s => s.id === siteId)?.name ?? siteId, amt }))
+      .sort((a, b) => b.amt - a.amt)
+  }, [cashflows, sites, thisMonthStart, thisMonthEnd])
+
+  const monthSiteIncome = useMemo(() => {
+    const map: Record<string, number> = {}
+    cashflows
+      .filter(c => c.type === 'income' && c.flow_date >= thisMonthStart && c.flow_date <= thisMonthEnd && c.site_id)
+      .forEach(c => { map[c.site_id!] = (map[c.site_id!] ?? 0) + c.amount })
+    return Object.entries(map)
+      .map(([siteId, amt]) => ({ name: sites.find(s => s.id === siteId)?.name ?? siteId, amt }))
+      .sort((a, b) => b.amt - a.amt)
+  }, [cashflows, sites, thisMonthStart, thisMonthEnd])
+
+  /* ── 월별 바 차트 (최근 6개월) ── */
   const monthlySummary = useMemo(() => {
     const months: { label: string; income: number; expense: number }[] = []
     for (let i = 5; i >= 0; i--) {
@@ -156,12 +163,11 @@ export default function Settlement() {
 
   const maxMonthly = Math.max(...monthlySummary.flatMap(m => [m.income, m.expense]), 1)
 
-  /* ── 목록 필터링 (월별) ── */
-  const monthFrom = viewMonth.format('YYYY-MM-DD')
-  const monthTo   = viewMonth.endOf('month').format('YYYY-MM-DD')
+  /* ── 목록 (월별) ── */
+  const monthFrom  = viewMonth.format('YYYY-MM-DD')
+  const monthTo    = viewMonth.endOf('month').format('YYYY-MM-DD')
   const monthFlows = cashflows.filter(c => c.flow_date >= monthFrom && c.flow_date <= monthTo)
 
-  // 날짜별 그룹
   const groupedByDate = useMemo(() => {
     const map: Record<string, Cashflow[]> = {}
     monthFlows.forEach(c => { if (!map[c.flow_date]) map[c.flow_date] = []; map[c.flow_date].push(c) })
@@ -171,45 +177,53 @@ export default function Settlement() {
   const monthIncome  = monthFlows.filter(c => c.type === 'income').reduce((s, c) => s + c.amount, 0)
   const monthExpense = monthFlows.filter(c => c.type === 'expense').reduce((s, c) => s + c.amount, 0)
 
+  const maxSiteExpense = Math.max(...monthSiteExpense.map(x => x.amt), 1)
+  const maxSiteIncome  = Math.max(...monthSiteIncome.map(x => x.amt), 1)
+
   /* ────────── RENDER ────────── */
   return (
     <div style={{ display: 'flex', height: 'calc(100vh - 58px)', overflow: 'hidden', background: 'var(--bg)', gap: 0 }}>
 
-      {/* ═══ 좌: 추가 폼 ═══ */}
-      <div style={{ width: 260, flexShrink: 0, borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', overflowY: 'auto' }}>
+      {/* ═══ 좌: 추가 폼 (320px) ═══ */}
+      <div style={{ width: 320, flexShrink: 0, borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', overflowY: 'auto' }}>
 
-        {/* 수입/지출 토글 */}
-        <div style={{ display: 'flex', padding: '12px 12px 0' }}>
-          <button onClick={() => setFormType('income')} style={{
-            flex: 1, padding: '10px 0', borderRadius: '8px 0 0 8px', border: '1px solid',
-            borderColor: formType === 'income' ? 'var(--green)' : 'var(--border)',
-            background: formType === 'income' ? 'var(--green-bg)' : 'var(--bg-elevated)',
-            color: formType === 'income' ? 'var(--green)' : 'var(--text-muted)',
-            fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'var(--font-body)',
-          }}>💰 수입</button>
-          <button onClick={() => setFormType('expense')} style={{
-            flex: 1, padding: '10px 0', borderRadius: '0 8px 8px 0', border: '1px solid',
-            borderColor: formType === 'expense' ? 'var(--red)' : 'var(--border)',
-            background: formType === 'expense' ? 'var(--red-bg)' : 'var(--bg-elevated)',
-            color: formType === 'expense' ? 'var(--red)' : 'var(--text-muted)',
-            fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'var(--font-body)',
-            marginLeft: -1,
-          }}>💸 지출</button>
+        {/* 날짜 — 최상단 */}
+        <div style={{ padding: '12px 12px 0' }}>
+          <div style={labelSt}>날짜</div>
+          <input type="date" style={{ ...inputSt, marginBottom: 10 }} value={formDate} onChange={e => setFormDate(e.target.value)} />
         </div>
 
-        <div style={{ padding: '14px 12px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {/* 수입/지출 토글 */}
+        <div style={{ padding: '0 12px' }}>
+          <div style={{ display: 'flex' }}>
+            <button onClick={() => setFormType('income')} style={{
+              flex: 1, padding: '10px 0', borderRadius: '8px 0 0 8px',
+              border: '2px solid', borderRight: formType === 'income' ? '2px solid var(--green)' : '1px solid var(--border)',
+              borderColor: formType === 'income' ? 'var(--green)' : 'var(--border)',
+              background: formType === 'income' ? 'var(--green-bg)' : 'var(--bg-elevated)',
+              color: formType === 'income' ? 'var(--green)' : 'var(--text-muted)',
+              fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'var(--font-body)',
+              boxShadow: formType === 'income' ? '0 0 0 1px var(--green)' : 'none',
+            }}>💰 수입</button>
+            <button onClick={() => setFormType('expense')} style={{
+              flex: 1, padding: '10px 0', borderRadius: '0 8px 8px 0',
+              border: '2px solid', borderLeft: 'none',
+              borderColor: formType === 'expense' ? 'var(--red)' : 'var(--border)',
+              background: formType === 'expense' ? 'var(--red-bg)' : 'var(--bg-elevated)',
+              color: formType === 'expense' ? 'var(--red)' : 'var(--text-muted)',
+              fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'var(--font-body)',
+              boxShadow: formType === 'expense' ? '0 0 0 1px var(--red)' : 'none',
+            }}>💸 지출</button>
+          </div>
+        </div>
+
+        <div style={{ padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 10 }}>
           {/* 금액 */}
           <div>
             <div style={labelSt}>금액 (원)</div>
             <input type="number" inputMode="numeric" placeholder="0" style={inputSt}
               value={formAmount} onChange={e => setFormAmount(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && saveCashflow()} autoFocus />
-          </div>
-
-          {/* 날짜 */}
-          <div>
-            <div style={labelSt}>날짜</div>
-            <input type="date" style={inputSt} value={formDate} onChange={e => setFormDate(e.target.value)} />
           </div>
 
           {/* 사이트 */}
@@ -230,15 +244,7 @@ export default function Settlement() {
             </select>
           </div>
 
-          {/* 내용 */}
-          <div>
-            <div style={labelSt}>내용 (선택)</div>
-            <input type="text" placeholder="설명..." style={inputSt}
-              value={formDesc} onChange={e => setFormDesc(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && saveCashflow()} />
-          </div>
-
-          {/* 저장 버튼 */}
+          {/* 저장 */}
           <button onClick={saveCashflow} disabled={!formAmount || saving} style={{
             padding: '12px 0', borderRadius: 8, border: 'none',
             background: !formAmount || saving ? 'var(--border)' : 'var(--gold)',
@@ -269,7 +275,7 @@ export default function Settlement() {
             <div style={{ marginTop: 10 }}>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 8 }}>
                 {categories.map(cat => (
-                  <div key={cat} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 8px', borderRadius: 6, background: 'var(--bg-elevated)', border: '1px solid var(--border)', fontSize: 11, opacity: DASHBOARD_CATS.includes(cat) ? 0.5 : 1 }}>
+                  <div key={cat} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 8px', borderRadius: 6, background: 'var(--bg-elevated)', border: '1px solid var(--border)', fontSize: 11, opacity: LOCKED_CATS.includes(cat) ? 0.5 : 1 }}>
                     {editCat === cat ? (
                       <>
                         <input value={editCatVal} onChange={e => setEditCatVal(e.target.value)}
@@ -281,7 +287,7 @@ export default function Settlement() {
                     ) : (
                       <>
                         <span style={{ color: 'var(--text-primary)' }}>{cat}</span>
-                        {!DASHBOARD_CATS.includes(cat) && (
+                        {!LOCKED_CATS.includes(cat) && (
                           <>
                             <button onClick={() => { setEditCat(cat); setEditCatVal(cat) }} style={iconBtnSt}><Pencil size={9} /></button>
                             <button onClick={() => removeCat(cat)} style={iconBtnSt}><X size={9} /></button>
@@ -293,9 +299,9 @@ export default function Settlement() {
                 ))}
               </div>
               <div style={{ display: 'flex', gap: 6 }}>
-                <input style={{ ...inputSt, marginBottom: 0, flex: 1 }} placeholder="새 카테고리..." value={newCat}
+                <input style={{ ...inputSt, flex: 1 }} placeholder="새 카테고리..." value={newCat}
                   onChange={e => setNewCat(e.target.value)} onKeyDown={e => e.key === 'Enter' && addCat()} />
-                <button onClick={addCat} style={{ padding: '0 12px', borderRadius: 7, border: 'none', background: 'var(--gold)', color: '#000', fontWeight: 700, cursor: 'pointer', fontSize: 12, fontFamily: 'var(--font-body)', flexShrink: 0 }}>추가</button>
+                <button onClick={addCat} style={mgmtAddBtnSt}>추가</button>
               </div>
             </div>
           )}
@@ -333,17 +339,17 @@ export default function Settlement() {
               ))}
               {settlementSites.length === 0 && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8 }}>없음</div>}
               <div style={{ display: 'flex', gap: 6 }}>
-                <input style={{ ...inputSt, marginBottom: 0, flex: 1 }} placeholder="새 사이트..." value={newSiteName}
+                <input style={{ ...inputSt, flex: 1 }} placeholder="새 사이트..." value={newSiteName}
                   onChange={e => setNewSiteName(e.target.value)} onKeyDown={e => e.key === 'Enter' && addSettlementSite()} />
-                <button onClick={addSettlementSite} style={{ padding: '0 12px', borderRadius: 7, border: 'none', background: 'var(--gold)', color: '#000', fontWeight: 700, cursor: 'pointer', fontSize: 12, fontFamily: 'var(--font-body)', flexShrink: 0 }}>추가</button>
+                <button onClick={addSettlementSite} style={mgmtAddBtnSt}>추가</button>
               </div>
             </div>
           )}
         </div>
       </div>
 
-      {/* ═══ 중: 날짜별 목록 ═══ */}
-      <div style={{ width: 300, flexShrink: 0, borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      {/* ═══ 중: 날짜별 목록 (340px) ═══ */}
+      <div style={{ width: 340, flexShrink: 0, borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
         {/* 월 네비 */}
         <div style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
@@ -380,7 +386,6 @@ export default function Settlement() {
             const dayExp = items.filter(c => c.type === 'expense').reduce((s, c) => s + c.amount, 0)
             return (
               <div key={date} style={{ marginTop: 12 }}>
-                {/* 날짜 헤더 */}
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
                   <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)' }}>
                     {dayjs(date).format('D일 (ddd)')}
@@ -390,7 +395,6 @@ export default function Settlement() {
                     {dayExp > 0 && <span style={{ fontSize: 11, fontFamily: 'var(--font-num)', color: 'var(--red)', fontWeight: 600 }}>-{fmt(dayExp)}</span>}
                   </div>
                 </div>
-                {/* 항목들 */}
                 {items.map(c => (
                   <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 8, background: 'var(--bg-card)', border: '1px solid var(--border-light)', marginBottom: 5 }}>
                     <div style={{
@@ -423,8 +427,8 @@ export default function Settlement() {
         {/* 전체 수지 요약 */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
           {[
-            { label: '총 수입', val: allIncome, color: 'var(--green)', prefix: '+' },
-            { label: '총 지출', val: allExpense, color: 'var(--red)', prefix: '-' },
+            { label: '총 수입', val: allIncome,  color: 'var(--green)', prefix: '+' },
+            { label: '총 지출', val: allExpense, color: 'var(--red)',   prefix: '-' },
             { label: '순 수지', val: allBalance, color: allBalance >= 0 ? 'var(--green)' : 'var(--red)', prefix: allBalance >= 0 ? '+' : '' },
           ].map(({ label, val, color, prefix }) => (
             <div key={label} style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px' }}>
@@ -432,6 +436,54 @@ export default function Settlement() {
               <div style={{ fontSize: 16, fontWeight: 800, fontFamily: 'var(--font-num)', color }}>{prefix}{fmt(val)}</div>
             </div>
           ))}
+        </div>
+
+        {/* 이번달 사이트별 — 좌: 지출 / 우: 수입 */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+
+          {/* 지출 */}
+          <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10, padding: '12px 14px' }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--red)', textTransform: 'uppercase', letterSpacing: '0.7px', marginBottom: 10 }}>
+              이번달 지출 — 사이트별
+            </div>
+            {monthSiteExpense.length === 0 && <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>내역 없음</div>}
+            {monthSiteExpense.map(({ name, amt }, i) => {
+              const pct = Math.round(amt / maxSiteExpense * 100)
+              return (
+                <div key={name} style={{ marginBottom: 9 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
+                    <span style={{ fontSize: 12, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '55%' }}>{name}</span>
+                    <span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-num)', color: 'var(--red)', flexShrink: 0 }}>-{fmt(amt)}</span>
+                  </div>
+                  <div style={{ height: 5, borderRadius: 3, background: 'var(--bg-elevated)' }}>
+                    <div style={{ height: '100%', borderRadius: 3, background: COLORS[i % COLORS.length], width: `${pct}%`, opacity: 0.85 }} />
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+
+          {/* 수입 */}
+          <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10, padding: '12px 14px' }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--green)', textTransform: 'uppercase', letterSpacing: '0.7px', marginBottom: 10 }}>
+              이번달 수입 — 사이트별
+            </div>
+            {monthSiteIncome.length === 0 && <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>내역 없음</div>}
+            {monthSiteIncome.map(({ name, amt }, i) => {
+              const pct = Math.round(amt / maxSiteIncome * 100)
+              return (
+                <div key={name} style={{ marginBottom: 9 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
+                    <span style={{ fontSize: 12, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '55%' }}>{name}</span>
+                    <span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-num)', color: 'var(--green)', flexShrink: 0 }}>+{fmt(amt)}</span>
+                  </div>
+                  <div style={{ height: 5, borderRadius: 3, background: 'var(--bg-elevated)' }}>
+                    <div style={{ height: '100%', borderRadius: 3, background: COLORS[i % COLORS.length], width: `${pct}%`, opacity: 0.85 }} />
+                  </div>
+                </div>
+              )
+            })}
+          </div>
         </div>
 
         {/* 월별 바 차트 */}
@@ -458,60 +510,12 @@ export default function Settlement() {
           </div>
         </div>
 
-        {/* 카테고리별 수입 */}
-        {byCatIncome.length > 0 && (
-          <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10, padding: '12px 14px' }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.7px', marginBottom: 10 }}>카테고리별 수입</div>
-            {byCatIncome.map(([cat, amt], i) => {
-              const pct = Math.round(amt / allIncome * 100)
-              return (
-                <div key={cat} style={{ marginBottom: 8 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
-                    <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{cat}</span>
-                    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                      <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{pct}%</span>
-                      <span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-num)', color: 'var(--green)' }}>{fmt(amt)}</span>
-                    </div>
-                  </div>
-                  <div style={{ height: 5, borderRadius: 3, background: 'var(--bg-elevated)' }}>
-                    <div style={{ height: '100%', borderRadius: 3, background: COLORS[i % COLORS.length], width: `${pct}%` }} />
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        )}
-
-        {/* 카테고리별 지출 */}
-        {byCatExpense.length > 0 && (
-          <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10, padding: '12px 14px' }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.7px', marginBottom: 10 }}>카테고리별 지출</div>
-            {byCatExpense.map(([cat, amt], i) => {
-              const pct = Math.round(amt / allExpense * 100)
-              return (
-                <div key={cat} style={{ marginBottom: 8 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
-                    <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{cat}</span>
-                    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                      <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{pct}%</span>
-                      <span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-num)', color: 'var(--red)' }}>{fmt(amt)}</span>
-                    </div>
-                  </div>
-                  <div style={{ height: 5, borderRadius: 3, background: 'var(--bg-elevated)' }}>
-                    <div style={{ height: '100%', borderRadius: 3, background: COLORS[i % COLORS.length], width: `${pct}%` }} />
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        )}
-
       </div>
     </div>
   )
 }
 
-/* ── 공통 인라인 스타일 상수 ── */
+/* ── 공통 스타일 상수 ── */
 const labelSt: React.CSSProperties = {
   fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.5px',
   textTransform: 'uppercase', marginBottom: 4,
@@ -519,7 +523,7 @@ const labelSt: React.CSSProperties = {
 const inputSt: React.CSSProperties = {
   width: '100%', background: 'var(--bg-elevated)', border: '1px solid var(--border)',
   borderRadius: 8, padding: '10px 12px', fontSize: 14, color: 'var(--text-primary)',
-  fontFamily: 'var(--font-body)', outline: 'none', boxSizing: 'border-box', marginBottom: 0,
+  fontFamily: 'var(--font-body)', outline: 'none', boxSizing: 'border-box',
 }
 const iconBtnSt: React.CSSProperties = {
   background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: 0, color: 'var(--text-muted)',
@@ -535,4 +539,9 @@ const miniSummSt: React.CSSProperties = {
 const sectionLabelSt: React.CSSProperties = {
   fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase',
   letterSpacing: '0.7px', marginBottom: 6,
+}
+const mgmtAddBtnSt: React.CSSProperties = {
+  padding: '0 12px', borderRadius: 7, border: 'none', background: 'var(--gold)',
+  color: '#000', fontWeight: 700, cursor: 'pointer', fontSize: 12,
+  fontFamily: 'var(--font-body)', flexShrink: 0,
 }

@@ -8,7 +8,7 @@ dayjs.extend(isoWeek)
 import {
   Plus, Trash2, Check, X, ChevronLeft, ChevronRight,
   RotateCcw, Calendar, Settings,
-  CheckCircle, XCircle, Gift, GripVertical, DollarSign,
+  CheckCircle, XCircle, Ban, Gift, GripVertical, DollarSign,
   TrendingUp, TrendingDown, ArrowDownToLine, LogOut, Clock,
 } from 'lucide-react'
 
@@ -475,6 +475,7 @@ export default function Dashboard() {
 
   const [todos, setTodos]       = useState<Todo[]>([])
   const [newTodo, setNewTodo]   = useState('')
+  const [showAddTodo, setShowAddTodo] = useState(false)
   const [settingsOpenId, setSettingsOpenId] = useState<string | null>(null)
   useEffect(() => { loadSites(); loadBets(); loadTodos(); loadCashflows() }, [])
 
@@ -774,11 +775,19 @@ export default function Dashboard() {
         {/* ── 좌: 할일 + 주간 입금 (260px) ── */}
         <div className="dashboard-side">
 
-          {/* 오늘 할 일 — 타이틀을 card 안에 포함해 베팅현황 타이틀과 시각적 높이 맞춤 */}
+          {/* 오늘 할 일 */}
           <div className="card" style={{ padding: '10px 12px' }}>
             <div className="flex-between mb-10">
               <span className="card-title" style={{ margin: 0 }}>오늘 할 일</span>
-              <span style={{ fontSize: 10, color: 'var(--text-secondary)' }}>{todayChecked}/{todos.length}</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: 10, color: 'var(--text-secondary)' }}>{todayChecked}/{todos.length}</span>
+                <button
+                  onClick={() => { setNewTodo(''); setShowAddTodo(true) }}
+                  style={{ background: 'var(--gold-bg)', border: '1px solid var(--gold-border)', borderRadius: 6, cursor: 'pointer', color: 'var(--gold)', display: 'flex', alignItems: 'center', padding: '3px 6px' }}
+                >
+                  <Plus size={13} />
+                </button>
+              </div>
             </div>
             {todos.length === 0 && <div className="empty" style={{ padding: '10px 0' }}><div className="empty-icon">📋</div>추가하세요</div>}
             {todos.map(t => {
@@ -838,10 +847,6 @@ export default function Dashboard() {
                 </div>
               )
             })}
-            <div className="flex-center gap-6 mt-10">
-              <input className="form-input" style={{ fontSize: 12 }} placeholder="할 일 추가..." value={newTodo} onChange={e => setNewTodo(e.target.value)} onKeyDown={e => e.key === 'Enter' && addTodo()} />
-              <button className="btn btn-primary btn-sm" onClick={addTodo} style={{ flexShrink: 0 }}><Plus size={11} /></button>
-            </div>
           </div>
 
           {/* 이번주/한달 입금 현황 */}
@@ -923,8 +928,15 @@ export default function Dashboard() {
                             renderedGroups.add(bet.parlay_group)
                             const groupBets = pending.filter(b => b.parlay_group === bet.parlay_group).sort((a,b) => a.parlay_leg - b.parlay_leg)
                             return (
-                              <div key={bet.parlay_group} className="site-bet-entry parlay-entry" style={{ marginBottom: 6 }}
+                              <div key={bet.parlay_group} className="site-bet-entry parlay-entry" style={{ marginBottom: 6, position: 'relative' }}
                               onMouseEnter={() => setHoverBetId(bet.parlay_group)} onMouseLeave={() => setHoverBetId(null)}>
+                                {hoverBetId === bet.parlay_group && (
+                                  <div style={{ position: 'absolute', top: 4, right: 4, display: 'flex', gap: 4, zIndex: 10 }}>
+                                    <button className="bet-result-icon win" onClick={() => applyParlayResult(groupBets, 'win')} style={{ padding: 3 }}><CheckCircle size={15} /></button>
+                                    <button className="bet-result-icon loss" onClick={() => applyParlayResult(groupBets, 'loss')} style={{ padding: 3 }}><XCircle size={15} /></button>
+                                    <button className="bet-result-icon cancel" onClick={() => applyParlayResult(groupBets, 'cancel')} style={{ padding: 3 }}><Ban size={15} /></button>
+                                  </div>
+                                )}
                                                                 {groupBets.map((gb, idx) => (
                                   <div key={gb.id} style={{ display: 'flex', gap: 5, marginBottom: 2 }}>
                                     <span style={{ fontSize: 10, color: 'var(--text-muted)', width: 18, textAlign: 'center', flexShrink: 0 }}>{idx===0?'①':'②'}</span>
@@ -933,33 +945,26 @@ export default function Dashboard() {
                                 ))}
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingLeft: 23, marginTop: 6 }}>
                                   <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-secondary)' }}>{bet.odds.toFixed(2)} / {pfx}{bet.stake.toLocaleString()}{sfx}</span>
-                                  {hoverBetId === bet.parlay_group && (
-                                    <div style={{ display: 'flex', gap: 8 }}>
-                                      <button className="bet-result-icon win" onClick={() => applyParlayResult(groupBets, 'win')}><CheckCircle size={20} /></button>
-                                      <button className="bet-result-icon loss" onClick={() => applyParlayResult(groupBets, 'loss')}><XCircle size={20} /></button>
-                                      <button className="bet-result-icon cancel" onClick={() => applyParlayResult(groupBets, 'cancel')}><X size={20} /></button>
-                                    </div>
-                                  )}
                                 </div>
                               </div>
                             )
                           }
                           return (
-                            <div key={bet.id} className="site-bet-entry" style={{ marginBottom: 6 }}
+                            <div key={bet.id} className="site-bet-entry" style={{ marginBottom: 6, position: 'relative' }}
                               onMouseEnter={() => setHoverBetId(bet.id)} onMouseLeave={() => setHoverBetId(null)}>
+                              {hoverBetId === bet.id && (
+                                <div style={{ position: 'absolute', top: 4, right: 4, display: 'flex', gap: 4, zIndex: 10 }}>
+                                  <button className="bet-result-icon win" onClick={() => applyResult(bet, 'win')} style={{ padding: 3 }}><CheckCircle size={15} /></button>
+                                  <button className="bet-result-icon loss" onClick={() => applyResult(bet, 'loss')} style={{ padding: 3 }}><XCircle size={15} /></button>
+                                  <button className="bet-result-icon cancel" onClick={() => applyResult(bet, 'cancel')} style={{ padding: 3 }}><Ban size={15} /></button>
+                                </div>
+                              )}
                               <div style={{ display: 'flex', gap: 5, marginBottom: 4 }}>
                                 <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0, width: 20, textAlign: 'center' }}>{SPORT_SHORT[bet.sport] ?? '📋'}</span>
                                 <span className="site-bet-match" style={{ flex: 1, marginBottom: 0, fontSize: 13 }}>{bet.match}</span>
                               </div>
                               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingLeft: 25 }}>
                                 <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-secondary)' }}>{bet.odds.toFixed(2)} / {pfx}{bet.stake.toLocaleString()}{sfx}</span>
-                                {hoverBetId === bet.id && (
-                                  <div style={{ display: 'flex', gap: 8 }}>
-                                    <button className="bet-result-icon win" onClick={() => applyResult(bet, 'win')}><CheckCircle size={20} /></button>
-                                    <button className="bet-result-icon loss" onClick={() => applyResult(bet, 'loss')}><XCircle size={20} /></button>
-                                    <button className="bet-result-icon cancel" onClick={() => applyResult(bet, 'cancel')}><X size={20} /></button>
-                                  </div>
-                                )}
                               </div>
                             </div>
                           )
@@ -1052,6 +1057,34 @@ export default function Dashboard() {
         </div>
 
       </div>
+
+      {/* 할 일 추가 모달 */}
+      {showAddTodo && (
+        <div className="modal-overlay" onClick={() => setShowAddTodo(false)}>
+          <div className="modal" style={{ maxWidth: 340 }} onClick={e => e.stopPropagation()}>
+            <div className="modal-title" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><Plus size={15} color="var(--gold)" /> 할 일 추가</span>
+              <button onClick={() => setShowAddTodo(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex' }}><X size={15} /></button>
+            </div>
+            <input
+              className="form-input"
+              style={{ fontSize: 14, marginBottom: 12 }}
+              placeholder="할 일을 입력하세요..."
+              value={newTodo}
+              onChange={e => setNewTodo(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter' && newTodo.trim()) { addTodo(); setShowAddTodo(false) } }}
+              autoFocus
+            />
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn btn-ghost" style={{ flex: 1 }} onClick={() => setShowAddTodo(false)}>취소</button>
+              <button className="btn btn-primary" style={{ flex: 2 }} disabled={!newTodo.trim()}
+                onClick={() => { addTodo(); setShowAddTodo(false) }}>
+                <Check size={13} /> 추가
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 모달 */}
       {showSiteMgr && (
