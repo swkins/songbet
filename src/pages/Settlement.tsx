@@ -68,10 +68,10 @@ export default function Settlement() {
     const desc = siteName ? `${siteName} / ${formCat || '기타'}` : formCat || '기타'
     const { data } = await supabase.from('cashflows').insert({
       flow_date: formDate, type: formType, category: formCat || '기타',
-      description: desc, amount: Number(formAmount), site_id: formSiteId || null,
+      description: desc, amount: Number(formAmount.replace(/,/g, '')), site_id: formSiteId || null,
     }).select().single()
     if (data) {
-      await logAction({ action_type: 'insert', table_name: 'cashflows', record_id: data.id, after_data: data as never, description: `수입/지출 추가: ${desc} ${Number(formAmount).toLocaleString()}원` })
+      await logAction({ action_type: 'insert', table_name: 'cashflows', record_id: data.id, after_data: data as never, description: `수입/지출 추가: ${desc} ${Number(formAmount.replace(/,/g, '')).toLocaleString()}원` })
       setCashflows(p => [data, ...p])
       setFormAmount(''); setFormSiteId(''); setFormCat('')
     }
@@ -180,6 +180,8 @@ export default function Settlement() {
   const maxSiteExpense = Math.max(...monthSiteExpense.map(x => x.amt), 1)
   const maxSiteIncome  = Math.max(...monthSiteIncome.map(x => x.amt), 1)
 
+  const DOW_KO = ['일', '월', '화', '수', '목', '금', '토']
+
   /* ────────── RENDER ────────── */
   return (
     <div style={{ display: 'flex', height: 'calc(100vh - 58px)', overflow: 'hidden', background: 'var(--bg)', gap: 0 }}>
@@ -221,9 +223,19 @@ export default function Settlement() {
           {/* 금액 */}
           <div>
             <div style={labelSt}>금액 (원)</div>
-            <input type="number" inputMode="numeric" placeholder="0" style={inputSt}
-              value={formAmount} onChange={e => setFormAmount(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && saveCashflow()} autoFocus />
+            <input
+              type="text"
+              inputMode="numeric"
+              placeholder="0"
+              style={{ ...inputSt, MozAppearance: 'textfield' } as React.CSSProperties}
+              value={formAmount ? Number(formAmount.replace(/,/g, '')).toLocaleString('ko-KR') : ''}
+              onChange={e => {
+                const raw = e.target.value.replace(/,/g, '')
+                if (raw === '' || /^\d+$/.test(raw)) setFormAmount(raw)
+              }}
+              onKeyDown={e => e.key === 'Enter' && saveCashflow()}
+              autoFocus
+            />
           </div>
 
           {/* 사이트 */}
@@ -368,7 +380,7 @@ export default function Settlement() {
               <span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-num)', color: 'var(--red)' }}>-{fmt(monthExpense)}</span>
             </div>
             <div style={miniSummSt}>
-              <span style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700 }}>수지</span>
+              <span style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700 }}>수익</span>
               <span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-num)', color: (monthIncome - monthExpense) >= 0 ? 'var(--green)' : 'var(--red)' }}>
                 {(monthIncome - monthExpense) >= 0 ? '+' : ''}{fmt(monthIncome - monthExpense)}
               </span>
@@ -388,7 +400,7 @@ export default function Settlement() {
               <div key={date} style={{ marginTop: 12 }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
                   <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)' }}>
-                    {dayjs(date).format('D일 (ddd)')}
+                    {dayjs(date).date()}일({DOW_KO[dayjs(date).day()]})
                   </span>
                   <div style={{ display: 'flex', gap: 8 }}>
                     {dayInc > 0 && <span style={{ fontSize: 11, fontFamily: 'var(--font-num)', color: 'var(--green)', fontWeight: 600 }}>+{fmt(dayInc)}</span>}
@@ -429,7 +441,7 @@ export default function Settlement() {
           {[
             { label: '총 수입', val: allIncome,  color: 'var(--green)', prefix: '+' },
             { label: '총 지출', val: allExpense, color: 'var(--red)',   prefix: '-' },
-            { label: '순 수지', val: allBalance, color: allBalance >= 0 ? 'var(--green)' : 'var(--red)', prefix: allBalance >= 0 ? '+' : '' },
+            { label: '순수익',  val: allBalance, color: allBalance >= 0 ? 'var(--green)' : 'var(--red)', prefix: allBalance >= 0 ? '+' : '' },
           ].map(({ label, val, color, prefix }) => (
             <div key={label} style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px' }}>
               <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.7px', textTransform: 'uppercase', marginBottom: 4 }}>{label}</div>

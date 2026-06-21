@@ -471,7 +471,6 @@ export default function Dashboard() {
   const [withdrawSite, setWithdrawSite] = useState<Site | null>(null)
   const [openFormSiteId, setOpenFormSiteId] = useState<string | null>(null)
   const [hoverBetId, setHoverBetId]     = useState<string | null>(null)
-  const [collapsedSettled, setCollapsedSettled] = useState<Set<string>>(new Set())
 
   const [todos, setTodos]       = useState<Todo[]>([])
   const [newTodo, setNewTodo]   = useState('')
@@ -931,13 +930,12 @@ export default function Dashboard() {
                               <div key={bet.parlay_group} className="site-bet-entry parlay-entry" style={{ marginBottom: 6, position: 'relative' }}
                               onMouseEnter={() => setHoverBetId(bet.parlay_group)} onMouseLeave={() => setHoverBetId(null)}>
                                 {hoverBetId === bet.parlay_group && (
-                                  <div style={{ position: 'absolute', top: 4, right: 4, display: 'flex', gap: 4, zIndex: 10 }}>
-                                    <button className="bet-result-icon win" onClick={() => applyParlayResult(groupBets, 'win')} style={{ padding: 3 }}><CheckCircle size={15} /></button>
-                                    <button className="bet-result-icon loss" onClick={() => applyParlayResult(groupBets, 'loss')} style={{ padding: 3 }}><XCircle size={15} /></button>
-                                    <button className="bet-result-icon cancel" onClick={() => applyParlayResult(groupBets, 'cancel')} style={{ padding: 3 }}><Ban size={15} /></button>
-                                  </div>
+                                  <button className="bet-result-icon cancel" onClick={() => applyParlayResult(groupBets, 'cancel')}
+                                    style={{ position: 'absolute', top: 3, right: 3, padding: 2, zIndex: 10 }}>
+                                    <Ban size={12} />
+                                  </button>
                                 )}
-                                                                {groupBets.map((gb, idx) => (
+                                {groupBets.map((gb, idx) => (
                                   <div key={gb.id} style={{ display: 'flex', gap: 5, marginBottom: 2 }}>
                                     <span style={{ fontSize: 10, color: 'var(--text-muted)', width: 18, textAlign: 'center', flexShrink: 0 }}>{idx===0?'①':'②'}</span>
                                     <span className="site-bet-match" style={{ flex: 1, marginBottom: 0, fontSize: 13 }}>{gb.match}</span>
@@ -945,6 +943,12 @@ export default function Dashboard() {
                                 ))}
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingLeft: 23, marginTop: 6 }}>
                                   <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-secondary)' }}>{bet.odds.toFixed(2)} / {pfx}{bet.stake.toLocaleString()}{sfx}</span>
+                                  {hoverBetId === bet.parlay_group && (
+                                    <div style={{ display: 'flex', gap: 6 }}>
+                                      <button className="bet-result-icon win" onClick={() => applyParlayResult(groupBets, 'win')} style={{ padding: 3 }}><CheckCircle size={16} /></button>
+                                      <button className="bet-result-icon loss" onClick={() => applyParlayResult(groupBets, 'loss')} style={{ padding: 3 }}><XCircle size={16} /></button>
+                                    </div>
+                                  )}
                                 </div>
                               </div>
                             )
@@ -953,11 +957,10 @@ export default function Dashboard() {
                             <div key={bet.id} className="site-bet-entry" style={{ marginBottom: 6, position: 'relative' }}
                               onMouseEnter={() => setHoverBetId(bet.id)} onMouseLeave={() => setHoverBetId(null)}>
                               {hoverBetId === bet.id && (
-                                <div style={{ position: 'absolute', top: 4, right: 4, display: 'flex', gap: 4, zIndex: 10 }}>
-                                  <button className="bet-result-icon win" onClick={() => applyResult(bet, 'win')} style={{ padding: 3 }}><CheckCircle size={15} /></button>
-                                  <button className="bet-result-icon loss" onClick={() => applyResult(bet, 'loss')} style={{ padding: 3 }}><XCircle size={15} /></button>
-                                  <button className="bet-result-icon cancel" onClick={() => applyResult(bet, 'cancel')} style={{ padding: 3 }}><Ban size={15} /></button>
-                                </div>
+                                <button className="bet-result-icon cancel" onClick={() => applyResult(bet, 'cancel')}
+                                  style={{ position: 'absolute', top: 3, right: 3, padding: 2, zIndex: 10 }}>
+                                  <Ban size={12} />
+                                </button>
                               )}
                               <div style={{ display: 'flex', gap: 5, marginBottom: 4 }}>
                                 <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0, width: 20, textAlign: 'center' }}>{SPORT_SHORT[bet.sport] ?? '📋'}</span>
@@ -965,6 +968,12 @@ export default function Dashboard() {
                               </div>
                               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingLeft: 25 }}>
                                 <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-secondary)' }}>{bet.odds.toFixed(2)} / {pfx}{bet.stake.toLocaleString()}{sfx}</span>
+                                {hoverBetId === bet.id && (
+                                  <div style={{ display: 'flex', gap: 6 }}>
+                                    <button className="bet-result-icon win" onClick={() => applyResult(bet, 'win')} style={{ padding: 3 }}><CheckCircle size={16} /></button>
+                                    <button className="bet-result-icon loss" onClick={() => applyResult(bet, 'loss')} style={{ padding: 3 }}><XCircle size={16} /></button>
+                                  </div>
+                                )}
                               </div>
                             </div>
                           )
@@ -982,20 +991,13 @@ export default function Dashboard() {
                       </div>
                       {/* 완료된 목록 — 마감(비활성) 사이트에선 숨김 */}
                       {site.active && settled.length > 0 && (() => {
-                        const isCollapsed = collapsedSettled.has(site.id)
-                        const toggleCollapsed = () => setCollapsedSettled(prev => {
-                          const next = new Set(prev)
-                          isCollapsed ? next.delete(site.id) : next.add(site.id)
-                          return next
-                        })
                         const renderedSettledGroups = new Set<string>()
                         return (
                           <div style={{ marginTop: 8, borderTop: '1px solid var(--border-light)', paddingTop: 6 }}>
-                            <button onClick={toggleCollapsed} style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '3px 2px', marginBottom: isCollapsed ? 0 : 4 }}>
-                              <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.8px' }}>완료된 목록 ({settled.length})</span>
-                              <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{isCollapsed ? '▼' : '▲'}</span>
-                            </button>
-                            {!isCollapsed && settled.map(bet => {
+                            <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.8px', padding: '3px 2px', marginBottom: 4 }}>
+                              완료된 목록 ({settled.length})
+                            </div>
+                            {settled.map(bet => {
                               if (bet.parlay_group) {
                                 if (renderedSettledGroups.has(bet.parlay_group)) return null
                                 renderedSettledGroups.add(bet.parlay_group)
