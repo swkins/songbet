@@ -302,11 +302,20 @@ function SingleBetForm({ site, onClose, onBet, defaultSport }: {
         onChange={e => handleOdds(e.target.value)}
         onBlur={e => { const n = parseOdds(e.target.value); if (n > 0) setOddsRaw(n.toFixed(2)) }} />
       {oddsV > 0 && <div style={{ fontSize: 9, color: 'var(--gold)', fontWeight: 700, textAlign: 'right' }}>→ {oddsV.toFixed(2)}</div>}
-      <input className="form-input inline-bet-input" type="number" placeholder={`금액 (${unit})`} value={amount}
-        onChange={e => setAmount(e.target.value)} onKeyDown={e => e.key === 'Enter' && submit()} />
+      <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+        <input className="form-input inline-bet-input" type="text" inputMode="numeric" placeholder={`금액 (${unit})`}
+          value={stakeN > 0 ? stakeN.toLocaleString() : amount}
+          style={{ flex: 1, MozAppearance: 'textfield' } as React.CSSProperties}
+          onChange={e => {
+            const raw = e.target.value.replace(/,/g, '')
+            if (raw === '' || /^\d+$/.test(raw)) setAmount(raw)
+          }}
+          onKeyDown={e => e.key === 'Enter' && submit()} />
+        <button onClick={() => setAmount('')} style={{ padding: '0 8px', height: 34, borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-body)', whiteSpace: 'nowrap', flexShrink: 0 }}>초기화</button>
+      </div>
       <div style={{ display: 'flex', gap: 4 }}>
         {hotkeys.map(hk => (
-          <button key={hk} className="hotkey-btn" onClick={() => setAmount(p => String(Number(p || 0) + hk))}>
+          <button key={hk} className="hotkey-btn" onClick={() => setAmount(p => String(Number(p.replace(/,/g,'') || 0) + hk))}>
             +{isusd ? `$${hk}` : `${hk.toLocaleString()}`}
           </button>
         ))}
@@ -366,11 +375,20 @@ function DoubleBetForm({ site, lastLeg1, onClose, onBet }: {
         onChange={e => handleOdds(e.target.value)}
         onBlur={e => { const n = parseOdds(e.target.value); if (n > 0) setOddsRaw(n.toFixed(2)) }} />
       {oddsV > 0 && <div style={{ fontSize: 9, color: 'var(--gold)', fontWeight: 700, textAlign: 'right' }}>배당 → {oddsV.toFixed(2)}</div>}
-      <input className="form-input inline-bet-input" type="number" placeholder={`금액 (${unit})`} value={amount}
-        onChange={e => setAmount(e.target.value)} onKeyDown={e => e.key === 'Enter' && submit()} />
+      <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+        <input className="form-input inline-bet-input" type="text" inputMode="numeric" placeholder={`금액 (${unit})`}
+          value={stakeN > 0 ? stakeN.toLocaleString() : amount}
+          style={{ flex: 1, MozAppearance: 'textfield' } as React.CSSProperties}
+          onChange={e => {
+            const raw = e.target.value.replace(/,/g, '')
+            if (raw === '' || /^\d+$/.test(raw)) setAmount(raw)
+          }}
+          onKeyDown={e => e.key === 'Enter' && submit()} />
+        <button onClick={() => setAmount('')} style={{ padding: '0 8px', height: 34, borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-body)', whiteSpace: 'nowrap', flexShrink: 0 }}>초기화</button>
+      </div>
       <div style={{ display: 'flex', gap: 4 }}>
         {hotkeys.map(hk => (
-          <button key={hk} className="hotkey-btn" onClick={() => setAmount(p => String(Number(p || 0) + hk))}>
+          <button key={hk} className="hotkey-btn" onClick={() => setAmount(p => String(Number(p.replace(/,/g,'') || 0) + hk))}>
             +{isusd ? `$${hk}` : `${hk.toLocaleString()}`}
           </button>
         ))}
