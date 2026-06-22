@@ -6,7 +6,7 @@ import dayjs from 'dayjs'
 import isoWeek from 'dayjs/plugin/isoWeek'
 dayjs.extend(isoWeek)
 import {
-  Plus, Trash2, Check, X, ChevronLeft, ChevronRight,
+  Plus, Trash2, Check, X,
   RotateCcw, Settings,
   CheckCircle, XCircle, Ban, Gift, GripVertical, DollarSign,
   TrendingUp, TrendingDown, ArrowDownToLine, LogOut,
@@ -57,33 +57,6 @@ async function getUsdKrwRate(): Promise<number> {
   return latest?.usd_krw ?? 1350
 }
 
-/* ── 미니 달력 ── */
-function MiniCalendar({ checkedDates, onToggle }: { checkedDates: string[]; onToggle: (d: string) => void }) {
-  const [viewMonth, setViewMonth] = useState(dayjs().startOf('month'))
-  const today = dayjs().format('YYYY-MM-DD')
-  const startDay = viewMonth.startOf('month').day()
-  const cells: (string | null)[] = [
-    ...Array(startDay).fill(null),
-    ...Array.from({ length: viewMonth.daysInMonth() }, (_, i) => viewMonth.date(i + 1).format('YYYY-MM-DD')),
-  ]
-  while (cells.length % 7 !== 0) cells.push(null)
-  return (
-    <div className="mini-cal">
-      <div className="mini-cal-header">
-        <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex' }} onClick={() => setViewMonth(p => p.subtract(1, 'month'))}><ChevronLeft size={11} /></button>
-        <span style={{ fontSize: 10 }}>{viewMonth.format('YYYY.MM')}</span>
-        <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex' }} onClick={() => setViewMonth(p => p.add(1, 'month'))}><ChevronRight size={11} /></button>
-      </div>
-      <div className="mini-cal-grid">
-        {['일','월','화','수','목','금','토'].map(d => <div key={d} className="mini-cal-dow">{d}</div>)}
-        {cells.map((date, i) => date
-          ? <div key={i} className={`mini-cal-day ${checkedDates.includes(date) ? 'checked' : ''} ${date === today ? 'today' : ''}`} onClick={() => onToggle(date)}>{dayjs(date).date()}</div>
-          : <div key={i} />
-        )}
-      </div>
-    </div>
-  )
-}
 
 /* ── 입금 모달 ── */
 function DepositModal({ site, onClose, onDeposit, onPoint }: {
@@ -721,7 +694,6 @@ export default function Dashboard() {
     }
   }
 
-  /* ── 할일 ── */
   /* ════════════ RENDER ════════════ */
   return (
     <div className="page">

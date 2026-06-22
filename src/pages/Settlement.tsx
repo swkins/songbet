@@ -107,7 +107,7 @@ export default function Settlement() {
   useEffect(() => { loadCashflows(); loadSites() }, [])
 
   async function loadCashflows() {
-    const { data } = await supabase.from('cashflows').select('*').order('flow_date', { ascending: false }).limit(300)
+    const { data } = await supabase.from('cashflows').select('*').order('flow_date', { ascending: false }).order('created_at', { ascending: false }).limit(300)
     if (data) setCashflows(data)
   }
   async function loadSites() {
@@ -245,7 +245,9 @@ export default function Settlement() {
   const groupedByDate = useMemo(() => {
     const map: Record<string, Cashflow[]> = {}
     monthFlows.forEach(c => { if (!map[c.flow_date]) map[c.flow_date] = []; map[c.flow_date].push(c) })
-    return Object.entries(map).sort((a, b) => b[0].localeCompare(a[0]))
+    return Object.entries(map)
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .map(([date, items]) => [date, [...items].sort((a, b) => b.created_at.localeCompare(a.created_at))] as [string, Cashflow[]])
   }, [monthFlows])
 
   const monthIncome  = monthFlows.filter(c => c.type === 'income').reduce((s, c) => s + c.amount, 0)
