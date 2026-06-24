@@ -18,11 +18,15 @@ export async function logAction(params: {
     description: params.description,
     cashflow_id: params.cashflow_id ?? null,
   })
-  // App에 로그 갱신 이벤트 발송
   window.dispatchEvent(new Event('log-updated'))
 }
 
 export async function purgeOldLogs() {
-  const cutoff = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString()
-  await supabase.from('action_logs').delete().lt('created_at', cutoff)
+  // action_logs: 3일 이상 지난 것 삭제 (기존)
+  const logCutoff = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString()
+  await supabase.from('action_logs').delete().lt('created_at', logCutoff)
+
+  // exchange_rates: 7일 이상 지난 것 삭제 (추가)
+  const rateCutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
+  await supabase.from('exchange_rates').delete().lt('fetched_at', rateCutoff)
 }
