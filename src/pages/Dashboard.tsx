@@ -893,20 +893,6 @@ export default function Dashboard() {
                           return (
                             <div key={bet.id} className="site-bet-entry" style={{ marginBottom: 6, position: 'relative' }}
                               onMouseEnter={() => setHoverBetId(bet.id)} onMouseLeave={() => setHoverBetId(null)}>
-                              {hoverBetId === bet.id && inlineEditBetId !== bet.id && (
-                                <>
-                                  <button onClick={() => { setInlineEditBetId(bet.id); setHoverBetId(null) }}
-                                    style={{ position: 'absolute', top: 3, right: 3, padding: 2, zIndex: 10, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--gold)', display: 'flex' }}
-                                    title="수정">
-                                    <Pencil size={12} />
-                                  </button>
-                                  <button className="bet-result-icon cancel" onClick={() => applyResult(bet, 'cancel')}
-                                    style={{ position: 'absolute', top: 3, right: 20, padding: 2, zIndex: 10 }}
-                                    title="취소">
-                                    <Ban size={12} />
-                                  </button>
-                                </>
-                              )}
                               {inlineEditBetId === bet.id ? (
                                 <InlineBetEditForm
                                   bet={bet}
@@ -915,21 +901,53 @@ export default function Dashboard() {
                                   onSave={(sport, content, odds, stake) => saveInlineEdit(bet, sport, content, odds, stake)}
                                 />
                               ) : (
-                                <>
-                                  <div style={{ display: 'flex', gap: 5, marginBottom: 4 }}>
-                                    <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0, width: 20, textAlign: 'center' }}>{SPORT_SHORT[bet.sport] ?? '📋'}</span>
-                                    <span className="site-bet-match" style={{ flex: 1, marginBottom: 0, fontSize: 13 }}>{bet.match}</span>
+                                <div style={{ display: 'flex', gap: 6, alignItems: 'stretch' }}>
+                                  {/* 좌: 경기 내용 */}
+                                  <div style={{ flex: 1, minWidth: 0 }}>
+                                    <div style={{ display: 'flex', gap: 4, marginBottom: 3 }}>
+                                      <span style={{ fontSize: 14, lineHeight: 1, flexShrink: 0, width: 18, textAlign: 'center' }}>{SPORT_SHORT[bet.sport] ?? '📋'}</span>
+                                      <span className="site-bet-match" style={{ flex: 1, marginBottom: 0, fontSize: 13 }}>{bet.match}</span>
+                                    </div>
+                                    <div style={{ paddingLeft: 22 }}>
+                                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-secondary)' }}>{bet.odds.toFixed(2)} / {pfx}{bet.stake.toLocaleString()}{sfx}</span>
+                                    </div>
                                   </div>
-                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingLeft: 25 }}>
-                                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-secondary)' }}>{bet.odds.toFixed(2)} / {pfx}{bet.stake.toLocaleString()}{sfx}</span>
-                                    {hoverBetId === bet.id && (
-                                      <div style={{ display: 'flex', gap: 6 }}>
-                                        <button className="bet-result-icon win" onClick={() => applyResult(bet, 'win')} style={{ padding: 3 }}><CheckCircle size={16} /></button>
-                                        <button className="bet-result-icon loss" onClick={() => applyResult(bet, 'loss')} style={{ padding: 3 }}><XCircle size={16} /></button>
-                                      </div>
-                                    )}
-                                  </div>
-                                </>
+                                  {/* 우: 2×2 버튼 그리드 (hover 시만) */}
+                                  {hoverBetId === bet.id && (
+                                    <div style={{
+                                      display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 3,
+                                      flexShrink: 0, alignSelf: 'center',
+                                    }}>
+                                      {/* 행1: 수정 / 취소 */}
+                                      <button
+                                        className="bet-action-btn"
+                                        title="수정"
+                                        onClick={() => { setInlineEditBetId(bet.id); setHoverBetId(null) }}
+                                        style={{ color: 'var(--gold)' }}>
+                                        <Pencil size={13} />
+                                      </button>
+                                      <button
+                                        className="bet-action-btn bet-action-cancel"
+                                        title="취소"
+                                        onClick={() => applyResult(bet, 'cancel')}>
+                                        <Ban size={13} />
+                                      </button>
+                                      {/* 행2: 적중 / 실패 */}
+                                      <button
+                                        className="bet-action-btn bet-action-win"
+                                        title="적중"
+                                        onClick={() => applyResult(bet, 'win')}>
+                                        <CheckCircle size={13} />
+                                      </button>
+                                      <button
+                                        className="bet-action-btn bet-action-loss"
+                                        title="실패"
+                                        onClick={() => applyResult(bet, 'loss')}>
+                                        <XCircle size={13} />
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
                               )}
                             </div>
                           )
