@@ -9,7 +9,7 @@ import {
   Plus, Trash2, Check, X,
   RotateCcw, Settings,
   CheckCircle, XCircle, Ban, Gift, GripVertical, DollarSign,
-  TrendingUp, TrendingDown, ArrowDownToLine, LogOut,
+  TrendingUp, TrendingDown, ArrowDownToLine, LogOut, Pencil,
 } from 'lucide-react'
 
 const SPORTS: { value: Sport; label: string }[] = [
@@ -441,6 +441,10 @@ export default function Dashboard() {
   const [withdrawSite, setWithdrawSite] = useState<Site | null>(null)
   const [openFormSiteId, setOpenFormSiteId] = useState<string | null>(null)
   const [hoverBetId, setHoverBetId]     = useState<string | null>(null)
+  const [editBet, setEditBet]           = useState<Bet | null>(null)
+  const [editContent, setEditContent]   = useState('')
+  const [editOdds, setEditOdds]         = useState('')
+  const [editStake, setEditStake]       = useState('')
 
   useEffect(() => { loadSites(); loadBets() }, [])
 
@@ -694,6 +698,29 @@ export default function Dashboard() {
     }
   }
 
+  /* ── 베팅 수정 ── */
+  function openEditBet(bet: Bet) {
+    setEditBet(bet)
+    setEditContent(bet.match)
+    setEditOdds(bet.odds.toFixed(2))
+    setEditStake(String(bet.stake))
+  }
+  async function saveEditBet() {
+    if (!editBet) return
+    const oddsVal = parseOdds(editOdds)
+    if (!editContent || oddsVal <= 0 || !editStake) return
+    const before = { ...editBet }
+    const { market, pick } = autoMarket(editContent)
+    const { data } = await supabase.from('bets').update({
+      match: editContent, market, pick, odds: oddsVal, stake: Number(editStake),
+    }).eq('id', editBet.id).select().single()
+    if (data) {
+      await logAction({ action_type: 'update', table_name: 'bets', record_id: data.id, before_data: before as never, after_data: data as never, description: `베팅 수정: ${data.match}` })
+      setBets(p => p.map(b => b.id === data.id ? data : b))
+    }
+    setEditBet(null)
+  }
+
   /* ════════════ RENDER ════════════ */
   return (
     <div className="page">
@@ -804,10 +831,16 @@ export default function Dashboard() {
                             <div key={bet.id} className="site-bet-entry" style={{ marginBottom: 6, position: 'relative' }}
                               onMouseEnter={() => setHoverBetId(bet.id)} onMouseLeave={() => setHoverBetId(null)}>
                               {hoverBetId === bet.id && (
-                                <button className="bet-result-icon cancel" onClick={() => applyResult(bet, 'cancel')}
-                                  style={{ position: 'absolute', top: 3, right: 3, padding: 2, zIndex: 10 }}>
-                                  <Ban size={12} />
-                                </button>
+                                <>
+                                  <button className="bet-result-icon cancel" onClick={() => applyResult(bet, 'cancel')}
+                                    style={{ position: 'absolute', top: 3, right: 22, padding: 2, zIndex: 10 }}>
+                                    <Ban size={12} />
+                                  </button>
+                                  <button onClick={() => openEditBet(bet)}
+                                    style={{ position: 'absolute', top: 3, right: 3, padding: 2, zIndex: 10, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--gold)', display: 'flex' }}>
+                                    <Pencil size={12} />
+                                  </button>
+                                </>
                               )}
                               <div style={{ display: 'flex', gap: 5, marginBottom: 4 }}>
                                 <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0, width: 20, textAlign: 'center' }}>{SPORT_SHORT[bet.sport] ?? '📋'}</span>
@@ -913,6 +946,47 @@ export default function Dashboard() {
       )}
       {depositSite && <DepositModal site={depositSite} onClose={() => setDepositSite(null)} onDeposit={doDeposit} onPoint={doPoint} />}
       {withdrawSite && <WithdrawModal site={withdrawSite} onClose={() => setWithdrawSite(null)} onWithdraw={doWithdraw} />}
+
+      {/* 베팅 수정 모달 */}
+      {editBet && (
+        <div className="modal-overlay" onClick={() => setEditBet(null)}>
+          <div className="modal" style={{ maxWidth: 420 }} onClick={e => e.stopPropagation()}>
+            <div className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Pencil size={14} style={{ color: 'var(--gold)' }} /> 베팅 수정
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div className="form-group">
+                <label className="form-label">내용</label>
+                <input className="form-input" value={editContent} onChange={e => setEditContent(e.target.value)} autoFocus />
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                <div className="form-group">
+                  <label className="form-label">
+                    배당
+                    {editOdds && parseOdds(editOdds) > 0 && (
+                      <span style={{ marginLeft: 6, color: 'var(--gold)', fontWeight: 700, fontSize: 11 }}>→ {parseOdds(editOdds).toFixed(2)}</span>
+                    )}
+                  </label>
+                  <input className="form-input" placeholder="125 = 1.25" value={editOdds}
+                    onChange={e => {
+                      const clean = e.target.value.replace(/[^0-9.]/g, '')
+                      setEditOdds(/^\d{3}$/.test(clean) ? (Number(clean) / 100).toFixed(2) : clean)
+                    }}
+                    onBlur={e => { const n = parseOdds(e.target.value); if (n > 0) setEditOdds(n.toFixed(2)) }} />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">금액</label>
+                  <input className="form-input" type="number" value={editStake} onChange={e => setEditStake(e.target.value)} />
+                </div>
+              </div>
+            </div>
+            <div className="modal-actions" style={{ marginTop: 14 }}>
+              <button className="btn btn-ghost" onClick={() => setEditBet(null)}>취소</button>
+              <button className="btn btn-primary" onClick={saveEditBet}><Check size={13} /> 저장</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
