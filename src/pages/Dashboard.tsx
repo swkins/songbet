@@ -254,7 +254,7 @@ function EditFormAmountRow({ isusd, amount, setAmount }: { isusd: boolean; amoun
       </div>
       <div style={{ display: 'flex', gap: 4 }}>
         {hotkeys.map(hk => (
-          <button key={hk} className="hotkey-btn" onClick={() => setAmount(p => String(Number(p.replace(/,/g,'') || 0) + hk))}>
+          <button key={hk} className="hotkey-btn" onClick={() => setAmount(String(Number(amount.replace(/,/g,'') || 0) + hk))}>
             +{isusd ? `$${hk}` : `${hk.toLocaleString()}`}
           </button>
         ))}
@@ -425,7 +425,7 @@ function SingleBetForm({ site, onClose, onBet, defaultSport }: {
       </div>
       <div style={{ display: 'flex', gap: 4 }}>
         {hotkeys.map(hk => (
-          <button key={hk} className="hotkey-btn" onClick={() => setAmount(p => String(Number(p.replace(/,/g,'') || 0) + hk))}>
+          <button key={hk} className="hotkey-btn" onClick={() => setAmount(String(Number(amount.replace(/,/g,'') || 0) + hk))}>
             +{isusd ? `$${hk}` : `${hk.toLocaleString()}`}
           </button>
         ))}
@@ -499,7 +499,7 @@ function DoubleBetForm({ site, lastLeg1, onClose, onBet }: {
       </div>
       <div style={{ display: 'flex', gap: 4 }}>
         {hotkeys.map(hk => (
-          <button key={hk} className="hotkey-btn" onClick={() => setAmount(p => String(Number(p.replace(/,/g,'') || 0) + hk))}>
+          <button key={hk} className="hotkey-btn" onClick={() => setAmount(String(Number(amount.replace(/,/g,'') || 0) + hk))}>
             +{isusd ? `$${hk}` : `${hk.toLocaleString()}`}
           </button>
         ))}
