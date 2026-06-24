@@ -305,24 +305,21 @@ tr:hover td { background: var(--bg-hover); }
 
 /* ── 베팅 카드 2×2 액션 버튼 ── */
 .bet-action-btn {
-  width: 28px; height: 28px;
+  width: 22px; height: 22px;
   display: flex; align-items: center; justify-content: center;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  border-radius: 5px;
+  background: none;
+  border: none;
+  border-radius: 4px;
   cursor: pointer;
   color: var(--text-secondary);
   transition: all 0.12s;
   padding: 0;
   flex-shrink: 0;
 }
-.bet-action-btn:hover { transform: scale(1.1); }
+.bet-action-btn:hover { opacity: 0.8; transform: scale(1.12); }
 .bet-action-btn.bet-action-win   { color: var(--green); }
 .bet-action-btn.bet-action-loss  { color: var(--red); }
 .bet-action-btn.bet-action-cancel { color: var(--text-secondary); }
-.bet-action-btn.bet-action-win:hover   { background: var(--green-bg); border-color: var(--green-border); }
-.bet-action-btn.bet-action-loss:hover  { background: var(--red-bg);   border-color: var(--red-border); }
-.bet-action-btn.bet-action-cancel:hover { background: var(--bg-card); }
 
 /* ── 입금/출금 아이콘 버튼 (배경 없음, 깔끔) ── */
 .site-icon-btn {

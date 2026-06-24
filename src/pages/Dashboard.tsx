@@ -238,12 +238,38 @@ function SiteMgrModal({ sites, onClose, onAdd, onDelete, onToggleCurrency, onTog
 }
 
 /* ── 인라인 베팅 수정폼 ── */
+/* ── 공통 인라인 수정폼 스타일 헬퍼 ── */
+function EditFormAmountRow({ isusd, amount, setAmount }: { isusd: boolean; amount: string; setAmount: (v: string) => void }) {
+  const unit = isusd ? '$' : '원'
+  const stakeN = Number(amount.replace(/,/g, ''))
+  const hotkeys = isusd ? [5, 10] : [5000, 10000]
+  return (
+    <>
+      <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+        <input className="form-input inline-bet-input" type="text" inputMode="numeric" placeholder={`금액 (${unit})`}
+          value={stakeN > 0 ? stakeN.toLocaleString() : amount}
+          style={{ flex: 1, MozAppearance: 'textfield' } as React.CSSProperties}
+          onChange={e => { const r = e.target.value.replace(/,/g, ''); if (r === '' || /^\d+$/.test(r)) setAmount(r) }} />
+        <button onClick={() => setAmount('')} style={{ padding: '0 8px', height: 34, borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-body)', whiteSpace: 'nowrap', flexShrink: 0 }}>초기화</button>
+      </div>
+      <div style={{ display: 'flex', gap: 4 }}>
+        {hotkeys.map(hk => (
+          <button key={hk} className="hotkey-btn" onClick={() => setAmount(p => String(Number(p.replace(/,/g,'') || 0) + hk))}>
+            +{isusd ? `$${hk}` : `${hk.toLocaleString()}`}
+          </button>
+        ))}
+      </div>
+    </>
+  )
+}
+
+/* ── 인라인 단폴 수정폼 ── */
 function InlineBetEditForm({ bet, site, onClose, onSave }: {
   bet: Bet; site: Site
   onClose: () => void
   onSave: (sport: string, content: string, odds: number, stake: number) => Promise<void>
 }) {
-  const isusd = site.currency === 'usd'; const unit = isusd ? '$' : '원'
+  const isusd = site.currency === 'usd'
   const [sport, setSport]     = useState(bet.sport)
   const [content, setContent] = useState(bet.match)
   const [oddsRaw, setOddsRaw] = useState(bet.odds.toFixed(2))
@@ -251,7 +277,6 @@ function InlineBetEditForm({ bet, site, onClose, onSave }: {
   const [submitting, setSubmitting] = useState(false)
   const oddsV = parseOdds(oddsRaw)
   const stakeN = Number(amount.replace(/,/g, ''))
-  const hotkeys = isusd ? [5, 10] : [5000, 10000]
 
   function handleOdds(raw: string) {
     const clean = raw.replace(/[^0-9.]/g, '')
@@ -260,11 +285,8 @@ function InlineBetEditForm({ bet, site, onClose, onSave }: {
   }
   async function submit() {
     if (!content || oddsV <= 0 || stakeN <= 0) return
-    setSubmitting(true)
-    await onSave(sport, content, oddsV, stakeN)
-    setSubmitting(false)
+    setSubmitting(true); await onSave(sport, content, oddsV, stakeN); setSubmitting(false)
   }
-
   return (
     <div className="inline-bet-form" style={{ borderColor: 'var(--gold-border)', background: 'var(--gold-bg)' }}>
       <select className="form-select inline-bet-input" value={sport} onChange={e => setSport(e.target.value as typeof bet.sport)}>
@@ -277,24 +299,7 @@ function InlineBetEditForm({ bet, site, onClose, onSave }: {
         onKeyDown={e => e.key === 'Enter' && submit()}
         onBlur={e => { const n = parseOdds(e.target.value); if (n > 0) setOddsRaw(n.toFixed(2)) }} />
       {oddsV > 0 && <div style={{ fontSize: 9, color: 'var(--gold)', fontWeight: 700, textAlign: 'right' }}>→ {oddsV.toFixed(2)}</div>}
-      <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-        <input className="form-input inline-bet-input" type="text" inputMode="numeric" placeholder={`금액 (${unit})`}
-          value={stakeN > 0 ? stakeN.toLocaleString() : amount}
-          style={{ flex: 1, MozAppearance: 'textfield' } as React.CSSProperties}
-          onChange={e => {
-            const raw = e.target.value.replace(/,/g, '')
-            if (raw === '' || /^\d+$/.test(raw)) setAmount(raw)
-          }}
-          onKeyDown={e => e.key === 'Enter' && submit()} />
-        <button onClick={() => setAmount('')} style={{ padding: '0 8px', height: 34, borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-body)', whiteSpace: 'nowrap', flexShrink: 0 }}>초기화</button>
-      </div>
-      <div style={{ display: 'flex', gap: 4 }}>
-        {hotkeys.map(hk => (
-          <button key={hk} className="hotkey-btn" onClick={() => setAmount(p => String(Number(p.replace(/,/g,'') || 0) + hk))}>
-            +{isusd ? `$${hk}` : `${hk.toLocaleString()}`}
-          </button>
-        ))}
-      </div>
+      <EditFormAmountRow isusd={isusd} amount={amount} setAmount={setAmount} />
       {oddsV > 0 && stakeN > 0 && (
         <div style={{ fontSize: 9, color: 'var(--gold)', fontWeight: 700, textAlign: 'right' }}>
           예상 +{isusd ? '$' : ''}{Math.round(stakeN * (oddsV - 1)).toLocaleString()}{isusd ? '' : '원'}
@@ -303,6 +308,63 @@ function InlineBetEditForm({ bet, site, onClose, onSave }: {
       <div style={{ display: 'flex', gap: 5 }}>
         <button className="btn btn-primary" style={{ flex: 1, fontSize: 12, padding: '7px 0', justifyContent: 'center' }}
           onClick={submit} disabled={!content || oddsV <= 0 || stakeN <= 0 || submitting}>
+          {submitting ? '저장중...' : '수정 저장'}
+        </button>
+        <button className="btn btn-ghost" style={{ padding: '7px 10px' }} onClick={onClose}><X size={12} /></button>
+      </div>
+    </div>
+  )
+}
+
+/* ── 인라인 두폴 수정폼 ── */
+function InlineParlayEditForm({ groupBets, site, onClose, onSave }: {
+  groupBets: Bet[]; site: Site
+  onClose: () => void
+  onSave: (c1: string, c2: string, odds: number, stake: number) => Promise<void>
+}) {
+  const isusd = site.currency === 'usd'
+  const leg1 = groupBets.find(b => b.parlay_leg === 1)
+  const leg2 = groupBets.find(b => b.parlay_leg === 2)
+  const [c1, setC1]           = useState(leg1?.match ?? '')
+  const [c2, setC2]           = useState(leg2?.match ?? '')
+  const [oddsRaw, setOddsRaw] = useState((leg1?.odds ?? 1).toFixed(2))
+  const [amount, setAmount]   = useState(String(leg1?.stake ?? 0))
+  const [submitting, setSubmitting] = useState(false)
+  const oddsV  = parseOdds(oddsRaw)
+  const stakeN = Number(amount.replace(/,/g, ''))
+  const labelSt: React.CSSProperties = { fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.6px', color: 'var(--text-muted)', marginBottom: 2 }
+
+  function handleOdds(raw: string) {
+    const clean = raw.replace(/[^0-9.]/g, '')
+    if (/^\d{3}$/.test(clean)) setOddsRaw((Number(clean) / 100).toFixed(2))
+    else setOddsRaw(clean)
+  }
+  async function submit() {
+    if (!c1 || !c2 || oddsV <= 0 || stakeN <= 0) return
+    setSubmitting(true); await onSave(c1, c2, oddsV, stakeN); setSubmitting(false)
+  }
+  return (
+    <div className="inline-bet-form" style={{ borderColor: 'var(--gold-border)', background: 'var(--gold-bg)' }}>
+      <div style={labelSt}>① 축</div>
+      <input className="form-input inline-bet-input" placeholder="경기 내용 ①" value={c1}
+        onChange={e => setC1(e.target.value)} autoFocus />
+      <div style={{ ...labelSt, marginTop: 4 }}>② 날개</div>
+      <input className="form-input inline-bet-input" placeholder="경기 내용 ②" value={c2}
+        onChange={e => setC2(e.target.value)} />
+      <input className="form-input inline-bet-input" placeholder="배당 (125=1.25)" value={oddsRaw}
+        onChange={e => handleOdds(e.target.value)}
+        onKeyDown={e => e.key === 'Enter' && submit()}
+        onBlur={e => { const n = parseOdds(e.target.value); if (n > 0) setOddsRaw(n.toFixed(2)) }} />
+      {oddsV > 0 && <div style={{ fontSize: 9, color: 'var(--gold)', fontWeight: 700, textAlign: 'right' }}>배당 → {oddsV.toFixed(2)}</div>}
+      <EditFormAmountRow isusd={isusd} amount={amount} setAmount={setAmount} />
+      {oddsV > 0 && stakeN > 0 && (
+        <div style={{ fontSize: 9, color: 'var(--gold)', fontWeight: 700, textAlign: 'right' }}>
+          예상 +{isusd ? '$' : ''}{Math.round(stakeN * (oddsV - 1)).toLocaleString()}{isusd ? '' : '원'}
+        </div>
+      )}
+      <div style={{ display: 'flex', gap: 5 }}>
+        <button className="btn btn-primary" style={{ flex: 1, fontSize: 12, padding: '7px 0', justifyContent: 'center' }}
+          onClick={submit} disabled={!c1 || !c2 || oddsV <= 0 || stakeN <= 0 || submitting}>
           {submitting ? '저장중...' : '수정 저장'}
         </button>
         <button className="btn btn-ghost" style={{ padding: '7px 10px' }} onClick={onClose}><X size={12} /></button>
@@ -784,6 +846,23 @@ export default function Dashboard() {
     setInlineEditBetId(null)
   }
 
+  async function saveInlineParlay(groupBets: Bet[], c1: string, c2: string, odds: number, stake: number) {
+    if (!c1 || !c2 || odds <= 0 || stake <= 0) return
+    const leg1 = groupBets.find(b => b.parlay_leg === 1)
+    const leg2 = groupBets.find(b => b.parlay_leg === 2)
+    if (!leg1 || !leg2) return
+    const { market: m1, pick: p1 } = autoMarket(c1)
+    const { market: m2, pick: p2 } = autoMarket(c2)
+    const [r1, r2] = await Promise.all([
+      supabase.from('bets').update({ match: c1, market: m1, pick: p1, odds, stake }).eq('id', leg1.id).select().single(),
+      supabase.from('bets').update({ match: c2, market: m2, pick: p2, odds, stake }).eq('id', leg2.id).select().single(),
+    ])
+    if (r1.data) setBets(p => p.map(b => b.id === r1.data!.id ? r1.data! : b))
+    if (r2.data) setBets(p => p.map(b => b.id === r2.data!.id ? r2.data! : b))
+    await logAction({ action_type: 'update', table_name: 'bets', record_id: leg1.id, before_data: leg1 as never, after_data: r1.data as never, description: `두폴 수정: ${c1}×${c2}` })
+    setInlineEditBetId(null)
+  }
+
   /* ════════════ RENDER ════════════ */
   return (
     <div className="page">
@@ -864,29 +943,52 @@ export default function Dashboard() {
                             renderedGroups.add(bet.parlay_group)
                             const groupBets = pending.filter(b => b.parlay_group === bet.parlay_group).sort((a,b) => a.parlay_leg - b.parlay_leg)
                             return (
-                              <div key={bet.parlay_group} className="site-bet-entry parlay-entry" style={{ marginBottom: 6, position: 'relative' }}
-                              onMouseEnter={() => setHoverBetId(bet.parlay_group)} onMouseLeave={() => setHoverBetId(null)}>
-                                {hoverBetId === bet.parlay_group && (
-                                  <button className="bet-result-icon cancel" onClick={() => applyParlayResult(groupBets, 'cancel')}
-                                    style={{ position: 'absolute', top: 3, right: 3, padding: 2, zIndex: 10 }}>
-                                    <Ban size={12} />
-                                  </button>
-                                )}
-                                {groupBets.map((gb, idx) => (
-                                  <div key={gb.id} style={{ display: 'flex', gap: 5, marginBottom: 2 }}>
-                                    <span style={{ fontSize: 10, color: 'var(--text-muted)', width: 18, textAlign: 'center', flexShrink: 0 }}>{idx===0?'①':'②'}</span>
-                                    <span className="site-bet-match" style={{ flex: 1, marginBottom: 0, fontSize: 13 }}>{gb.match}</span>
-                                  </div>
-                                ))}
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingLeft: 23, marginTop: 6 }}>
-                                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-secondary)' }}>{bet.odds.toFixed(2)} / {pfx}{bet.stake.toLocaleString()}{sfx}</span>
-                                  {hoverBetId === bet.parlay_group && (
-                                    <div style={{ display: 'flex', gap: 6 }}>
-                                      <button className="bet-result-icon win" onClick={() => applyParlayResult(groupBets, 'win')} style={{ padding: 3 }}><CheckCircle size={16} /></button>
-                                      <button className="bet-result-icon loss" onClick={() => applyParlayResult(groupBets, 'loss')} style={{ padding: 3 }}><XCircle size={16} /></button>
+                              <div key={bet.parlay_group} className="site-bet-entry parlay-entry" style={{ marginBottom: 6 }}
+                                onMouseEnter={() => setHoverBetId(bet.parlay_group)} onMouseLeave={() => setHoverBetId(null)}>
+                                {inlineEditBetId === bet.parlay_group ? (
+                                  <InlineParlayEditForm
+                                    groupBets={groupBets}
+                                    site={site}
+                                    onClose={() => setInlineEditBetId(null)}
+                                    onSave={(c1, c2, odds, stake) => saveInlineParlay(groupBets, c1, c2, odds, stake)}
+                                  />
+                                ) : (
+                                  <div style={{ display: 'flex', gap: 6, alignItems: 'stretch' }}>
+                                    {/* 좌: 경기 내용 */}
+                                    <div style={{ flex: 1, minWidth: 0 }}>
+                                      {groupBets.map((gb, idx) => (
+                                        <div key={gb.id} style={{ display: 'flex', gap: 4, marginBottom: 2 }}>
+                                          <span style={{ fontSize: 10, color: 'var(--text-muted)', width: 16, textAlign: 'center', flexShrink: 0 }}>{idx===0?'①':'②'}</span>
+                                          <span className="site-bet-match" style={{ flex: 1, marginBottom: 0, fontSize: 13 }}>{gb.match}</span>
+                                        </div>
+                                      ))}
+                                      <div style={{ paddingLeft: 20, marginTop: 3 }}>
+                                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-secondary)' }}>{bet.odds.toFixed(2)} / {pfx}{bet.stake.toLocaleString()}{sfx}</span>
+                                      </div>
                                     </div>
-                                  )}
-                                </div>
+                                    {/* 우: 2×2 버튼 그리드 */}
+                                    {hoverBetId === bet.parlay_group && (
+                                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 3, flexShrink: 0, alignSelf: 'center' }}>
+                                        <button className="bet-action-btn" title="수정" style={{ color: 'var(--gold)' }}
+                                          onClick={() => { setInlineEditBetId(bet.parlay_group); setHoverBetId(null) }}>
+                                          <Pencil size={11} />
+                                        </button>
+                                        <button className="bet-action-btn bet-action-cancel" title="취소"
+                                          onClick={() => applyParlayResult(groupBets, 'cancel')}>
+                                          <Ban size={11} />
+                                        </button>
+                                        <button className="bet-action-btn bet-action-win" title="적중"
+                                          onClick={() => applyParlayResult(groupBets, 'win')}>
+                                          <CheckCircle size={11} />
+                                        </button>
+                                        <button className="bet-action-btn bet-action-loss" title="실패"
+                                          onClick={() => applyParlayResult(groupBets, 'loss')}>
+                                          <XCircle size={11} />
+                                        </button>
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
                               </div>
                             )
                           }
@@ -924,26 +1026,26 @@ export default function Dashboard() {
                                         title="수정"
                                         onClick={() => { setInlineEditBetId(bet.id); setHoverBetId(null) }}
                                         style={{ color: 'var(--gold)' }}>
-                                        <Pencil size={13} />
+                                        <Pencil size={11} />
                                       </button>
                                       <button
                                         className="bet-action-btn bet-action-cancel"
                                         title="취소"
                                         onClick={() => applyResult(bet, 'cancel')}>
-                                        <Ban size={13} />
+                                        <Ban size={11} />
                                       </button>
                                       {/* 행2: 적중 / 실패 */}
                                       <button
                                         className="bet-action-btn bet-action-win"
                                         title="적중"
                                         onClick={() => applyResult(bet, 'win')}>
-                                        <CheckCircle size={13} />
+                                        <CheckCircle size={11} />
                                       </button>
                                       <button
                                         className="bet-action-btn bet-action-loss"
                                         title="실패"
                                         onClick={() => applyResult(bet, 'loss')}>
-                                        <XCircle size={13} />
+                                        <XCircle size={11} />
                                       </button>
                                     </div>
                                   )}
