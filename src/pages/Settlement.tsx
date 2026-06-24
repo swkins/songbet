@@ -5,14 +5,19 @@ import type { Cashflow, Site } from '../types'
 import dayjs from 'dayjs'
 import {
   Plus, Trash2, X, TrendingUp, TrendingDown,
-  ChevronLeft, ChevronRight, ChevronDown, Pencil, Check, ArrowUp, ArrowDown,
+  ChevronLeft, ChevronRight, ChevronDown, Pencil, Check, ArrowUp, ArrowDown, Bookmark, BookmarkCheck,
 } from 'lucide-react'
 
-// 베팅손실 제거, 베팅입금은 대시보드 전용이라 잠금만
 const DEFAULT_CATS = ['베팅수익', '급여', '식비', '교통', '쇼핑', '기타']
-const LOCKED_CATS  = ['베팅수익', '베팅입금']  // 삭제/편집 불가
+// 베팅입금만 잠금 (베팅수익은 삭제 가능)
+const LOCKED_CATS = ['베팅입금']
 
-/* ────────── helpers ────────── */
+interface CfCategory { id: number; name: string; sort_order: number }
+interface CfPreset {
+  id: number; name: string; amount: string
+  site_id: string; category: string; type: 'income' | 'expense'
+}
+
 function fmt(n: number) { return n.toLocaleString('ko-KR') }
 
 const COLORS = [
@@ -20,7 +25,6 @@ const COLORS = [
   '#1ABC9C','#E67E22','#34495E','#F39C12','#16A085',
 ]
 
-/* ── 입금 현황 (이번주/한달) ── */
 function DepositSummary({ sites, cashflows }: {
   sites: { id: string; name: string; currency: string }[]
   cashflows: { flow_date: string; type: string; amount: number; site_id: string | null }[]
@@ -32,22 +36,17 @@ function DepositSummary({ sites, cashflows }: {
   const monthEnd   = dayjs().endOf('month').format('YYYY-MM-DD')
   const from = mode === 'week' ? weekStart : monthStart
   const to   = mode === 'week' ? weekEnd   : monthEnd
-
   const filtered = cashflows.filter(c => c.type === 'expense' && c.flow_date >= from && c.flow_date <= to)
   const total = filtered.reduce((a, c) => a + c.amount, 0)
   const krwSites = sites.filter(s => s.currency === 'krw')
-
   return (
     <div style={{ borderTop: '1px solid var(--border)', padding: '10px 12px', flexShrink: 0 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-        <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.8px' }}>
-          입금 현황
-        </div>
+        <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.8px' }}>입금 현황</div>
         <div style={{ display: 'flex', gap: 4 }}>
           {(['week', 'month'] as const).map(m => (
             <button key={m} onClick={() => setMode(m)} style={{
-              fontSize: 9, fontWeight: 700, padding: '2px 7px', borderRadius: 4, border: '1px solid', cursor: 'pointer',
-              fontFamily: 'var(--font-body)',
+              fontSize: 9, fontWeight: 700, padding: '2px 7px', borderRadius: 4, border: '1px solid', cursor: 'pointer', fontFamily: 'var(--font-body)',
               background: mode === m ? 'var(--gold-bg)' : 'none',
               borderColor: mode === m ? 'var(--gold-border)' : 'var(--border)',
               color: mode === m ? 'var(--gold)' : 'var(--text-muted)',
@@ -78,33 +77,34 @@ export default function Settlement() {
 
   const [cashflows, setCashflows] = useState<Cashflow[]>([])
   const [sites, setSites] = useState<Site[]>([])
-  const [categories, setCategories] = useState<string[]>(() => {
-    try { return JSON.parse(localStorage.getItem('cf_cats') || 'null') || DEFAULT_CATS } catch { return DEFAULT_CATS }
-  })
+  const [categories, setCategories] = useState<CfCategory[]>([])
+  const [presets, setPresets] = useState<CfPreset[]>([])
 
-  /* 폼 상태 */
-  const [formType, setFormType]   = useState<'income' | 'expense'>('income')
-  const [formDate, setFormDate]   = useState(today)
+  const [formType, setFormType]     = useState<'income' | 'expense'>('income')
+  const [formDate, setFormDate]     = useState(today)
   const [formAmount, setFormAmount] = useState('')
   const [formSiteId, setFormSiteId] = useState('')
-  const [formCat, setFormCat]     = useState('')
-  const [saving, setSaving]       = useState(false)
+  const [formCat, setFormCat]       = useState('')
+  const [saving, setSaving]         = useState(false)
 
-  /* 목록 월 필터 */
   const [viewMonth, setViewMonth] = useState(dayjs().startOf('month'))
 
-  /* 드롭다운 열림 상태 */
-  const [catDropOpen, setCatDropOpen] = useState(false)
+  const [catDropOpen, setCatDropOpen]   = useState(false)
   const [siteDropOpen, setSiteDropOpen] = useState(false)
+  const [presetDropOpen, setPresetDropOpen] = useState(false)
 
-  const [newCat, setNewCat]       = useState('')
-  const [editCat, setEditCat]     = useState<string | null>(null)
+  const [newCat, setNewCat]         = useState('')
+  const [editCat, setEditCat]       = useState<number | null>(null)
   const [editCatVal, setEditCatVal] = useState('')
   const [newSiteName, setNewSiteName] = useState('')
-  const [editSite, setEditSite]   = useState<Site | null>(null)
+  const [editSite, setEditSite]       = useState<Site | null>(null)
   const [editSiteVal, setEditSiteVal] = useState('')
 
-  useEffect(() => { loadCashflows(); loadSites() }, [])
+  // 프리셋 저장 모달
+  const [showSavePreset, setShowSavePreset] = useState(false)
+  const [presetName, setPresetName]         = useState('')
+
+  useEffect(() => { loadCashflows(); loadSites(); loadCategories(); loadPresets() }, [])
 
   async function loadCashflows() {
     const { data } = await supabase.from('cashflows').select('*').order('flow_date', { ascending: false }).order('created_at', { ascending: false }).limit(300)
@@ -113,6 +113,21 @@ export default function Settlement() {
   async function loadSites() {
     const { data } = await supabase.from('sites').select('*').order('sort_order')
     if (data) setSites(data)
+  }
+  async function loadCategories() {
+    const { data } = await supabase.from('cf_categories').select('*').order('sort_order')
+    if (data && data.length > 0) {
+      setCategories(data)
+    } else {
+      // 최초: 기본값 insert
+      const rows = DEFAULT_CATS.map((name, i) => ({ name, sort_order: i }))
+      const { data: inserted } = await supabase.from('cf_categories').insert(rows).select().order('sort_order')
+      if (inserted) setCategories(inserted)
+    }
+  }
+  async function loadPresets() {
+    const { data } = await supabase.from('cf_presets').select('*').order('id')
+    if (data) setPresets(data as CfPreset[])
   }
 
   /* ── 저장 ── */
@@ -139,25 +154,37 @@ export default function Settlement() {
     setCashflows(p => p.filter(c => c.id !== cf.id))
   }
 
-  /* ── 카테고리 관리 ── */
-  const dragCat = { current: '' }; const overCat = { current: '' }
-  function saveCats(cats: string[]) { setCategories(cats); localStorage.setItem('cf_cats', JSON.stringify(cats)) }
-  function addCat() { if (!newCat.trim() || categories.includes(newCat.trim())) return; saveCats([...categories, newCat.trim()]); setNewCat('') }
-  function removeCat(cat: string) { if (LOCKED_CATS.includes(cat)) return; saveCats(categories.filter(c => c !== cat)) }
-  function confirmEditCat(cat: string) {
-    if (!editCatVal.trim() || editCatVal === cat) { setEditCat(null); return }
-    saveCats(categories.map(c => c === cat ? editCatVal.trim() : c)); setEditCat(null)
+  /* ── 카테고리 (Supabase) ── */
+  async function addCat() {
+    if (!newCat.trim() || categories.some(c => c.name === newCat.trim())) return
+    const sort_order = categories.length
+    const { data } = await supabase.from('cf_categories').insert({ name: newCat.trim(), sort_order }).select().single()
+    if (data) { setCategories(p => [...p, data]); setNewCat('') }
   }
-  function reorderCat(from: string, to: string) {
-    if (from === to) return
+  async function removeCat(cat: CfCategory) {
+    if (LOCKED_CATS.includes(cat.name)) return
+    await supabase.from('cf_categories').delete().eq('id', cat.id)
+    setCategories(p => p.filter(c => c.id !== cat.id))
+    if (formCat === cat.name) setFormCat('')
+  }
+  async function confirmEditCat(cat: CfCategory) {
+    if (!editCatVal.trim() || editCatVal === cat.name) { setEditCat(null); return }
+    const { data } = await supabase.from('cf_categories').update({ name: editCatVal.trim() }).eq('id', cat.id).select().single()
+    if (data) setCategories(p => p.map(c => c.id === data.id ? data : c))
+    setEditCat(null)
+  }
+  async function reorderCat(fromCat: CfCategory, toCat: CfCategory) {
+    if (fromCat.id === toCat.id) return
     const arr = [...categories]
-    const fi = arr.indexOf(from); const ti = arr.indexOf(to)
+    const fi = arr.findIndex(c => c.id === fromCat.id)
+    const ti = arr.findIndex(c => c.id === toCat.id)
     const [moved] = arr.splice(fi, 1); arr.splice(ti, 0, moved)
-    saveCats(arr)
+    const updated = arr.map((c, i) => ({ ...c, sort_order: i }))
+    setCategories(updated)
+    for (const c of updated) await supabase.from('cf_categories').update({ sort_order: c.sort_order }).eq('id', c.id)
   }
 
   /* ── 사이트 관리 ── */
-  const dragSite = { current: '' }; const overSite = { current: '' }
   const settlementSites = sites.filter(s => s.settlement_only)
   const dashboardSites  = sites.filter(s => !s.settlement_only)
 
@@ -170,14 +197,12 @@ export default function Settlement() {
     setSites(p => p.map(s => updated.find(u => u.id === s.id) ?? s))
     for (const s of updated) await supabase.from('sites').update({ sort_order: s.sort_order }).eq('id', s.id)
   }
-
   async function addSettlementSite() {
     if (!newSiteName.trim()) return
     const { data } = await supabase.from('sites').insert({
       name: newSiteName.trim(), balance: 0, active: false, sort_order: sites.length,
       rolling_target: 0, rolling_done: 0, last_deposit: 0, deposit_bet_done: 0,
-      point_deposit: 0, total_withdrawal: 0, currency: 'krw', bet_type: 'single',
-      settlement_only: true,
+      point_deposit: 0, total_withdrawal: 0, currency: 'krw', bet_type: 'single', settlement_only: true,
     }).select().single()
     if (data) { setSites(p => [...p, data]); setNewSiteName('') }
   }
@@ -192,36 +217,53 @@ export default function Settlement() {
     setEditSite(null)
   }
 
-  /* ── 전체 합계 ── */
+  /* ── 프리셋 ── */
+  async function savePreset() {
+    if (!presetName.trim()) return
+    const { data } = await supabase.from('cf_presets').insert({
+      name: presetName.trim(),
+      amount: formAmount,
+      site_id: formSiteId,
+      category: formCat,
+      type: formType,
+    }).select().single()
+    if (data) setPresets(p => [...p, data as CfPreset])
+    setShowSavePreset(false); setPresetName('')
+  }
+  function applyPreset(preset: CfPreset) {
+    setFormType(preset.type)
+    setFormAmount(preset.amount)
+    setFormSiteId(preset.site_id)
+    setFormCat(preset.category)
+    setPresetDropOpen(false)
+  }
+  async function deletePreset(id: number) {
+    await supabase.from('cf_presets').delete().eq('id', id)
+    setPresets(p => p.filter(x => x.id !== id))
+  }
+
+  /* ── 합계 ── */
   const allIncome  = cashflows.filter(c => c.type === 'income').reduce((s, c) => s + c.amount, 0)
   const allExpense = cashflows.filter(c => c.type === 'expense').reduce((s, c) => s + c.amount, 0)
   const allBalance = allIncome - allExpense
 
-  /* ── 이번달 사이트별 합계 ── */
   const thisMonthStart = dayjs().startOf('month').format('YYYY-MM-DD')
   const thisMonthEnd   = dayjs().endOf('month').format('YYYY-MM-DD')
 
   const monthSiteExpense = useMemo(() => {
     const map: Record<string, number> = {}
-    cashflows
-      .filter(c => c.type === 'expense' && c.flow_date >= thisMonthStart && c.flow_date <= thisMonthEnd && c.site_id)
+    cashflows.filter(c => c.type === 'expense' && c.flow_date >= thisMonthStart && c.flow_date <= thisMonthEnd && c.site_id)
       .forEach(c => { map[c.site_id!] = (map[c.site_id!] ?? 0) + c.amount })
-    return Object.entries(map)
-      .map(([siteId, amt]) => ({ name: sites.find(s => s.id === siteId)?.name ?? siteId, amt }))
-      .sort((a, b) => b.amt - a.amt)
+    return Object.entries(map).map(([siteId, amt]) => ({ name: sites.find(s => s.id === siteId)?.name ?? siteId, amt })).sort((a, b) => b.amt - a.amt)
   }, [cashflows, sites, thisMonthStart, thisMonthEnd])
 
   const monthSiteIncome = useMemo(() => {
     const map: Record<string, number> = {}
-    cashflows
-      .filter(c => c.type === 'income' && c.flow_date >= thisMonthStart && c.flow_date <= thisMonthEnd && c.site_id)
+    cashflows.filter(c => c.type === 'income' && c.flow_date >= thisMonthStart && c.flow_date <= thisMonthEnd && c.site_id)
       .forEach(c => { map[c.site_id!] = (map[c.site_id!] ?? 0) + c.amount })
-    return Object.entries(map)
-      .map(([siteId, amt]) => ({ name: sites.find(s => s.id === siteId)?.name ?? siteId, amt }))
-      .sort((a, b) => b.amt - a.amt)
+    return Object.entries(map).map(([siteId, amt]) => ({ name: sites.find(s => s.id === siteId)?.name ?? siteId, amt })).sort((a, b) => b.amt - a.amt)
   }, [cashflows, sites, thisMonthStart, thisMonthEnd])
 
-  /* ── 월별 바 차트 (최근 6개월) ── */
   const monthlySummary = useMemo(() => {
     const months: { label: string; income: number; expense: number }[] = []
     for (let i = 5; i >= 0; i--) {
@@ -237,7 +279,6 @@ export default function Settlement() {
 
   const maxMonthly = Math.max(...monthlySummary.flatMap(m => [m.income, m.expense]), 1)
 
-  /* ── 목록 (월별) ── */
   const monthFrom  = viewMonth.format('YYYY-MM-DD')
   const monthTo    = viewMonth.endOf('month').format('YYYY-MM-DD')
   const monthFlows = cashflows.filter(c => c.flow_date >= monthFrom && c.flow_date <= monthTo)
@@ -255,17 +296,18 @@ export default function Settlement() {
 
   const maxSiteExpense = Math.max(...monthSiteExpense.map(x => x.amt), 1)
   const maxSiteIncome  = Math.max(...monthSiteIncome.map(x => x.amt), 1)
-
   const DOW_KO = ['일', '월', '화', '수', '목', '금', '토']
 
-  /* ────────── RENDER ────────── */
+  /* ── catNames (편의) ── */
+  const catNames = categories.map(c => c.name)
+
   return (
     <div style={{ display: 'flex', height: 'calc(100vh - 58px)', overflow: 'hidden', background: 'var(--bg)', gap: 0 }}>
 
       {/* ═══ 좌: 추가 폼 (320px) ═══ */}
       <div style={{ width: 320, flexShrink: 0, borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', overflowY: 'auto' }}>
 
-        {/* 날짜 — 최상단 */}
+        {/* 날짜 */}
         <div style={{ padding: '12px 12px 0' }}>
           <div style={labelSt}>날짜</div>
           <input type="date" style={{ ...inputSt, marginBottom: 10 }} value={formDate} onChange={e => setFormDate(e.target.value)} />
@@ -274,20 +316,8 @@ export default function Settlement() {
         {/* 수입/지출 토글 */}
         <div style={{ padding: '0 12px' }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
-            <button onClick={() => setFormType('income')} style={{
-              padding: '10px 0', borderRadius: 8,
-              border: `2px solid ${formType === 'income' ? 'var(--green)' : 'var(--border)'}`,
-              background: formType === 'income' ? 'var(--green-bg)' : 'var(--bg-elevated)',
-              color: formType === 'income' ? 'var(--green)' : 'var(--text-muted)',
-              fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'var(--font-body)',
-            }}>💰 수입</button>
-            <button onClick={() => setFormType('expense')} style={{
-              padding: '10px 0', borderRadius: 8,
-              border: `2px solid ${formType === 'expense' ? 'var(--red)' : 'var(--border)'}`,
-              background: formType === 'expense' ? 'var(--red-bg)' : 'var(--bg-elevated)',
-              color: formType === 'expense' ? 'var(--red)' : 'var(--text-muted)',
-              fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'var(--font-body)',
-            }}>💸 지출</button>
+            <button onClick={() => setFormType('income')} style={{ padding: '10px 0', borderRadius: 8, border: `2px solid ${formType === 'income' ? 'var(--green)' : 'var(--border)'}`, background: formType === 'income' ? 'var(--green-bg)' : 'var(--bg-elevated)', color: formType === 'income' ? 'var(--green)' : 'var(--text-muted)', fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'var(--font-body)' }}>💰 수입</button>
+            <button onClick={() => setFormType('expense')} style={{ padding: '10px 0', borderRadius: 8, border: `2px solid ${formType === 'expense' ? 'var(--red)' : 'var(--border)'}`, background: formType === 'expense' ? 'var(--red-bg)' : 'var(--bg-elevated)', color: formType === 'expense' ? 'var(--red)' : 'var(--text-muted)', fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'var(--font-body)' }}>💸 지출</button>
           </div>
         </div>
 
@@ -295,49 +325,31 @@ export default function Settlement() {
           {/* 금액 */}
           <div>
             <div style={labelSt}>금액 (원)</div>
-            <input
-              type="text"
-              inputMode="numeric"
-              placeholder="0"
+            <input type="text" inputMode="numeric" placeholder="0"
               style={{ ...inputSt, MozAppearance: 'textfield' } as React.CSSProperties}
               value={formAmount ? Number(formAmount.replace(/,/g, '')).toLocaleString('ko-KR') : ''}
-              onChange={e => {
-                const raw = e.target.value.replace(/,/g, '')
-                if (raw === '' || /^\d+$/.test(raw)) setFormAmount(raw)
-              }}
-              onKeyDown={e => e.key === 'Enter' && saveCashflow()}
-              autoFocus
-            />
+              onChange={e => { const raw = e.target.value.replace(/,/g, ''); if (raw === '' || /^\d+$/.test(raw)) setFormAmount(raw) }}
+              onKeyDown={e => e.key === 'Enter' && saveCashflow()} autoFocus />
           </div>
 
-          {/* 사이트 */}
+          {/* 사이트 드롭다운 */}
           <div style={{ position: 'relative' }}>
             <div style={labelSt}>사이트</div>
-            <button
-              onClick={() => { setSiteDropOpen(p => !p); setCatDropOpen(false) }}
+            <button onClick={() => { setSiteDropOpen(p => !p); setCatDropOpen(false); setPresetDropOpen(false) }}
               style={{ ...inputSt, display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', textAlign: 'left' }}>
-              <span style={{ color: formSiteId ? 'var(--text-primary)' : 'var(--text-muted)' }}>
-                {formSiteId ? (sites.find(s => s.id === formSiteId)?.name ?? '없음') : '없음'}
-              </span>
+              <span style={{ color: formSiteId ? 'var(--text-primary)' : 'var(--text-muted)' }}>{formSiteId ? (sites.find(s => s.id === formSiteId)?.name ?? '없음') : '없음'}</span>
               <ChevronDown size={14} style={{ color: 'var(--text-muted)', flexShrink: 0, transform: siteDropOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }} />
             </button>
             {siteDropOpen && (
               <>
                 <div style={{ position: 'fixed', inset: 0, zIndex: 50 }} onClick={() => setSiteDropOpen(false)} />
                 <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 60, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.5)', overflow: 'hidden', maxHeight: 240, overflowY: 'auto' }}>
-                  {/* 없음 */}
                   <div onClick={() => { setFormSiteId(''); setSiteDropOpen(false) }}
-                    style={{ padding: '9px 12px', cursor: 'pointer', fontSize: 13, color: !formSiteId ? 'var(--gold)' : 'var(--text-muted)', background: !formSiteId ? 'var(--gold-bg)' : 'none' }}
-                    onMouseEnter={e => { if (formSiteId) e.currentTarget.style.background = 'var(--bg-elevated)' }}
-                    onMouseLeave={e => { if (formSiteId) e.currentTarget.style.background = 'none' }}>
-                    없음
-                  </div>
+                    style={{ padding: '9px 12px', cursor: 'pointer', fontSize: 13, color: !formSiteId ? 'var(--gold)' : 'var(--text-muted)', background: !formSiteId ? 'var(--gold-bg)' : 'none' }}>없음</div>
                   {sites.map((st, i) => (
                     <div key={st.id} style={{ display: 'flex', alignItems: 'center', borderTop: '1px solid var(--border-light)' }}>
                       <div onClick={() => { setFormSiteId(st.id); setSiteDropOpen(false) }}
-                        style={{ flex: 1, padding: '9px 12px', cursor: 'pointer', fontSize: 13, color: formSiteId === st.id ? 'var(--gold)' : 'var(--text-primary)', background: formSiteId === st.id ? 'var(--gold-bg)' : 'none' }}
-                        onMouseEnter={e => { if (formSiteId !== st.id) e.currentTarget.style.background = 'var(--bg-elevated)' }}
-                        onMouseLeave={e => { if (formSiteId !== st.id) e.currentTarget.style.background = 'none' }}>
+                        style={{ flex: 1, padding: '9px 12px', cursor: 'pointer', fontSize: 13, color: formSiteId === st.id ? 'var(--gold)' : 'var(--text-primary)', background: formSiteId === st.id ? 'var(--gold-bg)' : 'none' }}>
                         {editSite?.id === st.id ? (
                           <input value={editSiteVal} onChange={e => setEditSiteVal(e.target.value)}
                             onKeyDown={e => { e.stopPropagation(); if (e.key === 'Enter') confirmEditSite() }}
@@ -363,7 +375,6 @@ export default function Settlement() {
                       </div>
                     </div>
                   ))}
-                  {/* 하단 추가 */}
                   <div style={{ borderTop: '1px solid var(--border)', padding: '6px 8px', display: 'flex', gap: 6, background: 'var(--bg-elevated)' }}>
                     <input style={{ flex: 1, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 8px', fontSize: 12, color: 'var(--text-primary)', fontFamily: 'var(--font-body)', outline: 'none' }}
                       placeholder="결산 전용 사이트 추가..." value={newSiteName}
@@ -377,52 +388,42 @@ export default function Settlement() {
             )}
           </div>
 
-          {/* 카테고리 */}
+          {/* 카테고리 드롭다운 */}
           <div style={{ position: 'relative' }}>
             <div style={labelSt}>카테고리</div>
-            <button
-              onClick={() => { setCatDropOpen(p => !p); setSiteDropOpen(false) }}
+            <button onClick={() => { setCatDropOpen(p => !p); setSiteDropOpen(false); setPresetDropOpen(false) }}
               style={{ ...inputSt, display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', textAlign: 'left' }}>
-              <span style={{ color: formCat ? 'var(--text-primary)' : 'var(--text-muted)' }}>
-                {formCat || '선택 안 함'}
-              </span>
+              <span style={{ color: formCat ? 'var(--text-primary)' : 'var(--text-muted)' }}>{formCat || '선택 안 함'}</span>
               <ChevronDown size={14} style={{ color: 'var(--text-muted)', flexShrink: 0, transform: catDropOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }} />
             </button>
             {catDropOpen && (
               <>
                 <div style={{ position: 'fixed', inset: 0, zIndex: 50 }} onClick={() => setCatDropOpen(false)} />
                 <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 60, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.5)', overflow: 'hidden', maxHeight: 280, overflowY: 'auto' }}>
-                  {/* 선택 안 함 */}
                   <div onClick={() => { setFormCat(''); setCatDropOpen(false) }}
-                    style={{ padding: '9px 12px', cursor: 'pointer', fontSize: 13, color: !formCat ? 'var(--gold)' : 'var(--text-muted)', background: !formCat ? 'var(--gold-bg)' : 'none' }}
-                    onMouseEnter={e => { if (formCat) e.currentTarget.style.background = 'var(--bg-elevated)' }}
-                    onMouseLeave={e => { if (formCat) e.currentTarget.style.background = 'none' }}>
-                    선택 안 함
-                  </div>
+                    style={{ padding: '9px 12px', cursor: 'pointer', fontSize: 13, color: !formCat ? 'var(--gold)' : 'var(--text-muted)', background: !formCat ? 'var(--gold-bg)' : 'none' }}>선택 안 함</div>
                   {categories.map((cat, i) => (
-                    <div key={cat} style={{ display: 'flex', alignItems: 'center', borderTop: '1px solid var(--border-light)' }}>
-                      <div onClick={() => { if (editCat !== cat) { setFormCat(cat); setCatDropOpen(false) } }}
-                        style={{ flex: 1, padding: '9px 12px', cursor: 'pointer', fontSize: 13, color: formCat === cat ? 'var(--gold)' : 'var(--text-primary)', background: formCat === cat ? 'var(--gold-bg)' : 'none' }}
-                        onMouseEnter={e => { if (formCat !== cat) e.currentTarget.style.background = 'var(--bg-elevated)' }}
-                        onMouseLeave={e => { if (formCat !== cat) e.currentTarget.style.background = 'none' }}>
-                        {editCat === cat ? (
+                    <div key={cat.id} style={{ display: 'flex', alignItems: 'center', borderTop: '1px solid var(--border-light)' }}>
+                      <div onClick={() => { if (editCat !== cat.id) { setFormCat(cat.name); setCatDropOpen(false) } }}
+                        style={{ flex: 1, padding: '9px 12px', cursor: 'pointer', fontSize: 13, color: formCat === cat.name ? 'var(--gold)' : 'var(--text-primary)', background: formCat === cat.name ? 'var(--gold-bg)' : 'none' }}>
+                        {editCat === cat.id ? (
                           <input value={editCatVal} onChange={e => setEditCatVal(e.target.value)}
                             onKeyDown={e => { e.stopPropagation(); if (e.key === 'Enter') confirmEditCat(cat) }}
                             onClick={e => e.stopPropagation()}
                             style={{ background: 'none', border: 'none', outline: 'none', color: 'var(--text-primary)', fontSize: 13, width: '100%' }} autoFocus />
-                        ) : cat}
+                        ) : cat.name}
                       </div>
                       <div style={{ display: 'flex', gap: 2, padding: '0 6px', flexShrink: 0 }} onClick={e => e.stopPropagation()}>
-                        {LOCKED_CATS.includes(cat) ? (
+                        {LOCKED_CATS.includes(cat.name) ? (
                           <span style={{ fontSize: 9, color: 'var(--text-muted)', padding: '0 2px' }}>잠금</span>
-                        ) : editCat === cat ? (
+                        ) : editCat === cat.id ? (
                           <>
                             <button onClick={() => confirmEditCat(cat)} style={iconBtnSt}><Check size={11} color="var(--green)" /></button>
                             <button onClick={() => setEditCat(null)} style={iconBtnSt}><X size={11} /></button>
                           </>
                         ) : (
                           <>
-                            <button onClick={() => { setEditCat(cat); setEditCatVal(cat) }} style={iconBtnSt}><Pencil size={11} /></button>
+                            <button onClick={() => { setEditCat(cat.id); setEditCatVal(cat.name) }} style={iconBtnSt}><Pencil size={11} /></button>
                             {i > 0 && <button onClick={() => reorderCat(cat, categories[i - 1])} style={iconBtnSt}><ArrowUp size={11} /></button>}
                             {i < categories.length - 1 && <button onClick={() => reorderCat(cat, categories[i + 1])} style={iconBtnSt}><ArrowDown size={11} /></button>}
                             <button onClick={() => removeCat(cat)} style={iconBtnSt}><Trash2 size={11} color="var(--red)" /></button>
@@ -431,7 +432,6 @@ export default function Settlement() {
                       </div>
                     </div>
                   ))}
-                  {/* 하단 추가 */}
                   <div style={{ borderTop: '1px solid var(--border)', padding: '6px 8px', display: 'flex', gap: 6, background: 'var(--bg-elevated)' }}>
                     <input style={{ flex: 1, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 8px', fontSize: 12, color: 'var(--text-primary)', fontFamily: 'var(--font-body)', outline: 'none' }}
                       placeholder="새 카테고리..." value={newCat}
@@ -443,6 +443,53 @@ export default function Settlement() {
                 </div>
               </>
             )}
+          </div>
+
+          {/* 프리셋 행 */}
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            {/* 프리셋 불러오기 드롭다운 */}
+            <div style={{ position: 'relative', flex: 1 }}>
+              <button onClick={() => { setPresetDropOpen(p => !p); setCatDropOpen(false); setSiteDropOpen(false) }}
+                style={{ ...inputSt, display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', textAlign: 'left', padding: '8px 12px', fontSize: 12 }}>
+                <span style={{ color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <BookmarkCheck size={13} /> 프리셋 불러오기
+                </span>
+                <ChevronDown size={13} style={{ color: 'var(--text-muted)', flexShrink: 0, transform: presetDropOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }} />
+              </button>
+              {presetDropOpen && (
+                <>
+                  <div style={{ position: 'fixed', inset: 0, zIndex: 50 }} onClick={() => setPresetDropOpen(false)} />
+                  <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 60, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.5)', overflow: 'hidden', maxHeight: 240, overflowY: 'auto' }}>
+                    {presets.length === 0 && (
+                      <div style={{ padding: '12px', fontSize: 12, color: 'var(--text-muted)', textAlign: 'center' }}>저장된 프리셋 없음</div>
+                    )}
+                    {presets.map(p => (
+                      <div key={p.id} style={{ display: 'flex', alignItems: 'center', borderTop: '1px solid var(--border-light)' }}>
+                        <div onClick={() => applyPreset(p)}
+                          style={{ flex: 1, padding: '9px 12px', cursor: 'pointer', fontSize: 12 }}>
+                          <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{p.name}</div>
+                          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>
+                            {p.type === 'income' ? '💰' : '💸'} {p.amount ? `${Number(p.amount).toLocaleString()}원` : '금액 없음'}
+                            {p.category ? ` · ${p.category}` : ''}
+                            {p.site_id ? ` · ${sites.find(s => s.id === p.site_id)?.name ?? ''}` : ''}
+                          </div>
+                        </div>
+                        <button onClick={() => deletePreset(p.id)} style={{ ...iconBtnSt, padding: '0 8px' }}>
+                          <Trash2 size={11} color="var(--red)" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* 프리셋 저장 버튼 */}
+            <button onClick={() => { setShowSavePreset(true); setPresetName('') }}
+              title="현재 상태로 프리셋 저장"
+              style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 10px', cursor: 'pointer', color: 'var(--gold)', display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+              <Bookmark size={14} />
+            </button>
           </div>
 
           {/* 저장 */}
@@ -457,15 +504,11 @@ export default function Settlement() {
           </button>
         </div>
 
-        {/* 이번주/한달 입금 현황 */}
         <DepositSummary sites={sites} cashflows={cashflows} />
-
       </div>
 
-      {/* ═══ 중: 날짜별 목록 (340px) ═══ */}
+      {/* ═══ 중: 날짜별 목록 (400px) ═══ */}
       <div style={{ width: 400, flexShrink: 0, borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-
-        {/* 월 네비 */}
         <div style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
             <button onClick={() => setViewMonth(p => p.subtract(1, 'month'))} style={navBtnSt}><ChevronLeft size={14} /></button>
@@ -473,24 +516,12 @@ export default function Settlement() {
             <button onClick={() => setViewMonth(p => p.add(1, 'month'))} style={navBtnSt}><ChevronRight size={14} /></button>
           </div>
           <div style={{ display: 'flex', gap: 6 }}>
-            <div style={miniSummSt}>
-              <span style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700 }}>수입</span>
-              <span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-num)', color: 'var(--green)' }}>+{fmt(monthIncome)}</span>
-            </div>
-            <div style={miniSummSt}>
-              <span style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700 }}>지출</span>
-              <span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-num)', color: 'var(--red)' }}>-{fmt(monthExpense)}</span>
-            </div>
-            <div style={miniSummSt}>
-              <span style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700 }}>수익</span>
-              <span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-num)', color: (monthIncome - monthExpense) >= 0 ? 'var(--green)' : 'var(--red)' }}>
-                {(monthIncome - monthExpense) >= 0 ? '+' : ''}{fmt(monthIncome - monthExpense)}
-              </span>
-            </div>
+            <div style={miniSummSt}><span style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700 }}>수입</span><span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-num)', color: 'var(--green)' }}>+{fmt(monthIncome)}</span></div>
+            <div style={miniSummSt}><span style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700 }}>지출</span><span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-num)', color: 'var(--red)' }}>-{fmt(monthExpense)}</span></div>
+            <div style={miniSummSt}><span style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700 }}>수익</span><span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-num)', color: (monthIncome - monthExpense) >= 0 ? 'var(--green)' : 'var(--red)' }}>{(monthIncome - monthExpense) >= 0 ? '+' : ''}{fmt(monthIncome - monthExpense)}</span></div>
           </div>
         </div>
 
-        {/* 날짜별 리스트 */}
         <div style={{ flex: 1, overflowY: 'auto', padding: '0 12px' }}>
           {groupedByDate.length === 0 && (
             <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--text-muted)', fontSize: 13 }}>이 달의 내역이 없습니다</div>
@@ -501,9 +532,7 @@ export default function Settlement() {
             return (
               <div key={date} style={{ marginTop: 12 }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-                  <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)' }}>
-                    {dayjs(date).date()}일({DOW_KO[dayjs(date).day()]})
-                  </span>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)' }}>{dayjs(date).date()}일({DOW_KO[dayjs(date).day()]})</span>
                   <div style={{ display: 'flex', gap: 8 }}>
                     {dayInc > 0 && <span style={{ fontSize: 11, fontFamily: 'var(--font-num)', color: 'var(--green)', fontWeight: 600 }}>+{fmt(dayInc)}</span>}
                     {dayExp > 0 && <span style={{ fontSize: 11, fontFamily: 'var(--font-num)', color: 'var(--red)', fontWeight: 600 }}>-{fmt(dayExp)}</span>}
@@ -511,22 +540,15 @@ export default function Settlement() {
                 </div>
                 {items.map(c => (
                   <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 8, background: 'var(--bg-card)', border: '1px solid var(--border-light)', marginBottom: 5 }}>
-                    <div style={{
-                      width: 30, height: 30, borderRadius: 8, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      background: c.type === 'income' ? 'var(--green-bg)' : 'var(--red-bg)',
-                    }}>
+                    <div style={{ width: 30, height: 30, borderRadius: 8, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: c.type === 'income' ? 'var(--green-bg)' : 'var(--red-bg)' }}>
                       {c.type === 'income' ? <TrendingUp size={14} color="var(--green)" /> : <TrendingDown size={14} color="var(--red)" />}
                     </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.description}</div>
                       <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{c.category}</div>
                     </div>
-                    <span style={{ fontSize: 13, fontWeight: 700, fontFamily: 'var(--font-num)', flexShrink: 0, color: c.type === 'income' ? 'var(--green)' : 'var(--red)' }}>
-                      {c.type === 'income' ? '+' : '-'}{fmt(c.amount)}
-                    </span>
-                    <button onClick={() => deleteCashflow(c)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, color: 'var(--text-muted)', flexShrink: 0, display: 'flex' }}>
-                      <Trash2 size={12} />
-                    </button>
+                    <span style={{ fontSize: 13, fontWeight: 700, fontFamily: 'var(--font-num)', flexShrink: 0, color: c.type === 'income' ? 'var(--green)' : 'var(--red)' }}>{c.type === 'income' ? '+' : '-'}{fmt(c.amount)}</span>
+                    <button onClick={() => deleteCashflow(c)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, color: 'var(--text-muted)', flexShrink: 0, display: 'flex' }}><Trash2 size={12} /></button>
                   </div>
                 ))}
               </div>
@@ -537,8 +559,6 @@ export default function Settlement() {
 
       {/* ═══ 우: 통계 ═══ */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflowY: 'auto', padding: '14px 16px', gap: 14 }}>
-
-        {/* 전체 수지 요약 */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
           {[
             { label: '총 수입', val: allIncome,  color: 'var(--green)', prefix: '+' },
@@ -552,14 +572,9 @@ export default function Settlement() {
           ))}
         </div>
 
-        {/* 이번달 사이트별 — 좌: 지출 / 우: 수입 */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-
-          {/* 지출 */}
           <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10, padding: '12px 14px' }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--red)', textTransform: 'uppercase', letterSpacing: '0.7px', marginBottom: 10 }}>
-              이번달 지출 — 사이트별
-            </div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--red)', textTransform: 'uppercase', letterSpacing: '0.7px', marginBottom: 10 }}>이번달 지출 — 사이트별</div>
             {monthSiteExpense.length === 0 && <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>내역 없음</div>}
             {monthSiteExpense.map(({ name, amt }, i) => {
               const pct = Math.round(amt / maxSiteExpense * 100)
@@ -576,12 +591,8 @@ export default function Settlement() {
               )
             })}
           </div>
-
-          {/* 수입 */}
           <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10, padding: '12px 14px' }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--green)', textTransform: 'uppercase', letterSpacing: '0.7px', marginBottom: 10 }}>
-              이번달 수입 — 사이트별
-            </div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--green)', textTransform: 'uppercase', letterSpacing: '0.7px', marginBottom: 10 }}>이번달 수입 — 사이트별</div>
             {monthSiteIncome.length === 0 && <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>내역 없음</div>}
             {monthSiteIncome.map(({ name, amt }, i) => {
               const pct = Math.round(amt / maxSiteIncome * 100)
@@ -600,7 +611,6 @@ export default function Settlement() {
           </div>
         </div>
 
-        {/* 월별 바 차트 */}
         <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10, padding: '12px 14px' }}>
           <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.7px', marginBottom: 12 }}>월별 수입 / 지출</div>
           <div style={{ display: 'flex', gap: 6, alignItems: 'flex-end', height: 100 }}>
@@ -615,21 +625,40 @@ export default function Settlement() {
             ))}
           </div>
           <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: 'var(--text-muted)' }}>
-              <span style={{ width: 10, height: 10, borderRadius: 2, background: 'var(--green)' }} /> 수입
-            </span>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: 'var(--text-muted)' }}>
-              <span style={{ width: 10, height: 10, borderRadius: 2, background: 'var(--red)' }} /> 지출
-            </span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: 'var(--text-muted)' }}><span style={{ width: 10, height: 10, borderRadius: 2, background: 'var(--green)' }} /> 수입</span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: 'var(--text-muted)' }}><span style={{ width: 10, height: 10, borderRadius: 2, background: 'var(--red)' }} /> 지출</span>
           </div>
         </div>
-
       </div>
+
+      {/* ── 프리셋 저장 모달 ── */}
+      {showSavePreset && (
+        <div className="modal-overlay" onClick={() => setShowSavePreset(false)}>
+          <div className="modal" style={{ maxWidth: 340 }} onClick={e => e.stopPropagation()}>
+            <div className="modal-title">프리셋 저장</div>
+            <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 12, padding: '8px 10px', background: 'var(--bg-elevated)', borderRadius: 6 }}>
+              <div>{formType === 'income' ? '💰 수입' : '💸 지출'}</div>
+              {formAmount && <div>금액: {Number(formAmount).toLocaleString()}원</div>}
+              {formSiteId && <div>사이트: {sites.find(s => s.id === formSiteId)?.name}</div>}
+              {formCat && <div>카테고리: {formCat}</div>}
+            </div>
+            <div className="form-group mb-16">
+              <label className="form-label">프리셋 이름</label>
+              <input className="form-input" placeholder="예: 월급, 넷마블 입금" value={presetName}
+                onChange={e => setPresetName(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && savePreset()} autoFocus />
+            </div>
+            <div className="modal-actions">
+              <button className="btn btn-ghost" onClick={() => setShowSavePreset(false)}>취소</button>
+              <button className="btn btn-primary" onClick={savePreset} disabled={!presetName.trim()}><Bookmark size={13} /> 저장</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
 
-/* ── 공통 스타일 상수 ── */
 const labelSt: React.CSSProperties = {
   fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.5px',
   textTransform: 'uppercase', marginBottom: 4,
