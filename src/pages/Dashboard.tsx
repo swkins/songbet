@@ -949,7 +949,7 @@ export default function Dashboard() {
                       )}
                       {(() => {
                         const renderedGroups = new Set<string>()
-                        return pending.map(bet => {
+                        return [...pending].reverse().map(bet => {
                           if (bet.parlay_group) {
                             if (renderedGroups.has(bet.parlay_group)) return null
                             renderedGroups.add(bet.parlay_group)
