@@ -331,6 +331,107 @@ function DeleteBetsModal({ sport, bets, onClose, onDeleted }: {
   )
 }
 
+
+// ─── 룰북 패널 (종목별) ────────────────────────────────────────────
+function RulebookPanel({ sport }: { sport: Sport }) {
+  const S = { color: '#4ade80', bg: 'rgba(74,222,128,0.1)', border: 'rgba(74,222,128,0.3)' }
+  const A = { color: '#60a5fa', bg: 'rgba(96,165,250,0.1)', border: 'rgba(96,165,250,0.3)' }
+  const B = { color: '#fbbf24', bg: 'rgba(251,191,36,0.1)', border: 'rgba(251,191,36,0.3)' }
+
+  function Tier({ tier, label, range, note, color, bg, border }: {
+    tier: string; label: string; range: string; note: string; color: string; bg: string; border: string
+  }) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 5 }}>
+        <span style={{ fontSize: 10, fontWeight: 700, background: bg, border: `1px solid ${border}`, color, borderRadius: 4, padding: '1px 6px', width: 52, textAlign: 'center', flexShrink: 0 }}>{tier} {label}</span>
+        <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)', flexShrink: 0 }}>{range}</span>
+        {note && <span style={{ fontSize: 10, color: 'var(--text-secondary)' }}>{note}</span>}
+      </div>
+    )
+  }
+
+  function Pass({ text }: { text: string }) {
+    return (
+      <div style={{ fontSize: 10, color: 'var(--text-secondary)', marginBottom: 2, display: 'flex', gap: 4 }}>
+        <span style={{ color: '#f87171', fontWeight: 700, flexShrink: 0 }}>✕</span>{text}
+      </div>
+    )
+  }
+
+  if (sport === 'baseball') return (
+    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
+      {/* 역배 */}
+      <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, padding: '10px 14px', flex: '1 0 260px' }}>
+        <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.8px', color: 'var(--text-secondary)', marginBottom: 8 }}>⚾ 역배 — 진입 구간</div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          {[
+            { lg: 'MLB', s: '2.10~2.49', a: '2.50~2.79', pass: '2.80↑' },
+            { lg: 'NPB', s: '2.10~2.49', a: '2.50~2.59', pass: '2.60↑' },
+            { lg: 'KBO', s: '2.10~2.49', a: '2.50↑ 무제한', pass: '—' },
+          ].map(r => (
+            <div key={r.lg} style={{ display: 'flex', alignItems: 'center', gap: 5, width: '100%' }}>
+              <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-primary)', width: 32, flexShrink: 0 }}>{r.lg}</span>
+              <span style={{ fontSize: 9, background: S.bg, border: `1px solid ${S.border}`, color: S.color, borderRadius: 4, padding: '1px 5px' }}>S {r.s}</span>
+              <span style={{ fontSize: 9, background: A.bg, border: `1px solid ${A.border}`, color: A.color, borderRadius: 4, padding: '1px 5px' }}>A {r.a}</span>
+              {r.pass !== '—' && <span style={{ fontSize: 9, color: 'var(--text-secondary)' }}>✕{r.pass}</span>}
+            </div>
+          ))}
+        </div>
+      </div>
+      {/* 언더 */}
+      <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, padding: '10px 14px', flex: '1 0 220px' }}>
+        <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.8px', color: 'var(--text-secondary)', marginBottom: 8 }}>⚾ 언더 — 티어 기준 (MLB·NPB·KBO 동일)</div>
+        <Tier tier="S" label="1순위" range="1.90~2.09" note="메인" {...S} />
+        <Tier tier="A" label="2순위" range="2.10~2.29" note="여유시" {...A} />
+        <Tier tier="B" label="3순위" range="2.30~2.49" note="소액" {...B} />
+        <Pass text="1.89↓ 패스" />
+      </div>
+    </div>
+  )
+
+  if (sport === 'soccer') return (
+    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
+      <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, padding: '10px 14px', flex: '1 0 340px' }}>
+        <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.8px', color: 'var(--text-secondary)', marginBottom: 8 }}>⚽ 2.5 언더 — EPL·라리가·분데스·세리에·리그앙·UCL</div>
+        <div style={{ fontSize: 10, color: 'var(--text-secondary)', marginBottom: 8 }}>
+          강팀 배당 <strong style={{ color: 'var(--text-primary)' }}>1.40~1.79</strong> (홈/원정 무관) + 언더 배당 <strong style={{ color: 'var(--text-primary)' }}>1.80 이상</strong>
+        </div>
+        <Tier tier="S" label="1순위" range="1.80~2.09" note="메인" {...S} />
+        <Tier tier="A" label="2순위" range="2.10~2.29" note="테스트" {...A} />
+        <div style={{ marginTop: 6 }}>
+          <Pass text="강팀 1.39↓ 또는 1.80↑ 패스" />
+          <Pass text="언더 배당 1.79↓ 패스" />
+        </div>
+      </div>
+    </div>
+  )
+
+  if (sport === 'basketball') return (
+    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
+      {/* 플핸 */}
+      <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, padding: '10px 14px', flex: '1 0 220px' }}>
+        <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.8px', color: 'var(--text-secondary)', marginBottom: 8 }}>🏀 플핸(+스프레드) — 배당 1.90↑</div>
+        <Tier tier="S" label="1순위" range="+6.5~+9.5" note="메인" {...S} />
+        <Tier tier="A" label="2순위" range="+10.5~+12.5" note="2순위" {...A} />
+        <Tier tier="B" label="3순위" range="+5.5/+13.5~+14.5" note="소액" {...B} />
+        <Pass text="1.89↓ 패스" />
+      </div>
+      {/* 언더 */}
+      <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, padding: '10px 14px', flex: '1 0 220px' }}>
+        <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.8px', color: 'var(--text-secondary)', marginBottom: 8 }}>🏀 언더 — 마진 7% 이하</div>
+        <div style={{ fontSize: 10, color: 'var(--text-secondary)', marginBottom: 8 }}>
+          정배 배당 <strong style={{ color: 'var(--text-primary)' }}>1.20~1.59</strong> (범위 밖 패스)
+        </div>
+        <Tier tier="" label="1순위" range="언더 2.00↑" note="" color="#4ade80" bg="rgba(74,222,128,0.1)" border="rgba(74,222,128,0.3)" />
+        <Tier tier="" label="2순위" range="언더 1.90~1.99" note="" color="#60a5fa" bg="rgba(96,165,250,0.1)" border="rgba(96,165,250,0.3)" />
+        <Pass text="언더 1.89↓ 패스" />
+      </div>
+    </div>
+  )
+
+  return null
+}
+
 function SportPanel({ bets, sport, onDeleteRequest }: {
   bets: Bet[]; sport: typeof SPORTS[0]; onDeleteRequest: () => void
 }) {
@@ -343,8 +444,11 @@ function SportPanel({ bets, sport, onDeleteRequest }: {
     return { mkt, label: MARKET_LABELS[mkt], ...s }
   }).filter(Boolean) as ({ mkt: Market; label: string } & ReturnType<typeof calcStats>)[]
 
+  const showRulebook = ['baseball','soccer','basketball'].includes(sport.value)
+
   if (stats.total === 0) return (
     <div>
+      {showRulebook && <RulebookPanel sport={sport.value as Sport} />}
       <div style={{ padding: '24px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>결과 처리된 베팅이 없습니다</div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
         <button onClick={onDeleteRequest} className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--red)', borderColor: 'var(--red-border)', display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -361,6 +465,7 @@ function SportPanel({ bets, sport, onDeleteRequest }: {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      {showRulebook && <RulebookPanel sport={sport.value as Sport} />}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'flex-start' }}>
         {[
           { label: '승률', value: `${stats.winRate.toFixed(1)}%`, sub: `${stats.wins.length}W ${stats.losses.length}L`, cls: stats.winRate >= 50 ? 'profit-pos' : 'profit-neg' },
