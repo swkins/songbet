@@ -338,6 +338,135 @@ function GenericDetailPanel({ bets }: { bets: Bet[] }) {
 }
 
 
+function ParlayPanel({ bets }: { bets: Bet[] }) {
+  // parlay_group이 있는 베팅만 필터
+  const parlayBets = bets.filter(b => b.parlay_group !== null && b.result !== 'pending')
+  // 그룹별로 묶기 (parlay_leg=1 기준으로 대표)
+  const groups = Array.from(new Set(parlayBets.map(b => b.parlay_group))).map(g => {
+    const legs = parlayBets.filter(b => b.parlay_group === g).sort((a,b) => a.parlay_leg - b.parlay_leg)
+    const rep = legs[0]
+    return { group: g, legs, result: rep?.result ?? 'pending', odds: rep?.odds ?? 0, stake: rep?.stake ?? 0, profit: rep?.profit ?? 0 }
+  })
+  const wins = groups.filter(g => g.result === 'win')
+  const losses = groups.filter(g => g.result === 'loss')
+  const total = groups.length
+  const winRate = total > 0 ? wins.length / total * 100 : 0
+  const totalStake = groups.reduce((s,g) => s + g.stake, 0)
+  const totalProfit = groups.reduce((s,g) => s + g.profit, 0)
+  const roi = totalStake > 0 ? totalProfit / totalStake * 100 : 0
+  const avgOdds = total > 0 ? groups.reduce((s,g) => s + g.odds, 0) / total : 0
+
+  if (total === 0) return (
+    <div className="card"><div className="empty"><div className="empty-icon">2️⃣</div>두폴 베팅 기록이 없습니다</div></div>
+  )
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      {/* 요약 */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+        {[
+          { label: '승률', value: `${winRate.toFixed(1)}%`, sub: `${wins.length}W ${losses.length}L`, cls: winRate >= 50 ? 'profit-pos' : 'profit-neg' },
+          { label: '총 손익', value: `${totalProfit >= 0 ? '+' : ''}${totalProfit.toLocaleString()}`, sub: `${total}건`, cls: totalProfit >= 0 ? 'profit-pos' : 'profit-neg' },
+          { label: 'ROI', value: `${roi >= 0 ? '+' : ''}${roi.toFixed(1)}%`, sub: `투자 ${totalStake.toLocaleString()}`, cls: roi >= 0 ? 'profit-pos' : 'profit-neg' },
+          { label: '평균 배당', value: avgOdds.toFixed(2), sub: '', cls: '' },
+        ].map(t => (
+          <div key={t.label} className="card stat-tile" style={{ flex: '1 0 120px', maxWidth: 180 }}>
+            <div className={`stat-value ${t.cls}`}>{t.value}</div>
+            <div className="stat-label">{t.label}</div>
+            {t.sub && <div style={{ fontSize: 10, color: 'var(--text-secondary)', marginTop: 4 }}>{t.sub}</div>}
+          </div>
+        ))}
+      </div>
+
+      {/* 두폴 목록 */}
+      <div className="card">
+        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 10 }}>두폴 베팅 목록 ({total}건)</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {groups.map(g => {
+            const isWin = g.result === 'win', isLoss = g.result === 'loss'
+            return (
+              <div key={g.group} style={{ background: 'var(--bg-elevated)', border: `1px solid ${isWin ? 'var(--green-border)' : isLoss ? 'var(--red-border)' : 'var(--border)'}`, borderRadius: 8, padding: '10px 12px' }}>
+                {g.legs.map((leg, idx) => (
+                  <div key={leg.id} style={{ display: 'flex', gap: 6, marginBottom: idx < g.legs.length - 1 ? 4 : 0 }}>
+                    <span style={{ fontSize: 10, color: 'var(--text-muted)', width: 18, flexShrink: 0 }}>{idx===0?'①':'②'}</span>
+                    <span style={{ fontSize: 12, color: isWin ? 'var(--green)' : isLoss ? 'var(--red)' : 'var(--text-primary)', flex: 1 }}>{leg.match}</span>
+                  </div>
+                ))}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--border-light)' }}>
+                  <span style={{ fontSize: 11, color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>배당 {g.odds.toFixed(2)} / {g.stake.toLocaleString()}원</span>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: isWin ? 'var(--green)' : isLoss ? 'var(--red)' : 'var(--text-muted)' }}>
+                    {isWin ? `+${g.profit.toLocaleString()}원` : isLoss ? `-${g.stake.toLocaleString()}원` : 'PUSH'}
+                  </span>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+
+/* ── 종목별 데이터 삭제 모달 ── */
+function DeleteBetsModal({ sport, bets, onClose, onDeleted }: {
+  sport: typeof SPORTS[0]; bets: Bet[]; onClose: () => void; onDeleted: () => void
+}) {
+  const [confirm, setConfirm] = useState('')
+  const [deleting, setDeleting] = useState(false)
+  const sportBets = bets.filter(b => b.sport === sport.value)
+  const CONFIRM_WORD = sport.label
+
+  async function doDelete() {
+    if (confirm !== CONFIRM_WORD) return
+    setDeleting(true)
+    const ids = sportBets.map(b => b.id)
+    // 배치 삭제 (in 조건)
+    const { error } = await supabase.from('bets').delete().in('id', ids)
+    setDeleting(false)
+    if (!error) { onDeleted(); onClose() }
+    else alert('삭제 실패: ' + error.message)
+  }
+
+  return (
+    <div className="modal-overlay">
+      <div className="modal" style={{ maxWidth: 360 }} onClick={e => e.stopPropagation()}>
+        <div className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+          <Trash2 size={16} color="var(--red)" />
+          {sport.emoji} {sport.label} 데이터 삭제
+          <button onClick={onClose} style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex', padding: 2 }}><X size={15} /></button>
+        </div>
+        <div style={{ padding: '10px 12px', background: 'var(--red-bg)', border: '1px solid var(--red-border)', borderRadius: 'var(--radius-sm)', marginBottom: 14, fontSize: 12, color: 'var(--red)' }}>
+          ⚠️ <strong>{sport.label}</strong> 베팅 데이터 <strong>{sportBets.length}건</strong>이 영구 삭제됩니다.<br />
+          <span style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 4, display: 'block' }}>이 작업은 되돌릴 수 없습니다.</span>
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 6 }}>
+          확인을 위해 <strong style={{ color: 'var(--text-primary)' }}>"{CONFIRM_WORD}"</strong> 를 입력하세요
+        </div>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <input
+            className="form-input"
+            placeholder={CONFIRM_WORD}
+            value={confirm}
+            onChange={e => setConfirm(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && confirm === CONFIRM_WORD && doDelete()}
+            autoFocus
+          />
+          <button
+            className="btn"
+            style={{ background: 'var(--red)', color: '#fff', border: 'none', flexShrink: 0, opacity: confirm !== CONFIRM_WORD ? 0.4 : 1 }}
+            disabled={confirm !== CONFIRM_WORD || deleting}
+            onClick={doDelete}
+          >
+            {deleting ? '삭제중...' : '삭제'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+
 // ─── 룰북 패널 (종목별) ────────────────────────────────────────────
 function RulebookPanel({ sport }: { sport: Sport }) {
   const S = { color: '#4ade80', bg: 'rgba(74,222,128,0.1)', border: 'rgba(74,222,128,0.3)' }
