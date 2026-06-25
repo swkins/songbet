@@ -376,7 +376,7 @@ function InlineParlayEditForm({ groupBets, site, onClose, onSave }: {
 /* ── 인라인 베팅폼 (단폴) ── */
 function SingleBetForm({ site, onClose, onBet, defaultSport }: {
   site: Site; onClose: () => void; defaultSport: string
-  onBet: (sport: string, content: string, odds: number, amount: number) => Promise<boolean>
+  onBet: (sport: string, content: string, odds: number, amount: number, isLive: boolean) => Promise<boolean>
 }) {
   const isusd = site.currency === 'usd'; const unit = isusd ? '$' : '원'
   const defaultAmount = isusd ? '5' : '10000'
@@ -384,6 +384,7 @@ function SingleBetForm({ site, onClose, onBet, defaultSport }: {
   const [content, setContent] = useState('')
   const [oddsRaw, setOddsRaw] = useState('')
   const [amount, setAmount]   = useState(defaultAmount)
+  const [isLive, setIsLive]   = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const oddsV = parseOdds(oddsRaw); const stakeN = Number(amount.replace(/,/g, ""))
   const hotkeys = isusd ? [5, 10] : [5000, 10000]
@@ -396,7 +397,7 @@ function SingleBetForm({ site, onClose, onBet, defaultSport }: {
   async function submit() {
     if (!content || oddsV <= 0 || stakeN <= 0) return
     setSubmitting(true)
-    const ok = await onBet(sport, content, oddsV, stakeN)
+    const ok = await onBet(sport, content, oddsV, stakeN, isLive)
     setSubmitting(false)
     if (ok) onClose()
   }
@@ -435,10 +436,23 @@ function SingleBetForm({ site, onClose, onBet, defaultSport }: {
           예상 +{isusd ? '$' : ''}{Math.round(stakeN * (oddsV - 1)).toLocaleString()}{isusd ? '' : '원'}
         </div>
       )}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer', userSelect: 'none' }}>
+          <div onClick={() => setIsLive(p => !p)} style={{
+            width: 14, height: 14, borderRadius: 3, flexShrink: 0, cursor: 'pointer',
+            background: isLive ? '#f87171' : 'transparent',
+            border: `2px solid ${isLive ? '#f87171' : 'var(--border)'}`,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            {isLive && <span style={{ color: '#000', fontSize: 9, fontWeight: 900, lineHeight: 1 }}>✓</span>}
+          </div>
+          <span style={{ fontSize: 11, fontWeight: 700, color: isLive ? '#f87171' : 'var(--text-secondary)' }}>라이브</span>
+        </label>
+      </div>
       <div style={{ display: 'flex', gap: 5 }}>
-        <button className="btn btn-primary" style={{ flex: 1, fontSize: 12, padding: '7px 0', justifyContent: 'center' }}
+        <button className="btn btn-primary" style={{ flex: 1, fontSize: 12, padding: '7px 0', justifyContent: 'center', background: isLive ? 'rgba(248,113,113,0.15)' : undefined, borderColor: isLive ? '#f87171' : undefined, color: isLive ? '#f87171' : undefined }}
           onClick={submit} disabled={!content || oddsV <= 0 || stakeN <= 0 || submitting}>
-          등록
+          {isLive ? '🔴 라이브 등록' : '등록'}
         </button>
         <button className="btn btn-ghost" style={{ padding: '7px 10px' }} onClick={onClose}><X size={12} /></button>
       </div>
@@ -692,9 +706,9 @@ export default function Dashboard() {
   }
 
   /* ── 베팅 제출 ── */
-  async function submitBet(site: Site, sport: string, content: string, odds: number, stake: number): Promise<boolean> {
+  async function submitBet(site: Site, sport: string, content: string, odds: number, stake: number, isLive = false): Promise<boolean> {
     const { market, pick } = autoMarket(content)
-    const { data: betData } = await supabase.from('bets').insert({ bet_date: today, sport: sport as Sport, league: '', match: content, market, pick, odds, stake, result: 'pending' as BetResult, profit: 0, memo: '', site_id: site.id, parlay_group: null, parlay_leg: 1 }).select().single()
+    const { data: betData } = await supabase.from('bets').insert({ bet_date: today, sport: sport as Sport, league: '', match: content, market, pick, odds, stake, result: 'pending' as BetResult, profit: 0, memo: '', site_id: site.id, parlay_group: null, parlay_leg: 1, is_live: isLive }).select().single()
     if (!betData) return false
     const { data: siteData } = await supabase.from('sites').update({ balance: site.balance - stake, rolling_done: site.rolling_done + stake, deposit_bet_done: (site.deposit_bet_done ?? 0) + stake }).eq('id', site.id).select().single()
     if (siteData) {
@@ -943,7 +957,7 @@ export default function Dashboard() {
                           ) : site.bet_type === 'double' ? (
                             <DoubleBetForm site={site} lastLeg1={getLastLeg1(site.id)} onClose={() => setOpenFormSiteId(null)} onBet={(c1,c2,odds,amt) => submitDoubleBet(site,c1,c2,odds,amt)} />
                           ) : (
-                            <SingleBetForm site={site} defaultSport={pending.slice(-1)[0]?.sport ?? 'soccer'} onClose={() => setOpenFormSiteId(null)} onBet={(sp,ct,od,amt) => submitBet(site,sp,ct,od,amt)} />
+                            <SingleBetForm site={site} defaultSport={pending.slice(-1)[0]?.sport ?? 'soccer'} onClose={() => setOpenFormSiteId(null)} onBet={(sp,ct,od,amt,lv) => submitBet(site,sp,ct,od,amt,lv)} />
                           )}
                         </div>
                       )}

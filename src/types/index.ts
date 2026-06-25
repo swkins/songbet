@@ -21,6 +21,7 @@ export interface Bet {
   site_id: string | null
   parlay_group: string | null   // 두폴 그룹 uuid
   parlay_leg: number            // 1 or 2
+  is_live: boolean              // 라이브 베팅 여부
 }
 export interface Todo {
   id: string; created_at: string; todo_date: string; content: string
@@ -39,4 +40,4 @@ export interface ActionLog {
   before_data: Record<string, unknown> | null; after_data: Record<string, unknown> | null; description: string
   cashflow_id: string | null
 }
-export type Tab = 'dashboard' | 'stats' | 'settlement' | 'simul' | 'rulebook'
+export type Tab = 'dashboard' | 'stats' | 'settlement' | 'simul'
