@@ -510,6 +510,124 @@ export default function Simul() {
       </div>
   )
 
+  // ─── 우측 패널: 룰북 ──────────────────────────────────────────
+  const rulebook = (
+    <div style={card}>
+      <div style={secT}>전략 룰북 v2.0</div>
+
+      {/* 야구 */}
+      <div style={{ marginBottom: 14 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 6 }}>⚾ 야구 — 역배</div>
+        <div style={{ fontSize: 10, color: 'var(--text-secondary)', marginBottom: 5 }}>진입 기준: 배당 2.10 이상 (2.09↓ 패스)</div>
+        {[
+          { league: 'MLB', s: '2.10~2.49', a: '2.50~2.79', pass: '2.80↑' },
+          { league: 'NPB', s: '2.10~2.49', a: '2.50~2.59', pass: '2.60↑' },
+          { league: 'KBO', s: '2.10~2.49', a: '2.50↑ 무제한', pass: '—' },
+        ].map(r => (
+          <div key={r.league} style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 4 }}>
+            <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-primary)', width: 32, flexShrink: 0 }}>{r.league}</span>
+            <span style={{ fontSize: 9, background: 'rgba(74,222,128,0.1)', border: '1px solid rgba(74,222,128,0.3)', color: '#4ade80', borderRadius: 4, padding: '1px 5px' }}>S {r.s}</span>
+            <span style={{ fontSize: 9, background: 'rgba(96,165,250,0.1)', border: '1px solid rgba(96,165,250,0.3)', color: '#60a5fa', borderRadius: 4, padding: '1px 5px' }}>A {r.a}</span>
+            {r.pass !== '—' && <span style={{ fontSize: 9, color: 'var(--text-secondary)' }}>✕{r.pass}</span>}
+          </div>
+        ))}
+
+        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)', marginTop: 10, marginBottom: 5 }}>⚾ 야구 — 언더 (MLB·NPB·KBO 동일)</div>
+        <div style={{ fontSize: 10, color: 'var(--text-secondary)', marginBottom: 5 }}>조건: 언더 배당 1.90 이상 (1.89↓ 패스)</div>
+        {[
+          { tier: 'S', label: '1순위', range: '1.90~2.09', desc: '메인', color: '#4ade80', bg: 'rgba(74,222,128,0.1)', border: 'rgba(74,222,128,0.3)' },
+          { tier: 'A', label: '2순위', range: '2.10~2.29', desc: '여유 있을 때', color: '#60a5fa', bg: 'rgba(96,165,250,0.1)', border: 'rgba(96,165,250,0.3)' },
+          { tier: 'B', label: '3순위', range: '2.30~2.49', desc: '소액 테스트', color: '#fbbf24', bg: 'rgba(251,191,36,0.1)', border: 'rgba(251,191,36,0.3)' },
+        ].map(r => (
+          <div key={r.tier} style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 4 }}>
+            <span style={{ fontSize: 9, fontWeight: 700, background: r.bg, border: `1px solid ${r.border}`, color: r.color, borderRadius: 4, padding: '1px 5px', width: 42, textAlign: 'center', flexShrink: 0 }}>{r.tier} {r.label}</span>
+            <span style={{ fontSize: 10, color: 'var(--text-primary)', fontWeight: 600 }}>{r.range}</span>
+            <span style={{ fontSize: 9, color: 'var(--text-secondary)' }}>{r.desc}</span>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ height: 1, background: 'var(--border)', marginBottom: 12 }} />
+
+      {/* 축구 */}
+      <div style={{ marginBottom: 14 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 4 }}>⚽ 축구 — 2.5 언더</div>
+        <div style={{ fontSize: 9, color: 'var(--text-secondary)', marginBottom: 6 }}>EPL · 라리가 · 분데스 · 세리에 · 리그앙 · UCL</div>
+        <div style={{ fontSize: 10, color: 'var(--text-secondary)', marginBottom: 6 }}>
+          강팀 배당 <span style={{ color: 'var(--text-primary)', fontWeight: 700 }}>1.40~1.79</span> (홈/원정 무관)<br />
+          언더 배당 <span style={{ color: 'var(--text-primary)', fontWeight: 700 }}>1.80 이상</span>
+        </div>
+        {[
+          { tier: 'S', label: '1순위', range: '1.80~2.09', desc: '메인', color: '#4ade80', bg: 'rgba(74,222,128,0.1)', border: 'rgba(74,222,128,0.3)' },
+          { tier: 'A', label: '2순위', range: '2.10~2.29', desc: '테스트', color: '#60a5fa', bg: 'rgba(96,165,250,0.1)', border: 'rgba(96,165,250,0.3)' },
+        ].map(r => (
+          <div key={r.tier} style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 4 }}>
+            <span style={{ fontSize: 9, fontWeight: 700, background: r.bg, border: `1px solid ${r.border}`, color: r.color, borderRadius: 4, padding: '1px 5px', width: 42, textAlign: 'center', flexShrink: 0 }}>{r.tier} {r.label}</span>
+            <span style={{ fontSize: 10, color: 'var(--text-primary)', fontWeight: 600 }}>{r.range}</span>
+            <span style={{ fontSize: 9, color: 'var(--text-secondary)' }}>{r.desc}</span>
+          </div>
+        ))}
+        <div style={{ fontSize: 9, color: 'var(--text-secondary)', marginTop: 4 }}>
+          ✕ 강팀 1.39↓ · 1.80↑ / 언더 1.79↓ 패스
+        </div>
+      </div>
+
+      <div style={{ height: 1, background: 'var(--border)', marginBottom: 12 }} />
+
+      {/* 농구 */}
+      <div style={{ marginBottom: 6 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 4 }}>🏀 농구 — 플핸(+스프레드)</div>
+        <div style={{ fontSize: 9, color: 'var(--text-secondary)', marginBottom: 6 }}>NBA · 유로리그 · KBL · B리그 · CBA / 배당 1.90 이상</div>
+        {[
+          { tier: 'S', label: '1순위', range: '+6.5~+9.5', desc: '메인', color: '#4ade80', bg: 'rgba(74,222,128,0.1)', border: 'rgba(74,222,128,0.3)' },
+          { tier: 'A', label: '2순위', range: '+10.5~+12.5', desc: '2순위', color: '#60a5fa', bg: 'rgba(96,165,250,0.1)', border: 'rgba(96,165,250,0.3)' },
+          { tier: 'B', label: '3순위', range: '+5.5/+13.5~+14.5', desc: '소액', color: '#fbbf24', bg: 'rgba(251,191,36,0.1)', border: 'rgba(251,191,36,0.3)' },
+        ].map(r => (
+          <div key={r.tier} style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 4 }}>
+            <span style={{ fontSize: 9, fontWeight: 700, background: r.bg, border: `1px solid ${r.border}`, color: r.color, borderRadius: 4, padding: '1px 5px', width: 42, textAlign: 'center', flexShrink: 0 }}>{r.tier} {r.label}</span>
+            <span style={{ fontSize: 10, color: 'var(--text-primary)', fontWeight: 600 }}>{r.range}</span>
+            <span style={{ fontSize: 9, color: 'var(--text-secondary)' }}>{r.desc}</span>
+          </div>
+        ))}
+
+        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)', marginTop: 10, marginBottom: 4 }}>🏀 농구 — 언더</div>
+        <div style={{ fontSize: 10, color: 'var(--text-secondary)', marginBottom: 5 }}>
+          정배 배당 <span style={{ color: 'var(--text-primary)', fontWeight: 700 }}>1.20~1.59</span> (범위 밖 패스)
+        </div>
+        {[
+          { label: '1순위', range: '언더 2.00↑', color: '#4ade80', bg: 'rgba(74,222,128,0.1)', border: 'rgba(74,222,128,0.3)' },
+          { label: '2순위', range: '언더 1.90~1.99', color: '#60a5fa', bg: 'rgba(96,165,250,0.1)', border: 'rgba(96,165,250,0.3)' },
+        ].map(r => (
+          <div key={r.label} style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 4 }}>
+            <span style={{ fontSize: 9, fontWeight: 700, background: r.bg, border: `1px solid ${r.border}`, color: r.color, borderRadius: 4, padding: '1px 5px', width: 42, textAlign: 'center', flexShrink: 0 }}>{r.label}</span>
+            <span style={{ fontSize: 10, color: 'var(--text-primary)', fontWeight: 600 }}>{r.range}</span>
+          </div>
+        ))}
+        <div style={{ fontSize: 9, color: 'var(--text-secondary)', marginTop: 4 }}>
+          ✕ 언더 배당 1.89↓ 패스 / 마진 7% 이하
+        </div>
+      </div>
+
+      <div style={{ height: 1, background: 'var(--border)', marginBottom: 10 }} />
+
+      {/* 공통 원칙 */}
+      <div>
+        <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 5 }}>💡 공통 원칙</div>
+        {[
+          '배당만 본다 — 선발·날씨·라인업 무시',
+          '구간 이탈 시 무조건 패스',
+          '구간별 분리 기록 — 합산 금지',
+          '최소 100건 이상 후 구간 판단',
+        ].map((t, i) => (
+          <div key={i} style={{ fontSize: 9, color: 'var(--text-secondary)', marginBottom: 3, display: 'flex', gap: 4 }}>
+            <span style={{ color: 'var(--text-primary)', fontWeight: 700, flexShrink: 0 }}>{i + 1}.</span>
+            <span>{t}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+
   // ─── 우측 패널: 통계 ──────────────────────────────────────────
   const rightPanel = settled.length === 0 ? (
         <div style={card}>
@@ -580,7 +698,10 @@ export default function Simul() {
     <div style={{ display:'grid', gridTemplateColumns:'220px 220px 1fr', gap:10, padding:'12px', minHeight:'100vh', background:'var(--bg)', alignItems:'start' }}>
       {leftPanel}
       {midPanel}
-      {rightPanel}
+      <div style={{ display:'flex', flexDirection:'column', gap:0 }}>
+        {rightPanel}
+        {rulebook}
+      </div>
     </div>
   )
 }
