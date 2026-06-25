@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import type { Bet, Sport, Market } from '../types'
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, BarChart, Bar, ResponsiveContainer, Cell } from 'recharts'
@@ -18,12 +18,7 @@ const MARKET_LABELS: Record<Market, string> = {
   moneyline:'승패', handicap:'핸디캡', over:'오버', under:'언더', correct_score:'정확한스코어', other:'기타',
 }
 
-const BASE_ODDS_STEPS = [1.7,1.8,1.9,2.0,2.1,2.2,2.3,2.4,2.5,2.6]
-
-function getOddsBucket(odds: number): string {
-  return (Math.floor(odds * 10) / 10).toFixed(1)
-}
-
+// ─── 공통 유틸 ─────────────────────────────────────────────────────
 function calcStats(bets: Bet[]) {
   const settled = bets.filter(b => b.result !== 'pending')
   const wins = settled.filter(b => b.result === 'win')
@@ -38,295 +33,306 @@ function calcStats(bets: Bet[]) {
   return { settled, wins, losses, pushes, total, winRate, stake, profit, roi, avgOdds }
 }
 
-function OddsTableVertical({ title, bets }: { title: string; bets: Bet[] }) {
-  const settled = bets.filter(b => b.result !== 'pending')
-  const dataBuckets = Array.from(new Set(settled.map(b => getOddsBucket(b.odds))))
-    .filter(b => !BASE_ODDS_STEPS.map(s => s.toFixed(1)).includes(b))
-    .sort()
-  const allBuckets = [...BASE_ODDS_STEPS.map(s => s.toFixed(1)), ...dataBuckets]
-    .sort((a, b) => parseFloat(a) - parseFloat(b))
-
-  return (
-    <div className="card" style={{ width: 200, flexShrink: 0 }}>
-      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 8 }}>{title}</div>
-      <table style={{ width: '100%', fontSize: 10 }}>
-        <thead>
-          <tr>
-            <th style={{ textAlign: 'left', padding: '2px 6px', fontSize: 9, color: 'var(--text-muted)' }}>배당</th>
-            <th style={{ textAlign: 'center', fontSize: 9, color: 'var(--green)', padding: '2px 4px' }}>승률</th>
-            <th style={{ textAlign: 'center', fontSize: 9, color: 'var(--blue)', padding: '2px 4px' }}>ROI</th>
-            <th style={{ textAlign: 'center', fontSize: 9, color: 'var(--text-muted)', padding: '2px 4px' }}>건</th>
-          </tr>
-        </thead>
-        <tbody>
-          {allBuckets.map(bucket => {
-            const lo = parseFloat(bucket)
-            const bucketBets = settled.filter(b => getOddsBucket(b.odds) === bucket)
-            if (!bucketBets.length) return (
-              <tr key={bucket} style={{ opacity: 0.35 }}>
-                <td style={{ padding: '2px 6px', fontFamily: 'var(--font-num)', fontWeight: 700, color: 'var(--text-secondary)', fontSize: 11 }}>{lo.toFixed(1)}</td>
-                <td style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: 10 }}>—</td>
-                <td style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: 10 }}>—</td>
-                <td style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: 10 }}>0</td>
-              </tr>
-            )
-            const s = calcStats(bucketBets)
-            return (
-              <tr key={bucket}>
-                <td style={{ padding: '2px 6px', fontFamily: 'var(--font-num)', fontWeight: 700, color: 'var(--text-secondary)', fontSize: 11 }}>{lo.toFixed(1)}</td>
-                <td style={{ textAlign: 'center', padding: '2px 4px' }}>
-                  <span style={{ fontSize: 11, fontWeight: 700 }} className={s.winRate >= 50 ? 'profit-pos' : 'profit-neg'}>{s.winRate.toFixed(0)}%</span>
-                </td>
-                <td style={{ textAlign: 'center', padding: '2px 4px' }}>
-                  <span style={{ fontSize: 10, fontWeight: 600 }} className={s.roi >= 0 ? 'profit-pos' : 'profit-neg'}>{s.roi >= 0 ? '+' : ''}{s.roi.toFixed(0)}%</span>
-                </td>
-                <td style={{ textAlign: 'center', padding: '2px 4px', color: 'var(--text-muted)', fontSize: 10 }}>{s.total}</td>
-              </tr>
-            )
-          })}
-        </tbody>
-      </table>
-    </div>
-  )
-}
-
-function LineTableVertical({ title, rows }: {
-  title: string
-  rows: { label: string; bets: Bet[]; filterFn: (b: Bet) => boolean }[]
-}) {
-  return (
-    <div className="card" style={{ width: 200, flexShrink: 0 }}>
-      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 8 }}>{title}</div>
-      <table style={{ width: '100%', fontSize: 10 }}>
-        <thead>
-          <tr>
-            <th style={{ textAlign: 'left', padding: '2px 6px', fontSize: 9, color: 'var(--text-muted)' }}>라인</th>
-            <th style={{ textAlign: 'center', fontSize: 9, color: 'var(--green)', padding: '2px 4px' }}>승률</th>
-            <th style={{ textAlign: 'center', fontSize: 9, color: 'var(--blue)', padding: '2px 4px' }}>ROI</th>
-            <th style={{ textAlign: 'center', fontSize: 9, color: 'var(--text-muted)', padding: '2px 4px' }}>건</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map(r => {
-            const rb = r.bets.filter(b => b.result !== 'pending' && r.filterFn(b))
-            if (!rb.length) return (
-              <tr key={r.label} style={{ opacity: 0.4 }}>
-                <td style={{ padding: '2px 6px', fontWeight: 700, color: 'var(--text-secondary)', fontSize: 10 }}>{r.label}</td>
-                <td colSpan={3} style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: 10 }}>—</td>
-              </tr>
-            )
-            const s = calcStats(rb)
-            return (
-              <tr key={r.label}>
-                <td style={{ padding: '2px 6px', fontWeight: 700, color: 'var(--text-secondary)', fontSize: 10 }}>{r.label}</td>
-                <td style={{ textAlign: 'center', padding: '2px 4px' }}>
-                  <span style={{ fontSize: 11, fontWeight: 700 }} className={s.winRate >= 50 ? 'profit-pos' : 'profit-neg'}>{s.winRate.toFixed(0)}%</span>
-                </td>
-                <td style={{ textAlign: 'center', padding: '2px 4px' }}>
-                  <span style={{ fontSize: 10, fontWeight: 600 }} className={s.roi >= 0 ? 'profit-pos' : 'profit-neg'}>{s.roi >= 0 ? '+' : ''}{s.roi.toFixed(0)}%</span>
-                </td>
-                <td style={{ textAlign: 'center', padding: '2px 4px', color: 'var(--text-muted)', fontSize: 10 }}>{s.total}</td>
-              </tr>
-            )
-          })}
-        </tbody>
-      </table>
-    </div>
-  )
-}
-
 function pickHasLine(pick: string, line: string): boolean { return pick?.includes(line) ?? false }
 
-function ParlayPanel({ bets }: { bets: Bet[] }) {
-  // parlay_group이 있는 베팅만 필터
-  const parlayBets = bets.filter(b => b.parlay_group !== null && b.result !== 'pending')
-  // 그룹별로 묶기 (parlay_leg=1 기준으로 대표)
-  const groups = Array.from(new Set(parlayBets.map(b => b.parlay_group))).map(g => {
-    const legs = parlayBets.filter(b => b.parlay_group === g).sort((a,b) => a.parlay_leg - b.parlay_leg)
-    const rep = legs[0]
-    return { group: g, legs, result: rep?.result ?? 'pending', odds: rep?.odds ?? 0, stake: rep?.stake ?? 0, profit: rep?.profit ?? 0 }
-  })
-  const wins = groups.filter(g => g.result === 'win')
-  const losses = groups.filter(g => g.result === 'loss')
-  const total = groups.length
-  const winRate = total > 0 ? wins.length / total * 100 : 0
-  const totalStake = groups.reduce((s,g) => s + g.stake, 0)
-  const totalProfit = groups.reduce((s,g) => s + g.profit, 0)
-  const roi = totalStake > 0 ? totalProfit / totalStake * 100 : 0
-  const avgOdds = total > 0 ? groups.reduce((s,g) => s + g.odds, 0) / total : 0
+// ─── 룰북 기반 통계 행 ─────────────────────────────────────────────
+type RowColor = 'S' | 'A' | 'B' | 'none'
 
-  if (total === 0) return (
-    <div className="card"><div className="empty"><div className="empty-icon">2️⃣</div>두폴 베팅 기록이 없습니다</div></div>
-  )
+const TIER_STYLE: Record<RowColor, { color: string; bg: string; border: string; label: string }> = {
+  S:    { color: '#4ade80', bg: 'rgba(74,222,128,0.08)',  border: 'rgba(74,222,128,0.25)',  label: 'S' },
+  A:    { color: '#60a5fa', bg: 'rgba(96,165,250,0.08)',  border: 'rgba(96,165,250,0.25)',  label: 'A' },
+  B:    { color: '#fbbf24', bg: 'rgba(251,191,36,0.08)',  border: 'rgba(251,191,36,0.25)',  label: 'B' },
+  none: { color: 'var(--text-secondary)', bg: 'transparent', border: 'transparent', label: '—' },
+}
 
+interface RuleRow { label: string; bets: Bet[]; tier: RowColor; breakeven?: string }
+
+function RuleStatsTable({ title, rows, extra }: { title: string; rows: RuleRow[]; extra?: React.ReactNode }) {
+  const hasBets = rows.some(r => r.bets.filter(b => b.result !== 'pending').length > 0)
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      {/* 요약 */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-        {[
-          { label: '승률', value: `${winRate.toFixed(1)}%`, sub: `${wins.length}W ${losses.length}L`, cls: winRate >= 50 ? 'profit-pos' : 'profit-neg' },
-          { label: '총 손익', value: `${totalProfit >= 0 ? '+' : ''}${totalProfit.toLocaleString()}`, sub: `${total}건`, cls: totalProfit >= 0 ? 'profit-pos' : 'profit-neg' },
-          { label: 'ROI', value: `${roi >= 0 ? '+' : ''}${roi.toFixed(1)}%`, sub: `투자 ${totalStake.toLocaleString()}`, cls: roi >= 0 ? 'profit-pos' : 'profit-neg' },
-          { label: '평균 배당', value: avgOdds.toFixed(2), sub: '', cls: '' },
-        ].map(t => (
-          <div key={t.label} className="card stat-tile" style={{ flex: '1 0 120px', maxWidth: 180 }}>
-            <div className={`stat-value ${t.cls}`}>{t.value}</div>
-            <div className="stat-label">{t.label}</div>
-            {t.sub && <div style={{ fontSize: 10, color: 'var(--text-secondary)', marginTop: 4 }}>{t.sub}</div>}
+    <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, padding: '12px 14px', flex: '1 0 220px' }}>
+      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 10 }}>{title}</div>
+      {!hasBets && <div style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'center', padding: '12px 0' }}>데이터 없음</div>}
+      {hasBets && (
+        <table style={{ width: '100%', fontSize: 11, borderCollapse: 'collapse' }}>
+          <thead>
+            <tr style={{ borderBottom: '1px solid var(--border)' }}>
+              <th style={{ textAlign: 'left', padding: '3px 6px', fontSize: 9, color: 'var(--text-secondary)', fontWeight: 700 }}>구간</th>
+              <th style={{ textAlign: 'center', fontSize: 9, color: 'var(--text-secondary)', fontWeight: 700, padding: '3px 4px' }}>건</th>
+              <th style={{ textAlign: 'center', fontSize: 9, color: 'var(--text-secondary)', fontWeight: 700, padding: '3px 4px' }}>승률</th>
+              <th style={{ textAlign: 'center', fontSize: 9, color: 'var(--text-secondary)', fontWeight: 700, padding: '3px 4px' }}>ROI</th>
+              <th style={{ textAlign: 'center', fontSize: 9, color: 'var(--text-secondary)', fontWeight: 700, padding: '3px 4px' }}>손익</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(r => {
+              const s = calcStats(r.bets)
+              const ts = TIER_STYLE[r.tier]
+              const isEmpty = s.total === 0
+              return (
+                <tr key={r.label} style={{ borderBottom: '1px solid var(--border-light)', background: isEmpty ? 'transparent' : ts.bg, opacity: isEmpty ? 0.4 : 1 }}>
+                  <td style={{ padding: '5px 6px', display: 'flex', alignItems: 'center', gap: 5 }}>
+                    {r.tier !== 'none' && (
+                      <span style={{ fontSize: 9, fontWeight: 700, color: ts.color, background: ts.bg, border: `1px solid ${ts.border}`, borderRadius: 3, padding: '0 4px', flexShrink: 0 }}>{ts.label}</span>
+                    )}
+                    <span style={{ fontSize: 10, color: 'var(--text-primary)', fontWeight: 600 }}>{r.label}</span>
+                    {r.breakeven && !isEmpty && (
+                      <span style={{ fontSize: 8, color: 'var(--text-muted)' }}>손분 {r.breakeven}</span>
+                    )}
+                  </td>
+                  <td style={{ textAlign: 'center', padding: '5px 4px', fontSize: 10, color: 'var(--text-secondary)' }}>{isEmpty ? '—' : s.total}</td>
+                  <td style={{ textAlign: 'center', padding: '5px 4px' }}>
+                    {isEmpty ? <span style={{ color: 'var(--text-muted)', fontSize: 10 }}>—</span>
+                      : <span style={{ fontSize: 11, fontWeight: 700, color: s.winRate >= 50 ? '#4ade80' : '#f87171' }}>{s.winRate.toFixed(0)}%</span>}
+                  </td>
+                  <td style={{ textAlign: 'center', padding: '5px 4px' }}>
+                    {isEmpty ? <span style={{ color: 'var(--text-muted)', fontSize: 10 }}>—</span>
+                      : <span style={{ fontSize: 10, fontWeight: 700, color: s.roi >= 0 ? '#4ade80' : '#f87171' }}>{s.roi >= 0 ? '+' : ''}{s.roi.toFixed(1)}%</span>}
+                  </td>
+                  <td style={{ textAlign: 'center', padding: '5px 4px' }}>
+                    {isEmpty ? <span style={{ color: 'var(--text-muted)', fontSize: 10 }}>—</span>
+                      : <span style={{ fontSize: 10, fontWeight: 700, color: s.profit >= 0 ? '#4ade80' : '#f87171' }}>{s.profit >= 0 ? '+' : ''}{(s.profit/1000).toFixed(0)}K</span>}
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      )}
+      {extra}
+    </div>
+  )
+}
+
+// ─── 그외 베팅 패널 ───────────────────────────────────────────────
+function OtherBetsPanel({ bets }: { bets: Bet[] }) {
+  const settled = bets.filter(b => b.result !== 'pending')
+  if (!settled.length) return null
+  const s = calcStats(settled)
+  return (
+    <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, padding: '12px 14px', marginTop: 10 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)' }}>룰북 외 베팅</div>
+        <span style={{ fontSize: 9, color: 'var(--text-muted)', background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 4, padding: '1px 6px' }}>{settled.length}건</span>
+        <span style={{ fontSize: 10, fontWeight: 700, marginLeft: 'auto', color: s.roi >= 0 ? '#4ade80' : '#f87171' }}>ROI {s.roi >= 0 ? '+' : ''}{s.roi.toFixed(1)}%</span>
+        <span style={{ fontSize: 10, fontWeight: 700, color: s.profit >= 0 ? '#4ade80' : '#f87171' }}>{s.profit >= 0 ? '+' : ''}{s.profit.toLocaleString()}원</span>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 200, overflowY: 'auto' }}>
+        {settled.slice(0, 30).map(b => (
+          <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 10, padding: '4px 6px', background: 'var(--bg-elevated)', borderRadius: 5 }}>
+            <span style={{ color: 'var(--text-muted)', flexShrink: 0 }}>{b.bet_date.slice(5)}</span>
+            <span style={{ flex: 1, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.pick}</span>
+            <span style={{ color: 'var(--text-secondary)', flexShrink: 0 }}>@{b.odds.toFixed(2)}</span>
+            <span style={{ fontWeight: 700, flexShrink: 0, color: b.result === 'win' ? '#4ade80' : b.result === 'loss' ? '#f87171' : 'var(--text-muted)' }}>
+              {b.result === 'win' ? `+${b.profit.toLocaleString()}` : b.result === 'loss' ? `-${b.stake.toLocaleString()}` : 'PUSH'}
+            </span>
           </div>
         ))}
-      </div>
-
-      {/* 두폴 목록 */}
-      <div className="card">
-        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 10 }}>두폴 베팅 목록 ({total}건)</div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {groups.map(g => {
-            const isWin = g.result === 'win', isLoss = g.result === 'loss'
-            return (
-              <div key={g.group} style={{ background: 'var(--bg-elevated)', border: `1px solid ${isWin ? 'var(--green-border)' : isLoss ? 'var(--red-border)' : 'var(--border)'}`, borderRadius: 8, padding: '10px 12px' }}>
-                {g.legs.map((leg, idx) => (
-                  <div key={leg.id} style={{ display: 'flex', gap: 6, marginBottom: idx < g.legs.length - 1 ? 4 : 0 }}>
-                    <span style={{ fontSize: 10, color: 'var(--text-muted)', width: 18, flexShrink: 0 }}>{idx===0?'①':'②'}</span>
-                    <span style={{ fontSize: 12, color: isWin ? 'var(--green)' : isLoss ? 'var(--red)' : 'var(--text-primary)', flex: 1 }}>{leg.match}</span>
-                  </div>
-                ))}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--border-light)' }}>
-                  <span style={{ fontSize: 11, color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>배당 {g.odds.toFixed(2)} / {g.stake.toLocaleString()}원</span>
-                  <span style={{ fontSize: 12, fontWeight: 700, color: isWin ? 'var(--green)' : isLoss ? 'var(--red)' : 'var(--text-muted)' }}>
-                    {isWin ? `+${g.profit.toLocaleString()}원` : isLoss ? `-${g.stake.toLocaleString()}원` : 'PUSH'}
-                  </span>
-                </div>
-              </div>
-            )
-          })}
-        </div>
+        {settled.length > 30 && <div style={{ fontSize: 10, color: 'var(--text-muted)', textAlign: 'center', padding: 4 }}>+ {settled.length - 30}건 더</div>}
       </div>
     </div>
   )
 }
 
-function SportDetailPanel({ sport, bets }: { sport: Sport; bets: Bet[] }) {
-  const sb = bets.filter(b => b.sport === sport && b.result !== 'pending')
-  const moneyline = sb.filter(b => b.market === 'moneyline')
-  const handicap  = sb.filter(b => b.market === 'handicap')
-  const over      = sb.filter(b => b.market === 'over')
-  const under     = sb.filter(b => b.market === 'under')
+// ─── 야구 상세 통계 (룰북 기반) ──────────────────────────────────
+function BaseballDetailPanel({ bets }: { bets: Bet[] }) {
+  const settled = bets.filter(b => b.result !== 'pending')
+  const ml = settled.filter(b => b.market === 'moneyline')
+  const under = settled.filter(b => b.market === 'under')
 
-  if (sport === 'soccer') return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-      <OddsTableVertical title="승패 배당별" bets={moneyline} />
-      <OddsTableVertical title="-1.5 핸디 배당별" bets={handicap.filter(b => pickHasLine(b.pick, '-1.5'))} />
-      <OddsTableVertical title="0.5 핸디 배당별" bets={handicap.filter(b => pickHasLine(b.pick, '0.5'))} />
-      <OddsTableVertical title="1.5 핸디 배당별" bets={handicap.filter(b => pickHasLine(b.pick, '1.5') && !pickHasLine(b.pick, '-1.5'))} />
-      <OddsTableVertical title="2.5 오버 배당별" bets={over.filter(b => pickHasLine(b.pick, '2.5'))} />
-      <OddsTableVertical title="2.5 언더 배당별" bets={under.filter(b => pickHasLine(b.pick, '2.5'))} />
-    </div>
-  )
-  if (sport === 'baseball') return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-      <OddsTableVertical title="승패 배당별" bets={moneyline} />
-      <OddsTableVertical title="-1.5 핸디 배당별" bets={handicap.filter(b => pickHasLine(b.pick, '-1.5'))} />
-      <LineTableVertical title="오버 라인별" rows={['6.5','7.5','8.5','9.5'].map(l => ({ label: `${l} 오버`, bets: over, filterFn: (b: Bet) => pickHasLine(b.pick, l) }))} />
-      <LineTableVertical title="언더 라인별" rows={['6.5','7.5','8.5','9.5'].map(l => ({ label: `${l} 언더`, bets: under, filterFn: (b: Bet) => pickHasLine(b.pick, l) }))} />
-    </div>
-  )
-  if (sport === 'basketball') return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-      <OddsTableVertical title="승패 배당별" bets={moneyline} />
-      <LineTableVertical title="마핸 라인별" rows={['-1.5','-2.5','-3.5','-4.5','-5.5','-6.5'].map(l => ({ label: l, bets: handicap, filterFn: (b: Bet) => pickHasLine(b.pick, l) }))} />
-      <LineTableVertical title="플핸 라인별" rows={['4.5','5.5','6.5','7.5','8.5','9.5','10.5'].map(l => ({ label: `+${l}`, bets: handicap, filterFn: (b: Bet) => pickHasLine(b.pick, l) && !pickHasLine(b.pick,'-') }))} />
-      <OddsTableVertical title="오버 배당별" bets={over} />
-      <OddsTableVertical title="언더 배당별" bets={under} />
-    </div>
-  )
-  if (sport === 'esports') return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-      <OddsTableVertical title="승패 배당별" bets={moneyline} />
-      <OddsTableVertical title="-1.5 핸디 배당별" bets={handicap.filter(b => pickHasLine(b.pick, '-1.5'))} />
-      <OddsTableVertical title="-2.5 핸디 배당별" bets={handicap.filter(b => pickHasLine(b.pick, '-2.5'))} />
-      <OddsTableVertical title="+1.5 핸디 배당별" bets={handicap.filter(b => pickHasLine(b.pick, '1.5') && !pickHasLine(b.pick, '-1.5'))} />
-      <OddsTableVertical title="+2.5 핸디 배당별" bets={handicap.filter(b => pickHasLine(b.pick, '2.5') && !pickHasLine(b.pick, '-2.5'))} />
-    </div>
-  )
-  if (sport === 'volleyball') return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-      <OddsTableVertical title="승패 배당별" bets={moneyline} />
-      <OddsTableVertical title="핸디캡 배당별" bets={handicap} />
-      <OddsTableVertical title="오버 배당별" bets={over} />
-      <OddsTableVertical title="언더 배당별" bets={under} />
-    </div>
-  )
-  if (sport === 'hockey') return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-      <OddsTableVertical title="승패 배당별" bets={moneyline} />
-      <OddsTableVertical title="핸디캡 배당별" bets={handicap} />
-      <OddsTableVertical title="오버 배당별" bets={over} />
-      <OddsTableVertical title="언더 배당별" bets={under} />
-    </div>
-  )
+  // 역배 — 리그별 구간 분류
+  function mlInRange(b: Bet, lo: number, hi: number) { return b.odds >= lo && b.odds < hi }
+
+  const mlRows: RuleRow[] = [
+    { label: '2.10~2.49', tier: 'S', breakeven: '~49%', bets: ml.filter(b => mlInRange(b, 2.10, 2.50)) },
+    { label: '2.50~2.79', tier: 'A', breakeven: '~44%', bets: ml.filter(b => mlInRange(b, 2.50, 2.80)) },
+    { label: '2.80↑ (KBO)', tier: 'A', bets: ml.filter(b => b.odds >= 2.80) },
+  ]
+  const mlOther = ml.filter(b => b.odds < 2.10)
+
+  // 언더 — 배당 구간
+  const unRows: RuleRow[] = [
+    { label: '1.90~2.09', tier: 'S', breakeven: '51%', bets: under.filter(b => b.odds >= 1.90 && b.odds < 2.10) },
+    { label: '2.10~2.29', tier: 'A', breakeven: '48%', bets: under.filter(b => b.odds >= 2.10 && b.odds < 2.30) },
+    { label: '2.30~2.49', tier: 'B', breakeven: '44%', bets: under.filter(b => b.odds >= 2.30 && b.odds < 2.50) },
+  ]
+  const unOther = under.filter(b => b.odds < 1.90 || b.odds >= 2.50)
+
+  // 그외
+  const ruleIds = new Set([...mlRows.flatMap(r => r.bets), ...unRows.flatMap(r => r.bets)].map(b => b.id))
+  const otherBets = settled.filter(b => !ruleIds.has(b.id))
+
   return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-      <OddsTableVertical title="승패 배당별" bets={moneyline} />
-      {handicap.length > 0 && <OddsTableVertical title="핸디캡 배당별" bets={handicap} />}
+    <div>
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+        <RuleStatsTable title="⚾ 역배 — 배당 구간별" rows={mlRows}
+          extra={mlOther.length > 0 ? <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 6 }}>2.09↓ 제외: {mlOther.length}건</div> : undefined} />
+        <RuleStatsTable title="⚾ 언더 — 배당 구간별" rows={unRows}
+          extra={unOther.length > 0 ? <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 6 }}>범위 외: {unOther.length}건</div> : undefined} />
+      </div>
+      <OtherBetsPanel bets={otherBets} />
     </div>
   )
 }
 
-/* ── 종목별 데이터 삭제 모달 ── */
-function DeleteBetsModal({ sport, bets, onClose, onDeleted }: {
-  sport: typeof SPORTS[0]; bets: Bet[]; onClose: () => void; onDeleted: () => void
-}) {
-  const [confirm, setConfirm] = useState('')
-  const [deleting, setDeleting] = useState(false)
-  const sportBets = bets.filter(b => b.sport === sport.value && b.result !== 'pending')
-  const CONFIRM_WORD = sport.label
+// ─── 축구 상세 통계 (룰북 기반) ──────────────────────────────────
+function SoccerDetailPanel({ bets }: { bets: Bet[] }) {
+  const settled = bets.filter(b => b.result !== 'pending')
+  const under25 = settled.filter(b => (b.market === 'under') && pickHasLine(b.pick, '2.5'))
 
-  async function doDelete() {
-    if (confirm !== CONFIRM_WORD) return
-    setDeleting(true)
-    const ids = sportBets.map(b => b.id)
-    // 배치 삭제 (in 조건)
-    const { error } = await supabase.from('bets').delete().in('id', ids)
-    setDeleting(false)
-    if (!error) { onDeleted(); onClose() }
-    else alert('삭제 실패: ' + error.message)
+  // 강팀 배당 구간 × 언더 배당 티어
+  // 강팀 배당은 match 필드에 없어서 — 언더 배당으로만 티어 구분 + 강팀 배당 범위 메모
+  const u25Rows: RuleRow[] = [
+    { label: '언더 1.80~2.09 (S)', tier: 'S', bets: under25.filter(b => b.odds >= 1.80 && b.odds < 2.10) },
+    { label: '언더 2.10~2.29 (A)', tier: 'A', bets: under25.filter(b => b.odds >= 2.10 && b.odds < 2.30) },
+  ]
+  const u25Other = under25.filter(b => b.odds < 1.80 || b.odds >= 2.30)
+
+  // 나머지 시장별
+  const ml = settled.filter(b => b.market === 'moneyline')
+  const hcap = settled.filter(b => b.market === 'handicap')
+  const overBets = settled.filter(b => b.market === 'over')
+  const underOther = settled.filter(b => b.market === 'under' && !pickHasLine(b.pick, '2.5'))
+
+  const mlRows: RuleRow[] = [
+    { label: '1.40~1.79', tier: 'none', bets: ml.filter(b => b.odds >= 1.40 && b.odds < 1.80) },
+    { label: '1.80~2.49', tier: 'none', bets: ml.filter(b => b.odds >= 1.80 && b.odds < 2.50) },
+    { label: '2.50↑', tier: 'none', bets: ml.filter(b => b.odds >= 2.50) },
+    { label: '1.39↓', tier: 'none', bets: ml.filter(b => b.odds < 1.40) },
+  ]
+
+  // 그외
+  const ruleIds = new Set(u25Rows.flatMap(r => r.bets).map(b => b.id))
+  const otherBets = settled.filter(b => !ruleIds.has(b.id))
+
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+        <RuleStatsTable title="⚽ 2.5 언더 — 언더 배당 티어별" rows={u25Rows}
+          extra={
+            <div style={{ marginTop: 6 }}>
+              {u25Other.length > 0 && <div style={{ fontSize: 9, color: 'var(--text-muted)' }}>티어 외: {u25Other.length}건</div>}
+              <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 2 }}>* 강팀 배당 1.40~1.79 필터 미적용 (데이터 미보유)</div>
+            </div>
+          } />
+        <RuleStatsTable title="승패 배당 구간별 (참고)" rows={mlRows} />
+        {(hcap.length > 0 || overBets.length > 0 || underOther.length > 0) && (
+          <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, padding: '12px 14px', flex: '1 0 180px' }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 8 }}>기타 마켓</div>
+            {[
+              { label: '핸디캡', bets: hcap },
+              { label: '오버', bets: overBets },
+              { label: '언더(2.5외)', bets: underOther },
+            ].filter(r => r.bets.length > 0).map(r => {
+              const s = calcStats(r.bets)
+              return (
+                <div key={r.label} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 5 }}>
+                  <span style={{ fontSize: 10, color: 'var(--text-secondary)', width: 70 }}>{r.label} ({s.total}건)</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: s.winRate >= 50 ? '#4ade80' : '#f87171' }}>{s.winRate.toFixed(0)}%</span>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: s.roi >= 0 ? '#4ade80' : '#f87171' }}>{s.roi >= 0 ? '+' : ''}{s.roi.toFixed(1)}%</span>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+      <OtherBetsPanel bets={otherBets} />
+    </div>
+  )
+}
+
+// ─── 농구 상세 통계 (룰북 기반) ──────────────────────────────────
+function BasketballDetailPanel({ bets }: { bets: Bet[] }) {
+  const settled = bets.filter(b => b.result !== 'pending')
+  const hcap = settled.filter(b => b.market === 'handicap')
+  const under = settled.filter(b => b.market === 'under')
+  const ml    = settled.filter(b => b.market === 'moneyline')
+
+  function getSpread(pick: string): number | null {
+    const m = pick?.match(/[+\-]?(\d+\.?\d*)/)
+    if (!m) return null
+    return pick.includes('-') ? -parseFloat(m[1]) : parseFloat(m[1])
   }
 
+  // 플핸 (+스프레드)
+  const plusHcap = hcap.filter(b => { const s = getSpread(b.pick); return s !== null && s > 0 })
+  const pRows: RuleRow[] = [
+    { label: '+6.5~+9.5', tier: 'S', bets: plusHcap.filter(b => { const s = getSpread(b.pick)!; return s >= 6.5 && s <= 9.5 && b.odds >= 1.90 }) },
+    { label: '+10.5~+12.5', tier: 'A', bets: plusHcap.filter(b => { const s = getSpread(b.pick)!; return s >= 10.5 && s <= 12.5 && b.odds >= 1.90 }) },
+    { label: '+5.5/+13.5~+14.5', tier: 'B', bets: plusHcap.filter(b => { const s = getSpread(b.pick)!; return (s === 5.5 || (s >= 13.5 && s <= 14.5)) && b.odds >= 1.90 }) },
+  ]
+  const pOther = plusHcap.filter(b => !pRows.flatMap(r => r.bets).find(x => x.id === b.id))
+
+  // 마핸 (- 스프레드)
+  const minusHcap = hcap.filter(b => { const s = getSpread(b.pick); return s !== null && s < 0 })
+
+  // 언더 — 정배 배당 1.20~1.59 기준 (정배 배당 데이터 없으므로 언더 배당으로만)
+  const unRows: RuleRow[] = [
+    { label: '언더 2.00↑ (1순위)', tier: 'S', bets: under.filter(b => b.odds >= 2.00) },
+    { label: '언더 1.90~1.99 (2순위)', tier: 'A', bets: under.filter(b => b.odds >= 1.90 && b.odds < 2.00) },
+  ]
+  const unOther = under.filter(b => b.odds < 1.90)
+
+  // 그외
+  const ruleIds = new Set([...pRows.flatMap(r => r.bets), ...unRows.flatMap(r => r.bets)].map(b => b.id))
+  const otherBets = settled.filter(b => !ruleIds.has(b.id))
+
   return (
-    <div className="modal-overlay">
-      <div className="modal" style={{ maxWidth: 360 }} onClick={e => e.stopPropagation()}>
-        <div className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-          <Trash2 size={16} color="var(--red)" />
-          {sport.emoji} {sport.label} 데이터 삭제
-          <button onClick={onClose} style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex', padding: 2 }}><X size={15} /></button>
-        </div>
-        <div style={{ padding: '10px 12px', background: 'var(--red-bg)', border: '1px solid var(--red-border)', borderRadius: 'var(--radius-sm)', marginBottom: 14, fontSize: 12, color: 'var(--red)' }}>
-          ⚠️ <strong>{sport.label}</strong> 결과처리 완료 데이터 <strong>{sportBets.length}건</strong>이 영구 삭제됩니다.<br />
-          <span style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 4, display: 'block' }}>대기중(pending) 베팅은 제외됩니다. 이 작업은 되돌릴 수 없습니다.</span>
-        </div>
-        <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 6 }}>
-          확인을 위해 <strong style={{ color: 'var(--text-primary)' }}>"{CONFIRM_WORD}"</strong> 를 입력하세요
-        </div>
-        <div style={{ display: 'flex', gap: 6 }}>
-          <input
-            className="form-input"
-            placeholder={CONFIRM_WORD}
-            value={confirm}
-            onChange={e => setConfirm(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && confirm === CONFIRM_WORD && doDelete()}
-            autoFocus
-          />
-          <button
-            className="btn"
-            style={{ background: 'var(--red)', color: '#fff', border: 'none', flexShrink: 0, opacity: confirm !== CONFIRM_WORD ? 0.4 : 1 }}
-            disabled={confirm !== CONFIRM_WORD || deleting}
-            onClick={doDelete}
-          >
-            {deleting ? '삭제중...' : '삭제'}
-          </button>
-        </div>
+    <div>
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+        <RuleStatsTable title="🏀 플핸 — 스프레드 티어별 (배당 1.90↑)" rows={pRows}
+          extra={pOther.length > 0 ? <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 6 }}>범위 외 / 배당 미달: {pOther.length}건</div> : undefined} />
+        <RuleStatsTable title="🏀 언더 — 배당 구간별" rows={unRows}
+          extra={
+            <div style={{ marginTop: 6 }}>
+              {unOther.length > 0 && <div style={{ fontSize: 9, color: 'var(--text-muted)' }}>1.89↓ 제외: {unOther.length}건</div>}
+              <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 2 }}>* 정배 배당 1.20~1.59 필터 미적용 (데이터 미보유)</div>
+            </div>
+          } />
+        {(minusHcap.length > 0 || ml.length > 0) && (
+          <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, padding: '12px 14px', flex: '1 0 180px' }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 8 }}>기타 마켓</div>
+            {[
+              { label: '마핸(-스프레드)', bets: minusHcap },
+              { label: '승패', bets: ml },
+            ].filter(r => r.bets.length > 0).map(r => {
+              const s = calcStats(r.bets)
+              return (
+                <div key={r.label} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 5 }}>
+                  <span style={{ fontSize: 10, color: 'var(--text-secondary)', width: 90 }}>{r.label} ({s.total}건)</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: s.winRate >= 50 ? '#4ade80' : '#f87171' }}>{s.winRate.toFixed(0)}%</span>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: s.roi >= 0 ? '#4ade80' : '#f87171' }}>{s.roi >= 0 ? '+' : ''}{s.roi.toFixed(1)}%</span>
+                </div>
+              )
+            })}
+          </div>
+        )}
       </div>
+      <OtherBetsPanel bets={otherBets} />
+    </div>
+  )
+}
+
+// ─── 기타 종목 상세 ───────────────────────────────────────────────
+function GenericDetailPanel({ bets }: { bets: Bet[] }) {
+  const settled = bets.filter(b => b.result !== 'pending')
+  const byMarket = (['moneyline','handicap','over','under'] as Market[]).map(mkt => {
+    const mb = settled.filter(b => b.market === mkt)
+    if (!mb.length) return null
+    const s = calcStats(mb)
+    return { mkt, label: { moneyline:'승패', handicap:'핸디캡', over:'오버', under:'언더', correct_score:'정확한스코어', other:'기타' }[mkt], ...s }
+  }).filter(Boolean) as ({ mkt: Market; label: string } & ReturnType<typeof calcStats>)[]
+
+  return (
+    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+      {byMarket.map(r => (
+        <div key={r.mkt} style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, padding: '10px 14px', minWidth: 150 }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 6 }}>{r.label} ({r.total}건)</div>
+          <div style={{ fontSize: 16, fontWeight: 800, color: r.roi >= 0 ? '#4ade80' : '#f87171' }}>{r.roi >= 0 ? '+' : ''}{r.roi.toFixed(1)}%</div>
+          <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 2 }}>승률 <span style={{ fontWeight: 700, color: r.winRate >= 50 ? '#4ade80' : '#f87171' }}>{r.winRate.toFixed(1)}%</span></div>
+          <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>손익 <span style={{ fontWeight: 700, color: r.profit >= 0 ? '#4ade80' : '#f87171' }}>{r.profit >= 0 ? '+' : ''}{r.profit.toLocaleString()}</span></div>
+        </div>
+      ))}
     </div>
   )
 }
@@ -435,7 +441,8 @@ function RulebookPanel({ sport }: { sport: Sport }) {
 function SportPanel({ bets, sport, onDeleteRequest }: {
   bets: Bet[]; sport: typeof SPORTS[0]; onDeleteRequest: () => void
 }) {
-  const sb    = bets.filter(b => b.sport === sport.value)
+  const periodBets = bets.filter(b => b.sport === sport.value)
+  const sb    = periodBets
   const stats = calcStats(sb)
   const byMarket = (['moneyline', 'handicap', 'over', 'under'] as Market[]).map(mkt => {
     const mb = sb.filter(b => b.market === mkt && b.result !== 'pending')
@@ -504,7 +511,10 @@ function SportPanel({ bets, sport, onDeleteRequest }: {
             </table>
           </div>
         )}
-        <SportDetailPanel sport={sport.value as Sport} bets={bets} />
+        {sport.value === 'baseball'   && <BaseballDetailPanel bets={periodBets} />}
+        {sport.value === 'soccer'     && <SoccerDetailPanel bets={periodBets} />}
+        {sport.value === 'basketball' && <BasketballDetailPanel bets={periodBets} />}
+        {!['baseball','soccer','basketball'].includes(sport.value) && <GenericDetailPanel bets={periodBets} />}
       </div>
 
       {profitCurve.length > 1 && (
