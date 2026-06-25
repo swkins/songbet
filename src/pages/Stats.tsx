@@ -350,22 +350,26 @@ function LivePanel({ bets }: { bets: Bet[] }) {
   const s = calcStats(liveBets)
 
   // 종목별 집계
-  const bySport = (['soccer','baseball','basketball','volleyball','hockey','esports','other'] as Sport[]).map(sp => {
+  type SportStat = { sp: Sport; emoji: string } & ReturnType<typeof calcStats>
+  const bySport = (['soccer','baseball','basketball','volleyball','hockey','esports','other'] as Sport[]).reduce<SportStat[]>((acc, sp) => {
     const sb = liveBets.filter(b => b.sport === sp)
-    if (!sb.length) return null
+    if (!sb.length) return acc
     const ss = calcStats(sb)
     const emoji = { soccer:'⚽', baseball:'⚾', basketball:'🏀', volleyball:'🏐', hockey:'🏒', esports:'🎮', other:'📋' }[sp]
-    return { sp, emoji, ...ss }
-  }).filter(Boolean) as { sp: Sport; emoji: string } & ReturnType<typeof calcStats>[]
+    acc.push({ sp, emoji, ...ss })
+    return acc
+  }, [])
 
   // 마켓별 집계
-  const byMarket = (['moneyline','handicap','over','under'] as Market[]).map(mkt => {
+  type MarketStat = { mkt: Market; label: string } & ReturnType<typeof calcStats>
+  const byMarket = (['moneyline','handicap','over','under'] as Market[]).reduce<MarketStat[]>((acc, mkt) => {
     const mb = liveBets.filter(b => b.market === mkt)
-    if (!mb.length) return null
+    if (!mb.length) return acc
     const ms = calcStats(mb)
     const label = { moneyline:'승패', handicap:'핸디캡', over:'오버', under:'언더', correct_score:'정확한스코어', other:'기타' }[mkt]
-    return { mkt, label, ...ms }
-  }).filter(Boolean) as { mkt: Market; label: string } & ReturnType<typeof calcStats>[]
+    acc.push({ mkt, label, ...ms })
+    return acc
+  }, [])
 
   // 누적 손익 곡선
   const profitCurve = (() => {

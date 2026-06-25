@@ -40,4 +40,4 @@ export interface ActionLog {
   before_data: Record<string, unknown> | null; after_data: Record<string, unknown> | null; description: string
   cashflow_id: string | null
 }
-export type Tab = 'dashboard' | 'stats' | 'settlement' | 'simul'
+export type Tab = 'dashboard' | 'stats' | 'settlement' | 'simul' | 'rulebook'
