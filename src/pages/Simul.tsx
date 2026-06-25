@@ -628,70 +628,67 @@ export default function Simul() {
     </div>
   )
 
-  // ─── 우측 패널: 통계 ──────────────────────────────────────────
-  const rightPanel = settled.length === 0 ? (
-        <div style={card}>
-          <div style={secT}>모의 통계</div>
-          <div style={{ fontSize:11, color:'var(--text-secondary)', textAlign:'center', padding:'20px 0' }}>결과 처리 후 통계가 표시됩니다</div>
-        </div>
+  // ─── 우측 탭 상태 ──────────────────────────────────────────────
+  const [rightTab, setRightTab] = useState<'stats' | 'rulebook'>('stats')
+
+  // ─── 우측 패널: 통계 탭 ────────────────────────────────────────
+  const statsPanel = settled.length === 0 ? (
+    <div style={card}>
+      <div style={secT}>모의 통계</div>
+      <div style={{ fontSize:11, color:'var(--text-secondary)', textAlign:'center', padding:'20px 0' }}>결과 처리 후 통계가 표시됩니다</div>
+    </div>
   ) : (
-      <div style={{ display:'flex', flexDirection:'column', gap:0 }}>
-        <div style={card}>
-          <div style={secT}>모의 통계</div>
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:6, marginBottom:10 }}>
-            {[
-              { label:'총 베팅', val: settled.length+'건' },
-              { label:'적중률', val: winRate.toFixed(1)+'%', color: winRate>=50?'#4ade80':'#f87171' },
-              { label:'평균 배당', val: avgOdds.toFixed(2) },
-              { label:'모의 ROI', val: roi.toFixed(1)+'%', color: roi>=0?'#4ade80':'#f87171' },
-            ].map(({label, val, color}) => (
-              <div key={label} style={{ background:'var(--bg-elevated)', borderRadius:6, padding:'8px 10px' }}>
-                <div style={{ fontSize:9, color:'var(--text-secondary)', marginBottom:3 }}>{label}</div>
-                <div style={{ fontSize:15, fontWeight:700, color: color ?? 'var(--text-primary)' }}>{val}</div>
-              </div>
-            ))}
+    <div style={card}>
+      <div style={secT}>모의 통계</div>
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:6, marginBottom:10 }}>
+        {[
+          { label:'총 베팅', val: settled.length+'건' },
+          { label:'적중률', val: winRate.toFixed(1)+'%', color: winRate>=50?'#4ade80':'#f87171' },
+          { label:'평균 배당', val: avgOdds.toFixed(2) },
+          { label:'모의 ROI', val: roi.toFixed(1)+'%', color: roi>=0?'#4ade80':'#f87171' },
+        ].map(({label, val, color}) => (
+          <div key={label} style={{ background:'var(--bg-elevated)', borderRadius:6, padding:'8px 10px' }}>
+            <div style={{ fontSize:9, color:'var(--text-secondary)', marginBottom:3 }}>{label}</div>
+            <div style={{ fontSize:15, fontWeight:700, color: color ?? 'var(--text-primary)' }}>{val}</div>
           </div>
-          <div style={{ display:'flex', gap:8, marginBottom:10 }}>
-            <div style={{ flex:1, background:'rgba(74,222,128,0.08)', borderRadius:6, padding:'6px 10px', textAlign:'center', border:'1px solid rgba(74,222,128,0.2)' }}>
-              <div style={{ fontSize:9, color:'var(--text-secondary)' }}>적중</div>
-              <div style={{ fontSize:16, fontWeight:700, color:'#4ade80' }}>{wins.length}</div>
-            </div>
-            <div style={{ flex:1, background:'rgba(248,113,113,0.08)', borderRadius:6, padding:'6px 10px', textAlign:'center', border:'1px solid rgba(248,113,113,0.2)' }}>
-              <div style={{ fontSize:9, color:'var(--text-secondary)' }}>실패</div>
-              <div style={{ fontSize:16, fontWeight:700, color:'#f87171' }}>{losses.length}</div>
-            </div>
-          </div>
-
-          {/* 적중률 바 */}
-          <div style={{ marginBottom:10 }}>
-            <div style={{ fontSize:9, color:'var(--text-secondary)', marginBottom:4 }}>적중률</div>
-            <div style={{ height:6, background:'var(--bg-elevated)', borderRadius:3, overflow:'hidden' }}>
-              <div style={{ height:'100%', width:`${winRate}%`, background: winRate>=50?'#4ade80':'#f87171', borderRadius:3, transition:'width 0.3s' }} />
-            </div>
-          </div>
-
-          {/* 티어별 통계 */}
-          {tierStats.length > 0 && (
-            <div>
-              <div style={{ fontSize:9, color:'var(--text-secondary)', marginBottom:6, fontWeight:700 }}>티어별 적중률</div>
-              {tierStats.map(({tier, total, wins: tw, rate}) => (
-                <div key={tier} style={{ display:'flex', alignItems:'center', gap:6, marginBottom:5 }}>
-                  <TierBadge tier={tier} size={18} />
-                  <div style={{ flex:1 }}>
-                    <div style={{ display:'flex', justifyContent:'space-between', marginBottom:2 }}>
-                      <span style={{ fontSize:9, color:'var(--text-secondary)' }}>{tw}/{total}건</span>
-                      <span style={{ fontSize:9, fontWeight:700, color: rate>=50?'#4ade80':'#f87171' }}>{rate.toFixed(0)}%</span>
-                    </div>
-                    <div style={{ height:3, background:'var(--bg-elevated)', borderRadius:2, overflow:'hidden' }}>
-                      <div style={{ height:'100%', width:`${rate}%`, background: rate>=50?'#4ade80':'#f87171', borderRadius:2 }} />
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+        ))}
+      </div>
+      <div style={{ display:'flex', gap:8, marginBottom:10 }}>
+        <div style={{ flex:1, background:'rgba(74,222,128,0.08)', borderRadius:6, padding:'6px 10px', textAlign:'center', border:'1px solid rgba(74,222,128,0.2)' }}>
+          <div style={{ fontSize:9, color:'var(--text-secondary)' }}>적중</div>
+          <div style={{ fontSize:16, fontWeight:700, color:'#4ade80' }}>{wins.length}</div>
+        </div>
+        <div style={{ flex:1, background:'rgba(248,113,113,0.08)', borderRadius:6, padding:'6px 10px', textAlign:'center', border:'1px solid rgba(248,113,113,0.2)' }}>
+          <div style={{ fontSize:9, color:'var(--text-secondary)' }}>실패</div>
+          <div style={{ fontSize:16, fontWeight:700, color:'#f87171' }}>{losses.length}</div>
         </div>
       </div>
+      <div style={{ marginBottom:10 }}>
+        <div style={{ fontSize:9, color:'var(--text-secondary)', marginBottom:4 }}>적중률</div>
+        <div style={{ height:6, background:'var(--bg-elevated)', borderRadius:3, overflow:'hidden' }}>
+          <div style={{ height:'100%', width:`${winRate}%`, background: winRate>=50?'#4ade80':'#f87171', borderRadius:3, transition:'width 0.3s' }} />
+        </div>
+      </div>
+      {tierStats.length > 0 && (
+        <div>
+          <div style={{ fontSize:9, color:'var(--text-secondary)', marginBottom:6, fontWeight:700 }}>티어별 적중률</div>
+          {tierStats.map(({tier, total, wins: tw, rate}) => (
+            <div key={tier} style={{ display:'flex', alignItems:'center', gap:6, marginBottom:5 }}>
+              <TierBadge tier={tier} size={18} />
+              <div style={{ flex:1 }}>
+                <div style={{ display:'flex', justifyContent:'space-between', marginBottom:2 }}>
+                  <span style={{ fontSize:9, color:'var(--text-secondary)' }}>{tw}/{total}건</span>
+                  <span style={{ fontSize:9, fontWeight:700, color: rate>=50?'#4ade80':'#f87171' }}>{rate.toFixed(0)}%</span>
+                </div>
+                <div style={{ height:3, background:'var(--bg-elevated)', borderRadius:2, overflow:'hidden' }}>
+                  <div style={{ height:'100%', width:`${rate}%`, background: rate>=50?'#4ade80':'#f87171', borderRadius:2 }} />
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   )
 
   return (
@@ -699,8 +696,22 @@ export default function Simul() {
       {leftPanel}
       {midPanel}
       <div style={{ display:'flex', flexDirection:'column', gap:0 }}>
-        {rightPanel}
-        {rulebook}
+        {/* 우측 탭 */}
+        <div style={{ display:'flex', gap:4, marginBottom:8 }}>
+          {([
+            { id: 'stats' as const, label: '📊 통계' },
+            { id: 'rulebook' as const, label: '📖 룰북' },
+          ]).map(t => (
+            <button key={t.id} onClick={() => setRightTab(t.id)} style={{
+              flex:1, padding:'6px 0', borderRadius:6, fontSize:11, fontWeight:700, cursor:'pointer',
+              border: `1px solid ${rightTab === t.id ? 'var(--cyan-border)' : 'var(--border)'}`,
+              background: rightTab === t.id ? 'var(--cyan-bg)' : 'var(--bg-elevated)',
+              color: rightTab === t.id ? 'var(--cyan)' : 'var(--text-secondary)',
+              fontFamily: 'var(--font-body)',
+            }}>{t.label}</button>
+          ))}
+        </div>
+        {rightTab === 'stats' ? statsPanel : rulebook}
       </div>
     </div>
   )
