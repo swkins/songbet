@@ -935,6 +935,18 @@ export default function Dashboard() {
                       </div>
                     {/* 베팅 목록 */}
                     <div style={{ padding: '6px 8px' }}>
+                      {/* 베팅 추가 — 사이트 활성(입금) 상태일 때만, 항상 맨 위 */}
+                      {site.active && (
+                        <div style={{ marginBottom: pending.length > 0 ? 8 : 4 }}>
+                          {openFormSiteId !== site.id ? (
+                            <button className="site-add-btn" style={{ width: '100%', borderRadius: 8, padding: '12px 0', fontSize: 14 }} onClick={() => setOpenFormSiteId(site.id)}><Plus size={16} /> 베팅 추가</button>
+                          ) : site.bet_type === 'double' ? (
+                            <DoubleBetForm site={site} lastLeg1={getLastLeg1(site.id)} onClose={() => setOpenFormSiteId(null)} onBet={(c1,c2,odds,amt) => submitDoubleBet(site,c1,c2,odds,amt)} />
+                          ) : (
+                            <SingleBetForm site={site} defaultSport={pending.slice(-1)[0]?.sport ?? 'soccer'} onClose={() => setOpenFormSiteId(null)} onBet={(sp,ct,od,amt) => submitBet(site,sp,ct,od,amt)} />
+                          )}
+                        </div>
+                      )}
                       {(() => {
                         const renderedGroups = new Set<string>()
                         return pending.map(bet => {
@@ -1055,16 +1067,6 @@ export default function Dashboard() {
                           )
                         })
                       })()}
-                      {/* 베팅 추가 — 사이트 활성(입금) 상태일 때만 표시 */}
-                      <div style={{ marginTop: 4 }}>
-                        {!site.active ? null : openFormSiteId !== site.id ? (
-                          <button className="site-add-btn" style={{ width: '100%', borderRadius: 8, padding: '12px 0', fontSize: 14 }} onClick={() => setOpenFormSiteId(site.id)}><Plus size={16} /> 베팅 추가</button>
-                        ) : site.bet_type === 'double' ? (
-                          <DoubleBetForm site={site} lastLeg1={getLastLeg1(site.id)} onClose={() => setOpenFormSiteId(null)} onBet={(c1,c2,odds,amt) => submitDoubleBet(site,c1,c2,odds,amt)} />
-                        ) : (
-                          <SingleBetForm site={site} defaultSport={pending.slice(-1)[0]?.sport ?? 'soccer'} onClose={() => setOpenFormSiteId(null)} onBet={(sp,ct,od,amt) => submitBet(site,sp,ct,od,amt)} />
-                        )}
-                      </div>
                       {/* 완료된 목록 — 마감(비활성) 사이트에선 숨김 */}
                       {site.active && settled.length > 0 && (() => {
                         const renderedSettledGroups = new Set<string>()
