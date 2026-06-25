@@ -279,7 +279,7 @@ function DeleteBetsModal({ sport, bets, onClose, onDeleted }: {
 }) {
   const [confirm, setConfirm] = useState('')
   const [deleting, setDeleting] = useState(false)
-  const sportBets = bets.filter(b => b.sport === sport.value)
+  const sportBets = bets.filter(b => b.sport === sport.value && b.result !== 'pending')
   const CONFIRM_WORD = sport.label
 
   async function doDelete() {
@@ -302,8 +302,8 @@ function DeleteBetsModal({ sport, bets, onClose, onDeleted }: {
           <button onClick={onClose} style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex', padding: 2 }}><X size={15} /></button>
         </div>
         <div style={{ padding: '10px 12px', background: 'var(--red-bg)', border: '1px solid var(--red-border)', borderRadius: 'var(--radius-sm)', marginBottom: 14, fontSize: 12, color: 'var(--red)' }}>
-          ⚠️ <strong>{sport.label}</strong> 베팅 데이터 <strong>{sportBets.length}건</strong>이 영구 삭제됩니다.<br />
-          <span style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 4, display: 'block' }}>이 작업은 되돌릴 수 없습니다.</span>
+          ⚠️ <strong>{sport.label}</strong> 결과처리 완료 데이터 <strong>{sportBets.length}건</strong>이 영구 삭제됩니다.<br />
+          <span style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 4, display: 'block' }}>대기중(pending) 베팅은 제외됩니다. 이 작업은 되돌릴 수 없습니다.</span>
         </div>
         <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 6 }}>
           확인을 위해 <strong style={{ color: 'var(--text-primary)' }}>"{CONFIRM_WORD}"</strong> 를 입력하세요
