@@ -4,7 +4,6 @@ import Dashboard from './pages/Dashboard'
 import Settlement from './pages/Settlement'
 import Stats from './pages/Stats'
 import Simul from './pages/Simul'
-import Rulebook from './pages/Rulebook'
 import { supabase } from './lib/supabase'
 import { purgeOldLogs } from './lib/logger'
 import dayjs from 'dayjs'
@@ -15,7 +14,6 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'stats', label: '통계' },
   { id: 'settlement', label: '결산' },
   { id: 'simul', label: '모의' },
-  { id: 'rulebook', label: '룰북' },
 ]
 
 const WIDTH_OPTIONS: { label: string; value: string }[] = [
@@ -156,11 +154,12 @@ export default function App() {
   const [todos, setTodos] = useState<Todo[]>([])
   const [newTodoText, setNewTodoText] = useState('')
   const todayStr = dayjs().format('YYYY-MM-DD')
+  const todoDragId = { current: '' }; const todoOverId = { current: '' }
   const uncheckedCount = todos.filter(t => !t.check_dates.includes(todayStr)).length
 
   useEffect(() => { loadTodos() }, [])
   async function loadTodos() {
-    const { data } = await supabase.from('todos').select('*').order('created_at')
+    const { data } = await supabase.from('todos').select('*').order('sort_order', { ascending: true }).order('created_at')
     if (data) setTodos(data as Todo[])
   }
   async function toggleTodoApp(todo: Todo) {
@@ -174,7 +173,19 @@ export default function App() {
     const { data } = await supabase.from('todos').insert({ todo_date: todayStr, content: newTodoText.trim(), done: false, check_count: 0, check_dates: [] }).select().single()
     if (data) { setTodos(p => [...p, data as Todo]); setNewTodoText('') }
   }
-  async function deleteTodoApp(id: string) {
+  async function reorderTodosApp(draggedId: string, overId: string) {
+    const from = todos.findIndex(t => t.id === draggedId)
+    const to   = todos.findIndex(t => t.id === overId)
+    if (from === -1 || to === -1 || from === to) return
+    const reordered = [...todos]
+    const [moved] = reordered.splice(from, 1)
+    reordered.splice(to, 0, moved)
+    setTodos(reordered)
+    await Promise.all(reordered.map((t, i) =>
+      supabase.from('todos').update({ sort_order: i }).eq('id', t.id)
+    ))
+  }
+    async function deleteTodoApp(id: string) {
     await supabase.from('todos').delete().eq('id', id)
     setTodos(p => p.filter(t => t.id !== id))
   }
@@ -433,7 +444,6 @@ export default function App() {
           {tab === 'stats' && <Stats />}
           {tab === 'settlement' && <Settlement />}
           {tab === 'simul' && <Simul />}
-          {tab === 'rulebook' && <Rulebook />}
         </div>
       </div>
 
@@ -606,8 +616,17 @@ export default function App() {
                 const isChecked = todo.check_dates.includes(todayStr)
                 const isSettingsOpen = todoSettingsId === todo.id
                 return (
-                  <div key={todo.id} style={{ position: 'relative' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 14px', borderBottom: '1px solid var(--border-light)' }}>
+                  <div key={todo.id} style={{ position: 'relative' }}
+                    draggable
+                    onDragStart={() => { todoDragId.current = todo.id }}
+                    onDragOver={e => { e.preventDefault(); todoOverId.current = todo.id }}
+                    onDragEnd={() => {
+                      if (todoDragId.current && todoOverId.current && todoDragId.current !== todoOverId.current)
+                        reorderTodosApp(todoDragId.current, todoOverId.current)
+                      todoDragId.current = ''; todoOverId.current = ''
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 14px', borderBottom: '1px solid var(--border-light)', cursor: 'grab' }}>
                       <button
                         onClick={() => toggleTodoApp(todo)}
                         style={{
