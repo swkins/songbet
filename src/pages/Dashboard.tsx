@@ -996,27 +996,27 @@ export default function Dashboard() {
                                     {hoverBetId === bet.parlay_group && (
                                       <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flexShrink: 0, alignSelf: 'center' }}>
                                         <div style={{ display: 'flex', gap: 3, justifyContent: 'flex-end' }}>
-                                          <button className="bet-action-btn" title="수정" style={{ color: 'var(--gold)', padding: '2px 4px', minWidth: 0 }}
+                                          <button className="bet-action-btn" title="수정" style={{ color: 'var(--gold)', padding: '1px 3px', minWidth: 0 }}
                                             onClick={() => { setInlineEditBetId(bet.parlay_group); setHoverBetId(null) }}>
-                                            <Pencil size={10} />
+                                            <Pencil size={8} />
                                           </button>
-                                          <button className="bet-action-btn bet-action-cancel" title="베팅취소" style={{ padding: '2px 4px', minWidth: 0 }}
+                                          <button className="bet-action-btn bet-action-cancel" title="베팅취소" style={{ padding: '1px 3px', minWidth: 0 }}
                                             onClick={() => applyParlayResult(groupBets, 'cancel')}>
-                                            <Ban size={10} />
+                                            <Ban size={8} />
                                           </button>
                                         </div>
                                         <div style={{ display: 'flex', gap: 3 }}>
                                           <button className="bet-action-btn bet-action-win" title="적중" style={{ padding: '5px 8px', minWidth: 0 }}
                                             onClick={() => applyParlayResult(groupBets, 'win')}>
-                                            <CheckCircle size={16} />
+                                            <CheckCircle size={20} />
                                           </button>
                                           <button className="bet-action-btn bet-action-loss" title="실패" style={{ padding: '5px 8px', minWidth: 0 }}
                                             onClick={() => applyParlayResult(groupBets, 'loss')}>
-                                            <XCircle size={16} />
+                                            <XCircle size={20} />
                                           </button>
                                           <button className="bet-action-btn" title="적특" style={{ padding: '5px 8px', minWidth: 0, color: 'var(--blue)', borderColor: 'var(--blue-border)' }}
-                                            onClick={() => applyParlayResult(groupBets, 'push')}>
-                                            <MinusCircle size={16} />
+                                            onClick={() => { if (confirm('적특으로 처리하시겠습니까?')) applyParlayResult(groupBets, 'push') }}>
+                                            <MinusCircle size={20} />
                                           </button>
                                         </div>
                                       </div>
@@ -1055,13 +1055,13 @@ export default function Dashboard() {
                                       <div style={{ display: 'flex', gap: 3, justifyContent: 'flex-end' }}>
                                         <button className="bet-action-btn" title="수정"
                                           onClick={() => { setInlineEditBetId(bet.id); setHoverBetId(null) }}
-                                          style={{ color: 'var(--gold)', padding: '2px 4px', minWidth: 0 }}>
-                                          <Pencil size={10} />
+                                          style={{ color: 'var(--gold)', padding: '1px 3px', minWidth: 0 }}>
+                                          <Pencil size={8} />
                                         </button>
                                         <button className="bet-action-btn bet-action-cancel" title="베팅취소"
                                           onClick={() => applyResult(bet, 'cancel')}
-                                          style={{ padding: '2px 4px', minWidth: 0 }}>
-                                          <Ban size={10} />
+                                          style={{ padding: '1px 3px', minWidth: 0 }}>
+                                          <Ban size={8} />
                                         </button>
                                       </div>
                                       {/* 대형: 적중 / 실패 / 적특 */}
@@ -1069,17 +1069,17 @@ export default function Dashboard() {
                                         <button className="bet-action-btn bet-action-win" title="적중"
                                           onClick={() => applyResult(bet, 'win')}
                                           style={{ padding: '5px 8px', minWidth: 0 }}>
-                                          <CheckCircle size={16} />
+                                          <CheckCircle size={20} />
                                         </button>
                                         <button className="bet-action-btn bet-action-loss" title="실패"
                                           onClick={() => applyResult(bet, 'loss')}
                                           style={{ padding: '5px 8px', minWidth: 0 }}>
-                                          <XCircle size={16} />
+                                          <XCircle size={20} />
                                         </button>
                                         <button className="bet-action-btn" title="적특"
-                                          onClick={() => applyResult(bet, 'push')}
+                                          onClick={() => { if (confirm('적특으로 처리하시겠습니까?')) applyResult(bet, 'push') }}
                                           style={{ padding: '5px 8px', minWidth: 0, color: 'var(--blue)', borderColor: 'var(--blue-border)' }}>
-                                          <MinusCircle size={16} />
+                                          <MinusCircle size={20} />
                                         </button>
                                       </div>
                                     </div>
