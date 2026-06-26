@@ -866,11 +866,13 @@ export default function Stats() {
     if (data) setBets(data)
   }
 
-  const periodFiltered = bets.filter(b => {
+  const periodAll = bets.filter(b => {
     if (period === 'all') return true
     const days = period === '7d' ? 7 : period === '30d' ? 30 : 90
     return dayjs(b.bet_date).isAfter(dayjs().subtract(days, 'day'))
   })
+  // 라이브 베팅은 라이브 탭에서만 집계 — 일반 통계에서 제외
+  const periodFiltered = periodAll.filter(b => !b.is_live)
 
   const stats   = calcStats(periodFiltered)
   const settled = periodFiltered.filter(b => b.result !== 'pending')
@@ -989,7 +991,7 @@ export default function Stats() {
             <ParlayPanel bets={periodFiltered} />
           )}
           {activeSport === 'live' && (
-            <LivePanel bets={periodFiltered} />
+            <LivePanel bets={periodAll} />
           )}
         </>
       )}
