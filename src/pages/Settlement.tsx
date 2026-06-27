@@ -222,7 +222,7 @@ export default function Settlement() {
     let amountKrw: number | null = null
     if (isusd) {
       const info = rateInfo ?? await getUsdKrwRate().then(r => { setRateInfo(r); return r })
-      usdKrwRate = info.rate
+      usdKrwRate = info?.rate ?? 1350
       amountKrw = Math.round(amountNum * usdKrwRate)
     }
 
