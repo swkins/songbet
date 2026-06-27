@@ -54,9 +54,10 @@ async function purgeOldExchangeRates() {
   await supabase.from('exchange_rates').delete().lt('rate_date', cutoff)
 }
 
-function DepositSummary({ sites, cashflows }: {
+function DepositSummary({ sites, cashflows, rateInfo }: {
   sites: { id: string; name: string; currency: string }[]
-  cashflows: { flow_date: string; type: string; amount: number; site_id: string | null }[]
+  cashflows: { flow_date: string; type: string; amount: number; site_id: string | null; currency?: string; usd_krw_rate?: number | null; amount_krw?: number | null }[]
+  rateInfo: { rate: number } | null
 }) {
   const [mode, setMode] = useState<'week' | 'month'>('week')
   const weekStart  = dayjs().startOf('isoWeek').format('YYYY-MM-DD')
@@ -66,8 +67,15 @@ function DepositSummary({ sites, cashflows }: {
   const from = mode === 'week' ? weekStart : monthStart
   const to   = mode === 'week' ? weekEnd   : monthEnd
   const filtered = cashflows.filter(c => c.type === 'expense' && c.flow_date >= from && c.flow_date <= to)
-  const total = filtered.reduce((a, c) => a + c.amount, 0)
-  const krwSites = sites.filter(s => s.currency === 'krw')
+
+  function toKrwAmt(c: typeof filtered[0]): number {
+    if (c.currency !== 'usd') return c.amount
+    if (c.amount_krw != null) return Number(c.amount_krw)
+    return Math.round(c.amount * (rateInfo?.rate ?? 1350))
+  }
+
+  const total = filtered.reduce((a, c) => a + toKrwAmt(c), 0)
+
   return (
     <div style={{ borderTop: '1px solid var(--border)', padding: '10px 12px', flexShrink: 0 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
@@ -83,13 +91,22 @@ function DepositSummary({ sites, cashflows }: {
           ))}
         </div>
       </div>
-      {krwSites.map(s => {
-        const amt = filtered.filter(c => c.site_id === s.id).reduce((a, c) => a + c.amount, 0)
+      {sites.map(s => {
+        const siteCfs = filtered.filter(c => c.site_id === s.id)
+        const amt = siteCfs.reduce((a, c) => a + toKrwAmt(c), 0)
         if (amt === 0) return null
+        const isUsd = s.currency === 'usd'
+        const usdRaw = isUsd ? siteCfs.reduce((a, c) => a + c.amount, 0) : 0
         return (
           <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
-            <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{s.name}</span>
-            <span style={{ fontFamily: 'var(--font-num)', fontSize: 12, fontWeight: 700, color: 'var(--orange)' }}>{amt.toLocaleString()}원</span>
+            <span style={{ fontSize: 11, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 4 }}>
+              {s.name}
+              {isUsd && <span style={{ fontSize: 9, background: 'var(--blue-bg)', color: 'var(--blue)', border: '1px solid var(--blue-border)', borderRadius: 3, padding: '1px 4px', fontWeight: 700 }}>USD</span>}
+            </span>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 1 }}>
+              <span style={{ fontFamily: 'var(--font-num)', fontSize: 12, fontWeight: 700, color: 'var(--orange)' }}>{amt.toLocaleString()}원</span>
+              {isUsd && <span style={{ fontFamily: 'var(--font-num)', fontSize: 10, color: 'var(--text-muted)' }}>${usdRaw.toLocaleString()}</span>}
+            </div>
           </div>
         )
       })}
@@ -623,7 +640,7 @@ export default function Settlement() {
           </button>
         </div>
 
-        <DepositSummary sites={sites} cashflows={cashflows} />
+        <DepositSummary sites={sites} cashflows={cashflows} rateInfo={rateInfo} />
       </div>
 
       {/* ═══ 중: 날짜별 목록 (400px) ═══ */}
