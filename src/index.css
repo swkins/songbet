@@ -484,3 +484,5 @@ tr:hover td { background: var(--bg-hover); }
   .dashboard-side { width: 320px; flex-shrink: 0; }
   .dashboard-bets { flex: 1; min-width: 0; }
 }
+
+@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }

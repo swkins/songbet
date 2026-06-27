@@ -6,10 +6,10 @@ import dayjs from 'dayjs'
 import {
   Plus, Trash2, X, TrendingUp, TrendingDown,
   ChevronLeft, ChevronRight, ChevronDown, Pencil, Check, ArrowUp, ArrowDown, Bookmark, BookmarkCheck,
+  RefreshCw,
 } from 'lucide-react'
 
 const DEFAULT_CATS = ['베팅수익', '급여', '식비', '교통', '쇼핑', '기타']
-// 베팅입금만 잠금 (베팅수익은 삭제 가능)
 const LOCKED_CATS = ['베팅입금']
 
 interface CfCategory { id: number; name: string; sort_order: number }
@@ -24,6 +24,35 @@ const COLORS = [
   '#F5A623','#E74C3C','#2ECC71','#3498DB','#9B59B6',
   '#1ABC9C','#E67E22','#34495E','#F39C12','#16A085',
 ]
+
+// ── 환율 가져오기 (오늘자 캐시 우선, 없으면 API 호출 후 저장, 실패시 최근값)
+async function getUsdKrwRate(): Promise<{ rate: number; date: string; updatedAt: string }> {
+  const today = dayjs().format('YYYY-MM-DD')
+  const { data: cached } = await supabase
+    .from('exchange_rates').select('usd_krw, rate_date, fetched_at').eq('rate_date', today).single()
+  if (cached) return { rate: Number(cached.usd_krw), date: cached.rate_date, updatedAt: cached.fetched_at }
+  try {
+    const res = await fetch('https://open.er-api.com/v6/latest/USD')
+    const json = await res.json()
+    const rate = json?.rates?.KRW
+    if (rate) {
+      const { data: inserted } = await supabase
+        .from('exchange_rates').upsert({ rate_date: today, usd_krw: rate }).select('usd_krw, rate_date, fetched_at').single()
+      if (inserted) return { rate: Number(inserted.usd_krw), date: inserted.rate_date, updatedAt: inserted.fetched_at }
+      return { rate, date: today, updatedAt: new Date().toISOString() }
+    }
+  } catch {}
+  const { data: latest } = await supabase
+    .from('exchange_rates').select('usd_krw, rate_date, fetched_at').order('rate_date', { ascending: false }).limit(1).single()
+  if (latest) return { rate: Number(latest.usd_krw), date: latest.rate_date, updatedAt: latest.fetched_at }
+  return { rate: 1350, date: today, updatedAt: new Date().toISOString() }
+}
+
+// 7일 이상 된 환율 데이터 삭제
+async function purgeOldExchangeRates() {
+  const cutoff = dayjs().subtract(7, 'day').format('YYYY-MM-DD')
+  await supabase.from('exchange_rates').delete().lt('rate_date', cutoff)
+}
 
 function DepositSummary({ sites, cashflows }: {
   sites: { id: string; name: string; currency: string }[]
@@ -72,6 +101,38 @@ function DepositSummary({ sites, cashflows }: {
   )
 }
 
+// ── 환율 배너 (결산 통계 상단에 표시)
+function ExchangeRateBanner({ rateInfo, onRefresh, refreshing }: {
+  rateInfo: { rate: number; date: string; updatedAt: string } | null
+  onRefresh: () => void
+  refreshing: boolean
+}) {
+  if (!rateInfo) return (
+    <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>환율 로딩 중...</div>
+    </div>
+  )
+  const updatedStr = dayjs(rateInfo.updatedAt).format('YYYY-MM-DD HH:mm')
+  return (
+    <div style={{ background: 'var(--bg-card)', border: '1px solid var(--blue-border)', borderRadius: 10, padding: '10px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--blue)', textTransform: 'uppercase', letterSpacing: '0.7px' }}>USD/KRW</span>
+        <span style={{ fontFamily: 'var(--font-num)', fontSize: 18, fontWeight: 800, color: 'var(--text-primary)' }}>
+          {fmt(Math.round(rateInfo.rate))}원
+        </span>
+        <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>= $1</span>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>최종수정 {updatedStr}</span>
+        <button onClick={onRefresh} disabled={refreshing} title="환율 새로고침"
+          style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 6, padding: '4px 6px', cursor: refreshing ? 'default' : 'pointer', display: 'flex', alignItems: 'center', color: 'var(--text-muted)', opacity: refreshing ? 0.5 : 1 }}>
+          <RefreshCw size={12} style={{ animation: refreshing ? 'spin 1s linear infinite' : 'none' }} />
+        </button>
+      </div>
+    </div>
+  )
+}
+
 export default function Settlement() {
   const today = dayjs().format('YYYY-MM-DD')
 
@@ -79,6 +140,10 @@ export default function Settlement() {
   const [sites, setSites] = useState<Site[]>([])
   const [categories, setCategories] = useState<CfCategory[]>([])
   const [presets, setPresets] = useState<CfPreset[]>([])
+
+  // 환율 상태
+  const [rateInfo, setRateInfo] = useState<{ rate: number; date: string; updatedAt: string } | null>(null)
+  const [rateRefreshing, setRateRefreshing] = useState(false)
 
   const [formType, setFormType]     = useState<'income' | 'expense'>('income')
   const [formDate, setFormDate]     = useState(today)
@@ -100,11 +165,24 @@ export default function Settlement() {
   const [editSite, setEditSite]       = useState<Site | null>(null)
   const [editSiteVal, setEditSiteVal] = useState('')
 
-  // 프리셋 저장 모달
   const [showSavePreset, setShowSavePreset] = useState(false)
   const [presetName, setPresetName]         = useState('')
 
-  useEffect(() => { loadCashflows(); loadSites(); loadCategories(); loadPresets() }, [])
+  useEffect(() => {
+    loadCashflows(); loadSites(); loadCategories(); loadPresets()
+    // 환율 로드 + 7일 이상 데이터 정리
+    getUsdKrwRate().then(setRateInfo)
+    purgeOldExchangeRates()
+  }, [])
+
+  async function refreshRate() {
+    setRateRefreshing(true)
+    // 오늘 캐시 삭제 후 재호출 (강제 갱신)
+    await supabase.from('exchange_rates').delete().eq('rate_date', today)
+    const info = await getUsdKrwRate()
+    setRateInfo(info)
+    setRateRefreshing(false)
+  }
 
   async function loadCashflows() {
     const { data } = await supabase.from('cashflows').select('*').order('flow_date', { ascending: false }).order('created_at', { ascending: false }).limit(300)
@@ -119,7 +197,6 @@ export default function Settlement() {
     if (data && data.length > 0) {
       setCategories(data)
     } else {
-      // 최초: 기본값 insert
       const rows = DEFAULT_CATS.map((name, i) => ({ name, sort_order: i }))
       const { data: inserted } = await supabase.from('cf_categories').insert(rows).select().order('sort_order')
       if (inserted) setCategories(inserted)
@@ -135,13 +212,29 @@ export default function Settlement() {
     if (!formAmount || saving) return
     setSaving(true)
     const siteName = sites.find(s => s.id === formSiteId)?.name ?? ''
+    const site = sites.find(s => s.id === formSiteId)
+    const isusd = site?.currency === 'usd'
     const desc = siteName ? `${siteName} / ${formCat || '기타'}` : formCat || '기타'
+    const amountNum = Number(formAmount.replace(/,/g, ''))
+
+    // USD 항목이면 당일 환율 저장
+    let usdKrwRate: number | null = null
+    let amountKrw: number | null = null
+    if (isusd) {
+      const info = rateInfo ?? await getUsdKrwRate().then(r => { setRateInfo(r); return r })
+      usdKrwRate = info.rate
+      amountKrw = Math.round(amountNum * usdKrwRate)
+    }
+
     const { data } = await supabase.from('cashflows').insert({
       flow_date: formDate, type: formType, category: formCat || '기타',
-      description: desc, amount: Number(formAmount.replace(/,/g, '')), site_id: formSiteId || null,
+      description: desc, amount: amountNum, site_id: formSiteId || null,
+      currency: isusd ? 'usd' : 'krw',
+      usd_krw_rate: usdKrwRate,
+      amount_krw: isusd ? amountKrw : amountNum,
     }).select().single()
     if (data) {
-      await logAction({ action_type: 'insert', table_name: 'cashflows', record_id: data.id, after_data: data as never, description: `수입/지출 추가: ${desc} ${Number(formAmount.replace(/,/g, '')).toLocaleString()}원` })
+      await logAction({ action_type: 'insert', table_name: 'cashflows', record_id: data.id, after_data: data as never, description: `수입/지출 추가: ${desc} ${amountNum.toLocaleString()}${isusd ? '$' : '원'}` })
       setCashflows(p => [data, ...p])
       setFormAmount(''); setFormSiteId(''); setFormCat('')
     }
@@ -154,7 +247,7 @@ export default function Settlement() {
     setCashflows(p => p.filter(c => c.id !== cf.id))
   }
 
-  /* ── 카테고리 (Supabase) ── */
+  /* ── 카테고리 ── */
   async function addCat() {
     if (!newCat.trim() || categories.some(c => c.name === newCat.trim())) return
     const sort_order = categories.length
@@ -221,20 +314,13 @@ export default function Settlement() {
   async function savePreset() {
     if (!presetName.trim()) return
     const { data } = await supabase.from('cf_presets').insert({
-      name: presetName.trim(),
-      amount: formAmount,
-      site_id: formSiteId,
-      category: formCat,
-      type: formType,
+      name: presetName.trim(), amount: formAmount, site_id: formSiteId, category: formCat, type: formType,
     }).select().single()
     if (data) setPresets(p => [...p, data as CfPreset])
     setShowSavePreset(false); setPresetName('')
   }
   function applyPreset(preset: CfPreset) {
-    setFormType(preset.type)
-    setFormAmount(preset.amount)
-    setFormSiteId(preset.site_id)
-    setFormCat(preset.category)
+    setFormType(preset.type); setFormAmount(preset.amount); setFormSiteId(preset.site_id); setFormCat(preset.category)
     setPresetDropOpen(false)
   }
   async function deletePreset(id: number) {
@@ -242,9 +328,16 @@ export default function Settlement() {
     setPresets(p => p.filter(x => x.id !== id))
   }
 
-  /* ── 합계 ── */
-  const allIncome  = cashflows.filter(c => c.type === 'income').reduce((s, c) => s + c.amount, 0)
-  const allExpense = cashflows.filter(c => c.type === 'expense').reduce((s, c) => s + c.amount, 0)
+  /* ── 합계 계산 (달러/원화 분리, 원화 환산 포함) ── */
+  // 달러 cashflow는 amount_krw(저장된 당일환율 환산값) 사용, 없으면 현재 rate로 환산
+  function toKrw(cf: Cashflow): number {
+    if (cf.currency !== 'usd') return cf.amount
+    if (cf.amount_krw != null) return Number(cf.amount_krw)
+    return Math.round(cf.amount * (rateInfo?.rate ?? 1350))
+  }
+
+  const allIncome  = cashflows.filter(c => c.type === 'income').reduce((s, c) => s + toKrw(c), 0)
+  const allExpense = cashflows.filter(c => c.type === 'expense').reduce((s, c) => s + toKrw(c), 0)
   const allBalance = allIncome - allExpense
 
   const thisMonthStart = dayjs().startOf('month').format('YYYY-MM-DD')
@@ -253,16 +346,16 @@ export default function Settlement() {
   const monthSiteExpense = useMemo(() => {
     const map: Record<string, number> = {}
     cashflows.filter(c => c.type === 'expense' && c.flow_date >= thisMonthStart && c.flow_date <= thisMonthEnd && c.site_id)
-      .forEach(c => { map[c.site_id!] = (map[c.site_id!] ?? 0) + c.amount })
+      .forEach(c => { map[c.site_id!] = (map[c.site_id!] ?? 0) + toKrw(c) })
     return Object.entries(map).map(([siteId, amt]) => ({ name: sites.find(s => s.id === siteId)?.name ?? siteId, amt })).sort((a, b) => b.amt - a.amt)
-  }, [cashflows, sites, thisMonthStart, thisMonthEnd])
+  }, [cashflows, sites, thisMonthStart, thisMonthEnd, rateInfo])
 
   const monthSiteIncome = useMemo(() => {
     const map: Record<string, number> = {}
     cashflows.filter(c => c.type === 'income' && c.flow_date >= thisMonthStart && c.flow_date <= thisMonthEnd && c.site_id)
-      .forEach(c => { map[c.site_id!] = (map[c.site_id!] ?? 0) + c.amount })
+      .forEach(c => { map[c.site_id!] = (map[c.site_id!] ?? 0) + toKrw(c) })
     return Object.entries(map).map(([siteId, amt]) => ({ name: sites.find(s => s.id === siteId)?.name ?? siteId, amt })).sort((a, b) => b.amt - a.amt)
-  }, [cashflows, sites, thisMonthStart, thisMonthEnd])
+  }, [cashflows, sites, thisMonthStart, thisMonthEnd, rateInfo])
 
   const monthlySummary = useMemo(() => {
     const months: { label: string; income: number; expense: number }[] = []
@@ -270,12 +363,12 @@ export default function Settlement() {
       const m = dayjs().subtract(i, 'month')
       const from = m.startOf('month').format('YYYY-MM-DD')
       const to   = m.endOf('month').format('YYYY-MM-DD')
-      const inc = cashflows.filter(c => c.type === 'income'  && c.flow_date >= from && c.flow_date <= to).reduce((s, c) => s + c.amount, 0)
-      const exp = cashflows.filter(c => c.type === 'expense' && c.flow_date >= from && c.flow_date <= to).reduce((s, c) => s + c.amount, 0)
+      const inc = cashflows.filter(c => c.type === 'income'  && c.flow_date >= from && c.flow_date <= to).reduce((s, c) => s + toKrw(c), 0)
+      const exp = cashflows.filter(c => c.type === 'expense' && c.flow_date >= from && c.flow_date <= to).reduce((s, c) => s + toKrw(c), 0)
       months.push({ label: m.format('M월'), income: inc, expense: exp })
     }
     return months
-  }, [cashflows])
+  }, [cashflows, rateInfo])
 
   const maxMonthly = Math.max(...monthlySummary.flatMap(m => [m.income, m.expense]), 1)
 
@@ -291,15 +384,31 @@ export default function Settlement() {
       .map(([date, items]) => [date, [...items].sort((a, b) => b.created_at.localeCompare(a.created_at))] as [string, Cashflow[]])
   }, [monthFlows])
 
-  const monthIncome  = monthFlows.filter(c => c.type === 'income').reduce((s, c) => s + c.amount, 0)
-  const monthExpense = monthFlows.filter(c => c.type === 'expense').reduce((s, c) => s + c.amount, 0)
+  const monthIncome  = monthFlows.filter(c => c.type === 'income').reduce((s, c) => s + toKrw(c), 0)
+  const monthExpense = monthFlows.filter(c => c.type === 'expense').reduce((s, c) => s + toKrw(c), 0)
+
+  // 달러 cashflow 원화 환산 표시용
+  function usdKrwLabel(cf: Cashflow): string | null {
+    if (cf.currency !== 'usd') return null
+    const krw = cf.amount_krw != null ? Number(cf.amount_krw) : Math.round(cf.amount * (rateInfo?.rate ?? 1350))
+    const rateStr = cf.usd_krw_rate ? `@${Math.round(Number(cf.usd_krw_rate)).toLocaleString()}` : ''
+    return `₩${krw.toLocaleString()}${rateStr}`
+  }
+
+  // 이번달 달러 수입/지출 원화 환산 합계
+  const monthUsdIncomeKrw = monthFlows.filter(c => c.type === 'income' && c.currency === 'usd').reduce((s, c) => s + toKrw(c), 0)
+  const monthUsdExpenseKrw = monthFlows.filter(c => c.type === 'expense' && c.currency === 'usd').reduce((s, c) => s + toKrw(c), 0)
+  const hasUsdInMonth = monthUsdIncomeKrw > 0 || monthUsdExpenseKrw > 0
 
   const maxSiteExpense = Math.max(...monthSiteExpense.map(x => x.amt), 1)
   const maxSiteIncome  = Math.max(...monthSiteIncome.map(x => x.amt), 1)
   const DOW_KO = ['일', '월', '화', '수', '목', '금', '토']
 
-  /* ── catNames (편의) ── */
   const catNames = categories.map(c => c.name)
+
+  // 선택된 사이트의 통화
+  const selectedSiteCurrency = sites.find(s => s.id === formSiteId)?.currency ?? 'krw'
+  const formIsUsd = selectedSiteCurrency === 'usd'
 
   return (
     <div style={{ display: 'flex', height: 'calc(100vh - 58px)', overflow: 'hidden', background: 'var(--bg)', gap: 0 }}>
@@ -307,13 +416,11 @@ export default function Settlement() {
       {/* ═══ 좌: 추가 폼 (320px) ═══ */}
       <div style={{ width: 320, flexShrink: 0, borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', overflowY: 'auto' }}>
 
-        {/* 날짜 */}
         <div style={{ padding: '12px 12px 0' }}>
           <div style={labelSt}>날짜</div>
           <input type="date" style={{ ...inputSt, marginBottom: 10 }} value={formDate} onChange={e => setFormDate(e.target.value)} />
         </div>
 
-        {/* 수입/지출 토글 */}
         <div style={{ padding: '0 12px' }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
             <button onClick={() => setFormType('income')} style={{ padding: '10px 0', borderRadius: 8, border: `2px solid ${formType === 'income' ? 'var(--green)' : 'var(--border)'}`, background: formType === 'income' ? 'var(--green-bg)' : 'var(--bg-elevated)', color: formType === 'income' ? 'var(--green)' : 'var(--text-muted)', fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'var(--font-body)' }}>💰 수입</button>
@@ -324,12 +431,18 @@ export default function Settlement() {
         <div style={{ padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 10 }}>
           {/* 금액 */}
           <div>
-            <div style={labelSt}>금액 (원)</div>
+            <div style={labelSt}>금액 ({formIsUsd ? '$' : '원'})</div>
             <input type="text" inputMode="numeric" placeholder="0"
               style={{ ...inputSt, MozAppearance: 'textfield' } as React.CSSProperties}
               value={formAmount ? Number(formAmount.replace(/,/g, '')).toLocaleString('ko-KR') : ''}
               onChange={e => { const raw = e.target.value.replace(/,/g, ''); if (raw === '' || /^\d+$/.test(raw)) setFormAmount(raw) }}
               onKeyDown={e => e.key === 'Enter' && saveCashflow()} autoFocus />
+            {/* USD이면 환산 미리보기 */}
+            {formIsUsd && formAmount && rateInfo && (
+              <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 3, fontFamily: 'var(--font-num)' }}>
+                ≈ ₩{Math.round(Number(formAmount.replace(/,/g,'')) * rateInfo.rate).toLocaleString()} (@{Math.round(rateInfo.rate).toLocaleString()})
+              </div>
+            )}
           </div>
 
           {/* 사이트 드롭다운 */}
@@ -337,8 +450,13 @@ export default function Settlement() {
             <div style={labelSt}>사이트</div>
             <button onClick={() => { setSiteDropOpen(p => !p); setCatDropOpen(false); setPresetDropOpen(false) }}
               style={{ ...inputSt, display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', textAlign: 'left' }}>
-              <span style={{ color: formSiteId ? 'var(--text-primary)' : 'var(--text-muted)' }}>{formSiteId ? (sites.find(s => s.id === formSiteId)?.name ?? '없음') : '없음'}</span>
-              <ChevronDown size={14} style={{ color: 'var(--text-muted)', flexShrink: 0, transform: siteDropOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }} />
+              <span style={{ color: formSiteId ? 'var(--text-primary)' : 'var(--text-muted)' }}>
+                {formSiteId ? (sites.find(s => s.id === formSiteId)?.name ?? '없음') : '없음'}
+              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                {formIsUsd && <span style={{ fontSize: 9, background: 'var(--blue-bg)', color: 'var(--blue)', border: '1px solid var(--blue-border)', borderRadius: 3, padding: '1px 5px', fontWeight: 700 }}>USD</span>}
+                <ChevronDown size={14} style={{ color: 'var(--text-muted)', flexShrink: 0, transform: siteDropOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }} />
+              </div>
             </button>
             {siteDropOpen && (
               <>
@@ -355,7 +473,12 @@ export default function Settlement() {
                             onKeyDown={e => { e.stopPropagation(); if (e.key === 'Enter') confirmEditSite() }}
                             onClick={e => e.stopPropagation()}
                             style={{ background: 'none', border: 'none', outline: 'none', color: 'var(--text-primary)', fontSize: 13, width: '100%' }} autoFocus />
-                        ) : st.name}
+                        ) : (
+                          <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            {st.name}
+                            {st.currency === 'usd' && <span style={{ fontSize: 9, background: 'var(--blue-bg)', color: 'var(--blue)', border: '1px solid var(--blue-border)', borderRadius: 3, padding: '1px 5px', fontWeight: 700 }}>USD</span>}
+                          </span>
+                        )}
                       </div>
                       {!st.settlement_only && <span style={{ fontSize: 9, color: 'var(--text-muted)', padding: '0 4px', flexShrink: 0 }}>대시보드</span>}
                       <div style={{ display: 'flex', gap: 2, padding: '0 6px', flexShrink: 0 }} onClick={e => e.stopPropagation()}>
@@ -447,7 +570,6 @@ export default function Settlement() {
 
           {/* 프리셋 행 */}
           <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-            {/* 프리셋 불러오기 드롭다운 */}
             <div style={{ position: 'relative', flex: 1 }}>
               <button onClick={() => { setPresetDropOpen(p => !p); setCatDropOpen(false); setSiteDropOpen(false) }}
                 style={{ ...inputSt, display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', textAlign: 'left', padding: '8px 12px', fontSize: 12 }}>
@@ -469,7 +591,7 @@ export default function Settlement() {
                           style={{ flex: 1, padding: '9px 12px', cursor: 'pointer', fontSize: 12 }}>
                           <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{p.name}</div>
                           <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>
-                            {p.type === 'income' ? '💰' : '💸'} {p.amount ? `${Number(p.amount).toLocaleString()}원` : '금액 없음'}
+                            {p.type === 'income' ? '💰' : '💸'} {p.amount ? `${Number(p.amount).toLocaleString()}` : '금액 없음'}
                             {p.category ? ` · ${p.category}` : ''}
                             {p.site_id ? ` · ${sites.find(s => s.id === p.site_id)?.name ?? ''}` : ''}
                           </div>
@@ -483,8 +605,6 @@ export default function Settlement() {
                 </>
               )}
             </div>
-
-            {/* 프리셋 저장 버튼 */}
             <button onClick={() => { setShowSavePreset(true); setPresetName('') }}
               title="현재 상태로 프리셋 저장"
               style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 10px', cursor: 'pointer', color: 'var(--gold)', display: 'flex', alignItems: 'center', flexShrink: 0 }}>
@@ -492,7 +612,6 @@ export default function Settlement() {
             </button>
           </div>
 
-          {/* 저장 */}
           <button onClick={saveCashflow} disabled={!formAmount || saving} style={{
             padding: '12px 0', borderRadius: 8, border: 'none',
             background: !formAmount || saving ? 'var(--border)' : 'var(--gold)',
@@ -520,6 +639,14 @@ export default function Settlement() {
             <div style={miniSummSt}><span style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700 }}>지출</span><span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-num)', color: 'var(--red)' }}>-{fmt(monthExpense)}</span></div>
             <div style={miniSummSt}><span style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700 }}>수익</span><span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-num)', color: (monthIncome - monthExpense) >= 0 ? 'var(--green)' : 'var(--red)' }}>{(monthIncome - monthExpense) >= 0 ? '+' : ''}{fmt(monthIncome - monthExpense)}</span></div>
           </div>
+          {/* 달러 항목이 있는 달이면 원화 환산 합계 표시 */}
+          {hasUsdInMonth && (
+            <div style={{ marginTop: 6, padding: '5px 8px', background: 'var(--blue-bg)', borderRadius: 6, border: '1px solid var(--blue-border)', fontSize: 10, color: 'var(--blue)', display: 'flex', gap: 10 }}>
+              <span>USD→₩ 환산 포함</span>
+              {monthUsdIncomeKrw > 0 && <span>수입 +{fmt(monthUsdIncomeKrw)}</span>}
+              {monthUsdExpenseKrw > 0 && <span>지출 -{fmt(monthUsdExpenseKrw)}</span>}
+            </div>
+          )}
         </div>
 
         <div style={{ flex: 1, overflowY: 'auto', padding: '0 12px' }}>
@@ -527,8 +654,8 @@ export default function Settlement() {
             <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--text-muted)', fontSize: 13 }}>이 달의 내역이 없습니다</div>
           )}
           {groupedByDate.map(([date, items]) => {
-            const dayInc = items.filter(c => c.type === 'income').reduce((s, c) => s + c.amount, 0)
-            const dayExp = items.filter(c => c.type === 'expense').reduce((s, c) => s + c.amount, 0)
+            const dayInc = items.filter(c => c.type === 'income').reduce((s, c) => s + toKrw(c), 0)
+            const dayExp = items.filter(c => c.type === 'expense').reduce((s, c) => s + toKrw(c), 0)
             return (
               <div key={date} style={{ marginTop: 12 }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
@@ -538,19 +665,30 @@ export default function Settlement() {
                     {dayExp > 0 && <span style={{ fontSize: 11, fontFamily: 'var(--font-num)', color: 'var(--red)', fontWeight: 600 }}>-{fmt(dayExp)}</span>}
                   </div>
                 </div>
-                {items.map(c => (
-                  <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 8, background: 'var(--bg-card)', border: '1px solid var(--border-light)', marginBottom: 5 }}>
-                    <div style={{ width: 30, height: 30, borderRadius: 8, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: c.type === 'income' ? 'var(--green-bg)' : 'var(--red-bg)' }}>
-                      {c.type === 'income' ? <TrendingUp size={14} color="var(--green)" /> : <TrendingDown size={14} color="var(--red)" />}
+                {items.map(c => {
+                  const krwLabel = usdKrwLabel(c)
+                  return (
+                    <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 8, background: 'var(--bg-card)', border: '1px solid var(--border-light)', marginBottom: 5 }}>
+                      <div style={{ width: 30, height: 30, borderRadius: 8, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: c.type === 'income' ? 'var(--green-bg)' : 'var(--red-bg)' }}>
+                        {c.type === 'income' ? <TrendingUp size={14} color="var(--green)" /> : <TrendingDown size={14} color="var(--red)" />}
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.description}</div>
+                        <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{c.category}</div>
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 1, flexShrink: 0 }}>
+                        <span style={{ fontSize: 13, fontWeight: 700, fontFamily: 'var(--font-num)', color: c.type === 'income' ? 'var(--green)' : 'var(--red)' }}>
+                          {c.type === 'income' ? '+' : '-'}{c.currency === 'usd' ? '$' : ''}{fmt(c.amount)}{c.currency !== 'usd' ? '' : ''}
+                        </span>
+                        {/* 달러이면 원화 환산 괄호 표시 */}
+                        {krwLabel && (
+                          <span style={{ fontSize: 10, fontFamily: 'var(--font-num)', color: 'var(--blue)', opacity: 0.85 }}>({krwLabel})</span>
+                        )}
+                      </div>
+                      <button onClick={() => deleteCashflow(c)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, color: 'var(--text-muted)', flexShrink: 0, display: 'flex' }}><Trash2 size={12} /></button>
                     </div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.description}</div>
-                      <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{c.category}</div>
-                    </div>
-                    <span style={{ fontSize: 13, fontWeight: 700, fontFamily: 'var(--font-num)', flexShrink: 0, color: c.type === 'income' ? 'var(--green)' : 'var(--red)' }}>{c.type === 'income' ? '+' : '-'}{fmt(c.amount)}</span>
-                    <button onClick={() => deleteCashflow(c)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, color: 'var(--text-muted)', flexShrink: 0, display: 'flex' }}><Trash2 size={12} /></button>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             )
           })}
@@ -559,6 +697,10 @@ export default function Settlement() {
 
       {/* ═══ 우: 통계 ═══ */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflowY: 'auto', padding: '14px 16px', gap: 14 }}>
+
+        {/* 환율 배너 — 최상단 */}
+        <ExchangeRateBanner rateInfo={rateInfo} onRefresh={refreshRate} refreshing={rateRefreshing} />
+
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
           {[
             { label: '총 수입', val: allIncome,  color: 'var(--green)', prefix: '+' },
@@ -568,6 +710,7 @@ export default function Settlement() {
             <div key={label} style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px' }}>
               <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.7px', textTransform: 'uppercase', marginBottom: 4 }}>{label}</div>
               <div style={{ fontSize: 16, fontWeight: 800, fontFamily: 'var(--font-num)', color }}>{prefix}{fmt(val)}</div>
+              <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 2 }}>원화 환산 합계</div>
             </div>
           ))}
         </div>
@@ -638,7 +781,7 @@ export default function Settlement() {
             <div className="modal-title">프리셋 저장</div>
             <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 12, padding: '8px 10px', background: 'var(--bg-elevated)', borderRadius: 6 }}>
               <div>{formType === 'income' ? '💰 수입' : '💸 지출'}</div>
-              {formAmount && <div>금액: {Number(formAmount).toLocaleString()}원</div>}
+              {formAmount && <div>금액: {Number(formAmount).toLocaleString()}{formIsUsd ? '$' : '원'}</div>}
               {formSiteId && <div>사이트: {sites.find(s => s.id === formSiteId)?.name}</div>}
               {formCat && <div>카테고리: {formCat}</div>}
             </div>
