@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useMemo } from 'react'
+import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { logAction } from '../lib/logger'
 import type { Bet, Site, Sport, Market, BetResult } from '../types'
@@ -374,89 +374,20 @@ function InlineParlayEditForm({ groupBets, site, onClose, onSave }: {
 }
 
 /* ── 인라인 베팅폼 (단폴) ── */
-function SingleBetForm({ site, onClose, onBet, allBets }: {
-  site: Site; onClose: () => void; allBets: Bet[]
+function SingleBetForm({ site, onClose, onBet, defaultSport }: {
+  site: Site; onClose: () => void; defaultSport: string
   onBet: (sport: string, content: string, odds: number, amount: number, isLive: boolean) => Promise<boolean>
 }) {
   const isusd = site.currency === 'usd'; const unit = isusd ? '$' : '원'
   const defaultAmount = isusd ? '5' : '10000'
-  const [sport, setSport]       = useState<string>('')
-  const [sportManual, setSportManual] = useState(false)
+  const [sport, setSport]       = useState<string>(defaultSport || 'soccer')
   const [content, setContent]   = useState('')
   const [oddsRaw, setOddsRaw]   = useState('')
   const [amount, setAmount]     = useState(defaultAmount)
   const [isLive, setIsLive]     = useState(false)
   const [submitting, setSubmitting] = useState(false)
-  const [showSugg, setShowSugg] = useState(false)
-  const [suggIdx, setSuggIdx]   = useState(-1)
-  const contentRef = useRef<HTMLInputElement>(null)
   const oddsV = parseOdds(oddsRaw); const stakeN = Number(amount.replace(/,/g, ""))
   const hotkeys = isusd ? [5, 10] : [5000, 10000]
-
-  // 과거 베팅 match 목록 (중복 제거)
-  const pastMatches = useMemo(() => {
-    const seen = new Set<string>()
-    const result: Bet[] = []
-    for (const b of [...allBets].reverse()) {
-      if (b.match && !seen.has(b.match)) { seen.add(b.match); result.push(b) }
-    }
-    return result
-  }, [allBets])
-
-  // 2글자 이상일 때 추천 목록
-  const suggestions = useMemo(() => {
-    const q = content.trim()
-    if (q.length < 2) return []
-    return pastMatches
-      .filter(b => b.match.toLowerCase().includes(q.toLowerCase()))
-      .slice(0, 6)
-  }, [content, pastMatches])
-
-  // 과거 베팅에서 종목 감지 (수동 변경 안 한 경우만)
-  function detectSport(text: string): string {
-    const q = text.trim()
-    if (q.length < 2) return ''
-    // 입력값 포함하는 가장 최근 베팅의 종목 반환
-    const hit = pastMatches.find(b => b.match.toLowerCase().includes(q.toLowerCase()))
-    return hit?.sport ?? ''
-  }
-
-  function applyContent(val: string, fromSugg = false) {
-    setContent(val)
-    setShowSugg(!fromSugg && val.trim().length >= 2)
-    setSuggIdx(-1)
-    if (!sportManual) {
-      const detected = detectSport(val)
-      if (detected) setSport(detected)
-    }
-  }
-
-  function selectSuggestion(b: Bet) {
-    setContent(b.match)
-    setShowSugg(false)
-    setSuggIdx(-1)
-    if (!sportManual) setSport(b.sport)
-    // 포커스를 배당 입력으로 이동
-    setTimeout(() => {
-      const next = contentRef.current?.parentElement?.querySelector<HTMLInputElement>('input[placeholder*="배당"]')
-      next?.focus()
-    }, 0)
-  }
-
-  function handleContentKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
-    if (!showSugg || !suggestions.length) {
-      if (e.key === 'Enter') submit()
-      return
-    }
-    if (e.key === 'ArrowDown') { e.preventDefault(); setSuggIdx(i => Math.min(i + 1, suggestions.length - 1)) }
-    else if (e.key === 'ArrowUp') { e.preventDefault(); setSuggIdx(i => Math.max(i - 1, -1)) }
-    else if (e.key === 'Enter') {
-      e.preventDefault()
-      if (suggIdx >= 0 && suggestions[suggIdx]) selectSuggestion(suggestions[suggIdx])
-      else setShowSugg(false)
-    }
-    else if (e.key === 'Escape') { setShowSugg(false); setSuggIdx(-1) }
-  }
 
   function handleOdds(raw: string) {
     const clean = raw.replace(/[^0-9.]/g, '')
@@ -466,7 +397,7 @@ function SingleBetForm({ site, onClose, onBet, allBets }: {
   async function submit() {
     if (!content || oddsV <= 0 || stakeN <= 0) return
     setSubmitting(true)
-    const ok = await onBet(sport || 'other', content, oddsV, stakeN, isLive)
+    const ok = await onBet(sport, content, oddsV, stakeN, isLive)
     setSubmitting(false)
     if (ok) onClose()
   }
@@ -474,42 +405,11 @@ function SingleBetForm({ site, onClose, onBet, allBets }: {
   return (
     <div className="inline-bet-form">
       <select className="form-select inline-bet-input" value={sport}
-        onChange={e => { setSport(e.target.value); setSportManual(true) }}>
-        <option value="">종목 선택</option>
+        onChange={e => setSport(e.target.value)}>
         {SPORTS.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
       </select>
-      {/* 경기 내용 + 자동완성 */}
-      <div style={{ position: 'relative' }}>
-        <input ref={contentRef} className="form-input inline-bet-input" placeholder="경기 내용" value={content}
-          onChange={e => applyContent(e.target.value)}
-          onKeyDown={handleContentKeyDown}
-          onFocus={() => content.trim().length >= 2 && setShowSugg(true)}
-          onBlur={() => setTimeout(() => setShowSugg(false), 150)}
-          autoFocus />
-        {showSugg && suggestions.length > 0 && (
-          <div style={{
-            position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 300,
-            background: 'var(--bg-elevated)', border: '1px solid var(--gold-border)',
-            borderTop: 'none', borderRadius: '0 0 6px 6px',
-            boxShadow: '0 6px 16px rgba(0,0,0,0.4)', maxHeight: 200, overflowY: 'auto',
-          }}>
-            {suggestions.map((b, i) => (
-              <div key={b.id}
-                onMouseDown={e => { e.preventDefault(); selectSuggestion(b) }}
-                style={{
-                  padding: '6px 10px', cursor: 'pointer', fontSize: 11,
-                  background: i === suggIdx ? 'var(--gold-bg)' : 'transparent',
-                  borderBottom: '1px solid var(--border-light)',
-                  display: 'flex', alignItems: 'center', gap: 6,
-                }}>
-                <span style={{ fontSize: 13, flexShrink: 0 }}>{SPORT_SHORT[b.sport] ?? '📋'}</span>
-                <span style={{ flex: 1, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.match}</span>
-                <span style={{ fontSize: 9, color: 'var(--text-muted)', flexShrink: 0 }}>{b.bet_date.slice(5)}</span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+      <input className="form-input inline-bet-input" placeholder="경기 내용" value={content}
+        onChange={e => setContent(e.target.value)} autoFocus />
       <input className="form-input inline-bet-input" placeholder="배당 (125=1.25)" value={oddsRaw}
         onChange={e => handleOdds(e.target.value)}
         onKeyDown={e => e.key === 'Enter' && submit()}
@@ -1108,7 +1008,7 @@ export default function Dashboard() {
                           ) : site.bet_type === 'double' ? (
                             <DoubleBetForm site={site} lastLeg1={getLastLeg1(site.id)} onClose={() => setOpenFormSiteId(null)} onBet={(c1,c2,odds,amt) => submitDoubleBet(site,c1,c2,odds,amt)} />
                           ) : (
-                            <SingleBetForm site={site} allBets={bets} onClose={() => setOpenFormSiteId(null)} onBet={(sp,ct,od,amt,lv) => submitBet(site,sp,ct,od,amt,lv)} />
+                            <SingleBetForm site={site} defaultSport={pending.slice(-1)[0]?.sport ?? 'soccer'} onClose={() => setOpenFormSiteId(null)} onBet={(sp,ct,od,amt,lv) => submitBet(site,sp,ct,od,amt,lv)} />
                           )}
                         </div>
                       )}
