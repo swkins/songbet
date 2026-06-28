@@ -689,8 +689,10 @@ export default function Dashboard() {
   async function doWithdraw(amount: number) {
     if (!withdrawSite) return
     const before = { ...withdrawSite }; const isusd = withdrawSite.currency === 'usd'
-    const pinnedPending = bets.filter(b => b.site_id === withdrawSite.id && b.is_pinned && b.result === 'pending')
-    const hasPin = pinnedPending.length > 0
+    // stale state 대신 DB 직접 조회
+    const { data: pinnedRows } = await supabase.from('bets')
+      .select('id').eq('site_id', withdrawSite.id).eq('is_pinned', true).eq('result', 'pending').eq('is_hidden', false)
+    const hasPin = (pinnedRows?.length ?? 0) > 0
 
     let updatedSite: Site | null = null
     if (hasPin) {
