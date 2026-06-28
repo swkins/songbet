@@ -91,7 +91,7 @@ function RuleStatsTable({ title, rows, extra }: { title: string; rows: RuleRow[]
                   </td>
                   <td style={{ textAlign: 'center', padding: '5px 4px' }}>
                     {isEmpty ? <span style={{ color: 'var(--text-muted)', fontSize: 10 }}>—</span>
-                      : <span style={{ fontSize: 10, fontWeight: 700, color: s.profit >= 0 ? '#4ade80' : '#f87171' }}>{s.profit >= 0 ? '+' : ''}{(s.profit/1000).toFixed(0)}K</span>}
+                      : <span style={{ fontSize: 10, fontWeight: 700, color: s.profit >= 0 ? '#4ade80' : '#f87171' }}>{s.profit >= 0 ? '+' : ''}{s.profit.toLocaleString()}</span>}
                   </td>
                 </tr>
               )
@@ -966,7 +966,7 @@ export default function Stats() {
               </div>
             </div>
           )}
-          {activeSport !== 'all' && activeSport !== 'parlay' && (
+          {activeSport !== 'all' && activeSport !== 'parlay' && activeSport !== 'live' && (
             <SportPanel
               bets={periodFiltered}
               sport={SPORTS.find(s => s.value === activeSport)!}

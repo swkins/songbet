@@ -437,9 +437,9 @@ function SingleBetForm({ site, onClose, onBet, defaultSport }: {
         </div>
       )}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer', userSelect: 'none' }}>
-          <div onClick={() => setIsLive(p => !p)} style={{
-            width: 14, height: 14, borderRadius: 3, flexShrink: 0, cursor: 'pointer',
+        <label onClick={() => setIsLive(p => !p)} style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer', userSelect: 'none' }}>
+          <div style={{
+            width: 14, height: 14, borderRadius: 3, flexShrink: 0,
             background: isLive ? '#f87171' : 'transparent',
             border: `2px solid ${isLive ? '#f87171' : 'var(--border)'}`,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
