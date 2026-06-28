@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
 import { logAction } from '../lib/logger'
 import type { Bet, Site, Sport, Market, BetResult } from '../types'
@@ -380,41 +380,82 @@ function SingleBetForm({ site, onClose, onBet, allBets }: {
 }) {
   const isusd = site.currency === 'usd'; const unit = isusd ? '$' : '원'
   const defaultAmount = isusd ? '5' : '10000'
-  const [sport, setSport]     = useState<string>('')
-  const [sportManual, setSportManual] = useState(false)  // 수동 변경 여부
-  const [content, setContent] = useState('')
-  const [oddsRaw, setOddsRaw] = useState('')
-  const [amount, setAmount]   = useState(defaultAmount)
-  const [isLive, setIsLive]   = useState(false)
+  const [sport, setSport]       = useState<string>('')
+  const [sportManual, setSportManual] = useState(false)
+  const [content, setContent]   = useState('')
+  const [oddsRaw, setOddsRaw]   = useState('')
+  const [amount, setAmount]     = useState(defaultAmount)
+  const [isLive, setIsLive]     = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [showSugg, setShowSugg] = useState(false)
+  const [suggIdx, setSuggIdx]   = useState(-1)
+  const contentRef = useRef<HTMLInputElement>(null)
   const oddsV = parseOdds(oddsRaw); const stakeN = Number(amount.replace(/,/g, ""))
   const hotkeys = isusd ? [5, 10] : [5000, 10000]
 
-  // 경기 내용 변경 시 자동 종목 감지 (수동 변경 안 한 경우만)
-  function detectSport(text: string): string {
-    if (!text.trim()) return ''
-    const settled = allBets.filter(b => b.result !== 'pending' && b.match)
-    // 텍스트에서 단어 추출 (2글자 이상)
-    const words = text.trim().split(/\s+/).filter(w => w.length >= 2)
-    if (!words.length) return ''
-    // 각 단어가 포함된 과거 베팅 찾기
-    const sportCount: Record<string, number> = {}
-    for (const word of words) {
-      const matched = settled.filter(b => b.match.includes(word))
-      for (const b of matched) {
-        sportCount[b.sport] = (sportCount[b.sport] ?? 0) + 1
-      }
+  // 과거 베팅 match 목록 (중복 제거)
+  const pastMatches = useMemo(() => {
+    const seen = new Set<string>()
+    const result: Bet[] = []
+    for (const b of [...allBets].reverse()) {
+      if (b.match && !seen.has(b.match)) { seen.add(b.match); result.push(b) }
     }
-    if (!Object.keys(sportCount).length) return ''
-    return Object.entries(sportCount).sort((a, b) => b[1] - a[1])[0][0]
+    return result
+  }, [allBets])
+
+  // 2글자 이상일 때 추천 목록
+  const suggestions = useMemo(() => {
+    const q = content.trim()
+    if (q.length < 2) return []
+    return pastMatches
+      .filter(b => b.match.toLowerCase().includes(q.toLowerCase()))
+      .slice(0, 6)
+  }, [content, pastMatches])
+
+  // 과거 베팅에서 종목 감지 (수동 변경 안 한 경우만)
+  function detectSport(text: string): string {
+    const q = text.trim()
+    if (q.length < 2) return ''
+    // 입력값 포함하는 가장 최근 베팅의 종목 반환
+    const hit = pastMatches.find(b => b.match.toLowerCase().includes(q.toLowerCase()))
+    return hit?.sport ?? ''
   }
 
-  function handleContent(val: string) {
+  function applyContent(val: string, fromSugg = false) {
     setContent(val)
+    setShowSugg(!fromSugg && val.trim().length >= 2)
+    setSuggIdx(-1)
     if (!sportManual) {
       const detected = detectSport(val)
       if (detected) setSport(detected)
     }
+  }
+
+  function selectSuggestion(b: Bet) {
+    setContent(b.match)
+    setShowSugg(false)
+    setSuggIdx(-1)
+    if (!sportManual) setSport(b.sport)
+    // 포커스를 배당 입력으로 이동
+    setTimeout(() => {
+      const next = contentRef.current?.parentElement?.querySelector<HTMLInputElement>('input[placeholder*="배당"]')
+      next?.focus()
+    }, 0)
+  }
+
+  function handleContentKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (!showSugg || !suggestions.length) {
+      if (e.key === 'Enter') submit()
+      return
+    }
+    if (e.key === 'ArrowDown') { e.preventDefault(); setSuggIdx(i => Math.min(i + 1, suggestions.length - 1)) }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setSuggIdx(i => Math.max(i - 1, -1)) }
+    else if (e.key === 'Enter') {
+      e.preventDefault()
+      if (suggIdx >= 0 && suggestions[suggIdx]) selectSuggestion(suggestions[suggIdx])
+      else setShowSugg(false)
+    }
+    else if (e.key === 'Escape') { setShowSugg(false); setSuggIdx(-1) }
   }
 
   function handleOdds(raw: string) {
@@ -437,8 +478,38 @@ function SingleBetForm({ site, onClose, onBet, allBets }: {
         <option value="">종목 선택</option>
         {SPORTS.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
       </select>
-      <input className="form-input inline-bet-input" placeholder="경기 내용" value={content}
-        onChange={e => handleContent(e.target.value)} autoFocus />
+      {/* 경기 내용 + 자동완성 */}
+      <div style={{ position: 'relative' }}>
+        <input ref={contentRef} className="form-input inline-bet-input" placeholder="경기 내용" value={content}
+          onChange={e => applyContent(e.target.value)}
+          onKeyDown={handleContentKeyDown}
+          onFocus={() => content.trim().length >= 2 && setShowSugg(true)}
+          onBlur={() => setTimeout(() => setShowSugg(false), 150)}
+          autoFocus />
+        {showSugg && suggestions.length > 0 && (
+          <div style={{
+            position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 300,
+            background: 'var(--bg-elevated)', border: '1px solid var(--gold-border)',
+            borderTop: 'none', borderRadius: '0 0 6px 6px',
+            boxShadow: '0 6px 16px rgba(0,0,0,0.4)', maxHeight: 200, overflowY: 'auto',
+          }}>
+            {suggestions.map((b, i) => (
+              <div key={b.id}
+                onMouseDown={e => { e.preventDefault(); selectSuggestion(b) }}
+                style={{
+                  padding: '6px 10px', cursor: 'pointer', fontSize: 11,
+                  background: i === suggIdx ? 'var(--gold-bg)' : 'transparent',
+                  borderBottom: '1px solid var(--border-light)',
+                  display: 'flex', alignItems: 'center', gap: 6,
+                }}>
+                <span style={{ fontSize: 13, flexShrink: 0 }}>{SPORT_SHORT[b.sport] ?? '📋'}</span>
+                <span style={{ flex: 1, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.match}</span>
+                <span style={{ fontSize: 9, color: 'var(--text-muted)', flexShrink: 0 }}>{b.bet_date.slice(5)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
       <input className="form-input inline-bet-input" placeholder="배당 (125=1.25)" value={oddsRaw}
         onChange={e => handleOdds(e.target.value)}
         onKeyDown={e => e.key === 'Enter' && submit()}
@@ -718,21 +789,48 @@ export default function Dashboard() {
   async function doWithdraw(amount: number) {
     if (!withdrawSite) return
     const before = { ...withdrawSite }; const isusd = withdrawSite.currency === 'usd'
-    const totalIn = (withdrawSite.last_deposit ?? 0) + (withdrawSite.point_deposit ?? 0)
-    const netProfit = amount - totalIn
-    const { data } = await supabase.from('sites').update({ active: false, total_withdrawal: (withdrawSite.total_withdrawal ?? 0) + amount, balance: 0, last_deposit: 0, deposit_bet_done: 0, point_deposit: 0 }).eq('id', withdrawSite.id).select().single()
-    if (data) {
-      setSites(p => p.map(s => s.id === data.id ? data : s))
+    const pinnedPending = bets.filter(b => b.site_id === withdrawSite.id && b.is_pinned && b.result === 'pending')
+    const hasPin = pinnedPending.length > 0
+
+    let updatedSite: Site | null = null
+    if (hasPin) {
+      // 중간정산: 사이트 활성 유지, 잔액만 출금액만큼 차감, 나머지(입금/롤링 등) 유지
+      const newBalance = Math.max(0, withdrawSite.balance - amount)
+      const { data } = await supabase.from('sites').update({
+        balance: newBalance,
+        total_withdrawal: (withdrawSite.total_withdrawal ?? 0) + amount,
+      }).eq('id', withdrawSite.id).select().single()
+      updatedSite = data
+    } else {
+      // 완전 마감: 기존 로직
+      const { data } = await supabase.from('sites').update({
+        active: false,
+        total_withdrawal: (withdrawSite.total_withdrawal ?? 0) + amount,
+        balance: 0, last_deposit: 0, deposit_bet_done: 0, point_deposit: 0,
+      }).eq('id', withdrawSite.id).select().single()
+      updatedSite = data
+    }
+
+    if (updatedSite) {
+      setSites(p => p.map(s => s.id === updatedSite!.id ? updatedSite! : s))
       let usdKrwRate: number | null = null; let amountKrw: number | null = null
-      if (isusd) { usdKrwRate = await getUsdKrwRate(); amountKrw = Math.round(Math.abs(netProfit) * usdKrwRate) }
-      const { data: cf } = await supabase.from('cashflows').insert({ flow_date: today, type: 'income', category: '베팅수익', description: `${withdrawSite.name} 마감`, amount: amount, site_id: withdrawSite.id, currency: withdrawSite.currency, usd_krw_rate: usdKrwRate, amount_krw: isusd ? amountKrw : amount }).select().single()
-      await logAction({ action_type: 'update', table_name: 'sites', record_id: data.id, before_data: before as never, after_data: data as never, description: `${withdrawSite.name} 출금 ${amount.toLocaleString()}`, cashflow_id: cf?.id ?? null })
+      if (isusd) { usdKrwRate = await getUsdKrwRate(); amountKrw = Math.round(amount * usdKrwRate) }
+      const description = hasPin
+        ? `${withdrawSite.name} 마감 (중간정산)`
+        : `${withdrawSite.name} 마감`
+      const { data: cf } = await supabase.from('cashflows').insert({
+        flow_date: today, type: 'income', category: '베팅수익',
+        description, amount, site_id: withdrawSite.id,
+        currency: withdrawSite.currency, usd_krw_rate: usdKrwRate,
+        amount_krw: isusd ? amountKrw : amount,
+      }).select().single()
+      await logAction({ action_type: 'update', table_name: 'sites', record_id: updatedSite.id, before_data: before as never, after_data: updatedSite as never, description: `${withdrawSite.name} 출금 ${amount.toLocaleString()}${hasPin ? ' (중간정산)' : ''}`, cashflow_id: cf?.id ?? null })
     }
-    if (withdrawSite) {
-      // 핀 안 된 모든 베팅 숨김 (pending 포함)
-      await supabase.from('bets').update({ is_hidden: true }).eq('site_id', withdrawSite.id).eq('is_pinned', false)
-      setBets(p => p.filter(b => !(b.site_id === withdrawSite.id && !b.is_pinned)))
-    }
+
+    // 핀 안 된 모든 베팅 숨김 (pending 포함)
+    await supabase.from('bets').update({ is_hidden: true }).eq('site_id', withdrawSite.id).eq('is_pinned', false)
+    setBets(p => p.filter(b => !(b.site_id === withdrawSite.id && !b.is_pinned)))
+
     await loadSites()
     setWithdrawSite(null)
   }
