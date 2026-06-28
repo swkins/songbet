@@ -9,7 +9,7 @@ import {
   Plus, Trash2, Check, X,
   RotateCcw, Settings,
   CheckCircle, XCircle, Ban, MinusCircle, Gift, GripVertical, DollarSign,
-  TrendingUp, TrendingDown, ArrowDownToLine, LogOut, Pencil,
+  TrendingUp, TrendingDown, ArrowDownToLine, LogOut, Pencil, Pin,
 } from 'lucide-react'
 
 const SPORTS: { value: Sport; label: string }[] = [
@@ -374,13 +374,14 @@ function InlineParlayEditForm({ groupBets, site, onClose, onSave }: {
 }
 
 /* ── 인라인 베팅폼 (단폴) ── */
-function SingleBetForm({ site, onClose, onBet, defaultSport }: {
-  site: Site; onClose: () => void; defaultSport: string
+function SingleBetForm({ site, onClose, onBet, allBets }: {
+  site: Site; onClose: () => void; allBets: Bet[]
   onBet: (sport: string, content: string, odds: number, amount: number, isLive: boolean) => Promise<boolean>
 }) {
   const isusd = site.currency === 'usd'; const unit = isusd ? '$' : '원'
   const defaultAmount = isusd ? '5' : '10000'
-  const [sport, setSport]     = useState(defaultSport || 'soccer')
+  const [sport, setSport]     = useState<string>('')
+  const [sportManual, setSportManual] = useState(false)  // 수동 변경 여부
   const [content, setContent] = useState('')
   const [oddsRaw, setOddsRaw] = useState('')
   const [amount, setAmount]   = useState(defaultAmount)
@@ -388,6 +389,33 @@ function SingleBetForm({ site, onClose, onBet, defaultSport }: {
   const [submitting, setSubmitting] = useState(false)
   const oddsV = parseOdds(oddsRaw); const stakeN = Number(amount.replace(/,/g, ""))
   const hotkeys = isusd ? [5, 10] : [5000, 10000]
+
+  // 경기 내용 변경 시 자동 종목 감지 (수동 변경 안 한 경우만)
+  function detectSport(text: string): string {
+    if (!text.trim()) return ''
+    const settled = allBets.filter(b => b.result !== 'pending' && b.match)
+    // 텍스트에서 단어 추출 (2글자 이상)
+    const words = text.trim().split(/\s+/).filter(w => w.length >= 2)
+    if (!words.length) return ''
+    // 각 단어가 포함된 과거 베팅 찾기
+    const sportCount: Record<string, number> = {}
+    for (const word of words) {
+      const matched = settled.filter(b => b.match.includes(word))
+      for (const b of matched) {
+        sportCount[b.sport] = (sportCount[b.sport] ?? 0) + 1
+      }
+    }
+    if (!Object.keys(sportCount).length) return ''
+    return Object.entries(sportCount).sort((a, b) => b[1] - a[1])[0][0]
+  }
+
+  function handleContent(val: string) {
+    setContent(val)
+    if (!sportManual) {
+      const detected = detectSport(val)
+      if (detected) setSport(detected)
+    }
+  }
 
   function handleOdds(raw: string) {
     const clean = raw.replace(/[^0-9.]/g, '')
@@ -397,17 +425,20 @@ function SingleBetForm({ site, onClose, onBet, defaultSport }: {
   async function submit() {
     if (!content || oddsV <= 0 || stakeN <= 0) return
     setSubmitting(true)
-    const ok = await onBet(sport, content, oddsV, stakeN, isLive)
+    const ok = await onBet(sport || 'other', content, oddsV, stakeN, isLive)
     setSubmitting(false)
     if (ok) onClose()
   }
 
   return (
     <div className="inline-bet-form">
-      <select className="form-select inline-bet-input" value={sport} onChange={e => setSport(e.target.value)}>
+      <select className="form-select inline-bet-input" value={sport}
+        onChange={e => { setSport(e.target.value); setSportManual(true) }}>
+        <option value="">종목 선택</option>
         {SPORTS.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
       </select>
-      <input className="form-input inline-bet-input" placeholder="경기 내용" value={content} onChange={e => setContent(e.target.value)} autoFocus />
+      <input className="form-input inline-bet-input" placeholder="경기 내용" value={content}
+        onChange={e => handleContent(e.target.value)} autoFocus />
       <input className="form-input inline-bet-input" placeholder="배당 (125=1.25)" value={oddsRaw}
         onChange={e => handleOdds(e.target.value)}
         onKeyDown={e => e.key === 'Enter' && submit()}
@@ -437,16 +468,16 @@ function SingleBetForm({ site, onClose, onBet, defaultSport }: {
         </div>
       )}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
-        <label onClick={() => setIsLive(p => !p)} style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer', userSelect: 'none' }}>
+        <label onClick={() => setIsLive(p => !p)} style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', userSelect: 'none' }}>
           <div style={{
-            width: 14, height: 14, borderRadius: 3, flexShrink: 0,
+            width: 17, height: 17, borderRadius: 4, flexShrink: 0,
             background: isLive ? '#f87171' : 'transparent',
             border: `2px solid ${isLive ? '#f87171' : 'var(--border)'}`,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
           }}>
-            {isLive && <span style={{ color: '#000', fontSize: 9, fontWeight: 900, lineHeight: 1 }}>✓</span>}
+            {isLive && <span style={{ color: '#000', fontSize: 11, fontWeight: 900, lineHeight: 1 }}>✓</span>}
           </div>
-          <span style={{ fontSize: 11, fontWeight: 700, color: isLive ? '#f87171' : 'var(--text-secondary)' }}>라이브</span>
+          <span style={{ fontSize: 13, fontWeight: 700, color: isLive ? '#f87171' : 'var(--text-secondary)' }}>라이브</span>
         </label>
       </div>
       <div style={{ display: 'flex', gap: 5 }}>
@@ -698,8 +729,9 @@ export default function Dashboard() {
       await logAction({ action_type: 'update', table_name: 'sites', record_id: data.id, before_data: before as never, after_data: data as never, description: `${withdrawSite.name} 출금 ${amount.toLocaleString()}`, cashflow_id: cf?.id ?? null })
     }
     if (withdrawSite) {
-      await supabase.from('bets').update({ is_hidden: true }).eq('site_id', withdrawSite.id).neq('result', 'pending')
-      setBets(p => p.filter(b => !(b.site_id === withdrawSite.id && b.result !== 'pending')))
+      // 핀 안 된 모든 베팅 숨김 (pending 포함)
+      await supabase.from('bets').update({ is_hidden: true }).eq('site_id', withdrawSite.id).eq('is_pinned', false)
+      setBets(p => p.filter(b => !(b.site_id === withdrawSite.id && !b.is_pinned)))
     }
     await loadSites()
     setWithdrawSite(null)
@@ -833,7 +865,7 @@ export default function Dashboard() {
     }
 
     const profit = result === 'win' ? Math.round(bet.stake * (bet.odds - 1)) : result === 'loss' ? -bet.stake : 0
-    const { data } = await supabase.from('bets').update({ result, profit }).eq('id', bet.id).select().single()
+    const { data } = await supabase.from('bets').update({ result, profit, is_pinned: false }).eq('id', bet.id).select().single()
     if (data) {
       await logAction({ action_type: 'update', table_name: 'bets', record_id: data.id, before_data: bet as never, after_data: data as never, description: `결과: ${bet.match} → ${result}` })
       const updatedBets = bets.map(b => b.id === data.id ? data : b)
@@ -877,7 +909,28 @@ export default function Dashboard() {
     setInlineEditBetId(null)
   }
 
-  /* ════════════ RENDER ════════════ */
+  /* ── 베팅 고정/고정해제 ── */
+  async function togglePin(bet: Bet) {
+    const { data } = await supabase.from('bets').update({ is_pinned: !bet.is_pinned }).eq('id', bet.id).select().single()
+    if (data) setBets(p => p.map(b => b.id === data.id ? data : b))
+  }
+
+  /* ── 결과 처리 후 고정 해제 (완료 시) ── */
+  async function applyResultAndUnpin(bet: Bet, result: BetResult) {
+    const site = sites.find(s => s.id === bet.site_id)
+    const profit = result === 'win' ? Math.round(bet.stake * (bet.odds - 1)) : result === 'loss' ? -bet.stake : 0
+    const { data } = await supabase.from('bets').update({ result, profit, is_pinned: false }).eq('id', bet.id).select().single()
+    if (data) {
+      await logAction({ action_type: 'update', table_name: 'bets', record_id: data.id, before_data: bet as never, after_data: data as never, description: `결과: ${bet.match} → ${result}` })
+      setBets(p => p.map(b => b.id === data.id ? data : b))
+      if (site && result === 'win') {
+        const { data: sd } = await supabase.from('sites').update({ balance: site.balance + bet.stake + profit }).eq('id', site.id).select().single()
+        if (sd) setSites(p => p.map(s => s.id === sd.id ? sd : s))
+      }
+    }
+  }
+
+
   return (
     <div className="page">
       <div className="dashboard-main">
@@ -957,13 +1010,18 @@ export default function Dashboard() {
                           ) : site.bet_type === 'double' ? (
                             <DoubleBetForm site={site} lastLeg1={getLastLeg1(site.id)} onClose={() => setOpenFormSiteId(null)} onBet={(c1,c2,odds,amt) => submitDoubleBet(site,c1,c2,odds,amt)} />
                           ) : (
-                            <SingleBetForm site={site} defaultSport={pending.slice(-1)[0]?.sport ?? 'soccer'} onClose={() => setOpenFormSiteId(null)} onBet={(sp,ct,od,amt,lv) => submitBet(site,sp,ct,od,amt,lv)} />
+                            <SingleBetForm site={site} allBets={bets} onClose={() => setOpenFormSiteId(null)} onBet={(sp,ct,od,amt,lv) => submitBet(site,sp,ct,od,amt,lv)} />
                           )}
                         </div>
                       )}
-                      {(() => {
+                      {/* 고정 베팅은 비활성 사이트에도 항상 표시 */}
+                      {!site.active && pending.some(b => b.is_pinned) && (
+                        <div style={{ marginBottom: 4, fontSize: 10, fontWeight: 700, color: 'var(--gold)', padding: '3px 2px' }}>📌 고정 베팅</div>
+                      )}
+                      {(site.active ? pending : pending.filter(b => b.is_pinned)).length > 0 && (() => {
                         const renderedGroups = new Set<string>()
-                        return [...pending].reverse().map(bet => {
+                        const displayPending = site.active ? pending : pending.filter(b => b.is_pinned)
+                        return [...displayPending].reverse().map(bet => {
                           if (bet.parlay_group) {
                             if (renderedGroups.has(bet.parlay_group)) return null
                             renderedGroups.add(bet.parlay_group)
@@ -1027,7 +1085,7 @@ export default function Dashboard() {
                             )
                           }
                           return (
-                            <div key={bet.id} className="site-bet-entry" style={{ marginBottom: 6, position: 'relative' }}
+                            <div key={bet.id} className="site-bet-entry" style={{ marginBottom: 6, position: 'relative', background: bet.is_pinned ? 'rgba(251,191,36,0.07)' : undefined, border: bet.is_pinned ? '1px solid rgba(251,191,36,0.3)' : undefined, borderRadius: bet.is_pinned ? 8 : undefined }}
                               onMouseEnter={() => setHoverBetId(bet.id)} onMouseLeave={() => setHoverBetId(null)}>
                               {inlineEditBetId === bet.id ? (
                                 <InlineBetEditForm
@@ -1040,9 +1098,11 @@ export default function Dashboard() {
                                 <div style={{ display: 'flex', gap: 6, alignItems: 'stretch' }}>
                                   {/* 좌: 경기 내용 */}
                                   <div style={{ flex: 1, minWidth: 0 }}>
-                                    <div style={{ display: 'flex', gap: 4, marginBottom: 3 }}>
+                                    <div style={{ display: 'flex', gap: 4, marginBottom: 3, alignItems: 'center' }}>
                                       <span style={{ fontSize: 14, lineHeight: 1, flexShrink: 0, width: 18, textAlign: 'center' }}>{SPORT_SHORT[bet.sport] ?? '📋'}</span>
                                       <span className="site-bet-match" style={{ flex: 1, marginBottom: 0, fontSize: 13 }}>{bet.match}</span>
+                                      {bet.is_live && <span style={{ fontSize: 9, fontWeight: 700, color: '#f87171', background: 'rgba(248,113,113,0.12)', border: '1px solid rgba(248,113,113,0.3)', borderRadius: 3, padding: '1px 4px', flexShrink: 0 }}>🔴 LIVE</span>}
+                                      {bet.is_pinned && <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--gold)', flexShrink: 0 }}>📌</span>}
                                     </div>
                                     <div style={{ paddingLeft: 22 }}>
                                       <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-secondary)' }}>{bet.odds.toFixed(2)} / {pfx}{bet.stake.toLocaleString()}{sfx}</span>
@@ -1051,8 +1111,13 @@ export default function Dashboard() {
                                   {/* 우: 결과 버튼 (hover 시만) */}
                                   {hoverBetId === bet.id && (
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flexShrink: 0, alignSelf: 'center' }}>
-                                      {/* 소형: 수정 / 베팅취소 */}
+                                      {/* 소형: 고정 / 수정 / 베팅취소 */}
                                       <div style={{ display: 'flex', gap: 3, justifyContent: 'flex-end' }}>
+                                        <button className="bet-action-btn" title={bet.is_pinned ? '고정해제' : '고정'}
+                                          onClick={() => togglePin(bet)}
+                                          style={{ color: bet.is_pinned ? 'var(--gold)' : 'var(--text-muted)', width: 20, height: 20, borderColor: bet.is_pinned ? 'rgba(251,191,36,0.4)' : undefined, background: bet.is_pinned ? 'rgba(251,191,36,0.1)' : undefined }}>
+                                          <Pin size={11} />
+                                        </button>
                                         <button className="bet-action-btn" title="수정"
                                           onClick={() => { setInlineEditBetId(bet.id); setHoverBetId(null) }}
                                           style={{ color: 'var(--gold)', width: 20, height: 20 }}>
