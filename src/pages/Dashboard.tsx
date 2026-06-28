@@ -65,12 +65,22 @@ function DepositModal({ site, onClose, onDeposit, onPoint }: {
 }) {
   const [tab, setTab] = useState<'deposit' | 'point'>('deposit')
   const [amount, setAmount] = useState('')
-  const num = Number(amount.replace(/,/g, ""))
   const isusd = site.currency === 'usd'
+  const num = isusd ? parseFloat(amount) : Number(amount.replace(/,/g, ""))
+  const isValid = !isNaN(num) && num > 0
   const dep = site.last_deposit ?? 0; const pt = site.point_deposit ?? 0
   const tot = dep + pt; const done = site.deposit_bet_done ?? 0
   const rem = Math.max(0, tot - done); const pct = tot > 0 ? Math.round(done / tot * 100) : 0
   const unit = isusd ? '$' : '원'
+
+  function handleChange(val: string) {
+    if (isusd) {
+      if (val === '' || /^\d*\.?\d{0,2}$/.test(val)) setAmount(val)
+    } else {
+      const raw = val.replace(/,/g, '')
+      if (raw === '' || /^\d+$/.test(raw)) setAmount(raw)
+    }
+  }
 
   return (
     <div className="modal-overlay">
@@ -79,7 +89,6 @@ function DepositModal({ site, onClose, onDeposit, onPoint }: {
           <ArrowDownToLine size={16} color="var(--orange)" />
           {site.name} 입금 / 포인트
           {isusd && <span style={{ marginLeft: 6, fontSize: 10, background: 'var(--blue-bg)', color: 'var(--blue)', border: '1px solid var(--blue-border)', borderRadius: 4, padding: '1px 6px', fontWeight: 700 }}>USD</span>}
-          {/* 우상단 X 닫기 */}
           <button onClick={onClose} style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex', padding: 2, borderRadius: 4 }}><X size={15} /></button>
         </div>
         <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
@@ -111,11 +120,11 @@ function DepositModal({ site, onClose, onDeposit, onPoint }: {
           {tab === 'deposit' ? `입금액 (${unit})` : `포인트 추가`}
         </div>
         <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
-          <input className="form-input" type="text" inputMode="numeric" placeholder="0" value={amount}
-            onChange={e => setAmount(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter' && num > 0) { tab === 'deposit' ? onDeposit(num) : onPoint(num) }}} autoFocus />
-          <button className="btn btn-primary" disabled={!num || num <= 0}
-            onClick={() => { if (num > 0) { tab === 'deposit' ? onDeposit(num) : onPoint(num) }}} style={{ flexShrink: 0 }}>
+          <input className="form-input" type="text" inputMode="decimal" placeholder={isusd ? '0.00' : '0'} value={amount}
+            onChange={e => handleChange(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter' && isValid) { tab === 'deposit' ? onDeposit(num) : onPoint(num) }}} autoFocus />
+          <button className="btn btn-primary" disabled={!isValid}
+            onClick={() => { if (isValid) { tab === 'deposit' ? onDeposit(num) : onPoint(num) }}} style={{ flexShrink: 0 }}>
             <Check size={12} /> {tab === 'deposit' ? '입금' : '추가'}
           </button>
         </div>
@@ -130,9 +139,22 @@ function WithdrawModal({ site, onClose, onWithdraw }: {
   site: Site; onClose: () => void; onWithdraw: (amount: number) => void
 }) {
   const [amount, setAmount] = useState('')
-  const num = Number(amount.replace(/,/g, '')); const isusd = site.currency === 'usd'; const unit = isusd ? '$' : '원'
+  const isusd = site.currency === 'usd'; const unit = isusd ? '$' : '원'
+  // USD: 소수점 둘째자리까지, KRW: 정수
+  const num = isusd ? parseFloat(amount) : Number(amount.replace(/,/g, ''))
+  const isValid = !isNaN(num) && num > 0
   const totalIn = (site.last_deposit ?? 0) + (site.point_deposit ?? 0)
-  const netProfit = num > 0 ? num - totalIn : null
+  const netProfit = isValid ? num - totalIn : null
+
+  function handleChange(val: string) {
+    if (isusd) {
+      // 숫자와 소수점만 허용, 소수점 둘째자리까지
+      if (val === '' || /^\d*\.?\d{0,2}$/.test(val)) setAmount(val)
+    } else {
+      const raw = val.replace(/,/g, '')
+      if (raw === '' || /^\d+$/.test(raw)) setAmount(raw)
+    }
+  }
 
   return (
     /* overlay onClick 없음 → 바깥 클릭해도 닫히지 않음 */
@@ -141,7 +163,6 @@ function WithdrawModal({ site, onClose, onWithdraw }: {
         <div className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
           <LogOut size={16} color="var(--cyan)" />
           {site.name} 출금 / 마감
-          {/* 우상단 X 닫기 */}
           <button onClick={onClose} style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex', padding: 2, borderRadius: 4 }}><X size={15} /></button>
         </div>
         <div style={{ padding: '10px 12px', background: 'var(--bg-elevated)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', marginBottom: 14, fontSize: 12 }}>
@@ -156,10 +177,11 @@ function WithdrawModal({ site, onClose, onWithdraw }: {
         </div>
         <div style={{ fontSize: 9, color: 'var(--text-secondary)', marginBottom: 6, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.8px' }}>출금액 ({unit})</div>
         <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
-          <input className="form-input" type="text" inputMode="numeric" placeholder="0" value={amount}
-            onChange={e => setAmount(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && num > 0 && onWithdraw(num)} autoFocus />
-          <button className="btn btn-cyan" disabled={!num || num <= 0} onClick={() => num > 0 && onWithdraw(num)} style={{ flexShrink: 0 }}>
+          <input className="form-input" type="text" inputMode="decimal" placeholder={isusd ? '0.00' : '0'}
+            value={amount}
+            onChange={e => handleChange(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && isValid && onWithdraw(num)} autoFocus />
+          <button className="btn btn-cyan" disabled={!isValid} onClick={() => isValid && onWithdraw(num)} style={{ flexShrink: 0 }}>
             출금
           </button>
         </div>
@@ -168,7 +190,6 @@ function WithdrawModal({ site, onClose, onWithdraw }: {
             수익: <span className={netProfit >= 0 ? 'profit-pos' : 'profit-neg'}>{netProfit >= 0 ? '+' : ''}{isusd ? '$' : ''}{netProfit.toLocaleString()}{isusd ? '' : '원'}</span>
           </div>
         )}
-        {/* 하단 취소버튼 제거됨 */}
       </div>
     </div>
   )
@@ -713,21 +734,24 @@ export default function Dashboard() {
       updatedSite = data
     }
 
-    if (updatedSite) {
-      setSites(p => p.map(s => s.id === updatedSite!.id ? updatedSite! : s))
-      let usdKrwRate: number | null = null; let amountKrw: number | null = null
-      if (isusd) { usdKrwRate = await getUsdKrwRate(); amountKrw = Math.round(amount * usdKrwRate) }
-      const description = hasPin
-        ? `${withdrawSite.name} 마감 (중간정산)`
-        : `${withdrawSite.name} 마감`
-      const { data: cf } = await supabase.from('cashflows').insert({
-        flow_date: today, type: 'income', category: '베팅수익',
-        description, amount, site_id: withdrawSite.id,
-        currency: withdrawSite.currency, usd_krw_rate: usdKrwRate,
-        amount_krw: isusd ? amountKrw : amount,
-      }).select().single()
-      await logAction({ action_type: 'update', table_name: 'sites', record_id: updatedSite.id, before_data: before as never, after_data: updatedSite as never, description: `${withdrawSite.name} 출금 ${amount.toLocaleString()}${hasPin ? ' (중간정산)' : ''}`, cashflow_id: cf?.id ?? null })
-    }
+    if (updatedSite) setSites(p => p.map(s => s.id === updatedSite!.id ? updatedSite! : s))
+
+    // cashflow/log는 sites update 성공 여부와 무관하게 항상 기록
+    const siteIdForLog = withdrawSite.id
+    const siteNameForLog = withdrawSite.name
+    let usdKrwRate: number | null = null; let amountKrw: number | null = null
+    if (isusd) { usdKrwRate = await getUsdKrwRate(); amountKrw = Math.round(amount * usdKrwRate) }
+    const description = hasPin
+      ? `${siteNameForLog} 마감 (중간정산)`
+      : `${siteNameForLog} 마감`
+    const { data: cf, error: cfError } = await supabase.from('cashflows').insert({
+      flow_date: today, type: 'income', category: '베팅수익',
+      description, amount, site_id: siteIdForLog,
+      currency: withdrawSite.currency, usd_krw_rate: usdKrwRate,
+      amount_krw: isusd ? amountKrw : amount,
+    }).select().single()
+    if (cfError) console.error('cashflow insert error:', cfError)
+    await logAction({ action_type: 'update', table_name: 'sites', record_id: siteIdForLog, before_data: before as never, after_data: (updatedSite ?? before) as never, description: `${siteNameForLog} 출금 ${amount.toLocaleString()}${hasPin ? ' (중간정산)' : ''}`, cashflow_id: cf?.id ?? null })
 
     // 핀 안 된 모든 베팅 숨김 (pending 포함)
     await supabase.from('bets').update({ is_hidden: true }).eq('site_id', withdrawSite.id).eq('is_pinned', false)
