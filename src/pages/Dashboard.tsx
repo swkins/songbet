@@ -203,13 +203,46 @@ function WithdrawModal({ site, onClose, onWithdraw }: {
 }
 
 /* ── 사이트 관리 모달 ── */
-function SiteMgrModal({ sites, onClose, onAdd, onDelete, onToggleCurrency, onToggleBetType, onReorder }: {
+function DefaultStakeInput({ site, onCommit }: { site: Site; onCommit: (site: Site, val: number) => void }) {
+  const isusd = site.currency === 'usd'
+  const [val, setVal] = useState(String(site.default_stake ?? 0))
+  useEffect(() => { setVal(String(site.default_stake ?? 0)) }, [site.default_stake])
+
+  function commit() {
+    const n = isusd ? (Number(val) || 0) : (Number(val.replace(/,/g,'')) || 0)
+    if (n !== (site.default_stake ?? 0)) onCommit(site, n)
+  }
+  return (
+    <input
+      type="text"
+      inputMode={isusd ? 'decimal' : 'numeric'}
+      title="기본 베팅 금액 (베팅추가 시 초기값)"
+      placeholder={isusd ? '$0' : '0'}
+      value={val}
+      onChange={e => {
+        const v = e.target.value
+        if (isusd) {
+          if (v === '' || /^\d*\.?\d{0,2}$/.test(v)) setVal(v)
+        } else {
+          const raw = v.replace(/,/g, '')
+          if (raw === '' || /^\d+$/.test(raw)) setVal(raw)
+        }
+      }}
+      onBlur={commit}
+      onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+      style={{ width: 70, padding: '2px 5px', fontSize: 10, fontFamily: 'var(--font-mono)', textAlign: 'right', background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-primary)', flexShrink: 0 }}
+    />
+  )
+}
+
+function SiteMgrModal({ sites, onClose, onAdd, onDelete, onToggleCurrency, onToggleBetType, onReorder, onUpdateDefaultStake }: {
   sites: Site[]; onClose: () => void
   onAdd: (name: string, currency: 'krw' | 'usd', betType: 'single' | 'double') => void
   onDelete: (id: string) => void
   onToggleCurrency: (site: Site) => void
   onToggleBetType: (site: Site) => void
   onReorder: (from: string, to: string) => void
+  onUpdateDefaultStake: (site: Site, val: number) => void
 }) {
   const [newName, setNewName] = useState('')
   const [newCurrency, setNewCurrency] = useState<'krw' | 'usd'>('krw')
@@ -218,12 +251,19 @@ function SiteMgrModal({ sites, onClose, onAdd, onDelete, onToggleCurrency, onTog
 
   return (
     <div className="modal-overlay">
-      <div className="modal" style={{ maxWidth: 420 }}>
+      <div className="modal" style={{ maxWidth: 500 }}>
         <div className="modal-title" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Settings size={16} color="var(--gold)" /> 사이트 관리</div>
           <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex' }}><X size={16} /></button>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginBottom: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '2px 4px', fontSize: 9, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.6px' }}>
+            <span style={{ flex: 1 }}>사이트</span>
+            <span title="베팅추가 시 초기 베팅 금액 (0 = 기본값)" style={{ width: 70, textAlign: 'right', flexShrink: 0 }}>기본금액</span>
+            <span style={{ width: 56, textAlign: 'center', flexShrink: 0 }}>통화</span>
+            <span style={{ width: 36, textAlign: 'center', flexShrink: 0 }}>유형</span>
+            <span style={{ width: 18, flexShrink: 0 }}></span>
+          </div>
           {sites.map(s => (
             <div key={s.id} className="site-mgr-row"
               draggable
@@ -238,6 +278,7 @@ function SiteMgrModal({ sites, onClose, onAdd, onDelete, onToggleCurrency, onTog
               <GripVertical size={12} color="var(--text-muted)" style={{ flexShrink: 0 }} />
               <span style={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0, background: s.active ? 'var(--green)' : 'var(--border)', boxShadow: s.active ? '0 0 5px var(--green)' : 'none' }} />
               <span className="site-mgr-name">{s.name}</span>
+              <DefaultStakeInput site={s} onCommit={onUpdateDefaultStake} />
               <button onClick={() => onToggleCurrency(s)} title="KRW/USD" style={{ background: s.currency === 'usd' ? 'var(--blue-bg)' : 'var(--bg-elevated)', border: `1px solid ${s.currency === 'usd' ? 'var(--blue-border)' : 'var(--border)'}`, borderRadius: 4, color: s.currency === 'usd' ? 'var(--blue)' : 'var(--text-muted)', cursor: 'pointer', padding: '2px 7px', fontSize: 10, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 3, flexShrink: 0 }}>
                 {s.currency === 'usd' ? <><DollarSign size={10} /> USD</> : '₩ KRW'}
               </button>
@@ -415,16 +456,15 @@ function InlineParlayEditForm({ groupBets, site, onClose, onSave }: {
 /* ── 인라인 베팅폼 (단폴) ── */
 function SingleBetForm({ site, onClose, onBet, defaultSport }: {
   site: Site; onClose: () => void; defaultSport: string
-  onBet: (sport: string, content: string, odds: number, amount: number, isLive: boolean, isOddsFlow: boolean) => Promise<boolean>
+  onBet: (sport: string, content: string, odds: number, amount: number, isLive: boolean) => Promise<boolean>
 }) {
   const isusd = site.currency === 'usd'; const unit = isusd ? '$' : '원'
-  const defaultAmount = isusd ? '5' : '10000'
+  const defaultAmount = site.default_stake > 0 ? String(site.default_stake) : (isusd ? '5' : '10000')
   const [sport, setSport]       = useState<string>(defaultSport || 'soccer')
   const [content, setContent]   = useState('')
   const [oddsRaw, setOddsRaw]   = useState('')
   const [amount, setAmount]     = useState(defaultAmount)
   const [isLive, setIsLive]     = useState(false)
-  const [isOddsFlow, setIsOddsFlow] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const oddsV = parseOdds(oddsRaw)
   const stakeN = isusd ? (Number(amount) || 0) : (Number(amount.replace(/,/g, "")) || 0)
@@ -438,7 +478,7 @@ function SingleBetForm({ site, onClose, onBet, defaultSport }: {
   async function submit() {
     if (!content || oddsV <= 0 || stakeN <= 0) return
     setSubmitting(true)
-    const ok = await onBet(sport, content, oddsV, stakeN, isLive, isOddsFlow)
+    const ok = await onBet(sport, content, oddsV, stakeN, isLive)
     setSubmitting(false)
     if (ok) onClose()
   }
@@ -487,7 +527,7 @@ function SingleBetForm({ site, onClose, onBet, defaultSport }: {
           예상 +{isusd ? '$' : ''}{(isusd ? (stakeN * (oddsV - 1)).toFixed(2) : Math.round(stakeN * (oddsV - 1)).toLocaleString())}{isusd ? '' : '원'}
         </div>
       )}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 2, flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
         <label onClick={() => setIsLive(p => !p)} style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', userSelect: 'none' }}>
           <div style={{
             width: 17, height: 17, borderRadius: 4, flexShrink: 0,
@@ -499,22 +539,11 @@ function SingleBetForm({ site, onClose, onBet, defaultSport }: {
           </div>
           <span style={{ fontSize: 13, fontWeight: 700, color: isLive ? '#f87171' : 'var(--text-secondary)' }}>라이브</span>
         </label>
-        <label onClick={() => setIsOddsFlow(p => !p)} style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', userSelect: 'none' }}>
-          <div style={{
-            width: 17, height: 17, borderRadius: 4, flexShrink: 0,
-            background: isOddsFlow ? '#a78bfa' : 'transparent',
-            border: `2px solid ${isOddsFlow ? '#a78bfa' : 'var(--border)'}`,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}>
-            {isOddsFlow && <span style={{ color: '#000', fontSize: 11, fontWeight: 900, lineHeight: 1 }}>✓</span>}
-          </div>
-          <span style={{ fontSize: 13, fontWeight: 700, color: isOddsFlow ? '#a78bfa' : 'var(--text-secondary)' }}>📊 배당흐름</span>
-        </label>
       </div>
       <div style={{ display: 'flex', gap: 5 }}>
-        <button className="btn btn-primary" style={{ flex: 1, fontSize: 12, padding: '7px 0', justifyContent: 'center', background: isLive ? 'rgba(248,113,113,0.15)' : isOddsFlow ? 'rgba(167,139,250,0.15)' : undefined, borderColor: isLive ? '#f87171' : isOddsFlow ? '#a78bfa' : undefined, color: isLive ? '#f87171' : isOddsFlow ? '#a78bfa' : undefined }}
+        <button className="btn btn-primary" style={{ flex: 1, fontSize: 12, padding: '7px 0', justifyContent: 'center', background: isLive ? 'rgba(248,113,113,0.15)' : undefined, borderColor: isLive ? '#f87171' : undefined, color: isLive ? '#f87171' : undefined }}
           onClick={submit} disabled={!content || oddsV <= 0 || stakeN <= 0 || submitting}>
-          {isLive ? '🔴 라이브 등록' : isOddsFlow ? '📊 배당흐름 등록' : '등록'}
+          {isLive ? '🔴 라이브 등록' : '등록'}
         </button>
         <button className="btn btn-ghost" style={{ padding: '7px 10px' }} onClick={onClose}><X size={12} /></button>
       </div>
@@ -528,7 +557,7 @@ function DoubleBetForm({ site, lastLeg1, onClose, onBet }: {
   onBet: (c1: string, c2: string, odds: number, amount: number) => Promise<boolean>
 }) {
   const isusd = site.currency === 'usd'; const unit = isusd ? '$' : '원'
-  const defaultAmount = isusd ? '5' : '10000'
+  const defaultAmount = site.default_stake > 0 ? String(site.default_stake) : (isusd ? '5' : '10000')
   const [c1, setC1] = useState(lastLeg1?.content ?? '')
   const [c2, setC2] = useState('')
   const [oddsRaw, setOddsRaw] = useState('')
@@ -717,6 +746,10 @@ export default function Dashboard() {
     const { data } = await supabase.from('sites').update({ bet_type: site.bet_type === 'single' ? 'double' : 'single' }).eq('id', site.id).select().single()
     if (data) setSites(p => p.map(s => s.id === site.id ? data : s))
   }
+  async function updateDefaultStake(site: Site, val: number) {
+    const { data } = await supabase.from('sites').update({ default_stake: val }).eq('id', site.id).select().single()
+    if (data) setSites(p => p.map(s => s.id === site.id ? data : s))
+  }
   async function reorderSites(fromId: string, toId: string) {
     const reordered = [...sites]
     const fi = reordered.findIndex(s => s.id === fromId); const ti = reordered.findIndex(s => s.id === toId)
@@ -810,9 +843,9 @@ export default function Dashboard() {
   }
 
   /* ── 베팅 제출 ── */
-  async function submitBet(site: Site, sport: string, content: string, odds: number, stake: number, isLive = false, isOddsFlow = false): Promise<boolean> {
+  async function submitBet(site: Site, sport: string, content: string, odds: number, stake: number, isLive = false): Promise<boolean> {
     const { market, pick } = autoMarket(content)
-    const { data: betData } = await supabase.from('bets').insert({ bet_date: today, sport: sport as Sport, league: '', match: content, market, pick, odds, stake, result: 'pending' as BetResult, profit: 0, memo: '', site_id: site.id, parlay_group: null, parlay_leg: 1, is_live: isLive, is_odds_flow: isOddsFlow }).select().single()
+    const { data: betData } = await supabase.from('bets').insert({ bet_date: today, sport: sport as Sport, league: '', match: content, market, pick, odds, stake, result: 'pending' as BetResult, profit: 0, memo: '', site_id: site.id, parlay_group: null, parlay_leg: 1, is_live: isLive }).select().single()
     if (!betData) return false
     const { data: siteData } = await supabase.from('sites').update({ balance: site.balance - stake, rolling_done: site.rolling_done + stake, deposit_bet_done: (site.deposit_bet_done ?? 0) + stake }).eq('id', site.id).select().single()
     if (siteData) {
@@ -1094,7 +1127,7 @@ export default function Dashboard() {
                           ) : site.bet_type === 'double' ? (
                             <DoubleBetForm site={site} lastLeg1={getLastLeg1(site.id)} onClose={() => setOpenFormSiteId(null)} onBet={(c1,c2,odds,amt) => submitDoubleBet(site,c1,c2,odds,amt)} />
                           ) : (
-                            <SingleBetForm site={site} defaultSport={pending.slice(-1)[0]?.sport ?? 'soccer'} onClose={() => setOpenFormSiteId(null)} onBet={(sp,ct,od,amt,lv,of) => submitBet(site,sp,ct,od,amt,lv,of)} />
+                            <SingleBetForm site={site} defaultSport={pending.slice(-1)[0]?.sport ?? 'soccer'} onClose={() => setOpenFormSiteId(null)} onBet={(sp,ct,od,amt,lv) => submitBet(site,sp,ct,od,amt,lv)} />
                           )}
                         </div>
                       )}
@@ -1186,7 +1219,6 @@ export default function Dashboard() {
                                       <span style={{ fontSize: 14, lineHeight: 1, flexShrink: 0, width: 18, textAlign: 'center' }}>{SPORT_SHORT[bet.sport] ?? '📋'}</span>
                                       <span className="site-bet-match" style={{ flex: 1, marginBottom: 0, fontSize: 13 }}>{bet.match}</span>
                                       {bet.is_live && <span style={{ fontSize: 9, fontWeight: 700, color: '#f87171', background: 'rgba(248,113,113,0.12)', border: '1px solid rgba(248,113,113,0.3)', borderRadius: 3, padding: '1px 4px', flexShrink: 0 }}>🔴 LIVE</span>}
-                                      {bet.is_odds_flow && <span style={{ fontSize: 9, fontWeight: 700, color: '#a78bfa', background: 'rgba(167,139,250,0.12)', border: '1px solid rgba(167,139,250,0.3)', borderRadius: 3, padding: '1px 4px', flexShrink: 0 }}>📊 흐름</span>}
                                       {bet.is_pinned && <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--gold)', flexShrink: 0 }}>📌</span>}
                                     </div>
                                     <div style={{ paddingLeft: 22 }}>
@@ -1313,7 +1345,7 @@ export default function Dashboard() {
 
       {/* 모달 */}
       {showSiteMgr && (
-        <SiteMgrModal sites={sites} onClose={() => setShowSiteMgr(false)} onAdd={addSite} onDelete={deleteSite} onToggleCurrency={toggleCurrency} onToggleBetType={toggleBetType} onReorder={reorderSites} />
+        <SiteMgrModal sites={sites} onClose={() => setShowSiteMgr(false)} onAdd={addSite} onDelete={deleteSite} onToggleCurrency={toggleCurrency} onToggleBetType={toggleBetType} onReorder={reorderSites} onUpdateDefaultStake={updateDefaultStake} />
       )}
       {depositSite && <DepositModal site={depositSite} onClose={() => setDepositSite(null)} onDeposit={doDeposit} onPoint={doPoint} />}
       {withdrawSite && <WithdrawModal site={withdrawSite} onClose={() => setWithdrawSite(null)} onWithdraw={doWithdraw} />}
