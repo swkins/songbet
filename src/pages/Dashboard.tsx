@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { logAction } from '../lib/logger'
 import type { Bet, Site, Sport, Market, BetResult } from '../types'
@@ -65,6 +65,7 @@ function DepositModal({ site, onClose, onDeposit, onPoint }: {
 }) {
   const [tab, setTab] = useState<'deposit' | 'point'>('deposit')
   const [amount, setAmount] = useState('')
+  const inputRef = useRef<HTMLInputElement>(null)
   const isusd = site.currency === 'usd'
   const num = isusd ? parseFloat(amount) : Number(amount.replace(/,/g, ""))
   const isValid = !isNaN(num) && num > 0
@@ -72,6 +73,12 @@ function DepositModal({ site, onClose, onDeposit, onPoint }: {
   const tot = dep + pt; const done = site.deposit_bet_done ?? 0
   const rem = Math.max(0, tot - done); const pct = tot > 0 ? Math.round(done / tot * 100) : 0
   const unit = isusd ? '$' : '원'
+
+  // 탭 변경 시 입력 필드에 자동 포커스 + 기존 값 초기화
+  useEffect(() => {
+    setAmount('')
+    inputRef.current?.focus()
+  }, [tab])
 
   function handleChange(val: string) {
     if (isusd) {
@@ -120,7 +127,7 @@ function DepositModal({ site, onClose, onDeposit, onPoint }: {
           {tab === 'deposit' ? `입금액 (${unit})` : `포인트 추가`}
         </div>
         <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
-          <input className="form-input" type="text" inputMode="decimal" placeholder={isusd ? '0.00' : '0'} value={amount}
+          <input ref={inputRef} className="form-input" type="text" inputMode="decimal" placeholder={isusd ? '0.00' : '0'} value={amount}
             onChange={e => handleChange(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter' && isValid) { tab === 'deposit' ? onDeposit(num) : onPoint(num) }}} autoFocus />
           <button className="btn btn-primary" disabled={!isValid}
@@ -262,20 +269,31 @@ function SiteMgrModal({ sites, onClose, onAdd, onDelete, onToggleCurrency, onTog
 /* ── 공통 인라인 수정폼 스타일 헬퍼 ── */
 function EditFormAmountRow({ isusd, amount, setAmount }: { isusd: boolean; amount: string; setAmount: (v: string) => void }) {
   const unit = isusd ? '$' : '원'
-  const stakeN = Number(amount.replace(/,/g, ''))
+  const stakeN = isusd ? (Number(amount) || 0) : (Number(amount.replace(/,/g, '')) || 0)
   const hotkeys = isusd ? [5, 10] : [5000, 10000]
   return (
     <>
       <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-        <input className="form-input inline-bet-input" type="text" inputMode="numeric" placeholder={`금액 (${unit})`}
-          value={stakeN > 0 ? stakeN.toLocaleString() : amount}
+        <input className="form-input inline-bet-input" type="text" inputMode={isusd ? 'decimal' : 'numeric'} placeholder={`금액 (${unit})`}
+          value={isusd ? amount : (stakeN > 0 ? stakeN.toLocaleString() : amount)}
           style={{ flex: 1, MozAppearance: 'textfield' } as React.CSSProperties}
-          onChange={e => { const r = e.target.value.replace(/,/g, ''); if (r === '' || /^\d+$/.test(r)) setAmount(r) }} />
+          onChange={e => {
+            if (isusd) {
+              const v = e.target.value
+              if (v === '' || /^\d*\.?\d{0,2}$/.test(v)) setAmount(v)
+            } else {
+              const r = e.target.value.replace(/,/g, '')
+              if (r === '' || /^\d+$/.test(r)) setAmount(r)
+            }
+          }} />
         <button onClick={() => setAmount('')} style={{ padding: '0 8px', height: 34, borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-body)', whiteSpace: 'nowrap', flexShrink: 0 }}>초기화</button>
       </div>
       <div style={{ display: 'flex', gap: 4 }}>
         {hotkeys.map(hk => (
-          <button key={hk} className="hotkey-btn" onClick={() => setAmount(String(Number(amount.replace(/,/g,'') || 0) + hk))}>
+          <button key={hk} className="hotkey-btn" onClick={() => {
+            const cur = isusd ? (Number(amount) || 0) : (Number(amount.replace(/,/g,'')) || 0)
+            setAmount(String(cur + hk))
+          }}>
             +{isusd ? `$${hk}` : `${hk.toLocaleString()}`}
           </button>
         ))}
@@ -297,7 +315,7 @@ function InlineBetEditForm({ bet, site, onClose, onSave }: {
   const [amount, setAmount]   = useState(String(bet.stake))
   const [submitting, setSubmitting] = useState(false)
   const oddsV = parseOdds(oddsRaw)
-  const stakeN = Number(amount.replace(/,/g, ''))
+  const stakeN = isusd ? (Number(amount) || 0) : (Number(amount.replace(/,/g, '')) || 0)
 
   function handleOdds(raw: string) {
     const clean = raw.replace(/[^0-9.]/g, '')
@@ -323,7 +341,7 @@ function InlineBetEditForm({ bet, site, onClose, onSave }: {
       <EditFormAmountRow isusd={isusd} amount={amount} setAmount={setAmount} />
       {oddsV > 0 && stakeN > 0 && (
         <div style={{ fontSize: 9, color: 'var(--gold)', fontWeight: 700, textAlign: 'right' }}>
-          예상 +{isusd ? '$' : ''}{Math.round(stakeN * (oddsV - 1)).toLocaleString()}{isusd ? '' : '원'}
+          예상 +{isusd ? '$' : ''}{(isusd ? (stakeN * (oddsV - 1)).toFixed(2) : Math.round(stakeN * (oddsV - 1)).toLocaleString())}{isusd ? '' : '원'}
         </div>
       )}
       <div style={{ display: 'flex', gap: 5 }}>
@@ -352,7 +370,7 @@ function InlineParlayEditForm({ groupBets, site, onClose, onSave }: {
   const [amount, setAmount]   = useState(String(leg1?.stake ?? 0))
   const [submitting, setSubmitting] = useState(false)
   const oddsV  = parseOdds(oddsRaw)
-  const stakeN = Number(amount.replace(/,/g, ''))
+  const stakeN = isusd ? (Number(amount) || 0) : (Number(amount.replace(/,/g, '')) || 0)
   const labelSt: React.CSSProperties = { fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.6px', color: 'var(--text-muted)', marginBottom: 2 }
 
   function handleOdds(raw: string) {
@@ -380,7 +398,7 @@ function InlineParlayEditForm({ groupBets, site, onClose, onSave }: {
       <EditFormAmountRow isusd={isusd} amount={amount} setAmount={setAmount} />
       {oddsV > 0 && stakeN > 0 && (
         <div style={{ fontSize: 9, color: 'var(--gold)', fontWeight: 700, textAlign: 'right' }}>
-          예상 +{isusd ? '$' : ''}{Math.round(stakeN * (oddsV - 1)).toLocaleString()}{isusd ? '' : '원'}
+          예상 +{isusd ? '$' : ''}{(isusd ? (stakeN * (oddsV - 1)).toFixed(2) : Math.round(stakeN * (oddsV - 1)).toLocaleString())}{isusd ? '' : '원'}
         </div>
       )}
       <div style={{ display: 'flex', gap: 5 }}>
@@ -397,7 +415,7 @@ function InlineParlayEditForm({ groupBets, site, onClose, onSave }: {
 /* ── 인라인 베팅폼 (단폴) ── */
 function SingleBetForm({ site, onClose, onBet, defaultSport }: {
   site: Site; onClose: () => void; defaultSport: string
-  onBet: (sport: string, content: string, odds: number, amount: number, isLive: boolean) => Promise<boolean>
+  onBet: (sport: string, content: string, odds: number, amount: number, isLive: boolean, isOddsFlow: boolean) => Promise<boolean>
 }) {
   const isusd = site.currency === 'usd'; const unit = isusd ? '$' : '원'
   const defaultAmount = isusd ? '5' : '10000'
@@ -406,8 +424,10 @@ function SingleBetForm({ site, onClose, onBet, defaultSport }: {
   const [oddsRaw, setOddsRaw]   = useState('')
   const [amount, setAmount]     = useState(defaultAmount)
   const [isLive, setIsLive]     = useState(false)
+  const [isOddsFlow, setIsOddsFlow] = useState(false)
   const [submitting, setSubmitting] = useState(false)
-  const oddsV = parseOdds(oddsRaw); const stakeN = Number(amount.replace(/,/g, ""))
+  const oddsV = parseOdds(oddsRaw)
+  const stakeN = isusd ? (Number(amount) || 0) : (Number(amount.replace(/,/g, "")) || 0)
   const hotkeys = isusd ? [5, 10] : [5000, 10000]
 
   function handleOdds(raw: string) {
@@ -418,7 +438,7 @@ function SingleBetForm({ site, onClose, onBet, defaultSport }: {
   async function submit() {
     if (!content || oddsV <= 0 || stakeN <= 0) return
     setSubmitting(true)
-    const ok = await onBet(sport, content, oddsV, stakeN, isLive)
+    const ok = await onBet(sport, content, oddsV, stakeN, isLive, isOddsFlow)
     setSubmitting(false)
     if (ok) onClose()
   }
@@ -437,29 +457,37 @@ function SingleBetForm({ site, onClose, onBet, defaultSport }: {
         onBlur={e => { const n = parseOdds(e.target.value); if (n > 0) setOddsRaw(n.toFixed(2)) }} />
       {oddsV > 0 && <div style={{ fontSize: 9, color: 'var(--gold)', fontWeight: 700, textAlign: 'right' }}>→ {oddsV.toFixed(2)}</div>}
       <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-        <input className="form-input inline-bet-input" type="text" inputMode="numeric" placeholder={`금액 (${unit})`}
-          value={stakeN > 0 ? stakeN.toLocaleString() : amount}
+        <input className="form-input inline-bet-input" type="text" inputMode={isusd ? 'decimal' : 'numeric'} placeholder={`금액 (${unit})`}
+          value={isusd ? amount : (stakeN > 0 ? stakeN.toLocaleString() : amount)}
           style={{ flex: 1, MozAppearance: 'textfield' } as React.CSSProperties}
           onChange={e => {
-            const raw = e.target.value.replace(/,/g, '')
-            if (raw === '' || /^\d+$/.test(raw)) setAmount(raw)
+            if (isusd) {
+              const v = e.target.value
+              if (v === '' || /^\d*\.?\d{0,2}$/.test(v)) setAmount(v)
+            } else {
+              const raw = e.target.value.replace(/,/g, '')
+              if (raw === '' || /^\d+$/.test(raw)) setAmount(raw)
+            }
           }}
           onKeyDown={e => e.key === 'Enter' && submit()} />
         <button onClick={() => setAmount('')} style={{ padding: '0 8px', height: 34, borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-body)', whiteSpace: 'nowrap', flexShrink: 0 }}>초기화</button>
       </div>
       <div style={{ display: 'flex', gap: 4 }}>
         {hotkeys.map(hk => (
-          <button key={hk} className="hotkey-btn" onClick={() => setAmount(String(Number(amount.replace(/,/g,'') || 0) + hk))}>
+          <button key={hk} className="hotkey-btn" onClick={() => {
+            const cur = isusd ? (Number(amount) || 0) : (Number(amount.replace(/,/g,'')) || 0)
+            setAmount(String(cur + hk))
+          }}>
             +{isusd ? `$${hk}` : `${hk.toLocaleString()}`}
           </button>
         ))}
       </div>
       {oddsV > 0 && stakeN > 0 && (
         <div style={{ fontSize: 9, color: 'var(--green)', fontWeight: 700, textAlign: 'right' }}>
-          예상 +{isusd ? '$' : ''}{Math.round(stakeN * (oddsV - 1)).toLocaleString()}{isusd ? '' : '원'}
+          예상 +{isusd ? '$' : ''}{(isusd ? (stakeN * (oddsV - 1)).toFixed(2) : Math.round(stakeN * (oddsV - 1)).toLocaleString())}{isusd ? '' : '원'}
         </div>
       )}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 2, flexWrap: 'wrap' }}>
         <label onClick={() => setIsLive(p => !p)} style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', userSelect: 'none' }}>
           <div style={{
             width: 17, height: 17, borderRadius: 4, flexShrink: 0,
@@ -471,11 +499,22 @@ function SingleBetForm({ site, onClose, onBet, defaultSport }: {
           </div>
           <span style={{ fontSize: 13, fontWeight: 700, color: isLive ? '#f87171' : 'var(--text-secondary)' }}>라이브</span>
         </label>
+        <label onClick={() => setIsOddsFlow(p => !p)} style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', userSelect: 'none' }}>
+          <div style={{
+            width: 17, height: 17, borderRadius: 4, flexShrink: 0,
+            background: isOddsFlow ? '#a78bfa' : 'transparent',
+            border: `2px solid ${isOddsFlow ? '#a78bfa' : 'var(--border)'}`,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            {isOddsFlow && <span style={{ color: '#000', fontSize: 11, fontWeight: 900, lineHeight: 1 }}>✓</span>}
+          </div>
+          <span style={{ fontSize: 13, fontWeight: 700, color: isOddsFlow ? '#a78bfa' : 'var(--text-secondary)' }}>📊 배당흐름</span>
+        </label>
       </div>
       <div style={{ display: 'flex', gap: 5 }}>
-        <button className="btn btn-primary" style={{ flex: 1, fontSize: 12, padding: '7px 0', justifyContent: 'center', background: isLive ? 'rgba(248,113,113,0.15)' : undefined, borderColor: isLive ? '#f87171' : undefined, color: isLive ? '#f87171' : undefined }}
+        <button className="btn btn-primary" style={{ flex: 1, fontSize: 12, padding: '7px 0', justifyContent: 'center', background: isLive ? 'rgba(248,113,113,0.15)' : isOddsFlow ? 'rgba(167,139,250,0.15)' : undefined, borderColor: isLive ? '#f87171' : isOddsFlow ? '#a78bfa' : undefined, color: isLive ? '#f87171' : isOddsFlow ? '#a78bfa' : undefined }}
           onClick={submit} disabled={!content || oddsV <= 0 || stakeN <= 0 || submitting}>
-          {isLive ? '🔴 라이브 등록' : '등록'}
+          {isLive ? '🔴 라이브 등록' : isOddsFlow ? '📊 배당흐름 등록' : '등록'}
         </button>
         <button className="btn btn-ghost" style={{ padding: '7px 10px' }} onClick={onClose}><X size={12} /></button>
       </div>
@@ -495,7 +534,8 @@ function DoubleBetForm({ site, lastLeg1, onClose, onBet }: {
   const [oddsRaw, setOddsRaw] = useState('')
   const [amount, setAmount] = useState(defaultAmount)
   const [submitting, setSubmitting] = useState(false)
-  const oddsV = parseOdds(oddsRaw); const stakeN = Number(amount.replace(/,/g, ""))
+  const oddsV = parseOdds(oddsRaw)
+  const stakeN = isusd ? (Number(amount) || 0) : (Number(amount.replace(/,/g, "")) || 0)
   const hotkeys = isusd ? [5, 10] : [5000, 10000]
   const labelStyle: React.CSSProperties = { fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.6px', color: 'var(--text-muted)', marginBottom: 2 }
 
@@ -524,26 +564,34 @@ function DoubleBetForm({ site, lastLeg1, onClose, onBet }: {
         onBlur={e => { const n = parseOdds(e.target.value); if (n > 0) setOddsRaw(n.toFixed(2)) }} />
       {oddsV > 0 && <div style={{ fontSize: 9, color: 'var(--gold)', fontWeight: 700, textAlign: 'right' }}>배당 → {oddsV.toFixed(2)}</div>}
       <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-        <input className="form-input inline-bet-input" type="text" inputMode="numeric" placeholder={`금액 (${unit})`}
-          value={stakeN > 0 ? stakeN.toLocaleString() : amount}
+        <input className="form-input inline-bet-input" type="text" inputMode={isusd ? 'decimal' : 'numeric'} placeholder={`금액 (${unit})`}
+          value={isusd ? amount : (stakeN > 0 ? stakeN.toLocaleString() : amount)}
           style={{ flex: 1, MozAppearance: 'textfield' } as React.CSSProperties}
           onChange={e => {
-            const raw = e.target.value.replace(/,/g, '')
-            if (raw === '' || /^\d+$/.test(raw)) setAmount(raw)
+            if (isusd) {
+              const v = e.target.value
+              if (v === '' || /^\d*\.?\d{0,2}$/.test(v)) setAmount(v)
+            } else {
+              const raw = e.target.value.replace(/,/g, '')
+              if (raw === '' || /^\d+$/.test(raw)) setAmount(raw)
+            }
           }}
           onKeyDown={e => e.key === 'Enter' && submit()} />
         <button onClick={() => setAmount('')} style={{ padding: '0 8px', height: 34, borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-body)', whiteSpace: 'nowrap', flexShrink: 0 }}>초기화</button>
       </div>
       <div style={{ display: 'flex', gap: 4 }}>
         {hotkeys.map(hk => (
-          <button key={hk} className="hotkey-btn" onClick={() => setAmount(String(Number(amount.replace(/,/g,'') || 0) + hk))}>
+          <button key={hk} className="hotkey-btn" onClick={() => {
+            const cur = isusd ? (Number(amount) || 0) : (Number(amount.replace(/,/g,'')) || 0)
+            setAmount(String(cur + hk))
+          }}>
             +{isusd ? `$${hk}` : `${hk.toLocaleString()}`}
           </button>
         ))}
       </div>
       {oddsV > 0 && stakeN > 0 && (
         <div style={{ fontSize: 9, color: 'var(--green)', fontWeight: 700, textAlign: 'right' }}>
-          예상 +{isusd ? '$' : ''}{Math.round(stakeN * (oddsV - 1)).toLocaleString()}{isusd ? '' : '원'}
+          예상 +{isusd ? '$' : ''}{(isusd ? (stakeN * (oddsV - 1)).toFixed(2) : Math.round(stakeN * (oddsV - 1)).toLocaleString())}{isusd ? '' : '원'}
         </div>
       )}
       <div style={{ display: 'flex', gap: 5 }}>
@@ -762,9 +810,9 @@ export default function Dashboard() {
   }
 
   /* ── 베팅 제출 ── */
-  async function submitBet(site: Site, sport: string, content: string, odds: number, stake: number, isLive = false): Promise<boolean> {
+  async function submitBet(site: Site, sport: string, content: string, odds: number, stake: number, isLive = false, isOddsFlow = false): Promise<boolean> {
     const { market, pick } = autoMarket(content)
-    const { data: betData } = await supabase.from('bets').insert({ bet_date: today, sport: sport as Sport, league: '', match: content, market, pick, odds, stake, result: 'pending' as BetResult, profit: 0, memo: '', site_id: site.id, parlay_group: null, parlay_leg: 1, is_live: isLive }).select().single()
+    const { data: betData } = await supabase.from('bets').insert({ bet_date: today, sport: sport as Sport, league: '', match: content, market, pick, odds, stake, result: 'pending' as BetResult, profit: 0, memo: '', site_id: site.id, parlay_group: null, parlay_leg: 1, is_live: isLive, is_odds_flow: isOddsFlow }).select().single()
     if (!betData) return false
     const { data: siteData } = await supabase.from('sites').update({ balance: site.balance - stake, rolling_done: site.rolling_done + stake, deposit_bet_done: (site.deposit_bet_done ?? 0) + stake }).eq('id', site.id).select().single()
     if (siteData) {
@@ -813,7 +861,11 @@ export default function Dashboard() {
     }
 
     // leg1에만 실제 profit 기록, leg2는 0 → sitePnL 중복 합산 방지
-    const profit = result === 'win' ? Math.round(stake * (groupBets[0].odds - 1)) : result === 'loss' ? -stake : 0
+    const isusd = site?.currency === 'usd'
+    const rawProfit = stake * (groupBets[0].odds - 1)
+    const profit = result === 'win'
+      ? (isusd ? Math.round(rawProfit * 100) / 100 : Math.round(rawProfit))
+      : result === 'loss' ? -stake : 0
     const updatedList: Bet[] = []
     for (let i = 0; i < groupBets.length; i++) {
       const legProfit = i === 0 ? profit : 0  // leg1만 profit, 나머지 0
@@ -888,7 +940,11 @@ export default function Dashboard() {
       return
     }
 
-    const profit = result === 'win' ? Math.round(bet.stake * (bet.odds - 1)) : result === 'loss' ? -bet.stake : 0
+    const isusd = site?.currency === 'usd'
+    const rawProfit = bet.stake * (bet.odds - 1)
+    const profit = result === 'win'
+      ? (isusd ? Math.round(rawProfit * 100) / 100 : Math.round(rawProfit))
+      : result === 'loss' ? -bet.stake : 0
     const { data } = await supabase.from('bets').update({ result, profit, is_pinned: false }).eq('id', bet.id).select().single()
     if (data) {
       await logAction({ action_type: 'update', table_name: 'bets', record_id: data.id, before_data: bet as never, after_data: data as never, description: `결과: ${bet.match} → ${result}` })
@@ -942,7 +998,11 @@ export default function Dashboard() {
   /* ── 결과 처리 후 고정 해제 (완료 시) ── */
   async function applyResultAndUnpin(bet: Bet, result: BetResult) {
     const site = sites.find(s => s.id === bet.site_id)
-    const profit = result === 'win' ? Math.round(bet.stake * (bet.odds - 1)) : result === 'loss' ? -bet.stake : 0
+    const isusd = site?.currency === 'usd'
+    const rawProfit = bet.stake * (bet.odds - 1)
+    const profit = result === 'win'
+      ? (isusd ? Math.round(rawProfit * 100) / 100 : Math.round(rawProfit))
+      : result === 'loss' ? -bet.stake : 0
     const { data } = await supabase.from('bets').update({ result, profit, is_pinned: false }).eq('id', bet.id).select().single()
     if (data) {
       await logAction({ action_type: 'update', table_name: 'bets', record_id: data.id, before_data: bet as never, after_data: data as never, description: `결과: ${bet.match} → ${result}` })
@@ -1034,7 +1094,7 @@ export default function Dashboard() {
                           ) : site.bet_type === 'double' ? (
                             <DoubleBetForm site={site} lastLeg1={getLastLeg1(site.id)} onClose={() => setOpenFormSiteId(null)} onBet={(c1,c2,odds,amt) => submitDoubleBet(site,c1,c2,odds,amt)} />
                           ) : (
-                            <SingleBetForm site={site} defaultSport={pending.slice(-1)[0]?.sport ?? 'soccer'} onClose={() => setOpenFormSiteId(null)} onBet={(sp,ct,od,amt,lv) => submitBet(site,sp,ct,od,amt,lv)} />
+                            <SingleBetForm site={site} defaultSport={pending.slice(-1)[0]?.sport ?? 'soccer'} onClose={() => setOpenFormSiteId(null)} onBet={(sp,ct,od,amt,lv,of) => submitBet(site,sp,ct,od,amt,lv,of)} />
                           )}
                         </div>
                       )}
@@ -1126,6 +1186,7 @@ export default function Dashboard() {
                                       <span style={{ fontSize: 14, lineHeight: 1, flexShrink: 0, width: 18, textAlign: 'center' }}>{SPORT_SHORT[bet.sport] ?? '📋'}</span>
                                       <span className="site-bet-match" style={{ flex: 1, marginBottom: 0, fontSize: 13 }}>{bet.match}</span>
                                       {bet.is_live && <span style={{ fontSize: 9, fontWeight: 700, color: '#f87171', background: 'rgba(248,113,113,0.12)', border: '1px solid rgba(248,113,113,0.3)', borderRadius: 3, padding: '1px 4px', flexShrink: 0 }}>🔴 LIVE</span>}
+                                      {bet.is_odds_flow && <span style={{ fontSize: 9, fontWeight: 700, color: '#a78bfa', background: 'rgba(167,139,250,0.12)', border: '1px solid rgba(167,139,250,0.3)', borderRadius: 3, padding: '1px 4px', flexShrink: 0 }}>📊 흐름</span>}
                                       {bet.is_pinned && <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--gold)', flexShrink: 0 }}>📌</span>}
                                     </div>
                                     <div style={{ paddingLeft: 22 }}>

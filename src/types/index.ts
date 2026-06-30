@@ -23,6 +23,7 @@ export interface Bet {
   parlay_leg: number            // 1 or 2
   is_live: boolean              // 라이브 베팅 여부
   is_pinned: boolean            // 마감 시 고정 유지
+  is_odds_flow: boolean         // 배당흐름 베팅 (떨어진 배당 흐름의 반대편)
 }
 export interface Todo {
   id: string; created_at: string; todo_date: string; content: string
