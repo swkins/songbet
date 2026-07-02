@@ -134,6 +134,32 @@ function OtherBetsPanel({ bets }: { bets: Bet[] }) {
   )
 }
 
+// ─── 야구 리그 추론 (팀 이름 기반) ──────────────────────────────
+// 대부분 팀 이름이 리그 간 겹치지 않아 자동 판별 가능. 유일한 예외는 "롯데"
+// (KBO 롯데 자이언츠 / NPB 치바롯데마린즈 중복) — 다른 팀과 함께 언급되면 그 팀 기준으로 판별되고,
+// "롯데" 단독으로만 나오면 KBO로 추정한다.
+const KBO_TEAMS = ['KT','LG','NC','삼성','SSG','기아','두산','키움','한화']
+const MLB_TEAMS = [
+  '애리조나','애틀랜타','볼티모어','보스턴','시카고 컵스','화이트삭스','신시내티','클리블랜드','콜로라도',
+  '디트로이트','휴스턴','캔자스시티','LA에인절스','LA다저스','마이애미','밀워키','미네소타',
+  '뉴욕M','뉴욕메츠','뉴욕Y','뉴욕양키스','오클랜드','필라델피아','피츠버그','샌디에이고','샌프란시스코',
+  '시애틀','세인트루이스','탬파베이','텍사스','토론토','워싱턴',
+]
+const NPB_TEAMS = ['요미우리','한신','주니치','요코하마','히로시마','야쿠르트','소프트뱅크','니혼햄','오릭스','세이부','라쿠텐']
+
+type League = 'KBO' | 'MLB' | 'NPB'
+function inferLeague(matchText: string): League | null {
+  if (!matchText) return null
+  const found = new Set<League>()
+  if (KBO_TEAMS.some(t => matchText.includes(t))) found.add('KBO')
+  if (MLB_TEAMS.some(t => matchText.includes(t))) found.add('MLB')
+  if (NPB_TEAMS.some(t => matchText.includes(t))) found.add('NPB')
+  if (found.size === 1) return [...found][0]
+  if (found.size > 1) return null // 팀 이름이 뒤섞여 있어 판별 불가 (거의 발생하지 않음)
+  if (matchText.includes('롯데')) return 'KBO' // 단독 "롯데"는 KBO로 추정
+  return null
+}
+
 // ─── 야구 상세 통계 (룰북 기반) ──────────────────────────────────
 // 배당(odds) 앞의 "N.N 언더/오버" 형태에서 라인 숫자를 추출
 function extractTotalLine(pick: string): number | null {
@@ -145,7 +171,20 @@ function extractTotalLine(pick: string): number | null {
 function formatLine(n: number): string { return n.toFixed(1).replace(/\.0$/, '') }
 
 function BaseballDetailPanel({ bets }: { bets: Bet[] }) {
-  const settled = bets.filter(b => b.result !== 'pending')
+  const [leagueFilter, setLeagueFilter] = useState<League | 'ETC' | 'all'>('all')
+
+  const allSettled = bets.filter(b => b.result !== 'pending')
+  const leagueKeyOf = (b: Bet): League | 'ETC' => inferLeague(b.match) ?? 'ETC'
+
+  const leagueSummary: { league: League | 'ETC'; label: string } [] = [
+    { league: 'KBO', label: '🇰🇷 KBO' }, { league: 'MLB', label: '🇺🇸 MLB' }, { league: 'NPB', label: '🇯🇵 NPB' },
+    { league: 'ETC', label: '❓ 기타(리그 미확인)' },
+  ]
+  const leagueStats = leagueSummary
+    .map(({ league, label }) => ({ league, label, ...calcStats(allSettled.filter(b => leagueKeyOf(b) === league)) }))
+    .filter(r => r.total > 0)
+
+  const settled = leagueFilter === 'all' ? allSettled : allSettled.filter(b => leagueKeyOf(b) === leagueFilter)
   const ml = settled.filter(b => b.market === 'moneyline')
   const under = settled.filter(b => b.market === 'under')
   const over = settled.filter(b => b.market === 'over')
@@ -189,6 +228,38 @@ function BaseballDetailPanel({ bets }: { bets: Bet[] }) {
 
   return (
     <div>
+      {/* 리그별 요약 + 필터 탭 (팀 이름으로 자동 추론) */}
+      {leagueStats.length > 0 && (
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
+            <button onClick={() => setLeagueFilter('all')}
+              style={{ fontSize: 11, fontWeight: 700, padding: '5px 10px', borderRadius: 6, cursor: 'pointer', fontFamily: 'var(--font-body)',
+                border: `1px solid ${leagueFilter === 'all' ? 'var(--green-border)' : 'var(--border)'}`,
+                background: leagueFilter === 'all' ? 'var(--green-bg)' : 'var(--bg-elevated)',
+                color: leagueFilter === 'all' ? 'var(--green)' : 'var(--text-muted)' }}>전체</button>
+            {leagueStats.map(r => (
+              <button key={r.league} onClick={() => setLeagueFilter(r.league)}
+                style={{ fontSize: 11, fontWeight: 700, padding: '5px 10px', borderRadius: 6, cursor: 'pointer', fontFamily: 'var(--font-body)',
+                  border: `1px solid ${leagueFilter === r.league ? 'var(--green-border)' : 'var(--border)'}`,
+                  background: leagueFilter === r.league ? 'var(--green-bg)' : 'var(--bg-elevated)',
+                  color: leagueFilter === r.league ? 'var(--green)' : 'var(--text-muted)' }}>{r.label} ({r.total})</button>
+            ))}
+          </div>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            {leagueStats.map(r => (
+              <div key={r.league} style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 12px', minWidth: 130 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 4 }}>{r.label}</div>
+                <div style={{ display: 'flex', gap: 10, alignItems: 'baseline' }}>
+                  <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{r.total}건</span>
+                  <span style={{ fontSize: 12, fontWeight: 700 }} className={r.winRate >= 50 ? 'profit-pos' : 'profit-neg'}>{r.winRate.toFixed(0)}%</span>
+                  <span style={{ fontSize: 11, fontWeight: 700 }} className={r.profit >= 0 ? 'profit-pos' : 'profit-neg'}>{r.profit >= 0 ? '+' : ''}{r.profit.toLocaleString()}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
         <RuleStatsTable title="⚾ 승패(전체) — 0.1단위 배당 구간별" rows={mlRows} />
         <RuleStatsTable title="⚾ 언더 — 라인별 적중률" rows={underRows}
