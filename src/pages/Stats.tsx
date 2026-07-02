@@ -150,7 +150,7 @@ function BaseballDetailPanel({ bets }: { bets: Bet[] }) {
   const under = settled.filter(b => b.market === 'under')
   const over = settled.filter(b => b.market === 'over')
 
-  // 승패(역배·정배 전체) — 실제 베팅한 배당 범위를 0.1 단위로 전부 커버
+  // 승패(역배·정배 전체) — 실제 베팅한 배당 범위를 0.1 단위로 전부 커버 (룰북 등급 없이 순수 통계)
   const mlRows: RuleRow[] = (() => {
     if (!ml.length) return []
     const odds = ml.map(b => b.odds)
@@ -159,9 +159,8 @@ function BaseballDetailPanel({ bets }: { bets: Bet[] }) {
     const rows: RuleRow[] = []
     for (let lo = loStart; lo <= loEnd + 1e-9; lo = Math.round((lo + 0.1) * 10) / 10) {
       const hi = Math.round((lo + 0.1) * 10) / 10
-      const tier: RowColor = lo < 2.1 ? 'none' : lo < 2.5 ? 'S' : lo < 2.8 ? 'A' : 'B'
       const rowBets = ml.filter(b => b.odds >= lo && b.odds < hi)
-      if (rowBets.length > 0) rows.push({ label: lo.toFixed(1), tier, bets: rowBets })
+      if (rowBets.length > 0) rows.push({ label: lo.toFixed(1), tier: 'none', bets: rowBets })
     }
     return rows
   })()
@@ -776,7 +775,7 @@ function SportPanel({ bets, sport, onDeleteRequest }: {
     return { mkt, label: MARKET_LABELS[mkt], ...s }
   }).filter(Boolean) as ({ mkt: Market; label: string } & ReturnType<typeof calcStats>)[]
 
-  const showRulebook = ['baseball','soccer','basketball'].includes(sport.value)
+  const showRulebook = ['soccer','basketball'].includes(sport.value)
 
   if (stats.total === 0) return (
     <div>
@@ -822,7 +821,7 @@ function SportPanel({ bets, sport, onDeleteRequest }: {
           <div className="card" style={{ width: 220, flexShrink: 0 }}>
             <div className="card-title">마켓별 성적</div>
             <table>
-              <thead><tr><th>마켓</th><th className="td-right">건</th><th className="td-right">승률</th><th className="td-right">ROI</th></tr></thead>
+              <thead><tr><th>마켓</th><th className="td-right">건</th><th className="td-right">승률</th><th className="td-right">ROI</th><th className="td-right">손익</th></tr></thead>
               <tbody>
                 {byMarket.map(r => (
                   <tr key={r.mkt}>
@@ -830,6 +829,7 @@ function SportPanel({ bets, sport, onDeleteRequest }: {
                     <td className="td-right" style={{ color: 'var(--text-secondary)', fontSize: 11 }}>{r.total}</td>
                     <td className="td-right"><span className={r.winRate >= 50 ? 'profit-pos' : 'profit-neg'} style={{ fontSize: 11, fontWeight: 700 }}>{r.winRate.toFixed(0)}%</span></td>
                     <td className="td-right"><span className={r.roi >= 0 ? 'profit-pos' : 'profit-neg'} style={{ fontSize: 11, fontWeight: 700 }}>{r.roi >= 0 ? '+' : ''}{r.roi.toFixed(1)}%</span></td>
+                    <td className="td-right"><span className={r.profit >= 0 ? 'profit-pos' : 'profit-neg'} style={{ fontSize: 11, fontWeight: 700 }}>{r.profit >= 0 ? '+' : ''}{r.profit.toLocaleString()}</span></td>
                   </tr>
                 ))}
               </tbody>
