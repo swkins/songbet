@@ -135,41 +135,67 @@ function OtherBetsPanel({ bets }: { bets: Bet[] }) {
 }
 
 // ─── 야구 상세 통계 (룰북 기반) ──────────────────────────────────
+// 배당(odds) 앞의 "N.N 언더/오버" 형태에서 라인 숫자를 추출
+function extractTotalLine(pick: string): number | null {
+  const m = pick?.match(/(\d+\.?\d*)\s*(?:언더|오버|under|over)/i)
+  if (!m) return null
+  const n = parseFloat(m[1])
+  return isNaN(n) ? null : n
+}
+function formatLine(n: number): string { return n.toFixed(1).replace(/\.0$/, '') }
+
 function BaseballDetailPanel({ bets }: { bets: Bet[] }) {
   const settled = bets.filter(b => b.result !== 'pending')
   const ml = settled.filter(b => b.market === 'moneyline')
   const under = settled.filter(b => b.market === 'under')
+  const over = settled.filter(b => b.market === 'over')
 
-  // 역배 — 0.1 단위 구간별
-  const mlSteps = [2.1,2.2,2.3,2.4,2.5,2.6,2.7,2.8,2.9,3.0]
-  const mlRows: RuleRow[] = mlSteps.map(lo => {
-    const hi = Math.round((lo + 0.1) * 10) / 10
-    const tier: RowColor = lo < 2.5 ? 'S' : lo < 2.8 ? 'A' : 'B'
-    return { label: lo.toFixed(1), tier, bets: ml.filter(b => b.odds >= lo && b.odds < hi) }
-  })
-  const mlOther = ml.filter(b => b.odds < 2.1 || b.odds >= 3.1)
+  // 승패(역배·정배 전체) — 실제 베팅한 배당 범위를 0.1 단위로 전부 커버
+  const mlRows: RuleRow[] = (() => {
+    if (!ml.length) return []
+    const odds = ml.map(b => b.odds)
+    const loStart = Math.floor(Math.min(...odds) * 10) / 10
+    const loEnd = Math.floor((Math.max(...odds) - 0.0001) * 10) / 10
+    const rows: RuleRow[] = []
+    for (let lo = loStart; lo <= loEnd + 1e-9; lo = Math.round((lo + 0.1) * 10) / 10) {
+      const hi = Math.round((lo + 0.1) * 10) / 10
+      const tier: RowColor = lo < 2.1 ? 'none' : lo < 2.5 ? 'S' : lo < 2.8 ? 'A' : 'B'
+      const rowBets = ml.filter(b => b.odds >= lo && b.odds < hi)
+      if (rowBets.length > 0) rows.push({ label: lo.toFixed(1), tier, bets: rowBets })
+    }
+    return rows
+  })()
 
-  // 언더 — 0.1 단위 1.9~2.4
-  const unSteps = [1.9,2.0,2.1,2.2,2.3,2.4]
-  const unRows: RuleRow[] = unSteps.map(lo => {
-    const hi = Math.round((lo + 0.1) * 10) / 10
-    const tier: RowColor = lo < 2.1 ? 'S' : lo < 2.3 ? 'A' : 'B'
-    const be = lo < 2.0 ? '53%' : lo < 2.1 ? '51%' : lo < 2.2 ? '49%' : lo < 2.3 ? '47%' : lo < 2.4 ? '45%' : '43%'
-    return { label: lo.toFixed(1), tier, breakeven: be, bets: under.filter(b => b.odds >= lo && b.odds < hi) }
-  })
-  const unOther = under.filter(b => b.odds < 1.9 || b.odds >= 2.5)
+  // 언더 / 오버 — 배당 구간이 아닌 총점 라인(7.5, 8, 8.5 ...) 별로 적중률 집계
+  function groupByLine(list: Bet[]): { rows: RuleRow[]; noLineCount: number } {
+    const map = new Map<number, Bet[]>()
+    let noLineCount = 0
+    list.forEach(b => {
+      const line = extractTotalLine(b.pick)
+      if (line === null) { noLineCount++; return }
+      if (!map.has(line)) map.set(line, [])
+      map.get(line)!.push(b)
+    })
+    const rows = Array.from(map.entries())
+      .sort((a, b) => a[0] - b[0])
+      .map(([line, lineBets]) => ({ label: formatLine(line), tier: 'none' as RowColor, bets: lineBets }))
+    return { rows, noLineCount }
+  }
+  const { rows: underRows, noLineCount: underNoLine } = groupByLine(under)
+  const { rows: overRows, noLineCount: overNoLine } = groupByLine(over)
 
   // 그외
-  const ruleIds = new Set([...mlRows.flatMap(r => r.bets), ...unRows.flatMap(r => r.bets)].map(b => b.id))
+  const ruleIds = new Set([...mlRows.flatMap(r => r.bets), ...underRows.flatMap(r => r.bets), ...overRows.flatMap(r => r.bets)].map(b => b.id))
   const otherBets = settled.filter(b => !ruleIds.has(b.id))
 
   return (
     <div>
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-        <RuleStatsTable title="⚾ 역배 — 0.1단위 구간별" rows={mlRows}
-          extra={mlOther.length > 0 ? <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 6 }}>범위 외(2.09↓/3.1↑): {mlOther.length}건</div> : undefined} />
-        <RuleStatsTable title="⚾ 언더 — 0.1단위 구간별 (1.9~2.4)" rows={unRows}
-          extra={unOther.length > 0 ? <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 6 }}>범위 외: {unOther.length}건</div> : undefined} />
+        <RuleStatsTable title="⚾ 승패(전체) — 0.1단위 배당 구간별" rows={mlRows} />
+        <RuleStatsTable title="⚾ 언더 — 라인별 적중률" rows={underRows}
+          extra={underNoLine > 0 ? <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 6 }}>라인 미확인: {underNoLine}건</div> : undefined} />
+        <RuleStatsTable title="⚾ 오버 — 라인별 적중률" rows={overRows}
+          extra={overNoLine > 0 ? <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 6 }}>라인 미확인: {overNoLine}건</div> : undefined} />
       </div>
       <OtherBetsPanel bets={otherBets} />
     </div>
