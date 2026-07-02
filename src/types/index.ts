@@ -14,6 +14,7 @@ export interface Site {
   bet_type: 'single' | 'double'   // 단폴 or 두폴
   settlement_only: boolean          // 결산 전용 사이트 (대시보드 베팅현황에 미표시)
   default_stake: number             // 기본 베팅 금액 (0이면 통화별 폴백)
+  carry_pnl: number                 // 마감 시 진행중 베팅이 남아있으면 이월되는 누적 수익률 (진행중 베팅 없이 마감되면 0으로 초기화)
 }
 export interface Bet {
   id: string; created_at: string; bet_date: string; sport: Sport

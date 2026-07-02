@@ -712,9 +712,15 @@ export default function Dashboard() {
   const colCount = Math.max(1, sites.length)
 
   function sitePnL(site: Site) {
-    if (!site.active || (site.last_deposit ?? 0) === 0) return null
-    const settled = settledBySite(site.id)
-    return settled.reduce((acc, b) => acc + b.profit, 0)
+    const hasPending = pendingBySite(site.id).length > 0
+    const visibleSum = settledBySite(site.id).reduce((acc, b) => acc + b.profit, 0)
+    const carry = site.carry_pnl ?? 0
+    const total = carry + visibleSum
+    // 완전 마감(진행중 베팅 없음) 상태에서 이월/완료목록도 없으면 → 표시 안 함(초기화된 상태)
+    if (!site.active && !hasPending && total === 0) return null
+    // 활성 상태인데 아직 아무 이력도 없는 새 사이트 → 표시 안 함
+    if (site.active && (site.last_deposit ?? 0) === 0 && !hasPending && total === 0) return null
+    return total
   }
 
   function getLastLeg1(siteId: string): { content: string } | null {
@@ -792,12 +798,26 @@ export default function Dashboard() {
     if (!withdrawSite) return
     const before = { ...withdrawSite }; const isusd = withdrawSite.currency === 'usd'
 
+    // 완료된 목록(이미 결과 처리된 베팅)은 마감 시점에 숨김 처리 — 다음 마감 때 완료 목록이 비워지는 효과
+    // 진행중(pending) 베팅은 절대 건드리지 않음 — 결과 처리 전까지 계속 남아있어야 함
+    const siteSettled = settledBySite(withdrawSite.id)
+    const settledProfitSum = siteSettled.reduce((acc, b) => acc + b.profit, 0)
+    const stillPending = pendingBySite(withdrawSite.id).length > 0
+    // 진행중 베팅이 남아있으면 수익률을 이월(초기화하지 않음), 없으면 완전히 초기화
+    const newCarryPnl = stillPending ? (withdrawSite.carry_pnl ?? 0) + settledProfitSum : 0
+
+    if (siteSettled.length > 0) {
+      await supabase.from('bets').update({ is_hidden: true }).in('id', siteSettled.map(b => b.id))
+      setBets(p => p.filter(b => !siteSettled.some(sb => sb.id === b.id)))
+    }
+
     // 마감: 사이트 비활성 + 잔액/입금/롤링 초기화. 베팅 중인 목록은 절대 건드리지 않음
     // (결과 처리를 하지 않는 한 진행중인 베팅은 계속 남아있어야 함)
     const { data: updatedSite } = await supabase.from('sites').update({
       active: false,
       total_withdrawal: (withdrawSite.total_withdrawal ?? 0) + amount,
       balance: 0, last_deposit: 0, deposit_bet_done: 0, point_deposit: 0,
+      carry_pnl: newCarryPnl,
     }).eq('id', withdrawSite.id).select().single()
 
     if (updatedSite) setSites(p => p.map(s => s.id === updatedSite.id ? updatedSite : s))
@@ -1217,8 +1237,8 @@ export default function Dashboard() {
                           )
                         })
                       })()}
-                      {/* 완료된 목록 — 마감(비활성) 사이트에선 숨김 */}
-                      {site.active && settled.length > 0 && (() => {
+                      {/* 완료된 목록 — 다음 마감 처리 때 함께 사라짐 (비활성 사이트에서도 표시) */}
+                      {settled.length > 0 && (() => {
                         const renderedSettledGroups = new Set<string>()
                         return (
                           <div style={{ marginTop: 8, borderTop: '1px solid var(--border-light)', paddingTop: 6 }}>
