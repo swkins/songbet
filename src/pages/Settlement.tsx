@@ -360,18 +360,17 @@ export default function Settlement() {
   const thisMonthStart = dayjs().startOf('month').format('YYYY-MM-DD')
   const thisMonthEnd   = dayjs().endOf('month').format('YYYY-MM-DD')
 
-  const monthSiteExpense = useMemo(() => {
-    const map: Record<string, number> = {}
-    cashflows.filter(c => c.type === 'expense' && c.flow_date >= thisMonthStart && c.flow_date <= thisMonthEnd && c.site_id)
-      .forEach(c => { map[c.site_id!] = (map[c.site_id!] ?? 0) + toKrw(c) })
-    return Object.entries(map).map(([siteId, amt]) => ({ name: sites.find(s => s.id === siteId)?.name ?? siteId, amt })).sort((a, b) => b.amt - a.amt)
-  }, [cashflows, sites, thisMonthStart, thisMonthEnd, rateInfo])
-
-  const monthSiteIncome = useMemo(() => {
-    const map: Record<string, number> = {}
-    cashflows.filter(c => c.type === 'income' && c.flow_date >= thisMonthStart && c.flow_date <= thisMonthEnd && c.site_id)
-      .forEach(c => { map[c.site_id!] = (map[c.site_id!] ?? 0) + toKrw(c) })
-    return Object.entries(map).map(([siteId, amt]) => ({ name: sites.find(s => s.id === siteId)?.name ?? siteId, amt })).sort((a, b) => b.amt - a.amt)
+  const monthSiteBreakdown = useMemo(() => {
+    const map: Record<string, { income: number; expense: number }> = {}
+    cashflows.filter(c => c.flow_date >= thisMonthStart && c.flow_date <= thisMonthEnd && c.site_id)
+      .forEach(c => {
+        if (!map[c.site_id!]) map[c.site_id!] = { income: 0, expense: 0 }
+        if (c.type === 'income') map[c.site_id!].income += toKrw(c)
+        else if (c.type === 'expense') map[c.site_id!].expense += toKrw(c)
+      })
+    return Object.entries(map)
+      .map(([siteId, v]) => ({ name: sites.find(s => s.id === siteId)?.name ?? siteId, income: v.income, expense: v.expense, net: v.income - v.expense }))
+      .sort((a, b) => b.net - a.net)
   }, [cashflows, sites, thisMonthStart, thisMonthEnd, rateInfo])
 
   const monthlySummary = useMemo(() => {
@@ -417,8 +416,13 @@ export default function Settlement() {
   const monthUsdExpenseKrw = monthFlows.filter(c => c.type === 'expense' && c.currency === 'usd').reduce((s, c) => s + toKrw(c), 0)
   const hasUsdInMonth = monthUsdIncomeKrw > 0 || monthUsdExpenseKrw > 0
 
-  const maxSiteExpense = Math.max(...monthSiteExpense.map(x => x.amt), 1)
-  const maxSiteIncome  = Math.max(...monthSiteIncome.map(x => x.amt), 1)
+  const thisMonthIncomeTotal  = cashflows.filter(c => c.type === 'income'  && c.flow_date >= thisMonthStart && c.flow_date <= thisMonthEnd).reduce((s, c) => s + toKrw(c), 0)
+  const thisMonthExpenseTotal = cashflows.filter(c => c.type === 'expense' && c.flow_date >= thisMonthStart && c.flow_date <= thisMonthEnd).reduce((s, c) => s + toKrw(c), 0)
+  const thisMonthNetTotal = thisMonthIncomeTotal - thisMonthExpenseTotal
+
+  const maxSiteBreakdownIncome  = Math.max(...monthSiteBreakdown.map(x => x.income), 1)
+  const maxSiteBreakdownExpense = Math.max(...monthSiteBreakdown.map(x => x.expense), 1)
+  const maxSiteBreakdownNetAbs  = Math.max(...monthSiteBreakdown.map(x => Math.abs(x.net)), 1)
   const DOW_KO = ['일', '월', '화', '수', '목', '금', '토']
 
   const catNames = categories.map(c => c.name)
@@ -732,43 +736,60 @@ export default function Settlement() {
           ))}
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-          <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10, padding: '12px 14px' }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--red)', textTransform: 'uppercase', letterSpacing: '0.7px', marginBottom: 10 }}>이번달 지출 — 사이트별</div>
-            {monthSiteExpense.length === 0 && <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>내역 없음</div>}
-            {monthSiteExpense.map(({ name, amt }, i) => {
-              const pct = Math.round(amt / maxSiteExpense * 100)
-              return (
-                <div key={name} style={{ marginBottom: 9 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
-                    <span style={{ fontSize: 12, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '55%' }}>{name}</span>
-                    <span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-num)', color: 'var(--red)', flexShrink: 0 }}>-{fmt(amt)}</span>
-                  </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+          {[
+            { label: '이번달 총 수입', val: thisMonthIncomeTotal,  color: 'var(--green)', prefix: '+' },
+            { label: '이번달 총 지출', val: thisMonthExpenseTotal, color: 'var(--red)',   prefix: '-' },
+            { label: '이번달 순수익',  val: thisMonthNetTotal, color: thisMonthNetTotal >= 0 ? 'var(--green)' : 'var(--red)', prefix: thisMonthNetTotal >= 0 ? '+' : '' },
+          ].map(({ label, val, color, prefix }) => (
+            <div key={label} style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px' }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.7px', textTransform: 'uppercase', marginBottom: 4 }}>{label}</div>
+              <div style={{ fontSize: 16, fontWeight: 800, fontFamily: 'var(--font-num)', color }}>{prefix}{fmt(val)}</div>
+              <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 2 }}>이번달 원화 환산 합계</div>
+            </div>
+          ))}
+        </div>
+
+        <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10, padding: '12px 14px' }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.7px', marginBottom: 10 }}>이번달 사이트별 손익</div>
+          {monthSiteBreakdown.length === 0 && <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>내역 없음</div>}
+          {monthSiteBreakdown.length > 0 && (
+            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(60px, 1fr) 1fr 1fr 1fr', gap: 4, marginBottom: 8 }}>
+              <span />
+              <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--green)', textAlign: 'right' }}>수입</span>
+              <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--red)', textAlign: 'right' }}>지출</span>
+              <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-secondary)', textAlign: 'right' }}>순수익</span>
+            </div>
+          )}
+          {monthSiteBreakdown.map(({ name, income, expense, net }, i) => {
+            const incPct = Math.round(income / maxSiteBreakdownIncome * 100)
+            const expPct = Math.round(expense / maxSiteBreakdownExpense * 100)
+            const netPct = Math.round(Math.abs(net) / maxSiteBreakdownNetAbs * 100)
+            const netColor = net >= 0 ? 'var(--green)' : 'var(--red)'
+            return (
+              <div key={name} style={{ display: 'grid', gridTemplateColumns: 'minmax(60px, 1fr) 1fr 1fr 1fr', gap: 4, alignItems: 'center', marginBottom: 10 }}>
+                <span style={{ fontSize: 12, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</span>
+                <div>
+                  <div style={{ textAlign: 'right', fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-num)', color: 'var(--green)', marginBottom: 2 }}>+{fmt(income)}</div>
                   <div style={{ height: 5, borderRadius: 3, background: 'var(--bg-elevated)' }}>
-                    <div style={{ height: '100%', borderRadius: 3, background: COLORS[i % COLORS.length], width: `${pct}%`, opacity: 0.85 }} />
+                    <div style={{ height: '100%', borderRadius: 3, background: 'var(--green)', width: `${incPct}%`, marginLeft: 'auto', opacity: 0.85 }} />
                   </div>
                 </div>
-              )
-            })}
-          </div>
-          <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10, padding: '12px 14px' }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--green)', textTransform: 'uppercase', letterSpacing: '0.7px', marginBottom: 10 }}>이번달 수입 — 사이트별</div>
-            {monthSiteIncome.length === 0 && <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>내역 없음</div>}
-            {monthSiteIncome.map(({ name, amt }, i) => {
-              const pct = Math.round(amt / maxSiteIncome * 100)
-              return (
-                <div key={name} style={{ marginBottom: 9 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
-                    <span style={{ fontSize: 12, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '55%' }}>{name}</span>
-                    <span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-num)', color: 'var(--green)', flexShrink: 0 }}>+{fmt(amt)}</span>
-                  </div>
+                <div>
+                  <div style={{ textAlign: 'right', fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-num)', color: 'var(--red)', marginBottom: 2 }}>-{fmt(expense)}</div>
                   <div style={{ height: 5, borderRadius: 3, background: 'var(--bg-elevated)' }}>
-                    <div style={{ height: '100%', borderRadius: 3, background: COLORS[i % COLORS.length], width: `${pct}%`, opacity: 0.85 }} />
+                    <div style={{ height: '100%', borderRadius: 3, background: 'var(--red)', width: `${expPct}%`, marginLeft: 'auto', opacity: 0.85 }} />
                   </div>
                 </div>
-              )
-            })}
-          </div>
+                <div>
+                  <div style={{ textAlign: 'right', fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-num)', color: netColor, marginBottom: 2 }}>{net >= 0 ? '+' : ''}{fmt(net)}</div>
+                  <div style={{ height: 5, borderRadius: 3, background: 'var(--bg-elevated)' }}>
+                    <div style={{ height: '100%', borderRadius: 3, background: netColor, width: `${netPct}%`, marginLeft: 'auto', opacity: 0.85 }} />
+                  </div>
+                </div>
+              </div>
+            )
+          })}
         </div>
 
         <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10, padding: '12px 14px' }}>

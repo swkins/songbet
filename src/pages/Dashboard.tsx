@@ -877,10 +877,11 @@ export default function Dashboard() {
     const profit = result === 'win'
       ? (isusd ? Math.round(rawProfit * 100) / 100 : Math.round(rawProfit))
       : result === 'loss' ? -stake : 0
+    const rateAtSettlement = isusd ? await getUsdKrwRate() : null
     const updatedList: Bet[] = []
     for (let i = 0; i < groupBets.length; i++) {
       const legProfit = i === 0 ? profit : 0  // leg1만 profit, 나머지 0
-      const { data } = await supabase.from('bets').update({ result, profit: legProfit }).eq('id', groupBets[i].id).select().single()
+      const { data } = await supabase.from('bets').update({ result, profit: legProfit, usd_krw_rate: rateAtSettlement }).eq('id', groupBets[i].id).select().single()
       if (data) updatedList.push(data)
     }
     if (!updatedList.length) return
@@ -956,7 +957,8 @@ export default function Dashboard() {
     const profit = result === 'win'
       ? (isusd ? Math.round(rawProfit * 100) / 100 : Math.round(rawProfit))
       : result === 'loss' ? -bet.stake : 0
-    const { data } = await supabase.from('bets').update({ result, profit }).eq('id', bet.id).select().single()
+    const rateAtSettlement = isusd ? await getUsdKrwRate() : null
+    const { data } = await supabase.from('bets').update({ result, profit, usd_krw_rate: rateAtSettlement }).eq('id', bet.id).select().single()
     if (data) {
       await logAction({ action_type: 'update', table_name: 'bets', record_id: data.id, before_data: bet as never, after_data: data as never, description: `결과: ${bet.match} → ${result}` })
       const updatedBets = bets.map(b => b.id === data.id ? data : b)
