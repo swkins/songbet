@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { logAction } from '../lib/logger'
-import type { Bet, Site, Sport, Market, BetResult } from '../types'
+import type { Bet, Site, Sport, Market, BetResult, GameRolling } from '../types'
 import dayjs from 'dayjs'
 import isoWeek from 'dayjs/plugin/isoWeek'
 dayjs.extend(isoWeek)
@@ -10,7 +10,7 @@ import {
   RotateCcw, Settings,
   CheckCircle, XCircle, Ban, MinusCircle, Gift, GripVertical, DollarSign,
   TrendingUp, TrendingDown, ArrowDownToLine, LogOut, Pencil,
-  ClipboardPaste, Gamepad2,
+  ClipboardPaste,
 } from 'lucide-react'
 
 const SPORTS: { value: Sport; label: string }[] = [
@@ -783,6 +783,7 @@ export default function Dashboard() {
 
   const [sites, setSites]     = useState<Site[]>([])
   const [bets, setBets]       = useState<Bet[]>([])
+  const [gameRollings, setGameRollings] = useState<GameRolling[]>([])
 
   const [showSiteMgr, setShowSiteMgr]   = useState(false)
   const [depositSite, setDepositSite]   = useState<Site | null>(null)
@@ -792,7 +793,7 @@ export default function Dashboard() {
   const [hoverBetId, setHoverBetId]     = useState<string | null>(null)
   const [inlineEditBetId, setInlineEditBetId] = useState<string | null>(null)
 
-  useEffect(() => { loadSites(); loadBets() }, [])
+  useEffect(() => { loadSites(); loadBets(); loadGameRollings() }, [])
 
   async function loadSites() {
     const { data } = await supabase.from('sites').select('*').eq('settlement_only', false).order('sort_order')
@@ -802,12 +803,17 @@ export default function Dashboard() {
     const { data } = await supabase.from('bets').select('*').eq('is_hidden', false).order('bet_date', { ascending: true }).order('created_at', { ascending: true })
     if (data) setBets(data)
   }
+  async function loadGameRollings() {
+    const { data } = await supabase.from('game_rollings').select('*').order('created_at', { ascending: true })
+    if (data) setGameRollings(data)
+  }
   const totalRolling     = (s: Site) => (s.last_deposit ?? 0) + (s.point_deposit ?? 0)
   const depositRemaining = (s: Site) => Math.max(0, totalRolling(s) - (s.deposit_bet_done ?? 0))
   const depositPct       = (s: Site) => totalRolling(s) > 0 ? Math.round((s.deposit_bet_done ?? 0) / totalRolling(s) * 100) : 0
   const betsBySite       = (id: string) => bets.filter(b => b.site_id === id)
   const pendingBySite    = (id: string) => betsBySite(id).filter(b => b.result === 'pending')
   const settledBySite    = (id: string) => betsBySite(id).filter(b => b.result !== 'pending')
+  const gameRollingsBySite = (id: string) => gameRollings.filter(g => g.site_id === id)
   const colCount = Math.max(1, sites.length)
 
   function sitePnL(site: Site) {
@@ -910,6 +916,13 @@ export default function Dashboard() {
       setBets(p => p.filter(b => !siteSettled.some(sb => sb.id === b.id)))
     }
 
+    // 게임 롤링 기록도 마감 시 초기화 (deposit_bet_done이 0으로 리셋되므로 함께 정리)
+    const siteGameRollings = gameRollingsBySite(withdrawSite.id)
+    if (siteGameRollings.length > 0) {
+      await supabase.from('game_rollings').delete().in('id', siteGameRollings.map(g => g.id))
+      setGameRollings(p => p.filter(g => !siteGameRollings.some(sg => sg.id === g.id)))
+    }
+
     // 마감: 사이트 비활성 + 잔액/입금/롤링 초기화. 베팅 중인 목록은 절대 건드리지 않음
     // (결과 처리를 하지 않는 한 진행중인 베팅은 계속 남아있어야 함)
     const { data: updatedSite } = await supabase.from('sites').update({
@@ -968,17 +981,30 @@ export default function Dashboard() {
     return false
   }
 
-  /* ── 게임 롤링 추가 (베팅 없이 롤링 금액만 차감) ── */
+  /* ── 게임 롤링 추가 (베팅 없이 롤링 금액만 차감 + 목록에 기록) ── */
   async function submitGameRolling(site: Site, amount: number): Promise<boolean> {
     const before = { ...site }
+    const { data: grData } = await supabase.from('game_rollings').insert({ site_id: site.id, amount }).select().single()
+    if (!grData) return false
     const newDone = (site.deposit_bet_done ?? 0) + amount
     const { data } = await supabase.from('sites').update({ deposit_bet_done: newDone }).eq('id', site.id).select().single()
     if (data) {
       await logAction({ action_type: 'update', table_name: 'sites', record_id: data.id, before_data: before as never, after_data: data as never, description: `${site.name} 게임 롤링 +${amount.toLocaleString()}` })
+      setGameRollings(p => [...p, grData])
       setSites(p => p.map(s => s.id === data.id ? data : s))
       return true
     }
     return false
+  }
+  async function deleteGameRolling(gr: GameRolling) {
+    const site = sites.find(s => s.id === gr.site_id)
+    if (!confirm('게임 롤링 기록을 삭제하고 롤링을 복원할까요?')) return
+    await supabase.from('game_rollings').delete().eq('id', gr.id)
+    setGameRollings(p => p.filter(g => g.id !== gr.id))
+    if (site) {
+      const { data } = await supabase.from('sites').update({ deposit_bet_done: Math.max(0, (site.deposit_bet_done ?? 0) - gr.amount) }).eq('id', site.id).select().single()
+      if (data) setSites(p => p.map(s => s.id === data.id ? data : s))
+    }
   }
 
   /* ── 두폴 결과 처리 (두 leg 동시, stake 한 번만) ── */
@@ -1211,7 +1237,7 @@ export default function Dashboard() {
                           {openFormSiteId !== site.id ? (
                             <div style={{ display: 'flex', gap: 6 }}>
                               <button className="site-add-btn" style={{ flex: 1, borderRadius: 8, padding: '12px 0', fontSize: 14 }} onClick={() => { setOpenFormSiteId(site.id); setOpenFormType('sports') }}><Plus size={16} /> 스포츠</button>
-                              <button className="site-add-btn" style={{ flex: 1, borderRadius: 8, padding: '12px 0', fontSize: 14 }} onClick={() => { setOpenFormSiteId(site.id); setOpenFormType('game') }}><Gamepad2 size={16} /> 게임</button>
+                              <button className="site-add-btn" style={{ flex: 1, borderRadius: 8, padding: '12px 0', fontSize: 14 }} onClick={() => { setOpenFormSiteId(site.id); setOpenFormType('game') }}><Plus size={16} /> 게임</button>
                             </div>
                           ) : openFormType === 'game' ? (
                             <GameRollingForm site={site} onClose={() => setOpenFormSiteId(null)} onSubmit={amt => submitGameRolling(site, amt)} />
@@ -1220,6 +1246,22 @@ export default function Dashboard() {
                           ) : (
                             <SingleBetForm site={site} defaultSport={pending.slice(-1)[0]?.sport ?? 'soccer'} onClose={() => setOpenFormSiteId(null)} onBet={(sp,ct,od,amt,lv) => submitBet(site,sp,ct,od,amt,lv)} />
                           )}
+                        </div>
+                      )}
+                      {/* 게임 롤링 기록 — 배당/경기내용 없이 롤링 금액만 표시 */}
+                      {gameRollingsBySite(site.id).length > 0 && (
+                        <div style={{ marginBottom: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                          {gameRollingsBySite(site.id).map(gr => (
+                            <div key={gr.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '7px 10px', background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', fontSize: 12 }}>
+                              <span style={{ color: 'var(--text-secondary)', fontWeight: 700 }}>게임 롤링</span>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <span style={{ fontFamily: 'var(--font-num)', fontWeight: 700, color: 'var(--gold)' }}>
+                                  +{isusd ? '$' : ''}{gr.amount.toLocaleString()}{isusd ? '' : '원'}
+                                </span>
+                                <button onClick={() => deleteGameRolling(gr)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', padding: 2 }}><Trash2 size={12} /></button>
+                              </div>
+                            </div>
+                          ))}
                         </div>
                       )}
                       {/* 결과 처리 전까지는 사이트 활성/비활성과 무관하게 베팅 중인 목록을 항상 표시 */}

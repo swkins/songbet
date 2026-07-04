@@ -44,4 +44,7 @@ export interface ActionLog {
   before_data: Record<string, unknown> | null; after_data: Record<string, unknown> | null; description: string
   cashflow_id: string | null
 }
+export interface GameRolling {
+  id: string; created_at: string; site_id: string; amount: number
+}
 export type Tab = 'dashboard' | 'stats' | 'settlement' | 'simul' | 'rulebook'
