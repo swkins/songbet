@@ -10,6 +10,7 @@ import {
   RotateCcw, Settings,
   CheckCircle, XCircle, Ban, MinusCircle, Gift, GripVertical, DollarSign,
   TrendingUp, TrendingDown, ArrowDownToLine, LogOut, Pencil,
+  ClipboardPaste, Gamepad2,
 } from 'lucide-react'
 
 const SPORTS: { value: Sport; label: string }[] = [
@@ -41,6 +42,22 @@ function autoMarket(content: string): { market: Market; pick: string } {
   if (/-\s*\d/.test(s)) return { market: 'handicap', pick: s }
   if (/\+\s*\d/.test(s) || /^\d+(\.\d+)?$/.test(s)) return { market: 'handicap', pick: s }
   return { market: 'moneyline', pick: s }
+}
+
+// 어떤 형태로 복사되어 오든(쉼표/공백/문자 혼합 포함) 숫자만 뽑아내는 헬퍼
+// - KRW: 숫자만 남김 ("12,345원" → "12345", "1 234 567" → "1234567")
+// - USD: 숫자 + 소수점 1개(최대 소수 2자리)만 남김
+function extractAmount(raw: string, isusd: boolean): string {
+  if (!isusd) return raw.replace(/[^\d]/g, '')
+  let seenDot = false
+  let out = ''
+  for (const ch of raw) {
+    if (ch >= '0' && ch <= '9') out += ch
+    else if (ch === '.' && !seenDot) { out += ch; seenDot = true }
+  }
+  const dotIdx = out.indexOf('.')
+  if (dotIdx !== -1 && out.length - dotIdx - 1 > 2) out = out.slice(0, dotIdx + 3)
+  return out
 }
 
 async function getUsdKrwRate(): Promise<number> {
@@ -81,11 +98,20 @@ function DepositModal({ site, onClose, onDeposit, onPoint }: {
   }, [tab])
 
   function handleChange(val: string) {
-    if (isusd) {
-      if (val === '' || /^\d*\.?\d{0,2}$/.test(val)) setAmount(val)
-    } else {
-      const raw = val.replace(/,/g, '')
-      if (raw === '' || /^\d+$/.test(raw)) setAmount(raw)
+    // 타이핑/붙여넣기 모두 이 경로를 지나감 — 쉼표·공백·문자가 섞여 들어와도
+    // 숫자(및 USD는 소수점)만 자동으로 추출해서 반영 (기존엔 정규식 불일치 시 통째로 무시되어
+    // "복사했는데 붙여넣기가 안 되는" 문제가 있었음)
+    setAmount(extractAmount(val, isusd))
+  }
+
+  async function handlePasteClick() {
+    try {
+      const text = await navigator.clipboard.readText()
+      const extracted = extractAmount(text, isusd)
+      if (extracted) setAmount(extracted)
+      inputRef.current?.focus()
+    } catch {
+      alert('클립보드 접근 권한이 없습니다. 브라우저에서 클립보드 읽기 권한을 허용해주세요.')
     }
   }
 
@@ -130,6 +156,9 @@ function DepositModal({ site, onClose, onDeposit, onPoint }: {
           <input ref={inputRef} className="form-input" type="text" inputMode="decimal" placeholder={isusd ? '0.00' : '0'} value={amount}
             onChange={e => handleChange(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter' && isValid) { tab === 'deposit' ? onDeposit(num) : onPoint(num) }}} autoFocus />
+          <button type="button" className="btn btn-ghost" title="클립보드에서 숫자 붙여넣기" onClick={handlePasteClick} style={{ flexShrink: 0, padding: '0 10px' }}>
+            <ClipboardPaste size={14} />
+          </button>
           <button className="btn btn-primary" disabled={!isValid}
             onClick={() => { if (isValid) { tab === 'deposit' ? onDeposit(num) : onPoint(num) }}} style={{ flexShrink: 0 }}>
             <Check size={12} /> {tab === 'deposit' ? '입금' : '추가'}
@@ -634,6 +663,75 @@ function DoubleBetForm({ site, lastLeg1, onClose, onBet }: {
   )
 }
 
+/* ── 인라인 베팅폼 (게임 롤링 — 금액만 입력, 그만큼 남은 롤링 차감) ── */
+function GameRollingForm({ site, onClose, onSubmit }: {
+  site: Site; onClose: () => void
+  onSubmit: (amount: number) => Promise<boolean>
+}) {
+  const isusd = site.currency === 'usd'; const unit = isusd ? '$' : '원'
+  const [amount, setAmount] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const stakeN = isusd ? (parseFloat(amount) || 0) : (Number(amount.replace(/,/g, '')) || 0)
+  const isValid = stakeN > 0
+  const hotkeys = isusd ? [5, 10] : [5000, 10000]
+
+  function handleChange(val: string) { setAmount(extractAmount(val, isusd)) }
+  async function handlePasteClick() {
+    try {
+      const text = await navigator.clipboard.readText()
+      const extracted = extractAmount(text, isusd)
+      if (extracted) setAmount(extracted)
+      inputRef.current?.focus()
+    } catch {
+      alert('클립보드 접근 권한이 없습니다. 브라우저에서 클립보드 읽기 권한을 허용해주세요.')
+    }
+  }
+  async function submit() {
+    if (!isValid) return
+    setSubmitting(true)
+    const ok = await onSubmit(stakeN)
+    setSubmitting(false)
+    if (ok) onClose()
+  }
+
+  return (
+    <div className="inline-bet-form">
+      <div style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.6px', color: 'var(--text-muted)', marginBottom: 2 }}>
+        게임 롤링 금액 ({unit}) — 남은 롤링에서 차감됩니다
+      </div>
+      <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+        <input ref={inputRef} className="form-input inline-bet-input" type="text" inputMode={isusd ? 'decimal' : 'numeric'} placeholder={`롤링 금액 (${unit})`}
+          value={isusd ? amount : (stakeN > 0 ? stakeN.toLocaleString() : amount)}
+          style={{ flex: 1 }}
+          onChange={e => handleChange(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && submit()} autoFocus />
+        <button type="button" title="클립보드에서 숫자 붙여넣기" onClick={handlePasteClick} style={{ padding: '0 8px', height: 34, borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+          <ClipboardPaste size={14} />
+        </button>
+        <button onClick={() => setAmount('')} style={{ padding: '0 8px', height: 34, borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-body)', whiteSpace: 'nowrap', flexShrink: 0 }}>초기화</button>
+      </div>
+      <div style={{ display: 'flex', gap: 4 }}>
+        {hotkeys.map(hk => (
+          <button key={hk} className="hotkey-btn" onClick={() => {
+            const cur = isusd ? (Number(amount) || 0) : (Number(amount.replace(/,/g, '')) || 0)
+            setAmount(String(cur + hk))
+          }}>
+            +{isusd ? `$${hk}` : `${hk.toLocaleString()}`}
+          </button>
+        ))}
+      </div>
+      <div style={{ display: 'flex', gap: 5 }}>
+        <button className="btn btn-primary" style={{ flex: 1, fontSize: 12, padding: '7px 0', justifyContent: 'center' }}
+          onClick={submit} disabled={!isValid || submitting}>
+          {submitting ? '저장중...' : '게임 롤링 추가'}
+        </button>
+        <button className="btn btn-ghost" style={{ padding: '7px 10px' }} onClick={onClose}><X size={12} /></button>
+      </div>
+    </div>
+  )
+}
+
 /* ════════════════════════════════ DASHBOARD ════════════════════════════════ */
 
 function WeekMonthDeposit({ sites, cashflows, weekStart, weekEnd }: {
@@ -690,6 +788,7 @@ export default function Dashboard() {
   const [depositSite, setDepositSite]   = useState<Site | null>(null)
   const [withdrawSite, setWithdrawSite] = useState<Site | null>(null)
   const [openFormSiteId, setOpenFormSiteId] = useState<string | null>(null)
+  const [openFormType, setOpenFormType] = useState<'sports' | 'game'>('sports')
   const [hoverBetId, setHoverBetId]     = useState<string | null>(null)
   const [inlineEditBetId, setInlineEditBetId] = useState<string | null>(null)
 
@@ -865,6 +964,19 @@ export default function Dashboard() {
     if (siteData) {
       await logAction({ action_type: 'insert', table_name: 'bets', record_id: betsData[0].id, after_data: betsData[0] as never, description: `[${site.name}] 두폴 ${c1}×${c2} / ${stake.toLocaleString()}` })
       setBets(p => [...p, ...betsData]); setSites(p => p.map(s => s.id === siteData.id ? siteData : s)); return true
+    }
+    return false
+  }
+
+  /* ── 게임 롤링 추가 (베팅 없이 롤링 금액만 차감) ── */
+  async function submitGameRolling(site: Site, amount: number): Promise<boolean> {
+    const before = { ...site }
+    const newDone = (site.deposit_bet_done ?? 0) + amount
+    const { data } = await supabase.from('sites').update({ deposit_bet_done: newDone }).eq('id', site.id).select().single()
+    if (data) {
+      await logAction({ action_type: 'update', table_name: 'sites', record_id: data.id, before_data: before as never, after_data: data as never, description: `${site.name} 게임 롤링 +${amount.toLocaleString()}` })
+      setSites(p => p.map(s => s.id === data.id ? data : s))
+      return true
     }
     return false
   }
@@ -1097,7 +1209,12 @@ export default function Dashboard() {
                       {site.active && (
                         <div style={{ marginBottom: pending.length > 0 ? 8 : 4 }}>
                           {openFormSiteId !== site.id ? (
-                            <button className="site-add-btn" style={{ width: '100%', borderRadius: 8, padding: '12px 0', fontSize: 14 }} onClick={() => setOpenFormSiteId(site.id)}><Plus size={16} /> 베팅 추가</button>
+                            <div style={{ display: 'flex', gap: 6 }}>
+                              <button className="site-add-btn" style={{ flex: 1, borderRadius: 8, padding: '12px 0', fontSize: 14 }} onClick={() => { setOpenFormSiteId(site.id); setOpenFormType('sports') }}><Plus size={16} /> 스포츠</button>
+                              <button className="site-add-btn" style={{ flex: 1, borderRadius: 8, padding: '12px 0', fontSize: 14 }} onClick={() => { setOpenFormSiteId(site.id); setOpenFormType('game') }}><Gamepad2 size={16} /> 게임</button>
+                            </div>
+                          ) : openFormType === 'game' ? (
+                            <GameRollingForm site={site} onClose={() => setOpenFormSiteId(null)} onSubmit={amt => submitGameRolling(site, amt)} />
                           ) : site.bet_type === 'double' ? (
                             <DoubleBetForm site={site} lastLeg1={getLastLeg1(site.id)} onClose={() => setOpenFormSiteId(null)} onBet={(c1,c2,odds,amt) => submitDoubleBet(site,c1,c2,odds,amt)} />
                           ) : (
