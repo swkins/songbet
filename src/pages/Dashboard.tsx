@@ -895,7 +895,7 @@ export default function Dashboard() {
   async function doPoint(amount: number) {
     if (!depositSite) return
     const before = { ...depositSite }
-    const { data } = await supabase.from('sites').update({ balance: depositSite.balance + amount, point_deposit: (depositSite.point_deposit ?? 0) + amount }).eq('id', depositSite.id).select().single()
+    const { data } = await supabase.from('sites').update({ balance: depositSite.balance + amount, point_deposit: (depositSite.point_deposit ?? 0) + amount, active: true }).eq('id', depositSite.id).select().single()
     if (data) { await logAction({ action_type: 'update', table_name: 'sites', record_id: data.id, before_data: before as never, after_data: data as never, description: `${depositSite.name} 포인트 +${amount.toLocaleString()}P` }); setSites(p => p.map(s => s.id === data.id ? data : s)) }
     setDepositSite(null)
   }
@@ -1139,6 +1139,19 @@ export default function Dashboard() {
     if (data) {
       await logAction({ action_type: 'update', table_name: 'bets', record_id: data.id, before_data: before as never, after_data: data as never, description: `베팅 수정: ${data.match}` })
       setBets(p => p.map(b => b.id === data.id ? data : b))
+      // 금액(stake)이 변경된 만큼 사이트의 잔액/롤링에도 차액을 반영 (남은 롤링이 즉시 갱신되도록)
+      const delta = stake - bet.stake
+      if (delta !== 0) {
+        const site = sites.find(s => s.id === bet.site_id)
+        if (site) {
+          const { data: siteData } = await supabase.from('sites').update({
+            balance: site.balance - delta,
+            rolling_done: Math.max(0, site.rolling_done + delta),
+            deposit_bet_done: Math.max(0, (site.deposit_bet_done ?? 0) + delta),
+          }).eq('id', site.id).select().single()
+          if (siteData) setSites(p => p.map(s => s.id === siteData.id ? siteData : s))
+        }
+      }
     }
     setInlineEditBetId(null)
   }
@@ -1157,6 +1170,19 @@ export default function Dashboard() {
     if (r1.data) setBets(p => p.map(b => b.id === r1.data!.id ? r1.data! : b))
     if (r2.data) setBets(p => p.map(b => b.id === r2.data!.id ? r2.data! : b))
     await logAction({ action_type: 'update', table_name: 'bets', record_id: leg1.id, before_data: leg1 as never, after_data: r1.data as never, description: `두폴 수정: ${c1}×${c2}` })
+    // 두폴은 stake가 한 번만 차감되므로, 변경분도 한 번만 사이트에 반영 (남은 롤링 즉시 갱신)
+    const parlayDelta = stake - leg1.stake
+    if (parlayDelta !== 0) {
+      const site = sites.find(s => s.id === leg1.site_id)
+      if (site) {
+        const { data: siteData } = await supabase.from('sites').update({
+          balance: site.balance - parlayDelta,
+          rolling_done: Math.max(0, site.rolling_done + parlayDelta),
+          deposit_bet_done: Math.max(0, (site.deposit_bet_done ?? 0) + parlayDelta),
+        }).eq('id', site.id).select().single()
+        if (siteData) setSites(p => p.map(s => s.id === siteData.id ? siteData : s))
+      }
+    }
     setInlineEditBetId(null)
   }
 
@@ -1213,7 +1239,7 @@ export default function Dashboard() {
                       </div>
                     </div>
                     {/* 롤링 정보 */}
-                    <div style={{ padding: '8px 14px', borderBottom: '1px solid var(--border-light)', display: 'flex', flexDirection: 'column', gap: 3 }}>
+                    <div style={{ position: 'relative', padding: '8px 14px', borderBottom: '1px solid var(--border-light)', display: 'flex', flexDirection: 'column', gap: 3 }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                           <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>입금</span>
                           <span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-num)', color: '#E2E8F0' }}>{pfx}{dep.toLocaleString()}{sfx}</span>
@@ -1228,6 +1254,31 @@ export default function Dashboard() {
                         </div>
                         <div className="deposit-progress-bar"><div className="deposit-progress-fill" style={{ width: `${Math.min(100,pct)}%` }} /></div>
                         <div style={{ fontSize: 11, color: pct >= 100 ? 'var(--green)' : 'var(--orange)', fontWeight: 700, textAlign: 'right' }}>{pct}%</div>
+                        {/* 롤링 100% 완료 도장 — 입금/포인트/남은롤링 표시 영역 가운데에 반투명 오버레이 */}
+                        {pct >= 100 && (
+                          <div style={{
+                            position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            pointerEvents: 'none',
+                          }}>
+                            <div style={{
+                              opacity: 0.4,
+                              transform: 'rotate(-14deg)',
+                              border: '3px solid var(--green)',
+                              color: 'var(--green)',
+                              borderRadius: 8,
+                              padding: '2px 14px',
+                              fontSize: 15,
+                              fontWeight: 900,
+                              letterSpacing: '2px',
+                              fontFamily: 'var(--font-num)',
+                              textShadow: '0 0 4px var(--green)',
+                              background: 'rgba(0,0,0,0.05)',
+                            }}>
+                              롤링완료
+                            </div>
+                          </div>
+                        )}
                       </div>
                     {/* 베팅 목록 */}
                     <div style={{ padding: '6px 8px' }}>
