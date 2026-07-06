@@ -6,7 +6,7 @@ import Stats from './pages/Stats'
 import { supabase } from './lib/supabase'
 import { purgeOldLogs } from './lib/logger'
 import dayjs from 'dayjs'
-import { RotateCcw, ClipboardList, X, LayoutTemplate, Code2, Check, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Save, CheckSquare, Plus, Trash2, Settings, Pin } from 'lucide-react'
+import { RotateCcw, ClipboardList, X, LayoutTemplate, Code2, Check, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Save, CheckSquare, Plus, Trash2, Settings, Pin, StickyNote } from 'lucide-react'
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'dashboard', label: '대시보드' },
@@ -107,6 +107,15 @@ export default function App() {
   const [todoSettingsPos, setTodoSettingsPos] = useState<{top: number; right: number}>({ top: 0, right: 0 })
   const [undoing, setUndoing] = useState<string | null>(null)
   const [maxWidth, setMaxWidth] = useState<string>(() => localStorage.getItem('sb_width') ?? '1920px')
+
+  // 메모장 패널
+  const [showMemo, setShowMemo] = useState(false)
+  const [memoId, setMemoId] = useState<string | null>(null)
+  const [memoContent, setMemoContent] = useState('')
+  const [memoSaving, setMemoSaving] = useState(false)
+  const [memoSavedFlash, setMemoSavedFlash] = useState(false)
+  const memoLoaded = useRef(false)
+  const memoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // 코드 수정 패널
   const [showCode, setShowCode] = useState(false)
@@ -228,6 +237,39 @@ export default function App() {
       el.selectionStart = el.selectionEnd = el.value.length
     })
   }, [codeNotes])
+
+  // 메모장 — 패널 열릴 때 최초 1회 로드, 이후엔 그대로 유지
+  useEffect(() => {
+    if (showMemo && !memoLoaded.current) {
+      memoLoaded.current = true
+      loadMemo()
+    }
+  }, [showMemo])
+
+  async function loadMemo() {
+    const { data } = await supabase.from('memos').select('*').order('updated_at', { ascending: false }).limit(1).maybeSingle()
+    if (data) { setMemoId(data.id); setMemoContent(data.content ?? '') }
+  }
+
+  async function saveMemo(content: string) {
+    setMemoSaving(true)
+    if (memoId) {
+      const { data } = await supabase.from('memos').update({ content, updated_at: new Date().toISOString() }).eq('id', memoId).select().single()
+      if (data) setMemoId(data.id)
+    } else {
+      const { data } = await supabase.from('memos').insert({ content }).select().single()
+      if (data) setMemoId(data.id)
+    }
+    setMemoSaving(false)
+    setMemoSavedFlash(true)
+    setTimeout(() => setMemoSavedFlash(false), 1200)
+  }
+
+  function handleMemoChange(v: string) {
+    setMemoContent(v)
+    if (memoSaveTimer.current) clearTimeout(memoSaveTimer.current)
+    memoSaveTimer.current = setTimeout(() => saveMemo(v), 800)
+  }
 
   function setWidth(w: string) {
     setMaxWidth(w)
@@ -359,7 +401,7 @@ export default function App() {
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
 
             {/* 오늘 할 일 버튼 */}
-            <button onClick={() => { setShowTodo(p => !p); if (showCode) setShowCode(false); if (showLog) setShowLog(false) }} style={{
+            <button onClick={() => { setShowTodo(p => !p); if (showCode) setShowCode(false); if (showLog) setShowLog(false); if (showMemo) setShowMemo(false) }} style={{
               background: showTodo ? 'rgba(245,166,35,0.15)' : 'transparent',
               border: `1px solid ${showTodo ? 'var(--gold-border)' : 'var(--border)'}`,
               borderRadius: 'var(--radius-sm)', cursor: 'pointer',
@@ -411,8 +453,19 @@ export default function App() {
               )}
             </div>
 
+            {/* 메모장 버튼 */}
+            <button onClick={() => { setShowMemo(p => !p); if (showCode) setShowCode(false); if (showLog) setShowLog(false); if (showTodo) setShowTodo(false) }} style={{
+              background: showMemo ? 'var(--purple-bg)' : 'transparent',
+              border: `1px solid ${showMemo ? 'var(--purple-border)' : 'var(--border)'}`,
+              borderRadius: 'var(--radius-sm)', color: showMemo ? 'var(--purple)' : 'var(--text-secondary)',
+              cursor: 'pointer', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 5,
+              fontSize: 11, fontWeight: 600, fontFamily: 'var(--font-body)', transition: 'all 0.15s',
+            }}>
+              <StickyNote size={13} />메모
+            </button>
+
             {/* 코드 수정 버튼 */}
-            <button onClick={() => { setShowCode(p => !p); if (showLog) setShowLog(false); if (showTodo) setShowTodo(false) }} style={{
+            <button onClick={() => { setShowCode(p => !p); if (showLog) setShowLog(false); if (showTodo) setShowTodo(false); if (showMemo) setShowMemo(false) }} style={{
               background: showCode ? 'var(--cyan-bg)' : 'transparent',
               border: `1px solid ${showCode ? 'var(--cyan-border)' : 'var(--border)'}`,
               borderRadius: 'var(--radius-sm)', color: showCode ? 'var(--cyan)' : 'var(--text-secondary)',
@@ -423,7 +476,7 @@ export default function App() {
             </button>
 
             {/* LOG 버튼 — 숫자 뱃지 제거 */}
-            <button onClick={() => { setShowLog(p => !p); if (showCode) setShowCode(false); if (showTodo) setShowTodo(false) }} style={{
+            <button onClick={() => { setShowLog(p => !p); if (showCode) setShowCode(false); if (showTodo) setShowTodo(false); if (showMemo) setShowMemo(false) }} style={{
               background: showLog ? 'var(--gold-bg)' : 'transparent',
               border: `1px solid ${showLog ? 'var(--gold-border)' : 'var(--border)'}`,
               borderRadius: 'var(--radius-sm)', color: showLog ? 'var(--gold)' : 'var(--text-secondary)',
@@ -730,6 +783,41 @@ export default function App() {
                 </div>
               ))}
             </div>
+          </div>
+        </>
+      )}
+
+      {/* 메모장 패널 */}
+      {showMemo && (
+        <>
+          <div style={{ position: 'fixed', inset: 0, zIndex: 150 }} onClick={() => setShowMemo(false)} />
+          <div style={{
+            position: 'fixed', top: 56, right: 16, width: 320,
+            maxHeight: 'calc(100vh - 72px)',
+            background: 'var(--bg-card)', border: '1px solid var(--purple-border)',
+            borderRadius: 'var(--radius-lg)', boxShadow: '0 16px 48px rgba(0,0,0,0.6)',
+            zIndex: 160, display: 'flex', flexDirection: 'column', overflow: 'hidden',
+          }} onClick={e => e.stopPropagation()}>
+            <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--bg-elevated)', flexShrink: 0 }}>
+              <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '1.2px', textTransform: 'uppercase', color: 'var(--purple)' }}>메모장</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: 10, color: memoSavedFlash ? 'var(--green)' : 'var(--text-secondary)' }}>
+                  {memoSaving ? '저장중...' : memoSavedFlash ? '저장됨' : ''}
+                </span>
+                <button onClick={() => setShowMemo(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex' }}><X size={12} /></button>
+              </div>
+            </div>
+            <textarea
+              value={memoContent}
+              onChange={e => handleMemoChange(e.target.value)}
+              placeholder="메모를 입력하세요..."
+              style={{
+                flex: 1, minHeight: 260, resize: 'vertical', border: 'none', outline: 'none',
+                background: 'transparent', color: 'var(--text-primary)', fontFamily: 'var(--font-body)',
+                fontSize: 13, lineHeight: 1.5, padding: '12px 14px',
+              }}
+              autoFocus
+            />
           </div>
         </>
       )}
