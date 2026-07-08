@@ -437,7 +437,7 @@ export default function App() {
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
 
             {/* 마진율 계산기 버튼 */}
-            <button onClick={() => setShowMargin(p => !p)} style={{
+            <button onClick={() => { if (!showMargin) setMarginOdds(['', '', '']); setShowMargin(p => !p) }} style={{
               background: showMargin ? 'var(--gold-bg)' : 'transparent',
               border: `1px solid ${showMargin ? 'var(--gold-border)' : 'var(--border)'}`,
               borderRadius: 'var(--radius-sm)', color: showMargin ? 'var(--gold)' : 'var(--text-secondary)',
@@ -726,6 +726,7 @@ export default function App() {
                   placeholder={`배당 ${i + 1} (예: 124 → 1.24)`}
                   value={marginOdds[i]}
                   onChange={e => handleMarginOddsChange(i, e.target.value)}
+                  onFocus={() => setMarginOdds(prev => { const next = [...prev]; next[i] = ''; return next })}
                   style={{ fontFamily: 'var(--font-mono)', textAlign: 'center', fontSize: 14 }}
                   autoFocus={i === 0}
                 />

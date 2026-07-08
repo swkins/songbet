@@ -32,7 +32,7 @@ const SPORT_SHORT: Record<string, string> = {
 function SportButtonGroup({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-      {SPORTS.map(s => {
+      {SPORTS.filter(s => s.value !== 'other').map(s => {
         const active = value === s.value
         return (
           <button key={s.value} type="button" onClick={() => onChange(s.value)}
@@ -408,6 +408,7 @@ function InlineBetEditForm({ bet, site, onClose, onSave }: {
   const [oddsRaw, setOddsRaw] = useState(bet.odds.toFixed(2))
   const [amount, setAmount]   = useState(String(bet.stake))
   const [submitting, setSubmitting] = useState(false)
+  const contentRef = useRef<HTMLInputElement>(null)
   const oddsV = parseOdds(oddsRaw)
   const stakeN = isusd ? (Number(amount) || 0) : (Number(amount.replace(/,/g, '')) || 0)
 
@@ -422,8 +423,8 @@ function InlineBetEditForm({ bet, site, onClose, onSave }: {
   }
   return (
     <div className="inline-bet-form" style={{ borderColor: 'var(--gold-border)', background: 'var(--gold-bg)' }}>
-      <SportButtonGroup value={sport} onChange={v => setSport(v as typeof bet.sport)} />
-      <input className="form-input inline-bet-input" placeholder="경기 내용" value={content}
+      <SportButtonGroup value={sport} onChange={v => { setSport(v as typeof bet.sport); contentRef.current?.focus() }} />
+      <input ref={contentRef} className="form-input inline-bet-input" placeholder="경기 내용" value={content}
         onChange={e => setContent(e.target.value)} autoFocus />
       <input className="form-input inline-bet-input" placeholder="배당 (125=1.25)" value={oddsRaw}
         onChange={e => handleOdds(e.target.value)}
@@ -517,6 +518,7 @@ function SingleBetForm({ site, onClose, onBet, defaultSport }: {
   const [amount, setAmount]     = useState(defaultAmount)
   const [isLive, setIsLive]     = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const contentRef = useRef<HTMLInputElement>(null)
   const oddsV = parseOdds(oddsRaw)
   const stakeN = isusd ? (Number(amount) || 0) : (Number(amount.replace(/,/g, "")) || 0)
   const hotkeys = isusd ? [5, 10] : [5000, 10000]
@@ -536,8 +538,8 @@ function SingleBetForm({ site, onClose, onBet, defaultSport }: {
 
   return (
     <div className="inline-bet-form">
-      <SportButtonGroup value={sport} onChange={setSport} />
-      <input className="form-input inline-bet-input" placeholder="경기 내용" value={content}
+      <SportButtonGroup value={sport} onChange={v => { setSport(v); contentRef.current?.focus() }} />
+      <input ref={contentRef} className="form-input inline-bet-input" placeholder="경기 내용" value={content}
         onChange={e => setContent(e.target.value)} autoFocus />
       <input className="form-input inline-bet-input" placeholder="배당 (125=1.25)" value={oddsRaw}
         onChange={e => handleOdds(e.target.value)}
