@@ -6,11 +6,7 @@ import Stats from './pages/Stats'
 import { supabase } from './lib/supabase'
 import { purgeOldLogs } from './lib/logger'
 import dayjs from 'dayjs'
-<<<<<<< HEAD
-import { RotateCcw, ClipboardList, X, LayoutTemplate, Code2, Check, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Save, CheckSquare, Plus, Trash2, Settings, Pin, GripVertical, Percent } from 'lucide-react'
-=======
-import { RotateCcw, ClipboardList, X, LayoutTemplate, Code2, Check, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Save, CheckSquare, Plus, Trash2, Settings, Pin, StickyNote } from 'lucide-react'
->>>>>>> 22b24436488e9b88c464513c73306be4a38f7d0f
+import { RotateCcw, ClipboardList, X, LayoutTemplate, Code2, Check, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Save, CheckSquare, Plus, Trash2, Settings, Pin, GripVertical, Percent, StickyNote } from 'lucide-react'
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'dashboard', label: '대시보드' },
@@ -441,7 +437,7 @@ export default function App() {
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
 
             {/* 마진율 계산기 버튼 */}
-            <button onClick={() => { setShowMargin(p => !p); if (showCode) setShowCode(false); if (showLog) setShowLog(false); if (showTodo) setShowTodo(false) }} style={{
+            <button onClick={() => setShowMargin(p => !p)} style={{
               background: showMargin ? 'var(--gold-bg)' : 'transparent',
               border: `1px solid ${showMargin ? 'var(--gold-border)' : 'var(--border)'}`,
               borderRadius: 'var(--radius-sm)', color: showMargin ? 'var(--gold)' : 'var(--text-secondary)',
@@ -452,11 +448,7 @@ export default function App() {
             </button>
 
             {/* 오늘 할 일 버튼 */}
-<<<<<<< HEAD
-            <button onClick={() => { setShowTodo(p => !p); if (showCode) setShowCode(false); if (showLog) setShowLog(false); if (showMargin) setShowMargin(false) }} style={{
-=======
             <button onClick={() => { setShowTodo(p => !p); if (showCode) setShowCode(false); if (showLog) setShowLog(false); if (showMemo) setShowMemo(false) }} style={{
->>>>>>> 22b24436488e9b88c464513c73306be4a38f7d0f
               background: showTodo ? 'rgba(245,166,35,0.15)' : 'transparent',
               border: `1px solid ${showTodo ? 'var(--gold-border)' : 'var(--border)'}`,
               borderRadius: 'var(--radius-sm)', cursor: 'pointer',
@@ -520,11 +512,7 @@ export default function App() {
             </button>
 
             {/* 코드 수정 버튼 */}
-<<<<<<< HEAD
-            <button onClick={() => { setShowCode(p => !p); if (showLog) setShowLog(false); if (showTodo) setShowTodo(false); if (showMargin) setShowMargin(false) }} style={{
-=======
             <button onClick={() => { setShowCode(p => !p); if (showLog) setShowLog(false); if (showTodo) setShowTodo(false); if (showMemo) setShowMemo(false) }} style={{
->>>>>>> 22b24436488e9b88c464513c73306be4a38f7d0f
               background: showCode ? 'var(--cyan-bg)' : 'transparent',
               border: `1px solid ${showCode ? 'var(--cyan-border)' : 'var(--border)'}`,
               borderRadius: 'var(--radius-sm)', color: showCode ? 'var(--cyan)' : 'var(--text-secondary)',
@@ -535,11 +523,7 @@ export default function App() {
             </button>
 
             {/* LOG 버튼 — 숫자 뱃지 제거 */}
-<<<<<<< HEAD
-            <button onClick={() => { setShowLog(p => !p); if (showCode) setShowCode(false); if (showTodo) setShowTodo(false); if (showMargin) setShowMargin(false) }} style={{
-=======
             <button onClick={() => { setShowLog(p => !p); if (showCode) setShowCode(false); if (showTodo) setShowTodo(false); if (showMemo) setShowMemo(false) }} style={{
->>>>>>> 22b24436488e9b88c464513c73306be4a38f7d0f
               background: showLog ? 'var(--gold-bg)' : 'transparent',
               border: `1px solid ${showLog ? 'var(--gold-border)' : 'var(--border)'}`,
               borderRadius: 'var(--radius-sm)', color: showLog ? 'var(--gold)' : 'var(--text-secondary)',
@@ -701,7 +685,7 @@ export default function App() {
         </>
       )}
 
-      {/* 마진율 계산기 패널 — 코드 수정 메모 패널의 좌측에 위치 */}
+      {/* 마진율 계산기 패널 — 우측 패널들(메모장/코드수정/할일/LOG)과 독립적으로 열리며, 항상 그 왼쪽에 위치 */}
       {showMargin && (
         <>
           <div style={{ position: 'fixed', inset: 0, zIndex: 150 }} onClick={() => setShowMargin(false)} />
