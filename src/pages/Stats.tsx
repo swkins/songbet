@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { logAction } from '../lib/logger'
 import type { Bet, Sport, Market, Site } from '../types'
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, BarChart, Bar, ResponsiveContainer, Cell } from 'recharts'
 import dayjs from 'dayjs'
@@ -611,15 +612,26 @@ function DeleteBetsModal({ sport, bets, onClose, onDeleted }: {
 }) {
   const [confirm, setConfirm] = useState('')
   const [deleting, setDeleting] = useState(false)
-  const sportBets = bets.filter(b => b.sport === sport.value)
+  const allSportBets = bets.filter(b => b.sport === sport.value)
+  // 진행중(pending) 베팅은 절대 삭제 대상에 포함하지 않음 — 결과 처리 전까지는 보존
+  const sportBets = allSportBets.filter(b => b.result !== 'pending')
+  const pendingBets = allSportBets.filter(b => b.result === 'pending')
   const CONFIRM_WORD = sport.label
 
   async function doDelete() {
-    if (confirm !== CONFIRM_WORD) return
+    if (confirm !== CONFIRM_WORD || sportBets.length === 0) return
     setDeleting(true)
     const ids = sportBets.map(b => b.id)
     // 배치 삭제 (in 조건)
     const { error } = await supabase.from('bets').delete().in('id', ids)
+    if (!error) {
+      // 각 건별로 삭제 로그 기록 (before_data 보존 → 되돌리기/복구 가능하도록)
+      await Promise.all(sportBets.map(b => logAction({
+        action_type: 'delete', table_name: 'bets', record_id: b.id,
+        before_data: b as unknown as Record<string, unknown>,
+        description: `${sport.label} 데이터 일괄삭제: ${b.match}`,
+      })))
+    }
     setDeleting(false)
     if (!error) { onDeleted(); onClose() }
     else alert('삭제 실패: ' + error.message)
@@ -633,31 +645,42 @@ function DeleteBetsModal({ sport, bets, onClose, onDeleted }: {
           {sport.emoji} {sport.label} 데이터 삭제
           <button onClick={onClose} style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex', padding: 2 }}><X size={15} /></button>
         </div>
-        <div style={{ padding: '10px 12px', background: 'var(--red-bg)', border: '1px solid var(--red-border)', borderRadius: 'var(--radius-sm)', marginBottom: 14, fontSize: 12, color: 'var(--red)' }}>
-          ⚠️ <strong>{sport.label}</strong> 베팅 데이터 <strong>{sportBets.length}건</strong>이 영구 삭제됩니다.<br />
+        <div style={{ padding: '10px 12px', background: 'var(--red-bg)', border: '1px solid var(--red-border)', borderRadius: 'var(--radius-sm)', marginBottom: 10, fontSize: 12, color: 'var(--red)' }}>
+          ⚠️ <strong>{sport.label}</strong> 결과처리 완료 데이터 <strong>{sportBets.length}건</strong>이 영구 삭제됩니다.<br />
           <span style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 4, display: 'block' }}>이 작업은 되돌릴 수 없습니다.</span>
         </div>
-        <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 6 }}>
-          확인을 위해 <strong style={{ color: 'var(--text-primary)' }}>"{CONFIRM_WORD}"</strong> 를 입력하세요
-        </div>
-        <div style={{ display: 'flex', gap: 6 }}>
-          <input
-            className="form-input"
-            placeholder={CONFIRM_WORD}
-            value={confirm}
-            onChange={e => setConfirm(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && confirm === CONFIRM_WORD && doDelete()}
-            autoFocus
-          />
-          <button
-            className="btn"
-            style={{ background: 'var(--red)', color: '#fff', border: 'none', flexShrink: 0, opacity: confirm !== CONFIRM_WORD ? 0.4 : 1 }}
-            disabled={confirm !== CONFIRM_WORD || deleting}
-            onClick={doDelete}
-          >
-            {deleting ? '삭제중...' : '삭제'}
-          </button>
-        </div>
+        {pendingBets.length > 0 && (
+          <div style={{ padding: '8px 12px', background: 'var(--green-bg)', border: '1px solid var(--green-border)', borderRadius: 'var(--radius-sm)', marginBottom: 14, fontSize: 11, color: 'var(--green)' }}>
+            ✓ 진행중(대기) 베팅 <strong>{pendingBets.length}건</strong>은 삭제되지 않고 베팅현황에 그대로 유지됩니다.
+          </div>
+        )}
+        {sportBets.length === 0 ? (
+          <div style={{ fontSize: 12, color: 'var(--text-secondary)', textAlign: 'center', padding: '8px 0' }}>삭제할 완료 데이터가 없습니다.</div>
+        ) : (
+          <>
+            <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 6 }}>
+              확인을 위해 <strong style={{ color: 'var(--text-primary)' }}>"{CONFIRM_WORD}"</strong> 를 입력하세요
+            </div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <input
+                className="form-input"
+                placeholder={CONFIRM_WORD}
+                value={confirm}
+                onChange={e => setConfirm(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && confirm === CONFIRM_WORD && doDelete()}
+                autoFocus
+              />
+              <button
+                className="btn"
+                style={{ background: 'var(--red)', color: '#fff', border: 'none', flexShrink: 0, opacity: confirm !== CONFIRM_WORD ? 0.4 : 1 }}
+                disabled={confirm !== CONFIRM_WORD || deleting}
+                onClick={doDelete}
+              >
+                {deleting ? '삭제중...' : '삭제'}
+              </button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   )
