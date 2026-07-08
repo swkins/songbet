@@ -6,7 +6,7 @@ import Stats from './pages/Stats'
 import { supabase } from './lib/supabase'
 import { purgeOldLogs } from './lib/logger'
 import dayjs from 'dayjs'
-import { RotateCcw, ClipboardList, X, LayoutTemplate, Code2, Check, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Save, CheckSquare, Plus, Trash2, Settings, Pin } from 'lucide-react'
+import { RotateCcw, ClipboardList, X, LayoutTemplate, Code2, Check, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Save, CheckSquare, Plus, Trash2, Settings, Pin, GripVertical, Percent } from 'lucide-react'
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'dashboard', label: '대시보드' },
@@ -101,6 +101,10 @@ export default function App() {
   const [logs, setLogs] = useState<ActionLog[]>([])
   const [showLog, setShowLog] = useState(false)
   const [showTodo, setShowTodo] = useState(false)
+  const [showMargin, setShowMargin] = useState(false)
+  const [marginCount, setMarginCount] = useState<2 | 3>(2)
+  const [marginOdds, setMarginOdds] = useState<string[]>(['', '', ''])
+  const marginInputRefs = useRef<(HTMLInputElement | null)[]>([])
   const [showWidthMenu, setShowWidthMenu] = useState(false)
   const [pinCode, setPinCode] = useState(false)       // 코드수정 고정
   const [todoSettingsId, setTodoSettingsId] = useState<string | null>(null)
@@ -197,6 +201,38 @@ export default function App() {
     const { data } = await supabase.from('todos').update({ check_dates: newDates, check_count: newDates.length, done: newDates.includes(todayStr) }).eq('id', todo.id).select().single()
     if (data) setTodos(p => p.map(t => t.id === todo.id ? data as Todo : t))
   }
+
+  // 마진율 계산기 — 숫자 3자리 입력 시 자동으로 소숫점 배당(예: 124 → 1.24)으로 변환하고
+  // 다음 칸으로 커서를 이동시켜 연속 입력(예: 6자리 = 두 칸)이 가능하도록 함
+  function handleMarginOddsChange(idx: number, raw: string) {
+    const clean = raw.replace(/[^0-9.]/g, '')
+    const isTriple = /^\d{3}$/.test(clean)
+    setMarginOdds(prev => {
+      const next = [...prev]
+      next[idx] = isTriple ? (Number(clean) / 100).toFixed(2) : clean
+      return next
+    })
+    if (isTriple && idx + 1 < marginCount) {
+      requestAnimationFrame(() => {
+        const nextEl = marginInputRefs.current[idx + 1]
+        if (nextEl) { nextEl.focus(); nextEl.select() }
+      })
+    }
+  }
+  function resetMargin() { setMarginOdds(['', '', '']) }
+  function marginTier(pct: number): { label: string; color: string; bg: string; border: string } {
+    if (pct < 0)  return { label: '차익 기회 🔥', color: 'var(--cyan)',   bg: 'var(--cyan-bg)',   border: 'var(--cyan-border)' }
+    if (pct <= 2) return { label: '최상',          color: 'var(--green)',  bg: 'var(--green-bg)',  border: 'var(--green-border)' }
+    if (pct <= 4) return { label: '좋음',          color: 'var(--green)',  bg: 'var(--green-bg)',  border: 'var(--green-border)' }
+    if (pct <= 6) return { label: '보통',          color: 'var(--gold)',   bg: 'var(--gold-bg)',   border: 'var(--gold-border)' }
+    if (pct <= 8) return { label: '낮음',          color: 'var(--orange)', bg: 'var(--orange-bg)', border: 'var(--orange-border)' }
+    return           { label: '나쁨',          color: 'var(--red)',    bg: 'var(--red-bg)',    border: 'var(--red-border)' }
+  }
+  const activeMarginOdds = marginOdds.slice(0, marginCount)
+  const parsedMarginOdds = activeMarginOdds.map(o => parseFloat(o))
+  const marginAllValid = parsedMarginOdds.length === marginCount && parsedMarginOdds.every(n => !isNaN(n) && n > 0)
+  const marginPct = marginAllValid ? (parsedMarginOdds.reduce((a, n) => a + 1 / n, 0) - 1) * 100 : null
+  const marginTierInfo = marginPct !== null ? marginTier(marginPct) : null
 
   useEffect(() => {
     if (showCode) {
@@ -358,8 +394,19 @@ export default function App() {
           </div>
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
 
+            {/* 마진율 계산기 버튼 */}
+            <button onClick={() => { setShowMargin(p => !p); if (showCode) setShowCode(false); if (showLog) setShowLog(false); if (showTodo) setShowTodo(false) }} style={{
+              background: showMargin ? 'var(--gold-bg)' : 'transparent',
+              border: `1px solid ${showMargin ? 'var(--gold-border)' : 'var(--border)'}`,
+              borderRadius: 'var(--radius-sm)', color: showMargin ? 'var(--gold)' : 'var(--text-secondary)',
+              cursor: 'pointer', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 5,
+              fontSize: 11, fontWeight: 600, fontFamily: 'var(--font-body)', transition: 'all 0.15s',
+            }}>
+              <Percent size={13} />마진율
+            </button>
+
             {/* 오늘 할 일 버튼 */}
-            <button onClick={() => { setShowTodo(p => !p); if (showCode) setShowCode(false); if (showLog) setShowLog(false) }} style={{
+            <button onClick={() => { setShowTodo(p => !p); if (showCode) setShowCode(false); if (showLog) setShowLog(false); if (showMargin) setShowMargin(false) }} style={{
               background: showTodo ? 'rgba(245,166,35,0.15)' : 'transparent',
               border: `1px solid ${showTodo ? 'var(--gold-border)' : 'var(--border)'}`,
               borderRadius: 'var(--radius-sm)', cursor: 'pointer',
@@ -412,7 +459,7 @@ export default function App() {
             </div>
 
             {/* 코드 수정 버튼 */}
-            <button onClick={() => { setShowCode(p => !p); if (showLog) setShowLog(false); if (showTodo) setShowTodo(false) }} style={{
+            <button onClick={() => { setShowCode(p => !p); if (showLog) setShowLog(false); if (showTodo) setShowTodo(false); if (showMargin) setShowMargin(false) }} style={{
               background: showCode ? 'var(--cyan-bg)' : 'transparent',
               border: `1px solid ${showCode ? 'var(--cyan-border)' : 'var(--border)'}`,
               borderRadius: 'var(--radius-sm)', color: showCode ? 'var(--cyan)' : 'var(--text-secondary)',
@@ -423,7 +470,7 @@ export default function App() {
             </button>
 
             {/* LOG 버튼 — 숫자 뱃지 제거 */}
-            <button onClick={() => { setShowLog(p => !p); if (showCode) setShowCode(false); if (showTodo) setShowTodo(false) }} style={{
+            <button onClick={() => { setShowLog(p => !p); if (showCode) setShowCode(false); if (showTodo) setShowTodo(false); if (showMargin) setShowMargin(false) }} style={{
               background: showLog ? 'var(--gold-bg)' : 'transparent',
               border: `1px solid ${showLog ? 'var(--gold-border)' : 'var(--border)'}`,
               borderRadius: 'var(--radius-sm)', color: showLog ? 'var(--gold)' : 'var(--text-secondary)',
@@ -585,6 +632,76 @@ export default function App() {
         </>
       )}
 
+      {/* 마진율 계산기 패널 — 코드 수정 메모 패널의 좌측에 위치 */}
+      {showMargin && (
+        <>
+          <div style={{ position: 'fixed', inset: 0, zIndex: 150 }} onClick={() => setShowMargin(false)} />
+          <div style={{
+            position: 'fixed', top: 56, right: 372, width: 270,
+            background: 'var(--bg-card)', border: '1px solid var(--gold-border)',
+            borderRadius: 'var(--radius-lg)', boxShadow: '0 16px 48px rgba(0,0,0,0.6)',
+            zIndex: 160, display: 'flex', flexDirection: 'column', overflow: 'hidden',
+          }} onClick={e => e.stopPropagation()}>
+            <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--bg-elevated)' }}>
+              <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '1.2px', textTransform: 'uppercase', color: 'var(--gold)' }}>마진율 계산기</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <button
+                  onClick={() => setMarginCount(p => p === 2 ? 3 : 2)}
+                  title="배당 칸 수 전환 (2구/3구)"
+                  style={{
+                    background: 'none', border: '1px solid var(--border)', borderRadius: 4,
+                    color: 'var(--text-secondary)', cursor: 'pointer', padding: '2px 7px',
+                    fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-body)',
+                  }}>
+                  {marginCount}구
+                </button>
+                <button onClick={resetMargin} title="초기화" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex' }}>
+                  <RotateCcw size={12} />
+                </button>
+                <button onClick={() => setShowMargin(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex' }}><X size={12} /></button>
+              </div>
+            </div>
+
+            <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 7 }}>
+              {Array.from({ length: marginCount }).map((_, i) => (
+                <input
+                  key={i}
+                  ref={el => { marginInputRefs.current[i] = el }}
+                  className="form-input"
+                  type="text"
+                  inputMode="decimal"
+                  placeholder={`배당 ${i + 1} (예: 124 → 1.24)`}
+                  value={marginOdds[i]}
+                  onChange={e => handleMarginOddsChange(i, e.target.value)}
+                  style={{ fontFamily: 'var(--font-mono)', textAlign: 'center', fontSize: 14 }}
+                  autoFocus={i === 0}
+                />
+              ))}
+
+              <div style={{
+                marginTop: 4, padding: '12px 10px', borderRadius: 'var(--radius-sm)', textAlign: 'center',
+                background: marginTierInfo?.bg ?? 'var(--bg-elevated)',
+                border: `1px solid ${marginTierInfo?.border ?? 'var(--border)'}`,
+                transition: 'all 0.15s',
+              }}>
+                {marginPct !== null && marginTierInfo ? (
+                  <>
+                    <div style={{ fontSize: 22, fontWeight: 800, fontFamily: 'var(--font-num)', color: marginTierInfo.color, lineHeight: 1.2 }}>
+                      {marginPct.toFixed(2)}%
+                    </div>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: marginTierInfo.color, marginTop: 3 }}>
+                      {marginTierInfo.label}
+                    </div>
+                  </>
+                ) : (
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>배당을 모두 입력하세요</div>
+                )}
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
       {/* 오늘 할 일 패널 */}
       {showTodo && (
         <>
@@ -613,17 +730,22 @@ export default function App() {
                 const isChecked = todo.check_dates.includes(todayStr)
                 const isSettingsOpen = todoSettingsId === todo.id
                 return (
-                  <div key={todo.id} style={{ position: 'relative' }}
-                    draggable
-                    onDragStart={() => { todoDragId.current = todo.id }}
-                    onDragOver={e => { e.preventDefault(); todoOverId.current = todo.id }}
-                    onDragEnd={() => {
-                      if (todoDragId.current && todoOverId.current && todoDragId.current !== todoOverId.current)
-                        reorderTodosApp(todoDragId.current, todoOverId.current)
-                      todoDragId.current = ''; todoOverId.current = ''
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 14px', borderBottom: '1px solid var(--border-light)', cursor: 'grab' }}>
+                  <div key={todo.id} style={{ position: 'relative' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', borderBottom: '1px solid var(--border-light)' }}>
+                      {/* 드래그 전용 핸들 — 텍스트/체크박스 클릭과 분리해서 순서 이동은 여기서만 */}
+                      <span
+                        draggable
+                        onDragStart={() => { todoDragId.current = todo.id }}
+                        onDragOver={e => { e.preventDefault(); todoOverId.current = todo.id }}
+                        onDragEnd={() => {
+                          if (todoDragId.current && todoOverId.current && todoDragId.current !== todoOverId.current)
+                            reorderTodosApp(todoDragId.current, todoOverId.current)
+                          todoDragId.current = ''; todoOverId.current = ''
+                        }}
+                        style={{ display: 'flex', alignItems: 'center', cursor: 'grab', color: 'var(--text-muted)', flexShrink: 0 }}
+                      >
+                        <GripVertical size={13} />
+                      </span>
                       <button
                         onClick={() => toggleTodoApp(todo)}
                         style={{
@@ -634,7 +756,10 @@ export default function App() {
                         }}>
                         {isChecked && <Check size={10} color="#000" strokeWidth={3} />}
                       </button>
-                      <span style={{ flex: 1, fontSize: 13, color: isChecked ? 'var(--text-muted)' : 'var(--text-primary)', textDecoration: isChecked ? 'line-through' : 'none' }}>
+                      {/* 글자 영역 클릭으로도 체크 토글 */}
+                      <span
+                        onClick={() => toggleTodoApp(todo)}
+                        style={{ flex: 1, fontSize: 13, color: isChecked ? 'var(--text-muted)' : 'var(--text-primary)', textDecoration: isChecked ? 'line-through' : 'none', cursor: 'pointer', userSelect: 'none' }}>
                         {todo.content}
                       </span>
                       <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--gold)', background: 'var(--gold-bg)', border: '1px solid var(--gold-border)', padding: '1px 5px', borderRadius: 4, flexShrink: 0 }}>

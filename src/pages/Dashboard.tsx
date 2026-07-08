@@ -28,6 +28,30 @@ const SPORT_SHORT: Record<string, string> = {
   volleyball: '🏐', hockey: '🏒', esports: '🎮', other: '📋',
 }
 
+/* ── 종목 선택 버튼 그룹 (드롭다운 대신 항상 노출되는 버튼) ── */
+function SportButtonGroup({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+      {SPORTS.map(s => {
+        const active = value === s.value
+        return (
+          <button key={s.value} type="button" onClick={() => onChange(s.value)}
+            style={{
+              padding: '6px 9px', borderRadius: 'var(--radius-sm)', fontSize: 11, fontWeight: 700,
+              fontFamily: 'var(--font-body)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4,
+              border: `1px solid ${active ? 'var(--gold-border)' : 'var(--border)'}`,
+              background: active ? 'var(--gold-bg)' : 'var(--bg-elevated)',
+              color: active ? 'var(--gold)' : 'var(--text-secondary)',
+              transition: 'all 0.15s',
+            }}>
+            <span style={{ fontSize: 13, lineHeight: 1 }}>{SPORT_SHORT[s.value]}</span>{s.label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 function parseOdds(raw: string): number {
   const n = Number(raw.trim())
   if (isNaN(n) || n <= 0) return 0
@@ -398,9 +422,7 @@ function InlineBetEditForm({ bet, site, onClose, onSave }: {
   }
   return (
     <div className="inline-bet-form" style={{ borderColor: 'var(--gold-border)', background: 'var(--gold-bg)' }}>
-      <select className="form-select inline-bet-input" value={sport} onChange={e => setSport(e.target.value as typeof bet.sport)}>
-        {SPORTS.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
-      </select>
+      <SportButtonGroup value={sport} onChange={v => setSport(v as typeof bet.sport)} />
       <input className="form-input inline-bet-input" placeholder="경기 내용" value={content}
         onChange={e => setContent(e.target.value)} autoFocus />
       <input className="form-input inline-bet-input" placeholder="배당 (125=1.25)" value={oddsRaw}
@@ -514,10 +536,7 @@ function SingleBetForm({ site, onClose, onBet, defaultSport }: {
 
   return (
     <div className="inline-bet-form">
-      <select className="form-select inline-bet-input" value={sport}
-        onChange={e => setSport(e.target.value)}>
-        {SPORTS.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
-      </select>
+      <SportButtonGroup value={sport} onChange={setSport} />
       <input className="form-input inline-bet-input" placeholder="경기 내용" value={content}
         onChange={e => setContent(e.target.value)} autoFocus />
       <input className="form-input inline-bet-input" placeholder="배당 (125=1.25)" value={oddsRaw}
