@@ -370,12 +370,22 @@ function GenericDetailPanel({ bets }: { bets: Bet[] }) {
 
 
 // ─── 라이브 베팅 패널 ─────────────────────────────────────────────
-function LivePanel({ bets }: { bets: Bet[] }) {
+function LivePanel({ bets, onDeleteRequest }: { bets: Bet[]; onDeleteRequest: () => void }) {
   const liveBets = bets.filter(b => b.is_live && b.result !== 'pending')
   const pendingLive = bets.filter(b => b.is_live && b.result === 'pending')
 
   if (liveBets.length === 0 && pendingLive.length === 0) return (
     <div className="card"><div className="empty"><div className="empty-icon">🔴</div>라이브 베팅 기록이 없습니다</div></div>
+  )
+  if (liveBets.length === 0) return (
+    <div>
+      <div className="card"><div className="empty"><div className="empty-icon">🔴</div>결과 처리된 라이브 베팅이 없습니다</div></div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
+        <button onClick={onDeleteRequest} className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--red)', borderColor: 'var(--red-border)', display: 'flex', alignItems: 'center', gap: 4 }}>
+          <Trash2 size={11} /> 데이터 삭제
+        </button>
+      </div>
+    </div>
   )
 
   const s = calcStats(liveBets)
@@ -413,7 +423,7 @@ function LivePanel({ bets }: { bets: Bet[] }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
 
       {/* 요약 타일 */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'flex-start' }}>
         {[
           { label: '승률', value: `${s.winRate.toFixed(1)}%`, sub: `${s.wins.length}W ${s.losses.length}L`, cls: s.winRate >= 50 ? 'profit-pos' : 'profit-neg' },
           { label: '총 손익', value: `${s.profit >= 0 ? '+' : ''}${s.profit.toLocaleString()}`, sub: `${s.total}건`, cls: s.profit >= 0 ? 'profit-pos' : 'profit-neg' },
@@ -426,6 +436,9 @@ function LivePanel({ bets }: { bets: Bet[] }) {
             {t.sub && <div style={{ fontSize: 10, color: 'var(--text-secondary)', marginTop: 4 }}>{t.sub}</div>}
           </div>
         ))}
+        <button onClick={onDeleteRequest} className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--red)', borderColor: 'var(--red-border)', alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: 4, padding: '6px 10px' }}>
+          <Trash2 size={11} /> 데이터 삭제
+        </button>
       </div>
 
       {/* 종목별 카드 */}
@@ -536,7 +549,7 @@ function LivePanel({ bets }: { bets: Bet[] }) {
 
 
 
-function ParlayPanel({ bets }: { bets: Bet[] }) {
+function ParlayPanel({ bets, onDeleteRequest }: { bets: Bet[]; onDeleteRequest: () => void }) {
   // parlay_group이 있는 베팅만 필터
   const parlayBets = bets.filter(b => b.parlay_group !== null && b.result !== 'pending')
   // 그룹별로 묶기 (parlay_leg=1 기준으로 대표)
@@ -555,13 +568,20 @@ function ParlayPanel({ bets }: { bets: Bet[] }) {
   const avgOdds = total > 0 ? groups.reduce((s,g) => s + g.odds, 0) / total : 0
 
   if (total === 0) return (
-    <div className="card"><div className="empty"><div className="empty-icon">2️⃣</div>두폴 베팅 기록이 없습니다</div></div>
+    <div>
+      <div className="card"><div className="empty"><div className="empty-icon">2️⃣</div>두폴 베팅 기록이 없습니다</div></div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
+        <button onClick={onDeleteRequest} className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--red)', borderColor: 'var(--red-border)', display: 'flex', alignItems: 'center', gap: 4 }}>
+          <Trash2 size={11} /> 데이터 삭제
+        </button>
+      </div>
+    </div>
   )
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       {/* 요약 */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'flex-start' }}>
         {[
           { label: '승률', value: `${winRate.toFixed(1)}%`, sub: `${wins.length}W ${losses.length}L`, cls: winRate >= 50 ? 'profit-pos' : 'profit-neg' },
           { label: '총 손익', value: `${totalProfit >= 0 ? '+' : ''}${totalProfit.toLocaleString()}`, sub: `${total}건`, cls: totalProfit >= 0 ? 'profit-pos' : 'profit-neg' },
@@ -574,6 +594,9 @@ function ParlayPanel({ bets }: { bets: Bet[] }) {
             {t.sub && <div style={{ fontSize: 10, color: 'var(--text-secondary)', marginTop: 4 }}>{t.sub}</div>}
           </div>
         ))}
+        <button onClick={onDeleteRequest} className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--red)', borderColor: 'var(--red-border)', alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: 4, padding: '6px 10px' }}>
+          <Trash2 size={11} /> 데이터 삭제
+        </button>
       </div>
 
       {/* 두폴 목록 */}
@@ -606,30 +629,33 @@ function ParlayPanel({ bets }: { bets: Bet[] }) {
 }
 
 
-/* ── 종목별 데이터 삭제 모달 ── */
-function DeleteBetsModal({ sport, bets, onClose, onDeleted }: {
-  sport: typeof SPORTS[0]; bets: Bet[]; onClose: () => void; onDeleted: () => void
+/* ── 데이터 삭제 대상 (종목 / 라이브 / 두폴 공용) ── */
+interface DeleteTarget { label: string; emoji: string; matchFn: (b: Bet) => boolean }
+
+/* ── 데이터 삭제 모달 (종목 / 라이브 / 두폴 공용) ── */
+function DeleteBetsModal({ target, bets, onClose, onDeleted }: {
+  target: DeleteTarget; bets: Bet[]; onClose: () => void; onDeleted: () => void
 }) {
   const [confirm, setConfirm] = useState('')
   const [deleting, setDeleting] = useState(false)
-  const allSportBets = bets.filter(b => b.sport === sport.value)
+  const allMatched = bets.filter(target.matchFn)
   // 진행중(pending) 베팅은 절대 삭제 대상에 포함하지 않음 — 결과 처리 전까지는 보존
-  const sportBets = allSportBets.filter(b => b.result !== 'pending')
-  const pendingBets = allSportBets.filter(b => b.result === 'pending')
-  const CONFIRM_WORD = sport.label
+  const matchedBets = allMatched.filter(b => b.result !== 'pending')
+  const pendingBets = allMatched.filter(b => b.result === 'pending')
+  const CONFIRM_WORD = target.label
 
   async function doDelete() {
-    if (confirm !== CONFIRM_WORD || sportBets.length === 0) return
+    if (confirm !== CONFIRM_WORD || matchedBets.length === 0) return
     setDeleting(true)
-    const ids = sportBets.map(b => b.id)
+    const ids = matchedBets.map(b => b.id)
     // 배치 삭제 (in 조건)
     const { error } = await supabase.from('bets').delete().in('id', ids)
     if (!error) {
       // 각 건별로 삭제 로그 기록 (before_data 보존 → 되돌리기/복구 가능하도록)
-      await Promise.all(sportBets.map(b => logAction({
+      await Promise.all(matchedBets.map(b => logAction({
         action_type: 'delete', table_name: 'bets', record_id: b.id,
         before_data: b as unknown as Record<string, unknown>,
-        description: `${sport.label} 데이터 일괄삭제: ${b.match}`,
+        description: `${target.label} 데이터 일괄삭제: ${b.match}`,
       })))
     }
     setDeleting(false)
@@ -642,11 +668,11 @@ function DeleteBetsModal({ sport, bets, onClose, onDeleted }: {
       <div className="modal" style={{ maxWidth: 360 }} onClick={e => e.stopPropagation()}>
         <div className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
           <Trash2 size={16} color="var(--red)" />
-          {sport.emoji} {sport.label} 데이터 삭제
+          {target.emoji} {target.label} 데이터 삭제
           <button onClick={onClose} style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex', padding: 2 }}><X size={15} /></button>
         </div>
         <div style={{ padding: '10px 12px', background: 'var(--red-bg)', border: '1px solid var(--red-border)', borderRadius: 'var(--radius-sm)', marginBottom: 10, fontSize: 12, color: 'var(--red)' }}>
-          ⚠️ <strong>{sport.label}</strong> 결과처리 완료 데이터 <strong>{sportBets.length}건</strong>이 영구 삭제됩니다.<br />
+          ⚠️ <strong>{target.label}</strong> 결과처리 완료 데이터 <strong>{matchedBets.length}건</strong>이 영구 삭제됩니다.<br />
           <span style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 4, display: 'block' }}>이 작업은 되돌릴 수 없습니다.</span>
         </div>
         {pendingBets.length > 0 && (
@@ -654,7 +680,7 @@ function DeleteBetsModal({ sport, bets, onClose, onDeleted }: {
             ✓ 진행중(대기) 베팅 <strong>{pendingBets.length}건</strong>은 삭제되지 않고 베팅현황에 그대로 유지됩니다.
           </div>
         )}
-        {sportBets.length === 0 ? (
+        {matchedBets.length === 0 ? (
           <div style={{ fontSize: 12, color: 'var(--text-secondary)', textAlign: 'center', padding: '8px 0' }}>삭제할 완료 데이터가 없습니다.</div>
         ) : (
           <>
@@ -794,7 +820,7 @@ export default function Stats() {
   const [rateMap, setRateMap] = useState<Record<string, number>>({})
   const [period, setPeriod]   = useState<'all' | '7d' | '30d' | '90d'>('all')
   const [activeSport, setActiveSport] = useState<Sport | 'all' | 'parlay' | 'live'>('all')
-  const [deleteTarget, setDeleteTarget] = useState<typeof SPORTS[0] | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null)
 
   useEffect(() => { loadBets(); loadSites(); loadRates() }, [])
   async function loadBets() {
@@ -840,8 +866,8 @@ export default function Stats() {
     const days = period === '7d' ? 7 : period === '30d' ? 30 : 90
     return dayjs(b.bet_date).isAfter(dayjs().subtract(days, 'day'))
   })
-  // 라이브 베팅은 라이브 탭에서만 집계 — 일반 통계에서 제외
-  const periodFiltered = periodAll.filter(b => !b.is_live)
+  // 라이브 베팅은 라이브 탭에서만, 두폴 베팅은 두폴 탭에서만 집계 — 일반/종목별 통계에서는 제외
+  const periodFiltered = periodAll.filter(b => !b.is_live && b.parlay_group === null)
 
   const stats   = calcStats(periodFiltered)
   const settled = periodFiltered.filter(b => b.result !== 'pending')
@@ -953,22 +979,25 @@ export default function Stats() {
             <SportPanel
               bets={periodFiltered}
               sport={SPORTS.find(s => s.value === activeSport)!}
-              onDeleteRequest={() => setDeleteTarget(SPORTS.find(s => s.value === activeSport)!)}
+              onDeleteRequest={() => {
+                const sp = SPORTS.find(s => s.value === activeSport)!
+                setDeleteTarget({ label: sp.label, emoji: sp.emoji, matchFn: b => b.sport === sp.value && !b.is_live && b.parlay_group === null })
+              }}
             />
           )}
           {activeSport === 'parlay' && (
-            <ParlayPanel bets={periodFiltered} />
+            <ParlayPanel bets={periodAll} onDeleteRequest={() => setDeleteTarget({ label: '두폴', emoji: '2️⃣', matchFn: b => b.parlay_group !== null })} />
           )}
           {activeSport === 'live' && (
-            <LivePanel bets={periodAll} />
+            <LivePanel bets={periodAll} onDeleteRequest={() => setDeleteTarget({ label: '라이브', emoji: '🔴', matchFn: b => b.is_live })} />
           )}
         </>
       )}
 
-      {/* 종목 데이터 삭제 모달 */}
+      {/* 데이터 삭제 모달 (종목 / 라이브 / 두폴 공용) */}
       {deleteTarget && (
         <DeleteBetsModal
-          sport={deleteTarget}
+          target={deleteTarget}
           bets={bets}
           onClose={() => setDeleteTarget(null)}
           onDeleted={() => { loadBets(); setActiveSport('all') }}

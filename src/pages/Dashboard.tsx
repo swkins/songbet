@@ -202,9 +202,17 @@ function WithdrawModal({ site, onClose, onWithdraw }: {
   const isusd = site.currency === 'usd'; const unit = isusd ? '$' : '원'
   // USD: 소수점 둘째자리까지, KRW: 정수
   const num = isusd ? parseFloat(amount) : Number(amount.replace(/,/g, ''))
-  const isValid = !isNaN(num) && num > 0
+  // 0은 허용 — 실제 출금은 아니지만(돈을 다 잃은 경우) 입금/롤링 등을 초기화하는 용도로 사용
+  const isValid = !isNaN(num) && num >= 0
+  const isZero = isValid && num === 0
   const totalIn = (site.last_deposit ?? 0) + (site.point_deposit ?? 0)
   const netProfit = isValid ? num - totalIn : null
+
+  function handleSubmit() {
+    if (!isValid) return
+    if (isZero && !confirm('출금 없이 초기화만 진행할까요? (진행중인 베팅은 유지되고 입금/롤링만 초기화됩니다)')) return
+    onWithdraw(num)
+  }
 
   function handleChange(val: string) {
     if (isusd) {
@@ -240,12 +248,17 @@ function WithdrawModal({ site, onClose, onWithdraw }: {
           <input className="form-input" type="text" inputMode="decimal" placeholder={isusd ? '0.00' : '0'}
             value={amount}
             onChange={e => handleChange(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && isValid && onWithdraw(num)} autoFocus />
-          <button className="btn btn-cyan" disabled={!isValid} onClick={() => isValid && onWithdraw(num)} style={{ flexShrink: 0 }}>
-            출금
+            onKeyDown={e => e.key === 'Enter' && handleSubmit()} autoFocus />
+          <button className="btn btn-cyan" disabled={!isValid} onClick={handleSubmit} style={{ flexShrink: 0 }}>
+            {isZero ? '초기화' : '출금'}
           </button>
         </div>
-        {netProfit !== null && (
+        {isZero && (
+          <div style={{ padding: '8px 12px', borderRadius: 'var(--radius-sm)', fontSize: 11, marginBottom: 4, background: 'var(--bg-elevated)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}>
+            출금액 0원 — 실제 출금 없이 입금/롤링만 초기화됩니다. (진행중 베팅은 유지)
+          </div>
+        )}
+        {netProfit !== null && !isZero && (
           <div style={{ padding: '8px 12px', borderRadius: 'var(--radius-sm)', fontSize: 12, marginBottom: 4, background: netProfit >= 0 ? 'var(--green-bg)' : 'var(--red-bg)', border: `1px solid ${netProfit >= 0 ? 'var(--green-border)' : 'var(--red-border)'}` }}>
             수익: <span className={netProfit >= 0 ? 'profit-pos' : 'profit-neg'}>{netProfit >= 0 ? '+' : ''}{isusd ? '$' : ''}{netProfit.toLocaleString()}{isusd ? '' : '원'}</span>
           </div>
@@ -944,30 +957,37 @@ export default function Dashboard() {
       setGameRollings(p => p.filter(g => !siteGameRollings.some(sg => sg.id === g.id)))
     }
 
+    // 출금액 0원 = 실제 출금이 아니라 초기화(전액 손실 등). total_withdrawal에도 반영하지 않음
+    const isZeroWithdraw = amount === 0
+
     // 마감: 사이트 비활성 + 잔액/입금/롤링 초기화. 베팅 중인 목록은 절대 건드리지 않음
     // (결과 처리를 하지 않는 한 진행중인 베팅은 계속 남아있어야 함)
     const { data: updatedSite } = await supabase.from('sites').update({
       active: false,
-      total_withdrawal: (withdrawSite.total_withdrawal ?? 0) + amount,
+      total_withdrawal: isZeroWithdraw ? (withdrawSite.total_withdrawal ?? 0) : (withdrawSite.total_withdrawal ?? 0) + amount,
       balance: 0, last_deposit: 0, deposit_bet_done: 0, point_deposit: 0,
       carry_pnl: newCarryPnl,
     }).eq('id', withdrawSite.id).select().single()
 
     if (updatedSite) setSites(p => p.map(s => s.id === updatedSite.id ? updatedSite : s))
 
-    // cashflow/log는 sites update 성공 여부와 무관하게 항상 기록
+    // cashflow/log는 sites update 성공 여부와 무관하게 항상 기록 (단, 0원은 실제 자금 이동이 없으므로 cashflow 미생성)
     const siteIdForLog = withdrawSite.id
     const siteNameForLog = withdrawSite.name
-    let usdKrwRate: number | null = null; let amountKrw: number | null = null
-    if (isusd) { usdKrwRate = await getUsdKrwRate(); amountKrw = Math.round(amount * usdKrwRate) }
-    const { data: cf, error: cfError } = await supabase.from('cashflows').insert({
-      flow_date: today, type: 'income', category: '베팅수익',
-      description: `${siteNameForLog} 마감`, amount, site_id: siteIdForLog,
-      currency: withdrawSite.currency, usd_krw_rate: usdKrwRate,
-      amount_krw: isusd ? amountKrw : amount,
-    }).select().single()
-    if (cfError) console.error('cashflow insert error:', cfError)
-    await logAction({ action_type: 'update', table_name: 'sites', record_id: siteIdForLog, before_data: before as never, after_data: (updatedSite ?? before) as never, description: `${siteNameForLog} 출금 ${amount.toLocaleString()}`, cashflow_id: cf?.id ?? null })
+    let cf: { id: string } | null = null
+    if (!isZeroWithdraw) {
+      let usdKrwRate: number | null = null; let amountKrw: number | null = null
+      if (isusd) { usdKrwRate = await getUsdKrwRate(); amountKrw = Math.round(amount * usdKrwRate) }
+      const { data: cfData, error: cfError } = await supabase.from('cashflows').insert({
+        flow_date: today, type: 'income', category: '베팅수익',
+        description: `${siteNameForLog} 마감`, amount, site_id: siteIdForLog,
+        currency: withdrawSite.currency, usd_krw_rate: usdKrwRate,
+        amount_krw: isusd ? amountKrw : amount,
+      }).select().single()
+      if (cfError) console.error('cashflow insert error:', cfError)
+      cf = cfData
+    }
+    await logAction({ action_type: 'update', table_name: 'sites', record_id: siteIdForLog, before_data: before as never, after_data: (updatedSite ?? before) as never, description: isZeroWithdraw ? `${siteNameForLog} 마감 (초기화, 출금 없음)` : `${siteNameForLog} 출금 ${amount.toLocaleString()}`, cashflow_id: cf?.id ?? null })
 
     await loadSites()
     setWithdrawSite(null)
