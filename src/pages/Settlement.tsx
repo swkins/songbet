@@ -360,16 +360,29 @@ export default function Settlement() {
   const thisMonthStart = dayjs().startOf('month').format('YYYY-MM-DD')
   const thisMonthEnd   = dayjs().endOf('month').format('YYYY-MM-DD')
 
+  // 이번달 사이트별 손익 + 전체 누적 사이트별 손익을 함께 계산 (비교용)
   const monthSiteBreakdown = useMemo(() => {
-    const map: Record<string, { income: number; expense: number }> = {}
-    cashflows.filter(c => c.flow_date >= thisMonthStart && c.flow_date <= thisMonthEnd && c.site_id)
-      .forEach(c => {
-        if (!map[c.site_id!]) map[c.site_id!] = { income: 0, expense: 0 }
-        if (c.type === 'income') map[c.site_id!].income += toKrw(c)
-        else if (c.type === 'expense') map[c.site_id!].expense += toKrw(c)
+    const monthMap: Record<string, { income: number; expense: number }> = {}
+    const totalMap: Record<string, { income: number; expense: number }> = {}
+    cashflows.filter(c => c.site_id).forEach(c => {
+      if (!totalMap[c.site_id!]) totalMap[c.site_id!] = { income: 0, expense: 0 }
+      if (c.type === 'income') totalMap[c.site_id!].income += toKrw(c)
+      else if (c.type === 'expense') totalMap[c.site_id!].expense += toKrw(c)
+    })
+    cashflows.filter(c => c.flow_date >= thisMonthStart && c.flow_date <= thisMonthEnd && c.site_id).forEach(c => {
+      if (!monthMap[c.site_id!]) monthMap[c.site_id!] = { income: 0, expense: 0 }
+      if (c.type === 'income') monthMap[c.site_id!].income += toKrw(c)
+      else if (c.type === 'expense') monthMap[c.site_id!].expense += toKrw(c)
+    })
+    return Object.entries(monthMap)
+      .map(([siteId, v]) => {
+        const t = totalMap[siteId] ?? { income: 0, expense: 0 }
+        return {
+          name: sites.find(s => s.id === siteId)?.name ?? siteId,
+          income: v.income, expense: v.expense, net: v.income - v.expense,
+          totalIncome: t.income, totalExpense: t.expense, totalNet: t.income - t.expense,
+        }
       })
-    return Object.entries(map)
-      .map(([siteId, v]) => ({ name: sites.find(s => s.id === siteId)?.name ?? siteId, income: v.income, expense: v.expense, net: v.income - v.expense }))
       .sort((a, b) => b.net - a.net)
   }, [cashflows, sites, thisMonthStart, thisMonthEnd, rateInfo])
 
@@ -423,6 +436,9 @@ export default function Settlement() {
   const maxSiteBreakdownIncome  = Math.max(...monthSiteBreakdown.map(x => x.income), 1)
   const maxSiteBreakdownExpense = Math.max(...monthSiteBreakdown.map(x => x.expense), 1)
   const maxSiteBreakdownNetAbs  = Math.max(...monthSiteBreakdown.map(x => Math.abs(x.net)), 1)
+  const maxSiteTotalIncome  = Math.max(...monthSiteBreakdown.map(x => x.totalIncome), 1)
+  const maxSiteTotalExpense = Math.max(...monthSiteBreakdown.map(x => x.totalExpense), 1)
+  const maxSiteTotalNetAbs  = Math.max(...monthSiteBreakdown.map(x => Math.abs(x.totalNet)), 1)
   const DOW_KO = ['일', '월', '화', '수', '목', '금', '토']
 
   const catNames = categories.map(c => c.name)
@@ -724,67 +740,94 @@ export default function Settlement() {
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
           {[
-            { label: '총 수입', val: allIncome,  color: 'var(--green)', prefix: '+' },
-            { label: '총 지출', val: allExpense, color: 'var(--red)',   prefix: '-' },
-            { label: '순수익',  val: allBalance, color: allBalance >= 0 ? 'var(--green)' : 'var(--red)', prefix: allBalance >= 0 ? '+' : '' },
-          ].map(({ label, val, color, prefix }) => (
-            <div key={label} style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px' }}>
-              <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.7px', textTransform: 'uppercase', marginBottom: 4 }}>{label}</div>
-              <div style={{ fontSize: 16, fontWeight: 800, fontFamily: 'var(--font-num)', color }}>{prefix}{fmt(val)}</div>
-              <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 2 }}>원화 환산 합계</div>
-            </div>
-          ))}
-        </div>
-
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
-          {[
-            { label: '이번달 총 수입', val: thisMonthIncomeTotal,  color: 'var(--green)', prefix: '+' },
-            { label: '이번달 총 지출', val: thisMonthExpenseTotal, color: 'var(--red)',   prefix: '-' },
-            { label: '이번달 순수익',  val: thisMonthNetTotal, color: thisMonthNetTotal >= 0 ? 'var(--green)' : 'var(--red)', prefix: thisMonthNetTotal >= 0 ? '+' : '' },
-          ].map(({ label, val, color, prefix }) => (
-            <div key={label} style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px' }}>
-              <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.7px', textTransform: 'uppercase', marginBottom: 4 }}>{label}</div>
-              <div style={{ fontSize: 16, fontWeight: 800, fontFamily: 'var(--font-num)', color }}>{prefix}{fmt(val)}</div>
-              <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 2 }}>이번달 원화 환산 합계</div>
-            </div>
-          ))}
+            { label: '수입',  total: allIncome,  month: thisMonthIncomeTotal,  color: 'var(--green)', prefix: '+' },
+            { label: '지출',  total: allExpense, month: thisMonthExpenseTotal, color: 'var(--red)',   prefix: '-' },
+            { label: '순수익', total: allBalance, month: thisMonthNetTotal,     color: allBalance >= 0 ? 'var(--green)' : 'var(--red)', prefix: allBalance >= 0 ? '+' : '' },
+          ].map(({ label, total, month, color, prefix }) => {
+            const isNet = label === '순수익'
+            const monthColor  = isNet ? (month >= 0 ? 'var(--green)' : 'var(--red)') : color
+            const monthPrefix = isNet ? (month >= 0 ? '+' : '') : prefix
+            return (
+              <div key={label} style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px' }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.7px', textTransform: 'uppercase', marginBottom: 4 }}>{label}</div>
+                <div style={{ fontSize: 16, fontWeight: 800, fontFamily: 'var(--font-num)', color }}>{prefix}{fmt(total)}</div>
+                <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 2 }}>전체 누적</div>
+                <div style={{ borderTop: '1px dashed var(--border)', marginTop: 8, paddingTop: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                  <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>이번달</span>
+                  <span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-num)', color: monthColor }}>{monthPrefix}{fmt(month)}</span>
+                </div>
+              </div>
+            )
+          })}
         </div>
 
         <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10, padding: '12px 14px' }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.7px', marginBottom: 10 }}>이번달 사이트별 손익</div>
+          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.7px', marginBottom: 10 }}>사이트별 손익 (이번달 · 전체누적 비교)</div>
           {monthSiteBreakdown.length === 0 && <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>내역 없음</div>}
           {monthSiteBreakdown.length > 0 && (
-            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(60px, 1fr) 1fr 1fr 1fr', gap: 4, marginBottom: 8 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(48px, auto) 1fr 1fr 1fr', gap: 4, marginBottom: 8 }}>
               <span />
               <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--green)', textAlign: 'right' }}>수입</span>
               <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--red)', textAlign: 'right' }}>지출</span>
               <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-secondary)', textAlign: 'right' }}>순수익</span>
             </div>
           )}
-          {monthSiteBreakdown.map(({ name, income, expense, net }, i) => {
+          {monthSiteBreakdown.map(({ name, income, expense, net, totalIncome, totalExpense, totalNet }, i) => {
             const incPct = Math.round(income / maxSiteBreakdownIncome * 100)
             const expPct = Math.round(expense / maxSiteBreakdownExpense * 100)
             const netPct = Math.round(Math.abs(net) / maxSiteBreakdownNetAbs * 100)
             const netColor = net >= 0 ? 'var(--green)' : 'var(--red)'
+            const totIncPct = Math.round(totalIncome / maxSiteTotalIncome * 100)
+            const totExpPct = Math.round(totalExpense / maxSiteTotalExpense * 100)
+            const totNetPct = Math.round(Math.abs(totalNet) / maxSiteTotalNetAbs * 100)
+            const totNetColor = totalNet >= 0 ? 'var(--green)' : 'var(--red)'
             return (
-              <div key={name} style={{ display: 'grid', gridTemplateColumns: 'minmax(60px, 1fr) 1fr 1fr 1fr', gap: 4, alignItems: 'center', marginBottom: 10 }}>
-                <span style={{ fontSize: 12, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</span>
-                <div>
-                  <div style={{ textAlign: 'right', fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-num)', color: 'var(--green)', marginBottom: 2 }}>+{fmt(income)}</div>
-                  <div style={{ height: 5, borderRadius: 3, background: 'var(--bg-elevated)' }}>
-                    <div style={{ height: '100%', borderRadius: 3, background: 'var(--green)', width: `${incPct}%`, marginLeft: 'auto', opacity: 0.85 }} />
+              <div key={name} style={{ marginBottom: 12, paddingBottom: 10, borderBottom: i < monthSiteBreakdown.length - 1 ? '1px solid var(--border)' : 'none' }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</div>
+
+                {/* 이번달 */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(48px, auto) 1fr 1fr 1fr', gap: 4, alignItems: 'center', marginBottom: 5 }}>
+                  <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)' }}>이번달</span>
+                  <div>
+                    <div style={{ textAlign: 'right', fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-num)', color: 'var(--green)', marginBottom: 2 }}>+{fmt(income)}</div>
+                    <div style={{ height: 5, borderRadius: 3, background: 'var(--bg-elevated)' }}>
+                      <div style={{ height: '100%', borderRadius: 3, background: 'var(--green)', width: `${incPct}%`, marginLeft: 'auto', opacity: 0.85 }} />
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ textAlign: 'right', fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-num)', color: 'var(--red)', marginBottom: 2 }}>-{fmt(expense)}</div>
+                    <div style={{ height: 5, borderRadius: 3, background: 'var(--bg-elevated)' }}>
+                      <div style={{ height: '100%', borderRadius: 3, background: 'var(--red)', width: `${expPct}%`, marginLeft: 'auto', opacity: 0.85 }} />
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ textAlign: 'right', fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-num)', color: netColor, marginBottom: 2 }}>{net >= 0 ? '+' : ''}{fmt(net)}</div>
+                    <div style={{ height: 5, borderRadius: 3, background: 'var(--bg-elevated)' }}>
+                      <div style={{ height: '100%', borderRadius: 3, background: netColor, width: `${netPct}%`, marginLeft: 'auto', opacity: 0.85 }} />
+                    </div>
                   </div>
                 </div>
-                <div>
-                  <div style={{ textAlign: 'right', fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-num)', color: 'var(--red)', marginBottom: 2 }}>-{fmt(expense)}</div>
-                  <div style={{ height: 5, borderRadius: 3, background: 'var(--bg-elevated)' }}>
-                    <div style={{ height: '100%', borderRadius: 3, background: 'var(--red)', width: `${expPct}%`, marginLeft: 'auto', opacity: 0.85 }} />
+
+                {/* 전체누적 */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(48px, auto) 1fr 1fr 1fr', gap: 4, alignItems: 'center' }}>
+                  <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)' }}>전체누적</span>
+                  <div>
+                    <div style={{ textAlign: 'right', fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-num)', color: 'var(--green)', opacity: 0.7, marginBottom: 2 }}>+{fmt(totalIncome)}</div>
+                    <div style={{ height: 5, borderRadius: 3, background: 'var(--bg-elevated)' }}>
+                      <div style={{ height: '100%', borderRadius: 3, background: 'var(--green)', width: `${totIncPct}%`, marginLeft: 'auto', opacity: 0.4 }} />
+                    </div>
                   </div>
-                </div>
-                <div>
-                  <div style={{ textAlign: 'right', fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-num)', color: netColor, marginBottom: 2 }}>{net >= 0 ? '+' : ''}{fmt(net)}</div>
-                  <div style={{ height: 5, borderRadius: 3, background: 'var(--bg-elevated)' }}>
-                    <div style={{ height: '100%', borderRadius: 3, background: netColor, width: `${netPct}%`, marginLeft: 'auto', opacity: 0.85 }} />
+                  <div>
+                    <div style={{ textAlign: 'right', fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-num)', color: 'var(--red)', opacity: 0.7, marginBottom: 2 }}>-{fmt(totalExpense)}</div>
+                    <div style={{ height: 5, borderRadius: 3, background: 'var(--bg-elevated)' }}>
+                      <div style={{ height: '100%', borderRadius: 3, background: 'var(--red)', width: `${totExpPct}%`, marginLeft: 'auto', opacity: 0.4 }} />
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ textAlign: 'right', fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-num)', color: totNetColor, opacity: 0.7, marginBottom: 2 }}>{totalNet >= 0 ? '+' : ''}{fmt(totalNet)}</div>
+                    <div style={{ height: 5, borderRadius: 3, background: 'var(--bg-elevated)' }}>
+                      <div style={{ height: '100%', borderRadius: 3, background: totNetColor, width: `${totNetPct}%`, marginLeft: 'auto', opacity: 0.4 }} />
+                    </div>
                   </div>
                 </div>
               </div>
