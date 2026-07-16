@@ -121,6 +121,15 @@ function DepositModal({ site, onClose, onDeposit, onPoint }: {
     inputRef.current?.focus()
   }, [tab])
 
+  // ESC 키로 모달 닫기
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [onClose])
+
   function handleChange(val: string) {
     // 타이핑/붙여넣기 모두 이 경로를 지나감 — 쉼표·공백·문자가 섞여 들어와도
     // 숫자(및 USD는 소수점)만 자동으로 추출해서 반영 (기존엔 정규식 불일치 시 통째로 무시되어
@@ -199,6 +208,7 @@ function WithdrawModal({ site, onClose, onWithdraw }: {
   site: Site; onClose: () => void; onWithdraw: (amount: number) => void
 }) {
   const [amount, setAmount] = useState('')
+  const inputRef = useRef<HTMLInputElement>(null)
   const isusd = site.currency === 'usd'; const unit = isusd ? '$' : '원'
   // USD: 소수점 둘째자리까지, KRW: 정수
   const num = isusd ? parseFloat(amount) : Number(amount.replace(/,/g, ''))
@@ -208,6 +218,15 @@ function WithdrawModal({ site, onClose, onWithdraw }: {
   const totalIn = (site.last_deposit ?? 0) + (site.point_deposit ?? 0)
   const netProfit = isValid ? num - totalIn : null
 
+  // ESC 키로 모달 닫기
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [onClose])
+
   function handleSubmit() {
     if (!isValid) return
     if (isZero && !confirm('출금 없이 초기화만 진행할까요? (진행중인 베팅은 유지되고 입금/롤링만 초기화됩니다)')) return
@@ -215,12 +234,17 @@ function WithdrawModal({ site, onClose, onWithdraw }: {
   }
 
   function handleChange(val: string) {
-    if (isusd) {
-      // 숫자와 소수점만 허용, 소수점 둘째자리까지
-      if (val === '' || /^\d*\.?\d{0,2}$/.test(val)) setAmount(val)
-    } else {
-      const raw = val.replace(/,/g, '')
-      if (raw === '' || /^\d+$/.test(raw)) setAmount(raw)
+    setAmount(extractAmount(val, isusd))
+  }
+
+  async function handlePasteClick() {
+    try {
+      const text = await navigator.clipboard.readText()
+      const extracted = extractAmount(text, isusd)
+      if (extracted) setAmount(extracted)
+      inputRef.current?.focus()
+    } catch {
+      alert('클립보드 접근 권한이 없습니다. 브라우저에서 클립보드 읽기 권한을 허용해주세요.')
     }
   }
 
@@ -245,10 +269,13 @@ function WithdrawModal({ site, onClose, onWithdraw }: {
         </div>
         <div style={{ fontSize: 9, color: 'var(--text-secondary)', marginBottom: 6, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.8px' }}>출금액 ({unit})</div>
         <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
-          <input className="form-input" type="text" inputMode="decimal" placeholder={isusd ? '0.00' : '0'}
+          <input ref={inputRef} className="form-input" type="text" inputMode="decimal" placeholder={isusd ? '0.00' : '0'}
             value={amount}
             onChange={e => handleChange(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && handleSubmit()} autoFocus />
+          <button type="button" className="btn btn-ghost" title="클립보드에서 숫자 붙여넣기" onClick={handlePasteClick} style={{ flexShrink: 0, padding: '0 10px' }}>
+            <ClipboardPaste size={14} />
+          </button>
           <button className="btn btn-cyan" disabled={!isValid} onClick={handleSubmit} style={{ flexShrink: 0 }}>
             {isZero ? '초기화' : '출금'}
           </button>
@@ -851,14 +878,14 @@ export default function Dashboard() {
   const colCount = Math.max(1, sites.length)
 
   function sitePnL(site: Site) {
+    // 마감된(비활성) 사이트는 사이트명 옆 진행중 수익/손실 표시를 하지 않음
+    if (!site.active) return null
     const hasPending = pendingBySite(site.id).length > 0
     const visibleSum = settledBySite(site.id).reduce((acc, b) => acc + b.profit, 0)
     const carry = site.carry_pnl ?? 0
     const total = carry + visibleSum
-    // 완전 마감(진행중 베팅 없음) 상태에서 이월/완료목록도 없으면 → 표시 안 함(초기화된 상태)
-    if (!site.active && !hasPending && total === 0) return null
-    // 활성 상태인데 아직 아무 이력도 없는 새 사이트 → 표시 안 함
-    if (site.active && (site.last_deposit ?? 0) === 0 && !hasPending && total === 0) return null
+    // 아직 아무 이력도 없는 새 사이트 → 표시 안 함
+    if ((site.last_deposit ?? 0) === 0 && !hasPending && total === 0) return null
     return total
   }
 
