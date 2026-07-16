@@ -448,10 +448,10 @@ export default function Settlement() {
   const formIsUsd = selectedSiteCurrency === 'usd'
 
   return (
-    <div style={{ display: 'flex', height: 'calc(100vh - 58px)', overflow: 'hidden', background: 'var(--bg)', gap: 0 }}>
+    <div className="settlement-layout" style={{ display: 'flex', height: 'calc(100vh - 58px)', overflow: 'hidden', background: 'var(--bg)', gap: 0 }}>
 
       {/* ═══ 좌: 추가 폼 (320px) ═══ */}
-      <div style={{ width: 320, flexShrink: 0, borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', overflowY: 'auto' }}>
+      <div className="settlement-col settlement-col-form" style={{ width: 320, flexShrink: 0, borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', overflowY: 'auto' }}>
 
         <div style={{ padding: '12px 12px 0' }}>
           <div style={labelSt}>날짜</div>
@@ -664,7 +664,7 @@ export default function Settlement() {
       </div>
 
       {/* ═══ 중: 날짜별 목록 (400px) ═══ */}
-      <div style={{ width: 400, flexShrink: 0, borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div className="settlement-col settlement-col-list" style={{ width: 400, flexShrink: 0, borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <div style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
             <button onClick={() => setViewMonth(p => p.subtract(1, 'month'))} style={navBtnSt}><ChevronLeft size={14} /></button>
@@ -686,7 +686,7 @@ export default function Settlement() {
           )}
         </div>
 
-        <div style={{ flex: 1, overflowY: 'auto', padding: '0 12px' }}>
+        <div className="settlement-list-scroll" style={{ flex: 1, overflowY: 'auto', padding: '0 12px' }}>
           {groupedByDate.length === 0 && (
             <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--text-muted)', fontSize: 13 }}>이 달의 내역이 없습니다</div>
           )}
@@ -733,7 +733,7 @@ export default function Settlement() {
       </div>
 
       {/* ═══ 우: 통계 ═══ */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflowY: 'auto', padding: '14px 16px', gap: 14 }}>
+      <div className="settlement-col settlement-col-main" style={{ flex: 1, display: 'flex', flexDirection: 'column', overflowY: 'auto', padding: '14px 16px', gap: 14 }}>
 
         {/* 환율 배너 — 최상단 */}
         <ExchangeRateBanner rateInfo={rateInfo} onRefresh={refreshRate} refreshing={rateRefreshing} />

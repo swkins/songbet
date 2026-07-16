@@ -444,7 +444,7 @@ export default function App() {
               cursor: 'pointer', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 5,
               fontSize: 11, fontWeight: 600, fontFamily: 'var(--font-body)', transition: 'all 0.15s',
             }}>
-              <Percent size={13} />마진율
+              <Percent size={13} /><span className="nav-btn-label">마진율</span>
             </button>
 
             {/* 오늘 할 일 버튼 */}
@@ -476,7 +476,7 @@ export default function App() {
                 cursor: 'pointer', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 5,
                 fontSize: 11, fontWeight: 600, fontFamily: 'var(--font-body)', transition: 'all 0.15s',
               }}>
-                <LayoutTemplate size={13} />{currentLabel}
+                <LayoutTemplate size={13} /><span className="nav-btn-label">{currentLabel}</span>
               </button>
               {showWidthMenu && (
                 <>
@@ -508,7 +508,7 @@ export default function App() {
               cursor: 'pointer', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 5,
               fontSize: 11, fontWeight: 600, fontFamily: 'var(--font-body)', transition: 'all 0.15s',
             }}>
-              <StickyNote size={13} />메모
+              <StickyNote size={13} /><span className="nav-btn-label">메모</span>
             </button>
 
             {/* 코드 수정 버튼 */}
@@ -519,7 +519,7 @@ export default function App() {
               cursor: 'pointer', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 5,
               fontSize: 11, fontWeight: 600, fontFamily: 'var(--font-body)', transition: 'all 0.15s',
             }}>
-              <Code2 size={13} />코드수정
+              <Code2 size={13} /><span className="nav-btn-label">코드수정</span>
             </button>
 
             {/* LOG 버튼 — 숫자 뱃지 제거 */}
@@ -530,7 +530,7 @@ export default function App() {
               cursor: 'pointer', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 5,
               fontSize: 11, fontWeight: 600, fontFamily: 'var(--font-body)', transition: 'all 0.15s',
             }}>
-              <ClipboardList size={13} />LOG
+              <ClipboardList size={13} /><span className="nav-btn-label">LOG</span>
             </button>
           </div>
         </div>
@@ -548,7 +548,7 @@ export default function App() {
       {showCode && (
         <>
           {!pinCode && <div style={{ position: 'fixed', inset: 0, zIndex: 150 }} onClick={() => setShowCode(false)} />}
-          <div style={{
+          <div className="app-side-panel" style={{
             position: 'fixed', top: 56, right: 16, width: 340,
             maxHeight: 'calc(100vh - 72px)',
             background: 'var(--bg-card)', border: '1px solid var(--cyan-border)',
@@ -689,7 +689,7 @@ export default function App() {
       {showMargin && (
         <>
           <div style={{ position: 'fixed', inset: 0, zIndex: 150 }} onClick={() => setShowMargin(false)} />
-          <div style={{
+          <div className="app-side-panel" style={{
             position: 'fixed', top: 56, right: 372, width: 270,
             background: 'var(--bg-card)', border: '1px solid var(--gold-border)',
             borderRadius: 'var(--radius-lg)', boxShadow: '0 16px 48px rgba(0,0,0,0.6)',
@@ -760,7 +760,7 @@ export default function App() {
       {showTodo && (
         <>
           <div style={{ position: 'fixed', inset: 0, zIndex: 150 }} onClick={() => setShowTodo(false)} />
-          <div style={{
+          <div className="app-side-panel" style={{
             position: 'fixed', top: 56, right: 16, width: 300,
             maxHeight: 'calc(100vh - 72px)',
             background: 'var(--bg-card)', border: '1px solid var(--gold-border)',
@@ -892,7 +892,7 @@ export default function App() {
       {showLog && (
         <>
           <div style={{ position: 'fixed', inset: 0, zIndex: 150 }} onClick={() => setShowLog(false)} />
-          <div style={{ position: 'fixed', top: 56, right: 16, width: 300, maxHeight: 460, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', boxShadow: '0 16px 48px rgba(0,0,0,0.6)', zIndex: 160, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          <div className="app-side-panel" style={{ position: 'fixed', top: 56, right: 16, width: 300, maxHeight: 460, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', boxShadow: '0 16px 48px rgba(0,0,0,0.6)', zIndex: 160, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
             <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--bg-elevated)' }}>
               <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '1.2px', textTransform: 'uppercase', color: 'var(--text-secondary)' }}>Action Log</span>
               <button onClick={() => setShowLog(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex' }}><X size={12} /></button>
@@ -917,7 +917,7 @@ export default function App() {
       {showMemo && (
         <>
           <div style={{ position: 'fixed', inset: 0, zIndex: 150 }} onClick={() => setShowMemo(false)} />
-          <div style={{
+          <div className="app-side-panel" style={{
             position: 'fixed', top: 56, right: 16, width: 320,
             maxHeight: 'calc(100vh - 72px)',
             background: 'var(--bg-card)', border: '1px solid var(--purple-border)',
