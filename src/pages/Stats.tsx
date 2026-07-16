@@ -171,6 +171,44 @@ function extractTotalLine(pick: string): number | null {
 }
 function formatLine(n: number): string { return n.toFixed(1).replace(/\.0$/, '') }
 
+// ─── 야구 승패 배당구간 등급 (황금구간 v1 · 2026-07) ────────────────
+// S = 황금구간(흐름 무관 무조건), A = 흐름구간(배당 하락 방향 확인 필요), none = 회피
+function mlTier(odds: number): RowColor {
+  if (odds >= 2.2 && odds < 2.6) return 'S'
+  if ((odds >= 1.6 && odds < 2.2) || (odds >= 2.6 && odds < 3.0)) return 'A'
+  return 'none'
+}
+
+function BaseballRulebookSummary() {
+  return (
+    <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, padding: '12px 14px', marginBottom: 12 }}>
+      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 8 }}>⚾ 야구 룰북 요약 (배당구간 · 라인무브)</div>
+
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+        <span style={{ fontSize: 9, fontWeight: 700, color: TIER_STYLE.S.color, background: TIER_STYLE.S.bg, border: `1px solid ${TIER_STYLE.S.border}`, borderRadius: 4, padding: '2px 6px' }}>S 황금구간</span>
+        <span style={{ fontSize: 10, color: 'var(--text-secondary)' }}>2.20 ~ 2.59 — 흐름 무관 무조건 진입</span>
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+        <span style={{ fontSize: 9, fontWeight: 700, color: TIER_STYLE.A.color, background: TIER_STYLE.A.bg, border: `1px solid ${TIER_STYLE.A.border}`, borderRadius: 4, padding: '2px 6px' }}>A 흐름구간</span>
+        <span style={{ fontSize: 10, color: 'var(--text-secondary)' }}>1.60 ~ 2.19 / 2.60 ~ 2.99 — 배당 떨어지는 방향 확인 후 진입, 흐름 없으면 패스</span>
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+        <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 4, padding: '2px 6px' }}>회피</span>
+        <span style={{ fontSize: 10, color: 'var(--text-secondary)' }}>1.59 이하 / 3.00 이상 — 흐름 무관 패스</span>
+      </div>
+
+      <div style={{ borderTop: '1px solid var(--border-light)', paddingTop: 8 }}>
+        <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 4 }}>언더/오버 — 방향 고정 없음</div>
+        <div style={{ fontSize: 10, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+          라인 자체 이동(예: 8.5→9) = 강한 신호, 이동 방향 따라가기 (반영 후 진입도 유효)<br />
+          배당(주스)만 이동, 라인 고정 = 약한 신호, 원인 확인 후 판단<br />
+          "무조건 언더/오버" 없음 — 매치업(선발·불펜·날씨·구장) 기반이 기본, 라인무브는 확인 도구
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function BaseballDetailPanel({ bets }: { bets: Bet[] }) {
   const [leagueFilter, setLeagueFilter] = useState<League | 'ETC' | 'all'>('all')
 
@@ -200,7 +238,7 @@ function BaseballDetailPanel({ bets }: { bets: Bet[] }) {
     for (let lo = loStart; lo <= loEnd + 1e-9; lo = Math.round((lo + 0.1) * 10) / 10) {
       const hi = Math.round((lo + 0.1) * 10) / 10
       const rowBets = ml.filter(b => b.odds >= lo && b.odds < hi)
-      if (rowBets.length > 0) rows.push({ label: lo.toFixed(1), tier: 'none', bets: rowBets })
+      if (rowBets.length > 0) rows.push({ label: lo.toFixed(1), tier: mlTier(lo), bets: rowBets })
     }
     return rows
   })()
@@ -229,6 +267,8 @@ function BaseballDetailPanel({ bets }: { bets: Bet[] }) {
 
   return (
     <div>
+      <BaseballRulebookSummary />
+
       {/* 리그별 요약 + 필터 탭 (팀 이름으로 자동 추론) */}
       {leagueStats.length > 0 && (
         <div style={{ marginBottom: 12 }}>
