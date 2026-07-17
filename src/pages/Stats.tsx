@@ -182,7 +182,7 @@ function mlTier(odds: number): RowColor {
 function BaseballRulebookSummary() {
   return (
     <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, padding: '12px 14px', marginBottom: 12 }}>
-      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 8 }}>⚾ 야구 룰북 요약 v1.2 (배당구간 · 라인무브)</div>
+      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 8 }}>⚾ 야구 룰북 요약 (배당구간 · 라인무브)</div>
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
         <span style={{ fontSize: 9, fontWeight: 700, color: TIER_STYLE.S.color, background: TIER_STYLE.S.bg, border: `1px solid ${TIER_STYLE.S.border}`, borderRadius: 4, padding: '2px 6px' }}>S 황금구간</span>
