@@ -171,42 +171,20 @@ function extractTotalLine(pick: string): number | null {
 }
 function formatLine(n: number): string { return n.toFixed(1).replace(/\.0$/, '') }
 
+// 핸디캡(+N.N / -N.N) 픽 텍스트에서 라인 숫자 추출 (부호 무관, 절대값)
+function extractHandicapLine(pick: string): number | null {
+  const m = pick?.match(/([+-]\s*\d+\.?\d*)/)
+  if (!m) return null
+  const n = parseFloat(m[1].replace(/\s+/g, ''))
+  return isNaN(n) ? null : Math.abs(n)
+}
+
 // ─── 야구 승패 배당구간 등급 (황금구간 v1 · 2026-07) ────────────────
 // S = 황금구간(흐름 무관 무조건), A = 흐름구간(배당 하락 방향 확인 필요), none = 회피
 function mlTier(odds: number): RowColor {
   if (odds >= 2.2 && odds < 2.6) return 'S'
   if ((odds >= 1.6 && odds < 2.2) || (odds >= 2.6 && odds < 3.0)) return 'A'
   return 'none'
-}
-
-function BaseballRulebookSummary() {
-  return (
-    <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, padding: '12px 14px', marginBottom: 12 }}>
-      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 8 }}>⚾ 야구 룰북 요약 (배당구간 · 라인무브)</div>
-
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
-        <span style={{ fontSize: 9, fontWeight: 700, color: TIER_STYLE.S.color, background: TIER_STYLE.S.bg, border: `1px solid ${TIER_STYLE.S.border}`, borderRadius: 4, padding: '2px 6px' }}>S 황금구간</span>
-        <span style={{ fontSize: 10, color: 'var(--text-secondary)' }}>2.20 ~ 2.59 — 흐름 무관 무조건 진입</span>
-      </div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
-        <span style={{ fontSize: 9, fontWeight: 700, color: TIER_STYLE.A.color, background: TIER_STYLE.A.bg, border: `1px solid ${TIER_STYLE.A.border}`, borderRadius: 4, padding: '2px 6px' }}>A 흐름구간</span>
-        <span style={{ fontSize: 10, color: 'var(--text-secondary)' }}>1.60 ~ 2.19 / 2.60 ~ 2.99 — 배당 떨어지는 방향 확인 후 진입, 흐름 없으면 패스</span>
-      </div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
-        <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 4, padding: '2px 6px' }}>회피</span>
-        <span style={{ fontSize: 10, color: 'var(--text-secondary)' }}>1.59 이하 / 3.00 이상 — 흐름 무관 패스</span>
-      </div>
-
-      <div style={{ borderTop: '1px solid var(--border-light)', paddingTop: 8 }}>
-        <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 4 }}>언더/오버 — 방향 고정 없음</div>
-        <div style={{ fontSize: 10, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
-          라인 자체 이동(예: 8.5→9) = 강한 신호, 이동 방향 따라가기 (반영 후 진입도 유효)<br />
-          배당(주스)만 이동, 라인 고정 = 약한 신호, 원인 확인 후 판단<br />
-          "무조건 언더/오버" 없음 — 매치업(선발·불펜·날씨·구장) 기반이 기본, 라인무브는 확인 도구
-        </div>
-      </div>
-    </div>
-  )
 }
 
 function BaseballDetailPanel({ bets }: { bets: Bet[] }) {
@@ -228,17 +206,13 @@ function BaseballDetailPanel({ bets }: { bets: Bet[] }) {
   const under = settled.filter(b => b.market === 'under')
   const over = settled.filter(b => b.market === 'over')
 
-  // 승패(역배·정배 전체) — 실제 베팅한 배당 범위를 0.1 단위로 전부 커버 (룰북 등급 없이 순수 통계)
+  // 승패(역배·정배) — 2.1 ~ 2.9 구간을 0.1 단위로 고정 커버
   const mlRows: RuleRow[] = (() => {
-    if (!ml.length) return []
-    const odds = ml.map(b => b.odds)
-    const loStart = Math.floor(Math.min(...odds) * 10) / 10
-    const loEnd = Math.floor((Math.max(...odds) - 0.0001) * 10) / 10
     const rows: RuleRow[] = []
-    for (let lo = loStart; lo <= loEnd + 1e-9; lo = Math.round((lo + 0.1) * 10) / 10) {
+    for (let lo = 2.1; lo <= 2.9 + 1e-9; lo = Math.round((lo + 0.1) * 10) / 10) {
       const hi = Math.round((lo + 0.1) * 10) / 10
       const rowBets = ml.filter(b => b.odds >= lo && b.odds < hi)
-      if (rowBets.length > 0) rows.push({ label: lo.toFixed(1), tier: mlTier(lo), bets: rowBets })
+      rows.push({ label: lo.toFixed(1), tier: mlTier(lo), bets: rowBets })
     }
     return rows
   })()
@@ -267,8 +241,6 @@ function BaseballDetailPanel({ bets }: { bets: Bet[] }) {
 
   return (
     <div>
-      <BaseballRulebookSummary />
-
       {/* 리그별 요약 + 필터 탭 (팀 이름으로 자동 추론) */}
       {leagueStats.length > 0 && (
         <div style={{ marginBottom: 12 }}>
@@ -302,7 +274,7 @@ function BaseballDetailPanel({ bets }: { bets: Bet[] }) {
       )}
 
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-        <RuleStatsTable title="⚾ 승패(전체) — 0.1단위 배당 구간별" rows={mlRows} />
+        <RuleStatsTable title="⚾ 승패 — 2.1~2.9 0.1단위 배당 구간별" rows={mlRows} />
         <RuleStatsTable title="⚾ 언더 — 라인별 적중률" rows={underRows}
           extra={underNoLine > 0 ? <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 6 }}>라인 미확인: {underNoLine}건</div> : undefined} />
         <RuleStatsTable title="⚾ 오버 — 라인별 적중률" rows={overRows}
@@ -336,9 +308,22 @@ function SoccerDetailPanel({ bets }: { bets: Bet[] }) {
   const overBets = settled.filter(b => b.market === 'over')
   const underBets = settled.filter(b => b.market === 'under')
 
+  // 핸디캡 — 라인별(1.5 플핸, 2.5 플핸 등)로 나눈 뒤, 각 라인 내에서 0.1단위 배당 구간별 통계
+  const hcapLineMap = new Map<number, Bet[]>()
+  hcap.forEach(b => {
+    const line = extractHandicapLine(b.pick)
+    if (line === null) return
+    if (!hcapLineMap.has(line)) hcapLineMap.set(line, [])
+    hcapLineMap.get(line)!.push(b)
+  })
+  const hcapLineTables = Array.from(hcapLineMap.entries())
+    .sort((a, b) => a[0] - b[0])
+    .map(([line, lineBets]) => ({ title: `⚽ 핸디캡 ${formatLine(line)} 플핸 — 0.1단위 배당 구간별`, rows: oddsBinRows(lineBets) }))
+    .filter(t => t.rows.length > 0)
+
   const tables = [
     { title: '⚽ 승패 — 0.1단위 배당 구간별', rows: oddsBinRows(ml) },
-    { title: '⚽ 핸디캡 — 0.1단위 배당 구간별', rows: oddsBinRows(hcap) },
+    ...hcapLineTables,
     { title: '⚽ 오버 — 0.1단위 배당 구간별', rows: oddsBinRows(overBets) },
     { title: '⚽ 언더 — 0.1단위 배당 구간별', rows: oddsBinRows(underBets) },
   ].filter(t => t.rows.length > 0)
@@ -364,19 +349,29 @@ function BasketballDetailPanel({ bets }: { bets: Bet[] }) {
   const overBets = settled.filter(b => b.market === 'over')
   const underBets = settled.filter(b => b.market === 'under')
 
+  // 핸디캡 — 라인별(4.5 ~ 13.5, 1.0단위) 적중률/수익률
+  const hcapLineRows: RuleRow[] = (() => {
+    const rows: RuleRow[] = []
+    for (let line = 4.5; line <= 13.5 + 1e-9; line = Math.round((line + 1.0) * 10) / 10) {
+      const lineBets = hcap.filter(b => extractHandicapLine(b.pick) === line)
+      rows.push({ label: formatLine(line), tier: 'none', bets: lineBets })
+    }
+    return rows
+  })()
+
   const tables = [
     { title: '🏀 승패 — 0.1단위 배당 구간별', rows: oddsBinRows(ml) },
-    { title: '🏀 핸디캡 — 0.1단위 배당 구간별', rows: oddsBinRows(hcap) },
     { title: '🏀 오버 — 0.1단위 배당 구간별', rows: oddsBinRows(overBets) },
     { title: '🏀 언더 — 0.1단위 배당 구간별', rows: oddsBinRows(underBets) },
   ].filter(t => t.rows.length > 0)
 
-  const ruleIds = new Set(tables.flatMap(t => t.rows.flatMap(r => r.bets)).map(b => b.id))
+  const ruleIds = new Set([...tables.flatMap(t => t.rows.flatMap(r => r.bets)), ...hcapLineRows.flatMap(r => r.bets)].map(b => b.id))
   const otherBets = settled.filter(b => !ruleIds.has(b.id))
 
   return (
     <div>
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+        <RuleStatsTable title="🏀 핸디캡 — 라인별(4.5~13.5) 적중률" rows={hcapLineRows} />
         {tables.map(t => <RuleStatsTable key={t.title} title={t.title} rows={t.rows} />)}
       </div>
       <OtherBetsPanel bets={otherBets} />
@@ -589,90 +584,10 @@ function LivePanel({ bets, onDeleteRequest }: { bets: Bet[]; onDeleteRequest: ()
 
 
 
-function ParlayPanel({ bets, onDeleteRequest }: { bets: Bet[]; onDeleteRequest: () => void }) {
-  // parlay_group이 있는 베팅만 필터
-  const parlayBets = bets.filter(b => b.parlay_group !== null && b.result !== 'pending')
-  // 그룹별로 묶기 (parlay_leg=1 기준으로 대표)
-  const groups = Array.from(new Set(parlayBets.map(b => b.parlay_group))).map(g => {
-    const legs = parlayBets.filter(b => b.parlay_group === g).sort((a,b) => a.parlay_leg - b.parlay_leg)
-    const rep = legs[0]
-    return { group: g, legs, result: rep?.result ?? 'pending', odds: rep?.odds ?? 0, stake: rep?.stake ?? 0, profit: rep?.profit ?? 0 }
-  })
-  const wins = groups.filter(g => g.result === 'win')
-  const losses = groups.filter(g => g.result === 'loss')
-  const total = groups.length
-  const winRate = total > 0 ? wins.length / total * 100 : 0
-  const totalStake = groups.reduce((s,g) => s + g.stake, 0)
-  const totalProfit = groups.reduce((s,g) => s + g.profit, 0)
-  const roi = totalStake > 0 ? totalProfit / totalStake * 100 : 0
-  const avgOdds = total > 0 ? groups.reduce((s,g) => s + g.odds, 0) / total : 0
-
-  if (total === 0) return (
-    <div>
-      <div className="card"><div className="empty"><div className="empty-icon">2️⃣</div>두폴 베팅 기록이 없습니다</div></div>
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
-        <button onClick={onDeleteRequest} className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--red)', borderColor: 'var(--red-border)', display: 'flex', alignItems: 'center', gap: 4 }}>
-          <Trash2 size={11} /> 데이터 삭제
-        </button>
-      </div>
-    </div>
-  )
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      {/* 요약 */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'flex-start' }}>
-        {[
-          { label: '승률', value: `${winRate.toFixed(1)}%`, sub: `${wins.length}W ${losses.length}L`, cls: winRate >= 50 ? 'profit-pos' : 'profit-neg' },
-          { label: '총 손익', value: `${totalProfit >= 0 ? '+' : ''}${totalProfit.toLocaleString()}`, sub: `${total}건`, cls: totalProfit >= 0 ? 'profit-pos' : 'profit-neg' },
-          { label: 'ROI', value: `${roi >= 0 ? '+' : ''}${roi.toFixed(1)}%`, sub: `투자 ${totalStake.toLocaleString()}`, cls: roi >= 0 ? 'profit-pos' : 'profit-neg' },
-          { label: '평균 배당', value: avgOdds.toFixed(2), sub: '', cls: '' },
-        ].map(t => (
-          <div key={t.label} className="card stat-tile" style={{ flex: '1 0 120px', maxWidth: 180 }}>
-            <div className={`stat-value ${t.cls}`}>{t.value}</div>
-            <div className="stat-label">{t.label}</div>
-            {t.sub && <div style={{ fontSize: 10, color: 'var(--text-secondary)', marginTop: 4 }}>{t.sub}</div>}
-          </div>
-        ))}
-        <button onClick={onDeleteRequest} className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--red)', borderColor: 'var(--red-border)', alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: 4, padding: '6px 10px' }}>
-          <Trash2 size={11} /> 데이터 삭제
-        </button>
-      </div>
-
-      {/* 두폴 목록 */}
-      <div className="card">
-        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 10 }}>두폴 베팅 목록 ({total}건)</div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {groups.map(g => {
-            const isWin = g.result === 'win', isLoss = g.result === 'loss'
-            return (
-              <div key={g.group} style={{ background: 'var(--bg-elevated)', border: `1px solid ${isWin ? 'var(--green-border)' : isLoss ? 'var(--red-border)' : 'var(--border)'}`, borderRadius: 8, padding: '10px 12px' }}>
-                {g.legs.map((leg, idx) => (
-                  <div key={leg.id} style={{ display: 'flex', gap: 6, marginBottom: idx < g.legs.length - 1 ? 4 : 0 }}>
-                    <span style={{ fontSize: 10, color: 'var(--text-muted)', width: 18, flexShrink: 0 }}>{idx===0?'①':'②'}</span>
-                    <span style={{ fontSize: 12, color: isWin ? 'var(--green)' : isLoss ? 'var(--red)' : 'var(--text-primary)', flex: 1 }}>{leg.match}</span>
-                  </div>
-                ))}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--border-light)' }}>
-                  <span style={{ fontSize: 11, color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>배당 {g.odds.toFixed(2)} / {g.stake.toLocaleString()}원</span>
-                  <span style={{ fontSize: 12, fontWeight: 700, color: isWin ? 'var(--green)' : isLoss ? 'var(--red)' : 'var(--text-muted)' }}>
-                    {isWin ? `+${g.profit.toLocaleString()}원` : isLoss ? `-${g.stake.toLocaleString()}원` : 'PUSH'}
-                  </span>
-                </div>
-              </div>
-            )
-          })}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-
-/* ── 데이터 삭제 대상 (종목 / 라이브 / 두폴 공용) ── */
+/* ── 데이터 삭제 대상 (종목 / 라이브 공용) ── */
 interface DeleteTarget { label: string; emoji: string; matchFn: (b: Bet) => boolean }
 
-/* ── 데이터 삭제 모달 (종목 / 라이브 / 두폴 공용) ── */
+/* ── 데이터 삭제 모달 (종목 / 라이브 공용) ── */
 function DeleteBetsModal({ target, bets, onClose, onDeleted }: {
   target: DeleteTarget; bets: Bet[]; onClose: () => void; onDeleted: () => void
 }) {
@@ -859,7 +774,7 @@ export default function Stats() {
   const [sites, setSites]     = useState<Site[]>([])
   const [rateMap, setRateMap] = useState<Record<string, number>>({})
   const [period, setPeriod]   = useState<'all' | '7d' | '30d' | '90d'>('all')
-  const [activeSport, setActiveSport] = useState<Sport | 'all' | 'parlay' | 'live'>('all')
+  const [activeSport, setActiveSport] = useState<Sport | 'all' | 'live'>('all')
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null)
 
   useEffect(() => { loadBets(); loadSites(); loadRates() }, [])
@@ -906,7 +821,7 @@ export default function Stats() {
     const days = period === '7d' ? 7 : period === '30d' ? 30 : 90
     return dayjs(b.bet_date).isAfter(dayjs().subtract(days, 'day'))
   })
-  // 라이브 베팅은 라이브 탭에서만, 두폴 베팅은 두폴 탭에서만 집계 — 일반/종목별 통계에서는 제외
+  // 라이브 베팅은 라이브 탭에서만 집계, 두폴(합산) 베팅은 개별 다리로 중복 집계되지 않도록 일반/종목별 통계에서는 제외
   const periodFiltered = periodAll.filter(b => !b.is_live && b.parlay_group === null)
 
   const stats   = calcStats(periodFiltered)
@@ -949,8 +864,7 @@ export default function Stats() {
               { value: 'volleyball' as const, label: '배구', emoji: '🏐', cnt: settled.filter(b => b.sport === 'volleyball').length },
               { value: 'hockey' as const, label: '하키', emoji: '🏒', cnt: settled.filter(b => b.sport === 'hockey').length },
               { value: 'esports' as const, label: 'LOL', emoji: '🎮', cnt: settled.filter(b => b.sport === 'esports').length },
-            { value: 'parlay' as const, label: '두폴', emoji: '2️⃣', cnt: settled.filter(b => b.parlay_group !== null).length },
-              { value: 'live' as const, label: '라이브', emoji: '🔴', cnt: settled.filter(b => b.is_live).length },
+              { value: 'live' as const, label: '라이브', emoji: '🔴', cnt: periodAll.filter(b => b.is_live && b.result !== 'pending').length },
             ]).map(s => (
               <button key={s.value}
                 onClick={() => setActiveSport(s.value)}
@@ -1015,7 +929,7 @@ export default function Stats() {
               </div>
             </div>
           )}
-          {activeSport !== 'all' && activeSport !== 'parlay' && activeSport !== 'live' && (
+          {activeSport !== 'all' && activeSport !== 'live' && (
             <SportPanel
               bets={periodFiltered}
               sport={SPORTS.find(s => s.value === activeSport)!}
@@ -1025,16 +939,13 @@ export default function Stats() {
               }}
             />
           )}
-          {activeSport === 'parlay' && (
-            <ParlayPanel bets={periodAll} onDeleteRequest={() => setDeleteTarget({ label: '두폴', emoji: '2️⃣', matchFn: b => b.parlay_group !== null })} />
-          )}
           {activeSport === 'live' && (
             <LivePanel bets={periodAll} onDeleteRequest={() => setDeleteTarget({ label: '라이브', emoji: '🔴', matchFn: b => b.is_live })} />
           )}
         </>
       )}
 
-      {/* 데이터 삭제 모달 (종목 / 라이브 / 두폴 공용) */}
+      {/* 데이터 삭제 모달 (종목 / 라이브 공용) */}
       {deleteTarget && (
         <DeleteBetsModal
           target={deleteTarget}

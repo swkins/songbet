@@ -1354,9 +1354,8 @@ export default function Dashboard() {
                       {site.active && (
                         <div style={{ marginBottom: pending.length > 0 ? 8 : 4 }}>
                           {openFormSiteId !== site.id ? (
-                            <div style={{ display: 'flex', gap: 6 }}>
-                              <button className="site-add-btn" style={{ flex: 1, borderRadius: 8, padding: '12px 0', fontSize: 14 }} onClick={() => { setOpenFormSiteId(site.id); setOpenFormType('sports') }}><Plus size={16} /> 스포츠</button>
-                              <button className="site-add-btn" style={{ flex: 1, borderRadius: 8, padding: '12px 0', fontSize: 14 }} onClick={() => { setOpenFormSiteId(site.id); setOpenFormType('game') }}><Plus size={16} /> 게임</button>
+                            <div style={{ display: 'flex' }}>
+                              <button className="site-add-btn" style={{ width: 44, height: 40, borderRadius: 8, padding: 0 }} onClick={() => { setOpenFormSiteId(site.id); setOpenFormType('sports') }}><Plus size={18} /></button>
                             </div>
                           ) : openFormType === 'game' ? (
                             <GameRollingForm site={site} onClose={() => setOpenFormSiteId(null)} onSubmit={amt => submitGameRolling(site, amt)} />
