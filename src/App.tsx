@@ -750,7 +750,7 @@ export default function App() {
                       <button
                         onClick={() => toggleTodoApp(todo)}
                         style={{
-                          width: 18, height: 18, borderRadius: 4, flexShrink: 0, cursor: 'pointer',
+                          width: 28, height: 18, borderRadius: 5, flexShrink: 0, cursor: 'pointer',
                           background: isChecked ? 'var(--green)' : 'transparent',
                           border: `2px solid ${isChecked ? 'var(--green)' : 'var(--border)'}`,
                           display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0,

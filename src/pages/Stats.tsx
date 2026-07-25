@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { logAction } from '../lib/logger'
 import type { Bet, Sport, Market, Site } from '../types'
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, BarChart, Bar, ResponsiveContainer, Cell } from 'recharts'
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, BarChart, Bar, ResponsiveContainer, Cell, LineChart, Line, Legend } from 'recharts'
 import dayjs from 'dayjs'
 import { Trash2, X } from 'lucide-react'
 
@@ -149,8 +149,13 @@ const MLB_TEAMS = [
 const NPB_TEAMS = ['요미우리','한신','주니치','요코하마','히로시마','야쿠르트','소프트뱅크','니혼햄','오릭스','세이부','라쿠텐']
 
 type League = 'KBO' | 'MLB' | 'NPB'
-function inferLeague(matchText: string): League | null {
+interface LeagueOverride { keyword: string; league: League }
+function inferLeague(matchText: string, overrides?: LeagueOverride[]): League | null {
   if (!matchText) return null
+  if (overrides) {
+    const hit = overrides.find(o => o.keyword && matchText.includes(o.keyword))
+    if (hit) return hit.league
+  }
   const found = new Set<League>()
   if (KBO_TEAMS.some(t => matchText.includes(t))) found.add('KBO')
   if (MLB_TEAMS.some(t => matchText.includes(t))) found.add('MLB')
@@ -198,35 +203,58 @@ function baseballMlRows(ml: Bet[]): RuleRow[] {
   return rows
 }
 
-// 언더 / 오버 — 배당 구간이 아닌 총점 라인(7.5, 8, 8.5 ...) 별로 적중률 집계
-function baseballGroupByLine(list: Bet[]): { rows: RuleRow[]; noLineCount: number } {
-  const map = new Map<number, Bet[]>()
-  let noLineCount = 0
-  list.forEach(b => {
-    const line = extractTotalLine(b.pick)
-    if (line === null) { noLineCount++; return }
-    if (!map.has(line)) map.set(line, [])
-    map.get(line)!.push(b)
-  })
-  const rows = Array.from(map.entries())
-    .sort((a, b) => a[0] - b[0])
-    .map(([line, lineBets]) => ({ label: formatLine(line), tier: 'none' as RowColor, bets: lineBets }))
-  return { rows, noLineCount }
-}
-
-const BASEBALL_MARKET_TABS: { value: 'all' | 'moneyline' | 'over' | 'under'; label: string }[] = [
-  { value: 'all',       label: '전체' },
-  { value: 'moneyline', label: '승패' },
-  { value: 'over',      label: '오버' },
-  { value: 'under',     label: '언더' },
+const LEAGUE_BUTTONS: { league: League; label: string }[] = [
+  { league: 'KBO', label: '🇰🇷 KBO' }, { league: 'MLB', label: '🇺🇸 MLB' }, { league: 'NPB', label: '🇯🇵 NPB' },
 ]
 
-function BaseballDetailPanel({ bets }: { bets: Bet[] }) {
-  const [marketTab, setMarketTab] = useState<'all' | 'moneyline' | 'over' | 'under'>('all')
-  const [leagueFilter, setLeagueFilter] = useState<League | 'ETC' | 'all'>('all')
+// ─── 기타(리그 미확인) 항목 재배정 UI ────────────────────────────────
+function UnmatchedLeagueGroup({ matchText, bets, onAssign }: {
+  matchText: string; bets: Bet[]
+  onAssign: (keyword: string, league: League) => Promise<void>
+}) {
+  const [keyword, setKeyword] = useState(matchText)
+  const [saving, setSaving] = useState<League | null>(null)
+  const s = calcStats(bets)
+  async function assign(league: League) {
+    if (!keyword.trim()) return
+    setSaving(league)
+    await onAssign(keyword.trim(), league)
+    setSaving(null)
+  }
+  return (
+    <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, padding: '10px 12px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}>{matchText}</span>
+        <span style={{ fontSize: 9, color: 'var(--text-muted)', background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 4, padding: '1px 6px' }}>{s.total}건</span>
+        {s.total > 0 && <span style={{ fontSize: 10, fontWeight: 700, color: s.profit >= 0 ? '#4ade80' : '#f87171' }}>{s.profit >= 0 ? '+' : ''}{s.profit.toLocaleString()}원</span>}
+      </div>
+      <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 6 }}>
+        어떤 팀 이름 때문에 인식이 안 됐는지 확인하고, 필요하면 아래에서 판별용 키워드를 수정한 뒤 리그를 지정하세요. 지정하면 이 키워드가 포함된 베팅은 앞으로 항상 해당 리그로 분류됩니다.
+      </div>
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+        <input value={keyword} onChange={e => setKeyword(e.target.value)}
+          placeholder="판별 키워드 (예: 팀 이름)"
+          className="form-input"
+          style={{ flex: '1 0 160px', fontSize: 11, padding: '5px 8px' }} />
+        {LEAGUE_BUTTONS.map(l => (
+          <button key={l.league} onClick={() => assign(l.league)} disabled={saving !== null}
+            style={{ fontSize: 10, fontWeight: 700, padding: '5px 10px', borderRadius: 6, cursor: saving ? 'not-allowed' : 'pointer', fontFamily: 'var(--font-body)',
+              border: '1px solid var(--green-border)', background: 'var(--green-bg)', color: 'var(--green)' }}>
+            {saving === l.league ? '저장중...' : `→ ${l.label}`}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
 
+function BaseballDetailPanel({ bets, overrides, onAddOverride }: {
+  bets: Bet[]
+  overrides: LeagueOverride[]
+  onAddOverride: (keyword: string, league: League) => Promise<void>
+}) {
   const allSettled = bets.filter(b => b.result !== 'pending')
-  const leagueKeyOf = (b: Bet): League | 'ETC' => inferLeague(b.match) ?? 'ETC'
+  const leagueKeyOf = (b: Bet): League | 'ETC' => inferLeague(b.match, overrides) ?? 'ETC'
 
   const leagueSummary: { league: League | 'ETC'; label: string } [] = [
     { league: 'KBO', label: '🇰🇷 KBO' }, { league: 'MLB', label: '🇺🇸 MLB' }, { league: 'NPB', label: '🇯🇵 NPB' },
@@ -236,104 +264,64 @@ function BaseballDetailPanel({ bets }: { bets: Bet[] }) {
     .map(({ league, label }) => ({ league, label, ...calcStats(allSettled.filter(b => leagueKeyOf(b) === league)) }))
     .filter(r => r.total > 0)
 
-  // ── 전체 탭: 기존 리그 필터 + 3개 마켓 테이블을 함께 표시 ──────────────
-  const settled = leagueFilter === 'all' ? allSettled : allSettled.filter(b => leagueKeyOf(b) === leagueFilter)
-  const ml = settled.filter(b => b.market === 'moneyline')
-  const under = settled.filter(b => b.market === 'under')
-  const over = settled.filter(b => b.market === 'over')
+  // KBO / MLB / NPB — 승패(2.1~2.9) 배당구간별 적중률·수익률을 클릭 없이 바로 표시
+  const leagueTables = LEAGUE_BUTTONS.map(({ league, label }) => {
+    const leagueBets = allSettled.filter(b => leagueKeyOf(b) === league)
+    const mlBets = leagueBets.filter(b => b.market === 'moneyline')
+    const otherBets = leagueBets.filter(b => b.market !== 'moneyline')
+    return { league, label, rows: baseballMlRows(mlBets), otherBets }
+  }).filter(t => t.rows.some(r => r.bets.length > 0) || t.otherBets.length > 0)
 
-  const mlRows = baseballMlRows(ml)
-  const { rows: underRows, noLineCount: underNoLine } = baseballGroupByLine(under)
-  const { rows: overRows, noLineCount: overNoLine } = baseballGroupByLine(over)
-
-  const ruleIds = new Set([...mlRows.flatMap(r => r.bets), ...underRows.flatMap(r => r.bets), ...overRows.flatMap(r => r.bets)].map(b => b.id))
-  const otherBets = settled.filter(b => !ruleIds.has(b.id))
-
-  // ── 승패/오버/언더 탭: 리그별로 배당(또는 라인)별 적중률·수익률 표시 ──
-  const marketBets = marketTab === 'all' ? [] : allSettled.filter(b => b.market === marketTab)
-  const perLeagueTables = leagueSummary
-    .map(({ league, label }) => {
-      const leagueBets = marketBets.filter(b => leagueKeyOf(b) === league)
-      if (leagueBets.length === 0) return null
-      if (marketTab === 'moneyline') {
-        return { league, label, rows: baseballMlRows(leagueBets), noLineCount: 0 }
-      }
-      const { rows, noLineCount } = baseballGroupByLine(leagueBets)
-      return { league, label, rows, noLineCount }
-    })
-    .filter((x): x is { league: League | 'ETC'; label: string; rows: RuleRow[]; noLineCount: number } => x !== null)
-
-  const marketTitle = marketTab === 'moneyline' ? '승패 — 2.1~2.9 0.1단위 배당 구간별'
-    : marketTab === 'over' ? '오버 — 라인별 적중률'
-    : marketTab === 'under' ? '언더 — 라인별 적중률' : ''
+  // 기타(리그 미확인) — 어떤 경기명이 원인인지 보여주고 리그로 재배정
+  const etcBets = allSettled.filter(b => leagueKeyOf(b) === 'ETC')
+  const etcGroups = Array.from(
+    etcBets.reduce((map, b) => {
+      if (!map.has(b.match)) map.set(b.match, [])
+      map.get(b.match)!.push(b)
+      return map
+    }, new Map<string, Bet[]>())
+  ).sort((a, b) => b[1].length - a[1].length)
 
   return (
     <div>
-      {/* 마켓 탭 (전체 / 승패 / 오버 / 언더) */}
-      <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
-        {BASEBALL_MARKET_TABS.map(t => (
-          <button key={t.value} onClick={() => setMarketTab(t.value)}
-            style={{ fontSize: 12, fontWeight: 700, padding: '6px 14px', borderRadius: 6, cursor: 'pointer', fontFamily: 'var(--font-body)',
-              border: `1px solid ${marketTab === t.value ? 'var(--green-border)' : 'var(--border)'}`,
-              background: marketTab === t.value ? 'var(--green-bg)' : 'var(--bg-elevated)',
-              color: marketTab === t.value ? 'var(--green)' : 'var(--text-muted)' }}>{t.label}</button>
-        ))}
-      </div>
-
-      {/* 리그별 요약 (팀 이름으로 자동 추론) — 항상 표시 */}
+      {/* 리그별 요약 카드 */}
       {leagueStats.length > 0 && (
-        <div style={{ marginBottom: 12 }}>
-          {marketTab === 'all' && (
-            <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
-              <button onClick={() => setLeagueFilter('all')}
-                style={{ fontSize: 11, fontWeight: 700, padding: '5px 10px', borderRadius: 6, cursor: 'pointer', fontFamily: 'var(--font-body)',
-                  border: `1px solid ${leagueFilter === 'all' ? 'var(--green-border)' : 'var(--border)'}`,
-                  background: leagueFilter === 'all' ? 'var(--green-bg)' : 'var(--bg-elevated)',
-                  color: leagueFilter === 'all' ? 'var(--green)' : 'var(--text-muted)' }}>전체</button>
-              {leagueStats.map(r => (
-                <button key={r.league} onClick={() => setLeagueFilter(r.league)}
-                  style={{ fontSize: 11, fontWeight: 700, padding: '5px 10px', borderRadius: 6, cursor: 'pointer', fontFamily: 'var(--font-body)',
-                    border: `1px solid ${leagueFilter === r.league ? 'var(--green-border)' : 'var(--border)'}`,
-                    background: leagueFilter === r.league ? 'var(--green-bg)' : 'var(--bg-elevated)',
-                    color: leagueFilter === r.league ? 'var(--green)' : 'var(--text-muted)' }}>{r.label} ({r.total})</button>
-              ))}
-            </div>
-          )}
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            {leagueStats.map(r => (
-              <div key={r.league} style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 12px', minWidth: 130 }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 4 }}>{r.label}</div>
-                <div style={{ display: 'flex', gap: 10, alignItems: 'baseline' }}>
-                  <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{r.total}건</span>
-                  <span style={{ fontSize: 12, fontWeight: 700 }} className={r.winRate >= 50 ? 'profit-pos' : 'profit-neg'}>{r.winRate.toFixed(0)}%</span>
-                  <span style={{ fontSize: 11, fontWeight: 700 }} className={r.profit >= 0 ? 'profit-pos' : 'profit-neg'}>{r.profit >= 0 ? '+' : ''}{r.profit.toLocaleString()}</span>
-                </div>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
+          {leagueStats.map(r => (
+            <div key={r.league} style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 12px', minWidth: 130 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 4 }}>{r.label}</div>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'baseline' }}>
+                <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{r.total}건</span>
+                <span style={{ fontSize: 12, fontWeight: 700 }} className={r.winRate >= 50 ? 'profit-pos' : 'profit-neg'}>{r.winRate.toFixed(0)}%</span>
+                <span style={{ fontSize: 11, fontWeight: 700 }} className={r.profit >= 0 ? 'profit-pos' : 'profit-neg'}>{r.profit >= 0 ? '+' : ''}{r.profit.toLocaleString()}</span>
               </div>
-            ))}
-          </div>
+            </div>
+          ))}
         </div>
       )}
 
-      {marketTab === 'all' ? (
-        <>
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            <RuleStatsTable title="⚾ 승패 — 2.1~2.9 0.1단위 배당 구간별" rows={mlRows} />
-            <RuleStatsTable title="⚾ 언더 — 라인별 적중률" rows={underRows}
-              extra={underNoLine > 0 ? <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 6 }}>라인 미확인: {underNoLine}건</div> : undefined} />
-            <RuleStatsTable title="⚾ 오버 — 라인별 적중률" rows={overRows}
-              extra={overNoLine > 0 ? <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 6 }}>라인 미확인: {overNoLine}건</div> : undefined} />
+      {/* KBO / MLB / NPB 승패 배당구간별 테이블 — 바로 표시 */}
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+        {leagueTables.length === 0 && (
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '20px 0' }}>데이터 없음</div>
+        )}
+        {leagueTables.map(t => (
+          <RuleStatsTable key={t.league} title={`⚾ [${t.label}] 승패 — 2.1~2.9 0.1단위 배당 구간별`} rows={t.rows} />
+        ))}
+      </div>
+      {leagueTables.some(t => t.otherBets.length > 0) && (
+        <OtherBetsPanel bets={leagueTables.flatMap(t => t.otherBets)} />
+      )}
+
+      {/* 기타(리그 미확인) — 원인 확인 및 재배정 */}
+      {etcGroups.length > 0 && (
+        <div style={{ marginTop: 14 }}>
+          <div className="card-title" style={{ marginBottom: 8 }}>❓ 기타(리그 미확인) — {etcBets.length}건, 팀 이름 확인 후 리그 재배정</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {etcGroups.map(([matchText, groupBets]) => (
+              <UnmatchedLeagueGroup key={matchText} matchText={matchText} bets={groupBets} onAssign={onAddOverride} />
+            ))}
           </div>
-          <OtherBetsPanel bets={otherBets} />
-        </>
-      ) : (
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          {perLeagueTables.length === 0 && (
-            <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '20px 0' }}>데이터 없음</div>
-          )}
-          {perLeagueTables.map(t => (
-            <RuleStatsTable key={t.league} title={`⚾ [${t.label}] ${marketTitle}`} rows={t.rows}
-              extra={t.noLineCount > 0 ? <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 6 }}>라인 미확인: {t.noLineCount}건</div> : undefined} />
-          ))}
         </div>
       )}
     </div>
@@ -723,8 +711,9 @@ function DeleteBetsModal({ target, bets, onClose, onDeleted }: {
 }
 
 
-function SportPanel({ bets, sport, onDeleteRequest }: {
+function SportPanel({ bets, sport, onDeleteRequest, leagueOverrides, onAddLeagueOverride }: {
   bets: Bet[]; sport: typeof SPORTS[0]; onDeleteRequest: () => void
+  leagueOverrides: LeagueOverride[]; onAddLeagueOverride: (keyword: string, league: League) => Promise<void>
 }) {
   const periodBets = bets.filter(b => b.sport === sport.value)
   const sb    = periodBets
@@ -793,7 +782,7 @@ function SportPanel({ bets, sport, onDeleteRequest }: {
             </table>
           </div>
         )}
-        {sport.value === 'baseball'   && <BaseballDetailPanel bets={periodBets} />}
+        {sport.value === 'baseball'   && <BaseballDetailPanel bets={periodBets} overrides={leagueOverrides} onAddOverride={onAddLeagueOverride} />}
         {sport.value === 'soccer'     && <SoccerDetailPanel bets={periodBets} />}
         {sport.value === 'basketball' && <BasketballDetailPanel bets={periodBets} />}
         {!['baseball','soccer','basketball'].includes(sport.value) && <GenericDetailPanel bets={periodBets} />}
@@ -831,8 +820,9 @@ export default function Stats() {
   const [period, setPeriod]   = useState<'all' | '7d' | '30d' | '90d'>('all')
   const [activeSport, setActiveSport] = useState<Sport | 'all' | 'live'>('all')
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null)
+  const [leagueOverrides, setLeagueOverrides] = useState<LeagueOverride[]>([])
 
-  useEffect(() => { loadBets(); loadSites(); loadRates() }, [])
+  useEffect(() => { loadBets(); loadSites(); loadRates(); loadLeagueOverrides() }, [])
   async function loadBets() {
     const { data } = await supabase.from('bets').select('*').order('bet_date').order('created_at')
     if (data) setRawBets(data)
@@ -848,6 +838,14 @@ export default function Stats() {
       data.forEach(r => { map[r.rate_date] = r.usd_krw })
       setRateMap(map)
     }
+  }
+  async function loadLeagueOverrides() {
+    const { data } = await supabase.from('league_overrides').select('keyword, league')
+    if (data) setLeagueOverrides(data as LeagueOverride[])
+  }
+  async function addLeagueOverride(keyword: string, league: League) {
+    const { data } = await supabase.from('league_overrides').upsert({ keyword, league }, { onConflict: 'keyword' }).select().single()
+    if (data) setLeagueOverrides(p => [...p.filter(o => o.keyword !== keyword), { keyword: data.keyword, league: data.league }])
   }
 
   // 달러 사이트 베팅을 원화로 환산 — 결과처리 시점에 저장된 환율 우선,
@@ -982,12 +980,58 @@ export default function Stats() {
                   })}
                 </div>
               </div>
+
+              {(() => {
+                const trendSports = ([
+                  { value: 'soccer' as const,     label: '축구',   color: '#3498db' },
+                  { value: 'baseball' as const,    label: '야구',   color: '#e74c3c' },
+                  { value: 'basketball' as const,  label: '농구',   color: '#f39c12' },
+                  { value: 'volleyball' as const,  label: '배구',   color: '#9b59b6' },
+                  { value: 'hockey' as const,      label: '하키',   color: '#1abc9c' },
+                  { value: 'esports' as const,     label: 'LOL',    color: '#2ecc71' },
+                ]).filter(s => settled.some(b => b.sport === s.value))
+                if (trendSports.length === 0) return null
+
+                const dates = Array.from(new Set(settled.map(b => b.bet_date))).sort()
+                const cum: Record<string, number> = {}
+                trendSports.forEach(s => { cum[s.value] = 0 })
+                const trendData = dates.map(d => {
+                  trendSports.forEach(s => {
+                    cum[s.value] += settled.filter(b => b.bet_date === d && b.sport === s.value).reduce((a, b) => a + b.profit, 0)
+                  })
+                  const row: Record<string, string | number> = { date: d }
+                  trendSports.forEach(s => { row[s.value] = cum[s.value] })
+                  return row
+                })
+
+                return (
+                  <div className="card">
+                    <div className="card-title" style={{ marginBottom: 8 }}>종목별 수익 추세</div>
+                    <ResponsiveContainer width="100%" height={200}>
+                      <LineChart data={trendData} margin={{ top: 4, right: 4, left: 4, bottom: 4 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                        <XAxis dataKey="date" tick={{ fontSize: 9, fill: 'var(--text-secondary)' }} tickFormatter={d => dayjs(d).format('MM/DD')} />
+                        <YAxis tick={{ fontSize: 9, fill: 'var(--text-secondary)' }} tickFormatter={v => (v / 1000).toFixed(0) + 'K'} />
+                        <Tooltip contentStyle={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 6, fontSize: 11 }}
+                          formatter={(v: number, name: string) => [`${v.toLocaleString()}원`, trendSports.find(s => s.value === name)?.label ?? name]}
+                          labelFormatter={l => dayjs(l).format('YYYY-MM-DD')} />
+                        <Legend wrapperStyle={{ fontSize: 11 }} formatter={(v: string) => trendSports.find(s => s.value === v)?.label ?? v} />
+                        {trendSports.map(s => (
+                          <Line key={s.value} type="monotone" dataKey={s.value} name={s.value} stroke={s.color} strokeWidth={2} dot={false} />
+                        ))}
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                )
+              })()}
             </div>
           )}
           {activeSport !== 'all' && activeSport !== 'live' && (
             <SportPanel
               bets={periodFiltered}
               sport={SPORTS.find(s => s.value === activeSport)!}
+              leagueOverrides={leagueOverrides}
+              onAddLeagueOverride={addLeagueOverride}
               onDeleteRequest={() => {
                 const sp = SPORTS.find(s => s.value === activeSport)!
                 setDeleteTarget({ label: sp.label, emoji: sp.emoji, matchFn: b => b.sport === sp.value && !b.is_live && b.parlay_group === null })

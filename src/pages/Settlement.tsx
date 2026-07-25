@@ -59,13 +59,16 @@ function DepositSummary({ sites, cashflows, rateInfo }: {
   cashflows: { flow_date: string; type: string; amount: number; site_id: string | null; currency?: string; usd_krw_rate?: number | null; amount_krw?: number | null }[]
   rateInfo: { rate: number } | null
 }) {
-  const [mode, setMode] = useState<'week' | 'month'>('week')
+  const today = dayjs().format('YYYY-MM-DD')
+  const [mode, setMode] = useState<'week' | 'month' | 'custom'>('week')
+  const [customFrom, setCustomFrom] = useState(today)
+  const [customTo, setCustomTo] = useState(today)
   const weekStart  = dayjs().startOf('isoWeek').format('YYYY-MM-DD')
   const weekEnd    = dayjs().endOf('isoWeek').format('YYYY-MM-DD')
   const monthStart = dayjs().startOf('month').format('YYYY-MM-DD')
   const monthEnd   = dayjs().endOf('month').format('YYYY-MM-DD')
-  const from = mode === 'week' ? weekStart : monthStart
-  const to   = mode === 'week' ? weekEnd   : monthEnd
+  const from = mode === 'week' ? weekStart : mode === 'month' ? monthStart : customFrom
+  const to   = mode === 'week' ? weekEnd   : mode === 'month' ? monthEnd   : customTo
   const filtered = cashflows.filter(c => c.type === 'expense' && c.flow_date >= from && c.flow_date <= to)
 
   function toKrwAmt(c: typeof filtered[0]): number {
@@ -78,19 +81,28 @@ function DepositSummary({ sites, cashflows, rateInfo }: {
 
   return (
     <div style={{ borderTop: '1px solid var(--border)', padding: '10px 12px', flexShrink: 0 }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, flexWrap: 'wrap', gap: 6 }}>
         <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.8px' }}>입금 현황</div>
-        <div style={{ display: 'flex', gap: 4 }}>
-          {(['week', 'month'] as const).map(m => (
+        <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+          {(['week', 'month', 'custom'] as const).map(m => (
             <button key={m} onClick={() => setMode(m)} style={{
               fontSize: 9, fontWeight: 700, padding: '2px 7px', borderRadius: 4, border: '1px solid', cursor: 'pointer', fontFamily: 'var(--font-body)',
               background: mode === m ? 'var(--gold-bg)' : 'none',
               borderColor: mode === m ? 'var(--gold-border)' : 'var(--border)',
               color: mode === m ? 'var(--gold)' : 'var(--text-muted)',
-            }}>{m === 'week' ? '이번주' : '한달'}</button>
+            }}>{m === 'week' ? '이번주' : m === 'month' ? '한달' : '기간설정'}</button>
           ))}
         </div>
       </div>
+      {mode === 'custom' && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 10, flexWrap: 'wrap' }}>
+          <input type="date" value={customFrom} max={customTo} onChange={e => setCustomFrom(e.target.value)}
+            style={{ fontSize: 10, padding: '3px 5px', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-primary)', fontFamily: 'var(--font-body)' }} />
+          <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>~</span>
+          <input type="date" value={customTo} min={customFrom} onChange={e => setCustomTo(e.target.value)}
+            style={{ fontSize: 10, padding: '3px 5px', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-primary)', fontFamily: 'var(--font-body)' }} />
+        </div>
+      )}
       {sites.map(s => {
         const siteCfs = filtered.filter(c => c.site_id === s.id)
         const amt = siteCfs.reduce((a, c) => a + toKrwAmt(c), 0)
@@ -110,6 +122,9 @@ function DepositSummary({ sites, cashflows, rateInfo }: {
           </div>
         )
       })}
+      {filtered.length === 0 && (
+        <div style={{ fontSize: 10, color: 'var(--text-muted)', textAlign: 'center', padding: '6px 0' }}>해당 기간 입금 내역 없음</div>
+      )}
       <div style={{ borderTop: '1px solid var(--border)', paddingTop: 7, marginTop: 5, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)' }}>합계</span>
         <span style={{ fontFamily: 'var(--font-num)', fontSize: 14, fontWeight: 800, color: 'var(--orange)' }}>{total.toLocaleString()}원</span>
