@@ -464,7 +464,7 @@ export default function App() {
               background: showTodo ? 'rgba(245,166,35,0.15)' : 'transparent',
               border: `1px solid ${showTodo ? 'var(--gold-border)' : 'var(--border)'}`,
               borderRadius: 'var(--radius-sm)', cursor: 'pointer',
-              padding: '4px 8px', display: 'flex', alignItems: 'center', gap: 5,
+              padding: '4px 16px', minWidth: 40, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
               fontSize: 11, fontWeight: 600, fontFamily: 'var(--font-body)', transition: 'all 0.15s',
               color: showTodo ? 'var(--gold)' : 'var(--text-secondary)',
               position: 'relative',
@@ -585,7 +585,15 @@ export default function App() {
                   value={draftContent}
                   onChange={e => handleDraftChange(e.target.value)}
                   onBlur={handleDraftBlur}
-                  onKeyDown={e => handleNumberedEnter(e, draftContent, handleDraftChange)}
+                  onKeyDown={e => {
+                    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+                      e.preventDefault()
+                      if (saveTimer.current) clearTimeout(saveTimer.current)
+                      saveDraft(draftContent)
+                      return
+                    }
+                    handleNumberedEnter(e, draftContent, handleDraftChange)
+                  }}
                   placeholder={'1. 수정할 내용 입력\n2. 엔터 시 번호 자동 증가'}
                   style={{
                     width: '100%', minHeight: 260, resize: 'vertical',
@@ -782,14 +790,12 @@ export default function App() {
               {todos.length === 0 && (
                 <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>할 일이 없습니다</div>
               )}
-              {todos.length > 0 && todosToday.length === 0 && (
-                <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>오늘 활성화된 할 일이 없습니다</div>
-              )}
-              {todosToday.map(todo => {
+              {todos.map(todo => {
+                const isActiveToday = (todo.active_days ?? [0, 1, 2, 3, 4, 5, 6]).includes(todayDow)
                 const isChecked = todo.check_dates.includes(todayStr)
                 const isSettingsOpen = todoSettingsId === todo.id
                 return (
-                  <div key={todo.id} style={{ position: 'relative' }}>
+                  <div key={todo.id} style={{ position: 'relative', opacity: isActiveToday ? 1 : 0.45 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', borderBottom: '1px solid var(--border-light)' }}>
                       {/* 드래그 전용 핸들 — 텍스트/체크박스 클릭과 분리해서 순서 이동은 여기서만 */}
                       <span
@@ -821,6 +827,11 @@ export default function App() {
                         style={{ flex: 1, fontSize: 13, color: isChecked ? 'var(--text-muted)' : 'var(--text-primary)', textDecoration: isChecked ? 'line-through' : 'none', cursor: 'pointer', userSelect: 'none' }}>
                         {todo.content}
                       </span>
+                      {!isActiveToday && (
+                        <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', background: 'var(--bg-elevated)', border: '1px solid var(--border)', padding: '1px 5px', borderRadius: 4, flexShrink: 0 }}>
+                          오늘 비활성
+                        </span>
+                      )}
                       <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--gold)', background: 'var(--gold-bg)', border: '1px solid var(--gold-border)', padding: '1px 5px', borderRadius: 4, flexShrink: 0 }}>
                         {todo.check_count}회
                       </span>
