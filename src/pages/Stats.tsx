@@ -187,7 +187,42 @@ function mlTier(odds: number): RowColor {
   return 'none'
 }
 
+// 승패(역배·정배) — 2.1 ~ 2.9 구간을 0.1 단위로 고정 커버
+function baseballMlRows(ml: Bet[]): RuleRow[] {
+  const rows: RuleRow[] = []
+  for (let lo = 2.1; lo <= 2.9 + 1e-9; lo = Math.round((lo + 0.1) * 10) / 10) {
+    const hi = Math.round((lo + 0.1) * 10) / 10
+    const rowBets = ml.filter(b => b.odds >= lo && b.odds < hi)
+    rows.push({ label: lo.toFixed(1), tier: mlTier(lo), bets: rowBets })
+  }
+  return rows
+}
+
+// 언더 / 오버 — 배당 구간이 아닌 총점 라인(7.5, 8, 8.5 ...) 별로 적중률 집계
+function baseballGroupByLine(list: Bet[]): { rows: RuleRow[]; noLineCount: number } {
+  const map = new Map<number, Bet[]>()
+  let noLineCount = 0
+  list.forEach(b => {
+    const line = extractTotalLine(b.pick)
+    if (line === null) { noLineCount++; return }
+    if (!map.has(line)) map.set(line, [])
+    map.get(line)!.push(b)
+  })
+  const rows = Array.from(map.entries())
+    .sort((a, b) => a[0] - b[0])
+    .map(([line, lineBets]) => ({ label: formatLine(line), tier: 'none' as RowColor, bets: lineBets }))
+  return { rows, noLineCount }
+}
+
+const BASEBALL_MARKET_TABS: { value: 'all' | 'moneyline' | 'over' | 'under'; label: string }[] = [
+  { value: 'all',       label: '전체' },
+  { value: 'moneyline', label: '승패' },
+  { value: 'over',      label: '오버' },
+  { value: 'under',     label: '언더' },
+]
+
 function BaseballDetailPanel({ bets }: { bets: Bet[] }) {
+  const [marketTab, setMarketTab] = useState<'all' | 'moneyline' | 'over' | 'under'>('all')
   const [leagueFilter, setLeagueFilter] = useState<League | 'ETC' | 'all'>('all')
 
   const allSettled = bets.filter(b => b.result !== 'pending')
@@ -201,63 +236,69 @@ function BaseballDetailPanel({ bets }: { bets: Bet[] }) {
     .map(({ league, label }) => ({ league, label, ...calcStats(allSettled.filter(b => leagueKeyOf(b) === league)) }))
     .filter(r => r.total > 0)
 
+  // ── 전체 탭: 기존 리그 필터 + 3개 마켓 테이블을 함께 표시 ──────────────
   const settled = leagueFilter === 'all' ? allSettled : allSettled.filter(b => leagueKeyOf(b) === leagueFilter)
   const ml = settled.filter(b => b.market === 'moneyline')
   const under = settled.filter(b => b.market === 'under')
   const over = settled.filter(b => b.market === 'over')
 
-  // 승패(역배·정배) — 2.1 ~ 2.9 구간을 0.1 단위로 고정 커버
-  const mlRows: RuleRow[] = (() => {
-    const rows: RuleRow[] = []
-    for (let lo = 2.1; lo <= 2.9 + 1e-9; lo = Math.round((lo + 0.1) * 10) / 10) {
-      const hi = Math.round((lo + 0.1) * 10) / 10
-      const rowBets = ml.filter(b => b.odds >= lo && b.odds < hi)
-      rows.push({ label: lo.toFixed(1), tier: mlTier(lo), bets: rowBets })
-    }
-    return rows
-  })()
+  const mlRows = baseballMlRows(ml)
+  const { rows: underRows, noLineCount: underNoLine } = baseballGroupByLine(under)
+  const { rows: overRows, noLineCount: overNoLine } = baseballGroupByLine(over)
 
-  // 언더 / 오버 — 배당 구간이 아닌 총점 라인(7.5, 8, 8.5 ...) 별로 적중률 집계
-  function groupByLine(list: Bet[]): { rows: RuleRow[]; noLineCount: number } {
-    const map = new Map<number, Bet[]>()
-    let noLineCount = 0
-    list.forEach(b => {
-      const line = extractTotalLine(b.pick)
-      if (line === null) { noLineCount++; return }
-      if (!map.has(line)) map.set(line, [])
-      map.get(line)!.push(b)
-    })
-    const rows = Array.from(map.entries())
-      .sort((a, b) => a[0] - b[0])
-      .map(([line, lineBets]) => ({ label: formatLine(line), tier: 'none' as RowColor, bets: lineBets }))
-    return { rows, noLineCount }
-  }
-  const { rows: underRows, noLineCount: underNoLine } = groupByLine(under)
-  const { rows: overRows, noLineCount: overNoLine } = groupByLine(over)
-
-  // 그외
   const ruleIds = new Set([...mlRows.flatMap(r => r.bets), ...underRows.flatMap(r => r.bets), ...overRows.flatMap(r => r.bets)].map(b => b.id))
   const otherBets = settled.filter(b => !ruleIds.has(b.id))
 
+  // ── 승패/오버/언더 탭: 리그별로 배당(또는 라인)별 적중률·수익률 표시 ──
+  const marketBets = marketTab === 'all' ? [] : allSettled.filter(b => b.market === marketTab)
+  const perLeagueTables = leagueSummary
+    .map(({ league, label }) => {
+      const leagueBets = marketBets.filter(b => leagueKeyOf(b) === league)
+      if (leagueBets.length === 0) return null
+      if (marketTab === 'moneyline') {
+        return { league, label, rows: baseballMlRows(leagueBets), noLineCount: 0 }
+      }
+      const { rows, noLineCount } = baseballGroupByLine(leagueBets)
+      return { league, label, rows, noLineCount }
+    })
+    .filter((x): x is { league: League | 'ETC'; label: string; rows: RuleRow[]; noLineCount: number } => x !== null)
+
+  const marketTitle = marketTab === 'moneyline' ? '승패 — 2.1~2.9 0.1단위 배당 구간별'
+    : marketTab === 'over' ? '오버 — 라인별 적중률'
+    : marketTab === 'under' ? '언더 — 라인별 적중률' : ''
+
   return (
     <div>
-      {/* 리그별 요약 + 필터 탭 (팀 이름으로 자동 추론) */}
+      {/* 마켓 탭 (전체 / 승패 / 오버 / 언더) */}
+      <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+        {BASEBALL_MARKET_TABS.map(t => (
+          <button key={t.value} onClick={() => setMarketTab(t.value)}
+            style={{ fontSize: 12, fontWeight: 700, padding: '6px 14px', borderRadius: 6, cursor: 'pointer', fontFamily: 'var(--font-body)',
+              border: `1px solid ${marketTab === t.value ? 'var(--green-border)' : 'var(--border)'}`,
+              background: marketTab === t.value ? 'var(--green-bg)' : 'var(--bg-elevated)',
+              color: marketTab === t.value ? 'var(--green)' : 'var(--text-muted)' }}>{t.label}</button>
+        ))}
+      </div>
+
+      {/* 리그별 요약 (팀 이름으로 자동 추론) — 항상 표시 */}
       {leagueStats.length > 0 && (
         <div style={{ marginBottom: 12 }}>
-          <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
-            <button onClick={() => setLeagueFilter('all')}
-              style={{ fontSize: 11, fontWeight: 700, padding: '5px 10px', borderRadius: 6, cursor: 'pointer', fontFamily: 'var(--font-body)',
-                border: `1px solid ${leagueFilter === 'all' ? 'var(--green-border)' : 'var(--border)'}`,
-                background: leagueFilter === 'all' ? 'var(--green-bg)' : 'var(--bg-elevated)',
-                color: leagueFilter === 'all' ? 'var(--green)' : 'var(--text-muted)' }}>전체</button>
-            {leagueStats.map(r => (
-              <button key={r.league} onClick={() => setLeagueFilter(r.league)}
+          {marketTab === 'all' && (
+            <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
+              <button onClick={() => setLeagueFilter('all')}
                 style={{ fontSize: 11, fontWeight: 700, padding: '5px 10px', borderRadius: 6, cursor: 'pointer', fontFamily: 'var(--font-body)',
-                  border: `1px solid ${leagueFilter === r.league ? 'var(--green-border)' : 'var(--border)'}`,
-                  background: leagueFilter === r.league ? 'var(--green-bg)' : 'var(--bg-elevated)',
-                  color: leagueFilter === r.league ? 'var(--green)' : 'var(--text-muted)' }}>{r.label} ({r.total})</button>
-            ))}
-          </div>
+                  border: `1px solid ${leagueFilter === 'all' ? 'var(--green-border)' : 'var(--border)'}`,
+                  background: leagueFilter === 'all' ? 'var(--green-bg)' : 'var(--bg-elevated)',
+                  color: leagueFilter === 'all' ? 'var(--green)' : 'var(--text-muted)' }}>전체</button>
+              {leagueStats.map(r => (
+                <button key={r.league} onClick={() => setLeagueFilter(r.league)}
+                  style={{ fontSize: 11, fontWeight: 700, padding: '5px 10px', borderRadius: 6, cursor: 'pointer', fontFamily: 'var(--font-body)',
+                    border: `1px solid ${leagueFilter === r.league ? 'var(--green-border)' : 'var(--border)'}`,
+                    background: leagueFilter === r.league ? 'var(--green-bg)' : 'var(--bg-elevated)',
+                    color: leagueFilter === r.league ? 'var(--green)' : 'var(--text-muted)' }}>{r.label} ({r.total})</button>
+              ))}
+            </div>
+          )}
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             {leagueStats.map(r => (
               <div key={r.league} style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 12px', minWidth: 130 }}>
@@ -273,14 +314,28 @@ function BaseballDetailPanel({ bets }: { bets: Bet[] }) {
         </div>
       )}
 
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-        <RuleStatsTable title="⚾ 승패 — 2.1~2.9 0.1단위 배당 구간별" rows={mlRows} />
-        <RuleStatsTable title="⚾ 언더 — 라인별 적중률" rows={underRows}
-          extra={underNoLine > 0 ? <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 6 }}>라인 미확인: {underNoLine}건</div> : undefined} />
-        <RuleStatsTable title="⚾ 오버 — 라인별 적중률" rows={overRows}
-          extra={overNoLine > 0 ? <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 6 }}>라인 미확인: {overNoLine}건</div> : undefined} />
-      </div>
-      <OtherBetsPanel bets={otherBets} />
+      {marketTab === 'all' ? (
+        <>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <RuleStatsTable title="⚾ 승패 — 2.1~2.9 0.1단위 배당 구간별" rows={mlRows} />
+            <RuleStatsTable title="⚾ 언더 — 라인별 적중률" rows={underRows}
+              extra={underNoLine > 0 ? <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 6 }}>라인 미확인: {underNoLine}건</div> : undefined} />
+            <RuleStatsTable title="⚾ 오버 — 라인별 적중률" rows={overRows}
+              extra={overNoLine > 0 ? <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 6 }}>라인 미확인: {overNoLine}건</div> : undefined} />
+          </div>
+          <OtherBetsPanel bets={otherBets} />
+        </>
+      ) : (
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          {perLeagueTables.length === 0 && (
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '20px 0' }}>데이터 없음</div>
+          )}
+          {perLeagueTables.map(t => (
+            <RuleStatsTable key={t.league} title={`⚾ [${t.label}] ${marketTitle}`} rows={t.rows}
+              extra={t.noLineCount > 0 ? <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 6 }}>라인 미확인: {t.noLineCount}건</div> : undefined} />
+          ))}
+        </div>
+      )}
     </div>
   )
 }

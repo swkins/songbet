@@ -1354,7 +1354,7 @@ export default function Dashboard() {
                       {site.active && (
                         <div style={{ marginBottom: pending.length > 0 ? 8 : 4 }}>
                           {openFormSiteId !== site.id ? (
-                            <div style={{ display: 'flex' }}>
+                            <div style={{ display: 'flex', justifyContent: 'center' }}>
                               <button className="site-add-btn" style={{ width: 44, height: 40, borderRadius: 8, padding: 0 }} onClick={() => { setOpenFormSiteId(site.id); setOpenFormType('sports') }}><Plus size={18} /></button>
                             </div>
                           ) : openFormType === 'game' ? (
