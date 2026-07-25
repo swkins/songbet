@@ -440,13 +440,14 @@ function EditFormAmountRow({ isusd, amount, setAmount }: { isusd: boolean; amoun
 function InlineBetEditForm({ bet, site, onClose, onSave }: {
   bet: Bet; site: Site
   onClose: () => void
-  onSave: (sport: string, content: string, odds: number, stake: number) => Promise<void>
+  onSave: (sport: string, content: string, odds: number, stake: number, isLive: boolean) => Promise<void>
 }) {
   const isusd = site.currency === 'usd'
   const [sport, setSport]     = useState(bet.sport)
   const [content, setContent] = useState(bet.match)
   const [oddsRaw, setOddsRaw] = useState(bet.odds.toFixed(2))
   const [amount, setAmount]   = useState(String(bet.stake))
+  const [isLive, setIsLive]   = useState(!!bet.is_live)
   const [submitting, setSubmitting] = useState(false)
   const contentRef = useRef<HTMLInputElement>(null)
   const oddsV = parseOdds(oddsRaw)
@@ -459,7 +460,7 @@ function InlineBetEditForm({ bet, site, onClose, onSave }: {
   }
   async function submit() {
     if (!content || oddsV <= 0 || stakeN <= 0) return
-    setSubmitting(true); await onSave(sport, content, oddsV, stakeN); setSubmitting(false)
+    setSubmitting(true); await onSave(sport, content, oddsV, stakeN, isLive); setSubmitting(false)
   }
   return (
     <div className="inline-bet-form" style={{ borderColor: 'var(--gold-border)', background: 'var(--gold-bg)' }}>
@@ -477,8 +478,21 @@ function InlineBetEditForm({ bet, site, onClose, onSave }: {
           예상 +{isusd ? '$' : ''}{(isusd ? (stakeN * (oddsV - 1)).toFixed(2) : Math.round(stakeN * (oddsV - 1)).toLocaleString())}{isusd ? '' : '원'}
         </div>
       )}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+        <label onClick={() => setIsLive(p => !p)} style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', userSelect: 'none' }}>
+          <div style={{
+            width: 17, height: 17, borderRadius: 4, flexShrink: 0,
+            background: isLive ? '#f87171' : 'transparent',
+            border: `2px solid ${isLive ? '#f87171' : 'var(--border)'}`,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            {isLive && <span style={{ color: '#000', fontSize: 11, fontWeight: 900, lineHeight: 1 }}>✓</span>}
+          </div>
+          <span style={{ fontSize: 13, fontWeight: 700, color: isLive ? '#f87171' : 'var(--text-secondary)' }}>{isLive ? '🔴 라이브' : '라이브'}</span>
+        </label>
+      </div>
       <div style={{ display: 'flex', gap: 5 }}>
-        <button className="btn btn-primary" style={{ flex: 1, fontSize: 12, padding: '7px 0', justifyContent: 'center' }}
+        <button className="btn btn-primary" style={{ flex: 1, fontSize: 12, padding: '7px 0', justifyContent: 'center', background: isLive ? 'rgba(248,113,113,0.15)' : undefined, borderColor: isLive ? '#f87171' : undefined, color: isLive ? '#f87171' : undefined }}
           onClick={submit} disabled={!content || oddsV <= 0 || stakeN <= 0 || submitting}>
           {submitting ? '저장중...' : '수정 저장'}
         </button>
@@ -1197,12 +1211,12 @@ export default function Dashboard() {
   }
 
   /* ── 베팅 수정 (인라인) ── */
-  async function saveInlineEdit(bet: Bet, sport: string, content: string, odds: number, stake: number) {
+  async function saveInlineEdit(bet: Bet, sport: string, content: string, odds: number, stake: number, isLive: boolean) {
     if (!content || odds <= 0 || stake <= 0) return
     const before = { ...bet }
     const { market, pick } = autoMarket(content)
     const { data } = await supabase.from('bets').update({
-      sport: sport as Sport, match: content, market, pick, odds, stake,
+      sport: sport as Sport, match: content, market, pick, odds, stake, is_live: isLive,
     }).eq('id', bet.id).select().single()
     if (data) {
       await logAction({ action_type: 'update', table_name: 'bets', record_id: data.id, before_data: before as never, after_data: data as never, description: `베팅 수정: ${data.match}` })
@@ -1355,7 +1369,7 @@ export default function Dashboard() {
                         <div style={{ marginBottom: pending.length > 0 ? 8 : 4 }}>
                           {openFormSiteId !== site.id ? (
                             <div style={{ display: 'flex', justifyContent: 'center' }}>
-                              <button className="site-add-btn" style={{ width: 44, height: 40, borderRadius: 8, padding: 0 }} onClick={() => { setOpenFormSiteId(site.id); setOpenFormType('sports') }}><Plus size={18} /></button>
+                              <button className="site-add-btn" style={{ width: '100%', height: 48, borderRadius: 8, padding: 0, gap: 6, fontSize: 14, fontWeight: 700, border: '1.5px dashed var(--border)' }} onClick={() => { setOpenFormSiteId(site.id); setOpenFormType('sports') }}><Plus size={18} /> 베팅추가</button>
                             </div>
                           ) : openFormType === 'game' ? (
                             <GameRollingForm site={site} onClose={() => setOpenFormSiteId(null)} onSubmit={amt => submitGameRolling(site, amt)} />
@@ -1457,7 +1471,7 @@ export default function Dashboard() {
                                   bet={bet}
                                   site={site}
                                   onClose={() => setInlineEditBetId(null)}
-                                  onSave={(sport, content, odds, stake) => saveInlineEdit(bet, sport, content, odds, stake)}
+                                  onSave={(sport, content, odds, stake, isLive) => saveInlineEdit(bet, sport, content, odds, stake, isLive)}
                                 />
                               ) : (
                                 <div style={{ display: 'flex', gap: 6, alignItems: 'stretch' }}>
