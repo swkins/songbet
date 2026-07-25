@@ -156,6 +156,7 @@ export default function App() {
   const [pinCode, setPinCode] = useState(false)       // 코드수정 고정
   const [todoSettingsId, setTodoSettingsId] = useState<string | null>(null)
   const [todoSettingsPos, setTodoSettingsPos] = useState<{top: number; right: number}>({ top: 0, right: 0 })
+  const [showInactiveTodos, setShowInactiveTodos] = useState(false)
   const [undoing, setUndoing] = useState<string | null>(null)
   const [maxWidth, setMaxWidth] = useState<string>(() => localStorage.getItem('sb_width') ?? '1920px')
 
@@ -783,6 +784,14 @@ export default function App() {
                 <span style={{ fontSize: 10, color: 'var(--text-secondary)' }}>
                   {todosToday.filter(t => t.check_dates.includes(todayStr)).length}/{todosToday.length}
                 </span>
+                <button onClick={() => setShowInactiveTodos(p => !p)} style={{
+                  fontSize: 9, fontWeight: 700, padding: '2px 7px', borderRadius: 4, cursor: 'pointer', fontFamily: 'var(--font-body)',
+                  border: `1px solid ${showInactiveTodos ? 'var(--gold-border)' : 'var(--border)'}`,
+                  background: showInactiveTodos ? 'var(--gold-bg)' : 'none',
+                  color: showInactiveTodos ? 'var(--gold)' : 'var(--text-muted)',
+                }}>
+                  {showInactiveTodos ? '비활성 숨기기' : '비활성 표시'}
+                </button>
                 <button onClick={() => setShowTodo(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex' }}><X size={12} /></button>
               </div>
             </div>
@@ -790,7 +799,10 @@ export default function App() {
               {todos.length === 0 && (
                 <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>할 일이 없습니다</div>
               )}
-              {todos.map(todo => {
+              {todos.length > 0 && todos.filter(t => showInactiveTodos || (t.active_days ?? [0,1,2,3,4,5,6]).includes(todayDow)).length === 0 && (
+                <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>오늘 활성화된 할 일이 없습니다</div>
+              )}
+              {todos.filter(t => showInactiveTodos || (t.active_days ?? [0,1,2,3,4,5,6]).includes(todayDow)).map(todo => {
                 const isActiveToday = (todo.active_days ?? [0, 1, 2, 3, 4, 5, 6]).includes(todayDow)
                 const isChecked = todo.check_dates.includes(todayStr)
                 const isSettingsOpen = todoSettingsId === todo.id
@@ -851,10 +863,10 @@ export default function App() {
                       <>
                         <div style={{ position: 'fixed', inset: 0, zIndex: 300 }} onClick={() => setTodoSettingsId(null)} />
                         <div style={{
-                          position: 'fixed', top: todoSettingsPos.top, right: todoSettingsPos.right, zIndex: 310,
+                          position: 'fixed', top: todoSettingsPos.top, right: 16, zIndex: 310,
                           background: 'var(--bg-card)', border: '1px solid var(--border)',
                           borderRadius: 'var(--radius)', boxShadow: '0 8px 24px rgba(0,0,0,0.6)',
-                          minWidth: 220, padding: '8px 0',
+                          width: 268, padding: '8px 0',
                         }} onClick={e => e.stopPropagation()}>
                           {/* 활성 요일 */}
                           <div style={{ padding: '4px 12px 8px' }}>
