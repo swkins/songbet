@@ -348,27 +348,15 @@ function SoccerDetailPanel({ bets }: { bets: Bet[] }) {
   const settled = bets.filter(b => b.result !== 'pending')
   const ml = settled.filter(b => b.market === 'moneyline')
   const hcap = settled.filter(b => b.market === 'handicap')
-  const overBets = settled.filter(b => b.market === 'over')
-  const underBets = settled.filter(b => b.market === 'under')
+  const hcap15 = hcap.filter(b => extractHandicapLine(b.pick) === 1.5)
+  const hcap25 = hcap.filter(b => extractHandicapLine(b.pick) === 2.5)
 
-  // 핸디캡 — 라인별(1.5 플핸, 2.5 플핸 등)로 나눈 뒤, 각 라인 내에서 0.1단위 배당 구간별 통계
-  const hcapLineMap = new Map<number, Bet[]>()
-  hcap.forEach(b => {
-    const line = extractHandicapLine(b.pick)
-    if (line === null) return
-    if (!hcapLineMap.has(line)) hcapLineMap.set(line, [])
-    hcapLineMap.get(line)!.push(b)
-  })
-  const hcapLineTables = Array.from(hcapLineMap.entries())
-    .sort((a, b) => a[0] - b[0])
-    .map(([line, lineBets]) => ({ title: `⚽ 핸디캡 ${formatLine(line)} 플핸 — 0.1단위 배당 구간별`, rows: oddsBinRows(lineBets) }))
-    .filter(t => t.rows.length > 0)
-
+  // 베팅을 일반승(승무패) / 핸디캡 1.5 플핸 / 핸디캡 2.5 플핸 세 가지로 구분,
+  // 각각 0.1단위 배당 구간별 적중률·수익률을 표시. 그 외(다른 라인, 오버/언더 등)는 룰북 외로 이동.
   const tables = [
-    { title: '⚽ 승패 — 0.1단위 배당 구간별', rows: oddsBinRows(ml) },
-    ...hcapLineTables,
-    { title: '⚽ 오버 — 0.1단위 배당 구간별', rows: oddsBinRows(overBets) },
-    { title: '⚽ 언더 — 0.1단위 배당 구간별', rows: oddsBinRows(underBets) },
+    { title: '⚽ 일반승(승무패) — 0.1단위 배당 구간별', rows: oddsBinRows(ml) },
+    { title: '⚽ 핸디캡 1.5 플핸 — 0.1단위 배당 구간별', rows: oddsBinRows(hcap15) },
+    { title: '⚽ 핸디캡 2.5 플핸 — 0.1단위 배당 구간별', rows: oddsBinRows(hcap25) },
   ].filter(t => t.rows.length > 0)
 
   const ruleIds = new Set(tables.flatMap(t => t.rows.flatMap(r => r.bets)).map(b => b.id))

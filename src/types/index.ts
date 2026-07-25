@@ -30,6 +30,7 @@ export interface Bet {
 export interface Todo {
   id: string; created_at: string; todo_date: string; content: string
   done: boolean; check_count: number; check_dates: string[]
+  active_days: number[]   // 0=일 1=월 ... 6=토, 이 요일에만 목록에 노출
 }
 export interface Cashflow {
   id: string; created_at: string; flow_date: string; type: CashflowType
@@ -47,4 +48,4 @@ export interface ActionLog {
 export interface GameRolling {
   id: string; created_at: string; site_id: string; amount: number
 }
-export type Tab = 'dashboard' | 'stats' | 'settlement' | 'simul' | 'rulebook'
+export type Tab = 'dashboard' | 'stats' | 'settlement' | 'simul' | 'rulebook' | 'analysis'

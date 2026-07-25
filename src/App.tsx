@@ -3,6 +3,7 @@ import type { Tab, ActionLog, Todo } from './types'
 import Dashboard from './pages/Dashboard'
 import Settlement from './pages/Settlement'
 import Stats from './pages/Stats'
+import Analysis from './pages/Analysis'
 import { supabase } from './lib/supabase'
 import { purgeOldLogs } from './lib/logger'
 import dayjs from 'dayjs'
@@ -12,6 +13,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'dashboard', label: '대시보드' },
   { id: 'stats', label: '통계' },
   { id: 'settlement', label: '결산' },
+  { id: 'analysis', label: '분석' },
 ]
 
 const WIDTH_OPTIONS: { label: string; value: string }[] = [
@@ -96,6 +98,51 @@ function MiniCalendarApp({ checkedDates, onToggle }: { checkedDates: string[]; o
   )
 }
 
+/* ── 요일 선택기 (할 일 활성 요일 설정용) ── */
+const WEEKDAY_PRESETS: { label: string; days: number[] }[] = [
+  { label: '매일',   days: [0, 1, 2, 3, 4, 5, 6] },
+  { label: '평일',   days: [1, 2, 3, 4, 5] },
+  { label: '토요일', days: [6] },
+  { label: '일요일', days: [0] },
+]
+const WEEKDAY_ITEMS: { d: number; label: string }[] = [
+  { d: 1, label: '월' }, { d: 2, label: '화' }, { d: 3, label: '수' }, { d: 4, label: '목' },
+  { d: 5, label: '금' }, { d: 6, label: '토' }, { d: 0, label: '일' },
+]
+function WeekdayPicker({ value, onChange }: { value: number[]; onChange: (v: number[]) => void }) {
+  function toggleDay(d: number) {
+    if (value.includes(d)) onChange(value.filter(x => x !== d))
+    else onChange([...value, d].sort())
+  }
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 4, marginBottom: 5, flexWrap: 'wrap' }}>
+        {WEEKDAY_PRESETS.map(p => (
+          <button key={p.label} type="button" onClick={() => onChange(p.days)}
+            style={{ fontSize: 9, fontWeight: 700, padding: '3px 7px', borderRadius: 5, cursor: 'pointer', fontFamily: 'var(--font-body)',
+              border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-secondary)' }}>
+            {p.label}
+          </button>
+        ))}
+      </div>
+      <div style={{ display: 'flex', gap: 3 }}>
+        {WEEKDAY_ITEMS.map(({ d, label }) => {
+          const active = value.includes(d)
+          return (
+            <button key={d} type="button" onClick={() => toggleDay(d)}
+              style={{ width: 22, height: 22, borderRadius: 5, fontSize: 10, fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-body)',
+                border: `1px solid ${active ? 'var(--gold-border)' : 'var(--border)'}`,
+                background: active ? 'var(--gold-bg)' : 'transparent',
+                color: active ? 'var(--gold)' : 'var(--text-muted)' }}>
+              {label}
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 export default function App() {
   const [tab, setTab] = useState<Tab>('dashboard')
   const [logs, setLogs] = useState<ActionLog[]>([])
@@ -155,9 +202,12 @@ export default function App() {
   // 오늘 할 일 (Nav 패널용)
   const [todos, setTodos] = useState<Todo[]>([])
   const [newTodoText, setNewTodoText] = useState('')
+  const [newTodoDays, setNewTodoDays] = useState<number[]>([0, 1, 2, 3, 4, 5, 6])
   const todayStr = dayjs().format('YYYY-MM-DD')
+  const todayDow = dayjs().day()
   const todoDragId = { current: '' }; const todoOverId = { current: '' }
-  const uncheckedCount = todos.filter(t => !t.check_dates.includes(todayStr)).length
+  const todosToday = todos.filter(t => (t.active_days ?? [0, 1, 2, 3, 4, 5, 6]).includes(todayDow))
+  const uncheckedCount = todosToday.filter(t => !t.check_dates.includes(todayStr)).length
 
   useEffect(() => { loadTodos() }, [])
   async function loadTodos() {
@@ -172,8 +222,12 @@ export default function App() {
   }
   async function addTodoApp() {
     if (!newTodoText.trim()) return
-    const { data } = await supabase.from('todos').insert({ todo_date: todayStr, content: newTodoText.trim(), done: false, check_count: 0, check_dates: [] }).select().single()
-    if (data) { setTodos(p => [...p, data as Todo]); setNewTodoText('') }
+    const { data } = await supabase.from('todos').insert({ todo_date: todayStr, content: newTodoText.trim(), done: false, check_count: 0, check_dates: [], active_days: newTodoDays }).select().single()
+    if (data) { setTodos(p => [...p, data as Todo]); setNewTodoText(''); setNewTodoDays([0, 1, 2, 3, 4, 5, 6]) }
+  }
+  async function updateTodoDaysApp(todo: Todo, days: number[]) {
+    const { data } = await supabase.from('todos').update({ active_days: days }).eq('id', todo.id).select().single()
+    if (data) setTodos(p => p.map(t => t.id === todo.id ? data as Todo : t))
   }
   async function reorderTodosApp(draggedId: string, overId: string) {
     const from = todos.findIndex(t => t.id === draggedId)
@@ -488,6 +542,7 @@ export default function App() {
           {tab === 'dashboard' && <Dashboard />}
           {tab === 'stats' && <Stats />}
           {tab === 'settlement' && <Settlement />}
+          {tab === 'analysis' && <Analysis />}
         </div>
       </div>
 
@@ -718,7 +773,7 @@ export default function App() {
               <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '1.2px', textTransform: 'uppercase', color: 'var(--gold)' }}>오늘 할 일</span>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span style={{ fontSize: 10, color: 'var(--text-secondary)' }}>
-                  {todos.filter(t => t.check_dates.includes(todayStr)).length}/{todos.length}
+                  {todosToday.filter(t => t.check_dates.includes(todayStr)).length}/{todosToday.length}
                 </span>
                 <button onClick={() => setShowTodo(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex' }}><X size={12} /></button>
               </div>
@@ -727,7 +782,10 @@ export default function App() {
               {todos.length === 0 && (
                 <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>할 일이 없습니다</div>
               )}
-              {todos.map(todo => {
+              {todos.length > 0 && todosToday.length === 0 && (
+                <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>오늘 활성화된 할 일이 없습니다</div>
+              )}
+              {todosToday.map(todo => {
                 const isChecked = todo.check_dates.includes(todayStr)
                 const isSettingsOpen = todoSettingsId === todo.id
                 return (
@@ -787,6 +845,12 @@ export default function App() {
                           borderRadius: 'var(--radius)', boxShadow: '0 8px 24px rgba(0,0,0,0.6)',
                           minWidth: 220, padding: '8px 0',
                         }} onClick={e => e.stopPropagation()}>
+                          {/* 활성 요일 */}
+                          <div style={{ padding: '4px 12px 8px' }}>
+                            <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.6px', marginBottom: 6 }}>활성 요일</div>
+                            <WeekdayPicker value={todo.active_days ?? [0,1,2,3,4,5,6]} onChange={days => updateTodoDaysApp(todo, days)} />
+                          </div>
+                          <div style={{ borderTop: '1px solid var(--border-light)', margin: '4px 0' }} />
                           {/* 달력 */}
                           <div style={{ padding: '4px 12px 8px' }}>
                             <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.6px', marginBottom: 6 }}>달력</div>
@@ -819,17 +883,23 @@ export default function App() {
               })}
             </div>
             {/* 추가 입력 */}
-            <div style={{ padding: '10px 14px', borderTop: '1px solid var(--border)', flexShrink: 0, display: 'flex', gap: 6 }}>
-              <input
-                style={{ flex: 1, background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 7, padding: '8px 10px', fontSize: 12, color: 'var(--text-primary)', fontFamily: 'var(--font-body)', outline: 'none' }}
-                placeholder="할 일 추가..."
-                value={newTodoText}
-                onChange={e => setNewTodoText(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && addTodoApp()}
-              />
-              <button onClick={addTodoApp} style={{ background: 'var(--gold)', border: 'none', borderRadius: 7, padding: '0 12px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
-                <Plus size={14} color="#000" />
-              </button>
+            <div style={{ padding: '10px 14px', borderTop: '1px solid var(--border)', flexShrink: 0 }}>
+              <div style={{ marginBottom: 8 }}>
+                <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.6px', marginBottom: 5 }}>활성 요일</div>
+                <WeekdayPicker value={newTodoDays} onChange={setNewTodoDays} />
+              </div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input
+                  style={{ flex: 1, background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 7, padding: '8px 10px', fontSize: 12, color: 'var(--text-primary)', fontFamily: 'var(--font-body)', outline: 'none' }}
+                  placeholder="할 일 추가..."
+                  value={newTodoText}
+                  onChange={e => setNewTodoText(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && addTodoApp()}
+                />
+                <button onClick={addTodoApp} style={{ background: 'var(--gold)', border: 'none', borderRadius: 7, padding: '0 12px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
+                  <Plus size={14} color="#000" />
+                </button>
+              </div>
             </div>
           </div>
         </>
