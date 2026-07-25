@@ -143,6 +143,81 @@ function WeekdayPicker({ value, onChange }: { value: number[]; onChange: (v: num
   )
 }
 
+/* ── 할 일 설정 모달 (이름 변경 / 활성요일 / 달력 / 초기화 / 삭제) ── */
+function TodoSettingsModal({ todo, onClose, onRename, onDaysChange, onToggleDate, onReset, onDelete }: {
+  todo: Todo
+  onClose: () => void
+  onRename: (content: string) => void
+  onDaysChange: (days: number[]) => void
+  onToggleDate: (date: string) => void
+  onReset: () => void
+  onDelete: () => void
+}) {
+  const [nameDraft, setNameDraft] = useState(todo.content)
+  useEffect(() => { setNameDraft(todo.content) }, [todo.id])
+  function commitName() {
+    if (nameDraft.trim() && nameDraft !== todo.content) onRename(nameDraft)
+  }
+  return (
+    <>
+      <div style={{ position: 'fixed', inset: 0, zIndex: 300, background: 'rgba(0,0,0,0.5)' }} onClick={onClose} />
+      <div style={{
+        position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', zIndex: 310,
+        background: 'var(--bg-card)', border: '1px solid var(--border)',
+        borderRadius: 'var(--radius-lg)', boxShadow: '0 16px 48px rgba(0,0,0,0.7)',
+        width: 300, maxHeight: '85vh', overflowY: 'auto', padding: '14px 0',
+      }} onClick={e => e.stopPropagation()}>
+        <div style={{ padding: '0 14px 10px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '1.2px', textTransform: 'uppercase', color: 'var(--gold)' }}>할 일 설정</span>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex' }}><X size={13} /></button>
+        </div>
+        {/* 이름 변경 */}
+        <div style={{ padding: '4px 14px 10px' }}>
+          <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.6px', marginBottom: 6 }}>이름</div>
+          <input
+            value={nameDraft}
+            onChange={e => setNameDraft(e.target.value)}
+            onBlur={commitName}
+            onKeyDown={e => { if (e.key === 'Enter') { commitName(); (e.target as HTMLInputElement).blur() } }}
+            style={{ width: '100%', boxSizing: 'border-box', background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 7, padding: '7px 10px', fontSize: 13, color: 'var(--text-primary)', fontFamily: 'var(--font-body)', outline: 'none' }}
+          />
+        </div>
+        <div style={{ borderTop: '1px solid var(--border-light)', margin: '4px 0' }} />
+        {/* 활성 요일 */}
+        <div style={{ padding: '10px 14px 8px' }}>
+          <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.6px', marginBottom: 6 }}>활성 요일</div>
+          <WeekdayPicker value={todo.active_days ?? [0, 1, 2, 3, 4, 5, 6]} onChange={onDaysChange} />
+        </div>
+        <div style={{ borderTop: '1px solid var(--border-light)', margin: '4px 0' }} />
+        {/* 달력 */}
+        <div style={{ padding: '10px 14px 8px' }}>
+          <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.6px', marginBottom: 6 }}>달력</div>
+          <MiniCalendarApp checkedDates={todo.check_dates} onToggle={onToggleDate} />
+        </div>
+        <div style={{ borderTop: '1px solid var(--border-light)', margin: '4px 0' }} />
+        {/* 초기화 */}
+        <button
+          onClick={onReset}
+          style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-secondary)', fontSize: 12, fontFamily: 'var(--font-body)', textAlign: 'left' }}
+          onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-elevated)')}
+          onMouseLeave={e => (e.currentTarget.style.background = 'none')}
+        >
+          <RotateCcw size={12} color="var(--gold)" /> 초기화
+        </button>
+        {/* 삭제 */}
+        <button
+          onClick={onDelete}
+          style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 8, color: 'var(--red)', fontSize: 12, fontFamily: 'var(--font-body)', textAlign: 'left' }}
+          onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-elevated)')}
+          onMouseLeave={e => (e.currentTarget.style.background = 'none')}
+        >
+          <Trash2 size={12} /> 삭제
+        </button>
+      </div>
+    </>
+  )
+}
+
 export default function App() {
   const [tab, setTab] = useState<Tab>('dashboard')
   const [logs, setLogs] = useState<ActionLog[]>([])
@@ -155,7 +230,6 @@ export default function App() {
   const [showWidthMenu, setShowWidthMenu] = useState(false)
   const [pinCode, setPinCode] = useState(false)       // 코드수정 고정
   const [todoSettingsId, setTodoSettingsId] = useState<string | null>(null)
-  const [todoSettingsPos, setTodoSettingsPos] = useState<{top: number; right: number}>({ top: 0, right: 0 })
   const [showInactiveTodos, setShowInactiveTodos] = useState(false)
   const [undoing, setUndoing] = useState<string | null>(null)
   const [maxWidth, setMaxWidth] = useState<string>(() => localStorage.getItem('sb_width') ?? '1920px')
@@ -228,6 +302,11 @@ export default function App() {
   }
   async function updateTodoDaysApp(todo: Todo, days: number[]) {
     const { data } = await supabase.from('todos').update({ active_days: days }).eq('id', todo.id).select().single()
+    if (data) setTodos(p => p.map(t => t.id === todo.id ? data as Todo : t))
+  }
+  async function updateTodoContentApp(todo: Todo, content: string) {
+    if (!content.trim() || content === todo.content) return
+    const { data } = await supabase.from('todos').update({ content: content.trim() }).eq('id', todo.id).select().single()
     if (data) setTodos(p => p.map(t => t.id === todo.id ? data as Todo : t))
   }
   async function reorderTodosApp(draggedId: string, overId: string) {
@@ -848,59 +927,11 @@ export default function App() {
                         {todo.check_count}회
                       </span>
                       <button
-                        onClick={e => {
-                          if (isSettingsOpen) { setTodoSettingsId(null); return }
-                          const rect = e.currentTarget.getBoundingClientRect()
-                          setTodoSettingsPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right })
-                          setTodoSettingsId(todo.id)
-                        }}
+                        onClick={() => setTodoSettingsId(isSettingsOpen ? null : todo.id)}
                         style={{ background: isSettingsOpen ? 'var(--bg-elevated)' : 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex', padding: 3, borderRadius: 4, flexShrink: 0 }}>
                         <Settings size={11} />
                       </button>
                     </div>
-                    {/* 설정 팝업 — fixed로 화면 기준 위치 */}
-                    {isSettingsOpen && (
-                      <>
-                        <div style={{ position: 'fixed', inset: 0, zIndex: 300 }} onClick={() => setTodoSettingsId(null)} />
-                        <div style={{
-                          position: 'fixed', top: todoSettingsPos.top, right: 16, zIndex: 310,
-                          background: 'var(--bg-card)', border: '1px solid var(--border)',
-                          borderRadius: 'var(--radius)', boxShadow: '0 8px 24px rgba(0,0,0,0.6)',
-                          width: 268, padding: '8px 0',
-                        }} onClick={e => e.stopPropagation()}>
-                          {/* 활성 요일 */}
-                          <div style={{ padding: '4px 12px 8px' }}>
-                            <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.6px', marginBottom: 6 }}>활성 요일</div>
-                            <WeekdayPicker value={todo.active_days ?? [0,1,2,3,4,5,6]} onChange={days => updateTodoDaysApp(todo, days)} />
-                          </div>
-                          <div style={{ borderTop: '1px solid var(--border-light)', margin: '4px 0' }} />
-                          {/* 달력 */}
-                          <div style={{ padding: '4px 12px 8px' }}>
-                            <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.6px', marginBottom: 6 }}>달력</div>
-                            <MiniCalendarApp checkedDates={todo.check_dates} onToggle={d => toggleCalDateApp(todo, d)} />
-                          </div>
-                          <div style={{ borderTop: '1px solid var(--border-light)', margin: '4px 0' }} />
-                          {/* 초기화 */}
-                          <button
-                            onClick={() => { resetTodoApp(todo); setTodoSettingsId(null) }}
-                            style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', padding: '8px 14px', display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-secondary)', fontSize: 12, fontFamily: 'var(--font-body)', textAlign: 'left' }}
-                            onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-elevated)')}
-                            onMouseLeave={e => (e.currentTarget.style.background = 'none')}
-                          >
-                            <RotateCcw size={12} color="var(--gold)" /> 초기화
-                          </button>
-                          {/* 삭제 */}
-                          <button
-                            onClick={() => { deleteTodoApp(todo.id); setTodoSettingsId(null) }}
-                            style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', padding: '8px 14px', display: 'flex', alignItems: 'center', gap: 8, color: 'var(--red)', fontSize: 12, fontFamily: 'var(--font-body)', textAlign: 'left' }}
-                            onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-elevated)')}
-                            onMouseLeave={e => (e.currentTarget.style.background = 'none')}
-                          >
-                            <Trash2 size={12} /> 삭제
-                          </button>
-                        </div>
-                      </>
-                    )}
                   </div>
                 )
               })}
@@ -925,6 +956,21 @@ export default function App() {
               </div>
             </div>
           </div>
+          {todoSettingsId && (() => {
+            const settingsTodo = todos.find(t => t.id === todoSettingsId)
+            if (!settingsTodo) return null
+            return (
+              <TodoSettingsModal
+                todo={settingsTodo}
+                onClose={() => setTodoSettingsId(null)}
+                onRename={content => updateTodoContentApp(settingsTodo, content)}
+                onDaysChange={days => updateTodoDaysApp(settingsTodo, days)}
+                onToggleDate={d => toggleCalDateApp(settingsTodo, d)}
+                onReset={() => { resetTodoApp(settingsTodo); setTodoSettingsId(null) }}
+                onDelete={() => { deleteTodoApp(settingsTodo.id); setTodoSettingsId(null) }}
+              />
+            )
+          })()}
         </>
       )}
 
