@@ -10,7 +10,7 @@ import {
   RotateCcw, Settings,
   CheckCircle, XCircle, Ban, MinusCircle, Gift, GripVertical, DollarSign,
   TrendingUp, TrendingDown, ArrowDownToLine, LogOut, Pencil,
-  ClipboardPaste,
+  ClipboardPaste, ChevronUp, ChevronDown,
 } from 'lucide-react'
 
 const SPORTS: { value: Sport; label: string }[] = [
@@ -866,6 +866,7 @@ export default function Dashboard() {
   const [openFormSiteId, setOpenFormSiteId] = useState<string | null>(null)
   const [openFormType, setOpenFormType] = useState<'sports' | 'game'>('sports')
   const [hoverBetId, setHoverBetId]     = useState<string | null>(null)
+  const [expandedSettled, setExpandedSettled] = useState<Record<string, boolean>>({})
   const [inlineEditBetId, setInlineEditBetId] = useState<string | null>(null)
 
   useEffect(() => { loadSites(); loadBets(); loadGameRollings() }, [])
@@ -1531,12 +1532,16 @@ export default function Dashboard() {
                       {/* 완료된 목록 — 다음 마감 처리 때 함께 사라짐 (비활성 사이트에서도 표시) */}
                       {settled.length > 0 && (() => {
                         const renderedSettledGroups = new Set<string>()
+                        const isExpanded = !!expandedSettled[site.id]
                         return (
                           <div style={{ marginTop: 8, borderTop: '1px solid var(--border-light)', paddingTop: 6 }}>
-                            <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.8px', padding: '3px 2px', marginBottom: 4 }}>
+                            <div
+                              onClick={() => setExpandedSettled(p => ({ ...p, [site.id]: !p[site.id] }))}
+                              style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.8px', padding: '3px 2px', marginBottom: isExpanded ? 4 : 0, userSelect: 'none' }}>
+                              {isExpanded ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
                               완료된 목록 ({settled.length})
                             </div>
-                            {settled.map(bet => {
+                            {isExpanded && settled.map(bet => {
                               if (bet.parlay_group) {
                                 if (renderedSettledGroups.has(bet.parlay_group)) return null
                                 renderedSettledGroups.add(bet.parlay_group)
