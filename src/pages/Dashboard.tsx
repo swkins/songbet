@@ -1067,10 +1067,13 @@ export default function Dashboard() {
   const depositRemaining = (s: Site) => Math.max(0, totalRolling(s) - (s.deposit_bet_done ?? 0))
   const depositPct       = (s: Site) => totalRolling(s) > 0 ? Math.round((s.deposit_bet_done ?? 0) / totalRolling(s) * 100) : 0
   const toKrw = (amount: number, currency: 'krw' | 'usd') => currency === 'usd' ? amount * usdKrwRate : amount
-  // 전체 사이트 합산 (달러는 원화로 환산) — 지금 롤링이 얼마나 필요한지 한눈에 보기 위함
-  const aggDepositKrw   = sites.reduce((sum, s) => sum + toKrw(totalRolling(s), s.currency), 0)
-  const aggRollingDoneKrw = sites.reduce((sum, s) => sum + toKrw(s.deposit_bet_done ?? 0, s.currency), 0)
-  const aggRollingRemainingKrw = sites.reduce((sum, s) => sum + toKrw(depositRemaining(s), s.currency), 0)
+  // 전체 사이트 합산 (달러는 원화로 환산) — 지금 롤링이 얼마나 필요한지 한눈에 보기 위함 (개별 사이트 카드와 동일한 구성: 입금/포인트/남은롤링/진행률)
+  const aggDep = sites.reduce((sum, s) => sum + toKrw(s.last_deposit ?? 0, s.currency), 0)
+  const aggPt  = sites.reduce((sum, s) => sum + toKrw(s.point_deposit ?? 0, s.currency), 0)
+  const aggRollingTarget = aggDep + aggPt
+  const aggRollingDone   = sites.reduce((sum, s) => sum + toKrw(s.deposit_bet_done ?? 0, s.currency), 0)
+  const aggRem = Math.max(0, aggRollingTarget - aggRollingDone)
+  const aggPct = aggRollingTarget > 0 ? Math.round(aggRollingDone / aggRollingTarget * 100) : 0
   const betsBySite       = (id: string) => bets.filter(b => b.site_id === id)
   const pendingBySite    = (id: string) => betsBySite(id).filter(b => b.result === 'pending')
   const settledBySite    = (id: string) => betsBySite(id).filter(b => b.result !== 'pending')
@@ -1482,18 +1485,23 @@ export default function Dashboard() {
                   <Settings size={12} /> 사이트관리
                 </button>
               </div>
-              {(aggDepositKrw > 0 || aggRollingDoneKrw > 0) && (
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
-                  {[
-                    { label: '전체 입금 합계', value: aggDepositKrw },
-                    { label: '전체 롤링 진행', value: aggRollingDoneKrw },
-                    { label: '전체 잔여 롤링', value: aggRollingRemainingKrw, emphasize: true },
-                  ].map(t => (
-                    <div key={t.label} className="card" style={{ flex: '1 0 150px', padding: '8px 12px', background: t.emphasize ? 'var(--gold-bg)' : 'var(--bg-card)', border: `1px solid ${t.emphasize ? 'var(--gold-border)' : 'var(--border)'}` }}>
-                      <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 2 }}>{t.label}</div>
-                      <div style={{ fontFamily: 'var(--font-num)', fontSize: 16, fontWeight: 800, color: t.emphasize ? 'var(--gold)' : 'var(--text-primary)' }}>{Math.round(t.value).toLocaleString()}원</div>
-                    </div>
-                  ))}
+              {aggRollingTarget > 0 && (
+                <div style={{ position: 'relative', padding: '10px 14px', marginBottom: 12, borderRadius: 'var(--radius-sm)', border: '1px solid var(--gold-border)', background: 'var(--gold-bg)', display: 'flex', flexDirection: 'column', gap: 3 }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--gold)', marginBottom: 2, textTransform: 'uppercase', letterSpacing: '0.5px' }}>전체 사이트 합산 (원화 환산)</div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>입금</span>
+                    <span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-num)', color: '#E2E8F0' }}>{Math.round(aggDep).toLocaleString()}원</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>포인트</span>
+                    <span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-num)', color: aggPt > 0 ? 'var(--purple)' : 'var(--text-muted)' }}>{aggPt > 0 ? `+${Math.round(aggPt).toLocaleString()}원` : '–'}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>남은 롤링</span>
+                    <span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-num)', color: aggRem > 0 ? 'var(--gold)' : 'var(--green)' }}>{Math.round(aggRem).toLocaleString()}원</span>
+                  </div>
+                  <div className="deposit-progress-bar"><div className="deposit-progress-fill" style={{ width: `${Math.min(100, aggPct)}%` }} /></div>
+                  <div style={{ fontSize: 11, color: aggPct >= 100 ? 'var(--green)' : 'var(--orange)', fontWeight: 700, textAlign: 'right' }}>{aggPct}%</div>
                 </div>
               )}
               <div className="site-cards-wrap" style={{ '--site-cols': colCount } as React.CSSProperties}>

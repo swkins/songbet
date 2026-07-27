@@ -447,7 +447,7 @@ function UnmatchedFreeLeagueGroup({ matchText, bets, knownLeagues, onAssign, cur
   )
 }
 
-// ─── 순위 변동 배지 (어제 대비) ────────────────────────────────────
+// ─── 순위 변동 배지 (어제 대비, 순위 숫자 옆에 바로 붙여서 표시) ────────
 function RankChangeBadge({ current, previous }: { current: number; previous?: number }) {
   if (previous === undefined) return <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--gold)' }}>NEW</span>
   const delta = previous - current
@@ -458,10 +458,11 @@ function RankChangeBadge({ current, previous }: { current: number; previous?: nu
 
 interface LeagueRankRow { league: string; total: number; winRate: number; roi: number; profit: number }
 
-// ─── 리그 순위 컬럼 (10개 단위로 잘라 옆으로 나열) ───────────────────
-function LeagueRankColumn({ rows, startRank, yesterdayRankMap }: {
-  rows: LeagueRankRow[]; startRank: number; yesterdayRankMap: Map<string, number>
+// ─── 리그 순위 컬럼 (고정 칸수만큼 항상 표시, 리그가 없는 순위는 빈칸) ──
+function LeagueRankColumn({ rows, startRank, columnSize, yesterdayRankMap }: {
+  rows: LeagueRankRow[]; startRank: number; columnSize: number; yesterdayRankMap: Map<string, number>
 }) {
+  const slots: (LeagueRankRow | null)[] = Array.from({ length: columnSize }, (_, i) => rows[i] ?? null)
   return (
     <table style={{ fontSize: 10, borderCollapse: 'collapse', width: '100%', tableLayout: 'fixed' }}>
       <thead>
@@ -472,21 +473,30 @@ function LeagueRankColumn({ rows, startRank, yesterdayRankMap }: {
           <th style={{ textAlign: 'center', padding: '3px 4px', fontSize: 9, color: 'var(--text-secondary)', fontWeight: 700 }}>승률</th>
           <th style={{ textAlign: 'center', padding: '3px 4px', fontSize: 9, color: 'var(--text-secondary)', fontWeight: 700 }}>ROI</th>
           <th style={{ textAlign: 'center', padding: '3px 4px', fontSize: 9, color: 'var(--text-secondary)', fontWeight: 700 }}>손익</th>
-          <th style={{ textAlign: 'center', padding: '3px 4px', fontSize: 9, color: 'var(--text-secondary)', fontWeight: 700 }}>변동</th>
         </tr>
       </thead>
       <tbody>
-        {rows.map((r, i) => {
+        {slots.map((r, i) => {
           const rank = startRank + i
+          if (!r) {
+            return (
+              <tr key={`empty-${rank}`} style={{ borderBottom: '1px solid var(--border-light)' }}>
+                <td style={{ padding: '4px', textAlign: 'center', color: 'var(--text-muted)', fontWeight: 700 }}>{rank}</td>
+                <td colSpan={5} style={{ padding: '4px', color: 'var(--text-muted)', fontSize: 9 }}>—</td>
+              </tr>
+            )
+          }
           return (
             <tr key={r.league} style={{ borderBottom: '1px solid var(--border-light)' }}>
-              <td style={{ padding: '4px', textAlign: 'center', color: 'var(--text-muted)', fontWeight: 700 }}>{rank}</td>
+              <td style={{ padding: '4px', textAlign: 'center', whiteSpace: 'nowrap' }}>
+                <span style={{ color: 'var(--text-muted)', fontWeight: 700 }}>{rank}</span>{' '}
+                <RankChangeBadge current={rank} previous={yesterdayRankMap.get(r.league)} />
+              </td>
               <td style={{ padding: '4px', fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.league}>{r.league}</td>
               <td style={{ padding: '4px', textAlign: 'center', color: 'var(--text-secondary)' }}>{r.total}</td>
               <td style={{ padding: '4px', textAlign: 'center' }}><span style={{ fontWeight: 700, color: r.winRate >= 50 ? '#4ade80' : '#f87171' }}>{r.winRate.toFixed(0)}%</span></td>
               <td style={{ padding: '4px', textAlign: 'center' }}><span style={{ fontWeight: 700, color: r.roi >= 0 ? '#4ade80' : '#f87171' }}>{r.roi >= 0 ? '+' : ''}{r.roi.toFixed(1)}%</span></td>
               <td style={{ padding: '4px', textAlign: 'center', whiteSpace: 'nowrap' }}><span style={{ fontWeight: 700, color: r.profit >= 0 ? '#4ade80' : '#f87171' }}>{r.profit >= 0 ? '+' : ''}{r.profit.toLocaleString()}</span></td>
-              <td style={{ padding: '4px', textAlign: 'center' }}><RankChangeBadge current={rank} previous={yesterdayRankMap.get(r.league)} /></td>
             </tr>
           )
         })}
@@ -532,9 +542,11 @@ function SoccerLeagueSection({ bets, overrides, knownLeagues, onAddOverride, onA
     .sort((a, b) => b.profit - a.profit)
   const yesterdayRankMap = new Map(yesterdayRanking.map((r, i) => [r.league, i + 1]))
 
-  const top45 = ranking.slice(0, 45)
+  const RANK_TOTAL = 45
+  const COLUMN_SIZE = 15
+  const top45 = ranking.slice(0, RANK_TOTAL)
   const columns: LeagueRankRow[][] = []
-  for (let i = 0; i < top45.length; i += 15) columns.push(top45.slice(i, i + 15))
+  for (let i = 0; i < RANK_TOTAL; i += COLUMN_SIZE) columns.push(top45.slice(i, i + COLUMN_SIZE))
 
   // 리그 미확인(ETC)은 탭(마켓)과 무관하게 축구 전체 기준으로 모아서 보여줌
   const etcBets = allSettled.filter(b => leagueKeyOf(b) === 'ETC')
@@ -563,25 +575,22 @@ function SoccerLeagueSection({ bets, overrides, knownLeagues, onAddOverride, onA
         </div>
       </div>
 
-      {top45.length > 0 ? (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 10 }}>
-          {columns.map((col, ci) => (
-            <LeagueRankColumn key={ci} rows={col} startRank={ci * 15 + 1} yesterdayRankMap={yesterdayRankMap} />
-          ))}
-        </div>
-      ) : (
-        <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '12px 0' }}>
-          {SOCCER_MARKET_TABS.find(t => t.value === marketTab)?.label} 기준으로 리그가 지정된 베팅이 없습니다. 아래에서 팀을 리그에 매핑해 주세요.
-        </div>
-      )}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 10 }}>
+        {columns.map((col, ci) => (
+          <LeagueRankColumn key={ci} rows={col} startRank={ci * COLUMN_SIZE + 1} columnSize={COLUMN_SIZE} yesterdayRankMap={yesterdayRankMap} />
+        ))}
+      </div>
 
       <div style={{ marginTop: 10 }}>
         <AddLeagueInput onAdd={onAddLeague} placeholder="새 리그 이름 (예: 프리미어리그)" />
       </div>
 
       {etcGroups.length > 0 && (
-        <div style={{ marginTop: 14 }}>
-          <div className="card-title" style={{ marginBottom: 8 }}>❓ 리그 미확인 — {etcBets.length}건, 팀 이름 확인 후 리그 매핑</div>
+        <div style={{ marginTop: 18, padding: '12px 14px', borderRadius: 8, border: '1px solid var(--red-border)', background: 'var(--red-bg)' }}>
+          <div className="card-title" style={{ marginBottom: 4 }}>❓ 미분류 — {etcBets.length}건</div>
+          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 8 }}>
+            리그가 아직 지정되지 않은 팀들입니다. 위 리그 순위에는 포함되지 않아요. 팀 이름을 확인해 리그를 매핑하거나, 종목을 잘못 골랐다면 아래에서 종목을 바꿔주세요.
+          </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {etcGroups.map(([matchText, groupBets]) => (
               <UnmatchedFreeLeagueGroup key={matchText} matchText={matchText} bets={groupBets} knownLeagues={knownLeagues} onAssign={onAddOverride} currentSport="soccer" onChangeSport={onChangeSport} />
@@ -727,8 +736,11 @@ function EsportsLeagueSection({ bets, overrides, knownLeagues, onAddOverride, on
       </div>
 
       {etcGroups.length > 0 && (
-        <div style={{ marginTop: 14 }}>
-          <div className="card-title" style={{ marginBottom: 8 }}>❓ 리그 미확인 — {etcBets.length}건, 팀 이름 확인 후 리그 매핑</div>
+        <div style={{ marginTop: 18, padding: '12px 14px', borderRadius: 8, border: '1px solid var(--red-border)', background: 'var(--red-bg)' }}>
+          <div className="card-title" style={{ marginBottom: 4 }}>❓ 미분류 — {etcBets.length}건</div>
+          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 8 }}>
+            리그가 아직 지정되지 않은 팀들입니다. 위 리그별 성적에는 포함되지 않아요. 팀 이름을 확인해 리그를 매핑하거나, 종목을 잘못 골랐다면 아래에서 종목을 바꿔주세요.
+          </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {etcGroups.map(([matchText, groupBets]) => (
               <UnmatchedFreeLeagueGroup key={matchText} matchText={matchText} bets={groupBets} knownLeagues={knownLeagues} onAssign={onAddOverride} currentSport="esports" onChangeSport={onChangeSport} />
