@@ -1,8 +1,9 @@
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
 import { logAction } from '../lib/logger'
 import type { Bet, Site, Sport, Market, BetResult, GameRolling } from '../types'
 import { inferBaseballLeague, inferSoccerLeague, type LeagueOverride } from '../lib/league'
+import { buildTeamCandidates, suggestTeamCandidates, getTeamInsight, type TeamCandidate, type BetLite } from '../lib/teamInsight'
 import dayjs from 'dayjs'
 import isoWeek from 'dayjs/plugin/isoWeek'
 dayjs.extend(isoWeek)
@@ -66,6 +67,73 @@ function suggestLeague(sport: string, content: string, baseballOverrides: League
   if (sport === 'baseball') return inferBaseballLeague(content, baseballOverrides) ?? ''
   if (sport === 'soccer') return inferSoccerLeague(content, soccerOverrides) ?? ''
   return ''
+}
+
+/* ── 경기 내용 입력창: 팀 이름 자동완성 + 최근 성적/연승연패 표시 ── */
+function TeamContentInput({ value, onChange, candidates, allBets, placeholder, inputRef, autoFocus, onEnter, showInsight = true }: {
+  value: string; onChange: (v: string) => void
+  candidates: TeamCandidate[]; allBets: BetLite[]
+  placeholder: string
+  inputRef?: React.RefObject<HTMLInputElement>
+  autoFocus?: boolean
+  onEnter?: () => void
+  showInsight?: boolean
+}) {
+  const [open, setOpen] = useState(false)
+  const [hi, setHi] = useState(-1)
+  const localRef = useRef<HTMLInputElement>(null)
+  const ref = inputRef ?? localRef
+  const suggestions = suggestTeamCandidates(value, candidates)
+  const insight = showInsight ? getTeamInsight(value, allBets) : null
+
+  function pick(name: string) {
+    onChange(name)
+    setOpen(false); setHi(-1)
+  }
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <input ref={ref} className="form-input inline-bet-input" placeholder={placeholder} value={value}
+        autoFocus={autoFocus}
+        onChange={e => { onChange(e.target.value); setOpen(true); setHi(-1) }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        onKeyDown={e => {
+          if (open && suggestions.length > 0) {
+            if (e.key === 'ArrowDown') { e.preventDefault(); setHi(p => Math.min(p + 1, suggestions.length - 1)); return }
+            if (e.key === 'ArrowUp') { e.preventDefault(); setHi(p => Math.max(p - 1, 0)); return }
+            if (e.key === 'Enter' && hi >= 0) { e.preventDefault(); pick(suggestions[hi]); return }
+            if (e.key === 'Escape') { setOpen(false); setHi(-1); return }
+          }
+          if (e.key === 'Enter') onEnter?.()
+        }} />
+      {open && suggestions.length > 0 && (
+        <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 30, marginTop: 2, background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 6, maxHeight: 170, overflowY: 'auto', boxShadow: '0 4px 12px rgba(0,0,0,0.3)' }}>
+          {suggestions.map((s, i) => (
+            <div key={s} onMouseDown={() => pick(s)}
+              style={{ padding: '6px 9px', fontSize: 11, cursor: 'pointer', fontWeight: i === hi ? 700 : 500,
+                background: i === hi ? 'var(--gold-bg)' : 'transparent', color: i === hi ? 'var(--gold)' : 'var(--text-primary)' }}>
+              {s}
+            </div>
+          ))}
+        </div>
+      )}
+      {insight && insight.totalSettled > 0 && (
+        <div style={{ marginTop: 3, fontSize: 10, color: 'var(--text-secondary)', display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+          <span>최근 {insight.recentN}전 {insight.wins}승{insight.losses}패{insight.pushes ? `${insight.pushes}무` : ''}</span>
+          <span style={{ fontWeight: 700, color: insight.profit >= 0 ? 'var(--green)' : 'var(--red)' }}>
+            {insight.profit >= 0 ? '+' : ''}{insight.profit.toLocaleString()}원
+          </span>
+          {insight.streakType && insight.streakCount >= 2 && (
+            <span style={{ fontWeight: 700, color: insight.streakType === 'win' ? 'var(--green)' : 'var(--red)' }}>
+              {insight.streakType === 'win' ? '🔥' : '❄️'} {insight.streakCount}연{insight.streakType === 'win' ? '승' : '패'}
+              {insight.streakCount >= 3 ? (insight.streakType === 'win' ? ' · 추천' : ' · 리스크 주의') : ''}
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  )
 }
 
 function autoMarket(content: string): { market: Market; pick: string } {
@@ -446,11 +514,12 @@ function EditFormAmountRow({ isusd, amount, setAmount }: { isusd: boolean; amoun
 }
 
 /* ── 인라인 단폴 수정폼 ── */
-function InlineBetEditForm({ bet, site, onClose, onSave, baseballOverrides, soccerOverrides }: {
+function InlineBetEditForm({ bet, site, onClose, onSave, baseballOverrides, soccerOverrides, teamCandidates, allBetsHistory }: {
   bet: Bet; site: Site
   onClose: () => void
   onSave: (sport: string, content: string, odds: number, stake: number, isLive: boolean, league: string) => Promise<void>
   baseballOverrides: LeagueOverride[]; soccerOverrides: LeagueOverride[]
+  teamCandidates: TeamCandidate[]; allBetsHistory: BetLite[]
 }) {
   const isusd = site.currency === 'usd'
   const [sport, setSport]     = useState(bet.sport)
@@ -487,8 +556,8 @@ function InlineBetEditForm({ bet, site, onClose, onSave, baseballOverrides, socc
       <input className="form-input inline-bet-input" placeholder="리그 (자동 추론, 직접 입력 가능)" value={league}
         onChange={e => { setLeague(e.target.value); setLeagueTouched(true) }}
         style={{ fontSize: 11 }} />
-      <input ref={contentRef} className="form-input inline-bet-input" placeholder="경기 내용" value={content}
-        onChange={e => setContent(e.target.value)} autoFocus />
+      <TeamContentInput inputRef={contentRef} placeholder="경기 내용" value={content} onChange={setContent}
+        candidates={teamCandidates} allBets={allBetsHistory} autoFocus onEnter={submit} />
       <input className="form-input inline-bet-input" placeholder="배당 (125=1.25)" value={oddsRaw}
         onChange={e => handleOdds(e.target.value)}
         onKeyDown={e => e.key === 'Enter' && submit()}
@@ -525,11 +594,12 @@ function InlineBetEditForm({ bet, site, onClose, onSave, baseballOverrides, socc
 }
 
 /* ── 인라인 두폴 수정폼 ── */
-function InlineParlayEditForm({ groupBets, site, onClose, onSave, soccerOverrides }: {
+function InlineParlayEditForm({ groupBets, site, onClose, onSave, soccerOverrides, teamCandidates, allBetsHistory }: {
   groupBets: Bet[]; site: Site
   onClose: () => void
   onSave: (c1: string, c2: string, odds: number, stake: number, league1: string, league2: string) => Promise<void>
   soccerOverrides: LeagueOverride[]
+  teamCandidates: TeamCandidate[]; allBetsHistory: BetLite[]
 }) {
   const isusd = site.currency === 'usd'
   const leg1 = groupBets.find(b => b.parlay_leg === 1)
@@ -572,13 +642,11 @@ function InlineParlayEditForm({ groupBets, site, onClose, onSave, soccerOverride
       <div style={labelSt}>① 축</div>
       <input className="form-input inline-bet-input" placeholder="리그 ①" value={league1}
         onChange={e => { setLeague1(e.target.value); setLeague1Touched(true) }} style={{ fontSize: 11, marginBottom: 3 }} />
-      <input className="form-input inline-bet-input" placeholder="경기 내용 ①" value={c1}
-        onChange={e => setC1(e.target.value)} autoFocus />
+      <TeamContentInput placeholder="경기 내용 ①" value={c1} onChange={setC1} candidates={teamCandidates} allBets={allBetsHistory} autoFocus onEnter={submit} />
       <div style={{ ...labelSt, marginTop: 4 }}>② 날개</div>
       <input className="form-input inline-bet-input" placeholder="리그 ②" value={league2}
         onChange={e => { setLeague2(e.target.value); setLeague2Touched(true) }} style={{ fontSize: 11, marginBottom: 3 }} />
-      <input className="form-input inline-bet-input" placeholder="경기 내용 ②" value={c2}
-        onChange={e => setC2(e.target.value)} />
+      <TeamContentInput placeholder="경기 내용 ②" value={c2} onChange={setC2} candidates={teamCandidates} allBets={allBetsHistory} onEnter={submit} />
       <input className="form-input inline-bet-input" placeholder="배당 (125=1.25)" value={oddsRaw}
         onChange={e => handleOdds(e.target.value)}
         onKeyDown={e => e.key === 'Enter' && submit()}
@@ -602,14 +670,16 @@ function InlineParlayEditForm({ groupBets, site, onClose, onSave, soccerOverride
 }
 
 /* ── 인라인 베팅폼 (단폴) ── */
-function SingleBetForm({ site, onClose, onBet, defaultSport, baseballOverrides, soccerOverrides }: {
+function SingleBetForm({ site, onClose, onBet, defaultSport, baseballOverrides, soccerOverrides, teamCandidates, allBetsHistory }: {
   site: Site; onClose: () => void; defaultSport: string
   onBet: (sport: string, content: string, odds: number, amount: number, isLive: boolean, league: string) => Promise<boolean>
   baseballOverrides: LeagueOverride[]; soccerOverrides: LeagueOverride[]
+  teamCandidates: TeamCandidate[]; allBetsHistory: BetLite[]
 }) {
   const isusd = site.currency === 'usd'; const unit = isusd ? '$' : '원'
   const defaultAmount = site.default_stake > 0 ? String(site.default_stake) : (isusd ? '5' : '10000')
   const [sport, setSport]       = useState<string>(defaultSport || 'soccer')
+  const [sportTouched, setSportTouched] = useState(false)
   const [content, setContent]   = useState('')
   const [league, setLeague]     = useState('')
   const [leagueTouched, setLeagueTouched] = useState(false)
@@ -621,6 +691,14 @@ function SingleBetForm({ site, onClose, onBet, defaultSport, baseballOverrides, 
   const oddsV = parseOdds(oddsRaw)
   const stakeN = isusd ? (Number(amount) || 0) : (Number(amount.replace(/,/g, "")) || 0)
   const hotkeys = isusd ? [5, 10] : [5000, 10000]
+
+  // 경기 내용(팀 이름)만으로 최근에 이 팀을 어느 종목으로 베팅했는지 찾아 종목을 자동 선택
+  // (예: "휴스턴"만 써도 최근 베팅 기록이 야구였다면 야구로 전환. 직접 종목을 고른 뒤에는 덮어쓰지 않음)
+  useEffect(() => {
+    if (sportTouched) return
+    const insight = getTeamInsight(content, allBetsHistory, 1)
+    if (insight && insight.sport && insight.sport !== sport) setSport(insight.sport)
+  }, [content, sportTouched, allBetsHistory, sport])
 
   // 경기 내용/종목이 바뀔 때마다 리그를 자동 추론 (사용자가 직접 리그를 수정한 뒤에는 덮어쓰지 않음)
   useEffect(() => {
@@ -644,12 +722,12 @@ function SingleBetForm({ site, onClose, onBet, defaultSport, baseballOverrides, 
 
   return (
     <div className="inline-bet-form">
-      <SportButtonGroup value={sport} onChange={v => { setSport(v); setLeagueTouched(false); contentRef.current?.focus() }} />
+      <SportButtonGroup value={sport} onChange={v => { setSport(v); setSportTouched(true); setLeagueTouched(false); contentRef.current?.focus() }} />
       <input className="form-input inline-bet-input" placeholder="리그 (자동 추론, 직접 입력 가능)" value={league}
         onChange={e => { setLeague(e.target.value); setLeagueTouched(true) }}
         style={{ fontSize: 11 }} />
-      <input ref={contentRef} className="form-input inline-bet-input" placeholder="경기 내용" value={content}
-        onChange={e => setContent(e.target.value)} autoFocus />
+      <TeamContentInput inputRef={contentRef} placeholder="경기 내용" value={content} onChange={setContent}
+        candidates={teamCandidates} allBets={allBetsHistory} autoFocus onEnter={submit} />
       <input className="form-input inline-bet-input" placeholder="배당 (125=1.25)" value={oddsRaw}
         onChange={e => handleOdds(e.target.value)}
         onKeyDown={e => e.key === 'Enter' && submit()}
@@ -711,10 +789,11 @@ function SingleBetForm({ site, onClose, onBet, defaultSport, baseballOverrides, 
 }
 
 /* ── 인라인 베팅폼 (두폴) ── */
-function DoubleBetForm({ site, lastLeg1, onClose, onBet, soccerOverrides }: {
+function DoubleBetForm({ site, lastLeg1, onClose, onBet, soccerOverrides, teamCandidates, allBetsHistory }: {
   site: Site; lastLeg1: { content: string } | null; onClose: () => void
   onBet: (c1: string, c2: string, odds: number, amount: number, league1: string, league2: string) => Promise<boolean>
   soccerOverrides: LeagueOverride[]
+  teamCandidates: TeamCandidate[]; allBetsHistory: BetLite[]
 }) {
   const isusd = site.currency === 'usd'; const unit = isusd ? '$' : '원'
   const defaultAmount = site.default_stake > 0 ? String(site.default_stake) : (isusd ? '5' : '10000')
@@ -762,11 +841,11 @@ function DoubleBetForm({ site, lastLeg1, onClose, onBet, soccerOverrides }: {
       <div style={labelStyle}>① 축 (자동채움)</div>
       <input className="form-input inline-bet-input" placeholder="리그 ①" value={league1}
         onChange={e => { setLeague1(e.target.value); setLeague1Touched(true) }} style={{ fontSize: 11, marginBottom: 3 }} />
-      <input className="form-input inline-bet-input" placeholder="경기 내용 ①" value={c1} onChange={e => setC1(e.target.value)} autoFocus={!lastLeg1} />
+      <TeamContentInput placeholder="경기 내용 ①" value={c1} onChange={setC1} candidates={teamCandidates} allBets={allBetsHistory} autoFocus={!lastLeg1} onEnter={submit} />
       <div style={{ ...labelStyle, marginTop: 4 }}>② 날개</div>
       <input className="form-input inline-bet-input" placeholder="리그 ②" value={league2}
         onChange={e => { setLeague2(e.target.value); setLeague2Touched(true) }} style={{ fontSize: 11, marginBottom: 3 }} />
-      <input className="form-input inline-bet-input" placeholder="경기 내용 ②" value={c2} onChange={e => setC2(e.target.value)} autoFocus={!!lastLeg1} />
+      <TeamContentInput placeholder="경기 내용 ②" value={c2} onChange={setC2} candidates={teamCandidates} allBets={allBetsHistory} autoFocus={!!lastLeg1} onEnter={submit} />
       <input className="form-input inline-bet-input" placeholder="배당 (125=1.25)" value={oddsRaw}
         onChange={e => handleOdds(e.target.value)}
         onKeyDown={e => e.key === 'Enter' && submit()}
@@ -946,8 +1025,11 @@ export default function Dashboard() {
   const [inlineEditBetId, setInlineEditBetId] = useState<string | null>(null)
   const [baseballOverrides, setBaseballOverrides] = useState<LeagueOverride[]>([])
   const [soccerOverrides, setSoccerOverrides]     = useState<LeagueOverride[]>([])
+  // 팀 이름 자동완성 / 최근 성적·연승연패 조회용 — 사이트/숨김 여부와 무관하게 전체 베팅 이력을 별도로 보관
+  const [allBetsHistory, setAllBetsHistory] = useState<BetLite[]>([])
+  const teamCandidates = useMemo(() => buildTeamCandidates(allBetsHistory), [allBetsHistory])
 
-  useEffect(() => { loadSites(); loadBets(); loadGameRollings(); loadLeagueOverrides() }, [])
+  useEffect(() => { loadSites(); loadBets(); loadGameRollings(); loadLeagueOverrides(); loadAllBetsHistory() }, [])
 
   async function loadSites() {
     const { data } = await supabase.from('sites').select('*').eq('settlement_only', false).order('sort_order')
@@ -968,6 +1050,10 @@ export default function Dashboard() {
     ])
     if (bb) setBaseballOverrides(bb as LeagueOverride[])
     if (sc) setSoccerOverrides(sc as LeagueOverride[])
+  }
+  async function loadAllBetsHistory() {
+    const { data } = await supabase.from('bets').select('sport, match, result, profit, bet_date, created_at').order('bet_date', { ascending: false }).limit(5000)
+    if (data) setAllBetsHistory(data as BetLite[])
   }
   const totalRolling     = (s: Site) => (s.last_deposit ?? 0) + (s.point_deposit ?? 0)
   const depositRemaining = (s: Site) => Math.max(0, totalRolling(s) - (s.deposit_bet_done ?? 0))
@@ -1129,7 +1215,9 @@ export default function Dashboard() {
     const { data: siteData } = await supabase.from('sites').update({ balance: site.balance - stake, rolling_done: site.rolling_done + stake, deposit_bet_done: (site.deposit_bet_done ?? 0) + stake }).eq('id', site.id).select().single()
     if (siteData) {
       await logAction({ action_type: 'insert', table_name: 'bets', record_id: betData.id, after_data: betData as never, description: `[${site.name}] ${content} / ${stake.toLocaleString()}` })
-      setBets(p => [...p, betData]); setSites(p => p.map(s => s.id === siteData.id ? siteData : s)); return true
+      setBets(p => [...p, betData]); setSites(p => p.map(s => s.id === siteData.id ? siteData : s))
+      setAllBetsHistory(p => [{ sport: betData.sport, match: betData.match, result: betData.result, profit: betData.profit, bet_date: betData.bet_date, created_at: betData.created_at }, ...p])
+      return true
     }
     return false
   }
@@ -1145,7 +1233,9 @@ export default function Dashboard() {
     const { data: siteData } = await supabase.from('sites').update({ balance: site.balance - stake, rolling_done: site.rolling_done + stake, deposit_bet_done: (site.deposit_bet_done ?? 0) + stake }).eq('id', site.id).select().single()
     if (siteData) {
       await logAction({ action_type: 'insert', table_name: 'bets', record_id: betsData[0].id, after_data: betsData[0] as never, description: `[${site.name}] 두폴 ${c1}×${c2} / ${stake.toLocaleString()}` })
-      setBets(p => [...p, ...betsData]); setSites(p => p.map(s => s.id === siteData.id ? siteData : s)); return true
+      setBets(p => [...p, ...betsData]); setSites(p => p.map(s => s.id === siteData.id ? siteData : s))
+      setAllBetsHistory(p => [...betsData.map(b => ({ sport: b.sport, match: b.match, result: b.result, profit: b.profit, bet_date: b.bet_date, created_at: b.created_at })), ...p])
+      return true
     }
     return false
   }
@@ -1461,9 +1551,9 @@ export default function Dashboard() {
                           ) : openFormType === 'game' ? (
                             <GameRollingForm site={site} onClose={() => setOpenFormSiteId(null)} onSubmit={amt => submitGameRolling(site, amt)} />
                           ) : site.bet_type === 'double' ? (
-                            <DoubleBetForm site={site} lastLeg1={getLastLeg1(site.id)} onClose={() => setOpenFormSiteId(null)} onBet={(c1,c2,odds,amt,lg1,lg2) => submitDoubleBet(site,c1,c2,odds,amt,lg1,lg2)} soccerOverrides={soccerOverrides} />
+                            <DoubleBetForm site={site} lastLeg1={getLastLeg1(site.id)} onClose={() => setOpenFormSiteId(null)} onBet={(c1,c2,odds,amt,lg1,lg2) => submitDoubleBet(site,c1,c2,odds,amt,lg1,lg2)} soccerOverrides={soccerOverrides} teamCandidates={teamCandidates} allBetsHistory={allBetsHistory} />
                           ) : (
-                            <SingleBetForm site={site} defaultSport={pending.slice(-1)[0]?.sport ?? 'soccer'} onClose={() => setOpenFormSiteId(null)} onBet={(sp,ct,od,amt,lv,lg) => submitBet(site,sp,ct,od,amt,lv,lg)} baseballOverrides={baseballOverrides} soccerOverrides={soccerOverrides} />
+                            <SingleBetForm site={site} defaultSport={pending.slice(-1)[0]?.sport ?? 'soccer'} onClose={() => setOpenFormSiteId(null)} onBet={(sp,ct,od,amt,lv,lg) => submitBet(site,sp,ct,od,amt,lv,lg)} baseballOverrides={baseballOverrides} soccerOverrides={soccerOverrides} teamCandidates={teamCandidates} allBetsHistory={allBetsHistory} />
                           )}
                         </div>
                       )}
@@ -1502,6 +1592,8 @@ export default function Dashboard() {
                                     onClose={() => setInlineEditBetId(null)}
                                     onSave={(c1, c2, odds, stake, lg1, lg2) => saveInlineParlay(groupBets, c1, c2, odds, stake, lg1, lg2)}
                                     soccerOverrides={soccerOverrides}
+                                    teamCandidates={teamCandidates}
+                                    allBetsHistory={allBetsHistory}
                                   />
                                 ) : (
                                   <div style={{ display: 'flex', gap: 6, alignItems: 'stretch' }}>
@@ -1565,6 +1657,8 @@ export default function Dashboard() {
                                   onSave={(sport, content, odds, stake, isLive, league) => saveInlineEdit(bet, sport, content, odds, stake, isLive, league)}
                                   baseballOverrides={baseballOverrides}
                                   soccerOverrides={soccerOverrides}
+                                  teamCandidates={teamCandidates}
+                                  allBetsHistory={allBetsHistory}
                                 />
                               ) : (
                                 <div style={{ display: 'flex', gap: 6, alignItems: 'stretch' }}>

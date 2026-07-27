@@ -544,12 +544,12 @@ export default function App() {
               background: showTodo ? 'rgba(245,166,35,0.15)' : 'transparent',
               border: `1px solid ${showTodo ? 'var(--gold-border)' : 'var(--border)'}`,
               borderRadius: 'var(--radius-sm)', cursor: 'pointer',
-              padding: '4px 16px', minWidth: 40, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+              padding: '4px 10px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
               fontSize: 11, fontWeight: 600, fontFamily: 'var(--font-body)', transition: 'all 0.15s',
               color: showTodo ? 'var(--gold)' : 'var(--text-secondary)',
               position: 'relative',
             }}>
-              <CheckSquare size={13} />
+              <CheckSquare size={13} /><span className="nav-btn-label">오늘 할일</span>
               {uncheckedCount > 0 && (
                 <span style={{
                   position: 'absolute', top: -5, right: -5,
