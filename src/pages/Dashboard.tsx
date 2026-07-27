@@ -1074,6 +1074,22 @@ export default function Dashboard() {
   const aggRollingDone   = sites.reduce((sum, s) => sum + toKrw(s.deposit_bet_done ?? 0, s.currency), 0)
   const aggRem = Math.max(0, aggRollingTarget - aggRollingDone)
   const aggPct = aggRollingTarget > 0 ? Math.round(aggRollingDone / aggRollingTarget * 100) : 0
+  // 완료 종목별 간단 성적 (현재 완료된 목록 기준, 달러는 원화로 환산해서 ROI 계산)
+  const siteCurrencyOf = (siteId: string | null) => sites.find(s => s.id === siteId)?.currency ?? 'krw'
+  const settledForSummary = bets.filter(b => b.result !== 'pending')
+  const sportSummaries = SPORTS.filter(sp => sp.value !== 'other').map(sp => {
+    const sb = settledForSummary.filter(b => b.sport === sp.value)
+    if (!sb.length) return null
+    const wins = sb.filter(b => b.result === 'win').length
+    const stakeKrw = sb.reduce((s, b) => s + toKrw(b.stake, siteCurrencyOf(b.site_id)), 0)
+    const profitKrw = sb.reduce((s, b) => s + toKrw(b.profit, siteCurrencyOf(b.site_id)), 0)
+    return {
+      value: sp.value, label: sp.label,
+      total: sb.length,
+      winRate: Math.round(wins / sb.length * 100),
+      roi: stakeKrw > 0 ? profitKrw / stakeKrw * 100 : 0,
+    }
+  }).filter((s): s is NonNullable<typeof s> => s !== null)
   const betsBySite       = (id: string) => bets.filter(b => b.site_id === id)
   const pendingBySite    = (id: string) => betsBySite(id).filter(b => b.result === 'pending')
   const settledBySite    = (id: string) => betsBySite(id).filter(b => b.result !== 'pending')
@@ -1485,23 +1501,35 @@ export default function Dashboard() {
                   <Settings size={12} /> 사이트관리
                 </button>
               </div>
-              {aggRollingTarget > 0 && (
-                <div style={{ position: 'relative', padding: '10px 14px', marginBottom: 12, borderRadius: 'var(--radius-sm)', border: '1px solid var(--gold-border)', background: 'var(--gold-bg)', display: 'flex', flexDirection: 'column', gap: 3 }}>
-                  <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--gold)', marginBottom: 2, textTransform: 'uppercase', letterSpacing: '0.5px' }}>전체 사이트 합산 (원화 환산)</div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>입금</span>
-                    <span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-num)', color: '#E2E8F0' }}>{Math.round(aggDep).toLocaleString()}원</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>포인트</span>
-                    <span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-num)', color: aggPt > 0 ? 'var(--purple)' : 'var(--text-muted)' }}>{aggPt > 0 ? `+${Math.round(aggPt).toLocaleString()}원` : '–'}</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>남은 롤링</span>
-                    <span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-num)', color: aggRem > 0 ? 'var(--gold)' : 'var(--green)' }}>{Math.round(aggRem).toLocaleString()}원</span>
-                  </div>
-                  <div className="deposit-progress-bar"><div className="deposit-progress-fill" style={{ width: `${Math.min(100, aggPct)}%` }} /></div>
-                  <div style={{ fontSize: 11, color: aggPct >= 100 ? 'var(--green)' : 'var(--orange)', fontWeight: 700, textAlign: 'right' }}>{aggPct}%</div>
+              {(aggRollingTarget > 0 || sportSummaries.length > 0) && (
+                <div style={{ display: 'flex', gap: 10, marginBottom: 12, flexWrap: 'wrap', alignItems: 'stretch' }}>
+                  {aggRollingTarget > 0 && (
+                    <div style={{ position: 'relative', padding: '10px 14px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--gold-border)', background: 'var(--gold-bg)', display: 'flex', flexDirection: 'column', gap: 3, flex: '1 0 220px', maxWidth: 320 }}>
+                      <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--gold)', marginBottom: 2, textTransform: 'uppercase', letterSpacing: '0.5px' }}>전체 사이트 남은 롤링 (원화 환산)</div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>남은 롤링</span>
+                        <span style={{ fontSize: 14, fontWeight: 800, fontFamily: 'var(--font-num)', color: aggRem > 0 ? 'var(--gold)' : 'var(--green)' }}>{Math.round(aggRem).toLocaleString()}원</span>
+                      </div>
+                      <div className="deposit-progress-bar"><div className="deposit-progress-fill" style={{ width: `${Math.min(100, aggPct)}%` }} /></div>
+                      <div style={{ fontSize: 11, color: aggPct >= 100 ? 'var(--green)' : 'var(--orange)', fontWeight: 700, textAlign: 'right' }}>{aggPct}%</div>
+                    </div>
+                  )}
+                  {sportSummaries.length > 0 && (
+                    <div style={{ flex: '2 0 260px', padding: '10px 14px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', background: 'var(--bg-card)' }}>
+                      <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.5px' }}>완료 종목별 성적</div>
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                        {sportSummaries.map(s => (
+                          <div key={s.value} style={{ padding: '5px 9px', background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 6 }}>
+                            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 2 }}>{SPORT_SHORT[s.value] ?? '📋'} {s.label} <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>({s.total})</span></div>
+                            <div style={{ display: 'flex', gap: 7 }}>
+                              <span style={{ fontSize: 10, fontWeight: 700, color: s.winRate >= 50 ? 'var(--green)' : 'var(--red)' }}>{s.winRate}%</span>
+                              <span style={{ fontSize: 10, fontWeight: 700, color: s.roi >= 0 ? 'var(--green)' : 'var(--red)' }}>{s.roi >= 0 ? '+' : ''}{s.roi.toFixed(1)}%</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
               <div className="site-cards-wrap" style={{ '--site-cols': colCount } as React.CSSProperties}>
