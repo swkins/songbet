@@ -274,6 +274,12 @@ tr:hover td { background: var(--bg-hover); }
 .site-bet-entry:last-child { border-bottom: none; }
 .site-bet-entry.win-entry  { background: rgba(0,232,122,0.05); }
 .site-bet-entry.loss-entry { background: rgba(255,77,109,0.05); }
+.site-bet-entry.big-bet-entry {
+  background: rgba(245,166,35,0.08);
+  border-left: 3px solid var(--gold);
+  padding-left: 6px;
+}
+.site-bet-entry.big-bet-entry:hover { background: rgba(245,166,35,0.14); }
 
 .site-bet-match {
   font-weight: 700;

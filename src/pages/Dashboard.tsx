@@ -136,12 +136,18 @@ function TeamContentInput({ value, onChange, candidates, allBets, placeholder, i
   )
 }
 
+// 큰 금액 베팅 기준: 원화 3만원 이상, 달러 20달러 이상
+function isBigStake(stake: number, isusd: boolean): boolean {
+  return isusd ? stake >= 20 : stake >= 30000
+}
+
 function autoMarket(content: string): { market: Market; pick: string } {
   const s = content.trim()
   if (/오버/i.test(s) || /over/i.test(s)) return { market: 'over', pick: s }
   if (/언더/i.test(s) || /under/i.test(s)) return { market: 'under', pick: s }
-  if (/-\s*\d/.test(s)) return { market: 'handicap', pick: s }
-  if (/\+\s*\d/.test(s) || /^\d+(\.\d+)?$/.test(s)) return { market: 'handicap', pick: s }
+  // 팀 이름 등 뒤에 라인 숫자가 붙어 있으면 핸디캡 (부호 +/- 유무는 무관, 예: "수원삼성 1.5", "수원삼성 -1.5")
+  // 팀 이름만 단독으로 있으면(숫자 없음) 일반승(moneyline)
+  if (/[+-]?\d+(\.\d+)?\s*$/.test(s)) return { market: 'handicap', pick: s }
   return { market: 'moneyline', pick: s }
 }
 
@@ -1028,8 +1034,10 @@ export default function Dashboard() {
   // 팀 이름 자동완성 / 최근 성적·연승연패 조회용 — 사이트/숨김 여부와 무관하게 전체 베팅 이력을 별도로 보관
   const [allBetsHistory, setAllBetsHistory] = useState<BetLite[]>([])
   const teamCandidates = useMemo(() => buildTeamCandidates(allBetsHistory), [allBetsHistory])
+  // 전체 사이트 입금/롤링 합산 요약(원화 환산)용 환율
+  const [usdKrwRate, setUsdKrwRate] = useState<number>(1350)
 
-  useEffect(() => { loadSites(); loadBets(); loadGameRollings(); loadLeagueOverrides(); loadAllBetsHistory() }, [])
+  useEffect(() => { loadSites(); loadBets(); loadGameRollings(); loadLeagueOverrides(); loadAllBetsHistory(); getUsdKrwRate().then(setUsdKrwRate) }, [])
 
   async function loadSites() {
     const { data } = await supabase.from('sites').select('*').eq('settlement_only', false).order('sort_order')
@@ -1058,6 +1066,11 @@ export default function Dashboard() {
   const totalRolling     = (s: Site) => (s.last_deposit ?? 0) + (s.point_deposit ?? 0)
   const depositRemaining = (s: Site) => Math.max(0, totalRolling(s) - (s.deposit_bet_done ?? 0))
   const depositPct       = (s: Site) => totalRolling(s) > 0 ? Math.round((s.deposit_bet_done ?? 0) / totalRolling(s) * 100) : 0
+  const toKrw = (amount: number, currency: 'krw' | 'usd') => currency === 'usd' ? amount * usdKrwRate : amount
+  // 전체 사이트 합산 (달러는 원화로 환산) — 지금 롤링이 얼마나 필요한지 한눈에 보기 위함
+  const aggDepositKrw   = sites.reduce((sum, s) => sum + toKrw(totalRolling(s), s.currency), 0)
+  const aggRollingDoneKrw = sites.reduce((sum, s) => sum + toKrw(s.deposit_bet_done ?? 0, s.currency), 0)
+  const aggRollingRemainingKrw = sites.reduce((sum, s) => sum + toKrw(depositRemaining(s), s.currency), 0)
   const betsBySite       = (id: string) => bets.filter(b => b.site_id === id)
   const pendingBySite    = (id: string) => betsBySite(id).filter(b => b.result === 'pending')
   const settledBySite    = (id: string) => betsBySite(id).filter(b => b.result !== 'pending')
@@ -1469,6 +1482,20 @@ export default function Dashboard() {
                   <Settings size={12} /> 사이트관리
                 </button>
               </div>
+              {(aggDepositKrw > 0 || aggRollingDoneKrw > 0) && (
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+                  {[
+                    { label: '전체 입금 합계', value: aggDepositKrw },
+                    { label: '전체 롤링 진행', value: aggRollingDoneKrw },
+                    { label: '전체 잔여 롤링', value: aggRollingRemainingKrw, emphasize: true },
+                  ].map(t => (
+                    <div key={t.label} className="card" style={{ flex: '1 0 150px', padding: '8px 12px', background: t.emphasize ? 'var(--gold-bg)' : 'var(--bg-card)', border: `1px solid ${t.emphasize ? 'var(--gold-border)' : 'var(--border)'}` }}>
+                      <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 2 }}>{t.label}</div>
+                      <div style={{ fontFamily: 'var(--font-num)', fontSize: 16, fontWeight: 800, color: t.emphasize ? 'var(--gold)' : 'var(--text-primary)' }}>{Math.round(t.value).toLocaleString()}원</div>
+                    </div>
+                  ))}
+                </div>
+              )}
               <div className="site-cards-wrap" style={{ '--site-cols': colCount } as React.CSSProperties}>
               {sites.map(site => {
                 const dep = site.last_deposit ?? 0; const pt = site.point_deposit ?? 0
@@ -1583,7 +1610,7 @@ export default function Dashboard() {
                             renderedGroups.add(bet.parlay_group)
                             const groupBets = pending.filter(b => b.parlay_group === bet.parlay_group).sort((a,b) => a.parlay_leg - b.parlay_leg)
                             return (
-                              <div key={bet.parlay_group} className="site-bet-entry parlay-entry" style={{ marginBottom: 6 }}
+                              <div key={bet.parlay_group} className={`site-bet-entry parlay-entry${isBigStake(bet.stake, isusd) ? ' big-bet-entry' : ''}`} style={{ marginBottom: 6 }}
                                 onMouseEnter={() => setHoverBetId(bet.parlay_group)} onMouseLeave={() => setHoverBetId(null)}>
                                 {inlineEditBetId === bet.parlay_group ? (
                                   <InlineParlayEditForm
@@ -1610,6 +1637,7 @@ export default function Dashboard() {
                                       ))}
                                       <div style={{ paddingLeft: 20, marginTop: 3 }}>
                                         <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-secondary)' }}>{bet.odds.toFixed(2)} / {pfx}{bet.stake.toLocaleString()}{sfx}</span>
+                                        {isBigStake(bet.stake, isusd) && <span style={{ marginLeft: 5, fontSize: 9, fontWeight: 700, color: 'var(--gold)' }}>💰 큰 금액</span>}
                                       </div>
                                     </div>
                                     {/* 우: 결과 버튼 */}
@@ -1647,7 +1675,7 @@ export default function Dashboard() {
                             )
                           }
                           return (
-                            <div key={bet.id} className="site-bet-entry" style={{ marginBottom: 6, position: 'relative' }}
+                            <div key={bet.id} className={`site-bet-entry${isBigStake(bet.stake, isusd) ? ' big-bet-entry' : ''}`} style={{ marginBottom: 6, position: 'relative' }}
                               onMouseEnter={() => setHoverBetId(bet.id)} onMouseLeave={() => setHoverBetId(null)}>
                               {inlineEditBetId === bet.id ? (
                                 <InlineBetEditForm
@@ -1672,6 +1700,7 @@ export default function Dashboard() {
                                     </div>
                                     <div style={{ paddingLeft: 22 }}>
                                       <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-secondary)' }}>{bet.odds.toFixed(2)} / {pfx}{bet.stake.toLocaleString()}{sfx}</span>
+                                      {isBigStake(bet.stake, isusd) && <span style={{ marginLeft: 5, fontSize: 9, fontWeight: 700, color: 'var(--gold)' }}>💰 큰 금액</span>}
                                     </div>
                                   </div>
                                   {/* 우: 결과 버튼 (hover 시만) */}
@@ -1736,7 +1765,7 @@ export default function Dashboard() {
                                 const isWin = groupBets[0].result === 'win'
                                 const isLoss = groupBets[0].result === 'loss'
                                 return (
-                                  <div key={bet.parlay_group} className="site-bet-entry parlay-entry" style={{ marginBottom: 5, opacity: 0.7 }}
+                                  <div key={bet.parlay_group} className={`site-bet-entry parlay-entry${isBigStake(bet.stake, isusd) ? ' big-bet-entry' : ''}`} style={{ marginBottom: 5, opacity: 0.7 }}
                                     onMouseEnter={() => setHoverBetId('s_' + bet.parlay_group)} onMouseLeave={() => setHoverBetId(null)}>
                                     {groupBets.map((gb, idx) => (
                                       <div key={gb.id} style={{ marginBottom: 2 }}>
@@ -1748,7 +1777,7 @@ export default function Dashboard() {
                                       </div>
                                     ))}
                                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingLeft: 23, marginTop: 4 }}>
-                                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-muted)' }}>{bet.odds.toFixed(2)} / {pfx}{bet.stake.toLocaleString()}{sfx}</span>
+                                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-muted)' }}>{bet.odds.toFixed(2)} / {pfx}{bet.stake.toLocaleString()}{sfx}{isBigStake(bet.stake, isusd) && <span style={{ marginLeft: 5, fontSize: 9, fontWeight: 700, color: 'var(--gold)' }}>💰</span>}</span>
                                       {hoverBetId === 's_' + bet.parlay_group ? (
                                         <button className="btn btn-ghost btn-xs" style={{ fontSize: 10 }} onClick={() => applyParlayRevert(groupBets)}><RotateCcw size={9} /> 되돌리기</button>
                                       ) : (
@@ -1761,7 +1790,7 @@ export default function Dashboard() {
                                 )
                               }
                               return (
-                                <div key={bet.id} className="site-bet-entry" style={{ marginBottom: 5, opacity: 0.7 }}
+                                <div key={bet.id} className={`site-bet-entry${isBigStake(bet.stake, isusd) ? ' big-bet-entry' : ''}`} style={{ marginBottom: 5, opacity: 0.7 }}
                                   onMouseEnter={() => setHoverBetId('s_' + bet.id)} onMouseLeave={() => setHoverBetId(null)}>
                                   {bet.league && <div style={{ paddingLeft: 25, fontSize: 9, color: 'var(--text-muted)', fontWeight: 700 }}>{bet.league}</div>}
                                   <div style={{ display: 'flex', gap: 5, marginBottom: 3 }}>
@@ -1769,7 +1798,7 @@ export default function Dashboard() {
                                     <span className="site-bet-match" style={{ flex: 1, marginBottom: 0, fontSize: 12, color: bet.result === 'win' ? 'var(--green)' : bet.result === 'loss' ? 'var(--red)' : 'var(--text-secondary)' }}>{bet.match}</span>
                                   </div>
                                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingLeft: 25 }}>
-                                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-muted)' }}>{bet.odds.toFixed(2)} / {pfx}{bet.stake.toLocaleString()}{sfx}</span>
+                                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-muted)' }}>{bet.odds.toFixed(2)} / {pfx}{bet.stake.toLocaleString()}{sfx}{isBigStake(bet.stake, isusd) && <span style={{ marginLeft: 5, fontSize: 9, fontWeight: 700, color: 'var(--gold)' }}>💰</span>}</span>
                                     {hoverBetId === 's_' + bet.id ? (
                                       <button className="btn btn-ghost btn-xs" style={{ fontSize: 10 }} onClick={() => applyResult(bet, 'revert')}><RotateCcw size={9} /> 되돌리기</button>
                                     ) : (
