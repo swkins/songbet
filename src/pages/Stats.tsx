@@ -379,14 +379,16 @@ function UnmatchedSoccerLeagueGroup({ matchText, bets, knownLeagues, onAssign }:
         className="form-input"
         style={{ width: '100%', fontSize: 11, padding: '5px 8px', marginBottom: 6 }} />
       {knownLeagues.length > 0 && (
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 6 }}>
-          {knownLeagues.map(l => (
-            <button key={l} onClick={() => assign(l)} disabled={saving !== null}
-              style={{ fontSize: 10, fontWeight: 700, padding: '5px 10px', borderRadius: 6, cursor: saving ? 'not-allowed' : 'pointer', fontFamily: 'var(--font-body)',
-                border: '1px solid var(--green-border)', background: 'var(--green-bg)', color: 'var(--green)' }}>
-              {saving === l ? '저장중...' : `→ ${l}`}
-            </button>
-          ))}
+        <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
+          <select
+            defaultValue=""
+            disabled={saving !== null}
+            onChange={e => { const v = e.target.value; if (v) { assign(v); e.target.value = '' } }}
+            className="form-input"
+            style={{ flex: 1, fontSize: 11, padding: '5px 8px', cursor: saving ? 'not-allowed' : 'pointer' }}>
+            <option value="" disabled>{saving ? '저장중...' : '리그 선택 →'}</option>
+            {knownLeagues.map(l => <option key={l} value={l}>{l}</option>)}
+          </select>
         </div>
       )}
       <div style={{ display: 'flex', gap: 6 }}>
