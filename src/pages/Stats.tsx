@@ -4,7 +4,7 @@ import { logAction } from '../lib/logger'
 import type { Bet, Sport, Market, Site } from '../types'
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, BarChart, Bar, ResponsiveContainer, Cell, LineChart, Line, Legend } from 'recharts'
 import dayjs from 'dayjs'
-import { Trash2, X, Plus } from 'lucide-react'
+import { Trash2, X, Plus, Check, Pencil } from 'lucide-react'
 import { inferBaseballLeague, inferSoccerLeague, koCompare, type LeagueOverride, type BaseballLeague } from '../lib/league'
 
 const SPORTS: { value: Sport; label: string; emoji: string }[] = [
@@ -387,6 +387,64 @@ function AddLeagueInput({ onAdd, placeholder = '새 리그 이름' }: { onAdd: (
   )
 }
 
+// ─── 등록된 리그 이름 수정/삭제 (축구/LOL 공용) ─────────────────────
+function LeagueManageList({ leagues, onRename, onDelete }: {
+  leagues: string[]
+  onRename: (oldName: string, newName: string) => Promise<void>
+  onDelete: (name: string) => Promise<void>
+}) {
+  const [editing, setEditing] = useState<string | null>(null)
+  const [draft, setDraft] = useState('')
+  const [busy, setBusy] = useState<string | null>(null)
+
+  async function submitRename(oldName: string) {
+    const trimmed = draft.trim()
+    if (!trimmed || trimmed === oldName) { setEditing(null); return }
+    setBusy(oldName)
+    await onRename(oldName, trimmed)
+    setBusy(null); setEditing(null)
+  }
+  async function doDelete(name: string) {
+    if (!confirm(`"${name}" 리그를 삭제할까요?\n이 리그로 지정된 베팅과 팀 매핑은 모두 사라지고 다시 미분류로 돌아갑니다.`)) return
+    setBusy(name)
+    await onDelete(name)
+    setBusy(null)
+  }
+
+  if (!leagues.length) return null
+
+  return (
+    <div style={{ marginTop: 8 }}>
+      <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 4 }}>등록된 리그 관리 (수정/삭제)</div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+        {leagues.map(l => (
+          <div key={l} style={{ display: 'flex', alignItems: 'center', gap: 3, background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 6, padding: '3px 5px' }}>
+            {editing === l ? (
+              <>
+                <input autoFocus value={draft} onChange={e => setDraft(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') submitRename(l); if (e.key === 'Escape') setEditing(null) }}
+                  className="form-input" style={{ fontSize: 10, padding: '2px 4px', width: 100 }} />
+                <button onClick={() => submitRename(l)} disabled={busy === l} title="저장"
+                  style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--green)', display: 'flex', padding: 2 }}><Check size={11} /></button>
+                <button onClick={() => setEditing(null)} disabled={busy === l} title="취소"
+                  style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', padding: 2 }}><X size={11} /></button>
+              </>
+            ) : (
+              <>
+                <span style={{ fontSize: 10, color: 'var(--text-secondary)', fontWeight: 600 }}>{busy === l ? '처리중...' : l}</span>
+                <button onClick={() => { setEditing(l); setDraft(l) }} disabled={busy !== null} title="이름 수정"
+                  style={{ border: 'none', background: 'none', cursor: busy !== null ? 'not-allowed' : 'pointer', color: 'var(--text-muted)', display: 'flex', padding: 2 }}><Pencil size={10} /></button>
+                <button onClick={() => doDelete(l)} disabled={busy !== null} title="리그 삭제"
+                  style={{ border: 'none', background: 'none', cursor: busy !== null ? 'not-allowed' : 'pointer', color: 'var(--red)', display: 'flex', padding: 2 }}><Trash2 size={10} /></button>
+              </>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 // ─── 리그 미확인 팀 → 리그 매핑 지정 (축구/LOL 공용) ────────────────
 function UnmatchedFreeLeagueGroup({ matchText, bets, knownLeagues, onAssign, currentSport, onChangeSport }: {
   matchText: string; bets: Bet[]; knownLeagues: string[]
@@ -480,23 +538,23 @@ function LeagueRankColumn({ rows, startRank, columnSize, yesterdayRankMap }: {
           const rank = startRank + i
           if (!r) {
             return (
-              <tr key={`empty-${rank}`} style={{ borderBottom: '1px solid var(--border-light)' }}>
-                <td style={{ padding: '4px', textAlign: 'center', color: 'var(--text-muted)', fontWeight: 700 }}>{rank}</td>
-                <td colSpan={5} style={{ padding: '4px', color: 'var(--text-muted)', fontSize: 9 }}>—</td>
+              <tr key={`empty-${rank}`} style={{ borderBottom: '1px solid var(--border-light)', height: 24 }}>
+                <td style={{ padding: '4px', lineHeight: '14px', textAlign: 'center', color: 'var(--text-muted)', fontWeight: 700 }}>{rank}</td>
+                <td colSpan={5} style={{ padding: '4px', lineHeight: '14px', color: 'var(--text-muted)', fontSize: 9 }}>—</td>
               </tr>
             )
           }
           return (
-            <tr key={r.league} style={{ borderBottom: '1px solid var(--border-light)' }}>
-              <td style={{ padding: '4px', textAlign: 'center', whiteSpace: 'nowrap' }}>
-                <span style={{ color: 'var(--text-muted)', fontWeight: 700 }}>{rank}</span>{' '}
-                <RankChangeBadge current={rank} previous={yesterdayRankMap.get(r.league)} />
+            <tr key={r.league} style={{ borderBottom: '1px solid var(--border-light)', height: 24 }}>
+              <td style={{ padding: '4px', lineHeight: '14px', textAlign: 'center', whiteSpace: 'nowrap' }}>
+                <span style={{ color: 'var(--text-muted)', fontWeight: 700, lineHeight: '14px' }}>{rank}</span>{' '}
+                <span style={{ lineHeight: '14px', display: 'inline-block', verticalAlign: 'middle' }}><RankChangeBadge current={rank} previous={yesterdayRankMap.get(r.league)} /></span>
               </td>
-              <td style={{ padding: '4px', fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.league}>{r.league}</td>
-              <td style={{ padding: '4px', textAlign: 'center', color: 'var(--text-secondary)' }}>{r.total}</td>
-              <td style={{ padding: '4px', textAlign: 'center' }}><span style={{ fontWeight: 700, color: r.winRate >= 50 ? '#4ade80' : '#f87171' }}>{r.winRate.toFixed(0)}%</span></td>
-              <td style={{ padding: '4px', textAlign: 'center' }}><span style={{ fontWeight: 700, color: r.roi >= 0 ? '#4ade80' : '#f87171' }}>{r.roi >= 0 ? '+' : ''}{r.roi.toFixed(1)}%</span></td>
-              <td style={{ padding: '4px', textAlign: 'center', whiteSpace: 'nowrap' }}><span style={{ fontWeight: 700, color: r.profit >= 0 ? '#4ade80' : '#f87171' }}>{r.profit >= 0 ? '+' : ''}{r.profit.toLocaleString()}</span></td>
+              <td style={{ padding: '4px', lineHeight: '14px', fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.league}>{r.league}</td>
+              <td style={{ padding: '4px', lineHeight: '14px', textAlign: 'center', color: 'var(--text-secondary)' }}>{r.total}</td>
+              <td style={{ padding: '4px', lineHeight: '14px', textAlign: 'center' }}><span style={{ fontWeight: 700, color: r.winRate >= 50 ? '#4ade80' : '#f87171' }}>{r.winRate.toFixed(0)}%</span></td>
+              <td style={{ padding: '4px', lineHeight: '14px', textAlign: 'center' }}><span style={{ fontWeight: 700, color: r.roi >= 0 ? '#4ade80' : '#f87171' }}>{r.roi >= 0 ? '+' : ''}{r.roi.toFixed(1)}%</span></td>
+              <td style={{ padding: '4px', lineHeight: '14px', textAlign: 'center', whiteSpace: 'nowrap' }}><span style={{ fontWeight: 700, color: r.profit >= 0 ? '#4ade80' : '#f87171' }}>{r.profit >= 0 ? '+' : ''}{r.profit.toLocaleString()}</span></td>
             </tr>
           )
         })}
@@ -512,12 +570,14 @@ const SOCCER_MARKET_TABS: { value: SoccerMarketTab; label: string }[] = [
 ]
 
 // ─── 축구: 리그별 성적 (수익순 랭킹, 어제 대비 순위 변동, 10위 단위로 옆으로 배치) ──
-function SoccerLeagueSection({ bets, overrides, knownLeagues, onAddOverride, onAddLeague, onChangeSport }: {
+function SoccerLeagueSection({ bets, overrides, knownLeagues, onAddOverride, onAddLeague, onChangeSport, onRenameLeague, onDeleteLeague }: {
   bets: Bet[]
   overrides: LeagueOverride[]; knownLeagues: string[]
   onAddOverride: (keyword: string, league: string) => Promise<void>
   onAddLeague: (name: string) => Promise<void>
   onChangeSport: (bets: Bet[], newSport: Sport) => Promise<void>
+  onRenameLeague: (oldName: string, newName: string) => Promise<void>
+  onDeleteLeague: (name: string) => Promise<void>
 }) {
   const [marketTab, setMarketTab] = useState<SoccerMarketTab>('hcap15')
   const allSettled = bets.filter(b => b.result !== 'pending')
@@ -583,6 +643,7 @@ function SoccerLeagueSection({ bets, overrides, knownLeagues, onAddOverride, onA
 
       <div style={{ marginTop: 10 }}>
         <AddLeagueInput onAdd={onAddLeague} placeholder="새 리그 이름 (예: 프리미어리그)" />
+        <LeagueManageList leagues={knownLeagues} onRename={onRenameLeague} onDelete={onDeleteLeague} />
       </div>
 
       {etcGroups.length > 0 && (
@@ -603,12 +664,14 @@ function SoccerLeagueSection({ bets, overrides, knownLeagues, onAddOverride, onA
 }
 
 // ─── 축구 상세 통계 (배당 흐름 기반 — 마켓별 0.1단위 구간 통계) ──────
-function SoccerDetailPanel({ bets, overrides, knownLeagues, onAddOverride, onAddLeague, onChangeSport }: {
+function SoccerDetailPanel({ bets, overrides, knownLeagues, onAddOverride, onAddLeague, onChangeSport, onRenameLeague, onDeleteLeague }: {
   bets: Bet[]
   overrides: LeagueOverride[]; knownLeagues: string[]
   onAddOverride: (keyword: string, league: string) => Promise<void>
   onAddLeague: (name: string) => Promise<void>
   onChangeSport: (bets: Bet[], newSport: Sport) => Promise<void>
+  onRenameLeague: (oldName: string, newName: string) => Promise<void>
+  onDeleteLeague: (name: string) => Promise<void>
 }) {
   const settled = bets.filter(b => b.result !== 'pending')
   const ml = settled.filter(b => b.market === 'moneyline')
@@ -629,7 +692,7 @@ function SoccerDetailPanel({ bets, overrides, knownLeagues, onAddOverride, onAdd
 
   return (
     <div>
-      <SoccerLeagueSection bets={bets} overrides={overrides} knownLeagues={knownLeagues} onAddOverride={onAddOverride} onAddLeague={onAddLeague} onChangeSport={onChangeSport} />
+      <SoccerLeagueSection bets={bets} overrides={overrides} knownLeagues={knownLeagues} onAddOverride={onAddOverride} onAddLeague={onAddLeague} onChangeSport={onChangeSport} onRenameLeague={onRenameLeague} onDeleteLeague={onDeleteLeague} />
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
         {tables.map(t => <RuleStatsTable key={t.title} title={t.title} rows={t.rows} />)}
       </div>
@@ -702,12 +765,14 @@ function GenericDetailPanel({ bets }: { bets: Bet[] }) {
 
 
 // ─── LOL(e스포츠): 리그별 성적 (가나다순, 승률·ROI·손익) + 미확인 팀 매핑 ──
-function EsportsLeagueSection({ bets, overrides, knownLeagues, onAddOverride, onAddLeague, onChangeSport }: {
+function EsportsLeagueSection({ bets, overrides, knownLeagues, onAddOverride, onAddLeague, onChangeSport, onRenameLeague, onDeleteLeague }: {
   bets: Bet[]
   overrides: LeagueOverride[]; knownLeagues: string[]
   onAddOverride: (keyword: string, league: string) => Promise<void>
   onAddLeague: (name: string) => Promise<void>
   onChangeSport: (bets: Bet[], newSport: Sport) => Promise<void>
+  onRenameLeague: (oldName: string, newName: string) => Promise<void>
+  onDeleteLeague: (name: string) => Promise<void>
 }) {
   const allSettled = bets.filter(b => b.result !== 'pending')
   const leagueKeyOf = (b: Bet) => freeLeagueOf(b, overrides)
@@ -733,6 +798,7 @@ function EsportsLeagueSection({ bets, overrides, knownLeagues, onAddOverride, on
 
       <div style={{ marginTop: 10 }}>
         <AddLeagueInput onAdd={onAddLeague} placeholder="새 리그 이름 (예: LCK)" />
+        <LeagueManageList leagues={knownLeagues} onRename={onRenameLeague} onDelete={onDeleteLeague} />
       </div>
 
       {etcGroups.length > 0 && (
@@ -752,16 +818,18 @@ function EsportsLeagueSection({ bets, overrides, knownLeagues, onAddOverride, on
   )
 }
 
-function EsportsDetailPanel({ bets, overrides, knownLeagues, onAddOverride, onAddLeague, onChangeSport }: {
+function EsportsDetailPanel({ bets, overrides, knownLeagues, onAddOverride, onAddLeague, onChangeSport, onRenameLeague, onDeleteLeague }: {
   bets: Bet[]
   overrides: LeagueOverride[]; knownLeagues: string[]
   onAddOverride: (keyword: string, league: string) => Promise<void>
   onAddLeague: (name: string) => Promise<void>
   onChangeSport: (bets: Bet[], newSport: Sport) => Promise<void>
+  onRenameLeague: (oldName: string, newName: string) => Promise<void>
+  onDeleteLeague: (name: string) => Promise<void>
 }) {
   return (
     <div>
-      <EsportsLeagueSection bets={bets} overrides={overrides} knownLeagues={knownLeagues} onAddOverride={onAddOverride} onAddLeague={onAddLeague} onChangeSport={onChangeSport} />
+      <EsportsLeagueSection bets={bets} overrides={overrides} knownLeagues={knownLeagues} onAddOverride={onAddOverride} onAddLeague={onAddLeague} onChangeSport={onChangeSport} onRenameLeague={onRenameLeague} onDeleteLeague={onDeleteLeague} />
       <GenericDetailPanel bets={bets} />
     </div>
   )
@@ -1031,7 +1099,7 @@ function DeleteBetsModal({ target, bets, onClose, onDeleted }: {
 }
 
 
-function SportPanel({ bets, sport, onDeleteRequest, leagueOverrides, onAddLeagueOverride, soccerOverrides, soccerLeagues, onAddSoccerOverride, onAddSoccerLeague, esportsOverrides, esportsLeagues, onAddEsportsOverride, onAddEsportsLeague, onChangeSport }: {
+function SportPanel({ bets, sport, onDeleteRequest, leagueOverrides, onAddLeagueOverride, soccerOverrides, soccerLeagues, onAddSoccerOverride, onAddSoccerLeague, esportsOverrides, esportsLeagues, onAddEsportsOverride, onAddEsportsLeague, onChangeSport, onRenameSoccerLeague, onDeleteSoccerLeague, onRenameEsportsLeague, onDeleteEsportsLeague }: {
   bets: Bet[]; sport: typeof SPORTS[0]; onDeleteRequest: () => void
   leagueOverrides: LeagueOverride[]; onAddLeagueOverride: (keyword: string, league: League) => Promise<void>
   soccerOverrides: LeagueOverride[]; soccerLeagues: string[]
@@ -1041,6 +1109,10 @@ function SportPanel({ bets, sport, onDeleteRequest, leagueOverrides, onAddLeague
   onAddEsportsOverride: (keyword: string, league: string) => Promise<void>
   onAddEsportsLeague: (name: string) => Promise<void>
   onChangeSport: (bets: Bet[], newSport: Sport) => Promise<void>
+  onRenameSoccerLeague: (oldName: string, newName: string) => Promise<void>
+  onDeleteSoccerLeague: (name: string) => Promise<void>
+  onRenameEsportsLeague: (oldName: string, newName: string) => Promise<void>
+  onDeleteEsportsLeague: (name: string) => Promise<void>
 }) {
   const periodBets = bets.filter(b => b.sport === sport.value)
   const sb    = periodBets
@@ -1110,9 +1182,9 @@ function SportPanel({ bets, sport, onDeleteRequest, leagueOverrides, onAddLeague
           </div>
         )}
         {sport.value === 'baseball'   && <BaseballDetailPanel bets={periodBets} overrides={leagueOverrides} onAddOverride={onAddLeagueOverride} onChangeSport={onChangeSport} />}
-        {sport.value === 'soccer'     && <SoccerDetailPanel bets={periodBets} overrides={soccerOverrides} knownLeagues={soccerLeagues} onAddOverride={onAddSoccerOverride} onAddLeague={onAddSoccerLeague} onChangeSport={onChangeSport} />}
+        {sport.value === 'soccer'     && <SoccerDetailPanel bets={periodBets} overrides={soccerOverrides} knownLeagues={soccerLeagues} onAddOverride={onAddSoccerOverride} onAddLeague={onAddSoccerLeague} onChangeSport={onChangeSport} onRenameLeague={onRenameSoccerLeague} onDeleteLeague={onDeleteSoccerLeague} />}
         {sport.value === 'basketball' && <BasketballDetailPanel bets={periodBets} />}
-        {sport.value === 'esports'    && <EsportsDetailPanel bets={periodBets} overrides={esportsOverrides} knownLeagues={esportsLeagues} onAddOverride={onAddEsportsOverride} onAddLeague={onAddEsportsLeague} onChangeSport={onChangeSport} />}
+        {sport.value === 'esports'    && <EsportsDetailPanel bets={periodBets} overrides={esportsOverrides} knownLeagues={esportsLeagues} onAddOverride={onAddEsportsOverride} onAddLeague={onAddEsportsLeague} onChangeSport={onChangeSport} onRenameLeague={onRenameEsportsLeague} onDeleteLeague={onDeleteEsportsLeague} />}
         {!['baseball','soccer','basketball','esports'].includes(sport.value) && <GenericDetailPanel bets={periodBets} />}
       </div>
 
@@ -1204,6 +1276,21 @@ export default function Stats() {
     await supabase.from('soccer_leagues').upsert({ name }, { onConflict: 'name', ignoreDuplicates: true })
     setSoccerLeagues(p => Array.from(new Set([...p, name])).sort(koCompare))
   }
+  // 리그 이름 변경 — 등록/매핑/이미 지정된 베팅까지 함께 갱신 (같은 이름의 리그가 이미 있으면 그쪽으로 합쳐짐)
+  async function renameSoccerLeague(oldName: string, newName: string) {
+    if (!newName.trim() || newName === oldName) return
+    await supabase.from('soccer_leagues').update({ name: newName }).eq('name', oldName)
+    await supabase.from('soccer_league_overrides').update({ league: newName }).eq('league', oldName)
+    await supabase.from('bets').update({ league: newName }).eq('league', oldName).eq('sport', 'soccer')
+    await Promise.all([loadSoccerLeagueData(), loadBets()])
+  }
+  // 리그 삭제 — 팀 매핑도 함께 삭제되고, 이 리그로 지정됐던 베팅은 다시 미분류로 돌아감
+  async function deleteSoccerLeague(name: string) {
+    await supabase.from('soccer_league_overrides').delete().eq('league', name)
+    await supabase.from('bets').update({ league: '' }).eq('league', name).eq('sport', 'soccer')
+    await supabase.from('soccer_leagues').delete().eq('name', name)
+    await Promise.all([loadSoccerLeagueData(), loadBets()])
+  }
   async function loadEsportsLeagueData() {
     const [{ data: ovr }, { data: leagues }] = await Promise.all([
       supabase.from('esports_league_overrides').select('keyword, league'),
@@ -1221,6 +1308,19 @@ export default function Stats() {
   async function addEsportsLeague(name: string) {
     await supabase.from('esports_leagues').upsert({ name }, { onConflict: 'name', ignoreDuplicates: true })
     setEsportsLeagues(p => Array.from(new Set([...p, name])).sort(koCompare))
+  }
+  async function renameEsportsLeague(oldName: string, newName: string) {
+    if (!newName.trim() || newName === oldName) return
+    await supabase.from('esports_leagues').update({ name: newName }).eq('name', oldName)
+    await supabase.from('esports_league_overrides').update({ league: newName }).eq('league', oldName)
+    await supabase.from('bets').update({ league: newName }).eq('league', oldName).eq('sport', 'esports')
+    await Promise.all([loadEsportsLeagueData(), loadBets()])
+  }
+  async function deleteEsportsLeague(name: string) {
+    await supabase.from('esports_league_overrides').delete().eq('league', name)
+    await supabase.from('bets').update({ league: '' }).eq('league', name).eq('sport', 'esports')
+    await supabase.from('esports_leagues').delete().eq('name', name)
+    await Promise.all([loadEsportsLeagueData(), loadBets()])
   }
 
   // 달러 사이트 베팅을 원화로 환산 — 결과처리 시점에 저장된 환율 우선,
@@ -1416,6 +1516,10 @@ export default function Stats() {
               onAddEsportsOverride={addEsportsLeagueOverride}
               onAddEsportsLeague={addEsportsLeague}
               onChangeSport={changeBetsSport}
+              onRenameSoccerLeague={renameSoccerLeague}
+              onDeleteSoccerLeague={deleteSoccerLeague}
+              onRenameEsportsLeague={renameEsportsLeague}
+              onDeleteEsportsLeague={deleteEsportsLeague}
               onDeleteRequest={() => {
                 const sp = SPORTS.find(s => s.value === activeSport)!
                 setDeleteTarget({ label: sp.label, emoji: sp.emoji, matchFn: b => b.sport === sp.value && !b.is_live && b.parlay_group === null })
