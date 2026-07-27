@@ -1479,23 +1479,21 @@ export default function Dashboard() {
             </div>
           ) : (
             <div className="card" style={{ padding: '10px 14px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, gap: 10, flexWrap: 'wrap' }}>
                 <span className="card-title" style={{ margin: 0 }}>베팅 현황</span>
-                <button onClick={() => setShowSiteMgr(true)} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-secondary)', cursor: 'pointer', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-body)' }}>
-                  <Settings size={12} /> 사이트관리
-                </button>
-              </div>
-              {aggRollingTarget > 0 && (
-                <div style={{ position: 'relative', padding: '10px 14px', marginBottom: 12, borderRadius: 'var(--radius-sm)', border: '1px solid var(--gold-border)', background: 'var(--gold-bg)', display: 'flex', flexDirection: 'column', gap: 3, maxWidth: 320 }}>
-                  <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--gold)', marginBottom: 2, textTransform: 'uppercase', letterSpacing: '0.5px' }}>전체 사이트 남은 롤링 (원화 환산)</div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>남은 롤링</span>
-                    <span style={{ fontSize: 14, fontWeight: 800, fontFamily: 'var(--font-num)', color: aggRem > 0 ? 'var(--gold)' : 'var(--green)' }}>{Math.round(aggRem).toLocaleString()}원</span>
-                  </div>
-                  <div className="deposit-progress-bar"><div className="deposit-progress-fill" style={{ width: `${Math.min(100, aggPct)}%` }} /></div>
-                  <div style={{ fontSize: 11, color: aggPct >= 100 ? 'var(--green)' : 'var(--orange)', fontWeight: 700, textAlign: 'right' }}>{aggPct}%</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  {aggRollingTarget > 0 && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ fontSize: 12, fontWeight: 800, fontFamily: 'var(--font-num)', color: aggRem > 0 ? 'var(--gold)' : 'var(--green)' }}>{Math.round(aggRem).toLocaleString()}원</span>
+                      <div className="deposit-progress-bar" style={{ width: 50, margin: 0 }}><div className="deposit-progress-fill" style={{ width: `${Math.min(100, aggPct)}%` }} /></div>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: aggPct >= 100 ? 'var(--green)' : 'var(--orange)' }}>{aggPct}%</span>
+                    </div>
+                  )}
+                  <button onClick={() => setShowSiteMgr(true)} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-secondary)', cursor: 'pointer', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-body)' }}>
+                    <Settings size={12} /> 사이트관리
+                  </button>
                 </div>
-              )}
+              </div>
               <div className="site-cards-wrap" style={{ '--site-cols': colCount } as React.CSSProperties}>
               {sites.map(site => {
                 const dep = site.last_deposit ?? 0; const pt = site.point_deposit ?? 0
