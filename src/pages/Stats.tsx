@@ -411,6 +411,13 @@ function LeagueManageModal({ leagues, onRename, onDelete, onClose }: {
   const [confirmTarget, setConfirmTarget] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
 
+  // 모달이 떠 있는 동안은 뒤쪽 페이지가 휠 스크롤되지 않도록 잠금
+  useEffect(() => {
+    const prevOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = prevOverflow }
+  }, [])
+
   async function submitRename(oldName: string) {
     const trimmed = draft.trim()
     if (!trimmed || trimmed === oldName) { setEditing(null); return }
@@ -571,16 +578,18 @@ function LeagueRankColumn({ rows, startRank, columnSize, yesterdayRankMap }: {
           if (!r) {
             return (
               <tr key={`empty-${rank}`} style={{ borderBottom: '1px solid var(--border-light)', height: 24 }}>
-                <td style={{ padding: '4px', lineHeight: '14px', textAlign: 'center', color: 'var(--text-muted)', fontWeight: 700 }}>{rank}</td>
+                <td style={{ padding: '4px', lineHeight: '14px', whiteSpace: 'nowrap' }}>
+                  <span style={{ display: 'inline-block', width: 18, textAlign: 'right', color: 'var(--text-muted)', fontWeight: 700 }}>{rank}</span>
+                </td>
                 <td colSpan={5} style={{ padding: '4px', lineHeight: '14px', color: 'var(--text-muted)', fontSize: 9 }}>—</td>
               </tr>
             )
           }
           return (
             <tr key={r.league} style={{ borderBottom: '1px solid var(--border-light)', height: 24 }}>
-              <td style={{ padding: '4px', lineHeight: '14px', textAlign: 'center', whiteSpace: 'nowrap' }}>
-                <span style={{ color: 'var(--text-muted)', fontWeight: 700, lineHeight: '14px' }}>{rank}</span>{' '}
-                <span style={{ lineHeight: '14px', display: 'inline-block', verticalAlign: 'middle' }}><RankChangeBadge current={rank} previous={yesterdayRankMap.get(r.league)} /></span>
+              <td style={{ padding: '4px', lineHeight: '14px', whiteSpace: 'nowrap' }}>
+                <span style={{ display: 'inline-block', width: 18, textAlign: 'right', color: 'var(--text-muted)', fontWeight: 700 }}>{rank}</span>
+                <span style={{ marginLeft: 4, lineHeight: '14px', display: 'inline-block', verticalAlign: 'middle' }}><RankChangeBadge current={rank} previous={yesterdayRankMap.get(r.league)} /></span>
               </td>
               <td style={{ padding: '4px', lineHeight: '14px', fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.league}>{r.league}</td>
               <td style={{ padding: '4px', lineHeight: '14px', textAlign: 'center', color: 'var(--text-secondary)' }}>{r.total}</td>
