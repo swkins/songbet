@@ -12,6 +12,7 @@ export interface BetLite {
   profit: number
   bet_date: string
   created_at: string
+  league?: string | null
 }
 
 export interface TeamInsight {

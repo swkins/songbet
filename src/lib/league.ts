@@ -47,3 +47,34 @@ export function inferSoccerLeague(matchText: string, overrides?: LeagueOverride[
 export function koCompare(a: string, b: string): number {
   return a.localeCompare(b, 'ko')
 }
+
+// ─── 리그 자동완성 ───────────────────────────────────────────────
+// 경기 내용(TeamContentInput)의 팀 이름 자동완성과 동일한 방식으로,
+// 과거에 저장된 리그명들 중 한 글자만 입력해도 포함하는 것을 추천한다.
+export interface LeagueCandidate { name: string; lastDate: string }
+
+// 과거 베팅 전체에서 고유한 리그명 후보를 뽑아 최근 사용순으로 정렬
+export function buildLeagueCandidates(bets: { league?: string | null; bet_date: string }[]): LeagueCandidate[] {
+  const map = new Map<string, string>()
+  for (const b of bets) {
+    const name = (b.league ?? '').trim()
+    if (!name) continue
+    const prev = map.get(name)
+    if (!prev || b.bet_date > prev) map.set(name, b.bet_date)
+  }
+  return Array.from(map.entries())
+    .map(([name, lastDate]) => ({ name, lastDate }))
+    .sort((a, b) => b.lastDate.localeCompare(a.lastDate))
+}
+
+// 입력값을 포함하는 리그명 후보를 최대 limit개 반환 (자동완성 드롭다운용)
+export function suggestLeagueCandidates(query: string, candidates: LeagueCandidate[], limit = 8): string[] {
+  const q = query.trim()
+  if (!q) return []
+  const out: string[] = []
+  for (const c of candidates) {
+    if (c.name.includes(q)) out.push(c.name)
+    if (out.length >= limit) break
+  }
+  return out
+}
