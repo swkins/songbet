@@ -47,7 +47,7 @@ function SportButtonGroup({ value, onChange }: { value: string; onChange: (v: st
               color: active ? 'var(--gold)' : 'var(--text-secondary)',
               transition: 'all 0.15s',
             }}>
-            <span style={{ fontSize: 13, lineHeight: 1 }}>{sportGlyph(s.value) ?? SPORT_SHORT[s.value]}</span>{s.label}
+            <span style={{ fontSize: 17, lineHeight: 1 }}>{sportGlyph(s.value) ?? SPORT_SHORT[s.value]}</span>{s.label}
           </button>
         )
       })}
@@ -1745,7 +1745,7 @@ export default function Dashboard() {
                                   <div style={{ flex: 1, minWidth: 0 }}>
                                     {bet.league && <div style={{ paddingLeft: 22, fontSize: 9, color: 'var(--text-muted)', fontWeight: 700 }}>{bet.league}</div>}
                                     <div style={{ display: 'flex', gap: 4, marginBottom: 3, alignItems: 'center' }}>
-                                      <span style={{ fontSize: 14, lineHeight: 1, flexShrink: 0, width: 18, textAlign: 'center' }}>{sportGlyph(bet.sport) ?? SPORT_SHORT[bet.sport] ?? '📋'}</span>
+                                      <span style={{ fontSize: 18, lineHeight: 1, flexShrink: 0, width: 22, textAlign: 'center' }}>{sportGlyph(bet.sport) ?? SPORT_SHORT[bet.sport] ?? '📋'}</span>
                                       <span className="site-bet-match" style={{ flex: 1, marginBottom: 0, fontSize: 13 }}>{bet.match}</span>
                                       {bet.is_live && <span style={{ fontSize: 9, fontWeight: 700, color: '#f87171', background: 'rgba(248,113,113,0.12)', border: '1px solid rgba(248,113,113,0.3)', borderRadius: 3, padding: '1px 4px', flexShrink: 0 }}>🔴 LIVE</span>}
                                     </div>
@@ -1845,7 +1845,7 @@ export default function Dashboard() {
                                   onMouseEnter={() => setHoverBetId('s_' + bet.id)} onMouseLeave={() => setHoverBetId(null)}>
                                   {bet.league && <div style={{ paddingLeft: 25, fontSize: 9, color: 'var(--text-muted)', fontWeight: 700 }}>{bet.league}</div>}
                                   <div style={{ display: 'flex', gap: 5, marginBottom: 3 }}>
-                                    <span style={{ fontSize: 14, lineHeight: 1, flexShrink: 0, width: 20, textAlign: 'center' }}>{sportGlyph(bet.sport) ?? SPORT_SHORT[bet.sport] ?? '📋'}</span>
+                                    <span style={{ fontSize: 18, lineHeight: 1, flexShrink: 0, width: 24, textAlign: 'center' }}>{sportGlyph(bet.sport) ?? SPORT_SHORT[bet.sport] ?? '📋'}</span>
                                     <span className="site-bet-match" style={{ flex: 1, marginBottom: 0, fontSize: 12, color: bet.result === 'win' ? 'var(--green)' : bet.result === 'loss' ? 'var(--red)' : 'var(--text-secondary)' }}>{bet.match}</span>
                                   </div>
                                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingLeft: 25 }}>

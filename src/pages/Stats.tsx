@@ -225,16 +225,17 @@ function BaseballDetailPanel({ bets, overrides, knownLeagues, onAddOverride, onA
 }) {
   const allSettled = bets.filter(b => b.result !== 'pending')
   const leagueKeyOf = (b: Bet) => baseballLeagueKeyOf(b, overrides)
-  const FIXED = ['KBO', 'MLB', 'NPB']
+  const FIXED = ['KBO', 'MLB', 'NPB', 'CPBL', 'LMB']
 
   const leagueSummary: { league: string; label: string } [] = [
     { league: 'KBO', label: '🇰🇷 KBO' }, { league: 'MLB', label: '🇺🇸 MLB' }, { league: 'NPB', label: '🇯🇵 NPB' },
+    { league: 'CPBL', label: '🇹🇼 CPBL' }, { league: 'LMB', label: '🇲🇽 LMB' },
   ]
   const leagueStats = leagueSummary
     .map(({ league, label }) => ({ league, label, ...calcStats(allSettled.filter(b => leagueKeyOf(b) === league)) }))
     .filter(r => r.total > 0)
 
-  // KBO / MLB / NPB — 승패(2.1~2.9) 배당구간별 적중률·수익률을 클릭 없이 바로 표시 (기존과 동일하게 유지)
+  // KBO / MLB / NPB / CPBL / LMB — 승패(2.1~2.9) 배당구간별 적중률·수익률을 클릭 없이 바로 표시 (기존과 동일하게 유지)
   const leagueTables = leagueSummary.map(({ league, label }) => {
     const leagueBets = allSettled.filter(b => leagueKeyOf(b) === league)
     const mlBets = leagueBets.filter(b => b.market === 'moneyline')
@@ -242,7 +243,7 @@ function BaseballDetailPanel({ bets, overrides, knownLeagues, onAddOverride, onA
     return { league, label, rows: baseballMlRows(mlBets), otherBets }
   }).filter(t => t.rows.some(r => r.bets.length > 0) || t.otherBets.length > 0)
 
-  // 추가로 등록한 리그(KBO/MLB/NPB 외) — 축구/농구 등과 동일하게 승률·ROI·손익 표로 표시
+  // 추가로 등록한 리그(KBO/MLB/NPB/CPBL/LMB 외) — 축구/농구 등과 동일하게 승률·ROI·손익 표로 표시
   const customLeagueNames = Array.from(new Set(allSettled.map(leagueKeyOf).filter(l => l !== 'ETC' && !FIXED.includes(l)))).sort(koCompare)
   const customRows: RuleRow[] = customLeagueNames.map(l => ({ label: l, tier: 'none', bets: allSettled.filter(b => leagueKeyOf(b) === l) }))
 
@@ -968,7 +969,7 @@ function LivePanel({ bets, onDeleteRequest }: { bets: Bet[]; onDeleteRequest: ()
             return (
               <div key={r.sp} className="card" style={{ flex: '1 0 160px', minWidth: 160, maxWidth: 220 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-                  <span style={{ fontSize: 16 }}>{sportGlyph(r.sp) ?? r.emoji}</span>
+                  <span style={{ fontSize: 20 }}>{sportGlyph(r.sp, '1.2em') ?? r.emoji}</span>
                   <div>
                     <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)' }}>{r.sp}</div>
                     <div style={{ fontSize: 9, color: 'var(--text-secondary)' }}>{r.total}건</div>
@@ -1292,7 +1293,7 @@ export default function Stats() {
   const [volleyballOverrides, setVolleyballOverrides] = useState<LeagueOverride[]>([])
   const [volleyballLeagues, setVolleyballLeagues] = useState<string[]>([])
 
-  const BASEBALL_FIXED_LEAGUES = ['KBO', 'MLB', 'NPB']
+  const BASEBALL_FIXED_LEAGUES = ['KBO', 'MLB', 'NPB', 'CPBL', 'LMB']
 
   useEffect(() => { loadBets(); loadSites(); loadRates(); loadBaseballLeagueData(); loadSoccerLeagueData(); loadEsportsLeagueData(); loadBasketballLeagueData(); loadVolleyballLeagueData() }, [])
   async function loadBets() {
@@ -1560,7 +1561,7 @@ export default function Stats() {
               <button key={s.value}
                 onClick={() => setActiveSport(s.value)}
                 style={{ padding: '10px 20px', borderRadius: 8, border: activeSport === s.value ? '2px solid var(--gold)' : '1px solid var(--border)', background: activeSport === s.value ? 'var(--gold-bg)' : 'var(--bg-card)', color: activeSport === s.value ? 'var(--gold)' : 'var(--text-secondary)', fontWeight: 700, fontSize: 14, cursor: 'pointer', fontFamily: 'var(--font-body)', transition: 'all 0.15s' }}>
-                {sportGlyph(s.value) ?? s.emoji} {s.label} <span style={{ opacity: 0.7, fontSize: 12 }}>({s.cnt})</span>
+                {sportGlyph(s.value, '1.3em') ?? <span style={{ fontSize: 17 }}>{s.emoji}</span>} {s.label} <span style={{ opacity: 0.7, fontSize: 12 }}>({s.cnt})</span>
               </button>
             ))}
           </div>
@@ -1604,7 +1605,7 @@ export default function Stats() {
                       <div key={s.value}
                         onClick={() => setActiveSport(s.value as Sport)}
                         style={{ flex: '1 0 140px', background: 'var(--bg-card)', border: `1px solid ${isPos ? 'var(--green-border)' : 'var(--red-border)'}`, borderRadius: 10, padding: '12px 14px', cursor: 'pointer', transition: 'all 0.15s' }}>
-                        <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6 }}>{sportGlyph(s.value) ?? s.emoji} {s.label}</div>
+                        <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6 }}>{sportGlyph(s.value, '1.3em') ?? <span style={{ fontSize: 16 }}>{s.emoji}</span>} {s.label}</div>
                         <div style={{ fontSize: 18, fontWeight: 800, fontFamily: 'var(--font-num)', color: isPos ? 'var(--green)' : 'var(--red)', marginBottom: 2 }}>
                           {isPos ? '+' : ''}{profit.toLocaleString()}원
                         </div>
