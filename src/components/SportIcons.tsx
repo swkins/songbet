@@ -17,14 +17,39 @@ export function SoccerBallIcon({ size = '1em', style }: IconProps) {
       style={{ display: 'inline-block', verticalAlign: '-0.15em', flexShrink: 0, ...style }}
       xmlns="http://www.w3.org/2000/svg"
     >
-      <circle cx="12" cy="12" r="10.5" fill="#F5F7FA" stroke="#1C1F26" strokeWidth="1" />
-      {/* 중앙 오각형 */}
-      <polygon points="12,7.2 15,9.4 13.9,12.9 10.1,12.9 9,9.4" fill="#1C1F26" />
-      {/* 오각형과 연결되는 이음선 + 주변 조각 */}
-      <path d="M12,7.2 L9.3,3.4 M12,7.2 L14.7,3.4 M15,9.4 L19.2,8.7 M15,9.4 L18.4,12.6 M13.9,12.9 L15.6,17.2 M13.9,12.9 L10.1,12.9 M10.1,12.9 L8.4,17.2 M9,9.4 L4.8,8.7 M9,9.4 L5.6,12.6"
-        stroke="#1C1F26" strokeWidth="0.9" fill="none" strokeLinecap="round" />
-      {/* 바깥 곡면 느낌을 위한 하이라이트 */}
-      <path d="M6.2,5.4 A10.5,10.5 0 0 1 12,1.5" stroke="#FFFFFF" strokeWidth="1.1" fill="none" strokeLinecap="round" opacity="0.55" />
+      <defs>
+        <radialGradient id="soccerBallShade" cx="38%" cy="32%" r="75%">
+          <stop offset="0%" stopColor="#FFFFFF" />
+          <stop offset="60%" stopColor="#F2F3F5" />
+          <stop offset="100%" stopColor="#D7DAE0" />
+        </radialGradient>
+        <clipPath id="soccerBallClip">
+          <circle cx="12" cy="12" r="10" />
+        </clipPath>
+      </defs>
+      <circle cx="12" cy="12" r="10" fill="url(#soccerBallShade)" stroke="#1C1F26" strokeWidth="1" />
+      <g clipPath="url(#soccerBallClip)">
+        {/* 중앙 오각형 (전형적인 축구공 무늬의 핵심 조각) */}
+        <polygon points="12,5.6 15.2,7.9 13.9,11.7 10.1,11.7 8.8,7.9" fill="#1C1F26" />
+        {/* 중앙 오각형 각 꼭짓점에서 바깥으로 뻗는 이음선 */}
+        <path
+          d="M12,5.6 L12,1.4 M15.2,7.9 L18.6,4 M13.9,11.7 L22.6,10.6 M10.1,11.7 L1.4,10.6 M8.8,7.9 L5.4,4"
+          stroke="#1C1F26" strokeWidth="1" fill="none" strokeLinecap="round"
+        />
+        {/* 가장자리에 걸쳐 살짝 잘려 보이는 어두운 조각들 */}
+        <ellipse cx="12" cy="1.6" rx="2.1" ry="1.7" fill="#1C1F26" />
+        <ellipse cx="19.2" cy="3.6" rx="2" ry="1.7" fill="#1C1F26" transform="rotate(35 19.2 3.6)" />
+        <ellipse cx="23.1" cy="10.6" rx="2" ry="1.7" fill="#1C1F26" transform="rotate(95 23.1 10.6)" />
+        <ellipse cx="0.9" cy="10.6" rx="2" ry="1.7" fill="#1C1F26" transform="rotate(-95 0.9 10.6)" />
+        <ellipse cx="4.8" cy="3.6" rx="2" ry="1.7" fill="#1C1F26" transform="rotate(-35 4.8 3.6)" />
+        {/* 아래쪽 이음선 + 조각 (공 전체에 무늬가 둘러진 느낌) */}
+        <path d="M9.2,15.6 L6.5,20 M14.8,15.6 L17.5,20 M9.2,15.6 L14.8,15.6" stroke="#1C1F26" strokeWidth="1" fill="none" strokeLinecap="round" />
+        <ellipse cx="6.1" cy="21.3" rx="2" ry="1.7" fill="#1C1F26" transform="rotate(-60 6.1 21.3)" />
+        <ellipse cx="17.9" cy="21.3" rx="2" ry="1.7" fill="#1C1F26" transform="rotate(60 17.9 21.3)" />
+      </g>
+      <circle cx="12" cy="12" r="10" fill="none" stroke="#1C1F26" strokeWidth="1" />
+      {/* 곡면 하이라이트 */}
+      <path d="M5.6,5.2 A10,10 0 0 1 11.6,1.1" stroke="#FFFFFF" strokeWidth="1.1" fill="none" strokeLinecap="round" opacity="0.6" />
     </svg>
   )
 }
