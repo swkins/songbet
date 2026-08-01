@@ -5,7 +5,7 @@ import { Plus, Trash2, ChevronDown, ChevronUp, ExternalLink, RefreshCw, Trending
 import {
   LEAGUES, fetchScheduleEvents, extractTeamData, computeForm, matchupProbability, filterRecentGames,
   seriesScoreProbabilities, computeOddsValue, fetchLeagueTeams, findTeamCode, teamNameMatches,
-  type RawScheduleEvent,
+  classifyGameNarrative, type RawScheduleEvent, type TeamGameRecord, type NarrativeTeam,
 } from '../lib/lolEsports'
 
 interface EsportsTeam {
@@ -18,6 +18,27 @@ interface EsportsRosterPlayer {
   lolesports_player_id?: string | null
 }
 type RosterPatch = Partial<Pick<EsportsRosterPlayer, 'comment' | 'role' | 'nationality' | 'joined_at' | 'contract_until'>>
+
+interface EsportsGameStat {
+  id: string
+  team_id: string
+  team2_name: string
+  match_start_time: string | null
+  game_number: number
+  duration_seconds: number | null
+  team1_kills: number | null; team2_kills: number | null
+  team1_dragons: number | null; team2_dragons: number | null
+  team1_towers: number | null; team2_towers: number | null
+  team1_inhibitors: number | null; team2_inhibitors: number | null
+  team1_barons: number | null; team2_barons: number | null
+  winner_team: NarrativeTeam | null
+  first_blood_team: NarrativeTeam | null
+  first_tower_team: NarrativeTeam | null
+  first_baron_team: NarrativeTeam | null
+  fifth_kill_team: NarrativeTeam | null
+  tenth_kill_team: NarrativeTeam | null
+  notes: string | null
+}
 
 // ─── 공용 UI 조각 ──────────────────────────────────────────────────
 function CommentBox({ value, onSave, placeholder }: { value: string; onSave: (v: string) => void; placeholder: string }) {
@@ -173,9 +194,236 @@ function UpcomingPanel({ events, loading, error }: { events: RawScheduleEvent[] 
   )
 }
 
+// ─── 세트 기록 수동 입력 ────────────────────────────────────────
+function StatPairInput({ label, valueA, valueB, onChangeA, onChangeB }: {
+  label: string; valueA: string; valueB: string; onChangeA: (v: string) => void; onChangeB: (v: string) => void
+}) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      <span style={{ fontSize: 10, color: 'var(--text-secondary)', width: 46, flexShrink: 0 }}>{label}</span>
+      <input value={valueA} onChange={e => onChangeA(e.target.value.replace(/[^0-9]/g, ''))} inputMode="numeric"
+        style={{ width: 40, fontSize: 11, padding: '3px 4px', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text-primary)', textAlign: 'center' }} />
+      <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>:</span>
+      <input value={valueB} onChange={e => onChangeB(e.target.value.replace(/[^0-9]/g, ''))} inputMode="numeric"
+        style={{ width: 40, fontSize: 11, padding: '3px 4px', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text-primary)', textAlign: 'center' }} />
+    </div>
+  )
+}
+
+function MilestoneSelect({ label, value, onChange, teamName, opponentName }: {
+  label: string; value: NarrativeTeam | ''; onChange: (v: NarrativeTeam | '') => void; teamName: string; opponentName: string
+}) {
+  return (
+    <div>
+      <div style={{ fontSize: 8, color: 'var(--text-muted)', marginBottom: 2 }}>{label}</div>
+      <select value={value} onChange={e => onChange(e.target.value as NarrativeTeam | '')}
+        style={{ width: '100%', fontSize: 10, padding: '3px 4px', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text-primary)', fontFamily: 'var(--font-body)' }}>
+        <option value="">모름</option>
+        <option value="team1">{teamName}</option>
+        <option value="team2">{opponentName}</option>
+      </select>
+    </div>
+  )
+}
+
+interface GameStatForm {
+  gameNumber: number
+  durationMin: string; durationSec: string
+  team1Kills: string; team2Kills: string
+  team1Dragons: string; team2Dragons: string
+  team1Towers: string; team2Towers: string
+  team1Inhibitors: string; team2Inhibitors: string
+  team1Barons: string; team2Barons: string
+  winnerTeam: NarrativeTeam
+  firstBloodTeam: NarrativeTeam | ''
+  firstTowerTeam: NarrativeTeam | ''
+  firstBaronTeam: NarrativeTeam | ''
+  fifthKillTeam: NarrativeTeam | ''
+  tenthKillTeam: NarrativeTeam | ''
+}
+
+function emptyGameStatForm(gameNumber: number): GameStatForm {
+  return {
+    gameNumber, durationMin: '', durationSec: '',
+    team1Kills: '', team2Kills: '', team1Dragons: '', team2Dragons: '',
+    team1Towers: '', team2Towers: '', team1Inhibitors: '', team2Inhibitors: '',
+    team1Barons: '', team2Barons: '', winnerTeam: 'team1',
+    firstBloodTeam: '', firstTowerTeam: '', firstBaronTeam: '', fifthKillTeam: '', tenthKillTeam: '',
+  }
+}
+
+function GameStatCard({ stat, teamName, onDelete }: { stat: EsportsGameStat; teamName: string; onDelete: (id: string) => void }) {
+  const narrative = classifyGameNarrative({
+    team1Kills: stat.team1_kills ?? 0, team2Kills: stat.team2_kills ?? 0,
+    team1Dragons: stat.team1_dragons ?? 0, team2Dragons: stat.team2_dragons ?? 0,
+    team1Towers: stat.team1_towers ?? 0, team2Towers: stat.team2_towers ?? 0,
+    team1Inhibitors: stat.team1_inhibitors ?? 0, team2Inhibitors: stat.team2_inhibitors ?? 0,
+    team1Barons: stat.team1_barons ?? 0, team2Barons: stat.team2_barons ?? 0,
+    winnerTeam: stat.winner_team ?? 'team1',
+    firstBloodTeam: stat.first_blood_team, firstTowerTeam: stat.first_tower_team, firstBaronTeam: stat.first_baron_team,
+    fifthKillTeam: stat.fifth_kill_team, tenthKillTeam: stat.tenth_kill_team,
+  })
+  return (
+    <div style={{ background: 'var(--bg-elevated)', borderRadius: 6, padding: '8px 10px', fontSize: 10 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+        <span style={{ fontWeight: 800 }}>
+          {stat.game_number}세트{stat.duration_seconds ? ` · ${Math.floor(stat.duration_seconds / 60)}:${String(stat.duration_seconds % 60).padStart(2, '0')}` : ''}
+        </span>
+        <button onClick={() => onDelete(stat.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex' }}>
+          <Trash2 size={10} />
+        </button>
+      </div>
+      <div style={{ color: 'var(--text-secondary)', marginBottom: 4, lineHeight: 1.6 }}>
+        킬 {stat.team1_kills ?? '-'}:{stat.team2_kills ?? '-'} · 드래곤 {stat.team1_dragons ?? '-'}:{stat.team2_dragons ?? '-'} · 타워 {stat.team1_towers ?? '-'}:{stat.team2_towers ?? '-'} · 억제기 {stat.team1_inhibitors ?? '-'}:{stat.team2_inhibitors ?? '-'} · 바론 {stat.team1_barons ?? '-'}:{stat.team2_barons ?? '-'}
+      </div>
+      <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontWeight: 800, color: 'var(--gold)', background: 'var(--gold-bg)', border: '1px solid var(--gold-border)', borderRadius: 4, padding: '2px 6px', marginBottom: 4 }}>
+        {narrative.label}
+      </div>
+      <div style={{ color: 'var(--text-muted)', lineHeight: 1.4 }}>{narrative.detail}</div>
+    </div>
+  )
+}
+
+function RecentMatchRow({ teamId, teamName, game }: { teamId: string; teamName: string; game: TeamGameRecord }) {
+  const [expanded, setExpanded] = useState(false)
+  const [sets, setSets] = useState<EsportsGameStat[] | null>(null)
+  const [loadingSets, setLoadingSets] = useState(false)
+  const [showForm, setShowForm] = useState(false)
+  const [form, setForm] = useState<GameStatForm>(() => emptyGameStatForm(1))
+  const [saving, setSaving] = useState(false)
+
+  async function loadSets() {
+    setLoadingSets(true)
+    const { data } = await supabase.from('esports_game_stats').select('*')
+      .eq('team_id', teamId).eq('team2_name', game.opponent).eq('match_start_time', game.startTime)
+      .order('game_number')
+    setSets((data as EsportsGameStat[]) ?? [])
+    setLoadingSets(false)
+  }
+
+  function toggle() {
+    const next = !expanded
+    setExpanded(next)
+    if (next && sets === null) loadSets()
+  }
+
+  function openAddForm() {
+    setForm(emptyGameStatForm((sets?.length ?? 0) + 1))
+    setShowForm(true)
+  }
+
+  async function saveSet() {
+    setSaving(true)
+    const toInt = (v: string) => v === '' ? null : parseInt(v, 10)
+    const duration = (form.durationMin || form.durationSec)
+      ? (parseInt(form.durationMin || '0', 10) * 60 + parseInt(form.durationSec || '0', 10))
+      : null
+    const payload = {
+      team_id: teamId, team2_name: game.opponent, match_start_time: game.startTime, game_number: form.gameNumber,
+      duration_seconds: duration,
+      team1_kills: toInt(form.team1Kills), team2_kills: toInt(form.team2Kills),
+      team1_dragons: toInt(form.team1Dragons), team2_dragons: toInt(form.team2Dragons),
+      team1_towers: toInt(form.team1Towers), team2_towers: toInt(form.team2Towers),
+      team1_inhibitors: toInt(form.team1Inhibitors), team2_inhibitors: toInt(form.team2Inhibitors),
+      team1_barons: toInt(form.team1Barons), team2_barons: toInt(form.team2Barons),
+      winner_team: form.winnerTeam,
+      first_blood_team: form.firstBloodTeam || null,
+      first_tower_team: form.firstTowerTeam || null,
+      first_baron_team: form.firstBaronTeam || null,
+      fifth_kill_team: form.fifthKillTeam || null,
+      tenth_kill_team: form.tenthKillTeam || null,
+      source: 'manual',
+    }
+    const { data } = await supabase.from('esports_game_stats')
+      .upsert(payload, { onConflict: 'team_id,team2_name,match_start_time,game_number' })
+      .select().single()
+    if (data) {
+      setSets(prev => {
+        const others = (prev ?? []).filter(s => s.game_number !== (data as EsportsGameStat).game_number)
+        return [...others, data as EsportsGameStat].sort((a, b) => a.game_number - b.game_number)
+      })
+      setShowForm(false)
+    }
+    setSaving(false)
+  }
+
+  async function deleteSet(id: string) {
+    await supabase.from('esports_game_stats').delete().eq('id', id)
+    setSets(prev => (prev ?? []).filter(s => s.id !== id))
+  }
+
+  return (
+    <div>
+      <div onClick={toggle} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, padding: '5px 8px', background: 'var(--bg-card)', borderRadius: 6, cursor: 'pointer' }}>
+        {expanded ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+        <span style={{ color: 'var(--text-muted)', width: 50, flexShrink: 0 }}>{dayjs(game.startTime).format('MM/DD')}</span>
+        <span style={{ flex: 1 }}>vs {game.opponent}</span>
+        <span style={{ fontWeight: 800, color: game.teamScore > game.oppScore ? 'var(--green)' : 'var(--red)', flexShrink: 0 }}>{game.teamScore} : {game.oppScore}</span>
+      </div>
+      {expanded && (
+        <div style={{ padding: '8px 8px 8px 22px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {loadingSets && <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>불러오는 중...</div>}
+          {!loadingSets && sets && sets.map(s => (
+            <GameStatCard key={s.id} stat={s} teamName={teamName} onDelete={deleteSet} />
+          ))}
+          {!loadingSets && sets && sets.length === 0 && !showForm && (
+            <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>기록된 세트가 없습니다.</div>
+          )}
+          {!showForm && (
+            <button onClick={openAddForm} className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: 10, alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: 4 }}>
+              <Plus size={10} /> 세트 기록 추가
+            </button>
+          )}
+          {showForm && (
+            <div style={{ background: 'var(--bg-elevated)', borderRadius: 6, padding: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ fontSize: 10, fontWeight: 700 }}>{form.gameNumber}세트 기록 입력</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: 10, color: 'var(--text-secondary)', width: 46 }}>게임시간</span>
+                <input value={form.durationMin} onChange={e => setForm(f => ({ ...f, durationMin: e.target.value.replace(/[^0-9]/g, '') }))}
+                  placeholder="분" inputMode="numeric" style={{ width: 40, fontSize: 11, padding: '3px 4px', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text-primary)', textAlign: 'center' }} />
+                <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>분</span>
+                <input value={form.durationSec} onChange={e => setForm(f => ({ ...f, durationSec: e.target.value.replace(/[^0-9]/g, '') }))}
+                  placeholder="초" inputMode="numeric" style={{ width: 40, fontSize: 11, padding: '3px 4px', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text-primary)', textAlign: 'center' }} />
+                <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>초</span>
+              </div>
+              <StatPairInput label="킬" valueA={form.team1Kills} valueB={form.team2Kills} onChangeA={v => setForm(f => ({ ...f, team1Kills: v }))} onChangeB={v => setForm(f => ({ ...f, team2Kills: v }))} />
+              <StatPairInput label="드래곤" valueA={form.team1Dragons} valueB={form.team2Dragons} onChangeA={v => setForm(f => ({ ...f, team1Dragons: v }))} onChangeB={v => setForm(f => ({ ...f, team2Dragons: v }))} />
+              <StatPairInput label="타워" valueA={form.team1Towers} valueB={form.team2Towers} onChangeA={v => setForm(f => ({ ...f, team1Towers: v }))} onChangeB={v => setForm(f => ({ ...f, team2Towers: v }))} />
+              <StatPairInput label="억제기" valueA={form.team1Inhibitors} valueB={form.team2Inhibitors} onChangeA={v => setForm(f => ({ ...f, team1Inhibitors: v }))} onChangeB={v => setForm(f => ({ ...f, team2Inhibitors: v }))} />
+              <StatPairInput label="바론" valueA={form.team1Barons} valueB={form.team2Barons} onChangeA={v => setForm(f => ({ ...f, team1Barons: v }))} onChangeB={v => setForm(f => ({ ...f, team2Barons: v }))} />
+
+              <div>
+                <div style={{ fontSize: 8, color: 'var(--text-muted)', marginBottom: 2 }}>승리팀</div>
+                <select value={form.winnerTeam} onChange={e => setForm(f => ({ ...f, winnerTeam: e.target.value as NarrativeTeam }))}
+                  style={{ width: '100%', fontSize: 10, padding: '3px 4px', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text-primary)', fontFamily: 'var(--font-body)' }}>
+                  <option value="team1">{teamName}</option>
+                  <option value="team2">{game.opponent}</option>
+                </select>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                <MilestoneSelect label="첫 킬" value={form.firstBloodTeam} onChange={v => setForm(f => ({ ...f, firstBloodTeam: v }))} teamName={teamName} opponentName={game.opponent} />
+                <MilestoneSelect label="첫 타워" value={form.firstTowerTeam} onChange={v => setForm(f => ({ ...f, firstTowerTeam: v }))} teamName={teamName} opponentName={game.opponent} />
+                <MilestoneSelect label="첫 내셔" value={form.firstBaronTeam} onChange={v => setForm(f => ({ ...f, firstBaronTeam: v }))} teamName={teamName} opponentName={game.opponent} />
+                <MilestoneSelect label="5번째 킬 선취" value={form.fifthKillTeam} onChange={v => setForm(f => ({ ...f, fifthKillTeam: v }))} teamName={teamName} opponentName={game.opponent} />
+                <MilestoneSelect label="10번째 킬 선취" value={form.tenthKillTeam} onChange={v => setForm(f => ({ ...f, tenthKillTeam: v }))} teamName={teamName} opponentName={game.opponent} />
+              </div>
+
+              <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                <button onClick={() => setShowForm(false)} className="btn btn-ghost" style={{ padding: '5px 10px', fontSize: 11 }}>취소</button>
+                <button onClick={saveSet} disabled={saving} className="btn btn-primary" style={{ padding: '5px 10px', fontSize: 11 }}>{saving ? '저장 중...' : '저장'}</button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── 팀 카드 안: 경기 분석(다음 상대 예측 + 배당 가치) ────────────
-function TeamAnalysisPanel({ teamName, events, loading, error }: {
-  teamName: string; events: RawScheduleEvent[] | null; loading: boolean; error: boolean
+function TeamAnalysisPanel({ teamId, teamName, events, loading, error }: {
+  teamId: string; teamName: string; events: RawScheduleEvent[] | null; loading: boolean; error: boolean
 }) {
   const [oddsInputs, setOddsInputs] = useState<Record<string, string>>({})
 
@@ -220,11 +468,7 @@ function TeamAnalysisPanel({ teamName, events, loading, error }: {
             )}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               {recentGames.map((g, i) => (
-                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, padding: '5px 8px', background: 'var(--bg-card)', borderRadius: 6 }}>
-                  <span style={{ color: 'var(--text-muted)', width: 50, flexShrink: 0 }}>{dayjs(g.startTime).format('MM/DD')}</span>
-                  <span style={{ flex: 1 }}>vs {g.opponent}</span>
-                  <span style={{ fontWeight: 800, color: g.teamScore > g.oppScore ? 'var(--green)' : 'var(--red)', flexShrink: 0 }}>{g.teamScore} : {g.oppScore}</span>
-                </div>
+                <RecentMatchRow key={i} teamId={teamId} teamName={teamName} game={g} />
               ))}
             </div>
           </div>
@@ -411,7 +655,7 @@ function TeamCard({ team, roster, events, eventsLoading, eventsError, syncing, o
       </div>
       {expanded && (
         <div style={{ marginTop: 10 }}>
-          <TeamAnalysisPanel teamName={team.name} events={events} loading={eventsLoading} error={eventsError} />
+          <TeamAnalysisPanel teamId={team.id} teamName={team.name} events={events} loading={eventsLoading} error={eventsError} />
           <NamuwikiPanel team={team} onSaveUrl={onSaveNamuwikiUrl} onRefreshed={onNamuwikiRefreshed} />
           <div style={{ marginBottom: 10 }}>
             <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 4 }}>팀 코멘트</div>

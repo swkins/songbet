@@ -318,6 +318,81 @@ export function findTeamCode(events: RawScheduleEvent[], teamQuery: string): str
 
 export interface OddsValue { impliedProb: number; ev: number; edgePct: number; isValue: boolean }
 
+// ─── 세트 흐름 판정 (완벽한 승리 / 리드 지킨 승리 / 역전승 / 박빙·후반장악) ───
+export type NarrativeTeam = 'team1' | 'team2'
+
+export interface GameStatsInput {
+  team1Kills: number; team2Kills: number
+  team1Dragons: number; team2Dragons: number
+  team1Towers: number; team2Towers: number
+  team1Inhibitors: number; team2Inhibitors: number
+  team1Barons: number; team2Barons: number
+  winnerTeam: NarrativeTeam
+  firstBloodTeam?: NarrativeTeam | null
+  firstTowerTeam?: NarrativeTeam | null
+  firstBaronTeam?: NarrativeTeam | null
+  fifthKillTeam?: NarrativeTeam | null
+  tenthKillTeam?: NarrativeTeam | null
+}
+
+export interface GameNarrative {
+  label: string
+  detail: string
+  earlyLeader: NarrativeTeam | 'even' | null
+  dominanceScore: number // 승자 관점 최종 격차 점수 (클수록 압도적)
+}
+
+// 초반 마일스톤(첫 킬/첫 타워/첫 내셔/5킬·10킬 선취) + 최종 오브젝트 격차를 함께 봐서
+// "완벽한 승리 / 리드를 지킨 승리 / 역전승 / 박빙·후반장악"으로 분류
+export function classifyGameNarrative(g: GameStatsInput): GameNarrative {
+  const loser: NarrativeTeam = g.winnerTeam === 'team1' ? 'team2' : 'team1'
+
+  const milestones = [g.firstBloodTeam, g.firstTowerTeam, g.firstBaronTeam, g.fifthKillTeam, g.tenthKillTeam]
+  let team1Early = 0, team2Early = 0
+  for (const m of milestones) {
+    if (m === 'team1') team1Early++
+    else if (m === 'team2') team2Early++
+  }
+  const totalMarked = team1Early + team2Early
+  let earlyLeader: NarrativeTeam | 'even' | null = null
+  if (totalMarked > 0) {
+    earlyLeader = team1Early > team2Early ? 'team1' : team2Early > team1Early ? 'team2' : 'even'
+  }
+
+  const sign = g.winnerTeam === 'team1' ? 1 : -1
+  const killsDiff = sign * (g.team1Kills - g.team2Kills)
+  const dragonsDiff = sign * (g.team1Dragons - g.team2Dragons)
+  const towersDiff = sign * (g.team1Towers - g.team2Towers)
+  const inhibsDiff = sign * (g.team1Inhibitors - g.team2Inhibitors)
+  const baronsDiff = sign * (g.team1Barons - g.team2Barons)
+  const dominanceScore = killsDiff * 1 + dragonsDiff * 1.5 + towersDiff * 1.2 + inhibsDiff * 2.5 + baronsDiff * 3
+
+  const winnerHadEarlyLead = earlyLeader === g.winnerTeam
+  const loserHadEarlyLead = earlyLeader === loser
+
+  let label: string, detail: string
+  if (loserHadEarlyLead) {
+    label = '역전승'
+    detail = '초반 주요 지표(첫 킬·첫 타워·첫 내셔·5킬/10킬 선취)에서는 패배팀이 앞섰지만, 최종적으로는 승리팀이 뒤집었습니다.'
+  } else if (winnerHadEarlyLead && dominanceScore >= 8) {
+    label = '완벽한 승리'
+    detail = '초반 마일스톤과 최종 오브젝트·킬 격차 모두에서 일방적으로 앞선 스타트-투-피니시 승리입니다.'
+  } else if (winnerHadEarlyLead) {
+    label = '리드를 지킨 승리'
+    detail = '초반 주도권을 잡은 뒤 큰 흔들림 없이 승리로 연결했습니다.'
+  } else if (earlyLeader === 'even' || earlyLeader === null) {
+    label = dominanceScore >= 8 ? '후반 장악승' : '박빙의 승리'
+    detail = dominanceScore >= 8
+      ? '초반은 팽팽했지만 중후반 오브젝트 싸움에서 확실히 앞서며 승리했습니다.'
+      : '초반부터 끝까지 큰 격차 없이 접전 끝에 승리했습니다.'
+  } else {
+    label = '박빙의 승리'
+    detail = '초반과 최종 스탯 모두 큰 차이가 없는 접전이었습니다.'
+  }
+
+  return { label, detail, earlyLeader, dominanceScore }
+}
+
 // 배당 대비 기대값(EV) 계산. EV > 0 이면 모델 확률 기준 "베팅 가치 있음"
 export function computeOddsValue(modelProb: number, decimalOdds: number): OddsValue | null {
   if (!decimalOdds || !isFinite(decimalOdds) || decimalOdds <= 1) return null
