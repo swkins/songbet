@@ -115,7 +115,7 @@ export async function fetchRecentMatches(leagueCode: string): Promise<MatchResul
     })
 }
 
-function teamNameMatches(t: { name: string; code?: string }, query: string): boolean {
+export function teamNameMatches(t: { name: string; code?: string }, query: string): boolean {
   const q = query.trim().toLowerCase()
   if (!q) return false
   const n = (t.name ?? '').trim().toLowerCase()
@@ -231,6 +231,83 @@ export function seriesScoreProbabilities(p: number, bestOf: number): ScoreProb[]
     out.push({ score: `${m}:${k}`, winner: 'B', prob: comb * Math.pow(1 - p, k) * Math.pow(p, m) })
   }
   return out.sort((a, b) => b.prob - a.prob)
+}
+
+// ─── 팀 로스터 (getTeams) ─────────────────────────────────────────
+// lolesports API는 국적/입단일/계약기간을 제공하지 않는다 (선수 ID·실명·포지션만 제공).
+// 국적/계약 정보는 esports_roster 테이블의 별도 컬럼에 사용자가 직접 입력해 관리한다.
+export interface RawPlayer { id: string; summonerName: string; firstName?: string; lastName?: string; image?: string; role?: string }
+export interface RawTeam { code: string; image?: string; name: string; id: string; slug: string; players: RawPlayer[] }
+
+interface TeamsCacheEntry { teams: RawTeam[]; fetchedAt: number }
+const teamsCache: Record<string, TeamsCacheEntry> = {}
+
+export async function fetchLeagueTeams(leagueCode: string, opts?: { forceRefresh?: boolean }): Promise<RawTeam[]> {
+  const cached = teamsCache[leagueCode]
+  if (!opts?.forceRefresh && cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS) return cached.teams
+  const ids = await resolveLeagueIds()
+  const leagueId = ids[leagueCode]
+  if (!leagueId) throw new Error('league id not found')
+  const res = await fetch(`${LOLESPORTS_API}/getTeams?hl=en-US&id=${leagueId}`, { headers: { 'x-api-key': LOLESPORTS_KEY } })
+  if (!res.ok) throw new Error('getTeams failed')
+  const json = await res.json()
+  const teams: RawTeam[] = json?.data?.teams ?? []
+  teamsCache[leagueCode] = { teams, fetchedAt: Date.now() }
+  return teams
+}
+
+// ─── 리그 순위 (getTournamentsForLeague → getStandings) ─────────────
+export interface StandingEntry { code: string; name: string; wins: number; losses: number; ordinal: number }
+
+interface StandingsCacheEntry { standings: StandingEntry[]; fetchedAt: number }
+const standingsCache: Record<string, StandingsCacheEntry> = {}
+
+export async function fetchStandings(leagueCode: string, opts?: { forceRefresh?: boolean }): Promise<StandingEntry[]> {
+  const cached = standingsCache[leagueCode]
+  if (!opts?.forceRefresh && cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS) return cached.standings
+  const ids = await resolveLeagueIds()
+  const leagueId = ids[leagueCode]
+  if (!leagueId) throw new Error('league id not found')
+
+  const tRes = await fetch(`${LOLESPORTS_API}/getTournamentsForLeague?hl=en-US&leagueId=${leagueId}`, { headers: { 'x-api-key': LOLESPORTS_KEY } })
+  if (!tRes.ok) throw new Error('getTournamentsForLeague failed')
+  const tJson = await tRes.json()
+  const tournaments: { id: string; startDate: string; endDate: string }[] = tJson?.data?.leagues?.[0]?.tournaments ?? []
+  if (tournaments.length === 0) {
+    standingsCache[leagueCode] = { standings: [], fetchedAt: Date.now() }
+    return []
+  }
+  const now = dayjs()
+  let tournament = tournaments.find(t => dayjs(t.startDate).isBefore(now) && dayjs(t.endDate).isAfter(now))
+  if (!tournament) {
+    tournament = [...tournaments].sort((a, b) => dayjs(b.endDate).valueOf() - dayjs(a.endDate).valueOf())[0]
+  }
+
+  const sRes = await fetch(`${LOLESPORTS_API}/getStandings?hl=en-US&tournamentId=${tournament.id}`, { headers: { 'x-api-key': LOLESPORTS_KEY } })
+  if (!sRes.ok) throw new Error('getStandings failed')
+  const sJson = await sRes.json()
+  const stages: any[] = sJson?.data?.standings?.[0]?.stages ?? []
+  const lastStage = stages[stages.length - 1]
+  const rankingsRaw: any[] = lastStage?.sections?.flatMap((sec: any) => sec.rankings ?? []) ?? []
+  const out: StandingEntry[] = []
+  for (const r of rankingsRaw) {
+    for (const t of r.teams ?? []) {
+      out.push({ code: t.code ?? '', name: t.name ?? '', wins: t.record?.wins ?? 0, losses: t.record?.losses ?? 0, ordinal: r.ordinal ?? 0 })
+    }
+  }
+  out.sort((a, b) => a.ordinal - b.ordinal)
+  standingsCache[leagueCode] = { standings: out, fetchedAt: Date.now() }
+  return out
+}
+
+// 일정 데이터 안에서 팀의 게임 내 약자(code)를 찾음 (예: KIWOOM DRX → DRX, Ground Zero → GZ)
+export function findTeamCode(events: RawScheduleEvent[], teamQuery: string): string | null {
+  for (const e of events) {
+    const teams = e.match?.teams ?? []
+    const found = teams.find(t => teamNameMatches(t, teamQuery))
+    if (found?.code) return found.code
+  }
+  return null
 }
 
 export interface OddsValue { impliedProb: number; ev: number; edgePct: number; isValue: boolean }
