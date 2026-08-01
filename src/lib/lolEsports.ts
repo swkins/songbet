@@ -191,6 +191,12 @@ export function computeForm(records: TeamGameRecord[]): FormStats {
   }
 }
 
+// 최근 N일 이내의 경기만 필터 (기본 30일 = 최근 한 달 폼 계산용)
+export function filterRecentGames(records: TeamGameRecord[], days = 30): TeamGameRecord[] {
+  const cutoff = dayjs().subtract(days, 'day')
+  return records.filter(r => dayjs(r.startTime).isAfter(cutoff))
+}
+
 function clamp(v: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, v))
 }

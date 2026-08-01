@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import dayjs from 'dayjs'
-import { Plus, Trash2, ChevronLeft, ChevronDown, ChevronUp, ExternalLink, RefreshCw, TrendingUp, Users, BookOpen, AlertTriangle } from 'lucide-react'
+import { Plus, Trash2, ChevronDown, ChevronUp, ExternalLink, RefreshCw, TrendingUp, Users, BookOpen, AlertTriangle } from 'lucide-react'
 import {
-  LEAGUES, fetchScheduleEvents, extractTeamData, computeForm, matchupProbability,
-  seriesScoreProbabilities, computeOddsValue, fetchStandings, fetchLeagueTeams, findTeamCode, teamNameMatches,
-  type RawScheduleEvent, type StandingEntry,
+  LEAGUES, fetchScheduleEvents, extractTeamData, computeForm, matchupProbability, filterRecentGames,
+  seriesScoreProbabilities, computeOddsValue, fetchLeagueTeams, findTeamCode, teamNameMatches,
+  type RawScheduleEvent,
 } from '../lib/lolEsports'
 
 interface EsportsTeam {
@@ -74,68 +74,6 @@ function TeamCodeBadge({ code }: { code: string | null }) {
   )
 }
 
-// ─── 좌측: 순위 + 최근 폼 점수 ────────────────────────────────────
-function StandingsPanel({ leagueCode, events }: { leagueCode: string; events: RawScheduleEvent[] | null }) {
-  const [standings, setStandings] = useState<StandingEntry[] | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState(false)
-
-  async function load(forceRefresh?: boolean) {
-    setLoading(true); setError(false)
-    try {
-      setStandings(await fetchStandings(leagueCode, { forceRefresh }))
-    } catch {
-      setError(true)
-    } finally {
-      setLoading(false)
-    }
-  }
-  useEffect(() => { load() }, [leagueCode])
-
-  const rows = useMemo(() => {
-    if (!standings) return []
-    return standings.map(s => {
-      const form = events ? computeForm(extractTeamData(events, s.name || s.code).completed.slice(0, 10)) : null
-      const formScore = form && form.seriesPlayed > 0 ? Math.round((0.6 * form.gameWinRate + 0.4 * form.seriesWinRate) * 100) : null
-      return { ...s, formScore }
-    })
-  }, [standings, events])
-
-  return (
-    <div className="card">
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-        <div className="card-title" style={{ marginBottom: 0 }}>순위 · 최근 폼</div>
-        <button onClick={() => load(true)} disabled={loading} style={{ background: 'none', border: 'none', cursor: loading ? 'not-allowed' : 'pointer', color: 'var(--text-secondary)', display: 'flex' }}>
-          <RefreshCw size={12} style={{ animation: loading ? 'spin 1s linear infinite' : undefined }} />
-        </button>
-      </div>
-      {loading && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0' }}>불러오는 중...</div>}
-      {!loading && error && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0' }}>순위 데이터를 가져올 수 없습니다.</div>}
-      {!loading && !error && rows.length === 0 && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0' }}>진행 중인 스플릿 순위 정보가 없습니다.</div>}
-      {!loading && !error && rows.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          {rows.map((r, i) => (
-            <div key={r.code + i} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, padding: '6px 8px', background: 'var(--bg-elevated)', borderRadius: 6 }}>
-              <span style={{ width: 14, color: 'var(--text-muted)', flexShrink: 0 }}>{r.ordinal}</span>
-              <span style={{ width: 36, fontWeight: 800, color: 'var(--gold)', flexShrink: 0 }}>{r.code || '?'}</span>
-              <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</span>
-              <span style={{ color: 'var(--text-muted)', flexShrink: 0, fontSize: 10 }}>{r.wins}승{r.losses}패</span>
-              {r.formScore !== null && (
-                <span style={{ width: 30, textAlign: 'right', flexShrink: 0, fontWeight: 800, color: r.formScore >= 55 ? 'var(--green)' : r.formScore <= 45 ? 'var(--red)' : 'var(--text-secondary)' }}>
-                  {r.formScore}
-                </span>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-      <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 8, lineHeight: 1.4 }}>
-        순위/승패는 공식 스탠딩, 폼 점수는 최근 10세트 기준 자체 계산치입니다.
-      </div>
-    </div>
-  )
-}
-
 // ─── 중앙: 최근 경기 ────────────────────────────────────────────
 function RecentMatchesPanel({ leagueCode, events, loading, error }: { leagueCode: string; events: RawScheduleEvent[] | null; loading: boolean; error: boolean }) {
   const matches = useMemo(() => {
@@ -188,8 +126,8 @@ function UpcomingRow({ event, events }: { event: RawScheduleEvent; events: RawSc
   const teams = event.match?.teams ?? []
   const teamA = teams[0], teamB = teams[1]
   const bestOf = event.match?.strategy?.count ?? 3
-  const formA = useMemo(() => computeForm(extractTeamData(events, teamA?.name ?? '').completed.slice(0, 10)), [events, teamA?.name])
-  const formB = useMemo(() => computeForm(extractTeamData(events, teamB?.name ?? '').completed.slice(0, 10)), [events, teamB?.name])
+  const formA = useMemo(() => computeForm(filterRecentGames(extractTeamData(events, teamA?.name ?? '').completed)), [events, teamA?.name])
+  const formB = useMemo(() => computeForm(filterRecentGames(extractTeamData(events, teamB?.name ?? '').completed)), [events, teamB?.name])
   const p = matchupProbability(formA, formB)
   const scoreProbs = seriesScoreProbabilities(p, bestOf)
   const top = scoreProbs[0]
@@ -245,13 +183,13 @@ function TeamAnalysisPanel({ teamName, events, loading, error }: {
     () => events ? extractTeamData(events, teamName) : { completed: [], upcoming: [] },
     [events, teamName]
   )
-  const recentGames = completed.slice(0, 10)
+  const recentGames = filterRecentGames(completed)
   const form = useMemo(() => computeForm(recentGames), [recentGames])
 
   const next = upcoming[0]
   const oppRecentGames = useMemo(() => {
     if (!events || !next) return []
-    return extractTeamData(events, next.opponent).completed.slice(0, 10)
+    return filterRecentGames(extractTeamData(events, next.opponent).completed)
   }, [events, next?.opponent])
   const oppForm = useMemo(() => computeForm(oppRecentGames), [oppRecentGames])
 
@@ -275,7 +213,7 @@ function TeamAnalysisPanel({ teamName, events, loading, error }: {
         <>
           <div style={{ marginBottom: 12 }}>
             <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 6 }}>
-              최근 전적{form.seriesPlayed > 0 && ` · 최근 ${form.seriesPlayed}세트 ${form.wins}승 ${form.losses}패 (시리즈 승률 ${(form.seriesWinRate * 100).toFixed(0)}% · 맵 승률 ${(form.gameWinRate * 100).toFixed(0)}%)`}
+              최근 전적 (최근 한 달){form.seriesPlayed > 0 && ` · ${form.seriesPlayed}세트 ${form.wins}승 ${form.losses}패 (시리즈 승률 ${(form.seriesWinRate * 100).toFixed(0)}% · 맵 승률 ${(form.gameWinRate * 100).toFixed(0)}%)`}
             </div>
             {recentGames.length === 0 && (
               <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>기록된 경기가 없습니다 (팀 이름이 lolesports 표기와 다를 수 있어요)</div>
@@ -525,7 +463,7 @@ function TeamCard({ team, roster, events, eventsLoading, eventsError, syncing, o
   )
 }
 
-function LeagueView({ code, label, onBack }: { code: string; label: string; onBack: () => void }) {
+function LeagueView({ code, label }: { code: string; label: string }) {
   const [teams, setTeams] = useState<EsportsTeam[]>([])
   const [roster, setRoster] = useState<EsportsRosterPlayer[]>([])
   const [newTeam, setNewTeam] = useState('')
@@ -624,9 +562,6 @@ function LeagueView({ code, label, onBack }: { code: string; label: string; onBa
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
-        <button onClick={onBack} className="btn btn-ghost" style={{ padding: '6px 10px', display: 'flex', alignItems: 'center', gap: 4 }}>
-          <ChevronLeft size={13} /> 목록
-        </button>
         <h2 style={{ fontSize: 18, fontWeight: 800, margin: 0, flex: 1 }}>{label}</h2>
         <button onClick={() => loadEvents(true)} disabled={eventsLoading} className="btn btn-ghost" style={{ padding: '6px 10px', display: 'flex', alignItems: 'center', gap: 4 }}>
           <RefreshCw size={12} style={{ animation: eventsLoading ? 'spin 1s linear infinite' : undefined }} /> 새로고침
@@ -634,13 +569,10 @@ function LeagueView({ code, label, onBack }: { code: string; label: string; onBa
       </div>
 
       <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'flex-start', marginBottom: 14 }}>
-        <div style={{ flex: '1 1 260px', minWidth: 240 }}>
-          <StandingsPanel leagueCode={code} events={events} />
-        </div>
-        <div style={{ flex: '2 1 320px', minWidth: 280 }}>
+        <div style={{ flex: '1 1 320px', minWidth: 280 }}>
           <RecentMatchesPanel leagueCode={code} events={events} loading={eventsLoading} error={eventsError} />
         </div>
-        <div style={{ flex: '2 1 320px', minWidth: 280 }}>
+        <div style={{ flex: '1 1 320px', minWidth: 280 }}>
           <UpcomingPanel events={events} loading={eventsLoading} error={eventsError} />
         </div>
       </div>
@@ -667,29 +599,34 @@ function LeagueView({ code, label, onBack }: { code: string; label: string; onBa
 }
 
 export default function Analysis() {
-  const [activeLeague, setActiveLeague] = useState<string | null>(null)
-
-  if (activeLeague) {
-    const l = LEAGUES.find(x => x.code === activeLeague)!
-    return (
-      <div className="page">
-        <LeagueView code={l.code} label={l.label} onBack={() => setActiveLeague(null)} />
-      </div>
-    )
-  }
+  const [activeLeague, setActiveLeague] = useState<string>(LEAGUES[0].code)
+  const l = LEAGUES.find(x => x.code === activeLeague)!
 
   return (
     <div className="page">
       <h1 className="page-title" style={{ marginBottom: 16 }}>분석</h1>
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-        {LEAGUES.map(l => (
-          <button key={l.code} onClick={() => setActiveLeague(l.code)}
-            style={{ flex: '1 0 140px', padding: '20px 14px', borderRadius: 12, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text-primary)', fontWeight: 800, fontSize: 16, cursor: 'pointer', fontFamily: 'var(--font-body)', textAlign: 'center', transition: 'all 0.15s' }}
-            onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--gold-border)'; e.currentTarget.style.color = 'var(--gold)' }}
-            onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-primary)' }}>
-            🎮 {l.label}
-          </button>
-        ))}
+      <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+        <div style={{ width: 168, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 6, position: 'sticky', top: 14 }}>
+          {LEAGUES.map(lg => {
+            const active = lg.code === activeLeague
+            return (
+              <button key={lg.code} onClick={() => setActiveLeague(lg.code)}
+                style={{
+                  textAlign: 'left', padding: '12px 14px', borderRadius: 10,
+                  border: `1px solid ${active ? 'var(--gold-border)' : 'var(--border)'}`,
+                  background: active ? 'var(--gold-bg)' : 'var(--bg-card)',
+                  color: active ? 'var(--gold)' : 'var(--text-primary)',
+                  fontWeight: 800, fontSize: 14, cursor: 'pointer', fontFamily: 'var(--font-body)',
+                  transition: 'all 0.15s',
+                }}>
+                🎮 {lg.label}
+              </button>
+            )
+          })}
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <LeagueView key={l.code} code={l.code} label={l.label} />
+        </div>
       </div>
     </div>
   )
