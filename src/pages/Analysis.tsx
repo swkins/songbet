@@ -1,14 +1,17 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import dayjs from 'dayjs'
-import { Plus, Trash2, ChevronLeft, ChevronDown, ChevronUp, ExternalLink, RefreshCw, TrendingUp, Users } from 'lucide-react'
+import { Plus, Trash2, ChevronLeft, ChevronDown, ChevronUp, ExternalLink, RefreshCw, TrendingUp, Users, BookOpen, AlertTriangle } from 'lucide-react'
 import {
   LEAGUES, fetchScheduleEvents, extractTeamData, computeForm, matchupProbability,
   seriesScoreProbabilities, computeOddsValue, fetchStandings, fetchLeagueTeams, findTeamCode, teamNameMatches,
   type RawScheduleEvent, type StandingEntry,
 } from '../lib/lolEsports'
 
-interface EsportsTeam { id: string; league: string; name: string; comment: string; sort_order: number }
+interface EsportsTeam {
+  id: string; league: string; name: string; comment: string; sort_order: number
+  namuwiki_url: string | null; namuwiki_last_checked: string | null; namuwiki_changed: boolean
+}
 interface EsportsRosterPlayer {
   id: string; team_id: string; name: string; comment: string; sort_order: number
   role: string | null; nationality: string | null; joined_at: string | null; contract_until: string | null
@@ -349,7 +352,94 @@ function TeamAnalysisPanel({ teamName, events, loading, error }: {
   )
 }
 
-function TeamCard({ team, roster, events, eventsLoading, eventsError, syncing, onSyncRoster, onAddPlayer, onSaveTeamComment, onUpdatePlayer, onDeletePlayer, onDeleteTeam }: {
+// ─── 팀 카드 안: 나무위키 연동 (서버사이드 조회 + 변경 감지) ────────
+function NamuwikiPanel({ team, onSaveUrl, onRefreshed }: {
+  team: EsportsTeam
+  onSaveUrl: (teamId: string, url: string) => void
+  onRefreshed: (teamId: string, patch: { namuwiki_last_checked: string; namuwiki_changed: boolean }) => void
+}) {
+  const [urlDraft, setUrlDraft] = useState(team.namuwiki_url ?? '')
+  const [editingUrl, setEditingUrl] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(false)
+  const [preview, setPreview] = useState<string | null>(null)
+
+  useEffect(() => { setUrlDraft(team.namuwiki_url ?? '') }, [team.namuwiki_url])
+
+  async function refresh() {
+    if (!team.namuwiki_url) return
+    setLoading(true); setError(false)
+    try {
+      const { data, error: fnError } = await supabase.functions.invoke('namuwiki-check', { body: { teamId: team.id } })
+      if (fnError || !data || data.error) throw new Error('fetch failed')
+      setPreview(data.text as string)
+      onRefreshed(team.id, { namuwiki_last_checked: new Date().toISOString(), namuwiki_changed: false })
+    } catch {
+      setError(true)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="card" style={{ marginBottom: 10, background: 'var(--bg-elevated)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+        <div className="card-title" style={{ marginBottom: 0, display: 'flex', alignItems: 'center', gap: 5 }}>
+          <BookOpen size={11} /> 나무위키 연동
+          {team.namuwiki_changed && (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 9, fontWeight: 800, color: 'var(--red)', background: 'var(--red-bg)', border: '1px solid var(--red-border)', borderRadius: 4, padding: '2px 6px', marginLeft: 4 }}>
+              <AlertTriangle size={9} /> 변경 감지됨
+            </span>
+          )}
+        </div>
+        {team.namuwiki_url && (
+          <button onClick={refresh} disabled={loading} className="btn btn-ghost" style={{ padding: '3px 8px', fontSize: 10, display: 'flex', alignItems: 'center', gap: 4 }}>
+            <RefreshCw size={10} style={{ animation: loading ? 'spin 1s linear infinite' : undefined }} /> 새로고침
+          </button>
+        )}
+      </div>
+
+      {!editingUrl && team.namuwiki_url && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+          <a href={team.namuwiki_url} target="_blank" rel="noreferrer" style={{ fontSize: 10, color: 'var(--text-muted)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textDecoration: 'none' }}>
+            {team.namuwiki_url} <ExternalLink size={9} style={{ display: 'inline' }} />
+          </a>
+          <button onClick={() => setEditingUrl(true)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 9 }}>수정</button>
+        </div>
+      )}
+      {(editingUrl || !team.namuwiki_url) && (
+        <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
+          <input value={urlDraft} onChange={e => setUrlDraft(e.target.value)}
+            placeholder="나무위키 팀 문서 주소 (예: https://namu.wiki/w/...)"
+            className="form-input" style={{ flex: 1, fontSize: 11, padding: '5px 7px' }} />
+          <button onClick={() => { if (urlDraft.trim()) { onSaveUrl(team.id, urlDraft.trim()); setEditingUrl(false) } }}
+            className="btn btn-primary" style={{ padding: '5px 10px', fontSize: 11 }}>저장</button>
+        </div>
+      )}
+
+      {team.namuwiki_last_checked && (
+        <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 6 }}>
+          마지막 확인: {dayjs(team.namuwiki_last_checked).format('MM/DD HH:mm')} (매일 자동 확인 · 변경 감지 시 배지 표시)
+        </div>
+      )}
+
+      {loading && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '4px 0' }}>나무위키 페이지를 불러오는 중...</div>}
+      {!loading && error && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '4px 0' }}>나무위키 페이지를 가져오지 못했습니다.</div>}
+      {!loading && !error && preview && (
+        <div style={{ fontSize: 10, color: 'var(--text-secondary)', background: 'var(--bg-card)', borderRadius: 6, padding: '8px 10px', maxHeight: 220, overflowY: 'auto', whiteSpace: 'pre-wrap', lineHeight: 1.5, fontFamily: 'monospace' }}>
+          {preview}
+        </div>
+      )}
+      {!team.namuwiki_url && !editingUrl && (
+        <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+          나무위키 문서 주소를 등록하면 매일 자동으로 변경 여부를 확인하고, 새로고침으로 최신 로스터 변경 이력을 바로 볼 수 있어요. 실제 값 반영은 확인 후 직접 편집해 주세요 (위키 서술은 검증되지 않을 수 있어 자동 반영하지 않습니다).
+        </div>
+      )}
+    </div>
+  )
+}
+
+function TeamCard({ team, roster, events, eventsLoading, eventsError, syncing, onSyncRoster, onAddPlayer, onSaveTeamComment, onUpdatePlayer, onDeletePlayer, onDeleteTeam, onSaveNamuwikiUrl, onNamuwikiRefreshed }: {
   team: EsportsTeam
   roster: EsportsRosterPlayer[]
   events: RawScheduleEvent[] | null
@@ -362,6 +452,8 @@ function TeamCard({ team, roster, events, eventsLoading, eventsError, syncing, o
   onUpdatePlayer: (playerId: string, patch: RosterPatch) => void
   onDeletePlayer: (playerId: string) => void
   onDeleteTeam: (teamId: string) => void
+  onSaveNamuwikiUrl: (teamId: string, url: string) => void
+  onNamuwikiRefreshed: (teamId: string, patch: { namuwiki_last_checked: string; namuwiki_changed: boolean }) => void
 }) {
   const [expanded, setExpanded] = useState(false)
   const [newPlayer, setNewPlayer] = useState('')
@@ -382,6 +474,7 @@ function TeamCard({ team, roster, events, eventsLoading, eventsError, syncing, o
       {expanded && (
         <div style={{ marginTop: 10 }}>
           <TeamAnalysisPanel teamName={team.name} events={events} loading={eventsLoading} error={eventsError} />
+          <NamuwikiPanel team={team} onSaveUrl={onSaveNamuwikiUrl} onRefreshed={onNamuwikiRefreshed} />
           <div style={{ marginBottom: 10 }}>
             <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 4 }}>팀 코멘트</div>
             <CommentBox value={team.comment} onSave={v => onSaveTeamComment(team.id, v)} placeholder="팀에 대한 코멘트를 입력하세요..." />
@@ -491,6 +584,13 @@ function LeagueView({ code, label, onBack }: { code: string; label: string; onBa
     const { data } = await supabase.from('esports_roster').update(patch).eq('id', playerId).select().single()
     if (data) setRoster(p => p.map(r => r.id === playerId ? data as EsportsRosterPlayer : r))
   }
+  async function saveNamuwikiUrl(teamId: string, url: string) {
+    const { data } = await supabase.from('esports_teams').update({ namuwiki_url: url, namuwiki_changed: false }).eq('id', teamId).select().single()
+    if (data) setTeams(p => p.map(t => t.id === teamId ? data as EsportsTeam : t))
+  }
+  function namuwikiRefreshed(teamId: string, patch: { namuwiki_last_checked: string; namuwiki_changed: boolean }) {
+    setTeams(p => p.map(t => t.id === teamId ? { ...t, ...patch } : t))
+  }
   async function syncRoster(teamId: string, teamName: string) {
     setSyncingTeamId(teamId)
     try {
@@ -551,7 +651,8 @@ function LeagueView({ code, label, onBack }: { code: string; label: string; onBa
           events={events} eventsLoading={eventsLoading} eventsError={eventsError}
           syncing={syncingTeamId === t.id} onSyncRoster={syncRoster}
           onAddPlayer={addPlayer} onSaveTeamComment={saveTeamComment} onUpdatePlayer={updatePlayer}
-          onDeletePlayer={deletePlayer} onDeleteTeam={deleteTeam} />
+          onDeletePlayer={deletePlayer} onDeleteTeam={deleteTeam}
+          onSaveNamuwikiUrl={saveNamuwikiUrl} onNamuwikiRefreshed={namuwikiRefreshed} />
       ))}
       <div className="card" style={{ display: 'flex', gap: 6 }}>
         <input value={newTeam} onChange={e => setNewTeam(e.target.value)}
