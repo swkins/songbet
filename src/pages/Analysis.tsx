@@ -1,73 +1,18 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import dayjs from 'dayjs'
-import { Plus, Trash2, ChevronLeft, ChevronDown, ChevronUp, ExternalLink, RefreshCw } from 'lucide-react'
+import { Plus, Trash2, ChevronLeft, ChevronDown, ChevronUp, ExternalLink, RefreshCw, TrendingUp } from 'lucide-react'
+import {
+  LEAGUES, fetchRecentMatches, fetchScheduleEvents, extractTeamData, computeForm,
+  matchupProbability, seriesScoreProbabilities, computeOddsValue,
+  type RawScheduleEvent, type TeamGameRecord, type TeamUpcomingMatch,
+} from '../lib/lolEsports'
 
 interface EsportsTeam { id: string; league: string; name: string; comment: string; sort_order: number }
 interface EsportsRosterPlayer { id: string; team_id: string; name: string; comment: string; sort_order: number }
 
-const LEAGUES: { code: string; label: string; slugs: string[] }[] = [
-  { code: 'LCK',   label: 'LCK',   slugs: ['lck'] },
-  { code: 'LPL',   label: 'LPL',   slugs: ['lpl'] },
-  { code: 'LEC',   label: 'LEC',   slugs: ['lec'] },
-  { code: 'LCS',   label: 'LCS',   slugs: ['lcs'] },
-  { code: 'LCP',   label: 'LCP',   slugs: ['lcp'] },
-  { code: 'CBLOL', label: 'CBLOL', slugs: ['cblol', 'cblol-brazil'] },
-]
-
-const LOLESPORTS_API = 'https://esports-api.lolesports.com/persisted/gw'
-const LOLESPORTS_KEY = '0TvQnueqKa5mxJntVWt0w4LpLfEkrV1Ta8rQBb9Z'
-
-interface MatchResult {
-  id: string
-  startTime: string
-  teamA: string; teamB: string
-  scoreA: number; scoreB: number
-}
-
-// getLeagues 응답은 세션 동안 재사용 (요청 절약)
-let leagueIdCache: Record<string, string> | null = null
-
-async function resolveLeagueIds(): Promise<Record<string, string>> {
-  if (leagueIdCache) return leagueIdCache
-  const res = await fetch(`${LOLESPORTS_API}/getLeagues?hl=en-US`, { headers: { 'x-api-key': LOLESPORTS_KEY } })
-  if (!res.ok) throw new Error('getLeagues failed')
-  const json = await res.json()
-  const leagues: { id: string; slug: string }[] = json?.data?.leagues ?? []
-  const map: Record<string, string> = {}
-  for (const l of LEAGUES) {
-    const found = leagues.find(x => l.slugs.includes(x.slug))
-    if (found) map[l.code] = found.id
-  }
-  leagueIdCache = map
-  return map
-}
-
-async function fetchRecentMatches(leagueCode: string): Promise<MatchResult[]> {
-  const ids = await resolveLeagueIds()
-  const leagueId = ids[leagueCode]
-  if (!leagueId) throw new Error('league id not found')
-  const res = await fetch(`${LOLESPORTS_API}/getSchedule?hl=en-US&leagueId=${leagueId}`, { headers: { 'x-api-key': LOLESPORTS_KEY } })
-  if (!res.ok) throw new Error('getSchedule failed')
-  const json = await res.json()
-  const events: any[] = json?.data?.schedule?.events ?? []
-  return events
-    .filter(e => e.state === 'completed' && e.match)
-    .sort((a, b) => dayjs(b.startTime).valueOf() - dayjs(a.startTime).valueOf())
-    .slice(0, 8)
-    .map(e => {
-      const teams = e.match.teams ?? []
-      return {
-        id: e.match.id ?? e.startTime,
-        startTime: e.startTime,
-        teamA: teams[0]?.name ?? '?', teamB: teams[1]?.name ?? '?',
-        scoreA: teams[0]?.result?.gameWins ?? 0, scoreB: teams[1]?.result?.gameWins ?? 0,
-      }
-    })
-}
-
 function RecentMatches({ leagueCode, leagueLabel }: { leagueCode: string; leagueLabel: string }) {
-  const [matches, setMatches] = useState<MatchResult[] | null>(null)
+  const [matches, setMatches] = useState<Awaited<ReturnType<typeof fetchRecentMatches>> | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(false)
 
@@ -145,9 +90,150 @@ function CommentBox({ value, onSave, placeholder }: { value: string; onSave: (v:
   )
 }
 
-function TeamCard({ team, roster, onAddPlayer, onSaveTeamComment, onSavePlayerComment, onDeletePlayer, onDeleteTeam }: {
+// 팀 단위 심층 분석: 최근 전적 + 앞으로의 일정 + 최근 폼 기반 스코어 예측 + 배당 가치 계산
+function TeamAnalysisPanel({ leagueCode, teamName }: { leagueCode: string; teamName: string }) {
+  const [events, setEvents] = useState<RawScheduleEvent[] | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(false)
+  const [oddsInputs, setOddsInputs] = useState<Record<string, string>>({})
+
+  async function load(forceRefresh?: boolean) {
+    setLoading(true); setError(false)
+    try {
+      const data = await fetchScheduleEvents(leagueCode, { forceRefresh })
+      setEvents(data)
+    } catch {
+      setError(true)
+    } finally {
+      setLoading(false)
+    }
+  }
+  useEffect(() => { load() }, [leagueCode, teamName])
+
+  const { completed, upcoming } = useMemo<{ completed: TeamGameRecord[]; upcoming: TeamUpcomingMatch[] }>(
+    () => events ? extractTeamData(events, teamName) : { completed: [], upcoming: [] },
+    [events, teamName]
+  )
+  const recentGames = completed.slice(0, 10)
+  const form = useMemo(() => computeForm(recentGames), [recentGames])
+
+  const next = upcoming[0]
+  const oppRecentGames = useMemo(() => {
+    if (!events || !next) return []
+    return extractTeamData(events, next.opponent).completed.slice(0, 10)
+  }, [events, next?.opponent])
+  const oppForm = useMemo(() => computeForm(oppRecentGames), [oppRecentGames])
+
+  const pMap = next ? matchupProbability(form, oppForm) : 0.5
+  const scoreProbs = next ? seriesScoreProbabilities(pMap, next.bestOf) : []
+
+  function setOdds(score: string, v: string) {
+    setOddsInputs(p => ({ ...p, [score]: v }))
+  }
+
+  return (
+    <div className="card" style={{ marginBottom: 10, background: 'var(--bg-elevated)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+        <div className="card-title" style={{ marginBottom: 0, display: 'flex', alignItems: 'center', gap: 5 }}>
+          <TrendingUp size={11} /> 경기 분석
+        </div>
+        <button onClick={() => load(true)} disabled={loading} style={{ background: 'none', border: 'none', cursor: loading ? 'not-allowed' : 'pointer', color: 'var(--text-secondary)', display: 'flex' }}>
+          <RefreshCw size={12} style={{ animation: loading ? 'spin 1s linear infinite' : undefined }} />
+        </button>
+      </div>
+
+      {loading && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '6px 0' }}>불러오는 중...</div>}
+      {!loading && error && (
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '6px 0' }}>
+          데이터를 가져올 수 없습니다 (외부 API 접속 제한일 수 있음).
+        </div>
+      )}
+
+      {!loading && !error && (
+        <>
+          <div style={{ marginBottom: 12 }}>
+            <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 6 }}>
+              최근 전적{form.seriesPlayed > 0 && ` · 최근 ${form.seriesPlayed}세트 ${form.wins}승 ${form.losses}패 (시리즈 승률 ${(form.seriesWinRate * 100).toFixed(0)}% · 맵 승률 ${(form.gameWinRate * 100).toFixed(0)}%)`}
+            </div>
+            {recentGames.length === 0 && (
+              <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>기록된 경기가 없습니다 (팀 이름이 lolesports 표기와 다를 수 있어요)</div>
+            )}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              {recentGames.map((g, i) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, padding: '5px 8px', background: 'var(--bg-card)', borderRadius: 6 }}>
+                  <span style={{ color: 'var(--text-muted)', width: 55, flexShrink: 0 }}>{dayjs(g.startTime).format('MM/DD')}</span>
+                  <span style={{ flex: 1 }}>vs {g.opponent}</span>
+                  <span style={{ fontWeight: 800, color: g.teamScore > g.oppScore ? 'var(--green)' : 'var(--red)', flexShrink: 0 }}>{g.teamScore} : {g.oppScore}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ marginBottom: next ? 12 : 0 }}>
+            <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 6 }}>앞으로의 일정</div>
+            {upcoming.length === 0 && <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>예정된 경기가 없습니다</div>}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              {upcoming.slice(0, 5).map((u, i) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, padding: '5px 8px', background: 'var(--bg-card)', borderRadius: 6 }}>
+                  <span style={{ color: 'var(--text-muted)', width: 85, flexShrink: 0 }}>{dayjs(u.startTime).format('MM/DD HH:mm')}</span>
+                  <span style={{ flex: 1 }}>vs {u.opponent}</span>
+                  <span style={{ fontSize: 9, color: 'var(--text-muted)', flexShrink: 0 }}>BO{u.bestOf}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {next && (
+            <div>
+              <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 6 }}>
+                승부 예측 · vs {next.opponent} (BO{next.bestOf})
+              </div>
+              <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 8, lineHeight: 1.5 }}>
+                최근 폼 기준 세트 승률: <b style={{ color: 'var(--text-secondary)' }}>{teamName} {(pMap * 100).toFixed(0)}%</b> vs <b style={{ color: 'var(--text-secondary)' }}>{next.opponent} {((1 - pMap) * 100).toFixed(0)}%</b>
+                {oppForm.seriesPlayed === 0 && ' · 상대팀 최근 기록 부족(50% 기준 적용)'}
+                <br />배당을 입력하면 모델 확률 대비 기대값(EV)을 보여드려요. EV가 양수(초록)면 베팅 가치가 있다는 뜻입니다.
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {scoreProbs.map(sp => {
+                  const label = sp.winner === 'A' ? `${teamName} ${sp.score}` : `${next.opponent} ${sp.score}`
+                  const odds = parseFloat(oddsInputs[sp.score] ?? '')
+                  const value = computeOddsValue(sp.prob, odds)
+                  return (
+                    <div key={sp.score + sp.winner} style={{
+                      display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, padding: '6px 8px', borderRadius: 6,
+                      background: value?.isValue ? 'var(--green-bg)' : 'var(--bg-card)',
+                      border: value?.isValue ? '1px solid var(--green-border)' : '1px solid transparent',
+                    }}>
+                      <span style={{ flex: 1, fontWeight: 700 }}>{label}</span>
+                      <span style={{ width: 46, textAlign: 'right', color: 'var(--gold)', fontWeight: 800, flexShrink: 0 }}>{(sp.prob * 100).toFixed(1)}%</span>
+                      <input
+                        value={oddsInputs[sp.score] ?? ''}
+                        onChange={e => setOdds(sp.score, e.target.value)}
+                        placeholder="배당"
+                        inputMode="decimal"
+                        style={{ width: 54, fontSize: 11, padding: '3px 5px', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-primary)', textAlign: 'right', flexShrink: 0 }}
+                      />
+                      {value && (
+                        <span style={{ width: 66, textAlign: 'right', fontSize: 10, fontWeight: 700, color: value.isValue ? 'var(--green)' : 'var(--text-muted)', flexShrink: 0 }}>
+                          {value.isValue ? `+EV ${value.edgePct.toFixed(1)}%` : `${value.edgePct.toFixed(1)}%`}
+                        </span>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
+function TeamCard({ team, roster, leagueCode, onAddPlayer, onSaveTeamComment, onSavePlayerComment, onDeletePlayer, onDeleteTeam }: {
   team: EsportsTeam
   roster: EsportsRosterPlayer[]
+  leagueCode: string
   onAddPlayer: (teamId: string, name: string) => void
   onSaveTeamComment: (teamId: string, comment: string) => void
   onSavePlayerComment: (playerId: string, comment: string) => void
@@ -169,6 +255,7 @@ function TeamCard({ team, roster, onAddPlayer, onSaveTeamComment, onSavePlayerCo
       </div>
       {expanded && (
         <div style={{ marginTop: 10 }}>
+          <TeamAnalysisPanel leagueCode={leagueCode} teamName={team.name} />
           <div style={{ marginBottom: 10 }}>
             <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 4 }}>팀 코멘트</div>
             <CommentBox value={team.comment} onSave={v => onSaveTeamComment(team.id, v)} placeholder="팀에 대한 코멘트를 입력하세요..." />
@@ -262,7 +349,7 @@ function LeagueView({ code, label, onBack }: { code: string; label: string; onBa
 
       <div className="card-title" style={{ marginBottom: 8 }}>팀 목록</div>
       {teams.map(t => (
-        <TeamCard key={t.id} team={t} roster={roster.filter(r => r.team_id === t.id)}
+        <TeamCard key={t.id} team={t} roster={roster.filter(r => r.team_id === t.id)} leagueCode={code}
           onAddPlayer={addPlayer} onSaveTeamComment={saveTeamComment} onSavePlayerComment={savePlayerComment}
           onDeletePlayer={deletePlayer} onDeleteTeam={deleteTeam} />
       ))}
