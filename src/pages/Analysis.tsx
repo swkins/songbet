@@ -41,10 +41,10 @@ interface EsportsGameStat {
 
 // 리그 목록 안에서 어느 팀이 우리가 추적 중인 팀(esports_teams)인지 찾아서
 // {teamId, teamName, opponent} 형태로 반환. 세트 기록 입력/저장은 이 팀의 관점(team1)으로 저장된다.
-function resolveMatchTeam(teams: EsportsTeam[], teamAName: string, teamBName: string): { teamId: string; teamName: string; opponent: string; isA: boolean } | null {
-  const a = teams.find(t => teamNameMatches(t, teamAName))
+function resolveMatchTeam(teams: EsportsTeam[], teamAName: string, teamBName: string, codeA?: string, codeB?: string): { teamId: string; teamName: string; opponent: string; isA: boolean } | null {
+  const a = teams.find(t => teamNameMatches(t, teamAName) || (codeA && teamNameMatches(t, codeA)))
   if (a) return { teamId: a.id, teamName: a.name, opponent: teamBName, isA: true }
-  const b = teams.find(t => teamNameMatches(t, teamBName))
+  const b = teams.find(t => teamNameMatches(t, teamBName) || (codeB && teamNameMatches(t, codeB)))
   if (b) return { teamId: b.id, teamName: b.name, opponent: teamAName, isA: false }
   return null
 }
@@ -78,7 +78,7 @@ function RecentMatchesPanel({ leagueCode, events, loading, error, teams }: { lea
   const [overrides, setOverrides] = useState<Record<string, { teamId: string; isA: boolean }>>({})
   useEffect(() => {
     const ids = Array.from(new Set(
-      matches.map(m => resolveMatchTeam(teams, m.teamA, m.teamB)?.teamId).filter((x): x is string => !!x)
+      matches.map(m => resolveMatchTeam(teams, m.teamA, m.teamB, m.codeA, m.codeB)?.teamId).filter((x): x is string => !!x)
     ))
     if (ids.length === 0) { setRecordedByTeam({}); return }
     supabase.from('esports_game_stats').select('*').in('team_id', ids).then(({ data }) => {
@@ -106,7 +106,7 @@ function RecentMatchesPanel({ leagueCode, events, loading, error, teams }: { lea
       {!loading && !error && matches.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           {visibleMatches.map(m => {
-            const auto = resolveMatchTeam(teams, m.teamA, m.teamB)
+            const auto = resolveMatchTeam(teams, m.teamA, m.teamB, m.codeA, m.codeB)
             const ov = overrides[m.id]
             const resolved = auto ?? (ov ? {
               teamId: ov.teamId,
