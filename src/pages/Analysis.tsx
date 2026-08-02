@@ -53,10 +53,11 @@ function resolveMatchTeam(teams: EsportsTeam[], teamAName: string, teamBName: st
 function RecentMatchesPanel({ leagueCode, events, loading, error, teams }: { leagueCode: string; events: RawScheduleEvent[] | null; loading: boolean; error: boolean; teams: EsportsTeam[] }) {
   const matches = useMemo(() => {
     if (!events) return []
+    const cutoff = dayjs().subtract(30, 'day')
     return events
-      .filter(e => e.state === 'completed' && e.match)
+      .filter(e => e.state === 'completed' && e.match && dayjs(e.startTime).isAfter(cutoff))
       .sort((a, b) => dayjs(b.startTime).valueOf() - dayjs(a.startTime).valueOf())
-      .slice(0, 8)
+      .slice(0, 40) // 최근 한 달 기준, 과도한 렌더링만 방지하는 안전장치
       .map(e => {
         const teams = e.match!.teams ?? []
         return {
@@ -729,26 +730,8 @@ function LeagueView({ code, label }: { code: string; label: string }) {
   const [events, setEvents] = useState<RawScheduleEvent[] | null>(null)
   const [eventsLoading, setEventsLoading] = useState(false)
   const [eventsError, setEventsError] = useState(false)
-  const [golggSyncing, setGolggSyncing] = useState(false)
-  const [golggResult, setGolggResult] = useState<string | null>(null)
   const [powerScores, setPowerScores] = useState<Record<string, TeamPowerScore>>({})
   const [powerLoading, setPowerLoading] = useState(false)
-
-  async function syncGolgg() {
-    setGolggSyncing(true)
-    setGolggResult(null)
-    try {
-      const { data, error } = await supabase.functions.invoke('sync-golgg', {
-        body: { league: code, triggerType: 'manual' },
-      })
-      if (error) throw error
-      setGolggResult(`상세 스탯 ${data?.gamesAdded ?? 0}경기 갱신${data?.errors?.length ? ` (오류 ${data.errors.length}건)` : ''}`)
-    } catch {
-      setGolggResult('gol.gg 동기화 실패')
-    } finally {
-      setGolggSyncing(false)
-    }
-  }
 
   // 팀별 체급 점수 계산: 수동 입력된(source='manual') 세트 기록을 팀별로 묶어서 computeTeamPowerScore에 넣는다
   async function loadPowerScores(teamsList: EsportsTeam[]) {
@@ -849,11 +832,7 @@ function LeagueView({ code, label }: { code: string; label: string }) {
         <button onClick={() => loadEvents(true)} disabled={eventsLoading} className="btn btn-ghost" style={{ padding: '6px 10px', display: 'flex', alignItems: 'center', gap: 4 }}>
           <RefreshCw size={12} style={{ animation: eventsLoading ? 'spin 1s linear infinite' : undefined }} /> 일정 새로고침
         </button>
-        <button onClick={syncGolgg} disabled={golggSyncing} className="btn btn-ghost" style={{ padding: '6px 10px', display: 'flex', alignItems: 'center', gap: 4 }}>
-          <RefreshCw size={12} style={{ animation: golggSyncing ? 'spin 1s linear infinite' : undefined }} /> gol.gg 상세스탯 새로고침
-        </button>
       </div>
-      {golggResult && <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 8 }}>{golggResult}</div>}
 
       <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'flex-start', marginBottom: 14 }}>
         <div style={{ flex: '1 1 320px', minWidth: 280 }}>
