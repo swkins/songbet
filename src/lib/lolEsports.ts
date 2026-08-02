@@ -115,13 +115,35 @@ export async function fetchRecentMatches(leagueCode: string): Promise<MatchResul
     })
 }
 
+// lolesports API가 일부 경기에서 팀 이름 대신 코드만 내려주는 경우가 있어서(예: "JD Gaming" 대신 "JDG"),
+// 주요 코드 → 정식명 별칭을 등록해 매칭이 안 뚫리게 한다. 여기 없는 팀은 기존 풀네임 매칭만 적용된다.
+const TEAM_CODE_ALIASES: Record<string, string> = {
+  // LPL
+  jdg: 'jd gaming', tt: 'thundertalk gaming', lgd: 'lgd gaming', edg: 'edward gaming', ig: 'invictus gaming',
+  tes: 'top esports', we: 'team we', lng: 'lng esports', nip: 'ninjas in pyjamas', omg: 'oh my god',
+  al: "anyone's legend", blg: 'bilibili gaming', wbg: 'weibo gaming', up: 'ultra prime',
+  // LEC
+  fnc: 'fnatic', g2: 'g2 esports', gx: 'giantx', kc: 'karmine corp', vit: 'team vitality', th: 'team heretics',
+  shf: 'shifters', mkoi: 'movistar koi', sk: 'sk gaming', navi: 'natus vincere',
+  // LCS
+  c9: 'cloud9', dig: 'dignitas', fly: 'flyquest', sr: 'shopify rebellion', tl: 'team liquid', sen: 'sentinels', dsg: 'disguised',
+  // LCP
+  ctbc: 'ctbc flying oyster', gam: 'gam esports', fsh: 'fukuoka softbank hawks', sw: 'secret whales',
+  dfm: 'detonation focusme', mvk: 'mvk esports', dcg: 'deep cross gaming', gzg: 'ground zero gaming',
+  // CBLOL
+  fx: 'fluxo w7m', fur: 'furia', kyd: 'keyd stars', lou: 'loud', pain: 'pain gaming', red: 'red canids', lev: 'leviatán', los: 'los',
+}
+
 export function teamNameMatches(t: { name: string; code?: string }, query: string): boolean {
   const q = query.trim().toLowerCase()
   if (!q) return false
   const n = (t.name ?? '').trim().toLowerCase()
   const c = (t.code ?? '').trim().toLowerCase()
   if (!n && !c) return false
-  return n === q || c === q || n.includes(q) || q.includes(n)
+  if (n === q || c === q || n.includes(q) || q.includes(n)) return true
+  const alias = TEAM_CODE_ALIASES[q]
+  if (alias && (n === alias || n.includes(alias) || alias.includes(n))) return true
+  return false
 }
 
 export interface TeamGameRecord { opponent: string; teamScore: number; oppScore: number; startTime: string; bestOf: number }
