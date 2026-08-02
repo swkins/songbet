@@ -544,7 +544,7 @@ export interface TeamPowerScore {
   powerScore: number // 0~100
   avgPerfection: number
   winRate: number
-  gamesAnalyzed: number // 분석에 사용된 "시리즈"(BO3/BO5 매치) 수
+  gamesAnalyzed: number // 분석에 사용된 세트 수
 }
 
 // 시간 가중치: 최근 1~2달(60일)은 완만하게 줄고, 그 이후로는 30일마다 절반씩 급격히 줄어든다.
@@ -554,73 +554,70 @@ function timeDecayWeight(daysAgo: number): number {
   return 0.7 * Math.pow(0.5, (d - 60) / 30)
 }
 
-// 체급 점수는 "개별 세트"가 아니라 "시리즈(매치) 단위"로 계산한다.
-// 이유: BO3에서 2-1로 이긴 시리즈는, 중간에 한 세트를 내줬어도 명백히 좋은 결과다.
-// 세트 단위로 쪼개서 계산하면 "시리즈는 이겼지만 한 세트를 크게 내준" 경우가
-// 독립된 "패배 이변"으로 잘못 카운트되어 체급이 부당하게 깎이는 문제가 있었다.
-export interface SeriesRecordForPower {
-  winnerTeam: NarrativeTeam    // 시리즈 승자 (세트 다수결)
-  avgPerfection: number        // 시리즈 내 세트별 완벽도 점수 평균 (0~100)
-  sweep: boolean                // 상대에게 세트를 하나도 안 내준 완전 스윕이었는지
-  daysAgo?: number              // 시리즈 이후 지난 일수 (없으면 인덱스로 7일 간격 추정)
+// 체급 점수는 "세트(개별 게임)" 단위로 계산한다. 각 세트의 플레이 점수를 그대로 신호로 쓰고,
+// 그 세트가 속한 시리즈가 완전 스윕(2-0/3-0)으로 끝났으면 가산점을 준다.
+export interface SetRecordForPower {
+  won: boolean                  // 이 세트를 이겼는지
+  playScore: number             // 이 세트의 플레이 점수 (0~100, computePerfectionScore 결과)
+  seriesSweep: boolean          // 이 세트가 속한 시리즈가 완전 스윕(상대에게 세트를 하나도 안 내줌)으로 끝났는지
+  daysAgo?: number              // 세트 이후 지난 일수 (없으면 인덱스로 3.5일 간격 추정)
   opponentPriorScore?: number   // 상대 팀의 사전(prior) 체급 점수 0~100 (모르면 50=중립)
 }
 
 // 1단계: 상대 체급을 고려하지 않고, 순수 실적만으로 매긴 사전 점수.
-// "일단 이겨야 체급"이라는 전제로 승률 비중을 완벽도보다 높게 두고, 스윕승(2-0/3-0)에는 추가 보너스를 준다.
+// "일단 이겨야 체급"이라는 전제로 승률 비중을 플레이 점수보다 높게 두고, 스윕승(2-0/3-0)에는 추가 보너스를 준다.
 // 표본이 적을 때(특히 소수 경기 100% 승률처럼 극단적인 경우) 50점 쪽으로 완화(shrinkage)해서 과대평가를 막는다.
-export function computeTeamPriorScore(series: SeriesRecordForPower[]): TeamPowerScore {
-  if (series.length === 0) return { powerScore: 50, avgPerfection: 50, winRate: 0.5, gamesAnalyzed: 0 }
-  let weightSum = 0, perfectionWeighted = 0, winWeighted = 0, sweepWinWeighted = 0
-  series.forEach((r, i) => {
-    const w = timeDecayWeight(r.daysAgo ?? i * 7)
+export function computeTeamPriorScore(sets: SetRecordForPower[]): TeamPowerScore {
+  if (sets.length === 0) return { powerScore: 50, avgPerfection: 50, winRate: 0.5, gamesAnalyzed: 0 }
+  let weightSum = 0, playWeighted = 0, winWeighted = 0, sweepWinWeighted = 0
+  sets.forEach((r, i) => {
+    const w = timeDecayWeight(r.daysAgo ?? i * 3.5)
     weightSum += w
-    perfectionWeighted += r.avgPerfection * w
-    const won = r.winnerTeam === 'team1' ? 1 : 0
-    winWeighted += won * w
-    if (won && r.sweep) sweepWinWeighted += w
+    playWeighted += r.playScore * w
+    winWeighted += (r.won ? 1 : 0) * w
+    if (r.won && r.seriesSweep) sweepWinWeighted += w
   })
-  const avgPerfection = perfectionWeighted / weightSum
+  const avgPerfection = playWeighted / weightSum
   const winRate = winWeighted / weightSum
   const sweepWinRate = sweepWinWeighted / weightSum
-  // 완벽도 35% + 승률 55% + 스윕승 비율 보너스 10%
+  // 플레이 점수 35% + 승률 55% + 스윕승 비율 보너스 10%
   const rawScore = avgPerfection * 0.35 + (winRate * 100) * 0.55 + sweepWinRate * 100 * 0.10
-  // 표본 8시리즈 미만이면 50점 쪽으로 당겨서 소수 경기의 극단값을 완화
-  const confidence = Math.min(1, series.length / 8)
+  // 표본 16세트 미만이면 50점 쪽으로 당겨서 소수 경기의 극단값을 완화 (세트 기준이라 시리즈 기준보다 문턱을 넉넉히 잡음)
+  const confidence = Math.min(1, sets.length / 16)
   const powerScore = 50 + (rawScore - 50) * confidence
-  return { powerScore, avgPerfection, winRate, gamesAnalyzed: series.length }
+  return { powerScore, avgPerfection, winRate, gamesAnalyzed: sets.length }
 }
 
 // 2단계: 최종 체급 점수 — 이변 보정.
 // 상대 사전 점수 대비 기대 승률과 실제 결과의 차이("이변" surprise)만큼 점수를 움직인다.
-//   - 체급 낮은 팀이 높은 팀을 시리즈에서 이김(이변) → 크게 상승
+//   - 체급 낮은 팀이 높은 팀을 이김(이변) → 크게 상승
 //   - 체급 높은 팀이 낮은 팀을 이김(예상대로) → 조금만 상승
 //   - 체급 높은 팀이 낮은 팀에게 짐(역이변) → 크게 하락
-// 시리즈를 완전 스윕했으면(sweep) 그 시리즈의 영향력을 추가로 더 크게 준다.
-export function computeTeamPowerScore(series: SeriesRecordForPower[], myPriorScore = 50): TeamPowerScore {
-  if (series.length === 0) return { powerScore: 50, avgPerfection: 50, winRate: 0.5, gamesAnalyzed: 0 }
+// 그 세트가 속한 시리즈를 완전 스윕했으면 영향력을 추가로 더 크게 준다.
+export function computeTeamPowerScore(sets: SetRecordForPower[], myPriorScore = 50): TeamPowerScore {
+  if (sets.length === 0) return { powerScore: 50, avgPerfection: 50, winRate: 0.5, gamesAnalyzed: 0 }
   const K = 55
   const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
-  let weightSum = 0, scoreWeighted = 0, perfectionWeighted = 0, winWeighted = 0
-  series.forEach((r, i) => {
-    const w = timeDecayWeight(r.daysAgo ?? i * 7)
+  let weightSum = 0, scoreWeighted = 0, playWeighted = 0, winWeighted = 0
+  sets.forEach((r, i) => {
+    const w = timeDecayWeight(r.daysAgo ?? i * 3.5)
     weightSum += w
-    perfectionWeighted += r.avgPerfection * w
-    const actual = r.winnerTeam === 'team1' ? 1 : 0
+    playWeighted += r.playScore * w
+    const actual = r.won ? 1 : 0
     winWeighted += actual * w
 
     const oppPrior = r.opponentPriorScore ?? 50
     const expected = powerScoreMatchupProbability(myPriorScore, oppPrior)
     const surprise = actual - expected
-    let marginFactor = 0.5 + Math.abs(r.avgPerfection - 50) / 100
-    if (r.sweep) marginFactor += 0.15
-    const seriesScore = clamp(50 + surprise * marginFactor * K, 0, 100)
-    scoreWeighted += seriesScore * w
+    let marginFactor = 0.5 + Math.abs(r.playScore - 50) / 100
+    if (r.won && r.seriesSweep) marginFactor += 0.15
+    const setScore = clamp(50 + surprise * marginFactor * K, 0, 100)
+    scoreWeighted += setScore * w
   })
-  const avgPerfection = perfectionWeighted / weightSum
+  const avgPerfection = playWeighted / weightSum
   const winRate = winWeighted / weightSum
   const powerScore = scoreWeighted / weightSum
-  return { powerScore, avgPerfection, winRate, gamesAnalyzed: series.length }
+  return { powerScore, avgPerfection, winRate, gamesAnalyzed: sets.length }
 }
 
 

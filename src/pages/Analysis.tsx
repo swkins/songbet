@@ -7,7 +7,7 @@ import {
   seriesScoreProbabilities, computeOddsValue, teamNameMatches,
   classifyGameNarrative, computeBothSidesScores, computeBothSidesPerfection, computePerfectionScore,
   computeTeamPowerScore, computeTeamPriorScore, powerScoreMatchupProbability,
-  type RawScheduleEvent, type TeamGameRecord, type NarrativeTeam, type TeamPowerScore, type SeriesRecordForPower,
+  type RawScheduleEvent, type TeamGameRecord, type NarrativeTeam, type TeamPowerScore, type SetRecordForPower,
 } from '../lib/lolEsports'
 
 interface EsportsTeam {
@@ -72,6 +72,8 @@ function RecentMatchesPanel({ leagueCode, events, loading, error, teams }: { lea
 
   // 각 경기에 세트 기록이 입력돼있는지 스코어 옆에 배지로 보여주기 위해, 관련 팀들의 기록을 한 번에 조회
   const [recordedByTeam, setRecordedByTeam] = useState<Record<string, EsportsGameStat[]>>({})
+  const [showAll, setShowAll] = useState(false)
+  const visibleMatches = showAll ? matches : matches.slice(0, 8)
   useEffect(() => {
     const ids = Array.from(new Set(
       matches.map(m => resolveMatchTeam(teams, m.teamA, m.teamB)?.teamId).filter((x): x is string => !!x)
@@ -101,7 +103,7 @@ function RecentMatchesPanel({ leagueCode, events, loading, error, teams }: { lea
       {!loading && !error && matches.length === 0 && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0' }}>최근 완료된 경기가 없습니다</div>}
       {!loading && !error && matches.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          {matches.map(m => {
+          {visibleMatches.map(m => {
             const resolved = resolveMatchTeam(teams, m.teamA, m.teamB)
             if (!resolved) {
               // 추적 중인 팀이 아니면(예: 팀 목록에 아직 등록 안 함) 입력 불가, 결과만 표시
@@ -131,6 +133,11 @@ function RecentMatchesPanel({ leagueCode, events, loading, error, teams }: { lea
                 teamCode={resolved.isA ? codeA : codeB} opponentCode={resolved.isA ? codeB : codeA} />
             )
           })}
+          {matches.length > 8 && (
+            <button onClick={() => setShowAll(v => !v)} className="btn btn-ghost" style={{ padding: '5px 8px', fontSize: 10, alignSelf: 'center', marginTop: 2 }}>
+              {showAll ? '접기' : `${matches.length - 8}경기 더 보기 (최근 30일)`}
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -749,53 +756,56 @@ function LeagueView({ code, label }: { code: string; label: string }) {
         byTeam[r.team_id].push(r)
       }
 
-      // 세트를 시리즈(같은 상대+같은 날짜) 단위로 묶는다. 세트 하나하나를 독립 이변으로 보면
-      // "시리즈는 이겼는데 한 세트만 크게 내준" 경우가 부당하게 큰 패배 이변으로 잡히는 문제가 있었다.
-      const toSeries = (statRows: EsportsGameStat[]) => {
+      // 세트를 시리즈(같은 상대+같은 날짜) 단위로 묶어서, 그 시리즈가 스윕(2-0/3-0)이었는지만 판별한다.
+      // 체급 점수 자체는 세트 단위로 계산하되, "스윕승 세트"라는 태그만 시리즈에서 가져온다.
+      const toSets = (statRows: EsportsGameStat[]) => {
         const groups: Record<string, EsportsGameStat[]> = {}
         for (const s of statRows) {
           const key = `${s.team2_name}|${s.match_start_time}`
           if (!groups[key]) groups[key] = []
           groups[key].push(s)
         }
-        return Object.values(groups).map(sets => {
-          const perfs = sets.map(s => computePerfectionScore({
-            team1Kills: s.team1_kills ?? 0, team2Kills: s.team2_kills ?? 0,
-            team1Dragons: s.team1_dragons ?? 0, team2Dragons: s.team2_dragons ?? 0,
-            team1Towers: s.team1_towers ?? 0, team2Towers: s.team2_towers ?? 0,
-            team1Inhibitors: s.team1_inhibitors ?? 0, team2Inhibitors: s.team2_inhibitors ?? 0,
-            team1Barons: s.team1_barons ?? 0, team2Barons: s.team2_barons ?? 0,
-            winnerTeam: s.winner_team ?? 'team1' as NarrativeTeam,
-            firstBloodTeam: s.first_blood_team, firstTowerTeam: s.first_tower_team,
-            firstDragonTeam: s.first_dragon_team, firstBaronTeam: s.first_baron_team,
-            fifthKillTeam: s.fifth_kill_team, tenthKillTeam: s.tenth_kill_team,
-            durationSeconds: s.duration_seconds,
-          }))
-          const avgPerfection = perfs.reduce((a, b) => a + b, 0) / perfs.length
+        const result: (SetRecordForPower & { opponent: string })[] = []
+        for (const sets of Object.values(groups)) {
           const team1Wins = sets.filter(s => s.winner_team === 'team1').length
           const team2Wins = sets.length - team1Wins
           const winnerTeam: NarrativeTeam = team1Wins >= team2Wins ? 'team1' : 'team2'
-          const sweep = (winnerTeam === 'team1' && team2Wins === 0) || (winnerTeam === 'team2' && team1Wins === 0)
-          const daysAgo = sets[0].match_start_time != null ? dayjs().diff(dayjs(sets[0].match_start_time), 'day') : 0
-          return { winnerTeam, avgPerfection, sweep, daysAgo, opponent: sets[0].team2_name } as SeriesRecordForPower & { opponent: string }
-        })
+          const seriesSweep = (winnerTeam === 'team1' && team2Wins === 0) || (winnerTeam === 'team2' && team1Wins === 0)
+          for (const s of sets) {
+            const playScore = computePerfectionScore({
+              team1Kills: s.team1_kills ?? 0, team2Kills: s.team2_kills ?? 0,
+              team1Dragons: s.team1_dragons ?? 0, team2Dragons: s.team2_dragons ?? 0,
+              team1Towers: s.team1_towers ?? 0, team2Towers: s.team2_towers ?? 0,
+              team1Inhibitors: s.team1_inhibitors ?? 0, team2Inhibitors: s.team2_inhibitors ?? 0,
+              team1Barons: s.team1_barons ?? 0, team2Barons: s.team2_barons ?? 0,
+              winnerTeam: s.winner_team ?? 'team1' as NarrativeTeam,
+              firstBloodTeam: s.first_blood_team, firstTowerTeam: s.first_tower_team,
+              firstDragonTeam: s.first_dragon_team, firstBaronTeam: s.first_baron_team,
+              fifthKillTeam: s.fifth_kill_team, tenthKillTeam: s.tenth_kill_team,
+              durationSeconds: s.duration_seconds,
+            })
+            const daysAgo = s.match_start_time != null ? dayjs().diff(dayjs(s.match_start_time), 'day') : 0
+            result.push({ won: s.winner_team === 'team1', playScore, seriesSweep, daysAgo, opponent: s.team2_name })
+          }
+        }
+        return result
       }
 
-      const seriesByTeam: Record<string, ReturnType<typeof toSeries>> = {}
-      for (const t of teamsList) seriesByTeam[t.id] = toSeries(byTeam[t.id] ?? [])
+      const setsByTeam: Record<string, ReturnType<typeof toSets>> = {}
+      for (const t of teamsList) setsByTeam[t.id] = toSets(byTeam[t.id] ?? [])
 
-      // 1단계: 상대 체급을 모른 채로, 순수 실적(완벽도+승률+스윕비율)만으로 사전 점수 계산
+      // 1단계: 상대 체급을 모른 채로, 순수 실적(플레이 점수+승률+스윕비율)만으로 사전 점수 계산
       const priors: Record<string, number> = {}
-      for (const t of teamsList) priors[t.id] = computeTeamPriorScore(seriesByTeam[t.id]).powerScore
+      for (const t of teamsList) priors[t.id] = computeTeamPriorScore(setsByTeam[t.id]).powerScore
 
-      // 2단계: 각 시리즈의 상대팀 사전 점수를 붙여서, 이변 보정된 최종 체급 점수 계산
+      // 2단계: 각 세트의 상대팀 사전 점수를 붙여서, 이변 보정된 최종 체급 점수 계산
       const scores: Record<string, TeamPowerScore> = {}
       for (const t of teamsList) {
-        const series = seriesByTeam[t.id].map(r => {
+        const sets = setsByTeam[t.id].map(r => {
           const oppTeam = teamsList.find(tt => teamNameMatches(tt, r.opponent))
           return { ...r, opponentPriorScore: oppTeam ? priors[oppTeam.id] : undefined }
         })
-        scores[t.id] = computeTeamPowerScore(series, priors[t.id])
+        scores[t.id] = computeTeamPowerScore(sets, priors[t.id])
       }
       setPowerScores(scores)
     } finally {
