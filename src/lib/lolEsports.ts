@@ -330,6 +330,7 @@ export interface GameStatsInput {
   winnerTeam: NarrativeTeam
   firstBloodTeam?: NarrativeTeam | null
   firstTowerTeam?: NarrativeTeam | null
+  firstDragonTeam?: NarrativeTeam | null
   firstBaronTeam?: NarrativeTeam | null
   fifthKillTeam?: NarrativeTeam | null
   tenthKillTeam?: NarrativeTeam | null
@@ -347,7 +348,7 @@ export interface GameNarrative {
 export function classifyGameNarrative(g: GameStatsInput): GameNarrative {
   const loser: NarrativeTeam = g.winnerTeam === 'team1' ? 'team2' : 'team1'
 
-  const milestones = [g.firstBloodTeam, g.firstTowerTeam, g.firstBaronTeam, g.fifthKillTeam, g.tenthKillTeam]
+  const milestones = [g.firstBloodTeam, g.firstTowerTeam, g.firstDragonTeam, g.firstBaronTeam, g.fifthKillTeam, g.tenthKillTeam]
   let team1Early = 0, team2Early = 0
   for (const m of milestones) {
     if (m === 'team1') team1Early++
@@ -373,7 +374,7 @@ export function classifyGameNarrative(g: GameStatsInput): GameNarrative {
   let label: string, detail: string
   if (loserHadEarlyLead) {
     label = '역전승'
-    detail = '초반 주요 지표(첫 킬·첫 타워·첫 내셔·5킬/10킬 선취)에서는 패배팀이 앞섰지만, 최종적으로는 승리팀이 뒤집었습니다.'
+    detail = '초반 주요 지표(첫 킬·첫 타워·첫 드래곤·첫 내셔·5킬/10킬 선취)에서는 패배팀이 앞섰지만, 최종적으로는 승리팀이 뒤집었습니다.'
   } else if (winnerHadEarlyLead && dominanceScore >= 8) {
     label = '완벽한 승리'
     detail = '초반 마일스톤과 최종 오브젝트·킬 격차 모두에서 일방적으로 앞선 스타트-투-피니시 승리입니다.'

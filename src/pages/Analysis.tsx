@@ -35,6 +35,7 @@ interface EsportsGameStat {
   winner_team: NarrativeTeam | null
   first_blood_team: NarrativeTeam | null
   first_tower_team: NarrativeTeam | null
+  first_dragon_team: NarrativeTeam | null
   first_baron_team: NarrativeTeam | null
   fifth_kill_team: NarrativeTeam | null
   tenth_kill_team: NarrativeTeam | null
@@ -239,6 +240,7 @@ interface GameStatForm {
   winnerTeam: NarrativeTeam
   firstBloodTeam: NarrativeTeam | ''
   firstTowerTeam: NarrativeTeam | ''
+  firstDragonTeam: NarrativeTeam | ''
   firstBaronTeam: NarrativeTeam | ''
   fifthKillTeam: NarrativeTeam | ''
   tenthKillTeam: NarrativeTeam | ''
@@ -250,7 +252,7 @@ function emptyGameStatForm(gameNumber: number): GameStatForm {
     team1Kills: '', team2Kills: '', team1Dragons: '', team2Dragons: '',
     team1Towers: '', team2Towers: '', team1Inhibitors: '', team2Inhibitors: '',
     team1Barons: '', team2Barons: '', winnerTeam: 'team1',
-    firstBloodTeam: '', firstTowerTeam: '', firstBaronTeam: '', fifthKillTeam: '', tenthKillTeam: '',
+    firstBloodTeam: '', firstTowerTeam: '', firstDragonTeam: '', firstBaronTeam: '', fifthKillTeam: '', tenthKillTeam: '',
   }
 }
 
@@ -262,7 +264,7 @@ function GameStatCard({ stat, teamName, onDelete }: { stat: EsportsGameStat; tea
     team1Inhibitors: stat.team1_inhibitors ?? 0, team2Inhibitors: stat.team2_inhibitors ?? 0,
     team1Barons: stat.team1_barons ?? 0, team2Barons: stat.team2_barons ?? 0,
     winnerTeam: stat.winner_team ?? 'team1',
-    firstBloodTeam: stat.first_blood_team, firstTowerTeam: stat.first_tower_team, firstBaronTeam: stat.first_baron_team,
+    firstBloodTeam: stat.first_blood_team, firstTowerTeam: stat.first_tower_team, firstDragonTeam: stat.first_dragon_team, firstBaronTeam: stat.first_baron_team,
     fifthKillTeam: stat.fifth_kill_team, tenthKillTeam: stat.tenth_kill_team,
   })
   return (
@@ -348,6 +350,7 @@ function RecentMatchRow({ teamId, teamName, game }: { teamId: string; teamName: 
       winner_team: form.winnerTeam,
       first_blood_team: form.firstBloodTeam || null,
       first_tower_team: form.firstTowerTeam || null,
+      first_dragon_team: form.firstDragonTeam || null,
       first_baron_team: form.firstBaronTeam || null,
       fifth_kill_team: form.fifthKillTeam || null,
       tenth_kill_team: form.tenthKillTeam || null,
@@ -423,6 +426,7 @@ function RecentMatchRow({ teamId, teamName, game }: { teamId: string; teamName: 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
                 <MilestoneSelect label="첫 킬" value={form.firstBloodTeam} onChange={v => setForm(f => ({ ...f, firstBloodTeam: v }))} teamName={teamName} opponentName={game.opponent} />
                 <MilestoneSelect label="첫 타워" value={form.firstTowerTeam} onChange={v => setForm(f => ({ ...f, firstTowerTeam: v }))} teamName={teamName} opponentName={game.opponent} />
+                <MilestoneSelect label="첫 드래곤" value={form.firstDragonTeam} onChange={v => setForm(f => ({ ...f, firstDragonTeam: v }))} teamName={teamName} opponentName={game.opponent} />
                 <MilestoneSelect label="첫 내셔" value={form.firstBaronTeam} onChange={v => setForm(f => ({ ...f, firstBaronTeam: v }))} teamName={teamName} opponentName={game.opponent} />
                 <MilestoneSelect label="5번째 킬 선취" value={form.fifthKillTeam} onChange={v => setForm(f => ({ ...f, fifthKillTeam: v }))} teamName={teamName} opponentName={game.opponent} />
                 <MilestoneSelect label="10번째 킬 선취" value={form.tenthKillTeam} onChange={v => setForm(f => ({ ...f, tenthKillTeam: v }))} teamName={teamName} opponentName={game.opponent} />
