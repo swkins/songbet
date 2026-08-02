@@ -604,6 +604,7 @@ export interface SetRecordForPower {
   opponentPriorScore?: number   // 상대 팀의 사전(prior) 체급 점수 0~100 (모르면 50=중립)
   opponent?: string             // 상대팀 표시명 (히스토리 UI 표시용)
   matchStartTime?: string       // 경기 일시 (히스토리 UI 표시용)
+  gameNumber?: number           // 세트 번호 (히스토리 UI 정렬/표시용)
 }
 
 // 1단계: 상대 체급을 고려하지 않고, 순수 실적만으로 매긴 사전 점수.
@@ -639,6 +640,7 @@ const SURPRISE_ADJUSTMENT_K = 18
 export interface SetAdjustmentDetail {
   opponent: string
   matchStartTime: string
+  gameNumber: number
   won: boolean
   playScore: number
   seriesSweep: boolean
@@ -663,7 +665,7 @@ export function computeSetAdjustments(sets: SetRecordForPower[], myPriorScore = 
     let marginFactor = 0.5 + Math.abs(r.playScore - 50) / 100
     if (r.won && r.seriesSweep) marginFactor += 0.15
     const adjustment = surprise * marginFactor * SURPRISE_ADJUSTMENT_K
-    return { opponent: r.opponent ?? '', matchStartTime: r.matchStartTime ?? '', won: r.won, playScore: r.playScore, seriesSweep: r.seriesSweep, daysAgo, opponentPriorScore: oppPrior, expected, surprise, marginFactor, weight, adjustment }
+    return { opponent: r.opponent ?? '', matchStartTime: r.matchStartTime ?? '', gameNumber: r.gameNumber ?? 0, won: r.won, playScore: r.playScore, seriesSweep: r.seriesSweep, daysAgo, opponentPriorScore: oppPrior, expected, surprise, marginFactor, weight, adjustment }
   })
 }
 

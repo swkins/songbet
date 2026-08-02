@@ -780,6 +780,7 @@ function LeagueView({ code, label }: { code: string; label: string }) {
         .in('team_id', teamsList.map(t => t.id))
         .eq('source', 'manual')
         .order('match_start_time', { ascending: false })
+        .order('game_number', { ascending: true })
       const rows = (data as EsportsGameStat[]) ?? []
       const byTeam: Record<string, EsportsGameStat[]> = {}
       for (const r of rows) {
@@ -798,6 +799,7 @@ function LeagueView({ code, label }: { code: string; label: string }) {
         }
         const result: (SetRecordForPower & { opponent: string })[] = []
         for (const sets of Object.values(groups)) {
+          sets.sort((a, b) => a.game_number - b.game_number) // 1세트→2세트→3세트 순서 보장
           const team1Wins = sets.filter(s => s.winner_team === 'team1').length
           const team2Wins = sets.length - team1Wins
           const winnerTeam: NarrativeTeam = team1Wins >= team2Wins ? 'team1' : 'team2'
@@ -816,7 +818,7 @@ function LeagueView({ code, label }: { code: string; label: string }) {
               durationSeconds: s.duration_seconds,
             })
             const daysAgo = s.match_start_time != null ? dayjs().diff(dayjs(s.match_start_time), 'day') : 0
-            result.push({ won: s.winner_team === 'team1', playScore, seriesSweep, daysAgo, opponent: s.team2_name, matchStartTime: s.match_start_time ?? '' })
+            result.push({ won: s.winner_team === 'team1', playScore, seriesSweep, daysAgo, opponent: s.team2_name, matchStartTime: s.match_start_time ?? '', gameNumber: s.game_number })
           }
         }
         return result
@@ -899,7 +901,7 @@ function LeagueView({ code, label }: { code: string; label: string }) {
               // 히스토리는 오래된 경기 → 최근 경기 순으로 보여주고, 각 경기까지의 누적 점수를 같이 계산
               const history = expanded && detail
                 ? [...computeSetAdjustments(detail.sets, detail.prior)]
-                    .sort((a, b) => dayjs(a.matchStartTime).valueOf() - dayjs(b.matchStartTime).valueOf())
+                    .sort((a, b) => dayjs(a.matchStartTime).valueOf() - dayjs(b.matchStartTime).valueOf() || a.gameNumber - b.gameNumber)
                 : []
               let cumWeight = 0, cumAdj = 0
               const historyWithRunning = history.map(h => {
@@ -932,6 +934,7 @@ function LeagueView({ code, label }: { code: string; label: string }) {
                         <thead>
                           <tr style={{ color: 'var(--text-muted)', textAlign: 'right' }}>
                             <th style={{ textAlign: 'left', padding: '2px 4px' }}>날짜</th>
+                            <th style={{ textAlign: 'center', padding: '2px 4px' }}>세트</th>
                             <th style={{ textAlign: 'left', padding: '2px 4px' }}>상대</th>
                             <th style={{ padding: '2px 4px' }}>결과</th>
                             <th style={{ padding: '2px 4px' }}>플레이점수</th>
@@ -947,6 +950,7 @@ function LeagueView({ code, label }: { code: string; label: string }) {
                           {historyWithRunning.map((h, i) => (
                             <tr key={i} style={{ borderTop: '1px solid var(--border)', textAlign: 'right' }}>
                               <td style={{ textAlign: 'left', padding: '3px 4px', color: 'var(--text-muted)' }}>{h.matchStartTime ? dayjs(h.matchStartTime).format('MM/DD') : '-'}</td>
+                              <td style={{ textAlign: 'center', padding: '3px 4px', color: 'var(--text-muted)' }}>{h.gameNumber}세트</td>
                               <td style={{ textAlign: 'left', padding: '3px 4px' }}>{h.opponent}</td>
                               <td style={{ padding: '3px 4px', fontWeight: 700, color: h.won ? 'var(--green, #4ade80)' : 'var(--red, #f87171)' }}>{h.won ? '승' : '패'}</td>
                               <td style={{ padding: '3px 4px' }}>{h.playScore}</td>
