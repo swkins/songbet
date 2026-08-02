@@ -456,18 +456,27 @@ export function computeDetailedScores(g: GameStatsInput & { durationSeconds?: nu
   const durationPenalty = durationMin > 33 ? 1.5 : durationMin < 24 ? -0.5 : 0
   const snowball = clamp10(5 + sign * (earlyLeadCount * 1 + gapMagnitude * 0.5 - durationPenalty))
 
-  // 마무리능력: classifyGameNarrative의 earlyLeader 판정을 재사용
-  // - 상대가 초반 앞섰는데 내가 이겼다 → 역전 마무리 잘함 (높은 점수)
-  // - 내가 초반 앞섰는데 내가 졌다 → 리드 날림 (낮은 점수)
-  // - 그 외는 완만하게 평가
+  // 마무리능력: classifyGameNarrative의 earlyLeader 판정 + 경기시간을 함께 반영.
+  // 어떤 케이스든 "짧게 끝낼수록 마무리가 좋다"는 원칙이 일관되게 적용되도록,
+  // 25분 이하면 +1, 40분 이상이면 -1, 그 사이는 선형으로 이어지는 시간 보너스를 공통으로 더한다.
   const narrative = classifyGameNarrative(g)
   const loser: NarrativeTeam = g.winnerTeam === 'team1' ? 'team2' : 'team1'
   const iWon = g.winnerTeam === 'team1'
   const loserHadEarlyLead = narrative.earlyLeader === loser
   const iHadEarlyLead = narrative.earlyLeader === 'team1'
+  const durationBonus = durationMin == null ? 0
+    : durationMin <= 25 ? 1
+    : durationMin >= 40 ? -1
+    : 1 - (durationMin - 25) * (2 / 15)
   let closing: number
-  if (iWon) closing = loserHadEarlyLead ? 9 : (iHadEarlyLead ? (durationMin < 30 ? 7.5 : 6.5) : 6)
-  else closing = iHadEarlyLead ? 2 : 4
+  if (iWon) {
+    closing = loserHadEarlyLead ? 9 + durationBonus * 0.5   // 역전승: 이미 최상위권이라 시간 영향은 절반만
+      : iHadEarlyLead ? 7 + durationBonus                    // 리드를 끝까지 지킨 승: 시간 영향 그대로
+      : 6 + durationBonus                                     // 초반 팽팽했던 승: 시간 영향 그대로
+  } else {
+    closing = iHadEarlyLead ? 2 - Math.max(0, -durationBonus) * 0.5 // 리드 날림: 오래 끌수록 더 나쁘게
+      : 4 // 그냥 진 경우는 "마무리"를 논할 상황이 아니라 시간 무관
+  }
 
   return { laning, objectiveControl, teamfight, macro, snowball, closing: clamp10(closing) }
 }
@@ -498,44 +507,50 @@ export function computeBothSidesScores(g: GameStatsInput): { team1: DetailedGame
 }
 
 // ─── "플레이 점수" (1~100) ──────────────────────────────────────────
-// 승패 자체를 가장 큰 단일 요소로 두고("이겨야 점수가 있다"), 초반에 밀렸다가 뒤집은
-// 역전승에는 별도 보너스를 준다 — 그래야 "이겼는데 점수가 낮은" 비상식적인 결과가 안 나온다.
-//   1) 승패 (30점): 이기면 30, 지면 0
-//   2) 역전 보너스 (15점): 초반 마일스톤에서 상대가 앞섰는데도 결국 이겼으면 +15
-//      (처음부터 앞서서 이긴 경우는 마일스톤 점수 쪽에서 이미 보상되므로 중복 지급 안 함)
-//   3) 마일스톤 (20점): 퍼스트 킬/타워/드래곤/내셔/5킬/10킬 선취 6종
-//   4) 시간 (20점): 짧을수록 유리. 진 경기는 시간이 짧아도 의미가 약해 절반만 인정
-//   5) 안 내주기 (15점): 상대 킬/타워/억제기를 얼마나 적게 내줬는지
+// 승패는 여전히 중요하지만, 초반 마일스톤(누가 앞섰는지)에 비중을 더 실어서
+// "역전승이어도 초반에 앞섰던 팀은 그만큼 점수를 받는다"가 되도록 재조정했다.
+// 결과적으로 점수 격차 자체가 "얼마나 일방적인 경기였는지"에 비례하게 된다
+// (접전 끝 역전승은 격차가 작고, 완전 압도는 격차가 크게).
+//   1) 승패 (25점): 이기면 25, 지면 0
+//   2) 역전 보너스 (10점): 초반 마일스톤에서 상대가 앞섰는데도 결국 이겼으면 +10
+//   3) 마일스톤 (30점): 퍼스트 킬/타워/드래곤/내셔/5킬/10킬 선취 6종 — 초반 우위를 승패와 무관하게 반영
+//   4) 시간 (15점): LCK 평균 경기시간(32분) 기준. 평균보다 7분 빠르면(25분) 만점, 7분 느리면(39분) 0점,
+//      그 사이는 선형 비례 (초 단위까지 연속 계산). 진 경기는 절반만 인정.
+//   5) 안 내주기 (20점): 타워/억제기는 게임당 구조적 최대치(11개/3개)를 기준으로, 킬은 22킬(사실상
+//      게임을 거의 다 내준 수준)을 0점 기준으로 선형 계산
 export function computePerfectionScore(g: GameStatsInput): number {
   const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
   const durationMin = g.durationSeconds != null ? g.durationSeconds / 60 : null
   const won = g.winnerTeam === 'team1'
   const milestones = [g.firstBloodTeam, g.firstTowerTeam, g.firstDragonTeam, g.firstBaronTeam, g.fifthKillTeam, g.tenthKillTeam]
 
-  const winScore = won ? 30 : 0
+  const winScore = won ? 25 : 0
 
   const balancePoint = (m?: NarrativeTeam | null) => m === 'team1' ? 1 : m === 'team2' ? -1 : 0
   const earlyBalance = milestones.reduce((acc, m) => acc + balancePoint(m), 0) // 양수=내가 초반 우세
-  const comebackBonus = (won && earlyBalance < 0) ? 15 : 0
+  const comebackBonus = (won && earlyBalance < 0) ? 10 : 0
 
-  const msRaw = (m?: NarrativeTeam | null) => m === 'team1' ? 20 / 6 : m === 'team2' ? 0 : 10 / 6
+  const msRaw = (m?: NarrativeTeam | null) => m === 'team1' ? 30 / 6 : m === 'team2' ? 0 : 15 / 6
   const milestoneScore = milestones.reduce((acc, m) => acc + msRaw(m), 0)
 
-  let timeRaw = 10
+  const AVG_DURATION_MIN = 32 // LCK 평균 경기시간 기준값
+  const SPREAD_MIN = 7 // 평균에서 이만큼 벗어나면 만점/0점에 도달 (25분=만점, 39분=0점)
+  let timeRaw = 7.5 // 시간 정보 없으면 평균값(중립)
   if (durationMin != null) {
-    if (durationMin <= 20) timeRaw = 20
-    else if (durationMin >= 50) timeRaw = 0
-    else timeRaw = 20 * (50 - durationMin) / 30
+    const diffFromAvg = AVG_DURATION_MIN - durationMin // 양수=평균보다 빠름
+    timeRaw = clamp(7.5 + diffFromAvg * (7.5 / SPREAD_MIN), 0, 15) // 초 단위까지 연속 반영
   }
   const timeScore = won ? timeRaw : timeRaw * 0.5
 
-  const inhibDenial = clamp(5 - g.team2Inhibitors * (5 / 3), 0, 5)
-  const towerDenial = clamp(5 - g.team2Towers * (5 / 11), 0, 5)
-  const killDenial = clamp(5 - g.team2Kills * 0.2, 0, 5)
+  const inhibDenial = clamp(20 / 3 - g.team2Inhibitors * (20 / 9), 0, 20 / 3)   // 억제기 3개(구조적 최대) 다 내주면 0점
+  const towerDenial = clamp(20 / 3 - g.team2Towers * (20 / 33), 0, 20 / 3)      // 타워 11개(구조적 최대) 다 내주면 0점
+  const killDenial = clamp(20 / 3 - g.team2Kills * (20 / 3 / 22), 0, 20 / 3)    // 22킬 내주면 0점
   const denialScore = inhibDenial + towerDenial + killDenial
 
   return Math.round(clamp(winScore + comebackBonus + milestoneScore + timeScore + denialScore, 0, 100))
 }
+
+
 
 export function computeBothSidesPerfection(g: GameStatsInput): { team1: number; team2: number } {
   return { team1: computePerfectionScore(g), team2: computePerfectionScore(swapPerspective(g)) }

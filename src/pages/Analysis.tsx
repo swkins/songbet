@@ -650,7 +650,7 @@ function RecentMatchRow({ teamId, teamName, game, displayA, displayB, scoreA, sc
                       const tooltip = metricTooltip(key, p.stat, teamName, game.opponent, p.narrative.earlyLeader)
                       return (
                         <div key={label} title={tooltip} style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'help' }}>
-                          <span style={{ width: 40, flexShrink: 0, color: 'var(--text-secondary)', borderBottom: '1px dotted var(--text-muted)' }}>{label}</span>
+                          <span style={{ width: 52, flexShrink: 0, color: 'var(--text-secondary)', borderBottom: '1px dotted var(--text-muted)', whiteSpace: 'nowrap' }}>{label}</span>
                           <span style={{ width: 22, textAlign: 'right', fontWeight: 700, color: t1 >= t2 ? 'var(--text-primary)' : 'var(--text-muted)', flexShrink: 0 }}>{t1.toFixed(1)}</span>
                           <div style={{ flex: 1, height: 6, borderRadius: 3, display: 'flex', overflow: 'hidden' }}>
                             <div style={{ width: `${(t1 / total) * 100}%`, background: 'var(--gold)' }} />
