@@ -507,17 +507,29 @@ export function computeBothSidesScores(g: GameStatsInput): { team1: DetailedGame
 }
 
 // ─── "플레이 점수" (1~100) ──────────────────────────────────────────
-// 라인전/오브젝트/교전/운영/마무리 5개 세부지표(각 0~10)를 그대로 합산해서 ×2 스케일링한 값이다.
-// 예전에는 승패/마일스톤/시간/안내주기를 별도 공식으로 다시 계산했는데, 그러다 보니
-// "시간"이 승자에게만 붙는 항목이라 승패 격차 위에 또 격차를 얹는 부작용이 있었다.
-// 지금은 마무리(closing) 안에 승패+시간+역전 여부가 이미 반영돼 있으므로 그걸 그대로 쓴다.
-// 결과적으로 이긴 팀이 항상 진 팀보다 높게 나오되(마무리가 승/패에 따라 확실히 갈리므로),
-// 격차의 "크기"는 라인전/오브젝트/교전/운영에서 실제로 얼마나 일방적이었는지에 비례한다.
+// 경기시간을 "격차 자체를 조절하는 축"으로 삼는다:
+//   - 짧게 끝난 경기(20분 이하) → 한쪽이 확실히 압도했다는 뜻이므로 격차를 크게 증폭(×1.6)
+//   - 평균 페이스(32분) → 중립(×1.0), 지금까지 계산된 격차를 그대로 반영
+//   - 길게 끌린 경기(45분 이상) → 그만큼 접전이었다는 뜻이므로 격차를 크게 압축(×0.5)
+// 라인전/오브젝트/교전/운영/마무리 5개 세부지표 합(0~50, 중립값 25)에서 얼마나 벗어났는지를
+// "격차의 원재료"로 쓰고, 거기에 위 시간 배율을 곱해서 최종 점수를 50 기준 위아래로 벌리거나 좁힌다.
+// 마무리 지표 안에 승/패가 반영돼 있어서 이긴 팀이 진 팀보다 낮게 나오는 경우는 거의 없지만,
+// 격차의 "크기"는 이제 순수하게 경기시간이 결정한다.
+function durationSpreadMultiplier(durationMin: number): number {
+  if (durationMin <= 20) return 1.6
+  if (durationMin >= 45) return 0.5
+  if (durationMin <= 32) return 1.6 - (durationMin - 20) * (0.6 / 12)  // 20~32분: 1.6 → 1.0
+  return 1.0 - (durationMin - 32) * (0.5 / 13)                          // 32~45분: 1.0 → 0.5
+}
+
 export function computePerfectionScore(g: GameStatsInput): number {
   const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
+  const durationMin = g.durationSeconds != null ? g.durationSeconds / 60 : 32
   const d = computeDetailedScores(g)
-  const sum = d.laning + d.objectiveControl + d.teamfight + d.macro + d.closing
-  return Math.round(clamp(sum * 2, 0, 100))
+  const sum = d.laning + d.objectiveControl + d.teamfight + d.macro + d.closing // 0~50, 중립=25
+  const deviation = sum - 25
+  const spread = durationSpreadMultiplier(durationMin)
+  return Math.round(clamp(50 + deviation * 2 * spread, 0, 100))
 }
 
 
