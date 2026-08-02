@@ -6,8 +6,8 @@ import {
   LEAGUES, fetchScheduleEvents, extractTeamData, computeForm, matchupProbability, filterRecentGames,
   seriesScoreProbabilities, computeOddsValue, teamNameMatches,
   classifyGameNarrative, computeBothSidesScores, computeBothSidesPerfection, computePerfectionScore,
-  computeTeamPowerScore, powerScoreMatchupProbability,
-  type RawScheduleEvent, type TeamGameRecord, type NarrativeTeam, type TeamPowerScore,
+  computeTeamPowerScore, computeTeamPriorScore, powerScoreMatchupProbability,
+  type RawScheduleEvent, type TeamGameRecord, type NarrativeTeam, type TeamPowerScore, type TeamGameRecordForPower,
 } from '../lib/lolEsports'
 
 interface EsportsTeam {
@@ -335,7 +335,7 @@ function GameStatCard({ stat, teamName, onDelete, onEdit }: { stat: EsportsGameS
     durationSeconds: stat.duration_seconds,
   }
   const narrative = classifyGameNarrative(input)
-  const winScore = computePerfectionScore(input)
+  const winScore = computeBothSidesPerfection(input)
   return (
     <div style={{ background: 'var(--bg-elevated)', borderRadius: 6, padding: '8px 10px', fontSize: 10 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
@@ -363,7 +363,7 @@ function GameStatCard({ stat, teamName, onDelete, onEdit }: { stat: EsportsGameS
         킬 {stat.team1_kills ?? '-'}:{stat.team2_kills ?? '-'} · 내셔 {stat.team1_barons ?? '-'}:{stat.team2_barons ?? '-'} · 드래곤 {stat.team1_dragons ?? '-'}:{stat.team2_dragons ?? '-'} · 타워 {stat.team1_towers ?? '-'}:{stat.team2_towers ?? '-'} · 억제기 {stat.team1_inhibitors ?? '-'}:{stat.team2_inhibitors ?? '-'}{stat.team1_gold != null ? ` · 골드 ${stat.team1_gold}k:${stat.team2_gold}k` : ''}
       </div>
       <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontWeight: 800, color: 'var(--gold)', background: 'var(--gold-bg)', border: '1px solid var(--gold-border)', borderRadius: 4, padding: '2px 6px', marginBottom: 4 }}>
-        승리점수 {winScore} <span style={{ fontWeight: 500, color: 'var(--text-muted)' }}>({teamName} 관점, 100점 만점)</span>
+        플레이 점수 {winScore.team1} : {winScore.team2} <span style={{ fontWeight: 500, color: 'var(--text-muted)' }}>({teamName} : {stat.team2_name}, 100점 만점)</span>
       </div>
       <div style={{ color: 'var(--text-muted)', lineHeight: 1.4 }}>{narrative.detail}</div>
     </div>
@@ -606,7 +606,7 @@ function RecentMatchRow({ teamId, teamName, game, displayA, displayB, scoreA, sc
                     <b>{p.gameNumber}세트</b> · ({p.winnerTeam === 'team1' ? teamName : game.opponent} 승)
                   </div>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 8 }}>
-                    <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>완벽도</span>
+                    <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>플레이 점수</span>
                     <span style={{ fontSize: 16, fontWeight: 800, color: p.perfection.team1 >= p.perfection.team2 ? 'var(--gold)' : 'var(--text-primary)' }}>{p.perfection.team1}</span>
                     <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{teamName}</span>
                     <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>:</span>
@@ -741,9 +741,8 @@ function LeagueView({ code, label }: { code: string; label: string }) {
         if (!byTeam[r.team_id]) byTeam[r.team_id] = []
         byTeam[r.team_id].push(r)
       }
-      const scores: Record<string, TeamPowerScore> = {}
-      for (const t of teamsList) {
-        const records = (byTeam[t.id] ?? []).map(s => ({
+      const toRecords = (statRows: EsportsGameStat[]): TeamGameRecordForPower[] =>
+        statRows.map((s, i) => ({
           team1Kills: s.team1_kills ?? 0, team2Kills: s.team2_kills ?? 0,
           team1Dragons: s.team1_dragons ?? 0, team2Dragons: s.team2_dragons ?? 0,
           team1Towers: s.team1_towers ?? 0, team2Towers: s.team2_towers ?? 0,
@@ -754,8 +753,22 @@ function LeagueView({ code, label }: { code: string; label: string }) {
           firstDragonTeam: s.first_dragon_team, firstBaronTeam: s.first_baron_team,
           fifthKillTeam: s.fifth_kill_team, tenthKillTeam: s.tenth_kill_team,
           durationSeconds: s.duration_seconds,
+          daysAgo: s.match_start_time != null ? dayjs().diff(dayjs(s.match_start_time), 'day') : i * 7,
         }))
-        scores[t.id] = computeTeamPowerScore(records)
+
+      // 1단계: 상대 체급을 모른 채로, 순수 실적(완벽도+승률)만으로 사전 점수 계산
+      const priors: Record<string, number> = {}
+      for (const t of teamsList) priors[t.id] = computeTeamPriorScore(toRecords(byTeam[t.id] ?? [])).powerScore
+
+      // 2단계: 각 경기의 상대팀 사전 점수를 붙여서, 이변 보정된 최종 체급 점수 계산
+      const scores: Record<string, TeamPowerScore> = {}
+      for (const t of teamsList) {
+        const statRows = byTeam[t.id] ?? []
+        const records = toRecords(statRows).map((rec, i) => {
+          const oppTeam = teamsList.find(tt => teamNameMatches(tt, statRows[i].team2_name))
+          return { ...rec, opponentPriorScore: oppTeam ? priors[oppTeam.id] : undefined }
+        })
+        scores[t.id] = computeTeamPowerScore(records, priors[t.id])
       }
       setPowerScores(scores)
     } finally {

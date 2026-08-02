@@ -530,9 +530,6 @@ export function computeBothSidesPerfection(g: GameStatsInput): { team1: number; 
 }
 
 // ─── 팀 체급 점수 (수동 입력된 최근 경기 기반) ──────────────────────
-// 최근 경기일수록 가중치를 높게 줘서(0.85^n 감쇠) "지금 폼"에 가깝게 반영.
-// 완벽도 점수(60%) + 승률(40%)을 섞어서 0~100 스케일의 체급 점수를 만든다.
-// - 완벽도만 쓰면 "잘했는데 진 경기"가 과대평가될 수 있어 승률로 앵커를 잡아줌
 export interface TeamPowerScore {
   powerScore: number // 0~100
   avgPerfection: number
@@ -540,13 +537,26 @@ export interface TeamPowerScore {
   gamesAnalyzed: number
 }
 
-// records: 최신 경기가 앞에 오도록(내림차순) 정렬된 GameStatsInput 배열, team1=해당 팀 관점
-export function computeTeamPowerScore(records: GameStatsInput[]): TeamPowerScore {
+// 시간 가중치: 최근 1~2달(60일)은 완만하게 줄고, 그 이후로는 30일마다 절반씩 급격히 줄어든다.
+// 즉 "최근 폼"에 압도적 비중을 주되, 아주 오래된 경기도 완전히 0은 아니게(장기 추세도 살짝 반영).
+function timeDecayWeight(daysAgo: number): number {
+  const d = Math.max(0, daysAgo)
+  if (d <= 60) return 1 - 0.3 * (d / 60)          // 0일: 1.0 → 60일: 0.7 (완만)
+  return 0.7 * Math.pow(0.5, (d - 60) / 30)        // 60일 이후: 30일마다 절반씩 (급격)
+}
+
+export interface TeamGameRecordForPower extends GameStatsInput {
+  daysAgo?: number            // 경기 이후 지난 일수 (없으면 배열 인덱스로 7일 간격 추정)
+  opponentPriorScore?: number // 상대 팀의 사전(prior) 체급 점수 0~100 (모르면 50=중립, 이변 보정 없이 계산됨)
+}
+
+// 1단계: "사전(prior)" 점수 — 상대 체급을 고려하지 않고, 완벽도(perfection)+승률만으로 매긴 순수 실적 점수.
+// 2단계(computeTeamPowerScore)에서 상대의 이 사전 점수를 "기대 승률" 계산에 사용한다.
+export function computeTeamPriorScore(records: TeamGameRecordForPower[]): TeamPowerScore {
   if (records.length === 0) return { powerScore: 50, avgPerfection: 50, winRate: 0.5, gamesAnalyzed: 0 }
-  const decay = 0.85
   let weightSum = 0, perfectionWeighted = 0, winWeighted = 0
   records.forEach((r, i) => {
-    const w = Math.pow(decay, i)
+    const w = timeDecayWeight(r.daysAgo ?? i * 7)
     weightSum += w
     perfectionWeighted += computePerfectionScore(r) * w
     winWeighted += (r.winnerTeam === 'team1' ? 1 : 0) * w
@@ -556,6 +566,41 @@ export function computeTeamPowerScore(records: GameStatsInput[]): TeamPowerScore
   const powerScore = 0.6 * avgPerfection + 0.4 * (winRate * 100)
   return { powerScore, avgPerfection, winRate, gamesAnalyzed: records.length }
 }
+
+// 2단계: 최종 체급 점수 — "이변 보정"이 핵심.
+// 각 경기마다 상대 사전 점수(opponentPriorScore) 대비 기대 승률(powerScoreMatchupProbability)을 구하고,
+// 실제 결과와의 차이("이변 정도" surprise)만큼 점수를 움직인다.
+//   - 체급 낮은 팀이 높은 팀을 이김(이변, surprise 큼) → 크게 상승
+//   - 체급 높은 팀이 낮은 팀을 이김(예상대로, surprise 작음) → 조금만 상승
+//   - 체급 높은 팀이 낮은 팀에게 짐(역이변, surprise 매우 음수) → 크게 하락
+// 완승/완패일수록(완벽도 점수가 50에서 멀수록) 그 경기의 영향력도 더 커지게(marginFactor) 만든다.
+// 여기에 시간 가중치(timeDecayWeight)까지 곱해서 최종 평균을 낸다.
+export function computeTeamPowerScore(records: TeamGameRecordForPower[], myPriorScore = 50): TeamPowerScore {
+  if (records.length === 0) return { powerScore: 50, avgPerfection: 50, winRate: 0.5, gamesAnalyzed: 0 }
+  const K = 55 // 이변 보정 강도 (클수록 이변 경기 하나의 영향력이 커짐)
+  const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
+  let weightSum = 0, scoreWeighted = 0, perfectionWeighted = 0, winWeighted = 0
+  records.forEach((r, i) => {
+    const w = timeDecayWeight(r.daysAgo ?? i * 7)
+    weightSum += w
+    const myPerfection = computePerfectionScore(r)
+    perfectionWeighted += myPerfection * w
+    const actual = r.winnerTeam === 'team1' ? 1 : 0
+    winWeighted += actual * w
+
+    const oppPrior = r.opponentPriorScore ?? 50
+    const expected = powerScoreMatchupProbability(myPriorScore, oppPrior)
+    const surprise = actual - expected // -1(완전 역이변) ~ +1(완전 이변)
+    const marginFactor = 0.5 + Math.abs(myPerfection - 50) / 100 // 0.5(접전)~1.0(완승/완패)
+    const gameScore = clamp(50 + surprise * marginFactor * K, 0, 100)
+    scoreWeighted += gameScore * w
+  })
+  const avgPerfection = perfectionWeighted / weightSum
+  const winRate = winWeighted / weightSum
+  const powerScore = scoreWeighted / weightSum
+  return { powerScore, avgPerfection, winRate, gamesAnalyzed: records.length }
+}
+
 
 // 두 팀의 체급 점수 차이를 승률로 변환 (Elo와 비슷한 로지스틱 곡선, 표본이 적을 수 있어 5~95%로 클램프)
 export function powerScoreMatchupProbability(powerA: number, powerB: number): number {
