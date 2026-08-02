@@ -5,7 +5,7 @@ import { Plus, Trash2, ChevronDown, ChevronUp, ExternalLink, RefreshCw, Trending
 import {
   LEAGUES, fetchScheduleEvents, extractTeamData, computeForm, matchupProbability, filterRecentGames,
   seriesScoreProbabilities, computeOddsValue, fetchLeagueTeams, findTeamCode, teamNameMatches,
-  classifyGameNarrative, type RawScheduleEvent, type TeamGameRecord, type NarrativeTeam,
+  classifyGameNarrative, computeDetailedScores, type RawScheduleEvent, type TeamGameRecord, type NarrativeTeam, type DetailedGameScores,
 } from '../lib/lolEsports'
 
 interface EsportsTeam {
@@ -290,6 +290,7 @@ function GameStatCard({ stat, teamName, onDelete }: { stat: EsportsGameStat; tea
     winnerTeam: stat.winner_team ?? 'team1',
     firstBloodTeam: stat.first_blood_team, firstTowerTeam: stat.first_tower_team, firstDragonTeam: stat.first_dragon_team, firstBaronTeam: stat.first_baron_team,
     fifthKillTeam: stat.fifth_kill_team, tenthKillTeam: stat.tenth_kill_team,
+    durationSeconds: stat.duration_seconds,
   })
   return (
     <div style={{ background: 'var(--bg-elevated)', borderRadius: 6, padding: '8px 10px', fontSize: 10 }}>
@@ -417,6 +418,7 @@ function RecentMatchRow({ teamId, teamName, game, displayA, displayB, scoreA, sc
         firstBloodTeam: s.first_blood_team, firstTowerTeam: s.first_tower_team,
         firstDragonTeam: s.first_dragon_team, firstBaronTeam: s.first_baron_team,
         fifthKillTeam: s.fifth_kill_team, tenthKillTeam: s.tenth_kill_team,
+        durationSeconds: s.duration_seconds,
       }),
       winnerTeam: s.winner_team,
     }))
@@ -426,7 +428,27 @@ function RecentMatchRow({ teamId, teamName, game, displayA, displayB, scoreA, sc
     const oppWins = sets.length - ourWins
     // 우리 팀 관점에서 평균 dominanceScore (양수=평균적으로 우세, 음수=열세)
     const avgDominance = perSet.reduce((acc, p) => acc + (p.winnerTeam === 'team1' ? p.narrative.dominanceScore : -p.narrative.dominanceScore), 0) / perSet.length
-    return { perSet, ourWins, oppWins, avgDominance,
+
+    // 6개 세부 지표(라인전/오브젝트/한타/운영/스노볼/마무리) 평균
+    const detailScores = sets.map(s => computeDetailedScores({
+      team1Kills: s.team1_kills ?? 0, team2Kills: s.team2_kills ?? 0,
+      team1Dragons: s.team1_dragons ?? 0, team2Dragons: s.team2_dragons ?? 0,
+      team1Towers: s.team1_towers ?? 0, team2Towers: s.team2_towers ?? 0,
+      team1Inhibitors: s.team1_inhibitors ?? 0, team2Inhibitors: s.team2_inhibitors ?? 0,
+      team1Barons: s.team1_barons ?? 0, team2Barons: s.team2_barons ?? 0,
+      winnerTeam: s.winner_team ?? 'team1',
+      firstBloodTeam: s.first_blood_team, firstTowerTeam: s.first_tower_team,
+      firstDragonTeam: s.first_dragon_team, firstBaronTeam: s.first_baron_team,
+      fifthKillTeam: s.fifth_kill_team, tenthKillTeam: s.tenth_kill_team,
+      durationSeconds: s.duration_seconds,
+    }))
+    const avgKey = (k: keyof DetailedGameScores) => detailScores.reduce((acc, d) => acc + d[k], 0) / detailScores.length
+    const avgDetail: DetailedGameScores = {
+      laning: avgKey('laning'), objectiveControl: avgKey('objectiveControl'), teamfight: avgKey('teamfight'),
+      macro: avgKey('macro'), snowball: avgKey('snowball'), closing: avgKey('closing'),
+    }
+
+    return { perSet, ourWins, oppWins, avgDominance, avgDetail,
       kills: { our: sum('team1_kills'), opp: sum('team2_kills') },
       dragons: { our: sum('team1_dragons'), opp: sum('team2_dragons') },
       towers: { our: sum('team1_towers'), opp: sum('team2_towers') },
@@ -477,10 +499,29 @@ function RecentMatchRow({ teamId, teamName, game, displayA, displayB, scoreA, sc
               <div style={{ color: 'var(--text-secondary)', marginBottom: 6, lineHeight: 1.6 }}>
                 합계 — 킬 {seriesAnalysis.kills.our}:{seriesAnalysis.kills.opp} · 드래곤 {seriesAnalysis.dragons.our}:{seriesAnalysis.dragons.opp} · 타워 {seriesAnalysis.towers.our}:{seriesAnalysis.towers.opp} · 바론 {seriesAnalysis.barons.our}:{seriesAnalysis.barons.opp}
               </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginBottom: 6 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginBottom: 8 }}>
                 {seriesAnalysis.perSet.map(p => (
                   <div key={p.gameNumber} style={{ color: 'var(--text-secondary)' }}>
                     {p.gameNumber}세트 · <b style={{ color: 'var(--gold)' }}>{p.narrative.label}</b> ({p.winnerTeam === 'team1' ? teamName : game.opponent} 승)
+                  </div>
+                ))}
+              </div>
+              <div style={{ fontWeight: 800, marginBottom: 4, fontSize: 10, color: 'var(--text-muted)' }}>세부 지표 평균 (0~10, {teamName} 관점 · 추정치)</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 8 }}>
+                {([
+                  ['라인전', seriesAnalysis.avgDetail.laning],
+                  ['오브젝트 컨트롤', seriesAnalysis.avgDetail.objectiveControl],
+                  ['한타능력', seriesAnalysis.avgDetail.teamfight],
+                  ['운영능력', seriesAnalysis.avgDetail.macro],
+                  ['스노볼', seriesAnalysis.avgDetail.snowball],
+                  ['마무리능력', seriesAnalysis.avgDetail.closing],
+                ] as [string, number][]).map(([label, score]) => (
+                  <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ width: 70, flexShrink: 0, color: 'var(--text-secondary)' }}>{label}</span>
+                    <div style={{ flex: 1, height: 6, borderRadius: 3, background: 'var(--bg-card)', overflow: 'hidden' }}>
+                      <div style={{ width: `${score * 10}%`, height: '100%', background: score >= 6 ? 'var(--green, #4ade80)' : score <= 4 ? 'var(--red, #f87171)' : 'var(--gold)' }} />
+                    </div>
+                    <span style={{ width: 28, textAlign: 'right', fontWeight: 700, color: 'var(--text-primary)' }}>{score.toFixed(1)}</span>
                   </div>
                 ))}
               </div>

@@ -334,6 +334,7 @@ export interface GameStatsInput {
   firstBaronTeam?: NarrativeTeam | null
   fifthKillTeam?: NarrativeTeam | null
   tenthKillTeam?: NarrativeTeam | null
+  durationSeconds?: number | null // 있으면 "완벽한 승리" 판정에 게임 길이를 반영 (짧을수록 완벽승 인정, 길수록 엄격해짐)
 }
 
 export interface GameNarrative {
@@ -343,8 +344,10 @@ export interface GameNarrative {
   dominanceScore: number // 승자 관점 최종 격차 점수 (클수록 압도적)
 }
 
-// 초반 마일스톤(첫 킬/첫 타워/첫 내셔/5킬·10킬 선취) + 최종 오브젝트 격차를 함께 봐서
-// "완벽한 승리 / 리드를 지킨 승리 / 역전승 / 박빙·후반장악"으로 분류
+// 초반 마일스톤(첫 킬/첫 타워/첫 내셔/5킬·10킬 선취) + 최종 오브젝트 격차 + 게임 길이를 함께 봐서
+// "완벽한 승리 / 리드를 지킨 승리 / 역전승 / 박빙·후반장악"으로 분류.
+// 완벽한 승리는 "모든 게 다 맞아떨어져야 빨리 끝난다"는 전제로, 게임이 길어질수록 기준을 엄격하게 잡고
+// 40분 이상이면 격차가 아무리 커도 완벽한 승리로 보지 않는다 (그만큼 저항이 있었다는 뜻이므로).
 export function classifyGameNarrative(g: GameStatsInput): GameNarrative {
   const loser: NarrativeTeam = g.winnerTeam === 'team1' ? 'team2' : 'team1'
 
@@ -371,16 +374,32 @@ export function classifyGameNarrative(g: GameStatsInput): GameNarrative {
   const winnerHadEarlyLead = earlyLeader === g.winnerTeam
   const loserHadEarlyLead = earlyLeader === loser
 
+  // 게임 길이에 따라 "완벽한 승리" 문턱값을 동적으로 조정. 짧을수록 관대하게, 길수록 엄격하게.
+  const durationMin = g.durationSeconds != null ? g.durationSeconds / 60 : null
+  let perfectThreshold = 8
+  let perfectAllowed = true
+  if (durationMin != null) {
+    if (durationMin <= 26) perfectThreshold = 6
+    else if (durationMin <= 30) perfectThreshold = 8
+    else if (durationMin <= 34) perfectThreshold = 10
+    else perfectThreshold = 14 // 34~40분: 사실상 웬만한 격차로는 안 뜨게
+    if (durationMin >= 40) perfectAllowed = false // 40분 이상은 격차가 아무리 커도 완벽승 아님
+  }
+
   let label: string, detail: string
   if (loserHadEarlyLead) {
     label = '역전승'
     detail = '초반 주요 지표(첫 킬·첫 타워·첫 드래곤·첫 내셔·5킬/10킬 선취)에서는 패배팀이 앞섰지만, 최종적으로는 승리팀이 뒤집었습니다.'
-  } else if (winnerHadEarlyLead && dominanceScore >= 8) {
+  } else if (winnerHadEarlyLead && dominanceScore >= perfectThreshold && perfectAllowed) {
     label = '완벽한 승리'
-    detail = '초반 마일스톤과 최종 오브젝트·킬 격차 모두에서 일방적으로 앞선 스타트-투-피니시 승리입니다.'
+    detail = durationMin != null
+      ? `초반 마일스톤과 최종 오브젝트·킬 격차 모두에서 일방적으로 앞섰고, ${Math.round(durationMin)}분 만에 빠르게 끝낸 스타트-투-피니시 승리입니다.`
+      : '초반 마일스톤과 최종 오브젝트·킬 격차 모두에서 일방적으로 앞선 스타트-투-피니시 승리입니다.'
   } else if (winnerHadEarlyLead) {
     label = '리드를 지킨 승리'
-    detail = '초반 주도권을 잡은 뒤 큰 흔들림 없이 승리로 연결했습니다.'
+    detail = durationMin != null && durationMin >= 34
+      ? `초반 주도권은 잡았지만 게임이 ${Math.round(durationMin)}분까지 길어진 걸 보면 상대의 저항이 만만치 않았습니다.`
+      : '초반 주도권을 잡은 뒤 큰 흔들림 없이 승리로 연결했습니다.'
   } else if (earlyLeader === 'even' || earlyLeader === null) {
     label = dominanceScore >= 8 ? '후반 장악승' : '박빙의 승리'
     detail = dominanceScore >= 8
@@ -392,6 +411,65 @@ export function classifyGameNarrative(g: GameStatsInput): GameNarrative {
   }
 
   return { label, detail, earlyLeader, dominanceScore }
+}
+
+// ─── 세트 상세 스코어 (라인전/오브젝트/한타/운영/스노볼/마무리) ─────────
+// 주의: 골드 그래프·분당 타임스탬프가 없는 상태에서의 근사치다.
+// "라인전"과 "한타"를 완벽히 분리할 수단이 없어 초반 마일스톤(퍼스트 킬/5킬선취)을
+// 라인전 대리지표로, 분당 킬 격차를 한타 대리지표로 쓰는 식의 근사임을 전제로 한다.
+export interface DetailedGameScores {
+  laning: number          // 라인전 (0~10)
+  objectiveControl: number // 오브젝트 컨트롤 (0~10)
+  teamfight: number        // 한타능력 (0~10)
+  macro: number            // 운영능력 (0~10)
+  snowball: number         // 스노볼 (0~10)
+  closing: number          // 마무리능력 (0~10)
+}
+
+export function computeDetailedScores(g: GameStatsInput & { durationSeconds?: number | null }): DetailedGameScores {
+  const clamp10 = (v: number) => Math.max(0, Math.min(10, v))
+  const pt = (m?: NarrativeTeam | null) => m === 'team1' ? 1 : m === 'team2' ? -1 : 0
+  const sign = g.winnerTeam === 'team1' ? 1 : -1
+  const durationMin = g.durationSeconds ? g.durationSeconds / 60 : 30
+
+  const killDiff = g.team1Kills - g.team2Kills
+  const towerDiff = g.team1Towers - g.team2Towers
+  const dragonDiff = g.team1Dragons - g.team2Dragons
+  const baronDiff = g.team1Barons - g.team2Barons
+  const inhibDiff = g.team1Inhibitors - g.team2Inhibitors
+
+  // 라인전: 퍼스트 블러드 + 5킬 선취(초반 지표), 첫 타워는 약하게 반영
+  const laning = clamp10(5 + pt(g.firstBloodTeam) * 2 + pt(g.fifthKillTeam) * 2.5 + pt(g.firstTowerTeam) * 0.5)
+
+  // 오브젝트 컨트롤: 드래곤/바론 실제 획득 격차 + 퍼스트 드래곤/바론
+  const objectiveControl = clamp10(5 + dragonDiff * 0.8 + baronDiff * 1.3 + pt(g.firstDragonTeam) * 0.6 + pt(g.firstBaronTeam) * 0.6)
+
+  // 한타능력: 분당 킬 격차(교전 효율) + 10킬 선취(중반 교전 주도권)
+  const teamfight = clamp10(5 + (killDiff / Math.max(durationMin, 10)) * 8 + pt(g.tenthKillTeam) * 1)
+
+  // 운영능력: 타워/억제기 격차 (라인전보다 한 단계 넓은 맵 장악력)
+  const macro = clamp10(5 + towerDiff * 0.45 + inhibDiff * 1.1)
+
+  // 스노볼: 초반 마일스톤을 얼마나 쥐었는지 + 최종 격차 크기 - (게임이 길어질수록 스노볼 약화로 간주)
+  const earlyLeadCount = pt(g.firstBloodTeam) + pt(g.firstTowerTeam) + pt(g.firstDragonTeam)
+  const gapMagnitude = Math.abs(towerDiff) * 0.4 + Math.abs(dragonDiff) * 0.6 + Math.abs(baronDiff) * 1
+  const durationPenalty = durationMin > 33 ? 1.5 : durationMin < 24 ? -0.5 : 0
+  const snowball = clamp10(5 + sign * (earlyLeadCount * 1 + gapMagnitude * 0.5 - durationPenalty))
+
+  // 마무리능력: classifyGameNarrative의 earlyLeader 판정을 재사용
+  // - 상대가 초반 앞섰는데 내가 이겼다 → 역전 마무리 잘함 (높은 점수)
+  // - 내가 초반 앞섰는데 내가 졌다 → 리드 날림 (낮은 점수)
+  // - 그 외는 완만하게 평가
+  const narrative = classifyGameNarrative(g)
+  const loser: NarrativeTeam = g.winnerTeam === 'team1' ? 'team2' : 'team1'
+  const iWon = g.winnerTeam === 'team1'
+  const loserHadEarlyLead = narrative.earlyLeader === loser
+  const iHadEarlyLead = narrative.earlyLeader === 'team1'
+  let closing: number
+  if (iWon) closing = loserHadEarlyLead ? 9 : (iHadEarlyLead ? (durationMin < 30 ? 7.5 : 6.5) : 6)
+  else closing = iHadEarlyLead ? 2 : 4
+
+  return { laning, objectiveControl, teamfight, macro, snowball, closing: clamp10(closing) }
 }
 
 // 배당 대비 기대값(EV) 계산. EV > 0 이면 모델 확률 기준 "베팅 가치 있음"
