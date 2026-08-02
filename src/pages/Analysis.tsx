@@ -98,8 +98,18 @@ function TeamCodeBadge({ code }: { code: string | null }) {
   )
 }
 
-// ─── 중앙: 최근 경기 ────────────────────────────────────────────
-function RecentMatchesPanel({ leagueCode, events, loading, error }: { leagueCode: string; events: RawScheduleEvent[] | null; loading: boolean; error: boolean }) {
+// 리그 목록 안에서 어느 팀이 우리가 추적 중인 팀(esports_teams)인지 찾아서
+// {teamId, teamName, opponent} 형태로 반환. 세트 기록 입력/저장은 이 팀의 관점(team1)으로 저장된다.
+function resolveMatchTeam(teams: EsportsTeam[], teamAName: string, teamBName: string): { teamId: string; teamName: string; opponent: string; isA: boolean } | null {
+  const a = teams.find(t => teamNameMatches(t, teamAName))
+  if (a) return { teamId: a.id, teamName: a.name, opponent: teamBName, isA: true }
+  const b = teams.find(t => teamNameMatches(t, teamBName))
+  if (b) return { teamId: b.id, teamName: b.name, opponent: teamAName, isA: false }
+  return null
+}
+
+// ─── 중앙: 최근 경기 (클릭하면 바로 펼쳐져서 세트 기록 입력 + 분석 가능) ──
+function RecentMatchesPanel({ leagueCode, events, loading, error, teams }: { leagueCode: string; events: RawScheduleEvent[] | null; loading: boolean; error: boolean; teams: EsportsTeam[] }) {
   const matches = useMemo(() => {
     if (!events) return []
     return events
@@ -113,6 +123,7 @@ function RecentMatchesPanel({ leagueCode, events, loading, error }: { leagueCode
           teamA: teams[0]?.name ?? '?', codeA: teams[0]?.code ?? '',
           teamB: teams[1]?.name ?? '?', codeB: teams[1]?.code ?? '',
           scoreA: teams[0]?.result?.gameWins ?? 0, scoreB: teams[1]?.result?.gameWins ?? 0,
+          bestOf: e.match!.strategy?.count ?? 3,
         }
       })
   }, [events])
@@ -120,7 +131,7 @@ function RecentMatchesPanel({ leagueCode, events, loading, error }: { leagueCode
   return (
     <div className="card">
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-        <div className="card-title" style={{ marginBottom: 0 }}>최근 경기</div>
+        <div className="card-title" style={{ marginBottom: 0 }}>최근 경기 <span style={{ fontWeight: 400, color: 'var(--text-muted)', fontSize: 10 }}>· 클릭해서 세트 기록 입력</span></div>
         <a href={`https://lolesports.com/en-US/leagues/${leagueCode.toLowerCase()}`} target="_blank" rel="noreferrer"
           style={{ fontSize: 10, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 3, textDecoration: 'none' }}>
           lolesports.com <ExternalLink size={10} />
@@ -131,14 +142,27 @@ function RecentMatchesPanel({ leagueCode, events, loading, error }: { leagueCode
       {!loading && !error && matches.length === 0 && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0' }}>최근 완료된 경기가 없습니다</div>}
       {!loading && !error && matches.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          {matches.map(m => (
-            <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, padding: '6px 8px', background: 'var(--bg-elevated)', borderRadius: 6 }}>
-              <span style={{ color: 'var(--text-muted)', flexShrink: 0, width: 58 }}>{dayjs(m.startTime).format('MM/DD HH:mm')}</span>
-              <span style={{ flex: 1, textAlign: 'right', fontWeight: m.scoreA > m.scoreB ? 800 : 400, color: m.scoreA > m.scoreB ? 'var(--text-primary)' : 'var(--text-secondary)' }}>{m.codeA || m.teamA}</span>
-              <span style={{ fontWeight: 800, color: 'var(--gold)', flexShrink: 0 }}>{m.scoreA} : {m.scoreB}</span>
-              <span style={{ flex: 1, fontWeight: m.scoreB > m.scoreA ? 800 : 400, color: m.scoreB > m.scoreA ? 'var(--text-primary)' : 'var(--text-secondary)' }}>{m.codeB || m.teamB}</span>
-            </div>
-          ))}
+          {matches.map(m => {
+            const resolved = resolveMatchTeam(teams, m.teamA, m.teamB)
+            if (!resolved) {
+              // 추적 중인 팀이 아니면(예: 팀 목록에 아직 등록 안 함) 입력 불가, 결과만 표시
+              return (
+                <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, padding: '6px 8px', background: 'var(--bg-elevated)', borderRadius: 6, opacity: 0.6 }}>
+                  <span style={{ color: 'var(--text-muted)', flexShrink: 0, width: 58 }}>{dayjs(m.startTime).format('MM/DD HH:mm')}</span>
+                  <span style={{ flex: 1, textAlign: 'right' }}>{m.codeA || m.teamA}</span>
+                  <span style={{ fontWeight: 800, color: 'var(--gold)', flexShrink: 0 }}>{m.scoreA} : {m.scoreB}</span>
+                  <span style={{ flex: 1 }}>{m.codeB || m.teamB}</span>
+                </div>
+              )
+            }
+            const teamScore = resolved.isA ? m.scoreA : m.scoreB
+            const oppScore = resolved.isA ? m.scoreB : m.scoreA
+            return (
+              <RecentMatchRow key={m.id} teamId={resolved.teamId} teamName={resolved.teamName}
+                game={{ opponent: resolved.opponent, teamScore, oppScore, startTime: m.startTime, bestOf: m.bestOf }}
+                displayA={m.codeA || m.teamA} displayB={m.codeB || m.teamB} scoreA={m.scoreA} scoreB={m.scoreB} />
+            )
+          })}
         </div>
       )}
     </div>
@@ -296,13 +320,17 @@ function GameStatCard({ stat, teamName, onDelete }: { stat: EsportsGameStat; tea
   )
 }
 
-function RecentMatchRow({ teamId, teamName, game }: { teamId: string; teamName: string; game: TeamGameRecord }) {
+function RecentMatchRow({ teamId, teamName, game, displayA, displayB, scoreA, scoreB }: {
+  teamId: string; teamName: string; game: TeamGameRecord
+  displayA?: string; displayB?: string; scoreA?: number; scoreB?: number
+}) {
   const [expanded, setExpanded] = useState(false)
   const [sets, setSets] = useState<EsportsGameStat[] | null>(null)
   const [loadingSets, setLoadingSets] = useState(false)
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState<GameStatForm>(() => emptyGameStatForm(1))
   const [saving, setSaving] = useState(false)
+  const [showAnalysis, setShowAnalysis] = useState(false)
 
   async function loadSets() {
     setLoadingSets(true)
@@ -374,13 +402,51 @@ function RecentMatchRow({ teamId, teamName, game }: { teamId: string; teamName: 
     setSets(prev => (prev ?? []).filter(s => s.id !== id))
   }
 
+  // 세트별 서사 판정을 모아 시리즈 전체 요약을 만든다 (순수 로직, AI 없음)
+  const seriesAnalysis = useMemo(() => {
+    if (!sets || sets.length === 0) return null
+    const perSet = sets.map(s => ({
+      gameNumber: s.game_number,
+      narrative: classifyGameNarrative({
+        team1Kills: s.team1_kills ?? 0, team2Kills: s.team2_kills ?? 0,
+        team1Dragons: s.team1_dragons ?? 0, team2Dragons: s.team2_dragons ?? 0,
+        team1Towers: s.team1_towers ?? 0, team2Towers: s.team2_towers ?? 0,
+        team1Inhibitors: s.team1_inhibitors ?? 0, team2Inhibitors: s.team2_inhibitors ?? 0,
+        team1Barons: s.team1_barons ?? 0, team2Barons: s.team2_barons ?? 0,
+        winnerTeam: s.winner_team ?? 'team1',
+        firstBloodTeam: s.first_blood_team, firstTowerTeam: s.first_tower_team,
+        firstDragonTeam: s.first_dragon_team, firstBaronTeam: s.first_baron_team,
+        fifthKillTeam: s.fifth_kill_team, tenthKillTeam: s.tenth_kill_team,
+      }),
+      winnerTeam: s.winner_team,
+    }))
+    const sum = (key: 'team1_kills' | 'team2_kills' | 'team1_dragons' | 'team2_dragons' | 'team1_towers' | 'team2_towers' | 'team1_barons' | 'team2_barons') =>
+      sets.reduce((acc, s) => acc + (s[key] ?? 0), 0)
+    const ourWins = sets.filter(s => s.winner_team === 'team1').length
+    const oppWins = sets.length - ourWins
+    // 우리 팀 관점에서 평균 dominanceScore (양수=평균적으로 우세, 음수=열세)
+    const avgDominance = perSet.reduce((acc, p) => acc + (p.winnerTeam === 'team1' ? p.narrative.dominanceScore : -p.narrative.dominanceScore), 0) / perSet.length
+    return { perSet, ourWins, oppWins, avgDominance,
+      kills: { our: sum('team1_kills'), opp: sum('team2_kills') },
+      dragons: { our: sum('team1_dragons'), opp: sum('team2_dragons') },
+      towers: { our: sum('team1_towers'), opp: sum('team2_towers') },
+      barons: { our: sum('team1_barons'), opp: sum('team2_barons') },
+    }
+  }, [sets])
+
+  const headerA = displayA ?? teamName
+  const headerB = displayB ?? game.opponent
+  const hScoreA = scoreA ?? game.teamScore
+  const hScoreB = scoreB ?? game.oppScore
+
   return (
     <div>
       <div onClick={toggle} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, padding: '5px 8px', background: 'var(--bg-card)', borderRadius: 6, cursor: 'pointer' }}>
         {expanded ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
         <span style={{ color: 'var(--text-muted)', width: 50, flexShrink: 0 }}>{dayjs(game.startTime).format('MM/DD')}</span>
-        <span style={{ flex: 1 }}>vs {game.opponent}</span>
-        <span style={{ fontWeight: 800, color: game.teamScore > game.oppScore ? 'var(--green)' : 'var(--red)', flexShrink: 0 }}>{game.teamScore} : {game.oppScore}</span>
+        <span style={{ flex: 1, textAlign: 'right', fontWeight: hScoreA > hScoreB ? 800 : 400 }}>{headerA}</span>
+        <span style={{ fontWeight: 800, color: 'var(--gold)', flexShrink: 0 }}>{hScoreA} : {hScoreB}</span>
+        <span style={{ flex: 1, fontWeight: hScoreB > hScoreA ? 800 : 400 }}>{headerB}</span>
       </div>
       {expanded && (
         <div style={{ padding: '8px 8px 8px 22px', display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -389,12 +455,41 @@ function RecentMatchRow({ teamId, teamName, game }: { teamId: string; teamName: 
             <GameStatCard key={s.id} stat={s} teamName={teamName} onDelete={deleteSet} />
           ))}
           {!loadingSets && sets && sets.length === 0 && !showForm && (
-            <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>기록된 세트가 없습니다.</div>
+            <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>기록된 세트가 없습니다. 아래에서 세트별로 입력해 주세요.</div>
           )}
-          {!showForm && (
-            <button onClick={openAddForm} className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: 10, alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: 4 }}>
-              <Plus size={10} /> 세트 기록 추가
-            </button>
+          <div style={{ display: 'flex', gap: 6 }}>
+            {!showForm && (
+              <button onClick={openAddForm} className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: 10, display: 'flex', alignItems: 'center', gap: 4 }}>
+                <Plus size={10} /> 세트 기록 추가
+              </button>
+            )}
+            {sets && sets.length > 0 && (
+              <button onClick={() => setShowAnalysis(v => !v)} className="btn btn-primary" style={{ padding: '4px 8px', fontSize: 10, display: 'flex', alignItems: 'center', gap: 4 }}>
+                <TrendingUp size={10} /> {showAnalysis ? '분석 닫기' : '분석 보기'}
+              </button>
+            )}
+          </div>
+          {showAnalysis && seriesAnalysis && (
+            <div style={{ background: 'var(--gold-bg)', border: '1px solid var(--gold-border)', borderRadius: 6, padding: 10, fontSize: 11 }}>
+              <div style={{ fontWeight: 800, marginBottom: 6 }}>
+                시리즈 스코어 {seriesAnalysis.ourWins} : {seriesAnalysis.oppWins} ({teamName} 관점)
+              </div>
+              <div style={{ color: 'var(--text-secondary)', marginBottom: 6, lineHeight: 1.6 }}>
+                합계 — 킬 {seriesAnalysis.kills.our}:{seriesAnalysis.kills.opp} · 드래곤 {seriesAnalysis.dragons.our}:{seriesAnalysis.dragons.opp} · 타워 {seriesAnalysis.towers.our}:{seriesAnalysis.towers.opp} · 바론 {seriesAnalysis.barons.our}:{seriesAnalysis.barons.opp}
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginBottom: 6 }}>
+                {seriesAnalysis.perSet.map(p => (
+                  <div key={p.gameNumber} style={{ color: 'var(--text-secondary)' }}>
+                    {p.gameNumber}세트 · <b style={{ color: 'var(--gold)' }}>{p.narrative.label}</b> ({p.winnerTeam === 'team1' ? teamName : game.opponent} 승)
+                  </div>
+                ))}
+              </div>
+              <div style={{ color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                {seriesAnalysis.avgDominance >= 8 ? `전반적으로 ${teamName}이(가) 오브젝트·킬 지표에서 뚜렷하게 앞선 시리즈였습니다.`
+                  : seriesAnalysis.avgDominance <= -8 ? `전반적으로 ${game.opponent}이(가) 오브젝트·킬 지표에서 뚜렷하게 앞선 시리즈였습니다.`
+                  : '세트마다 흐름이 갈려 뚜렷한 우세 없이 접전 위주로 진행된 시리즈입니다.'}
+              </div>
+            </div>
           )}
           {showForm && (
             <div style={{ background: 'var(--bg-elevated)', borderRadius: 6, padding: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -859,7 +954,7 @@ function LeagueView({ code, label }: { code: string; label: string }) {
 
       <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'flex-start', marginBottom: 14 }}>
         <div style={{ flex: '1 1 320px', minWidth: 280 }}>
-          <RecentMatchesPanel leagueCode={code} events={events} loading={eventsLoading} error={eventsError} />
+          <RecentMatchesPanel leagueCode={code} events={events} loading={eventsLoading} error={eventsError} teams={teams} />
         </div>
         <div style={{ flex: '1 1 320px', minWidth: 280 }}>
           <UpcomingPanel events={events} loading={eventsLoading} error={eventsError} />
