@@ -241,6 +241,37 @@ function clamp(v: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, v))
 }
 
+// 시리즈 전체 관점의 확률 요약: 강팀 일반승 vs 약팀 1경기+ 승리, 강팀 스윕(예: 2:0) vs 약팀 일반승 비교용.
+// p는 A가 한 세트(맵)를 이길 확률. favIsA=true면 A가 강팀.
+export interface SeriesOutcomeSummary {
+  favIsA: boolean
+  favWinProb: number         // 강팀이 시리즈를 이길 확률(일반승, 스코어 무관)
+  underWinProb: number       // 약팀이 시리즈를 이길 확률(일반승, 스코어 무관)
+  favSweepProb: number       // 강팀이 스윕(예: BO3면 2:0, BO5면 3:0)으로 이길 확률
+  underAtLeastOneGameProb: number // 약팀이 최소 1세트라도 따낼 확률 (= 1 - 강팀 스윕 확률)
+  sweepScore: string          // 강팀 스윕 스코어 표기 (예: "2:0")
+}
+
+export function seriesOutcomeSummary(p: number, bestOf: number): SeriesOutcomeSummary {
+  const bo = bestOf && bestOf > 1 ? bestOf : 1
+  const k = Math.ceil(bo / 2)
+  const scoreProbs = seriesScoreProbabilities(p, bestOf)
+  const aWinProb = scoreProbs.filter(sp => sp.winner === 'A').reduce((s, x) => s + x.prob, 0)
+  const bWinProb = 1 - aWinProb
+  const favIsA = p >= 0.5
+  const favWinProb = favIsA ? aWinProb : bWinProb
+  const underWinProb = favIsA ? bWinProb : aWinProb
+  const sweepScore = `${k}:0`
+  const favSweepProb = favIsA
+    ? (scoreProbs.find(sp => sp.winner === 'A' && sp.score === sweepScore)?.prob ?? aWinProb)
+    : (scoreProbs.find(sp => sp.winner === 'B' && sp.score === `0:${k}`)?.prob ?? bWinProb)
+  return {
+    favIsA, favWinProb, underWinProb, favSweepProb,
+    underAtLeastOneGameProb: 1 - favSweepProb,
+    sweepScore,
+  }
+}
+
 // 두 팀의 최근 폼을 비교해 "한 세트(맵)를 이길 확률"을 추정
 // (세트 승률과 시리즈 승률을 가중 결합한 값의 상대적 차이를 0.5 기준으로 보정)
 export function matchupProbability(formA: FormStats, formB: FormStats): number {
@@ -415,29 +446,32 @@ export function classifyGameNarrative(g: GameStatsInput): GameNarrative {
   const loserHadEarlyLead = earlyLeader === loser
 
   // 게임 길이에 따라 "완벽한 승리" 문턱값을 동적으로 조정. 짧을수록 관대하게, 길수록 엄격하게.
+  // 30분 이하 = 빠른 마무리, 30~33분 = 평균적인 게임 시간, 33분 초과 = 질질 끌린 경기라는 기준으로 재정의.
+  // 27~29분처럼 30분보다도 더 짧게 끝난 경우는 그만큼 실력차가 크다는 뜻이라 문턱을 더 낮게(=더 관대하게) 잡는다.
   const durationMin = g.durationSeconds != null ? g.durationSeconds / 60 : null
   let perfectThreshold = 8
   let perfectAllowed = true
   if (durationMin != null) {
-    if (durationMin <= 26) perfectThreshold = 6
+    if (durationMin <= 24) perfectThreshold = 5
+    else if (durationMin <= 27) perfectThreshold = 6
     else if (durationMin <= 30) perfectThreshold = 8
-    else if (durationMin <= 34) perfectThreshold = 10
-    else perfectThreshold = 14 // 34~40분: 사실상 웬만한 격차로는 안 뜨게
-    if (durationMin >= 40) perfectAllowed = false // 40분 이상은 격차가 아무리 커도 완벽승 아님
+    else if (durationMin <= 33) perfectThreshold = 12 // 평균 게임 시간대: 완벽승 인정 기준을 크게 높임
+    else perfectThreshold = 18 // 33분 초과: 사실상 웬만한 격차로는 안 뜨게
+    if (durationMin > 33) perfectAllowed = false // 33분(평균) 넘게 끌렸으면 격차가 아무리 커도 "완벽한 승리"는 아님
   }
 
   let label: string, detail: string
   if (loserHadEarlyLead) {
     label = '역전승'
-    detail = '초반 주요 지표(첫 킬·첫 타워·첫 드래곤·첫 내셔·5킬/10킬 선취)에서는 패배팀이 앞섰지만, 최종적으로는 승리팀이 뒤집었습니다.'
+    detail = '초반 주요 지표(퍼스트 1킬·퍼스트 타워·퍼스트 드래곤·퍼스트 내셔·퍼스트 5킬/퍼스트 10킬)에서는 패배팀이 앞섰지만, 최종적으로는 승리팀이 뒤집었습니다.'
   } else if (winnerHadEarlyLead && dominanceScore >= perfectThreshold && perfectAllowed) {
     label = '완벽한 승리'
-    detail = durationMin != null
+    detail = durationMin != null && durationMin <= 30
       ? `초반 마일스톤과 최종 오브젝트·킬 격차 모두에서 일방적으로 앞섰고, ${Math.round(durationMin)}분 만에 빠르게 끝낸 스타트-투-피니시 승리입니다.`
       : '초반 마일스톤과 최종 오브젝트·킬 격차 모두에서 일방적으로 앞선 스타트-투-피니시 승리입니다.'
   } else if (winnerHadEarlyLead) {
     label = '리드를 지킨 승리'
-    detail = durationMin != null && durationMin >= 34
+    detail = durationMin != null && durationMin > 33
       ? `초반 주도권은 잡았지만 게임이 ${Math.round(durationMin)}분까지 길어진 걸 보면 상대의 저항이 만만치 않았습니다.`
       : '초반 주도권을 잡은 뒤 큰 흔들림 없이 승리로 연결했습니다.'
   } else if (earlyLeader === 'even' || earlyLeader === null) {
@@ -493,7 +527,8 @@ export function computeDetailedScores(g: GameStatsInput & { durationSeconds?: nu
   // 스노볼: 초반 마일스톤을 얼마나 쥐었는지 + 최종 격차 크기 - (게임이 길어질수록 스노볼 약화로 간주)
   const earlyLeadCount = pt(g.firstBloodTeam) + pt(g.firstTowerTeam) + pt(g.firstDragonTeam)
   const gapMagnitude = Math.abs(towerDiff) * 0.4 + Math.abs(dragonDiff) * 0.6 + Math.abs(baronDiff) * 1
-  const durationPenalty = durationMin > 33 ? 1.5 : durationMin < 24 ? -0.5 : 0
+  // 30분 이하로 끝냈으면 보너스(-값), 30~33분은 평균이라 중립, 33분 초과로 끌렸으면 페널티
+  const durationPenalty = durationMin > 33 ? 1.5 : durationMin <= 30 ? -0.5 : 0
   const snowball = clamp10(5 + sign * (earlyLeadCount * 1 + gapMagnitude * 0.5 - durationPenalty))
 
   // 마무리능력: classifyGameNarrative의 earlyLeader 판정 + 경기시간을 함께 반영.
@@ -505,9 +540,9 @@ export function computeDetailedScores(g: GameStatsInput & { durationSeconds?: nu
   const loserHadEarlyLead = narrative.earlyLeader === loser
   const iHadEarlyLead = narrative.earlyLeader === 'team1'
   const durationBonus = durationMin == null ? 0
-    : durationMin <= 25 ? 1
+    : durationMin <= 30 ? 1
     : durationMin >= 40 ? -1
-    : 1 - (durationMin - 25) * (2 / 15)
+    : 1 - (durationMin - 30) * (2 / 10)
   let closing: number
   if (iWon) {
     closing = loserHadEarlyLead ? 9 + durationBonus * 0.5   // 역전승: 이미 최상위권이라 시간 영향은 절반만
@@ -547,19 +582,20 @@ export function computeBothSidesScores(g: GameStatsInput): { team1: DetailedGame
 }
 
 // ─── "플레이 점수" (1~100) ──────────────────────────────────────────
-// 경기시간을 "격차 자체를 조절하는 축"으로 삼는다:
-//   - 짧게 끝난 경기(20분 이하) → 한쪽이 확실히 압도했다는 뜻이므로 격차를 크게 증폭(×1.6)
-//   - 평균 페이스(32분) → 중립(×1.0), 지금까지 계산된 격차를 그대로 반영
-//   - 길게 끌린 경기(45분 이상) → 그만큼 접전이었다는 뜻이므로 격차를 크게 압축(×0.5)
-// 라인전/오브젝트/교전/운영/마무리 5개 세부지표 합(0~50, 중립값 25)에서 얼마나 벗어났는지를
-// "격차의 원재료"로 쓰고, 거기에 위 시간 배율을 곱해서 최종 점수를 50 기준 위아래로 벌리거나 좁힌다.
-// 마무리 지표 안에 승/패가 반영돼 있어서 이긴 팀이 진 팀보다 낮게 나오는 경우는 거의 없지만,
-// 격차의 "크기"는 이제 순수하게 경기시간이 결정한다.
+// 경기시간을 "격차 자체를 조절하는 축"으로 삼는다. 기준은 30분/33분:
+//   - 30분 이하로 끝난 경기 → 그만큼 실력차가 크다는 뜻이므로 격차를 크게 증폭. 30분에서 멀어질수록
+//     (27분, 24분처럼 더 빨리 끝날수록) 증폭을 더 키운다 — "30분 내로 끝내는 것도 힘든데 그보다도
+//     더 빨리 끝내는 건 실력차가 훨씬 크다는 뜻"이라는 전제.
+//   - 30~33분 → 평균적인 게임 페이스이므로 중립(×1.0), 지금까지 계산된 격차를 그대로 반영.
+//   - 33분 초과 → 질질 끌렸다는 뜻이므로 격차를 압축. 특히 35분을 넘어가면 "아주 미세한 차이"만
+//     남도록 배율을 크게 낮춘다.
 function durationSpreadMultiplier(durationMin: number): number {
-  if (durationMin <= 20) return 1.6
-  if (durationMin >= 45) return 0.5
-  if (durationMin <= 32) return 1.6 - (durationMin - 20) * (0.6 / 12)  // 20~32분: 1.6 → 1.0
-  return 1.0 - (durationMin - 32) * (0.5 / 13)                          // 32~45분: 1.0 → 0.5
+  if (durationMin <= 20) return 1.8
+  if (durationMin <= 27) return 1.8 - (durationMin - 20) * (0.3 / 7)   // 20~27분: 1.8 → 1.5
+  if (durationMin <= 30) return 1.5 - (durationMin - 27) * (0.3 / 3)   // 27~30분: 1.5 → 1.2
+  if (durationMin <= 33) return 1.0                                    // 30~33분: 평균 페이스, 중립
+  if (durationMin <= 35) return 1.0 - (durationMin - 33) * (0.7 / 2)   // 33~35분: 1.0 → 0.3
+  return 0.2                                                            // 35분 초과: 아주 미세한 차이만
 }
 
 export function computePerfectionScore(g: GameStatsInput): number {
@@ -568,8 +604,15 @@ export function computePerfectionScore(g: GameStatsInput): number {
   const d = computeDetailedScores(g)
   const sum = d.laning + d.objectiveControl + d.teamfight + d.macro + d.closing // 0~50, 중립=25
   const deviation = sum - 25
-  const spread = durationSpreadMultiplier(durationMin)
-  return Math.round(clamp(50 + deviation * 2 * spread, 0, 100))
+  const baseSpread = durationSpreadMultiplier(durationMin)
+  // 이미 스탯 격차 자체가 큰(=원래도 실력차가 컸던) 경기는 "빨리 끝낸 것"에 대한 추가 가산을 줄인다.
+  // (실력차가 큰 상태에서 30분 내로 끝내는 건 당연한 결과이지, 별도로 더 보상할 일은 아니라는 전제)
+  const dampenedExtra = (baseSpread - 1) * (10 / (10 + Math.abs(deviation)))
+  const effectiveSpread = 1 + dampenedExtra
+  let score = clamp(50 + deviation * 2 * effectiveSpread, 0, 100)
+  // 약팀 상대로 오래 끌리더라도 승리는 승리 — 이겼다면 아무리 배율이 낮아도 최소한 미미하게는 중립(50점)보다 높아야 한다.
+  if (g.winnerTeam === 'team1') score = Math.max(score, 51)
+  return Math.round(score)
 }
 
 
