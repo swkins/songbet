@@ -715,6 +715,24 @@ function LeagueView({ code, label }: { code: string; label: string }) {
   const [eventsLoading, setEventsLoading] = useState(false)
   const [eventsError, setEventsError] = useState(false)
   const [syncingTeamId, setSyncingTeamId] = useState<string | null>(null)
+  const [golggSyncing, setGolggSyncing] = useState(false)
+  const [golggResult, setGolggResult] = useState<string | null>(null)
+
+  async function syncGolgg() {
+    setGolggSyncing(true)
+    setGolggResult(null)
+    try {
+      const { data, error } = await supabase.functions.invoke('sync-golgg', {
+        body: { league: code, triggerType: 'manual' },
+      })
+      if (error) throw error
+      setGolggResult(`상세 스탯 ${data?.gamesAdded ?? 0}경기 갱신${data?.errors?.length ? ` (오류 ${data.errors.length}건)` : ''}`)
+    } catch {
+      setGolggResult('gol.gg 동기화 실패')
+    } finally {
+      setGolggSyncing(false)
+    }
+  }
 
   async function load() {
     const { data: teamData } = await supabase.from('esports_teams').select('*').eq('league', code).order('sort_order').order('created_at')
@@ -808,9 +826,13 @@ function LeagueView({ code, label }: { code: string; label: string }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
         <h2 style={{ fontSize: 18, fontWeight: 800, margin: 0, flex: 1 }}>{label}</h2>
         <button onClick={() => loadEvents(true)} disabled={eventsLoading} className="btn btn-ghost" style={{ padding: '6px 10px', display: 'flex', alignItems: 'center', gap: 4 }}>
-          <RefreshCw size={12} style={{ animation: eventsLoading ? 'spin 1s linear infinite' : undefined }} /> 새로고침
+          <RefreshCw size={12} style={{ animation: eventsLoading ? 'spin 1s linear infinite' : undefined }} /> 일정 새로고침
+        </button>
+        <button onClick={syncGolgg} disabled={golggSyncing} className="btn btn-ghost" style={{ padding: '6px 10px', display: 'flex', alignItems: 'center', gap: 4 }}>
+          <RefreshCw size={12} style={{ animation: golggSyncing ? 'spin 1s linear infinite' : undefined }} /> gol.gg 상세스탯 새로고침
         </button>
       </div>
+      {golggResult && <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 8 }}>{golggResult}</div>}
 
       <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'flex-start', marginBottom: 14 }}>
         <div style={{ flex: '1 1 320px', minWidth: 280 }}>
