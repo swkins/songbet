@@ -529,6 +529,41 @@ export function computeBothSidesPerfection(g: GameStatsInput): { team1: number; 
   return { team1: computePerfectionScore(g), team2: computePerfectionScore(swapPerspective(g)) }
 }
 
+// ─── 팀 체급 점수 (수동 입력된 최근 경기 기반) ──────────────────────
+// 최근 경기일수록 가중치를 높게 줘서(0.85^n 감쇠) "지금 폼"에 가깝게 반영.
+// 완벽도 점수(60%) + 승률(40%)을 섞어서 0~100 스케일의 체급 점수를 만든다.
+// - 완벽도만 쓰면 "잘했는데 진 경기"가 과대평가될 수 있어 승률로 앵커를 잡아줌
+export interface TeamPowerScore {
+  powerScore: number // 0~100
+  avgPerfection: number
+  winRate: number
+  gamesAnalyzed: number
+}
+
+// records: 최신 경기가 앞에 오도록(내림차순) 정렬된 GameStatsInput 배열, team1=해당 팀 관점
+export function computeTeamPowerScore(records: GameStatsInput[]): TeamPowerScore {
+  if (records.length === 0) return { powerScore: 50, avgPerfection: 50, winRate: 0.5, gamesAnalyzed: 0 }
+  const decay = 0.85
+  let weightSum = 0, perfectionWeighted = 0, winWeighted = 0
+  records.forEach((r, i) => {
+    const w = Math.pow(decay, i)
+    weightSum += w
+    perfectionWeighted += computePerfectionScore(r) * w
+    winWeighted += (r.winnerTeam === 'team1' ? 1 : 0) * w
+  })
+  const avgPerfection = perfectionWeighted / weightSum
+  const winRate = winWeighted / weightSum
+  const powerScore = 0.6 * avgPerfection + 0.4 * (winRate * 100)
+  return { powerScore, avgPerfection, winRate, gamesAnalyzed: records.length }
+}
+
+// 두 팀의 체급 점수 차이를 승률로 변환 (Elo와 비슷한 로지스틱 곡선, 표본이 적을 수 있어 5~95%로 클램프)
+export function powerScoreMatchupProbability(powerA: number, powerB: number): number {
+  const diff = powerA - powerB
+  const raw = 1 / (1 + Math.pow(10, -diff / 25))
+  return Math.max(0.05, Math.min(0.95, raw))
+}
+
 // 배당 대비 기대값(EV) 계산. EV > 0 이면 모델 확률 기준 "베팅 가치 있음"
 export function computeOddsValue(modelProb: number, decimalOdds: number): OddsValue | null {
   if (!decimalOdds || !isFinite(decimalOdds) || decimalOdds <= 1) return null

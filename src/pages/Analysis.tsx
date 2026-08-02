@@ -1,23 +1,19 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import dayjs from 'dayjs'
-import { Plus, Trash2, ChevronDown, ChevronUp, ExternalLink, RefreshCw, TrendingUp, Users, BookOpen, AlertTriangle } from 'lucide-react'
+import { Plus, Trash2, ChevronDown, ChevronUp, ExternalLink, RefreshCw, TrendingUp } from 'lucide-react'
 import {
   LEAGUES, fetchScheduleEvents, extractTeamData, computeForm, matchupProbability, filterRecentGames,
-  seriesScoreProbabilities, computeOddsValue, fetchLeagueTeams, findTeamCode, teamNameMatches,
-  classifyGameNarrative, computeBothSidesScores, computeBothSidesPerfection, type RawScheduleEvent, type TeamGameRecord, type NarrativeTeam,
+  seriesScoreProbabilities, computeOddsValue, teamNameMatches,
+  classifyGameNarrative, computeBothSidesScores, computeBothSidesPerfection,
+  computeTeamPowerScore, powerScoreMatchupProbability,
+  type RawScheduleEvent, type TeamGameRecord, type NarrativeTeam, type TeamPowerScore,
 } from '../lib/lolEsports'
 
 interface EsportsTeam {
   id: string; league: string; name: string; comment: string; sort_order: number
   namuwiki_url: string | null; namuwiki_last_checked: string | null; namuwiki_changed: boolean
 }
-interface EsportsRosterPlayer {
-  id: string; team_id: string; name: string; comment: string; sort_order: number
-  role: string | null; nationality: string | null; joined_at: string | null; contract_until: string | null
-  lolesports_player_id?: string | null
-}
-type RosterPatch = Partial<Pick<EsportsRosterPlayer, 'comment' | 'role' | 'nationality' | 'joined_at' | 'contract_until'>>
 
 interface EsportsGameStat {
   id: string
@@ -41,61 +37,6 @@ interface EsportsGameStat {
   tenth_kill_team: NarrativeTeam | null
   notes: string | null
   source: string
-}
-
-// ─── 공용 UI 조각 ──────────────────────────────────────────────────
-function CommentBox({ value, onSave, placeholder }: { value: string; onSave: (v: string) => void; placeholder: string }) {
-  const [draft, setDraft] = useState(value)
-  const [editing, setEditing] = useState(false)
-  useEffect(() => { setDraft(value) }, [value])
-  if (!editing) {
-    return (
-      <div onClick={() => setEditing(true)} style={{ fontSize: 11, color: value ? 'var(--text-secondary)' : 'var(--text-muted)', cursor: 'text', padding: '4px 6px', borderRadius: 5, background: 'var(--bg-elevated)', minHeight: 18 }}>
-        {value || placeholder}
-      </div>
-    )
-  }
-  return (
-    <textarea
-      autoFocus
-      value={draft}
-      onChange={e => setDraft(e.target.value)}
-      onBlur={() => { setEditing(false); if (draft !== value) onSave(draft) }}
-      style={{ width: '100%', fontSize: 11, padding: '4px 6px', borderRadius: 5, border: '1px solid var(--gold-border)', background: 'var(--bg-elevated)', color: 'var(--text-primary)', fontFamily: 'var(--font-body)', resize: 'vertical', minHeight: 40 }}
-    />
-  )
-}
-
-// 선수 프로필의 짧은 한 줄 필드 (포지션/국적/합류일/계약기간) — 클릭하면 인라인 편집
-function InlineField({ label, value, onSave, placeholder }: { label: string; value: string | null; onSave: (v: string) => void; placeholder: string }) {
-  const [draft, setDraft] = useState(value ?? '')
-  const [editing, setEditing] = useState(false)
-  useEffect(() => { setDraft(value ?? '') }, [value])
-  return (
-    <div>
-      <div style={{ fontSize: 8, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 2 }}>{label}</div>
-      {editing ? (
-        <input
-          autoFocus value={draft} onChange={e => setDraft(e.target.value)}
-          onBlur={() => { setEditing(false); if (draft !== (value ?? '')) onSave(draft) }}
-          onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
-          style={{ width: '100%', fontSize: 11, padding: '3px 5px', borderRadius: 4, border: '1px solid var(--gold-border)', background: 'var(--bg-card)', color: 'var(--text-primary)', fontFamily: 'var(--font-body)' }}
-        />
-      ) : (
-        <div onClick={() => setEditing(true)} style={{ fontSize: 11, color: value ? 'var(--text-secondary)' : 'var(--text-muted)', cursor: 'text', padding: '3px 5px', borderRadius: 4, background: 'var(--bg-card)', minHeight: 16 }}>
-          {value || placeholder}
-        </div>
-      )}
-    </div>
-  )
-}
-
-function TeamCodeBadge({ code }: { code: string | null }) {
-  return (
-    <span style={{ fontSize: 9, fontWeight: 800, color: 'var(--gold)', background: 'var(--gold-bg)', border: '1px solid var(--gold-border)', borderRadius: 4, padding: '2px 5px', flexShrink: 0, letterSpacing: 0.3 }}>
-      {code ?? '?'}
-    </span>
-  )
 }
 
 // 리그 목록 안에서 어느 팀이 우리가 추적 중인 팀(esports_teams)인지 찾아서
@@ -170,34 +111,96 @@ function RecentMatchesPanel({ leagueCode, events, loading, error, teams }: { lea
 }
 
 // ─── 우측: 앞으로의 일정 + 승부 예측 ──────────────────────────────
-function UpcomingRow({ event, events }: { event: RawScheduleEvent; events: RawScheduleEvent[] }) {
-  const teams = event.match?.teams ?? []
-  const teamA = teams[0], teamB = teams[1]
+function UpcomingRow({ event, events, teams, powerScores }: {
+  event: RawScheduleEvent; events: RawScheduleEvent[]; teams: EsportsTeam[]; powerScores: Record<string, TeamPowerScore>
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const [oddsInputs, setOddsInputs] = useState<Record<string, string>>({})
+  const matchTeams = event.match?.teams ?? []
+  const teamA = matchTeams[0], teamB = matchTeams[1]
   const bestOf = event.match?.strategy?.count ?? 3
+
+  const idA = useMemo(() => teams.find(t => teamNameMatches(t, teamA?.name ?? ''))?.id ?? null, [teams, teamA?.name])
+  const idB = useMemo(() => teams.find(t => teamNameMatches(t, teamB?.name ?? ''))?.id ?? null, [teams, teamB?.name])
+  const powerA = idA ? powerScores[idA] : undefined
+  const powerB = idB ? powerScores[idB] : undefined
+  const usePower = !!(powerA && powerB && powerA.gamesAnalyzed > 0 && powerB.gamesAnalyzed > 0)
+
+  // 체급 점수 데이터가 부족하면 lolesports 시리즈/세트 승률 기반으로 폴백
   const formA = useMemo(() => computeForm(filterRecentGames(extractTeamData(events, teamA?.name ?? '').completed)), [events, teamA?.name])
   const formB = useMemo(() => computeForm(filterRecentGames(extractTeamData(events, teamB?.name ?? '').completed)), [events, teamB?.name])
-  const p = matchupProbability(formA, formB)
+
+  const p = usePower && powerA && powerB ? powerScoreMatchupProbability(powerA.powerScore, powerB.powerScore) : matchupProbability(formA, formB)
   const scoreProbs = seriesScoreProbabilities(p, bestOf)
   const top = scoreProbs[0]
   const topLabel = top.winner === 'A' ? (teamA?.code || teamA?.name) : (teamB?.code || teamB?.name)
 
+  function setOdds(score: string, v: string) {
+    setOddsInputs(prev => ({ ...prev, [score]: v }))
+  }
+
   return (
-    <div style={{ padding: '8px 8px', background: 'var(--bg-elevated)', borderRadius: 6 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, marginBottom: 4 }}>
-        <span style={{ color: 'var(--text-muted)', width: 76, flexShrink: 0 }}>{dayjs(event.startTime).format('MM/DD HH:mm')}</span>
-        <span style={{ flex: 1, textAlign: 'right', fontWeight: 700 }}>{teamA?.code || teamA?.name}</span>
-        <span style={{ fontSize: 9, color: 'var(--text-muted)', flexShrink: 0 }}>BO{bestOf}</span>
-        <span style={{ flex: 1, fontWeight: 700 }}>{teamB?.code || teamB?.name}</span>
+    <div style={{ background: 'var(--bg-elevated)', borderRadius: 6 }}>
+      <div onClick={() => setExpanded(v => !v)} style={{ padding: '8px 8px', cursor: 'pointer' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, marginBottom: 4 }}>
+          {expanded ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+          <span style={{ color: 'var(--text-muted)', width: 70, flexShrink: 0 }}>{dayjs(event.startTime).format('MM/DD HH:mm')}</span>
+          <span style={{ flex: 1, textAlign: 'right', fontWeight: 700 }}>{teamA?.code || teamA?.name}</span>
+          <span style={{ fontSize: 9, color: 'var(--text-muted)', flexShrink: 0 }}>BO{bestOf}</span>
+          <span style={{ flex: 1, fontWeight: 700 }}>{teamB?.code || teamB?.name}</span>
+        </div>
+        <div style={{ fontSize: 10, color: 'var(--text-muted)', textAlign: 'center' }}>
+          예측 승률 <b style={{ color: 'var(--text-secondary)' }}>{(p * 100).toFixed(0)}%</b> : <b style={{ color: 'var(--text-secondary)' }}>{((1 - p) * 100).toFixed(0)}%</b>
+          {' · '}예상 스코어 <b style={{ color: 'var(--gold)' }}>{topLabel} {top.score}</b> ({(top.prob * 100).toFixed(0)}%)
+          {usePower && powerA && powerB
+            ? <div style={{ marginTop: 2 }}>체급 기반 · {teamA?.code || teamA?.name} {powerA.powerScore.toFixed(1)} : {powerB.powerScore.toFixed(1)} {teamB?.code || teamB?.name}</div>
+            : <div style={{ marginTop: 2 }}>체급 데이터 부족 · lolesports 전적 기반 폴백</div>}
+        </div>
       </div>
-      <div style={{ fontSize: 10, color: 'var(--text-muted)', textAlign: 'center' }}>
-        예측 승률 <b style={{ color: 'var(--text-secondary)' }}>{(p * 100).toFixed(0)}%</b> : <b style={{ color: 'var(--text-secondary)' }}>{((1 - p) * 100).toFixed(0)}%</b>
-        {' · '}예상 스코어 <b style={{ color: 'var(--gold)' }}>{topLabel} {top.score}</b> ({(top.prob * 100).toFixed(0)}%)
-      </div>
+      {expanded && (
+        <div style={{ padding: '0 8px 8px 8px' }}>
+          <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 6 }}>
+            배당을 입력하면 모델 확률 대비 기대값(EV)을 보여드려요. EV가 양수(초록)면 베팅 가치가 있다는 뜻입니다.
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {scoreProbs.map(sp => {
+              const label = sp.winner === 'A' ? `${teamA?.code || teamA?.name} ${sp.score}` : `${teamB?.code || teamB?.name} ${sp.score}`
+              const odds = parseFloat(oddsInputs[sp.score] ?? '')
+              const value = computeOddsValue(sp.prob, odds)
+              return (
+                <div key={sp.score + sp.winner} style={{
+                  display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, padding: '6px 8px', borderRadius: 6,
+                  background: value?.isValue ? 'var(--green-bg)' : 'var(--bg-card)',
+                  border: value?.isValue ? '1px solid var(--green-border)' : '1px solid transparent',
+                }}>
+                  <span style={{ flex: 1, fontWeight: 700 }}>{label}</span>
+                  <span style={{ width: 46, textAlign: 'right', color: 'var(--gold)', fontWeight: 800, flexShrink: 0 }}>{(sp.prob * 100).toFixed(1)}%</span>
+                  <input
+                    value={oddsInputs[sp.score] ?? ''}
+                    onChange={e => setOdds(sp.score, e.target.value)}
+                    onClick={e => e.stopPropagation()}
+                    placeholder="배당"
+                    inputMode="decimal"
+                    style={{ width: 54, fontSize: 11, padding: '3px 5px', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-primary)', textAlign: 'right', flexShrink: 0 }}
+                  />
+                  {value && (
+                    <span style={{ width: 62, textAlign: 'right', fontSize: 10, fontWeight: 700, color: value.isValue ? 'var(--green)' : 'var(--text-muted)', flexShrink: 0 }}>
+                      {value.isValue ? `+EV ${value.edgePct.toFixed(1)}%` : `${value.edgePct.toFixed(1)}%`}
+                    </span>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
 
-function UpcomingPanel({ events, loading, error }: { events: RawScheduleEvent[] | null; loading: boolean; error: boolean }) {
+function UpcomingPanel({ events, loading, error, teams, powerScores }: {
+  events: RawScheduleEvent[] | null; loading: boolean; error: boolean; teams: EsportsTeam[]; powerScores: Record<string, TeamPowerScore>
+}) {
   const upcoming = useMemo(() => {
     if (!events) return []
     return events
@@ -214,7 +217,7 @@ function UpcomingPanel({ events, loading, error }: { events: RawScheduleEvent[] 
       {!loading && !error && upcoming.length === 0 && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0' }}>예정된 경기가 없습니다</div>}
       {!loading && !error && upcoming.length > 0 && events && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {upcoming.map(e => <UpcomingRow key={e.match!.id ?? e.id} event={e} events={events} />)}
+          {upcoming.map(e => <UpcomingRow key={e.match!.id ?? e.id} event={e} events={events} teams={teams} powerScores={powerScores} />)}
         </div>
       )}
     </div>
@@ -577,302 +580,15 @@ function RecentMatchRow({ teamId, teamName, game, displayA, displayB, scoreA, sc
   )
 }
 
-// ─── 팀 카드 안: 경기 분석(다음 상대 예측 + 배당 가치) ────────────
-function TeamAnalysisPanel({ teamId, teamName, events, loading, error }: {
-  teamId: string; teamName: string; events: RawScheduleEvent[] | null; loading: boolean; error: boolean
-}) {
-  const [oddsInputs, setOddsInputs] = useState<Record<string, string>>({})
-
-  const { completed, upcoming } = useMemo(
-    () => events ? extractTeamData(events, teamName) : { completed: [], upcoming: [] },
-    [events, teamName]
-  )
-  const recentGames = filterRecentGames(completed)
-  const form = useMemo(() => computeForm(recentGames), [recentGames])
-
-  const next = upcoming[0]
-  const oppRecentGames = useMemo(() => {
-    if (!events || !next) return []
-    return filterRecentGames(extractTeamData(events, next.opponent).completed)
-  }, [events, next?.opponent])
-  const oppForm = useMemo(() => computeForm(oppRecentGames), [oppRecentGames])
-
-  const pMap = next ? matchupProbability(form, oppForm) : 0.5
-  const scoreProbs = next ? seriesScoreProbabilities(pMap, next.bestOf) : []
-
-  function setOdds(score: string, v: string) {
-    setOddsInputs(p => ({ ...p, [score]: v }))
-  }
-
-  return (
-    <div className="card" style={{ marginBottom: 10, background: 'var(--bg-elevated)' }}>
-      <div className="card-title" style={{ marginBottom: 10, display: 'flex', alignItems: 'center', gap: 5 }}>
-        <TrendingUp size={11} /> 경기 분석
-      </div>
-
-      {loading && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '6px 0' }}>불러오는 중...</div>}
-      {!loading && error && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '6px 0' }}>데이터를 가져올 수 없습니다 (외부 API 접속 제한일 수 있음).</div>}
-
-      {!loading && !error && (
-        <>
-          <div style={{ marginBottom: 12 }}>
-            <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 6 }}>
-              최근 전적 (최근 한 달){form.seriesPlayed > 0 && ` · ${form.seriesPlayed}세트 ${form.wins}승 ${form.losses}패 (시리즈 승률 ${(form.seriesWinRate * 100).toFixed(0)}% · 맵 승률 ${(form.gameWinRate * 100).toFixed(0)}%)`}
-            </div>
-            {recentGames.length === 0 && (
-              <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>기록된 경기가 없습니다 (팀 이름이 lolesports 표기와 다를 수 있어요)</div>
-            )}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              {recentGames.map((g, i) => (
-                <RecentMatchRow key={i} teamId={teamId} teamName={teamName} game={g} />
-              ))}
-            </div>
-          </div>
-
-          <div style={{ marginBottom: next ? 12 : 0 }}>
-            <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 6 }}>앞으로의 일정</div>
-            {upcoming.length === 0 && <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>예정된 경기가 없습니다</div>}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              {upcoming.slice(0, 5).map((u, i) => (
-                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, padding: '5px 8px', background: 'var(--bg-card)', borderRadius: 6 }}>
-                  <span style={{ color: 'var(--text-muted)', width: 80, flexShrink: 0 }}>{dayjs(u.startTime).format('MM/DD HH:mm')}</span>
-                  <span style={{ flex: 1 }}>vs {u.opponent}</span>
-                  <span style={{ fontSize: 9, color: 'var(--text-muted)', flexShrink: 0 }}>BO{u.bestOf}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {next && (
-            <div>
-              <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 6 }}>
-                승부 예측 · vs {next.opponent} (BO{next.bestOf})
-              </div>
-              <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 8, lineHeight: 1.5 }}>
-                최근 폼 기준 세트 승률: <b style={{ color: 'var(--text-secondary)' }}>{teamName} {(pMap * 100).toFixed(0)}%</b> vs <b style={{ color: 'var(--text-secondary)' }}>{next.opponent} {((1 - pMap) * 100).toFixed(0)}%</b>
-                {oppForm.seriesPlayed === 0 && ' · 상대팀 최근 기록 부족(50% 기준 적용)'}
-                <br />배당을 입력하면 모델 확률 대비 기대값(EV)을 보여드려요. EV가 양수(초록)면 베팅 가치가 있다는 뜻입니다.
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {scoreProbs.map(sp => {
-                  const label = sp.winner === 'A' ? `${teamName} ${sp.score}` : `${next.opponent} ${sp.score}`
-                  const odds = parseFloat(oddsInputs[sp.score] ?? '')
-                  const value = computeOddsValue(sp.prob, odds)
-                  return (
-                    <div key={sp.score + sp.winner} style={{
-                      display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, padding: '6px 8px', borderRadius: 6,
-                      background: value?.isValue ? 'var(--green-bg)' : 'var(--bg-card)',
-                      border: value?.isValue ? '1px solid var(--green-border)' : '1px solid transparent',
-                    }}>
-                      <span style={{ flex: 1, fontWeight: 700 }}>{label}</span>
-                      <span style={{ width: 46, textAlign: 'right', color: 'var(--gold)', fontWeight: 800, flexShrink: 0 }}>{(sp.prob * 100).toFixed(1)}%</span>
-                      <input
-                        value={oddsInputs[sp.score] ?? ''}
-                        onChange={e => setOdds(sp.score, e.target.value)}
-                        placeholder="배당"
-                        inputMode="decimal"
-                        style={{ width: 54, fontSize: 11, padding: '3px 5px', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-primary)', textAlign: 'right', flexShrink: 0 }}
-                      />
-                      {value && (
-                        <span style={{ width: 62, textAlign: 'right', fontSize: 10, fontWeight: 700, color: value.isValue ? 'var(--green)' : 'var(--text-muted)', flexShrink: 0 }}>
-                          {value.isValue ? `+EV ${value.edgePct.toFixed(1)}%` : `${value.edgePct.toFixed(1)}%`}
-                        </span>
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-          )}
-        </>
-      )}
-    </div>
-  )
-}
-
-// ─── 팀 카드 안: 나무위키 연동 (서버사이드 조회 + 변경 감지) ────────
-function NamuwikiPanel({ team, onSaveUrl, onRefreshed }: {
-  team: EsportsTeam
-  onSaveUrl: (teamId: string, url: string) => void
-  onRefreshed: (teamId: string, patch: { namuwiki_last_checked: string; namuwiki_changed: boolean }) => void
-}) {
-  const [urlDraft, setUrlDraft] = useState(team.namuwiki_url ?? '')
-  const [editingUrl, setEditingUrl] = useState(false)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState(false)
-  const [preview, setPreview] = useState<string | null>(null)
-
-  useEffect(() => { setUrlDraft(team.namuwiki_url ?? '') }, [team.namuwiki_url])
-
-  async function refresh() {
-    if (!team.namuwiki_url) return
-    setLoading(true); setError(false)
-    try {
-      const { data, error: fnError } = await supabase.functions.invoke('namuwiki-check', { body: { teamId: team.id } })
-      if (fnError || !data || data.error) throw new Error('fetch failed')
-      setPreview(data.text as string)
-      onRefreshed(team.id, { namuwiki_last_checked: new Date().toISOString(), namuwiki_changed: false })
-    } catch {
-      setError(true)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  return (
-    <div className="card" style={{ marginBottom: 10, background: 'var(--bg-elevated)' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-        <div className="card-title" style={{ marginBottom: 0, display: 'flex', alignItems: 'center', gap: 5 }}>
-          <BookOpen size={11} /> 나무위키 연동
-          {team.namuwiki_changed && (
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 9, fontWeight: 800, color: 'var(--red)', background: 'var(--red-bg)', border: '1px solid var(--red-border)', borderRadius: 4, padding: '2px 6px', marginLeft: 4 }}>
-              <AlertTriangle size={9} /> 변경 감지됨
-            </span>
-          )}
-        </div>
-        {team.namuwiki_url && (
-          <button onClick={refresh} disabled={loading} className="btn btn-ghost" style={{ padding: '3px 8px', fontSize: 10, display: 'flex', alignItems: 'center', gap: 4 }}>
-            <RefreshCw size={10} style={{ animation: loading ? 'spin 1s linear infinite' : undefined }} /> 새로고침
-          </button>
-        )}
-      </div>
-
-      {!editingUrl && team.namuwiki_url && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-          <a href={team.namuwiki_url} target="_blank" rel="noreferrer" style={{ fontSize: 10, color: 'var(--text-muted)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textDecoration: 'none' }}>
-            {team.namuwiki_url} <ExternalLink size={9} style={{ display: 'inline' }} />
-          </a>
-          <button onClick={() => setEditingUrl(true)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 9 }}>수정</button>
-        </div>
-      )}
-      {(editingUrl || !team.namuwiki_url) && (
-        <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
-          <input value={urlDraft} onChange={e => setUrlDraft(e.target.value)}
-            placeholder="나무위키 팀 문서 주소 (예: https://namu.wiki/w/...)"
-            className="form-input" style={{ flex: 1, fontSize: 11, padding: '5px 7px' }} />
-          <button onClick={() => { if (urlDraft.trim()) { onSaveUrl(team.id, urlDraft.trim()); setEditingUrl(false) } }}
-            className="btn btn-primary" style={{ padding: '5px 10px', fontSize: 11 }}>저장</button>
-        </div>
-      )}
-
-      {team.namuwiki_last_checked && (
-        <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 6 }}>
-          마지막 확인: {dayjs(team.namuwiki_last_checked).format('MM/DD HH:mm')} (매일 자동 확인 · 변경 감지 시 배지 표시)
-        </div>
-      )}
-
-      {loading && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '4px 0' }}>나무위키 페이지를 불러오는 중...</div>}
-      {!loading && error && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '4px 0' }}>나무위키 페이지를 가져오지 못했습니다.</div>}
-      {!loading && !error && preview && (
-        <div style={{ fontSize: 10, color: 'var(--text-secondary)', background: 'var(--bg-card)', borderRadius: 6, padding: '8px 10px', maxHeight: 220, overflowY: 'auto', whiteSpace: 'pre-wrap', lineHeight: 1.5, fontFamily: 'monospace' }}>
-          {preview}
-        </div>
-      )}
-      {!team.namuwiki_url && !editingUrl && (
-        <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>
-          나무위키 문서 주소를 등록하면 매일 자동으로 변경 여부를 확인하고, 새로고침으로 최신 로스터 변경 이력을 바로 볼 수 있어요. 실제 값 반영은 확인 후 직접 편집해 주세요 (위키 서술은 검증되지 않을 수 있어 자동 반영하지 않습니다).
-        </div>
-      )}
-    </div>
-  )
-}
-
-function TeamCard({ team, roster, events, eventsLoading, eventsError, syncing, onSyncRoster, onAddPlayer, onSaveTeamComment, onUpdatePlayer, onDeletePlayer, onDeleteTeam, onSaveNamuwikiUrl, onNamuwikiRefreshed }: {
-  team: EsportsTeam
-  roster: EsportsRosterPlayer[]
-  events: RawScheduleEvent[] | null
-  eventsLoading: boolean
-  eventsError: boolean
-  syncing: boolean
-  onSyncRoster: (teamId: string, teamName: string) => void
-  onAddPlayer: (teamId: string, name: string) => void
-  onSaveTeamComment: (teamId: string, comment: string) => void
-  onUpdatePlayer: (playerId: string, patch: RosterPatch) => void
-  onDeletePlayer: (playerId: string) => void
-  onDeleteTeam: (teamId: string) => void
-  onSaveNamuwikiUrl: (teamId: string, url: string) => void
-  onNamuwikiRefreshed: (teamId: string, patch: { namuwiki_last_checked: string; namuwiki_changed: boolean }) => void
-}) {
-  const [expanded, setExpanded] = useState(false)
-  const [newPlayer, setNewPlayer] = useState('')
-  const code = useMemo(() => events ? findTeamCode(events, team.name) : null, [events, team.name])
-
-  return (
-    <div className="card" style={{ marginBottom: 10 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }} onClick={() => setExpanded(p => !p)}>
-        {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-        <TeamCodeBadge code={code} />
-        <span style={{ fontSize: 14, fontWeight: 700, flex: 1 }}>{team.name}</span>
-        <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{roster.length}명</span>
-        <button onClick={e => { e.stopPropagation(); if (confirm(`${team.name} 팀을 삭제하시겠습니까? (로스터도 함께 삭제됩니다)`)) onDeleteTeam(team.id) }}
-          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red)', display: 'flex' }}>
-          <Trash2 size={13} />
-        </button>
-      </div>
-      {expanded && (
-        <div style={{ marginTop: 10 }}>
-          <TeamAnalysisPanel teamId={team.id} teamName={team.name} events={events} loading={eventsLoading} error={eventsError} />
-          <NamuwikiPanel team={team} onSaveUrl={onSaveNamuwikiUrl} onRefreshed={onNamuwikiRefreshed} />
-          <div style={{ marginBottom: 10 }}>
-            <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 4 }}>팀 코멘트</div>
-            <CommentBox value={team.comment} onSave={v => onSaveTeamComment(team.id, v)} placeholder="팀에 대한 코멘트를 입력하세요..." />
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-            <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>로스터</div>
-            <button onClick={() => onSyncRoster(team.id, team.name)} disabled={syncing}
-              className="btn btn-ghost" style={{ padding: '3px 8px', fontSize: 10, display: 'flex', alignItems: 'center', gap: 4 }}>
-              <Users size={11} /> lolesports 로스터 동기화
-              <RefreshCw size={10} style={{ animation: syncing ? 'spin 1s linear infinite' : undefined }} />
-            </button>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 8 }}>
-            {roster.map(p => (
-              <div key={p.id} style={{ background: 'var(--bg-elevated)', borderRadius: 7, padding: '8px 10px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-                  <span style={{ fontSize: 12, fontWeight: 700, flex: 1 }}>{p.name}</span>
-                  <button onClick={() => onDeletePlayer(p.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex' }}>
-                    <Trash2 size={11} />
-                  </button>
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 6 }}>
-                  <InlineField label="포지션" value={p.role} onSave={v => onUpdatePlayer(p.id, { role: v })} placeholder="TOP/JUG/MID/BOT/SUP" />
-                  <InlineField label="국적" value={p.nationality} onSave={v => onUpdatePlayer(p.id, { nationality: v })} placeholder="예: KR" />
-                  <InlineField label="합류일" value={p.joined_at} onSave={v => onUpdatePlayer(p.id, { joined_at: v })} placeholder="예: 2024-11" />
-                  <InlineField label="계약기간" value={p.contract_until} onSave={v => onUpdatePlayer(p.id, { contract_until: v })} placeholder="예: 2026-11" />
-                </div>
-                <CommentBox value={p.comment} onSave={v => onUpdatePlayer(p.id, { comment: v })} placeholder="선수 코멘트..." />
-              </div>
-            ))}
-            {roster.length === 0 && <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>로스터가 없습니다. 위 "lolesports 로스터 동기화" 버튼으로 선수 명단(ID·포지션)을 자동으로 불러올 수 있어요.</div>}
-          </div>
-          <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 8, lineHeight: 1.4 }}>
-            국적·합류일·계약기간은 lolesports 공개 API에서 제공하지 않아 자동으로 채울 수 없습니다. 나무위키/Leaguepedia 등을 참고해 직접 입력해 주세요.
-          </div>
-          <div style={{ display: 'flex', gap: 6 }}>
-            <input value={newPlayer} onChange={e => setNewPlayer(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter' && newPlayer.trim()) { onAddPlayer(team.id, newPlayer.trim()); setNewPlayer('') } }}
-              placeholder="선수 이름 추가..." className="form-input" style={{ flex: 1, fontSize: 11, padding: '6px 8px' }} />
-            <button onClick={() => { if (newPlayer.trim()) { onAddPlayer(team.id, newPlayer.trim()); setNewPlayer('') } }}
-              className="btn btn-primary" style={{ padding: '6px 10px' }}>
-              <Plus size={13} />
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
 function LeagueView({ code, label }: { code: string; label: string }) {
   const [teams, setTeams] = useState<EsportsTeam[]>([])
-  const [roster, setRoster] = useState<EsportsRosterPlayer[]>([])
-  const [newTeam, setNewTeam] = useState('')
   const [events, setEvents] = useState<RawScheduleEvent[] | null>(null)
   const [eventsLoading, setEventsLoading] = useState(false)
   const [eventsError, setEventsError] = useState(false)
-  const [syncingTeamId, setSyncingTeamId] = useState<string | null>(null)
   const [golggSyncing, setGolggSyncing] = useState(false)
   const [golggResult, setGolggResult] = useState<string | null>(null)
+  const [powerScores, setPowerScores] = useState<Record<string, TeamPowerScore>>({})
+  const [powerLoading, setPowerLoading] = useState(false)
 
   async function syncGolgg() {
     setGolggSyncing(true)
@@ -890,16 +606,48 @@ function LeagueView({ code, label }: { code: string; label: string }) {
     }
   }
 
+  // 팀별 체급 점수 계산: 수동 입력된(source='manual') 세트 기록을 팀별로 묶어서 computeTeamPowerScore에 넣는다
+  async function loadPowerScores(teamsList: EsportsTeam[]) {
+    if (teamsList.length === 0) { setPowerScores({}); return }
+    setPowerLoading(true)
+    try {
+      const { data } = await supabase.from('esports_game_stats').select('*')
+        .in('team_id', teamsList.map(t => t.id))
+        .eq('source', 'manual')
+        .order('match_start_time', { ascending: false })
+      const rows = (data as EsportsGameStat[]) ?? []
+      const byTeam: Record<string, EsportsGameStat[]> = {}
+      for (const r of rows) {
+        if (!byTeam[r.team_id]) byTeam[r.team_id] = []
+        byTeam[r.team_id].push(r)
+      }
+      const scores: Record<string, TeamPowerScore> = {}
+      for (const t of teamsList) {
+        const records = (byTeam[t.id] ?? []).map(s => ({
+          team1Kills: s.team1_kills ?? 0, team2Kills: s.team2_kills ?? 0,
+          team1Dragons: s.team1_dragons ?? 0, team2Dragons: s.team2_dragons ?? 0,
+          team1Towers: s.team1_towers ?? 0, team2Towers: s.team2_towers ?? 0,
+          team1Inhibitors: s.team1_inhibitors ?? 0, team2Inhibitors: s.team2_inhibitors ?? 0,
+          team1Barons: s.team1_barons ?? 0, team2Barons: s.team2_barons ?? 0,
+          winnerTeam: s.winner_team ?? 'team1' as NarrativeTeam,
+          firstBloodTeam: s.first_blood_team, firstTowerTeam: s.first_tower_team,
+          firstDragonTeam: s.first_dragon_team, firstBaronTeam: s.first_baron_team,
+          fifthKillTeam: s.fifth_kill_team, tenthKillTeam: s.tenth_kill_team,
+          durationSeconds: s.duration_seconds,
+        }))
+        scores[t.id] = computeTeamPowerScore(records)
+      }
+      setPowerScores(scores)
+    } finally {
+      setPowerLoading(false)
+    }
+  }
+
   async function load() {
     const { data: teamData } = await supabase.from('esports_teams').select('*').eq('league', code).order('sort_order').order('created_at')
     const teamsList = (teamData as EsportsTeam[]) ?? []
     setTeams(teamsList)
-    if (teamsList.length > 0) {
-      const { data: rosterData } = await supabase.from('esports_roster').select('*').in('team_id', teamsList.map(t => t.id)).order('sort_order').order('created_at')
-      setRoster((rosterData as EsportsRosterPlayer[]) ?? [])
-    } else {
-      setRoster([])
-    }
+    loadPowerScores(teamsList)
   }
   async function loadEvents(forceRefresh?: boolean) {
     setEventsLoading(true); setEventsError(false)
@@ -913,69 +661,9 @@ function LeagueView({ code, label }: { code: string; label: string }) {
   }
   useEffect(() => { load(); loadEvents() }, [code])
 
-  async function addTeam() {
-    if (!newTeam.trim()) return
-    const { data } = await supabase.from('esports_teams').insert({ league: code, name: newTeam.trim(), comment: '', sort_order: teams.length }).select().single()
-    if (data) { setTeams(p => [...p, data as EsportsTeam]); setNewTeam('') }
-  }
-  async function deleteTeam(teamId: string) {
-    await supabase.from('esports_teams').delete().eq('id', teamId)
-    setTeams(p => p.filter(t => t.id !== teamId))
-    setRoster(p => p.filter(r => r.team_id !== teamId))
-  }
-  async function saveTeamComment(teamId: string, comment: string) {
-    const { data } = await supabase.from('esports_teams').update({ comment }).eq('id', teamId).select().single()
-    if (data) setTeams(p => p.map(t => t.id === teamId ? data as EsportsTeam : t))
-  }
-  async function addPlayer(teamId: string, name: string) {
-    const count = roster.filter(r => r.team_id === teamId).length
-    const { data } = await supabase.from('esports_roster').insert({ team_id: teamId, name, comment: '', sort_order: count }).select().single()
-    if (data) setRoster(p => [...p, data as EsportsRosterPlayer])
-  }
-  async function deletePlayer(playerId: string) {
-    await supabase.from('esports_roster').delete().eq('id', playerId)
-    setRoster(p => p.filter(r => r.id !== playerId))
-  }
-  async function updatePlayer(playerId: string, patch: RosterPatch) {
-    const { data } = await supabase.from('esports_roster').update(patch).eq('id', playerId).select().single()
-    if (data) setRoster(p => p.map(r => r.id === playerId ? data as EsportsRosterPlayer : r))
-  }
-  async function saveNamuwikiUrl(teamId: string, url: string) {
-    const { data } = await supabase.from('esports_teams').update({ namuwiki_url: url, namuwiki_changed: false }).eq('id', teamId).select().single()
-    if (data) setTeams(p => p.map(t => t.id === teamId ? data as EsportsTeam : t))
-  }
-  function namuwikiRefreshed(teamId: string, patch: { namuwiki_last_checked: string; namuwiki_changed: boolean }) {
-    setTeams(p => p.map(t => t.id === teamId ? { ...t, ...patch } : t))
-  }
-  async function syncRoster(teamId: string, teamName: string) {
-    setSyncingTeamId(teamId)
-    try {
-      const apiTeams = await fetchLeagueTeams(code)
-      const match = apiTeams.find(t => teamNameMatches(t, teamName))
-      if (!match) {
-        alert(`lolesports에서 "${teamName}" 팀을 찾지 못했습니다. 저장된 팀 이름이 lolesports 표기와 다를 수 있어요.`)
-        return
-      }
-      for (const p of match.players) {
-        const displayName = (p.summonerName || `${p.firstName ?? ''} ${p.lastName ?? ''}`.trim()) || '이름 없음'
-        const existing = roster.find(r => r.team_id === teamId && r.lolesports_player_id === p.id)
-        if (existing) {
-          const { data } = await supabase.from('esports_roster').update({ name: displayName, role: p.role ?? null }).eq('id', existing.id).select().single()
-          if (data) setRoster(prev => prev.map(r => r.id === existing.id ? data as EsportsRosterPlayer : r))
-        } else {
-          const count = roster.filter(r => r.team_id === teamId).length
-          const { data } = await supabase.from('esports_roster').insert({
-            team_id: teamId, name: displayName, comment: '', sort_order: count, role: p.role ?? null, lolesports_player_id: p.id,
-          }).select().single()
-          if (data) setRoster(prev => [...prev, data as EsportsRosterPlayer])
-        }
-      }
-    } catch {
-      alert('로스터 동기화 중 오류가 발생했습니다 (외부 API 접속 제한일 수 있음).')
-    } finally {
-      setSyncingTeamId(null)
-    }
-  }
+  const rankedTeams = useMemo(() =>
+    [...teams].sort((a, b) => (powerScores[b.id]?.powerScore ?? 50) - (powerScores[a.id]?.powerScore ?? 50)),
+  [teams, powerScores])
 
   return (
     <div>
@@ -995,26 +683,32 @@ function LeagueView({ code, label }: { code: string; label: string }) {
           <RecentMatchesPanel leagueCode={code} events={events} loading={eventsLoading} error={eventsError} teams={teams} />
         </div>
         <div style={{ flex: '1 1 320px', minWidth: 280 }}>
-          <UpcomingPanel events={events} loading={eventsLoading} error={eventsError} />
+          <UpcomingPanel events={events} loading={eventsLoading} error={eventsError} teams={teams} powerScores={powerScores} />
         </div>
       </div>
 
-      <div className="card-title" style={{ marginBottom: 8 }}>팀 목록</div>
-      {teams.map(t => (
-        <TeamCard key={t.id} team={t} roster={roster.filter(r => r.team_id === t.id)}
-          events={events} eventsLoading={eventsLoading} eventsError={eventsError}
-          syncing={syncingTeamId === t.id} onSyncRoster={syncRoster}
-          onAddPlayer={addPlayer} onSaveTeamComment={saveTeamComment} onUpdatePlayer={updatePlayer}
-          onDeletePlayer={deletePlayer} onDeleteTeam={deleteTeam}
-          onSaveNamuwikiUrl={saveNamuwikiUrl} onNamuwikiRefreshed={namuwikiRefreshed} />
-      ))}
-      <div className="card" style={{ display: 'flex', gap: 6 }}>
-        <input value={newTeam} onChange={e => setNewTeam(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && addTeam()}
-          placeholder="팀 이름 추가..." className="form-input" style={{ flex: 1 }} />
-        <button onClick={addTeam} className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          <Plus size={14} /> 팀 추가
-        </button>
+      <div className="card">
+        <div className="card-title" style={{ marginBottom: 8 }}>
+          팀 체급 점수 <span style={{ fontWeight: 400, color: 'var(--text-muted)', fontSize: 10 }}>· 수동 입력한 경기(최근일수록 가중치 ↑) 기반, 승부 예측에 사용됨</span>
+        </div>
+        {powerLoading && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '6px 0' }}>계산 중...</div>}
+        {!powerLoading && rankedTeams.length === 0 && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '6px 0' }}>등록된 팀이 없습니다.</div>}
+        {!powerLoading && rankedTeams.map(t => {
+          const ps = powerScores[t.id]
+          return (
+            <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, padding: '6px 8px', background: 'var(--bg-elevated)', borderRadius: 6, marginBottom: 4 }}>
+              <span style={{ flex: 1, fontWeight: 700 }}>{t.name}</span>
+              {ps && ps.gamesAnalyzed > 0 ? (
+                <>
+                  <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>{ps.gamesAnalyzed}경기 · 승률 {(ps.winRate * 100).toFixed(0)}%</span>
+                  <span style={{ fontWeight: 800, color: 'var(--gold)', width: 40, textAlign: 'right' }}>{ps.powerScore.toFixed(1)}</span>
+                </>
+              ) : (
+                <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>입력된 경기 없음 (기본값 50.0)</span>
+              )}
+            </div>
+          )
+        })}
       </div>
     </div>
   )
