@@ -13,6 +13,7 @@ import {
 interface EsportsTeam {
   id: string; league: string; name: string; comment: string; sort_order: number
   namuwiki_url: string | null; namuwiki_last_checked: string | null; namuwiki_changed: boolean
+  gpr_score: number | null
 }
 
 interface EsportsGameStat {
@@ -826,7 +827,7 @@ function LeagueView({ code, label }: { code: string; label: string }) {
 
       // 1단계: 상대 체급을 모른 채로, 순수 실적(플레이 점수+승률+스윕비율)만으로 사전 점수 계산
       const priors: Record<string, number> = {}
-      for (const t of teamsList) priors[t.id] = computeTeamPriorScore(setsByTeam[t.id]).powerScore
+      for (const t of teamsList) priors[t.id] = computeTeamPriorScore(setsByTeam[t.id], t.gpr_score ?? 50).powerScore
 
       // 2단계: 각 세트의 상대팀 사전 점수를 붙여서, 이변 보정된 최종 체급 점수 계산
       const scores: Record<string, TeamPowerScore> = {}
@@ -925,7 +926,7 @@ function LeagueView({ code, label }: { code: string; label: string }) {
                   {expanded && detail && (
                     <div style={{ padding: '8px 8px', background: 'var(--bg-card)', borderRadius: 6, marginTop: 2, fontSize: 9, overflowX: 'auto' }}>
                       <div style={{ color: 'var(--text-muted)', marginBottom: 6 }}>
-                        사전 점수(순수 실적) {detail.prior.toFixed(1)}점에서 시작 → 아래 경기들이 순서대로 이변 보정을 가감하며 최종 {ps?.powerScore.toFixed(1)}점까지 도달
+                        사전 점수 {detail.prior.toFixed(1)}점(라이엇 공식 GPR 기반 시작값에서 우리 데이터로 보정됨)에서 시작 → 아래 경기들이 순서대로 이변 보정을 가감하며 최종 {ps?.powerScore.toFixed(1)}점까지 도달
                       </div>
                       <table style={{ borderCollapse: 'collapse', width: '100%', minWidth: 520 }}>
                         <thead>

@@ -609,8 +609,11 @@ export interface SetRecordForPower {
 // 1단계: 상대 체급을 고려하지 않고, 순수 실적만으로 매긴 사전 점수.
 // "일단 이겨야 체급"이라는 전제로 승률 비중을 플레이 점수보다 높게 두고, 스윕승(2-0/3-0)에는 추가 보너스를 준다.
 // 표본이 적을 때(특히 소수 경기 100% 승률처럼 극단적인 경우) 50점 쪽으로 완화(shrinkage)해서 과대평가를 막는다.
-export function computeTeamPriorScore(sets: SetRecordForPower[]): TeamPowerScore {
-  if (sets.length === 0) return { powerScore: 50, avgPerfection: 50, winRate: 0.5, gamesAnalyzed: 0 }
+// baselineScore: lolesports.com 공식 GPR(Global Power Rankings)을 0~100로 정규화한 값.
+// 데이터가 적은 팀(또는 아예 없는 팀)은 이 실제 파워랭킹 값에서 시작하고, 우리가 직접 입력한
+// 경기가 쌓일수록 그 실측 데이터 쪽으로 점점 더 끌려가는 구조 (50점 중립 시작이 아님).
+export function computeTeamPriorScore(sets: SetRecordForPower[], baselineScore = 50): TeamPowerScore {
+  if (sets.length === 0) return { powerScore: baselineScore, avgPerfection: baselineScore, winRate: 0.5, gamesAnalyzed: 0 }
   let weightSum = 0, playWeighted = 0, winWeighted = 0, sweepWinWeighted = 0
   sets.forEach((r, i) => {
     const w = timeDecayWeight(r.daysAgo ?? i * 3.5)
@@ -624,9 +627,9 @@ export function computeTeamPriorScore(sets: SetRecordForPower[]): TeamPowerScore
   const sweepWinRate = sweepWinWeighted / weightSum
   // 플레이 점수 35% + 승률 55% + 스윕승 비율 보너스 10%
   const rawScore = avgPerfection * 0.35 + (winRate * 100) * 0.55 + sweepWinRate * 100 * 0.10
-  // 표본 16세트 미만이면 50점 쪽으로 당겨서 소수 경기의 극단값을 완화 (세트 기준이라 시리즈 기준보다 문턱을 넉넉히 잡음)
+  // 표본 16세트 미만이면 GPR 기본값 쪽으로 당겨서 소수 경기의 극단값을 완화
   const confidence = Math.min(1, sets.length / 16)
-  const powerScore = 50 + (rawScore - 50) * confidence
+  const powerScore = baselineScore + (rawScore - baselineScore) * confidence
   return { powerScore, avgPerfection, winRate, gamesAnalyzed: sets.length }
 }
 
@@ -676,7 +679,7 @@ export function computeSetAdjustments(sets: SetRecordForPower[], myPriorScore = 
 //   - 체급 높은 팀이 낮은 팀에게 짐(역이변) → 소폭 하락
 // 그 세트가 속한 시리즈를 완전 스윕했으면 그 경기의 영향력을 추가로 더 크게 준다.
 export function computeTeamPowerScore(sets: SetRecordForPower[], myPriorScore = 50): TeamPowerScore {
-  if (sets.length === 0) return { powerScore: 50, avgPerfection: 50, winRate: 0.5, gamesAnalyzed: 0 }
+  if (sets.length === 0) return { powerScore: myPriorScore, avgPerfection: myPriorScore, winRate: 0.5, gamesAnalyzed: 0 }
   const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
   const details = computeSetAdjustments(sets, myPriorScore)
   let weightSum = 0, playWeighted = 0, winWeighted = 0, adjWeighted = 0
