@@ -69,6 +69,23 @@ function RecentMatchesPanel({ leagueCode, events, loading, error, teams }: { lea
       })
   }, [events])
 
+  // 각 경기에 세트 기록이 입력돼있는지 스코어 옆에 배지로 보여주기 위해, 관련 팀들의 기록을 한 번에 조회
+  const [recordedByTeam, setRecordedByTeam] = useState<Record<string, EsportsGameStat[]>>({})
+  useEffect(() => {
+    const ids = Array.from(new Set(
+      matches.map(m => resolveMatchTeam(teams, m.teamA, m.teamB)?.teamId).filter((x): x is string => !!x)
+    ))
+    if (ids.length === 0) { setRecordedByTeam({}); return }
+    supabase.from('esports_game_stats').select('*').in('team_id', ids).then(({ data }) => {
+      const grouped: Record<string, EsportsGameStat[]> = {}
+      for (const row of (data as EsportsGameStat[]) ?? []) {
+        if (!grouped[row.team_id]) grouped[row.team_id] = []
+        grouped[row.team_id].push(row)
+      }
+      setRecordedByTeam(grouped)
+    })
+  }, [matches, teams])
+
   return (
     <div className="card">
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
@@ -98,10 +115,16 @@ function RecentMatchesPanel({ leagueCode, events, loading, error, teams }: { lea
             }
             const teamScore = resolved.isA ? m.scoreA : m.scoreB
             const oppScore = resolved.isA ? m.scoreB : m.scoreA
+            const recordCount = (recordedByTeam[resolved.teamId] ?? []).filter(s => {
+              const d = dayjs(s.match_start_time)
+              const inRange = d.isAfter(dayjs(m.startTime).subtract(1, 'day')) && d.isBefore(dayjs(m.startTime).add(1, 'day'))
+              return inRange && (teamNameMatches({ name: s.team2_name }, resolved.opponent) || teamNameMatches({ name: resolved.opponent }, s.team2_name))
+            }).length
             return (
               <RecentMatchRow key={m.id} teamId={resolved.teamId} teamName={resolved.teamName}
                 game={{ opponent: resolved.opponent, teamScore, oppScore, startTime: m.startTime, bestOf: m.bestOf }}
-                displayA={m.codeA || m.teamA} displayB={m.codeB || m.teamB} scoreA={m.scoreA} scoreB={m.scoreB} teams={teams} />
+                displayA={m.codeA || m.teamA} displayB={m.codeB || m.teamB} scoreA={m.scoreA} scoreB={m.scoreB} teams={teams}
+                recordCount={recordCount} />
             )
           })}
         </div>
@@ -240,18 +263,31 @@ function StatPairInput({ label, valueA, valueB, onChangeA, onChangeB }: {
   )
 }
 
+function MilestoneButton({ selected, onClick, children }: { selected: boolean; onClick: () => void; children: string }) {
+  return (
+    <button type="button" onClick={onClick} style={{
+      flex: 1, fontSize: 9, padding: '4px 4px', borderRadius: 4, cursor: 'pointer',
+      border: `1px solid ${selected ? 'var(--gold-border)' : 'var(--border)'}`,
+      background: selected ? 'var(--gold)' : 'var(--bg-card)',
+      color: selected ? 'var(--bg-card)' : 'var(--text-secondary)',
+      fontWeight: selected ? 800 : 500, fontFamily: 'var(--font-body)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+    }}>
+      {children}
+    </button>
+  )
+}
+
 function MilestoneSelect({ label, value, onChange, teamName, opponentName }: {
   label: string; value: NarrativeTeam | ''; onChange: (v: NarrativeTeam | '') => void; teamName: string; opponentName: string
 }) {
   return (
-    <div>
-      <div style={{ fontSize: 8, color: 'var(--text-muted)', marginBottom: 2 }}>{label}</div>
-      <select value={value} onChange={e => onChange(e.target.value as NarrativeTeam | '')}
-        style={{ width: '100%', fontSize: 10, padding: '3px 4px', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text-primary)', fontFamily: 'var(--font-body)' }}>
-        <option value="">모름</option>
-        <option value="team1">{teamName}</option>
-        <option value="team2">{opponentName}</option>
-      </select>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      <span style={{ fontSize: 9, color: 'var(--text-muted)', width: 60, flexShrink: 0 }}>{label}</span>
+      <div style={{ display: 'flex', gap: 4, flex: 1 }}>
+        <MilestoneButton selected={value === ''} onClick={() => onChange('')}>모름</MilestoneButton>
+        <MilestoneButton selected={value === 'team1'} onClick={() => onChange('team1')}>{teamName}</MilestoneButton>
+        <MilestoneButton selected={value === 'team2'} onClick={() => onChange('team2')}>{opponentName}</MilestoneButton>
+      </div>
     </div>
   )
 }
@@ -324,10 +360,10 @@ function GameStatCard({ stat, teamName, onDelete }: { stat: EsportsGameStat; tea
   )
 }
 
-function RecentMatchRow({ teamId, teamName, game, displayA, displayB, scoreA, scoreB, teams }: {
+function RecentMatchRow({ teamId, teamName, game, displayA, displayB, scoreA, scoreB, teams, recordCount }: {
   teamId: string; teamName: string; game: TeamGameRecord
   displayA?: string; displayB?: string; scoreA?: number; scoreB?: number
-  teams: EsportsTeam[]
+  teams: EsportsTeam[]; recordCount?: number
 }) {
   const [expanded, setExpanded] = useState(false)
   const [sets, setSets] = useState<EsportsGameStat[] | null>(null)
@@ -490,6 +526,11 @@ function RecentMatchRow({ teamId, teamName, game, displayA, displayB, scoreA, sc
         <span style={{ color: 'var(--text-muted)', width: 50, flexShrink: 0 }}>{dayjs(game.startTime).format('MM/DD')}</span>
         <span style={{ flex: 1, textAlign: 'right', fontWeight: hScoreA > hScoreB ? 800 : 400 }}>{headerA}</span>
         <span style={{ fontWeight: 800, color: 'var(--gold)', flexShrink: 0 }}>{hScoreA} : {hScoreB}</span>
+        {recordCount != null && (
+          recordCount > 0
+            ? <span style={{ fontSize: 8, fontWeight: 800, color: 'var(--green)', background: 'var(--green-bg)', border: '1px solid var(--green-border)', borderRadius: 4, padding: '1px 5px', flexShrink: 0 }}>입력됨 {recordCount}</span>
+            : <span style={{ fontSize: 8, color: 'var(--text-muted)', border: '1px solid var(--border)', borderRadius: 4, padding: '1px 5px', flexShrink: 0 }}>미입력</span>
+        )}
         <span style={{ flex: 1, fontWeight: hScoreB > hScoreA ? 800 : 400 }}>{headerB}</span>
       </div>
       {expanded && (
@@ -579,19 +620,24 @@ function RecentMatchRow({ teamId, teamName, game, displayA, displayB, scoreA, sc
                   placeholder="초" inputMode="numeric" style={{ width: 40, fontSize: 11, padding: '3px 4px', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text-primary)', textAlign: 'center' }} />
                 <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>초</span>
               </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ width: 46, flexShrink: 0 }} />
+                <span style={{ width: 40, fontSize: 9, fontWeight: 700, textAlign: 'center', color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{teamName}</span>
+                <span style={{ width: 9 }} />
+                <span style={{ width: 40, fontSize: 9, fontWeight: 700, textAlign: 'center', color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{game.opponent}</span>
+              </div>
               <StatPairInput label="킬" valueA={form.team1Kills} valueB={form.team2Kills} onChangeA={v => setForm(f => ({ ...f, team1Kills: v }))} onChangeB={v => setForm(f => ({ ...f, team2Kills: v }))} />
               <StatPairInput label="드래곤" valueA={form.team1Dragons} valueB={form.team2Dragons} onChangeA={v => setForm(f => ({ ...f, team1Dragons: v }))} onChangeB={v => setForm(f => ({ ...f, team2Dragons: v }))} />
               <StatPairInput label="타워" valueA={form.team1Towers} valueB={form.team2Towers} onChangeA={v => setForm(f => ({ ...f, team1Towers: v }))} onChangeB={v => setForm(f => ({ ...f, team2Towers: v }))} />
               <StatPairInput label="억제기" valueA={form.team1Inhibitors} valueB={form.team2Inhibitors} onChangeA={v => setForm(f => ({ ...f, team1Inhibitors: v }))} onChangeB={v => setForm(f => ({ ...f, team2Inhibitors: v }))} />
               <StatPairInput label="바론" valueA={form.team1Barons} valueB={form.team2Barons} onChangeA={v => setForm(f => ({ ...f, team1Barons: v }))} onChangeB={v => setForm(f => ({ ...f, team2Barons: v }))} />
 
-              <div>
-                <div style={{ fontSize: 8, color: 'var(--text-muted)', marginBottom: 2 }}>승리팀</div>
-                <select value={form.winnerTeam} onChange={e => setForm(f => ({ ...f, winnerTeam: e.target.value as NarrativeTeam }))}
-                  style={{ width: '100%', fontSize: 10, padding: '3px 4px', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text-primary)', fontFamily: 'var(--font-body)' }}>
-                  <option value="team1">{teamName}</option>
-                  <option value="team2">{game.opponent}</option>
-                </select>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: 9, color: 'var(--text-muted)', width: 60, flexShrink: 0 }}>승리팀</span>
+                <div style={{ display: 'flex', gap: 4, flex: 1 }}>
+                  <MilestoneButton selected={form.winnerTeam === 'team1'} onClick={() => setForm(f => ({ ...f, winnerTeam: 'team1' }))}>{teamName}</MilestoneButton>
+                  <MilestoneButton selected={form.winnerTeam === 'team2'} onClick={() => setForm(f => ({ ...f, winnerTeam: 'team2' }))}>{game.opponent}</MilestoneButton>
+                </div>
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
