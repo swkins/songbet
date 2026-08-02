@@ -6,8 +6,8 @@ import {
   LEAGUES, fetchScheduleEvents, extractTeamData, computeForm, matchupProbability, filterRecentGames,
   seriesScoreProbabilities, computeOddsValue, teamNameMatches,
   classifyGameNarrative, computeBothSidesScores, computeBothSidesPerfection, computePerfectionScore,
-  computeTeamPowerScore, computeTeamPriorScore, computeSetAdjustments, powerScoreMatchupProbability,
-  type RawScheduleEvent, type TeamGameRecord, type NarrativeTeam, type TeamPowerScore, type SetRecordForPower,
+  simulateLeagueElo, powerScoreMatchupProbability,
+  type RawScheduleEvent, type TeamGameRecord, type NarrativeTeam, type TeamPowerScore, type EloMatchRecord, type EloGameLog,
 } from '../lib/lolEsports'
 
 interface EsportsTeam {
@@ -767,11 +767,11 @@ function LeagueView({ code, label }: { code: string; label: string }) {
   const [eventsLoading, setEventsLoading] = useState(false)
   const [eventsError, setEventsError] = useState(false)
   const [powerScores, setPowerScores] = useState<Record<string, TeamPowerScore>>({})
-  const [powerDetails, setPowerDetails] = useState<Record<string, { prior: number; sets: SetRecordForPower[] }>>({})
+  const [powerLog, setPowerLog] = useState<Record<string, EloGameLog[]>>({})
   const [expandedPowerTeam, setExpandedPowerTeam] = useState<string | null>(null)
   const [powerLoading, setPowerLoading] = useState(false)
 
-  // 팀별 체급 점수 계산: 수동 입력된(source='manual') 세트 기록을 팀별로 묶어서 computeTeamPowerScore에 넣는다
+  // 팀 체급 점수 계산: 라이엇 GPR 공식(순차 Elo)을 리그 전체 경기에 시간순으로 적용
   async function loadPowerScores(teamsList: EsportsTeam[]) {
     if (teamsList.length === 0) { setPowerScores({}); return }
     setPowerLoading(true)
@@ -779,71 +779,45 @@ function LeagueView({ code, label }: { code: string; label: string }) {
       const { data } = await supabase.from('esports_game_stats').select('*')
         .in('team_id', teamsList.map(t => t.id))
         .eq('source', 'manual')
-        .order('match_start_time', { ascending: false })
+        .order('match_start_time', { ascending: true })
         .order('game_number', { ascending: true })
       const rows = (data as EsportsGameStat[]) ?? []
-      const byTeam: Record<string, EsportsGameStat[]> = {}
-      for (const r of rows) {
-        if (!byTeam[r.team_id]) byTeam[r.team_id] = []
-        byTeam[r.team_id].push(r)
-      }
 
-      // 세트를 시리즈(같은 상대+같은 날짜) 단위로 묶어서, 그 시리즈가 스윕(2-0/3-0)이었는지만 판별한다.
-      // 체급 점수 자체는 세트 단위로 계산하되, "스윕승 세트"라는 태그만 시리즈에서 가져온다.
-      const toSets = (statRows: EsportsGameStat[]) => {
-        const groups: Record<string, EsportsGameStat[]> = {}
-        for (const s of statRows) {
-          const key = `${s.team2_name}|${s.match_start_time}`
-          if (!groups[key]) groups[key] = []
-          groups[key].push(s)
-        }
-        const result: (SetRecordForPower & { opponent: string })[] = []
-        for (const sets of Object.values(groups)) {
-          sets.sort((a, b) => a.game_number - b.game_number) // 1세트→2세트→3세트 순서 보장
-          const team1Wins = sets.filter(s => s.winner_team === 'team1').length
-          const team2Wins = sets.length - team1Wins
-          const winnerTeam: NarrativeTeam = team1Wins >= team2Wins ? 'team1' : 'team2'
-          const seriesSweep = (winnerTeam === 'team1' && team2Wins === 0) || (winnerTeam === 'team2' && team1Wins === 0)
-          for (const s of sets) {
-            const playScore = computePerfectionScore({
-              team1Kills: s.team1_kills ?? 0, team2Kills: s.team2_kills ?? 0,
-              team1Dragons: s.team1_dragons ?? 0, team2Dragons: s.team2_dragons ?? 0,
-              team1Towers: s.team1_towers ?? 0, team2Towers: s.team2_towers ?? 0,
-              team1Inhibitors: s.team1_inhibitors ?? 0, team2Inhibitors: s.team2_inhibitors ?? 0,
-              team1Barons: s.team1_barons ?? 0, team2Barons: s.team2_barons ?? 0,
-              winnerTeam: s.winner_team ?? 'team1' as NarrativeTeam,
-              firstBloodTeam: s.first_blood_team, firstTowerTeam: s.first_tower_team,
-              firstDragonTeam: s.first_dragon_team, firstBaronTeam: s.first_baron_team,
-              fifthKillTeam: s.fifth_kill_team, tenthKillTeam: s.tenth_kill_team,
-              durationSeconds: s.duration_seconds,
-            })
-            const daysAgo = s.match_start_time != null ? dayjs().diff(dayjs(s.match_start_time), 'day') : 0
-            result.push({ won: s.winner_team === 'team1', playScore, seriesSweep, daysAgo, opponent: s.team2_name, matchStartTime: s.match_start_time ?? '', gameNumber: s.game_number })
-          }
-        }
-        return result
-      }
-
-      const setsByTeam: Record<string, ReturnType<typeof toSets>> = {}
-      for (const t of teamsList) setsByTeam[t.id] = toSets(byTeam[t.id] ?? [])
-
-      // 1단계: 상대 체급을 모른 채로, 순수 실적(플레이 점수+승률+스윕비율)만으로 사전 점수 계산
-      const priors: Record<string, number> = {}
-      for (const t of teamsList) priors[t.id] = computeTeamPriorScore(setsByTeam[t.id], t.gpr_score ?? 50).powerScore
-
-      // 2단계: 각 세트의 상대팀 사전 점수를 붙여서, 이변 보정된 최종 체급 점수 계산
-      const scores: Record<string, TeamPowerScore> = {}
-      const details: Record<string, { prior: number; sets: SetRecordForPower[] }> = {}
-      for (const t of teamsList) {
-        const sets = setsByTeam[t.id].map(r => {
-          const oppTeam = teamsList.find(tt => teamNameMatches(tt, r.opponent))
-          return { ...r, opponentPriorScore: oppTeam ? priors[oppTeam.id] : undefined }
+      // 미러링 때문에 실제 경기 하나가 두 행(양팀 관점)으로 존재한다. 한 방향만 남기고 중복 제거.
+      const seenKeys = new Set<string>()
+      const matches: EloMatchRecord[] = []
+      for (const s of rows) {
+        const oppTeam = teamsList.find(t => teamNameMatches(t, s.team2_name))
+        if (!oppTeam) continue // 추적 안 되는 상대는 시뮬레이션에서 제외 (레이팅 기준점이 없음)
+        const key = [s.team_id, oppTeam.id].sort().join('|') + `|${s.match_start_time}|${s.game_number}`
+        if (seenKeys.has(key)) continue
+        seenKeys.add(key)
+        matches.push({
+          teamAId: s.team_id, teamBId: oppTeam.id,
+          winnerIsA: s.winner_team === 'team1',
+          matchStartTime: s.match_start_time ?? '', gameNumber: s.game_number,
         })
-        scores[t.id] = computeTeamPowerScore(sets, priors[t.id])
-        details[t.id] = { prior: priors[t.id], sets }
+      }
+
+      const initialRatings: Record<string, number> = {}
+      for (const t of teamsList) initialRatings[t.id] = t.gpr_score ?? 50
+
+      const { finalRatings, log } = simulateLeagueElo(initialRatings, matches)
+
+      const scores: Record<string, TeamPowerScore> = {}
+      const logByTeam: Record<string, EloGameLog[]> = {}
+      for (const t of teamsList) {
+        const teamLog = log.filter(l => l.teamId === t.id)
+        const wins = teamLog.filter(l => l.won).length
+        scores[t.id] = {
+          powerScore: finalRatings[t.id] ?? t.gpr_score ?? 50,
+          winRate: teamLog.length > 0 ? wins / teamLog.length : 0.5,
+          gamesAnalyzed: teamLog.length,
+        }
+        logByTeam[t.id] = teamLog
       }
       setPowerScores(scores)
-      setPowerDetails(details)
+      setPowerLog(logByTeam)
     } finally {
       setPowerLoading(false)
     }
@@ -897,19 +871,7 @@ function LeagueView({ code, label }: { code: string; label: string }) {
             {!powerLoading && rankedTeams.map(t => {
               const ps = powerScores[t.id]
               const expanded = expandedPowerTeam === t.id
-              const detail = powerDetails[t.id]
-              // 히스토리는 오래된 경기 → 최근 경기 순으로 보여주고, 각 경기까지의 누적 점수를 같이 계산
-              const history = expanded && detail
-                ? [...computeSetAdjustments(detail.sets, detail.prior)]
-                    .sort((a, b) => dayjs(a.matchStartTime).valueOf() - dayjs(b.matchStartTime).valueOf() || a.gameNumber - b.gameNumber)
-                : []
-              let cumWeight = 0, cumAdj = 0
-              const historyWithRunning = history.map(h => {
-                cumWeight += h.weight
-                cumAdj += h.adjustment * h.weight
-                const running = Math.max(0, Math.min(100, detail.prior + cumAdj / cumWeight))
-                return { ...h, running }
-              })
+              const teamLog = powerLog[t.id] ?? []
               return (
                 <div key={t.id} style={{ marginBottom: 4 }}>
                   <div onClick={() => setExpandedPowerTeam(expanded ? null : t.id)}
@@ -922,48 +884,47 @@ function LeagueView({ code, label }: { code: string; label: string }) {
                         <span style={{ fontWeight: 800, color: 'var(--gold)', width: 40, textAlign: 'right' }}>{ps.powerScore.toFixed(1)}</span>
                       </>
                     ) : (
-                      <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>입력된 경기 없음 (기본값 50.0)</span>
+                      <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>입력된 경기 없음 (GPR 기본값 {(t.gpr_score ?? 50).toFixed(1)})</span>
                     )}
                   </div>
-                  {expanded && detail && (
+                  {expanded && (
                     <div style={{ padding: '8px 8px', background: 'var(--bg-card)', borderRadius: 6, marginTop: 2, fontSize: 9, overflowX: 'auto' }}>
                       <div style={{ color: 'var(--text-muted)', marginBottom: 6 }}>
-                        사전 점수 {detail.prior.toFixed(1)}점(라이엇 공식 GPR 기반 시작값에서 우리 데이터로 보정됨)에서 시작 → 아래 경기들이 순서대로 이변 보정을 가감하며 최종 {ps?.powerScore.toFixed(1)}점까지 도달
+                        GPR 기본값 {(t.gpr_score ?? 50).toFixed(1)}점에서 시작 → 아래 경기를 시간순으로 하나씩 반영(순차 Elo)하며 최종 {ps?.powerScore.toFixed(1)}점까지 도달. 이겼으면 상대가 아무리 약해도 항상 조금은 오르고, 졌으면 항상 조금은 내려갑니다.
                       </div>
-                      <table style={{ borderCollapse: 'collapse', width: '100%', minWidth: 520 }}>
-                        <thead>
-                          <tr style={{ color: 'var(--text-muted)', textAlign: 'right' }}>
-                            <th style={{ textAlign: 'left', padding: '2px 4px' }}>날짜</th>
-                            <th style={{ textAlign: 'center', padding: '2px 4px' }}>세트</th>
-                            <th style={{ textAlign: 'left', padding: '2px 4px' }}>상대</th>
-                            <th style={{ padding: '2px 4px' }}>결과</th>
-                            <th style={{ padding: '2px 4px' }}>플레이점수</th>
-                            <th style={{ padding: '2px 4px' }}>상대사전</th>
-                            <th style={{ padding: '2px 4px' }}>기대승률</th>
-                            <th style={{ padding: '2px 4px' }}>이변</th>
-                            <th style={{ padding: '2px 4px' }}>가중치</th>
-                            <th style={{ padding: '2px 4px' }}>조정치</th>
-                            <th style={{ padding: '2px 4px', color: 'var(--gold)' }}>누적점수</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {historyWithRunning.map((h, i) => (
-                            <tr key={i} style={{ borderTop: '1px solid var(--border)', textAlign: 'right' }}>
-                              <td style={{ textAlign: 'left', padding: '3px 4px', color: 'var(--text-muted)' }}>{h.matchStartTime ? dayjs(h.matchStartTime).format('MM/DD') : '-'}</td>
-                              <td style={{ textAlign: 'center', padding: '3px 4px', color: 'var(--text-muted)' }}>{h.gameNumber}세트</td>
-                              <td style={{ textAlign: 'left', padding: '3px 4px' }}>{h.opponent}</td>
-                              <td style={{ padding: '3px 4px', fontWeight: 700, color: h.won ? 'var(--green, #4ade80)' : 'var(--red, #f87171)' }}>{h.won ? '승' : '패'}</td>
-                              <td style={{ padding: '3px 4px' }}>{h.playScore}</td>
-                              <td style={{ padding: '3px 4px' }}>{h.opponentPriorScore.toFixed(1)}</td>
-                              <td style={{ padding: '3px 4px' }}>{(h.expected * 100).toFixed(0)}%</td>
-                              <td style={{ padding: '3px 4px', color: h.surprise >= 0 ? 'var(--green, #4ade80)' : 'var(--red, #f87171)' }}>{h.surprise >= 0 ? '+' : ''}{h.surprise.toFixed(2)}</td>
-                              <td style={{ padding: '3px 4px', color: 'var(--text-muted)' }}>{h.weight.toFixed(2)}</td>
-                              <td style={{ padding: '3px 4px', color: h.adjustment >= 0 ? 'var(--green, #4ade80)' : 'var(--red, #f87171)' }}>{h.adjustment >= 0 ? '+' : ''}{h.adjustment.toFixed(1)}</td>
-                              <td style={{ padding: '3px 4px', fontWeight: 800, color: 'var(--gold)' }}>{h.running.toFixed(1)}</td>
+                      {teamLog.length === 0 && <div style={{ color: 'var(--text-muted)' }}>입력된 경기가 없습니다.</div>}
+                      {teamLog.length > 0 && (
+                        <table style={{ borderCollapse: 'collapse', width: '100%', minWidth: 480 }}>
+                          <thead>
+                            <tr style={{ color: 'var(--text-muted)', textAlign: 'right' }}>
+                              <th style={{ textAlign: 'left', padding: '2px 4px' }}>날짜</th>
+                              <th style={{ textAlign: 'center', padding: '2px 4px' }}>세트</th>
+                              <th style={{ textAlign: 'left', padding: '2px 4px' }}>상대</th>
+                              <th style={{ padding: '2px 4px' }}>결과</th>
+                              <th style={{ padding: '2px 4px' }}>경기 전 점수</th>
+                              <th style={{ padding: '2px 4px' }}>상대 점수</th>
+                              <th style={{ padding: '2px 4px' }}>기대승률</th>
+                              <th style={{ padding: '2px 4px' }}>변화량</th>
+                              <th style={{ padding: '2px 4px', color: 'var(--gold)' }}>경기 후 점수</th>
                             </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                          </thead>
+                          <tbody>
+                            {teamLog.map((h, i) => (
+                              <tr key={i} style={{ borderTop: '1px solid var(--border)', textAlign: 'right' }}>
+                                <td style={{ textAlign: 'left', padding: '3px 4px', color: 'var(--text-muted)' }}>{h.matchStartTime ? dayjs(h.matchStartTime).format('MM/DD') : '-'}</td>
+                                <td style={{ textAlign: 'center', padding: '3px 4px', color: 'var(--text-muted)' }}>{h.gameNumber}세트</td>
+                                <td style={{ textAlign: 'left', padding: '3px 4px' }}>{teams.find(x => x.id === h.opponentId)?.name ?? '?'}</td>
+                                <td style={{ padding: '3px 4px', fontWeight: 700, color: h.won ? 'var(--green, #4ade80)' : 'var(--red, #f87171)' }}>{h.won ? '승' : '패'}</td>
+                                <td style={{ padding: '3px 4px', color: 'var(--text-muted)' }}>{h.ratingBefore.toFixed(1)}</td>
+                                <td style={{ padding: '3px 4px', color: 'var(--text-muted)' }}>{h.opponentRatingBefore.toFixed(1)}</td>
+                                <td style={{ padding: '3px 4px' }}>{(h.expected * 100).toFixed(0)}%</td>
+                                <td style={{ padding: '3px 4px', fontWeight: 700, color: h.delta >= 0 ? 'var(--green, #4ade80)' : 'var(--red, #f87171)' }}>{h.delta >= 0 ? '+' : ''}{h.delta.toFixed(2)}</td>
+                                <td style={{ padding: '3px 4px', fontWeight: 800, color: 'var(--gold)' }}>{h.ratingAfter.toFixed(1)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
                     </div>
                   )}
                 </div>

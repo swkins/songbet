@@ -579,131 +579,78 @@ export function computeBothSidesPerfection(g: GameStatsInput): { team1: number; 
   return { team1: computePerfectionScore(g), team2: computePerfectionScore(swapPerspective(g)) }
 }
 
-// ─── 팀 체급 점수 (수동 입력된 최근 경기 기반) ──────────────────────
+// ─── 팀 체급 점수: 라이엇 공식 GPR 방식(순차 Elo)을 그대로 적용 ──────
+// lolesports.com이 공개한 실제 공식을 그대로 채택:
+//   P_after = P_before + I × (W - We)
+//   We = 1 / (10^(-dr/scale) + 1)      (dr = 나-상대 레이팅 차이)
+// 경기 중요도(I)는 라이엇처럼 플레이인/스테이지/플레이오프로 세분화하지 않고 고정값 하나로 통일했다.
+// 핵심은 "리그 전체 경기를 시간순으로 하나의 타임라인에서 함께 시뮬레이션"한다는 점 —
+// 팀별로 따로 계산하지 않는다. 그래야 매 경기 시점의 상대 레이팅이 정확하고,
+// "이겼는데도 평균이 내려가는" 문제가 구조적으로 사라진다(이기면 항상 최소한 조금은 오름).
 export interface TeamPowerScore {
   powerScore: number // 0~100
-  avgPerfection: number
   winRate: number
-  gamesAnalyzed: number // 분석에 사용된 세트 수
+  gamesAnalyzed: number
 }
 
-// 시간 가중치: 최근 1~2달(60일)은 완만하게 줄고, 그 이후로는 30일마다 절반씩 급격히 줄어든다.
-function timeDecayWeight(daysAgo: number): number {
-  const d = Math.max(0, daysAgo)
-  if (d <= 60) return 1 - 0.3 * (d / 60)
-  return 0.7 * Math.pow(0.5, (d - 60) / 30)
+const ELO_SCALE = 25   // dr(레이팅 차이)를 나누는 값 — 0~100 스케일에 맞춘 로지스틱 기울기
+const ELO_I = 8         // 경기 중요도(고정값, 단계 구분 없음)
+
+export interface EloMatchRecord {
+  teamAId: string
+  teamBId: string
+  winnerIsA: boolean
+  matchStartTime: string
+  gameNumber: number
 }
 
-// 체급 점수는 "세트(개별 게임)" 단위로 계산한다. 각 세트의 플레이 점수를 그대로 신호로 쓰고,
-// 그 세트가 속한 시리즈가 완전 스윕(2-0/3-0)으로 끝났으면 가산점을 준다.
-export interface SetRecordForPower {
-  won: boolean                  // 이 세트를 이겼는지
-  playScore: number             // 이 세트의 플레이 점수 (0~100, computePerfectionScore 결과)
-  seriesSweep: boolean          // 이 세트가 속한 시리즈가 완전 스윕(상대에게 세트를 하나도 안 내줌)으로 끝났는지
-  daysAgo?: number              // 세트 이후 지난 일수 (없으면 인덱스로 3.5일 간격 추정)
-  opponentPriorScore?: number   // 상대 팀의 사전(prior) 체급 점수 0~100 (모르면 50=중립)
-  opponent?: string             // 상대팀 표시명 (히스토리 UI 표시용)
-  matchStartTime?: string       // 경기 일시 (히스토리 UI 표시용)
-  gameNumber?: number           // 세트 번호 (히스토리 UI 정렬/표시용)
-}
-
-// 1단계: 상대 체급을 고려하지 않고, 순수 실적만으로 매긴 사전 점수.
-// "일단 이겨야 체급"이라는 전제로 승률 비중을 플레이 점수보다 높게 두고, 스윕승(2-0/3-0)에는 추가 보너스를 준다.
-// 표본이 적을 때(특히 소수 경기 100% 승률처럼 극단적인 경우) 50점 쪽으로 완화(shrinkage)해서 과대평가를 막는다.
-// baselineScore: lolesports.com 공식 GPR(Global Power Rankings)을 0~100로 정규화한 값.
-// 데이터가 적은 팀(또는 아예 없는 팀)은 이 실제 파워랭킹 값에서 시작하고, 우리가 직접 입력한
-// 경기가 쌓일수록 그 실측 데이터 쪽으로 점점 더 끌려가는 구조 (50점 중립 시작이 아님).
-export function computeTeamPriorScore(sets: SetRecordForPower[], baselineScore = 50): TeamPowerScore {
-  if (sets.length === 0) return { powerScore: baselineScore, avgPerfection: baselineScore, winRate: 0.5, gamesAnalyzed: 0 }
-  let weightSum = 0, playWeighted = 0, winWeighted = 0, sweepWinWeighted = 0
-  sets.forEach((r, i) => {
-    const w = timeDecayWeight(r.daysAgo ?? i * 3.5)
-    weightSum += w
-    playWeighted += r.playScore * w
-    winWeighted += (r.won ? 1 : 0) * w
-    if (r.won && r.seriesSweep) sweepWinWeighted += w
-  })
-  const avgPerfection = playWeighted / weightSum
-  const winRate = winWeighted / weightSum
-  const sweepWinRate = sweepWinWeighted / weightSum
-  // 플레이 점수 35% + 승률 55% + 스윕승 비율 보너스 10%
-  const rawScore = avgPerfection * 0.35 + (winRate * 100) * 0.55 + sweepWinRate * 100 * 0.10
-  // 표본 16세트 미만이면 GPR 기본값 쪽으로 당겨서 소수 경기의 극단값을 완화
-  const confidence = Math.min(1, sets.length / 16)
-  const powerScore = baselineScore + (rawScore - baselineScore) * confidence
-  return { powerScore, avgPerfection, winRate, gamesAnalyzed: sets.length }
-}
-
-// 2단계에서 쓰는 "이변 보정 강도" — 사전 점수를 뒤엎지 않도록 작게 잡음
-const SURPRISE_ADJUSTMENT_K = 18
-
-export interface SetAdjustmentDetail {
-  opponent: string
+export interface EloGameLog {
+  teamId: string
+  opponentId: string
   matchStartTime: string
   gameNumber: number
   won: boolean
-  playScore: number
-  seriesSweep: boolean
-  daysAgo: number
-  opponentPriorScore: number
-  expected: number      // 기대 승률 (0~1)
-  surprise: number       // 실제 - 기대 (이변 정도, -1~1)
-  marginFactor: number
-  weight: number          // 시간 가중치
-  adjustment: number      // surprise * marginFactor * K (가중치 곱하기 전 원값)
+  ratingBefore: number
+  opponentRatingBefore: number
+  expected: number   // We (기대승률)
+  delta: number       // 이번 경기로 움직인 값
+  ratingAfter: number
 }
 
-// 세트별로 "이변 보정 조정치"가 어떻게 계산됐는지 낱낱이 보여준다 (체급 점수 히스토리 UI에서 사용).
-export function computeSetAdjustments(sets: SetRecordForPower[], myPriorScore = 50): SetAdjustmentDetail[] {
-  return sets.map((r, i) => {
-    const daysAgo = r.daysAgo ?? i * 3.5
-    const weight = timeDecayWeight(daysAgo)
-    const oppPrior = r.opponentPriorScore ?? 50
-    const expected = powerScoreMatchupProbability(myPriorScore, oppPrior)
-    const actual = r.won ? 1 : 0
-    const surprise = actual - expected
-    let marginFactor = 0.5 + Math.abs(r.playScore - 50) / 100
-    if (r.won && r.seriesSweep) marginFactor += 0.15
-    const adjustment = surprise * marginFactor * SURPRISE_ADJUSTMENT_K
-    return { opponent: r.opponent ?? '', matchStartTime: r.matchStartTime ?? '', gameNumber: r.gameNumber ?? 0, won: r.won, playScore: r.playScore, seriesSweep: r.seriesSweep, daysAgo, opponentPriorScore: oppPrior, expected, surprise, marginFactor, weight, adjustment }
-  })
+export interface EloSimulationResult {
+  finalRatings: Record<string, number>
+  log: EloGameLog[] // 팀 관점별로 한 줄씩(경기당 2줄), 시간순 정렬됨
 }
 
-// 2단계: 최종 체급 점수 — 이변 보정.
-// 중요: 이변 보정은 사전 점수를 "대체"하는 게 아니라 "가감"하는 용도다.
-// (예전엔 50점을 기준으로 이변 점수만으로 최종 점수를 다시 계산했는데, 그러면 실력이 정확히
-//  예측대로 나온 팀은 승패와 무관하게 전부 50점 근처로 수렴해버리는 결함이 있었다 —
-//  1위 팀이 예상대로 계속 이기면 "이겨도 당연한 거라 점수 안 오르고", 어쩌다 한 번 지면
-//  "이변"으로 크게 깎여서 정작 압도적인 팀이 하위권에 나오는 문제가 있었음.)
-// 상대 사전 점수 대비 기대 승률과 실제 결과의 차이("이변" surprise)만큼 사전 점수에 소폭 가감한다.
-//   - 체급 낮은 팀이 높은 팀을 이김(이변) → 소폭 상승
-//   - 체급 높은 팀이 낮은 팀을 이김(예상대로) → 거의 그대로
-//   - 체급 높은 팀이 낮은 팀에게 짐(역이변) → 소폭 하락
-// 그 세트가 속한 시리즈를 완전 스윕했으면 그 경기의 영향력을 추가로 더 크게 준다.
-export function computeTeamPowerScore(sets: SetRecordForPower[], myPriorScore = 50): TeamPowerScore {
-  if (sets.length === 0) return { powerScore: myPriorScore, avgPerfection: myPriorScore, winRate: 0.5, gamesAnalyzed: 0 }
+// initialRatings: 팀별 시작 레이팅(보통 GPR 기반 0~100 정규화 값). matches: 리그 전체 경기(중복 없이 한 방향씩만).
+export function simulateLeagueElo(initialRatings: Record<string, number>, matches: EloMatchRecord[]): EloSimulationResult {
   const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
-  const details = computeSetAdjustments(sets, myPriorScore)
-  let weightSum = 0, playWeighted = 0, winWeighted = 0, adjWeighted = 0
-  details.forEach((d, i) => {
-    weightSum += d.weight
-    playWeighted += sets[i].playScore * d.weight
-    winWeighted += (sets[i].won ? 1 : 0) * d.weight
-    adjWeighted += d.adjustment * d.weight
-  })
-  const avgPerfection = playWeighted / weightSum
-  const winRate = winWeighted / weightSum
-  const avgAdjustment = adjWeighted / weightSum
-  const powerScore = clamp(myPriorScore + avgAdjustment, 0, 100)
-  return { powerScore, avgPerfection, winRate, gamesAnalyzed: sets.length }
+  const ratings: Record<string, number> = { ...initialRatings }
+  const log: EloGameLog[] = []
+  const sorted = [...matches].sort((a, b) =>
+    new Date(a.matchStartTime).getTime() - new Date(b.matchStartTime).getTime() || a.gameNumber - b.gameNumber
+  )
+  for (const m of sorted) {
+    const ra = ratings[m.teamAId] ?? 50
+    const rb = ratings[m.teamBId] ?? 50
+    const dr = ra - rb
+    const we = 1 / (Math.pow(10, -dr / ELO_SCALE) + 1)
+    const w = m.winnerIsA ? 1 : 0
+    const delta = ELO_I * (w - we)
+    const raAfter = clamp(ra + delta, 0, 100)
+    const rbAfter = clamp(rb - delta, 0, 100)
+    ratings[m.teamAId] = raAfter
+    ratings[m.teamBId] = rbAfter
+    log.push({ teamId: m.teamAId, opponentId: m.teamBId, matchStartTime: m.matchStartTime, gameNumber: m.gameNumber, won: m.winnerIsA, ratingBefore: ra, opponentRatingBefore: rb, expected: we, delta, ratingAfter: raAfter })
+    log.push({ teamId: m.teamBId, opponentId: m.teamAId, matchStartTime: m.matchStartTime, gameNumber: m.gameNumber, won: !m.winnerIsA, ratingBefore: rb, opponentRatingBefore: ra, expected: 1 - we, delta: -delta, ratingAfter: rbAfter })
+  }
+  return { finalRatings: ratings, log }
 }
-
-
 
 // 두 팀의 체급 점수 차이를 승률로 변환 (Elo와 비슷한 로지스틱 곡선, 표본이 적을 수 있어 5~95%로 클램프)
 export function powerScoreMatchupProbability(powerA: number, powerB: number): number {
   const diff = powerA - powerB
-  const raw = 1 / (1 + Math.pow(10, -diff / 25))
+  const raw = 1 / (1 + Math.pow(10, -diff / ELO_SCALE))
   return Math.max(0.05, Math.min(0.95, raw))
 }
 
