@@ -74,6 +74,8 @@ function RecentMatchesPanel({ leagueCode, events, loading, error, teams }: { lea
   const [recordedByTeam, setRecordedByTeam] = useState<Record<string, EsportsGameStat[]>>({})
   const [showAll, setShowAll] = useState(false)
   const visibleMatches = showAll ? matches : matches.slice(0, 8)
+  // 자동 팀 매칭이 실패한 경기를 사용자가 수동으로 지정할 수 있게 하는 예외 처리
+  const [overrides, setOverrides] = useState<Record<string, { teamId: string; isA: boolean }>>({})
   useEffect(() => {
     const ids = Array.from(new Set(
       matches.map(m => resolveMatchTeam(teams, m.teamA, m.teamB)?.teamId).filter((x): x is string => !!x)
@@ -104,15 +106,38 @@ function RecentMatchesPanel({ leagueCode, events, loading, error, teams }: { lea
       {!loading && !error && matches.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           {visibleMatches.map(m => {
-            const resolved = resolveMatchTeam(teams, m.teamA, m.teamB)
+            const auto = resolveMatchTeam(teams, m.teamA, m.teamB)
+            const ov = overrides[m.id]
+            const resolved = auto ?? (ov ? {
+              teamId: ov.teamId,
+              teamName: teams.find(t => t.id === ov.teamId)?.name ?? '',
+              opponent: ov.isA ? (m.codeB || m.teamB) : (m.codeA || m.teamA),
+              isA: ov.isA,
+            } : null)
             if (!resolved) {
-              // 추적 중인 팀이 아니면(예: 팀 목록에 아직 등록 안 함) 입력 불가, 결과만 표시
+              // 자동 매칭 실패 (예: lolesports API가 이 경기만 팀 이름을 다르게 내려준 경우) → 수동 선택으로 우회
               return (
-                <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, padding: '6px 8px', background: 'var(--bg-elevated)', borderRadius: 6, opacity: 0.6 }}>
-                  <span style={{ color: 'var(--text-muted)', flexShrink: 0, width: 58 }}>{dayjs(m.startTime).format('MM/DD HH:mm')}</span>
-                  <span style={{ flex: 1, textAlign: 'right' }}>{m.codeA || m.teamA}</span>
-                  <span style={{ fontWeight: 800, color: 'var(--gold)', flexShrink: 0 }}>{m.scoreA} : {m.scoreB}</span>
-                  <span style={{ flex: 1 }}>{m.codeB || m.teamB}</span>
+                <div key={m.id} style={{ padding: '6px 8px', background: 'var(--bg-elevated)', borderRadius: 6 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, opacity: 0.6 }}>
+                    <span style={{ color: 'var(--text-muted)', flexShrink: 0, width: 58 }}>{dayjs(m.startTime).format('MM/DD HH:mm')}</span>
+                    <span style={{ flex: 1, textAlign: 'right' }}>{m.codeA || m.teamA}</span>
+                    <span style={{ fontWeight: 800, color: 'var(--gold)', flexShrink: 0 }}>{m.scoreA} : {m.scoreB}</span>
+                    <span style={{ flex: 1 }}>{m.codeB || m.teamB}</span>
+                  </div>
+                  <select
+                    value=""
+                    onChange={e => {
+                      const teamId = e.target.value
+                      if (!teamId) return
+                      const chosen = teams.find(t => t.id === teamId)
+                      const isA = chosen ? (teamNameMatches(chosen, m.teamA) || teamNameMatches(chosen, m.codeA)) : true
+                      setOverrides(prev => ({ ...prev, [m.id]: { teamId, isA } }))
+                    }}
+                    style={{ width: '100%', marginTop: 4, fontSize: 10, padding: '3px 4px', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text-primary)', fontFamily: 'var(--font-body)' }}
+                  >
+                    <option value="">자동 매칭 실패 · 수동으로 팀 선택해서 입력하기</option>
+                    {teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                  </select>
                 </div>
               )
             }
