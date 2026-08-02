@@ -115,13 +115,21 @@ export async function fetchRecentMatches(leagueCode: string): Promise<MatchResul
     })
 }
 
-// lolesports API가 일부 경기에서 팀 이름 대신 코드만 내려주는 경우가 있어서(예: "JD Gaming" 대신 "JDG"),
-// 주요 코드 → 정식명 별칭을 등록해 매칭이 안 뚫리게 한다. 여기 없는 팀은 기존 풀네임 매칭만 적용된다.
+// lolesports API가 일부 경기에서 팀 이름 대신 코드만 내려주거나(예: "JD Gaming" 대신 "JDG"),
+// 표기 형식이 제각각인 경우가 있어서(예: "EDWARD GAMING" vs "EDward Gaming", "WeiboGaming" vs "Weibo Gaming",
+// "Xi'an Team WE" vs "Team WE") 정규화(공백/대소문자/구두점 제거) 비교를 기본으로 하고,
+// 정규화로도 안 잡히는 완전히 다른 표기(예: "Beijing JDG Esports")는 별도 별칭으로 등록한다.
+function normalizeTeamStr(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]/g, '')
+}
+
 const TEAM_CODE_ALIASES: Record<string, string> = {
   // LPL
   jdg: 'jd gaming', tt: 'thundertalk gaming', lgd: 'lgd gaming', edg: 'edward gaming', ig: 'invictus gaming',
   tes: 'top esports', we: 'team we', lng: 'lng esports', nip: 'ninjas in pyjamas', omg: 'oh my god',
   al: "anyone's legend", blg: 'bilibili gaming', wbg: 'weibo gaming', up: 'ultra prime',
+  // 정규화 매칭으로 안 뚫리는 완전히 다른 표기(구단 정식 브랜드명 등)
+  beijingjdgesports: 'jd gaming', shanghaiedwardgaming: 'edward gaming',
   // LEC
   fnc: 'fnatic', g2: 'g2 esports', gx: 'giantx', kc: 'karmine corp', vit: 'team vitality', th: 'team heretics',
   shf: 'shifters', mkoi: 'movistar koi', sk: 'sk gaming', navi: 'natus vincere',
@@ -135,14 +143,24 @@ const TEAM_CODE_ALIASES: Record<string, string> = {
 }
 
 export function teamNameMatches(t: { name: string; code?: string }, query: string): boolean {
-  const q = query.trim().toLowerCase()
-  if (!q) return false
-  const n = (t.name ?? '').trim().toLowerCase()
-  const c = (t.code ?? '').trim().toLowerCase()
-  if (!n && !c) return false
+  const qRaw = query.trim().toLowerCase()
+  if (!qRaw) return false
+  const nRaw = (t.name ?? '').trim().toLowerCase()
+  const cRaw = (t.code ?? '').trim().toLowerCase()
+  if (!nRaw && !cRaw) return false
+  if (nRaw === qRaw || cRaw === qRaw || nRaw.includes(qRaw) || qRaw.includes(nRaw)) return true
+
+  // 공백/대소문자/구두점 차이는 정규화해서 다시 비교 ("WeiboGaming" ↔ "Weibo Gaming" 등)
+  const q = normalizeTeamStr(qRaw)
+  const n = normalizeTeamStr(nRaw)
+  const c = normalizeTeamStr(cRaw)
   if (n === q || c === q || n.includes(q) || q.includes(n)) return true
-  const alias = TEAM_CODE_ALIASES[q]
-  if (alias && (n === alias || n.includes(alias) || alias.includes(n))) return true
+
+  const alias = TEAM_CODE_ALIASES[qRaw] ?? TEAM_CODE_ALIASES[q]
+  if (alias) {
+    const na = normalizeTeamStr(alias)
+    if (n === na || n.includes(na) || na.includes(n)) return true
+  }
   return false
 }
 

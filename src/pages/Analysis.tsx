@@ -876,30 +876,31 @@ function LeagueView({ code, label }: { code: string; label: string }) {
         <div style={{ flex: '1 1 320px', minWidth: 280 }}>
           <UpcomingPanel events={events} loading={eventsLoading} error={eventsError} teams={teams} powerScores={powerScores} />
         </div>
-      </div>
-
-      <div className="card">
-        <div className="card-title" style={{ marginBottom: 8 }}>
-          팀 체급 점수 <span style={{ fontWeight: 400, color: 'var(--text-muted)', fontSize: 10 }}>· 수동 입력한 경기(최근일수록 가중치 ↑) 기반, 승부 예측에 사용됨</span>
-        </div>
-        {powerLoading && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '6px 0' }}>계산 중...</div>}
-        {!powerLoading && rankedTeams.length === 0 && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '6px 0' }}>등록된 팀이 없습니다.</div>}
-        {!powerLoading && rankedTeams.map(t => {
-          const ps = powerScores[t.id]
-          return (
-            <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, padding: '6px 8px', background: 'var(--bg-elevated)', borderRadius: 6, marginBottom: 4 }}>
-              <span style={{ flex: 1, fontWeight: 700 }}>{t.name}</span>
-              {ps && ps.gamesAnalyzed > 0 ? (
-                <>
-                  <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>{ps.gamesAnalyzed}경기 · 승률 {(ps.winRate * 100).toFixed(0)}%</span>
-                  <span style={{ fontWeight: 800, color: 'var(--gold)', width: 40, textAlign: 'right' }}>{ps.powerScore.toFixed(1)}</span>
-                </>
-              ) : (
-                <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>입력된 경기 없음 (기본값 50.0)</span>
-              )}
+        <div style={{ flex: '1 1 280px', minWidth: 260 }}>
+          <div className="card">
+            <div className="card-title" style={{ marginBottom: 8 }}>
+              팀 체급 점수 <span style={{ fontWeight: 400, color: 'var(--text-muted)', fontSize: 10 }}>· 수동 입력한 경기(최근일수록 가중치 ↑) 기반, 승부 예측에 사용됨</span>
             </div>
-          )
-        })}
+            {powerLoading && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '6px 0' }}>계산 중...</div>}
+            {!powerLoading && rankedTeams.length === 0 && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '6px 0' }}>등록된 팀이 없습니다.</div>}
+            {!powerLoading && rankedTeams.map(t => {
+              const ps = powerScores[t.id]
+              return (
+                <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, padding: '6px 8px', background: 'var(--bg-elevated)', borderRadius: 6, marginBottom: 4 }}>
+                  <span style={{ flex: 1, fontWeight: 700 }}>{t.name}</span>
+                  {ps && ps.gamesAnalyzed > 0 ? (
+                    <>
+                      <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>{ps.gamesAnalyzed}경기 · 승률 {(ps.winRate * 100).toFixed(0)}%</span>
+                      <span style={{ fontWeight: 800, color: 'var(--gold)', width: 40, textAlign: 'right' }}>{ps.powerScore.toFixed(1)}</span>
+                    </>
+                  ) : (
+                    <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>입력된 경기 없음 (기본값 50.0)</span>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </div>
       </div>
     </div>
   )
