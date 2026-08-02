@@ -31,6 +31,7 @@ interface EsportsGameStat {
   team1_towers: number | null; team2_towers: number | null
   team1_inhibitors: number | null; team2_inhibitors: number | null
   team1_barons: number | null; team2_barons: number | null
+  team1_gold: number | null; team2_gold: number | null
   winner_team: NarrativeTeam | null
   first_blood_team: NarrativeTeam | null
   first_tower_team: NarrativeTeam | null
@@ -38,6 +39,7 @@ interface EsportsGameStat {
   fifth_kill_team: NarrativeTeam | null
   tenth_kill_team: NarrativeTeam | null
   notes: string | null
+  source: string
 }
 
 // ─── 공용 UI 조각 ──────────────────────────────────────────────────
@@ -266,15 +268,23 @@ function GameStatCard({ stat, teamName, onDelete }: { stat: EsportsGameStat; tea
   return (
     <div style={{ background: 'var(--bg-elevated)', borderRadius: 6, padding: '8px 10px', fontSize: 10 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-        <span style={{ fontWeight: 800 }}>
+        <span style={{ fontWeight: 800, display: 'flex', alignItems: 'center', gap: 5 }}>
           {stat.game_number}세트{stat.duration_seconds ? ` · ${Math.floor(stat.duration_seconds / 60)}:${String(stat.duration_seconds % 60).padStart(2, '0')}` : ''}
+          <span style={{
+            fontSize: 8, fontWeight: 800, padding: '1px 5px', borderRadius: 3,
+            color: stat.source === 'golgg' ? 'var(--gold)' : 'var(--text-muted)',
+            background: stat.source === 'golgg' ? 'var(--gold-bg)' : 'var(--bg-card)',
+            border: `1px solid ${stat.source === 'golgg' ? 'var(--gold-border)' : 'var(--border)'}`,
+          }}>
+            {stat.source === 'golgg' ? 'gol.gg 자동' : '수동입력'}
+          </span>
         </span>
         <button onClick={() => onDelete(stat.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex' }}>
           <Trash2 size={10} />
         </button>
       </div>
       <div style={{ color: 'var(--text-secondary)', marginBottom: 4, lineHeight: 1.6 }}>
-        킬 {stat.team1_kills ?? '-'}:{stat.team2_kills ?? '-'} · 드래곤 {stat.team1_dragons ?? '-'}:{stat.team2_dragons ?? '-'} · 타워 {stat.team1_towers ?? '-'}:{stat.team2_towers ?? '-'} · 억제기 {stat.team1_inhibitors ?? '-'}:{stat.team2_inhibitors ?? '-'} · 바론 {stat.team1_barons ?? '-'}:{stat.team2_barons ?? '-'}
+        킬 {stat.team1_kills ?? '-'}:{stat.team2_kills ?? '-'} · 드래곤 {stat.team1_dragons ?? '-'}:{stat.team2_dragons ?? '-'} · 타워 {stat.team1_towers ?? '-'}:{stat.team2_towers ?? '-'} · 억제기 {stat.team1_inhibitors ?? '-'}:{stat.team2_inhibitors ?? '-'} · 바론 {stat.team1_barons ?? '-'}:{stat.team2_barons ?? '-'}{stat.team1_gold != null ? ` · 골드 ${stat.team1_gold}k:${stat.team2_gold}k` : ''}
       </div>
       <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontWeight: 800, color: 'var(--gold)', background: 'var(--gold-bg)', border: '1px solid var(--gold-border)', borderRadius: 4, padding: '2px 6px', marginBottom: 4 }}>
         {narrative.label}
@@ -294,10 +304,19 @@ function RecentMatchRow({ teamId, teamName, game }: { teamId: string; teamName: 
 
   async function loadSets() {
     setLoadingSets(true)
+    // gol.gg 자동수집 데이터는 상대팀 표기(예: "Gen.G")와 날짜만 있고 정확한 시각/lolesports 표기명("Gen.G Esports")과
+    // 일치하지 않으므로, 날짜 ±1일 범위 + 느슨한 팀명 매칭(teamNameMatches)으로 찾는다.
+    // 수동 입력 데이터(정확한 team2_name/match_start_time)도 이 범위 안에 포함되므로 함께 잡힌다.
+    const dayStart = dayjs(game.startTime).subtract(1, 'day').startOf('day').toISOString()
+    const dayEnd = dayjs(game.startTime).add(1, 'day').endOf('day').toISOString()
     const { data } = await supabase.from('esports_game_stats').select('*')
-      .eq('team_id', teamId).eq('team2_name', game.opponent).eq('match_start_time', game.startTime)
+      .eq('team_id', teamId)
+      .gte('match_start_time', dayStart)
+      .lte('match_start_time', dayEnd)
       .order('game_number')
-    setSets((data as EsportsGameStat[]) ?? [])
+    const all = (data as EsportsGameStat[]) ?? []
+    const filtered = all.filter(s => teamNameMatches({ name: s.team2_name }, game.opponent) || teamNameMatches({ name: game.opponent }, s.team2_name))
+    setSets(filtered)
     setLoadingSets(false)
   }
 
