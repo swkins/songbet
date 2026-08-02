@@ -497,6 +497,38 @@ export function computeBothSidesScores(g: GameStatsInput): { team1: DetailedGame
   return { team1: computeDetailedScores(g), team2: computeDetailedScores(swapPerspective(g)) }
 }
 
+// ─── "완벽도" 점수 (1~100) ──────────────────────────────────────────
+// 우선순위 그대로 가중치를 매김: 시간(40) > 마일스톤 6종 다 가져가기(30) > 상대에게 안 내주기(30)
+// - 시간: 20분 이하면 만점(40), 50분 이상이면 0점, 그 사이는 선형 감소 (짧을수록 압도적으로 유리하게)
+// - 마일스톤: 퍼스트 킬/타워/드래곤/내셔/5킬/10킬 6개 각 5점, 기록이 없으면(모름) 중립 2.5점
+// - 안 내주기: 상대 킬/타워/억제기 각 10점 만점에서 상대가 많이 가져갈수록 깎임
+export function computePerfectionScore(g: GameStatsInput): number {
+  const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
+  const durationMin = g.durationSeconds != null ? g.durationSeconds / 60 : null
+
+  let timeScore = 20 // 시간 정보가 없으면 중립값
+  if (durationMin != null) {
+    if (durationMin <= 20) timeScore = 40
+    else if (durationMin >= 50) timeScore = 0
+    else timeScore = 40 * (50 - durationMin) / 30
+  }
+
+  const msPoint = (m?: NarrativeTeam | null) => m === 'team1' ? 5 : m === 'team2' ? 0 : 2.5
+  const milestoneScore = msPoint(g.firstBloodTeam) + msPoint(g.firstTowerTeam) + msPoint(g.firstDragonTeam)
+    + msPoint(g.firstBaronTeam) + msPoint(g.fifthKillTeam) + msPoint(g.tenthKillTeam)
+
+  const inhibDenial = clamp(10 - g.team2Inhibitors * (10 / 3), 0, 10)
+  const towerDenial = clamp(10 - g.team2Towers * (10 / 11), 0, 10)
+  const killDenial = clamp(10 - g.team2Kills * 0.4, 0, 10)
+  const denialScore = inhibDenial + towerDenial + killDenial
+
+  return Math.round(clamp(timeScore + milestoneScore + denialScore, 0, 100))
+}
+
+export function computeBothSidesPerfection(g: GameStatsInput): { team1: number; team2: number } {
+  return { team1: computePerfectionScore(g), team2: computePerfectionScore(swapPerspective(g)) }
+}
+
 // 배당 대비 기대값(EV) 계산. EV > 0 이면 모델 확률 기준 "베팅 가치 있음"
 export function computeOddsValue(modelProb: number, decimalOdds: number): OddsValue | null {
   if (!decimalOdds || !isFinite(decimalOdds) || decimalOdds <= 1) return null

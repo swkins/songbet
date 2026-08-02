@@ -5,7 +5,7 @@ import { Plus, Trash2, ChevronDown, ChevronUp, ExternalLink, RefreshCw, Trending
 import {
   LEAGUES, fetchScheduleEvents, extractTeamData, computeForm, matchupProbability, filterRecentGames,
   seriesScoreProbabilities, computeOddsValue, fetchLeagueTeams, findTeamCode, teamNameMatches,
-  classifyGameNarrative, computeBothSidesScores, type RawScheduleEvent, type TeamGameRecord, type NarrativeTeam, type DetailedGameScores,
+  classifyGameNarrative, computeBothSidesScores, computeBothSidesPerfection, type RawScheduleEvent, type TeamGameRecord, type NarrativeTeam,
 } from '../lib/lolEsports'
 
 interface EsportsTeam {
@@ -424,6 +424,7 @@ function RecentMatchRow({ teamId, teamName, game, displayA, displayB, scoreA, sc
         narrative: classifyGameNarrative(input),
         winnerTeam: s.winner_team,
         both: computeBothSidesScores(input),
+        perfection: computeBothSidesPerfection(input),
       }
     })
     const sum = (key: 'team1_kills' | 'team2_kills' | 'team1_dragons' | 'team2_dragons' | 'team1_towers' | 'team2_towers' | 'team1_barons' | 'team2_barons') =>
@@ -489,8 +490,17 @@ function RecentMatchRow({ teamId, teamName, game, displayA, displayB, scoreA, sc
 
               {seriesAnalysis.perSet.map(p => (
                 <div key={p.gameNumber} style={{ marginBottom: 12, paddingBottom: 10, borderBottom: '1px solid var(--gold-border)' }}>
-                  <div style={{ marginBottom: 6 }}>
+                  <div style={{ marginBottom: 4 }}>
                     <b>{p.gameNumber}세트</b> · <b style={{ color: 'var(--gold)' }}>{p.narrative.label}</b> ({p.winnerTeam === 'team1' ? teamName : game.opponent} 승)
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 8 }}>
+                    <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>완벽도</span>
+                    <span style={{ fontSize: 16, fontWeight: 800, color: p.perfection.team1 >= p.perfection.team2 ? 'var(--gold)' : 'var(--text-primary)' }}>{p.perfection.team1}</span>
+                    <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{teamName}</span>
+                    <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>:</span>
+                    <span style={{ fontSize: 16, fontWeight: 800, color: p.perfection.team2 >= p.perfection.team1 ? 'var(--gold)' : 'var(--text-primary)' }}>{p.perfection.team2}</span>
+                    <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{game.opponent}</span>
+                    <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>(100점 만점)</span>
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                     {([
