@@ -443,6 +443,9 @@ function RecentMatchRow({ teamId, teamName, game, displayA, displayB, scoreA, sc
   // 상대팀도 우리가 추적 중인 팀이면(예: DK도 esports_teams에 있으면) 그쪽 team_id도 찾아둔다.
   // 세트 저장 시 양쪽에 다 기록해야 상대팀 체급 점수에도 이 경기가 반영된다.
   const opponentTeamId = useMemo(() => teams.find(t => teamNameMatches(t, game.opponent))?.id ?? null, [teams, game.opponent])
+  // team2_name을 저장할 때 매번 다른 원문 표기(대소문자/띄어쓰기 차이)를 그대로 쓰면 같은 상대가
+  // 다른 문자열로 여러 번 저장되어 중복 데이터가 생긴다. 추적 중인 팀이면 항상 정식명으로 통일해서 저장한다.
+  const canonicalOpponentName = teams.find(t => t.id === opponentTeamId)?.name ?? game.opponent
   // 기록 입력 폼에서는 풀네임 대신 약자(코드)를 쓴다. 코드가 없으면 풀네임으로 폴백.
   const teamLabel = teamCode || teamName
   const oppLabel = opponentCode || game.opponent
@@ -502,7 +505,7 @@ function RecentMatchRow({ teamId, teamName, game, displayA, displayB, scoreA, sc
       ? (parseInt(form.durationMin || '0', 10) * 60 + parseInt(form.durationSec || '0', 10))
       : null
     const payload = {
-      team_id: teamId, team2_name: game.opponent, match_start_time: game.startTime, game_number: form.gameNumber,
+      team_id: teamId, team2_name: canonicalOpponentName, match_start_time: game.startTime, game_number: form.gameNumber,
       duration_seconds: duration,
       team1_kills: toInt(form.team1Kills), team2_kills: toInt(form.team2Kills),
       team1_dragons: toInt(form.team1Dragons), team2_dragons: toInt(form.team2Dragons),
