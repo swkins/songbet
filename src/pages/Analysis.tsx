@@ -7,7 +7,7 @@ import {
   seriesScoreProbabilities, computeOddsValue, teamNameMatches,
   classifyGameNarrative, computeBothSidesScores, computeBothSidesPerfection, computePerfectionScore,
   computeTeamPowerScore, computeTeamPriorScore, powerScoreMatchupProbability,
-  type RawScheduleEvent, type TeamGameRecord, type NarrativeTeam, type TeamPowerScore, type TeamGameRecordForPower,
+  type RawScheduleEvent, type TeamGameRecord, type NarrativeTeam, type TeamPowerScore, type SeriesRecordForPower,
 } from '../lib/lolEsports'
 
 interface EsportsTeam {
@@ -741,34 +741,54 @@ function LeagueView({ code, label }: { code: string; label: string }) {
         if (!byTeam[r.team_id]) byTeam[r.team_id] = []
         byTeam[r.team_id].push(r)
       }
-      const toRecords = (statRows: EsportsGameStat[]): TeamGameRecordForPower[] =>
-        statRows.map((s, i) => ({
-          team1Kills: s.team1_kills ?? 0, team2Kills: s.team2_kills ?? 0,
-          team1Dragons: s.team1_dragons ?? 0, team2Dragons: s.team2_dragons ?? 0,
-          team1Towers: s.team1_towers ?? 0, team2Towers: s.team2_towers ?? 0,
-          team1Inhibitors: s.team1_inhibitors ?? 0, team2Inhibitors: s.team2_inhibitors ?? 0,
-          team1Barons: s.team1_barons ?? 0, team2Barons: s.team2_barons ?? 0,
-          winnerTeam: s.winner_team ?? 'team1' as NarrativeTeam,
-          firstBloodTeam: s.first_blood_team, firstTowerTeam: s.first_tower_team,
-          firstDragonTeam: s.first_dragon_team, firstBaronTeam: s.first_baron_team,
-          fifthKillTeam: s.fifth_kill_team, tenthKillTeam: s.tenth_kill_team,
-          durationSeconds: s.duration_seconds,
-          daysAgo: s.match_start_time != null ? dayjs().diff(dayjs(s.match_start_time), 'day') : i * 7,
-        }))
 
-      // 1단계: 상대 체급을 모른 채로, 순수 실적(완벽도+승률)만으로 사전 점수 계산
+      // 세트를 시리즈(같은 상대+같은 날짜) 단위로 묶는다. 세트 하나하나를 독립 이변으로 보면
+      // "시리즈는 이겼는데 한 세트만 크게 내준" 경우가 부당하게 큰 패배 이변으로 잡히는 문제가 있었다.
+      const toSeries = (statRows: EsportsGameStat[]) => {
+        const groups: Record<string, EsportsGameStat[]> = {}
+        for (const s of statRows) {
+          const key = `${s.team2_name}|${s.match_start_time}`
+          if (!groups[key]) groups[key] = []
+          groups[key].push(s)
+        }
+        return Object.values(groups).map(sets => {
+          const perfs = sets.map(s => computePerfectionScore({
+            team1Kills: s.team1_kills ?? 0, team2Kills: s.team2_kills ?? 0,
+            team1Dragons: s.team1_dragons ?? 0, team2Dragons: s.team2_dragons ?? 0,
+            team1Towers: s.team1_towers ?? 0, team2Towers: s.team2_towers ?? 0,
+            team1Inhibitors: s.team1_inhibitors ?? 0, team2Inhibitors: s.team2_inhibitors ?? 0,
+            team1Barons: s.team1_barons ?? 0, team2Barons: s.team2_barons ?? 0,
+            winnerTeam: s.winner_team ?? 'team1' as NarrativeTeam,
+            firstBloodTeam: s.first_blood_team, firstTowerTeam: s.first_tower_team,
+            firstDragonTeam: s.first_dragon_team, firstBaronTeam: s.first_baron_team,
+            fifthKillTeam: s.fifth_kill_team, tenthKillTeam: s.tenth_kill_team,
+            durationSeconds: s.duration_seconds,
+          }))
+          const avgPerfection = perfs.reduce((a, b) => a + b, 0) / perfs.length
+          const team1Wins = sets.filter(s => s.winner_team === 'team1').length
+          const team2Wins = sets.length - team1Wins
+          const winnerTeam: NarrativeTeam = team1Wins >= team2Wins ? 'team1' : 'team2'
+          const sweep = (winnerTeam === 'team1' && team2Wins === 0) || (winnerTeam === 'team2' && team1Wins === 0)
+          const daysAgo = sets[0].match_start_time != null ? dayjs().diff(dayjs(sets[0].match_start_time), 'day') : 0
+          return { winnerTeam, avgPerfection, sweep, daysAgo, opponent: sets[0].team2_name } as SeriesRecordForPower & { opponent: string }
+        })
+      }
+
+      const seriesByTeam: Record<string, ReturnType<typeof toSeries>> = {}
+      for (const t of teamsList) seriesByTeam[t.id] = toSeries(byTeam[t.id] ?? [])
+
+      // 1단계: 상대 체급을 모른 채로, 순수 실적(완벽도+승률+스윕비율)만으로 사전 점수 계산
       const priors: Record<string, number> = {}
-      for (const t of teamsList) priors[t.id] = computeTeamPriorScore(toRecords(byTeam[t.id] ?? [])).powerScore
+      for (const t of teamsList) priors[t.id] = computeTeamPriorScore(seriesByTeam[t.id]).powerScore
 
-      // 2단계: 각 경기의 상대팀 사전 점수를 붙여서, 이변 보정된 최종 체급 점수 계산
+      // 2단계: 각 시리즈의 상대팀 사전 점수를 붙여서, 이변 보정된 최종 체급 점수 계산
       const scores: Record<string, TeamPowerScore> = {}
       for (const t of teamsList) {
-        const statRows = byTeam[t.id] ?? []
-        const records = toRecords(statRows).map((rec, i) => {
-          const oppTeam = teamsList.find(tt => teamNameMatches(tt, statRows[i].team2_name))
-          return { ...rec, opponentPriorScore: oppTeam ? priors[oppTeam.id] : undefined }
+        const series = seriesByTeam[t.id].map(r => {
+          const oppTeam = teamsList.find(tt => teamNameMatches(tt, r.opponent))
+          return { ...r, opponentPriorScore: oppTeam ? priors[oppTeam.id] : undefined }
         })
-        scores[t.id] = computeTeamPowerScore(records, priors[t.id])
+        scores[t.id] = computeTeamPowerScore(series, priors[t.id])
       }
       setPowerScores(scores)
     } finally {

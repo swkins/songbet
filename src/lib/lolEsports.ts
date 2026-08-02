@@ -534,72 +534,85 @@ export interface TeamPowerScore {
   powerScore: number // 0~100
   avgPerfection: number
   winRate: number
-  gamesAnalyzed: number
+  gamesAnalyzed: number // 분석에 사용된 "시리즈"(BO3/BO5 매치) 수
 }
 
 // 시간 가중치: 최근 1~2달(60일)은 완만하게 줄고, 그 이후로는 30일마다 절반씩 급격히 줄어든다.
-// 즉 "최근 폼"에 압도적 비중을 주되, 아주 오래된 경기도 완전히 0은 아니게(장기 추세도 살짝 반영).
 function timeDecayWeight(daysAgo: number): number {
   const d = Math.max(0, daysAgo)
-  if (d <= 60) return 1 - 0.3 * (d / 60)          // 0일: 1.0 → 60일: 0.7 (완만)
-  return 0.7 * Math.pow(0.5, (d - 60) / 30)        // 60일 이후: 30일마다 절반씩 (급격)
+  if (d <= 60) return 1 - 0.3 * (d / 60)
+  return 0.7 * Math.pow(0.5, (d - 60) / 30)
 }
 
-export interface TeamGameRecordForPower extends GameStatsInput {
-  daysAgo?: number            // 경기 이후 지난 일수 (없으면 배열 인덱스로 7일 간격 추정)
-  opponentPriorScore?: number // 상대 팀의 사전(prior) 체급 점수 0~100 (모르면 50=중립, 이변 보정 없이 계산됨)
+// 체급 점수는 "개별 세트"가 아니라 "시리즈(매치) 단위"로 계산한다.
+// 이유: BO3에서 2-1로 이긴 시리즈는, 중간에 한 세트를 내줬어도 명백히 좋은 결과다.
+// 세트 단위로 쪼개서 계산하면 "시리즈는 이겼지만 한 세트를 크게 내준" 경우가
+// 독립된 "패배 이변"으로 잘못 카운트되어 체급이 부당하게 깎이는 문제가 있었다.
+export interface SeriesRecordForPower {
+  winnerTeam: NarrativeTeam    // 시리즈 승자 (세트 다수결)
+  avgPerfection: number        // 시리즈 내 세트별 완벽도 점수 평균 (0~100)
+  sweep: boolean                // 상대에게 세트를 하나도 안 내준 완전 스윕이었는지
+  daysAgo?: number              // 시리즈 이후 지난 일수 (없으면 인덱스로 7일 간격 추정)
+  opponentPriorScore?: number   // 상대 팀의 사전(prior) 체급 점수 0~100 (모르면 50=중립)
 }
 
-// 1단계: "사전(prior)" 점수 — 상대 체급을 고려하지 않고, 완벽도(perfection)+승률만으로 매긴 순수 실적 점수.
-// 2단계(computeTeamPowerScore)에서 상대의 이 사전 점수를 "기대 승률" 계산에 사용한다.
-export function computeTeamPriorScore(records: TeamGameRecordForPower[]): TeamPowerScore {
-  if (records.length === 0) return { powerScore: 50, avgPerfection: 50, winRate: 0.5, gamesAnalyzed: 0 }
-  let weightSum = 0, perfectionWeighted = 0, winWeighted = 0
-  records.forEach((r, i) => {
+// 1단계: 상대 체급을 고려하지 않고, 순수 실적만으로 매긴 사전 점수.
+// "일단 이겨야 체급"이라는 전제로 승률 비중을 완벽도보다 높게 두고, 스윕승(2-0/3-0)에는 추가 보너스를 준다.
+// 표본이 적을 때(특히 소수 경기 100% 승률처럼 극단적인 경우) 50점 쪽으로 완화(shrinkage)해서 과대평가를 막는다.
+export function computeTeamPriorScore(series: SeriesRecordForPower[]): TeamPowerScore {
+  if (series.length === 0) return { powerScore: 50, avgPerfection: 50, winRate: 0.5, gamesAnalyzed: 0 }
+  let weightSum = 0, perfectionWeighted = 0, winWeighted = 0, sweepWinWeighted = 0
+  series.forEach((r, i) => {
     const w = timeDecayWeight(r.daysAgo ?? i * 7)
     weightSum += w
-    perfectionWeighted += computePerfectionScore(r) * w
-    winWeighted += (r.winnerTeam === 'team1' ? 1 : 0) * w
+    perfectionWeighted += r.avgPerfection * w
+    const won = r.winnerTeam === 'team1' ? 1 : 0
+    winWeighted += won * w
+    if (won && r.sweep) sweepWinWeighted += w
   })
   const avgPerfection = perfectionWeighted / weightSum
   const winRate = winWeighted / weightSum
-  const powerScore = 0.6 * avgPerfection + 0.4 * (winRate * 100)
-  return { powerScore, avgPerfection, winRate, gamesAnalyzed: records.length }
+  const sweepWinRate = sweepWinWeighted / weightSum
+  // 완벽도 35% + 승률 55% + 스윕승 비율 보너스 10%
+  const rawScore = avgPerfection * 0.35 + (winRate * 100) * 0.55 + sweepWinRate * 100 * 0.10
+  // 표본 8시리즈 미만이면 50점 쪽으로 당겨서 소수 경기의 극단값을 완화
+  const confidence = Math.min(1, series.length / 8)
+  const powerScore = 50 + (rawScore - 50) * confidence
+  return { powerScore, avgPerfection, winRate, gamesAnalyzed: series.length }
 }
 
-// 2단계: 최종 체급 점수 — "이변 보정"이 핵심.
-// 각 경기마다 상대 사전 점수(opponentPriorScore) 대비 기대 승률(powerScoreMatchupProbability)을 구하고,
-// 실제 결과와의 차이("이변 정도" surprise)만큼 점수를 움직인다.
-//   - 체급 낮은 팀이 높은 팀을 이김(이변, surprise 큼) → 크게 상승
-//   - 체급 높은 팀이 낮은 팀을 이김(예상대로, surprise 작음) → 조금만 상승
-//   - 체급 높은 팀이 낮은 팀에게 짐(역이변, surprise 매우 음수) → 크게 하락
-// 완승/완패일수록(완벽도 점수가 50에서 멀수록) 그 경기의 영향력도 더 커지게(marginFactor) 만든다.
-// 여기에 시간 가중치(timeDecayWeight)까지 곱해서 최종 평균을 낸다.
-export function computeTeamPowerScore(records: TeamGameRecordForPower[], myPriorScore = 50): TeamPowerScore {
-  if (records.length === 0) return { powerScore: 50, avgPerfection: 50, winRate: 0.5, gamesAnalyzed: 0 }
-  const K = 55 // 이변 보정 강도 (클수록 이변 경기 하나의 영향력이 커짐)
+// 2단계: 최종 체급 점수 — 이변 보정.
+// 상대 사전 점수 대비 기대 승률과 실제 결과의 차이("이변" surprise)만큼 점수를 움직인다.
+//   - 체급 낮은 팀이 높은 팀을 시리즈에서 이김(이변) → 크게 상승
+//   - 체급 높은 팀이 낮은 팀을 이김(예상대로) → 조금만 상승
+//   - 체급 높은 팀이 낮은 팀에게 짐(역이변) → 크게 하락
+// 시리즈를 완전 스윕했으면(sweep) 그 시리즈의 영향력을 추가로 더 크게 준다.
+export function computeTeamPowerScore(series: SeriesRecordForPower[], myPriorScore = 50): TeamPowerScore {
+  if (series.length === 0) return { powerScore: 50, avgPerfection: 50, winRate: 0.5, gamesAnalyzed: 0 }
+  const K = 55
   const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
   let weightSum = 0, scoreWeighted = 0, perfectionWeighted = 0, winWeighted = 0
-  records.forEach((r, i) => {
+  series.forEach((r, i) => {
     const w = timeDecayWeight(r.daysAgo ?? i * 7)
     weightSum += w
-    const myPerfection = computePerfectionScore(r)
-    perfectionWeighted += myPerfection * w
+    perfectionWeighted += r.avgPerfection * w
     const actual = r.winnerTeam === 'team1' ? 1 : 0
     winWeighted += actual * w
 
     const oppPrior = r.opponentPriorScore ?? 50
     const expected = powerScoreMatchupProbability(myPriorScore, oppPrior)
-    const surprise = actual - expected // -1(완전 역이변) ~ +1(완전 이변)
-    const marginFactor = 0.5 + Math.abs(myPerfection - 50) / 100 // 0.5(접전)~1.0(완승/완패)
-    const gameScore = clamp(50 + surprise * marginFactor * K, 0, 100)
-    scoreWeighted += gameScore * w
+    const surprise = actual - expected
+    let marginFactor = 0.5 + Math.abs(r.avgPerfection - 50) / 100
+    if (r.sweep) marginFactor += 0.15
+    const seriesScore = clamp(50 + surprise * marginFactor * K, 0, 100)
+    scoreWeighted += seriesScore * w
   })
   const avgPerfection = perfectionWeighted / weightSum
   const winRate = winWeighted / weightSum
   const powerScore = scoreWeighted / weightSum
-  return { powerScore, avgPerfection, winRate, gamesAnalyzed: records.length }
+  return { powerScore, avgPerfection, winRate, gamesAnalyzed: series.length }
 }
+
 
 
 // 두 팀의 체급 점수 차이를 승률로 변환 (Elo와 비슷한 로지스틱 곡선, 표본이 적을 수 있어 5~95%로 클램프)
