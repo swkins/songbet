@@ -497,32 +497,44 @@ export function computeBothSidesScores(g: GameStatsInput): { team1: DetailedGame
   return { team1: computeDetailedScores(g), team2: computeDetailedScores(swapPerspective(g)) }
 }
 
-// ─── "완벽도" 점수 (1~100) ──────────────────────────────────────────
-// 우선순위 그대로 가중치를 매김: 시간(40) > 마일스톤 6종 다 가져가기(30) > 상대에게 안 내주기(30)
-// - 시간: 20분 이하면 만점(40), 50분 이상이면 0점, 그 사이는 선형 감소 (짧을수록 압도적으로 유리하게)
-// - 마일스톤: 퍼스트 킬/타워/드래곤/내셔/5킬/10킬 6개 각 5점, 기록이 없으면(모름) 중립 2.5점
-// - 안 내주기: 상대 킬/타워/억제기 각 10점 만점에서 상대가 많이 가져갈수록 깎임
+// ─── "플레이 점수" (1~100) ──────────────────────────────────────────
+// 승패 자체를 가장 큰 단일 요소로 두고("이겨야 점수가 있다"), 초반에 밀렸다가 뒤집은
+// 역전승에는 별도 보너스를 준다 — 그래야 "이겼는데 점수가 낮은" 비상식적인 결과가 안 나온다.
+//   1) 승패 (30점): 이기면 30, 지면 0
+//   2) 역전 보너스 (15점): 초반 마일스톤에서 상대가 앞섰는데도 결국 이겼으면 +15
+//      (처음부터 앞서서 이긴 경우는 마일스톤 점수 쪽에서 이미 보상되므로 중복 지급 안 함)
+//   3) 마일스톤 (20점): 퍼스트 킬/타워/드래곤/내셔/5킬/10킬 선취 6종
+//   4) 시간 (20점): 짧을수록 유리. 진 경기는 시간이 짧아도 의미가 약해 절반만 인정
+//   5) 안 내주기 (15점): 상대 킬/타워/억제기를 얼마나 적게 내줬는지
 export function computePerfectionScore(g: GameStatsInput): number {
   const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
   const durationMin = g.durationSeconds != null ? g.durationSeconds / 60 : null
+  const won = g.winnerTeam === 'team1'
+  const milestones = [g.firstBloodTeam, g.firstTowerTeam, g.firstDragonTeam, g.firstBaronTeam, g.fifthKillTeam, g.tenthKillTeam]
 
-  let timeScore = 20 // 시간 정보가 없으면 중립값
+  const winScore = won ? 30 : 0
+
+  const balancePoint = (m?: NarrativeTeam | null) => m === 'team1' ? 1 : m === 'team2' ? -1 : 0
+  const earlyBalance = milestones.reduce((acc, m) => acc + balancePoint(m), 0) // 양수=내가 초반 우세
+  const comebackBonus = (won && earlyBalance < 0) ? 15 : 0
+
+  const msRaw = (m?: NarrativeTeam | null) => m === 'team1' ? 20 / 6 : m === 'team2' ? 0 : 10 / 6
+  const milestoneScore = milestones.reduce((acc, m) => acc + msRaw(m), 0)
+
+  let timeRaw = 10
   if (durationMin != null) {
-    if (durationMin <= 20) timeScore = 40
-    else if (durationMin >= 50) timeScore = 0
-    else timeScore = 40 * (50 - durationMin) / 30
+    if (durationMin <= 20) timeRaw = 20
+    else if (durationMin >= 50) timeRaw = 0
+    else timeRaw = 20 * (50 - durationMin) / 30
   }
+  const timeScore = won ? timeRaw : timeRaw * 0.5
 
-  const msPoint = (m?: NarrativeTeam | null) => m === 'team1' ? 5 : m === 'team2' ? 0 : 2.5
-  const milestoneScore = msPoint(g.firstBloodTeam) + msPoint(g.firstTowerTeam) + msPoint(g.firstDragonTeam)
-    + msPoint(g.firstBaronTeam) + msPoint(g.fifthKillTeam) + msPoint(g.tenthKillTeam)
-
-  const inhibDenial = clamp(10 - g.team2Inhibitors * (10 / 3), 0, 10)
-  const towerDenial = clamp(10 - g.team2Towers * (10 / 11), 0, 10)
-  const killDenial = clamp(10 - g.team2Kills * 0.4, 0, 10)
+  const inhibDenial = clamp(5 - g.team2Inhibitors * (5 / 3), 0, 5)
+  const towerDenial = clamp(5 - g.team2Towers * (5 / 11), 0, 5)
+  const killDenial = clamp(5 - g.team2Kills * 0.2, 0, 5)
   const denialScore = inhibDenial + towerDenial + killDenial
 
-  return Math.round(clamp(timeScore + milestoneScore + denialScore, 0, 100))
+  return Math.round(clamp(winScore + comebackBonus + milestoneScore + timeScore + denialScore, 0, 100))
 }
 
 export function computeBothSidesPerfection(g: GameStatsInput): { team1: number; team2: number } {

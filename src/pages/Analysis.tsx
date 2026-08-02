@@ -251,6 +251,29 @@ function UpcomingPanel({ events, loading, error, teams, powerScores }: {
 }
 
 // ─── 세트 기록 수동 입력 ────────────────────────────────────────
+function milestoneLabel(m: NarrativeTeam | null, teamLabel: string, oppLabel: string): string {
+  return m === 'team1' ? teamLabel : m === 'team2' ? oppLabel : '기록없음'
+}
+
+// 세부 지표 하나가 어떤 원본 수치로 계산됐는지 마우스 오버로 보여주기 위한 설명 텍스트
+function metricTooltip(metricKey: string, s: EsportsGameStat, teamLabel: string, oppLabel: string, earlyLeader: NarrativeTeam | 'even' | null): string {
+  const dur = s.duration_seconds != null ? `${Math.floor(s.duration_seconds / 60)}분 ${s.duration_seconds % 60}초` : '경기시간 미입력'
+  switch (metricKey) {
+    case 'laning':
+      return `퍼스트 블러드: ${milestoneLabel(s.first_blood_team, teamLabel, oppLabel)} · 5킬 선취: ${milestoneLabel(s.fifth_kill_team, teamLabel, oppLabel)} · 퍼스트 타워: ${milestoneLabel(s.first_tower_team, teamLabel, oppLabel)}`
+    case 'objective':
+      return `드래곤 ${s.team1_dragons ?? '-'}:${s.team2_dragons ?? '-'} · 내셔 ${s.team1_barons ?? '-'}:${s.team2_barons ?? '-'} · 퍼스트 드래곤: ${milestoneLabel(s.first_dragon_team, teamLabel, oppLabel)} · 퍼스트 내셔: ${milestoneLabel(s.first_baron_team, teamLabel, oppLabel)}`
+    case 'teamfight':
+      return `킬 ${s.team1_kills ?? '-'}:${s.team2_kills ?? '-'} (${dur} 기준 분당 킬 격차로 환산) · 10킬 선취: ${milestoneLabel(s.tenth_kill_team, teamLabel, oppLabel)}`
+    case 'macro':
+      return `타워 ${s.team1_towers ?? '-'}:${s.team2_towers ?? '-'} · 억제기 ${s.team1_inhibitors ?? '-'}:${s.team2_inhibitors ?? '-'}`
+    case 'closing':
+      return `승자: ${s.winner_team === 'team1' ? teamLabel : oppLabel} · 초반 주도권: ${earlyLeader === 'team1' ? teamLabel : earlyLeader === 'team2' ? oppLabel : earlyLeader === 'even' ? '팽팽' : '기록없음'} (초반에 밀렸다가 뒤집었으면 높은 점수)`
+    default:
+      return ''
+  }
+}
+
 function StatPairInput({ label, valueA, valueB, onChangeA, onChangeB }: {
   label: string; valueA: string; valueB: string; onChangeA: (v: string) => void; onChangeB: (v: string) => void
 }) {
@@ -532,6 +555,7 @@ function RecentMatchRow({ teamId, teamName, game, displayA, displayB, scoreA, sc
         winnerTeam: s.winner_team,
         both: computeBothSidesScores(input),
         perfection: computeBothSidesPerfection(input),
+        stat: s,
       }
     })
     const sum = (key: 'team1_kills' | 'team2_kills' | 'team1_dragons' | 'team2_dragons' | 'team1_towers' | 'team2_towers' | 'team1_barons' | 'team2_barons') =>
@@ -616,17 +640,17 @@ function RecentMatchRow({ teamId, teamName, game, displayA, displayB, scoreA, sc
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                     {([
-                      ['라인전', p.both.team1.laning, p.both.team2.laning],
-                      ['오브젝트 컨트롤', p.both.team1.objectiveControl, p.both.team2.objectiveControl],
-                      ['한타능력', p.both.team1.teamfight, p.both.team2.teamfight],
-                      ['운영능력', p.both.team1.macro, p.both.team2.macro],
-                      ['스노볼', p.both.team1.snowball, p.both.team2.snowball],
-                      ['마무리능력', p.both.team1.closing, p.both.team2.closing],
-                    ] as [string, number, number][]).map(([label, t1, t2]) => {
+                      ['라인전', 'laning', p.both.team1.laning, p.both.team2.laning],
+                      ['오브젝트', 'objective', p.both.team1.objectiveControl, p.both.team2.objectiveControl],
+                      ['교전', 'teamfight', p.both.team1.teamfight, p.both.team2.teamfight],
+                      ['운영', 'macro', p.both.team1.macro, p.both.team2.macro],
+                      ['마무리', 'closing', p.both.team1.closing, p.both.team2.closing],
+                    ] as [string, string, number, number][]).map(([label, key, t1, t2]) => {
                       const total = t1 + t2 || 1
+                      const tooltip = metricTooltip(key, p.stat, teamName, game.opponent, p.narrative.earlyLeader)
                       return (
-                        <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                          <span style={{ width: 66, flexShrink: 0, color: 'var(--text-secondary)' }}>{label}</span>
+                        <div key={label} title={tooltip} style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'help' }}>
+                          <span style={{ width: 40, flexShrink: 0, color: 'var(--text-secondary)', borderBottom: '1px dotted var(--text-muted)' }}>{label}</span>
                           <span style={{ width: 22, textAlign: 'right', fontWeight: 700, color: t1 >= t2 ? 'var(--text-primary)' : 'var(--text-muted)', flexShrink: 0 }}>{t1.toFixed(1)}</span>
                           <div style={{ flex: 1, height: 6, borderRadius: 3, display: 'flex', overflow: 'hidden' }}>
                             <div style={{ width: `${(t1 / total) * 100}%`, background: 'var(--gold)' }} />
