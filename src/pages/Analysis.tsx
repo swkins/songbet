@@ -101,7 +101,7 @@ function RecentMatchesPanel({ leagueCode, events, loading, error, teams }: { lea
             return (
               <RecentMatchRow key={m.id} teamId={resolved.teamId} teamName={resolved.teamName}
                 game={{ opponent: resolved.opponent, teamScore, oppScore, startTime: m.startTime, bestOf: m.bestOf }}
-                displayA={m.codeA || m.teamA} displayB={m.codeB || m.teamB} scoreA={m.scoreA} scoreB={m.scoreB} />
+                displayA={m.codeA || m.teamA} displayB={m.codeB || m.teamB} scoreA={m.scoreA} scoreB={m.scoreB} teams={teams} />
             )
           })}
         </div>
@@ -324,9 +324,10 @@ function GameStatCard({ stat, teamName, onDelete }: { stat: EsportsGameStat; tea
   )
 }
 
-function RecentMatchRow({ teamId, teamName, game, displayA, displayB, scoreA, scoreB }: {
+function RecentMatchRow({ teamId, teamName, game, displayA, displayB, scoreA, scoreB, teams }: {
   teamId: string; teamName: string; game: TeamGameRecord
   displayA?: string; displayB?: string; scoreA?: number; scoreB?: number
+  teams: EsportsTeam[]
 }) {
   const [expanded, setExpanded] = useState(false)
   const [sets, setSets] = useState<EsportsGameStat[] | null>(null)
@@ -335,6 +336,10 @@ function RecentMatchRow({ teamId, teamName, game, displayA, displayB, scoreA, sc
   const [form, setForm] = useState<GameStatForm>(() => emptyGameStatForm(1))
   const [saving, setSaving] = useState(false)
   const [showAnalysis, setShowAnalysis] = useState(false)
+
+  // 상대팀도 우리가 추적 중인 팀이면(예: DK도 esports_teams에 있으면) 그쪽 team_id도 찾아둔다.
+  // 세트 저장 시 양쪽에 다 기록해야 상대팀 체급 점수에도 이 경기가 반영된다.
+  const opponentTeamId = useMemo(() => teams.find(t => teamNameMatches(t, game.opponent))?.id ?? null, [teams, game.opponent])
 
   async function loadSets() {
     setLoadingSets(true)
@@ -398,12 +403,42 @@ function RecentMatchRow({ teamId, teamName, game, displayA, displayB, scoreA, sc
       })
       setShowForm(false)
     }
+
+    // 상대팀도 추적 중인 팀이면, 상대팀 관점(team1=상대팀)으로 뒤집어서 똑같이 저장.
+    // 이걸 안 하면 상대팀은 이 경기가 체급 점수 계산에 아예 안 잡힌다.
+    if (opponentTeamId) {
+      const flip = (v: NarrativeTeam | null) => v === 'team1' ? 'team2' : v === 'team2' ? 'team1' : null
+      const mirrorPayload = {
+        team_id: opponentTeamId, team2_name: teamName, match_start_time: game.startTime, game_number: form.gameNumber,
+        duration_seconds: duration,
+        team1_kills: payload.team2_kills, team2_kills: payload.team1_kills,
+        team1_dragons: payload.team2_dragons, team2_dragons: payload.team1_dragons,
+        team1_towers: payload.team2_towers, team2_towers: payload.team1_towers,
+        team1_inhibitors: payload.team2_inhibitors, team2_inhibitors: payload.team1_inhibitors,
+        team1_barons: payload.team2_barons, team2_barons: payload.team1_barons,
+        winner_team: flip(payload.winner_team as NarrativeTeam),
+        first_blood_team: flip(payload.first_blood_team as NarrativeTeam | null),
+        first_tower_team: flip(payload.first_tower_team as NarrativeTeam | null),
+        first_dragon_team: flip(payload.first_dragon_team as NarrativeTeam | null),
+        first_baron_team: flip(payload.first_baron_team as NarrativeTeam | null),
+        fifth_kill_team: flip(payload.fifth_kill_team as NarrativeTeam | null),
+        tenth_kill_team: flip(payload.tenth_kill_team as NarrativeTeam | null),
+        source: 'manual',
+      }
+      await supabase.from('esports_game_stats').upsert(mirrorPayload, { onConflict: 'team_id,team2_name,match_start_time,game_number' })
+    }
     setSaving(false)
   }
 
   async function deleteSet(id: string) {
+    const target = (sets ?? []).find(s => s.id === id)
     await supabase.from('esports_game_stats').delete().eq('id', id)
     setSets(prev => (prev ?? []).filter(s => s.id !== id))
+    if (target && opponentTeamId) {
+      await supabase.from('esports_game_stats').delete()
+        .eq('team_id', opponentTeamId).eq('team2_name', teamName)
+        .eq('match_start_time', game.startTime).eq('game_number', target.game_number)
+    }
   }
 
   // 세트별 서사 판정 + 세트별(개별) 양쪽 관점 세부 지표를 만든다 (시리즈 전체 평균은 노이즈가 껴서 안 씀, 순수 로직/AI 없음)
