@@ -602,6 +602,8 @@ export interface SetRecordForPower {
   seriesSweep: boolean          // 이 세트가 속한 시리즈가 완전 스윕(상대에게 세트를 하나도 안 내줌)으로 끝났는지
   daysAgo?: number              // 세트 이후 지난 일수 (없으면 인덱스로 3.5일 간격 추정)
   opponentPriorScore?: number   // 상대 팀의 사전(prior) 체급 점수 0~100 (모르면 50=중립)
+  opponent?: string             // 상대팀 표시명 (히스토리 UI 표시용)
+  matchStartTime?: string       // 경기 일시 (히스토리 UI 표시용)
 }
 
 // 1단계: 상대 체급을 고려하지 않고, 순수 실적만으로 매긴 사전 점수.
@@ -628,35 +630,66 @@ export function computeTeamPriorScore(sets: SetRecordForPower[]): TeamPowerScore
   return { powerScore, avgPerfection, winRate, gamesAnalyzed: sets.length }
 }
 
-// 2단계: 최종 체급 점수 — 이변 보정.
-// 상대 사전 점수 대비 기대 승률과 실제 결과의 차이("이변" surprise)만큼 점수를 움직인다.
-//   - 체급 낮은 팀이 높은 팀을 이김(이변) → 크게 상승
-//   - 체급 높은 팀이 낮은 팀을 이김(예상대로) → 조금만 상승
-//   - 체급 높은 팀이 낮은 팀에게 짐(역이변) → 크게 하락
-// 그 세트가 속한 시리즈를 완전 스윕했으면 영향력을 추가로 더 크게 준다.
-export function computeTeamPowerScore(sets: SetRecordForPower[], myPriorScore = 50): TeamPowerScore {
-  if (sets.length === 0) return { powerScore: 50, avgPerfection: 50, winRate: 0.5, gamesAnalyzed: 0 }
-  const K = 55
-  const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
-  let weightSum = 0, scoreWeighted = 0, playWeighted = 0, winWeighted = 0
-  sets.forEach((r, i) => {
-    const w = timeDecayWeight(r.daysAgo ?? i * 3.5)
-    weightSum += w
-    playWeighted += r.playScore * w
-    const actual = r.won ? 1 : 0
-    winWeighted += actual * w
+// 2단계에서 쓰는 "이변 보정 강도" — 사전 점수를 뒤엎지 않도록 작게 잡음
+const SURPRISE_ADJUSTMENT_K = 18
 
+export interface SetAdjustmentDetail {
+  opponent: string
+  matchStartTime: string
+  won: boolean
+  playScore: number
+  seriesSweep: boolean
+  daysAgo: number
+  opponentPriorScore: number
+  expected: number      // 기대 승률 (0~1)
+  surprise: number       // 실제 - 기대 (이변 정도, -1~1)
+  marginFactor: number
+  weight: number          // 시간 가중치
+  adjustment: number      // surprise * marginFactor * K (가중치 곱하기 전 원값)
+}
+
+// 세트별로 "이변 보정 조정치"가 어떻게 계산됐는지 낱낱이 보여준다 (체급 점수 히스토리 UI에서 사용).
+export function computeSetAdjustments(sets: SetRecordForPower[], myPriorScore = 50): SetAdjustmentDetail[] {
+  return sets.map((r, i) => {
+    const daysAgo = r.daysAgo ?? i * 3.5
+    const weight = timeDecayWeight(daysAgo)
     const oppPrior = r.opponentPriorScore ?? 50
     const expected = powerScoreMatchupProbability(myPriorScore, oppPrior)
+    const actual = r.won ? 1 : 0
     const surprise = actual - expected
     let marginFactor = 0.5 + Math.abs(r.playScore - 50) / 100
     if (r.won && r.seriesSweep) marginFactor += 0.15
-    const setScore = clamp(50 + surprise * marginFactor * K, 0, 100)
-    scoreWeighted += setScore * w
+    const adjustment = surprise * marginFactor * SURPRISE_ADJUSTMENT_K
+    return { opponent: r.opponent ?? '', matchStartTime: r.matchStartTime ?? '', won: r.won, playScore: r.playScore, seriesSweep: r.seriesSweep, daysAgo, opponentPriorScore: oppPrior, expected, surprise, marginFactor, weight, adjustment }
+  })
+}
+
+// 2단계: 최종 체급 점수 — 이변 보정.
+// 중요: 이변 보정은 사전 점수를 "대체"하는 게 아니라 "가감"하는 용도다.
+// (예전엔 50점을 기준으로 이변 점수만으로 최종 점수를 다시 계산했는데, 그러면 실력이 정확히
+//  예측대로 나온 팀은 승패와 무관하게 전부 50점 근처로 수렴해버리는 결함이 있었다 —
+//  1위 팀이 예상대로 계속 이기면 "이겨도 당연한 거라 점수 안 오르고", 어쩌다 한 번 지면
+//  "이변"으로 크게 깎여서 정작 압도적인 팀이 하위권에 나오는 문제가 있었음.)
+// 상대 사전 점수 대비 기대 승률과 실제 결과의 차이("이변" surprise)만큼 사전 점수에 소폭 가감한다.
+//   - 체급 낮은 팀이 높은 팀을 이김(이변) → 소폭 상승
+//   - 체급 높은 팀이 낮은 팀을 이김(예상대로) → 거의 그대로
+//   - 체급 높은 팀이 낮은 팀에게 짐(역이변) → 소폭 하락
+// 그 세트가 속한 시리즈를 완전 스윕했으면 그 경기의 영향력을 추가로 더 크게 준다.
+export function computeTeamPowerScore(sets: SetRecordForPower[], myPriorScore = 50): TeamPowerScore {
+  if (sets.length === 0) return { powerScore: 50, avgPerfection: 50, winRate: 0.5, gamesAnalyzed: 0 }
+  const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
+  const details = computeSetAdjustments(sets, myPriorScore)
+  let weightSum = 0, playWeighted = 0, winWeighted = 0, adjWeighted = 0
+  details.forEach((d, i) => {
+    weightSum += d.weight
+    playWeighted += sets[i].playScore * d.weight
+    winWeighted += (sets[i].won ? 1 : 0) * d.weight
+    adjWeighted += d.adjustment * d.weight
   })
   const avgPerfection = playWeighted / weightSum
   const winRate = winWeighted / weightSum
-  const powerScore = scoreWeighted / weightSum
+  const avgAdjustment = adjWeighted / weightSum
+  const powerScore = clamp(myPriorScore + avgAdjustment, 0, 100)
   return { powerScore, avgPerfection, winRate, gamesAnalyzed: sets.length }
 }
 
