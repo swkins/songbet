@@ -5,7 +5,7 @@ import { Plus, Trash2, ChevronDown, ChevronUp, ExternalLink, RefreshCw, Trending
 import {
   LEAGUES, fetchScheduleEvents, extractTeamData, computeForm, matchupProbability, filterRecentGames,
   seriesScoreProbabilities, computeOddsValue, fetchLeagueTeams, findTeamCode, teamNameMatches,
-  classifyGameNarrative, computeDetailedScores, type RawScheduleEvent, type TeamGameRecord, type NarrativeTeam, type DetailedGameScores,
+  classifyGameNarrative, computeBothSidesScores, type RawScheduleEvent, type TeamGameRecord, type NarrativeTeam, type DetailedGameScores,
 } from '../lib/lolEsports'
 
 interface EsportsTeam {
@@ -403,52 +403,35 @@ function RecentMatchRow({ teamId, teamName, game, displayA, displayB, scoreA, sc
     setSets(prev => (prev ?? []).filter(s => s.id !== id))
   }
 
-  // 세트별 서사 판정을 모아 시리즈 전체 요약을 만든다 (순수 로직, AI 없음)
+  // 세트별 서사 판정 + 세트별(개별) 양쪽 관점 세부 지표를 만든다 (시리즈 전체 평균은 노이즈가 껴서 안 씀, 순수 로직/AI 없음)
   const seriesAnalysis = useMemo(() => {
     if (!sets || sets.length === 0) return null
-    const perSet = sets.map(s => ({
-      gameNumber: s.game_number,
-      narrative: classifyGameNarrative({
+    const perSet = sets.map(s => {
+      const input = {
         team1Kills: s.team1_kills ?? 0, team2Kills: s.team2_kills ?? 0,
         team1Dragons: s.team1_dragons ?? 0, team2Dragons: s.team2_dragons ?? 0,
         team1Towers: s.team1_towers ?? 0, team2Towers: s.team2_towers ?? 0,
         team1Inhibitors: s.team1_inhibitors ?? 0, team2Inhibitors: s.team2_inhibitors ?? 0,
         team1Barons: s.team1_barons ?? 0, team2Barons: s.team2_barons ?? 0,
-        winnerTeam: s.winner_team ?? 'team1',
+        winnerTeam: s.winner_team ?? 'team1' as NarrativeTeam,
         firstBloodTeam: s.first_blood_team, firstTowerTeam: s.first_tower_team,
         firstDragonTeam: s.first_dragon_team, firstBaronTeam: s.first_baron_team,
         fifthKillTeam: s.fifth_kill_team, tenthKillTeam: s.tenth_kill_team,
         durationSeconds: s.duration_seconds,
-      }),
-      winnerTeam: s.winner_team,
-    }))
+      }
+      return {
+        gameNumber: s.game_number,
+        narrative: classifyGameNarrative(input),
+        winnerTeam: s.winner_team,
+        both: computeBothSidesScores(input),
+      }
+    })
     const sum = (key: 'team1_kills' | 'team2_kills' | 'team1_dragons' | 'team2_dragons' | 'team1_towers' | 'team2_towers' | 'team1_barons' | 'team2_barons') =>
       sets.reduce((acc, s) => acc + (s[key] ?? 0), 0)
     const ourWins = sets.filter(s => s.winner_team === 'team1').length
     const oppWins = sets.length - ourWins
-    // 우리 팀 관점에서 평균 dominanceScore (양수=평균적으로 우세, 음수=열세)
-    const avgDominance = perSet.reduce((acc, p) => acc + (p.winnerTeam === 'team1' ? p.narrative.dominanceScore : -p.narrative.dominanceScore), 0) / perSet.length
 
-    // 6개 세부 지표(라인전/오브젝트/한타/운영/스노볼/마무리) 평균
-    const detailScores = sets.map(s => computeDetailedScores({
-      team1Kills: s.team1_kills ?? 0, team2Kills: s.team2_kills ?? 0,
-      team1Dragons: s.team1_dragons ?? 0, team2Dragons: s.team2_dragons ?? 0,
-      team1Towers: s.team1_towers ?? 0, team2Towers: s.team2_towers ?? 0,
-      team1Inhibitors: s.team1_inhibitors ?? 0, team2Inhibitors: s.team2_inhibitors ?? 0,
-      team1Barons: s.team1_barons ?? 0, team2Barons: s.team2_barons ?? 0,
-      winnerTeam: s.winner_team ?? 'team1',
-      firstBloodTeam: s.first_blood_team, firstTowerTeam: s.first_tower_team,
-      firstDragonTeam: s.first_dragon_team, firstBaronTeam: s.first_baron_team,
-      fifthKillTeam: s.fifth_kill_team, tenthKillTeam: s.tenth_kill_team,
-      durationSeconds: s.duration_seconds,
-    }))
-    const avgKey = (k: keyof DetailedGameScores) => detailScores.reduce((acc, d) => acc + d[k], 0) / detailScores.length
-    const avgDetail: DetailedGameScores = {
-      laning: avgKey('laning'), objectiveControl: avgKey('objectiveControl'), teamfight: avgKey('teamfight'),
-      macro: avgKey('macro'), snowball: avgKey('snowball'), closing: avgKey('closing'),
-    }
-
-    return { perSet, ourWins, oppWins, avgDominance, avgDetail,
+    return { perSet, ourWins, oppWins,
       kills: { our: sum('team1_kills'), opp: sum('team2_kills') },
       dragons: { our: sum('team1_dragons'), opp: sum('team2_dragons') },
       towers: { our: sum('team1_towers'), opp: sum('team2_towers') },
@@ -496,40 +479,44 @@ function RecentMatchRow({ teamId, teamName, game, displayA, displayB, scoreA, sc
               <div style={{ fontWeight: 800, marginBottom: 6 }}>
                 시리즈 스코어 {seriesAnalysis.ourWins} : {seriesAnalysis.oppWins} ({teamName} 관점)
               </div>
-              <div style={{ color: 'var(--text-secondary)', marginBottom: 6, lineHeight: 1.6 }}>
+              <div style={{ color: 'var(--text-secondary)', marginBottom: 10, lineHeight: 1.6 }}>
                 합계 — 킬 {seriesAnalysis.kills.our}:{seriesAnalysis.kills.opp} · 드래곤 {seriesAnalysis.dragons.our}:{seriesAnalysis.dragons.opp} · 타워 {seriesAnalysis.towers.our}:{seriesAnalysis.towers.opp} · 바론 {seriesAnalysis.barons.our}:{seriesAnalysis.barons.opp}
               </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginBottom: 8 }}>
-                {seriesAnalysis.perSet.map(p => (
-                  <div key={p.gameNumber} style={{ color: 'var(--text-secondary)' }}>
-                    {p.gameNumber}세트 · <b style={{ color: 'var(--gold)' }}>{p.narrative.label}</b> ({p.winnerTeam === 'team1' ? teamName : game.opponent} 승)
+
+              <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 8 }}>
+                아래는 세트별 개별 비교입니다 (시리즈 전체를 평균내면 세트마다 다른 흐름이 뭉개져서, 세트 단위로 따로 계산했어요). 왼쪽 = {teamName}, 오른쪽 = {game.opponent}.
+              </div>
+
+              {seriesAnalysis.perSet.map(p => (
+                <div key={p.gameNumber} style={{ marginBottom: 12, paddingBottom: 10, borderBottom: '1px solid var(--gold-border)' }}>
+                  <div style={{ marginBottom: 6 }}>
+                    <b>{p.gameNumber}세트</b> · <b style={{ color: 'var(--gold)' }}>{p.narrative.label}</b> ({p.winnerTeam === 'team1' ? teamName : game.opponent} 승)
                   </div>
-                ))}
-              </div>
-              <div style={{ fontWeight: 800, marginBottom: 4, fontSize: 10, color: 'var(--text-muted)' }}>세부 지표 평균 (0~10, {teamName} 관점 · 추정치)</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 8 }}>
-                {([
-                  ['라인전', seriesAnalysis.avgDetail.laning],
-                  ['오브젝트 컨트롤', seriesAnalysis.avgDetail.objectiveControl],
-                  ['한타능력', seriesAnalysis.avgDetail.teamfight],
-                  ['운영능력', seriesAnalysis.avgDetail.macro],
-                  ['스노볼', seriesAnalysis.avgDetail.snowball],
-                  ['마무리능력', seriesAnalysis.avgDetail.closing],
-                ] as [string, number][]).map(([label, score]) => (
-                  <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span style={{ width: 70, flexShrink: 0, color: 'var(--text-secondary)' }}>{label}</span>
-                    <div style={{ flex: 1, height: 6, borderRadius: 3, background: 'var(--bg-card)', overflow: 'hidden' }}>
-                      <div style={{ width: `${score * 10}%`, height: '100%', background: score >= 6 ? 'var(--green, #4ade80)' : score <= 4 ? 'var(--red, #f87171)' : 'var(--gold)' }} />
-                    </div>
-                    <span style={{ width: 28, textAlign: 'right', fontWeight: 700, color: 'var(--text-primary)' }}>{score.toFixed(1)}</span>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    {([
+                      ['라인전', p.both.team1.laning, p.both.team2.laning],
+                      ['오브젝트 컨트롤', p.both.team1.objectiveControl, p.both.team2.objectiveControl],
+                      ['한타능력', p.both.team1.teamfight, p.both.team2.teamfight],
+                      ['운영능력', p.both.team1.macro, p.both.team2.macro],
+                      ['스노볼', p.both.team1.snowball, p.both.team2.snowball],
+                      ['마무리능력', p.both.team1.closing, p.both.team2.closing],
+                    ] as [string, number, number][]).map(([label, t1, t2]) => {
+                      const total = t1 + t2 || 1
+                      return (
+                        <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                          <span style={{ width: 66, flexShrink: 0, color: 'var(--text-secondary)' }}>{label}</span>
+                          <span style={{ width: 22, textAlign: 'right', fontWeight: 700, color: t1 >= t2 ? 'var(--text-primary)' : 'var(--text-muted)', flexShrink: 0 }}>{t1.toFixed(1)}</span>
+                          <div style={{ flex: 1, height: 6, borderRadius: 3, display: 'flex', overflow: 'hidden' }}>
+                            <div style={{ width: `${(t1 / total) * 100}%`, background: 'var(--gold)' }} />
+                            <div style={{ width: `${(t2 / total) * 100}%`, background: 'var(--border)' }} />
+                          </div>
+                          <span style={{ width: 22, textAlign: 'left', fontWeight: 700, color: t2 >= t1 ? 'var(--text-primary)' : 'var(--text-muted)', flexShrink: 0 }}>{t2.toFixed(1)}</span>
+                        </div>
+                      )
+                    })}
                   </div>
-                ))}
-              </div>
-              <div style={{ color: 'var(--text-muted)', lineHeight: 1.5 }}>
-                {seriesAnalysis.avgDominance >= 8 ? `전반적으로 ${teamName}이(가) 오브젝트·킬 지표에서 뚜렷하게 앞선 시리즈였습니다.`
-                  : seriesAnalysis.avgDominance <= -8 ? `전반적으로 ${game.opponent}이(가) 오브젝트·킬 지표에서 뚜렷하게 앞선 시리즈였습니다.`
-                  : '세트마다 흐름이 갈려 뚜렷한 우세 없이 접전 위주로 진행된 시리즈입니다.'}
-              </div>
+                </div>
+              ))}
             </div>
           )}
           {showForm && (

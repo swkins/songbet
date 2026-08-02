@@ -472,6 +472,31 @@ export function computeDetailedScores(g: GameStatsInput & { durationSeconds?: nu
   return { laning, objectiveControl, teamfight, macro, snowball, closing: clamp10(closing) }
 }
 
+// team1/team2 관점을 뒤집은 입력을 만든다 (양쪽 점수를 각자 시점에서 정확히 계산하기 위함).
+// 단순히 10-score로 미러링하지 않는 이유: 마무리능력처럼 클램프/비대칭 로직이 섞인 지표가 있어서
+// 각자 관점으로 다시 계산하는 게 더 정확하다.
+function swapPerspective(g: GameStatsInput): GameStatsInput {
+  const flip = (m?: NarrativeTeam | null): NarrativeTeam | null | undefined =>
+    m === 'team1' ? 'team2' : m === 'team2' ? 'team1' : m
+  return {
+    team1Kills: g.team2Kills, team2Kills: g.team1Kills,
+    team1Dragons: g.team2Dragons, team2Dragons: g.team1Dragons,
+    team1Towers: g.team2Towers, team2Towers: g.team1Towers,
+    team1Inhibitors: g.team2Inhibitors, team2Inhibitors: g.team1Inhibitors,
+    team1Barons: g.team2Barons, team2Barons: g.team1Barons,
+    winnerTeam: (flip(g.winnerTeam) ?? 'team1') as NarrativeTeam,
+    firstBloodTeam: flip(g.firstBloodTeam), firstTowerTeam: flip(g.firstTowerTeam),
+    firstDragonTeam: flip(g.firstDragonTeam), firstBaronTeam: flip(g.firstBaronTeam),
+    fifthKillTeam: flip(g.fifthKillTeam), tenthKillTeam: flip(g.tenthKillTeam),
+    durationSeconds: g.durationSeconds,
+  }
+}
+
+// 한쪽 관점으로만 보여주지 않고, 양팀 각자 시점에서의 점수를 함께 반환
+export function computeBothSidesScores(g: GameStatsInput): { team1: DetailedGameScores; team2: DetailedGameScores } {
+  return { team1: computeDetailedScores(g), team2: computeDetailedScores(swapPerspective(g)) }
+}
+
 // 배당 대비 기대값(EV) 계산. EV > 0 이면 모델 확률 기준 "베팅 가치 있음"
 export function computeOddsValue(modelProb: number, decimalOdds: number): OddsValue | null {
   if (!decimalOdds || !isFinite(decimalOdds) || decimalOdds <= 1) return null
