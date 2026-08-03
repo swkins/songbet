@@ -46,9 +46,14 @@ interface EsportsGameStat {
 // 리그 목록 안에서 어느 팀이 우리가 추적 중인 팀(esports_teams)인지 찾아서
 // {teamId, teamName, opponent} 형태로 반환. 세트 기록 입력/저장은 이 팀의 관점(team1)으로 저장된다.
 function resolveMatchTeam(teams: EsportsTeam[], teamAName: string, teamBName: string, codeA?: string, codeB?: string): { teamId: string; teamName: string; opponent: string; isA: boolean } | null {
-  const a = teams.find(t => teamNameMatches(t, teamAName) || (codeA && teamNameMatches(t, codeA)))
+  // 코드(약자)가 있으면 최우선으로 신뢰한다. lolesports API가 name 필드는 부정확하게 내려주는 경우가
+  // 있어서(예: 한 이벤트의 name이 다른 팀 이름과 우연히 같게 나옴), 코드로 먼저 찾아지면 그걸로 확정하고
+  // 절대 name 기반 매칭으로 넘어가지 않는다 — name 매칭이 엉뚱한 팀을 잘못 집는 걸 원천 차단.
+  const aByCode = codeA ? teams.find(t => teamNameMatches(t, codeA)) : undefined
+  const a = aByCode ?? teams.find(t => teamNameMatches(t, teamAName))
   if (a) return { teamId: a.id, teamName: a.name, opponent: teamBName, isA: true }
-  const b = teams.find(t => teamNameMatches(t, teamBName) || (codeB && teamNameMatches(t, codeB)))
+  const bByCode = codeB ? teams.find(t => teamNameMatches(t, codeB)) : undefined
+  const b = bByCode ?? teams.find(t => teamNameMatches(t, teamBName))
   if (b) return { teamId: b.id, teamName: b.name, opponent: teamAName, isA: false }
   return null
 }
@@ -481,9 +486,8 @@ function RecentMatchRow({ teamId, teamName, game, displayA, displayB, scoreA, sc
   // 코드(약자)가 있으면 코드를 먼저 신뢰하고, 혹시라도 우리 팀 자신과 매칭되면(자기 자신과는 경기를 할 수 없으니)
   // 데이터 이상으로 보고 매칭을 버린다.
   const opponentTeamId = useMemo(() => {
-    const found = teams.find(t =>
-      (opponentCode && teamNameMatches(t, opponentCode)) || teamNameMatches(t, game.opponent)
-    )
+    const byCode = opponentCode ? teams.find(t => teamNameMatches(t, opponentCode)) : undefined
+    const found = byCode ?? teams.find(t => teamNameMatches(t, game.opponent))
     if (!found || found.id === teamId) return null
     return found.id
   }, [teams, game.opponent, opponentCode, teamId])
@@ -1016,6 +1020,27 @@ interface AbilityProfile {
 }
 
 function clampScore(v: number): number { return Math.max(0, Math.min(100, Math.round(v))) }
+// 표본이 충분할 때만(4개 이상) IQR(사분위 범위) 기준으로 극단값을 제거하고 평균을 낸다.
+// 표본이 적으면(3개 이하) 극단값 제거가 오히려 정보 손실이 크므로 그냥 평균을 낸다.
+function quantile(sorted: number[], q: number): number {
+  const pos = (sorted.length - 1) * q
+  const base = Math.floor(pos)
+  const rest = pos - base
+  return sorted[base + 1] !== undefined ? sorted[base] + rest * (sorted[base + 1] - sorted[base]) : sorted[base]
+}
+function trimmedAvg(values: number[]): number | null {
+  if (values.length === 0) return null
+  if (values.length < 4) return values.reduce((a, b) => a + b, 0) / values.length
+  const sorted = [...values].sort((a, b) => a - b)
+  const q1 = quantile(sorted, 0.25)
+  const q3 = quantile(sorted, 0.75)
+  const iqr = q3 - q1
+  const lo = q1 - 1.5 * iqr
+  const hi = q3 + 1.5 * iqr
+  const filtered = sorted.filter(v => v >= lo && v <= hi)
+  const use = filtered.length > 0 ? filtered : sorted // 전부 걸러지는 극단적인 경우 안전하게 원본으로 폴백
+  return use.reduce((a, b) => a + b, 0) / use.length
+}
 // 순수 차이값(킬차/타워차 등)을 50 중립 기준 0~100 점수로 환산
 function diffToScore(avgDiff: number | null, scale: number): number | null {
   return avgDiff == null ? null : clampScore(50 + avgDiff * scale)
@@ -1051,13 +1076,13 @@ function computeAbilityProfile(rows: EsportsGameStat[]): AbilityProfile {
     return total > 0 ? mine / total : null
   }
 
-  const winDurations = wins.map(r => r.duration_seconds).filter((d): d is number => d != null)
-  const avgWinDurationMin = winDurations.length > 0 ? winDurations.reduce((a, b) => a + b, 0) / winDurations.length / 60 : null
-  const subThirtyWinRate = winDurations.length > 0 ? winDurations.filter(d => d <= 1800).length / winDurations.length : null
-  const lossDurations = losses.map(r => r.duration_seconds).filter((d): d is number => d != null)
-  const avgLossDurationMin = lossDurations.length > 0 ? lossDurations.reduce((a, b) => a + b, 0) / lossDurations.length / 60 : null
-  const avgTotalKillsWin = avg(wins, totalKills)
-  const avgTotalKillsLoss = avg(losses, totalKills)
+  const winDurationsSec = wins.map(r => r.duration_seconds).filter((d): d is number => d != null)
+  const avgWinDurationMin = winDurationsSec.length > 0 ? trimmedAvg(winDurationsSec.map(d => d / 60)) : null
+  const subThirtyWinRate = winDurationsSec.length > 0 ? winDurationsSec.filter(d => d <= 1800).length / winDurationsSec.length : null
+  const lossDurationsSec = losses.map(r => r.duration_seconds).filter((d): d is number => d != null)
+  const avgLossDurationMin = lossDurationsSec.length > 0 ? trimmedAvg(lossDurationsSec.map(d => d / 60)) : null
+  const avgTotalKillsWin = trimmedAvg(wins.map(totalKills).filter((v): v is number => v != null))
+  const avgTotalKillsLoss = trimmedAvg(losses.map(totalKills).filter((v): v is number => v != null))
 
   // 멘탈능력: 초반 마일스톤(퍼스트 1킬/타워/드래곤/내셔/5킬/10킬)로 "누가 초반 주도권을 쥐었는지" 판정
   let earlyLeadCount = 0, earlyBehindCount = 0, chokeCount = 0, comebackCount = 0
@@ -1182,10 +1207,18 @@ function LeagueView({ code, label }: { code: string; label: string }) {
       const rows = (data as EsportsGameStat[]) ?? []
 
       // 미러링 때문에 실제 경기 하나가 두 행(양팀 관점)으로 존재한다. 한 방향만 남기고 중복 제거.
+      // 이름만으로 못 찾으면, 등록된 코드가 그 텍스트 안에 단어 경계로 포함돼 있는지도 확인한다.
+      // (예: 스폰서 개명으로 team2_name이 "RED Kalunga"처럼 바뀌어도, 코드 "RED"가 등록돼 있으면 여전히 연결됨)
+      function findOpponentTeam(text: string): EsportsTeam | undefined {
+        const direct = teamsList.find(t => teamNameMatches(t, text))
+        if (direct) return direct
+        const lower = text.toLowerCase()
+        return teamsList.find(t => t.code && new RegExp(`(^|[^a-z0-9])${t.code.toLowerCase()}($|[^a-z0-9])`).test(lower))
+      }
       const seenKeys = new Set<string>()
       const matches: EloMatchRecord[] = []
       for (const s of rows) {
-        const oppTeam = teamsList.find(t => teamNameMatches(t, s.team2_name))
+        const oppTeam = findOpponentTeam(s.team2_name)
         if (!oppTeam) continue // 추적 안 되는 상대는 시뮬레이션에서 제외 (레이팅 기준점이 없음)
         const key = [s.team_id, oppTeam.id].sort().join('|') + `|${s.match_start_time}|${s.game_number}`
         if (seenKeys.has(key)) continue
