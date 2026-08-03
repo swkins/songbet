@@ -165,20 +165,14 @@ function RecentMatchesPanel({ leagueCode, events, loading, error, teams, onCreat
             const oppScore = resolved.isA ? m.scoreB : m.scoreA
             const codeA = m.codeA || m.teamA
             const codeB = m.codeB || m.teamB
-            const oppCodeForMatch = resolved.isA ? m.codeB : m.codeA
-            // "입력됨 N" 배지: RecentMatchRow 안의 canonicalOpponentName과 똑같은 방식(코드 우선)으로
-            // 상대팀을 다시 확정한 뒤 그 정식 이름으로 비교한다. 그냥 raw 이름/코드로 비교하면
-            // (API가 부정확한 name을 내려주는 경기에서) 실제로 입력된 기록이 있어도 "미입력"으로 잘못 표시된다.
-            const oppTeamForRecord = teams.find(t =>
-              (oppCodeForMatch && teamNameMatches(t, oppCodeForMatch)) || teamNameMatches(t, resolved.opponent)
-            )
-            const canonicalOppNameForRecord = oppTeamForRecord?.name ?? resolved.opponent
+            // "입력됨 N" 배지: 상대팀 이름/코드로 다시 대조하지 않고 날짜(±1일)만으로 판단한다.
+            // lolesports API가 이름/코드 필드를 이 경기에서만 다르게 내려주는 경우가 있어서, 그걸 기준으로
+            // 재확인하려고 할 때마다 미묘하게 다른 이유로 계속 실패했다 (실제로는 기록이 있는데도 "미입력"으로
+            // 잘못 표시됨). team_id + 날짜만으로도 이 팀이 그 날짜 즈음 치른 경기는 사실상 하나뿐이라 충분히
+            // 안전하고, match_start_time은 이름/코드와 달리 항상 신뢰할 수 있다.
             const recordCount = (recordedByTeam[resolved.teamId] ?? []).filter(s => {
               const d = dayjs(s.match_start_time)
-              const inRange = d.isAfter(dayjs(m.startTime).subtract(1, 'day')) && d.isBefore(dayjs(m.startTime).add(1, 'day'))
-              return inRange && (
-                teamNameMatches({ name: s.team2_name }, canonicalOppNameForRecord) || teamNameMatches({ name: canonicalOppNameForRecord }, s.team2_name)
-              )
+              return d.isAfter(dayjs(m.startTime).subtract(1, 'day')) && d.isBefore(dayjs(m.startTime).add(1, 'day'))
             }).length
             return (
               <RecentMatchRow key={m.id} teamId={resolved.teamId} teamName={resolved.teamName}
@@ -507,12 +501,12 @@ function RecentMatchRow({ teamId, teamName, game, displayA, displayB, scoreA, sc
   async function loadSets() {
     setLoadingSets(true)
     // gol.gg 자동수집 데이터는 상대팀 표기(예: "Gen.G")와 날짜만 있고 정확한 시각/lolesports 표기명("Gen.G Esports")과
-    // 일치하지 않으므로, 날짜 ±1일 범위 + 느슨한 팀명 매칭(teamNameMatches)으로 찾는다.
-    // 수동 입력 데이터(정확한 team2_name/match_start_time)도 이 범위 안에 포함되므로 함께 잡힌다.
-    // game.opponent(=lolesports API가 방금 이 순간 내려준 raw 이름) 대신 canonicalOpponentName을 기준으로
-    // 비교하는 이유: API가 특정 팀의 name 필드를 부정확하게 내려줄 때가 있어서, raw 이름으로 걸러내면
-    // 방금 정상적으로 저장한 기록이 새로고침 후에는 안 보이는 것처럼 사라지는 문제가 있었다.
-    // canonicalOpponentName은 코드(약자) 우선으로 신뢰성 있게 찾은 등록 팀명이라 안정적이다.
+    // 일치하지 않으므로, 날짜 ±1일 범위로 찾는다. 수동 입력 데이터(정확한 match_start_time)도 이 범위 안에
+    // 포함되므로 함께 잡힌다.
+    // 상대팀 이름/코드로 추가 대조는 하지 않는다: lolesports API가 이름/코드 필드를 경기마다 다르게, 때로는
+    // 부정확하게 내려줄 수 있어서, 그걸 기준으로 다시 걸러내려고 하면 방금 정상 저장한 기록이 새로고침 후엔
+    // 안 보이는 것처럼 사라지는 문제가 반복됐다. team_id + 날짜만으로도 이 팀이 그 날짜 즈음 치른 경기는
+    // 사실상 하나뿐이라 충분히 안전하고, match_start_time은 항상 신뢰할 수 있다.
     const dayStart = dayjs(game.startTime).subtract(1, 'day').startOf('day').toISOString()
     const dayEnd = dayjs(game.startTime).add(1, 'day').endOf('day').toISOString()
     const { data } = await supabase.from('esports_game_stats').select('*')
@@ -520,10 +514,7 @@ function RecentMatchRow({ teamId, teamName, game, displayA, displayB, scoreA, sc
       .gte('match_start_time', dayStart)
       .lte('match_start_time', dayEnd)
       .order('game_number')
-    const all = (data as EsportsGameStat[]) ?? []
-    const filtered = all.filter(s =>
-      teamNameMatches({ name: s.team2_name }, canonicalOpponentName) || teamNameMatches({ name: canonicalOpponentName }, s.team2_name)
-    )
+    const filtered = (data as EsportsGameStat[]) ?? []
     setSets(filtered)
     setLoadingSets(false)
   }
