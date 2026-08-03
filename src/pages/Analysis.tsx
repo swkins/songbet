@@ -1502,8 +1502,8 @@ function LeagueView({ code, label }: { code: string; label: string }) {
                         {recentSets.map((win, i) => (
                           <span key={i} style={{
                             fontSize: 8, fontWeight: 800, width: 12, textAlign: 'center', borderRadius: 2, lineHeight: '13px',
-                            color: win ? 'var(--green, #4ade80)' : '#fff',
-                            background: win ? 'transparent' : 'var(--red, #f87171)',
+                            color: '#fff',
+                            background: win ? 'var(--green, #4ade80)' : 'var(--red, #f87171)',
                           }}>
                             {win ? 'W' : 'L'}
                           </span>
