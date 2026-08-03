@@ -966,6 +966,119 @@ function RatingHistoryChart({ teamLog }: { teamLog: EloGameLog[] }) {
   )
 }
 
+interface AbilityProfile {
+  n: number
+  fbRate: number; fifthKillRate: number; firstDragonRate: number; laningRate: number
+  winTeamfightDiff: number | null; lossTeamfightDiff: number | null
+  winMacroDiff: number | null; lossMacroDiff: number | null
+  winObjRate: number | null; lossObjRate: number | null
+  avgWinDurationMin: number | null; subThirtyWinRate: number | null
+  avgLossDurationMin: number | null // 패배 시 버티는 능력: 질 때도 오래 끌수록(=쉽게 안 무너질수록) 높은 값
+  winCount: number; lossCount: number
+  // 멘탈능력: 초반 주도권을 쥐고도 진 비율(초킹)과, 밀리고도 이긴 비율(역전승)
+  earlyLeadCount: number; earlyBehindCount: number
+  chokeCount: number; comebackCount: number
+  chokeRate: number | null; comebackRate: number | null
+  scores: {
+    laning: number | null; teamfight: number | null; macro: number | null
+    objective: number | null; closing: number | null; mental: number | null
+  }
+}
+
+function clampScore(v: number): number { return Math.max(0, Math.min(100, Math.round(v))) }
+// 순수 차이값(킬차/타워차 등)을 50 중립 기준 0~100 점수로 환산
+function diffToScore(avgDiff: number | null, scale: number): number | null {
+  return avgDiff == null ? null : clampScore(50 + avgDiff * scale)
+}
+// 0~1 비율값을 50 중립 기준 0~100 점수로 환산
+function rateToScore(rate: number | null): number | null {
+  return rate == null ? null : clampScore(50 + (rate - 0.5) * 100)
+}
+
+// 팀의 세트 기록들로부터 "능력치 프로필"을 계산한다. 승패를 나눠서 보는 이유:
+// 이기면서 벌리는 능력과 지면서도 버티는 능력은 서로 다른 재능이라, 한 세트를 점수 하나로 뭉개면 안 보임.
+function computeAbilityProfile(rows: EsportsGameStat[]): AbilityProfile {
+  const n = rows.length
+  const rate = (count: number) => n > 0 ? count / n : 0
+  const fb = rows.filter(r => r.first_blood_team === 'team1').length
+  const fifth = rows.filter(r => r.fifth_kill_team === 'team1').length
+  const fdragon = rows.filter(r => r.first_dragon_team === 'team1').length
+
+  const wins = rows.filter(r => r.winner_team === 'team1')
+  const losses = rows.filter(r => r.winner_team === 'team2')
+
+  function avg(arr: EsportsGameStat[], fn: (r: EsportsGameStat) => number | null): number | null {
+    const vals = arr.map(fn).filter((v): v is number => v != null)
+    return vals.length > 0 ? vals.reduce((a, b) => a + b, 0) / vals.length : null
+  }
+  const killDiff = (r: EsportsGameStat) => (r.team1_kills != null && r.team2_kills != null) ? r.team1_kills - r.team2_kills : null
+  const towerDiff = (r: EsportsGameStat) => (r.team1_towers != null && r.team2_towers != null) ? r.team1_towers - r.team2_towers : null
+  const objRate = (r: EsportsGameStat) => {
+    const mine = (r.team1_dragons ?? 0) + (r.team1_barons ?? 0)
+    const theirs = (r.team2_dragons ?? 0) + (r.team2_barons ?? 0)
+    const total = mine + theirs
+    return total > 0 ? mine / total : null
+  }
+
+  const winDurations = wins.map(r => r.duration_seconds).filter((d): d is number => d != null)
+  const avgWinDurationMin = winDurations.length > 0 ? winDurations.reduce((a, b) => a + b, 0) / winDurations.length / 60 : null
+  const subThirtyWinRate = winDurations.length > 0 ? winDurations.filter(d => d <= 1800).length / winDurations.length : null
+  const lossDurations = losses.map(r => r.duration_seconds).filter((d): d is number => d != null)
+  const avgLossDurationMin = lossDurations.length > 0 ? lossDurations.reduce((a, b) => a + b, 0) / lossDurations.length / 60 : null
+
+  // 멘탈능력: 초반 마일스톤(퍼스트 1킬/타워/드래곤/내셔/5킬/10킬)로 "누가 초반 주도권을 쥐었는지" 판정
+  let earlyLeadCount = 0, earlyBehindCount = 0, chokeCount = 0, comebackCount = 0
+  for (const r of rows) {
+    const milestones = [r.first_blood_team, r.first_tower_team, r.first_dragon_team, r.first_baron_team, r.fifth_kill_team, r.tenth_kill_team]
+    let mine = 0, theirs = 0
+    for (const m of milestones) { if (m === 'team1') mine++; else if (m === 'team2') theirs++ }
+    if (mine === 0 && theirs === 0) continue // 마일스톤 미입력 세트는 판정 불가라 제외
+    const earlyLeader: NarrativeTeam | 'even' = mine > theirs ? 'team1' : theirs > mine ? 'team2' : 'even'
+    if (earlyLeader === 'team1') {
+      earlyLeadCount++
+      if (r.winner_team === 'team2') chokeCount++
+    } else if (earlyLeader === 'team2') {
+      earlyBehindCount++
+      if (r.winner_team === 'team1') comebackCount++
+    }
+  }
+  const chokeRate = earlyLeadCount > 0 ? chokeCount / earlyLeadCount : null
+  const comebackRate = earlyBehindCount > 0 ? comebackCount / earlyBehindCount : null
+
+  const laningRate = n > 0 ? (fb + fifth + fdragon) / (3 * n) : 0
+  const avgKillDiffAll = avg(rows, killDiff)
+  const avgTowerDiffAll = avg(rows, towerDiff)
+  const avgObjRateAll = avg(rows, objRate)
+
+  const winCloseScore = avgWinDurationMin != null ? clampScore(50 + (30 - avgWinDurationMin) * 3) : null
+  const lossCloseScore = avgLossDurationMin != null ? clampScore(50 + (avgLossDurationMin - 30) * 3) : null
+  const closingScore = winCloseScore != null && lossCloseScore != null ? Math.round((winCloseScore + lossCloseScore) / 2)
+    : winCloseScore ?? lossCloseScore
+
+  const mentalScore = (earlyLeadCount > 0 || earlyBehindCount > 0)
+    ? clampScore(50 + (comebackRate ?? 0) * 30 - (chokeRate ?? 0) * 30)
+    : null
+
+  return {
+    n,
+    fbRate: rate(fb), fifthKillRate: rate(fifth), firstDragonRate: rate(fdragon), laningRate,
+    winTeamfightDiff: avg(wins, killDiff), lossTeamfightDiff: avg(losses, killDiff),
+    winMacroDiff: avg(wins, towerDiff), lossMacroDiff: avg(losses, towerDiff),
+    winObjRate: avg(wins, objRate), lossObjRate: avg(losses, objRate),
+    avgWinDurationMin, subThirtyWinRate, avgLossDurationMin,
+    winCount: wins.length, lossCount: losses.length,
+    earlyLeadCount, earlyBehindCount, chokeCount, comebackCount, chokeRate, comebackRate,
+    scores: {
+      laning: n > 0 ? rateToScore(laningRate) : null,
+      teamfight: diffToScore(avgKillDiffAll, 3),
+      macro: diffToScore(avgTowerDiffAll, 6),
+      objective: rateToScore(avgObjRateAll),
+      closing: closingScore,
+      mental: mentalScore,
+    },
+  }
+}
+
 function LeagueView({ code, label }: { code: string; label: string }) {
   const [teams, setTeams] = useState<EsportsTeam[]>([])
   const [events, setEvents] = useState<RawScheduleEvent[] | null>(null)
@@ -978,6 +1091,7 @@ function LeagueView({ code, label }: { code: string; label: string }) {
   const [expandedHistoryIdx, setExpandedHistoryIdx] = useState<number | null>(null)
   const [powerLoading, setPowerLoading] = useState(false)
   const [recentSetResults, setRecentSetResults] = useState<Record<string, boolean[]>>({})
+  const [abilityProfiles, setAbilityProfiles] = useState<Record<string, AbilityProfile>>({})
 
   // 팀 체급 점수 계산: 라이엇 GPR 공식(순차 Elo)을 리그 전체 경기에 시간순으로 적용
   async function loadPowerScores(teamsList: EsportsTeam[]) {
@@ -1035,6 +1149,13 @@ function LeagueView({ code, label }: { code: string; label: string }) {
         recentSets[t.id] = teamRows.slice(-5).map(s => s.winner_team === 'team1')
       }
       setRecentSetResults(recentSets)
+
+      // 능력치 프로필: 라인전/교전/운영/오브젝트/마무리 5개 축, 승패로 나눠서 계산
+      const profiles: Record<string, AbilityProfile> = {}
+      for (const t of teamsList) {
+        profiles[t.id] = computeAbilityProfile(rows.filter(s => s.team_id === t.id))
+      }
+      setAbilityProfiles(profiles)
     } finally {
       setPowerLoading(false)
     }
@@ -1232,6 +1353,24 @@ function LeagueView({ code, label }: { code: string; label: string }) {
                   {expanded && (
                     <div style={{ padding: '8px 8px', background: 'var(--bg-card)', borderRadius: 6, marginTop: 2, fontSize: 9 }}>
                       {teamLog.length > 1 && <RatingHistoryChart teamLog={teamLog} />}
+                      {(() => {
+                        const ap = abilityProfiles[t.id]
+                        if (!ap || ap.n === 0) return null
+                        const pct = (v: number | null) => v == null ? '-' : `${(v * 100).toFixed(0)}%`
+                        const signed = (v: number | null, digits = 1) => v == null ? '-' : `${v >= 0 ? '+' : ''}${v.toFixed(digits)}`
+                        const sc = (v: number | null) => v == null ? null : <b style={{ color: 'var(--gold)', background: 'var(--gold-bg)', border: '1px solid var(--gold-border)', borderRadius: 3, padding: '0px 4px', marginLeft: 4 }}>{v}</b>
+                        return (
+                          <div style={{ marginBottom: 8, padding: '6px 7px', background: 'var(--bg-elevated)', borderRadius: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                            <div style={{ fontWeight: 800, color: 'var(--text-secondary)' }}>능력치 프로필 <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>(n={ap.n}, 승 {ap.winCount}·패 {ap.lossCount})</span></div>
+                            <div>라인전{sc(ap.scores.laning)} <span style={{ color: 'var(--text-muted)' }}>· 퍼스트1킬 {pct(ap.fbRate)} · 5킬선취 {pct(ap.fifthKillRate)} · 퍼스트드래곤 {pct(ap.firstDragonRate)}</span></div>
+                            <div>교전능력{sc(ap.scores.teamfight)} <span style={{ color: 'var(--text-muted)' }}>이길 때 킬차</span> <b style={{ color: 'var(--gold)' }}>{signed(ap.winTeamfightDiff)}</b> <span style={{ color: 'var(--text-muted)' }}>· 질 때 킬차</span> <b style={{ color: 'var(--gold)' }}>{signed(ap.lossTeamfightDiff)}</b></div>
+                            <div>운영능력{sc(ap.scores.macro)} <span style={{ color: 'var(--text-muted)' }}>이길 때 타워차</span> <b style={{ color: 'var(--gold)' }}>{signed(ap.winMacroDiff)}</b> <span style={{ color: 'var(--text-muted)' }}>· 질 때 타워차</span> <b style={{ color: 'var(--gold)' }}>{signed(ap.lossMacroDiff)}</b></div>
+                            <div>오브젝트 관리{sc(ap.scores.objective)} <span style={{ color: 'var(--text-muted)' }}>이길 때 장악률</span> <b style={{ color: 'var(--gold)' }}>{pct(ap.winObjRate)}</b> <span style={{ color: 'var(--text-muted)' }}>· 질 때 장악률</span> <b style={{ color: 'var(--gold)' }}>{pct(ap.lossObjRate)}</b></div>
+                            <div>마무리능력{sc(ap.scores.closing)} <span style={{ color: 'var(--text-muted)' }}>평균 승리시간</span> <b style={{ color: 'var(--gold)' }}>{ap.avgWinDurationMin != null ? `${ap.avgWinDurationMin.toFixed(1)}분` : '-'}</b> <span style={{ color: 'var(--text-muted)' }}>· 30분내 승리</span> <b style={{ color: 'var(--gold)' }}>{pct(ap.subThirtyWinRate)}</b> <span style={{ color: 'var(--text-muted)' }}>· 패배 시 버틴 시간</span> <b style={{ color: 'var(--gold)' }}>{ap.avgLossDurationMin != null ? `${ap.avgLossDurationMin.toFixed(1)}분` : '-'}</b></div>
+                            <div>멘탈능력{sc(ap.scores.mental)} <span style={{ color: 'var(--text-muted)' }}>초반 주도권 잡고 진 비율</span> <b style={{ color: 'var(--gold)' }}>{pct(ap.chokeRate)}</b> <span style={{ color: 'var(--text-muted)' }}>(n={ap.earlyLeadCount})</span> <span style={{ color: 'var(--text-muted)' }}>· 밀리다 이긴 비율(역전승)</span> <b style={{ color: 'var(--gold)' }}>{pct(ap.comebackRate)}</b> <span style={{ color: 'var(--text-muted)' }}>(n={ap.earlyBehindCount})</span></div>
+                          </div>
+                        )
+                      })()}
                       <div style={{ color: 'var(--text-muted)', marginBottom: 6 }}>
                         GPR 기본값 {(t.gpr_score ?? 50).toFixed(1)}점에서 시작 → 아래 경기를 시간순으로 하나씩 반영(순차 Elo)하며 최종 {ps?.powerScore.toFixed(1)}점까지 도달. 이겼으면 상대가 아무리 약해도 항상 조금은 오르고, 졌으면 항상 조금은 내려갑니다. 항목을 누르면 자세한 사유가 나옵니다.
                       </div>
