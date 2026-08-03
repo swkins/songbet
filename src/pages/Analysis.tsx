@@ -222,16 +222,6 @@ function UpcomingRow({ event, events, teams, powerScores }: {
   const isTomorrow = dayjs(event.startTime).isSame(dayjs().add(1, 'day'), 'day')
   const dateBadge = isToday ? '오늘' : isTomorrow ? '내일' : null
 
-  // BO3 한정 지정 마켓 2종의 배당 계산기 상태 (강팀 일반승/약팀+1.5, 강팀-1.5/약팀 일반승)
-  const [pickOdds, setPickOdds] = useState<Record<string, string>>({})
-  function setPickOdd(key: string, v: string) { setPickOdds(prev => ({ ...prev, [key]: v })) }
-  const pickRows = bestOf === 3 ? [
-    { key: 'favML', label: `강팀(${favLabel}) 일반승`, prob: outcome.favWinProb },
-    { key: 'dogSpread', label: `약팀(${underLabel}) +1.5`, prob: outcome.underAtLeastOneGameProb },
-    { key: 'favSpread', label: `강팀(${favLabel}) -1.5`, prob: outcome.favSweepProb },
-    { key: 'dogML', label: `약팀(${underLabel}) 일반승`, prob: outcome.underWinProb },
-  ] : []
-
   return (
     <div style={{ background: 'var(--bg-elevated)', borderRadius: 6, border: dateBadge ? '1px solid var(--gold-border)' : '1px solid transparent' }}>
       <div onClick={() => setExpanded(v => !v)} style={{ padding: '8px 8px', cursor: 'pointer' }}>
@@ -251,52 +241,16 @@ function UpcomingRow({ event, events, teams, powerScores }: {
           {usePower && powerA && powerB
             ? <div style={{ marginTop: 2 }}>파워랭킹 기반 · {teamA?.code || teamA?.name} {powerA.powerScore.toFixed(1)} : {powerB.powerScore.toFixed(1)} {teamB?.code || teamB?.name}</div>
             : <div style={{ marginTop: 2 }}>파워랭킹 데이터 부족 · lolesports 전적 기반 폴백</div>}
-          {bestOf > 1 && (
-            <div style={{ marginTop: 4, paddingTop: 4, borderTop: '1px dashed var(--border)', display: 'flex', flexDirection: 'column', gap: 1 }}>
-              <div>강팀({favLabel}) 일반승 <b>{(outcome.favWinProb * 100).toFixed(0)}%</b> vs 약팀({underLabel}) 1세트+ 확보 <b>{(outcome.underAtLeastOneGameProb * 100).toFixed(0)}%</b></div>
-              <div>강팀({favLabel}) {outcome.sweepScore} 완승 <b>{(outcome.favSweepProb * 100).toFixed(0)}%</b> vs 약팀({underLabel}) 일반승 <b>{(outcome.underWinProb * 100).toFixed(0)}%</b></div>
+          {bestOf === 3 && (
+            <div style={{ marginTop: 4, paddingTop: 4, borderTop: '1px dashed var(--border)', display: 'flex', flexDirection: 'column', gap: 2, fontWeight: 700, color: 'var(--text-secondary)' }}>
+              <div>{underLabel} 1.5 <span style={{ color: 'var(--gold)' }}>{(outcome.underAtLeastOneGameProb * 100).toFixed(0)}%</span> &nbsp; {favLabel} <span style={{ color: 'var(--gold)' }}>{(outcome.favWinProb * 100).toFixed(0)}%</span></div>
+              <div>{favLabel} -1.5 <span style={{ color: 'var(--gold)' }}>{(outcome.favSweepProb * 100).toFixed(0)}%</span> &nbsp; {underLabel} <span style={{ color: 'var(--gold)' }}>{(outcome.underWinProb * 100).toFixed(0)}%</span></div>
             </div>
           )}
         </div>
       </div>
       {expanded && (
         <div style={{ padding: '0 8px 8px 8px' }}>
-          {pickRows.length > 0 && (
-            <>
-              <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 6 }}>
-                BO3 지정 마켓 · 실제로 보이는 배당을 넣으면 모델 확률 대비 엣지를 계산해드려요. (핸디캡 ±1.5는 스윕 여부 기준)
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 10 }}>
-                {pickRows.map(pr => {
-                  const odds = parseFloat(pickOdds[pr.key] ?? '')
-                  const value = computeOddsValue(pr.prob, odds)
-                  return (
-                    <div key={pr.key} style={{
-                      display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, padding: '6px 8px', borderRadius: 6,
-                      background: value?.isValue ? 'var(--green-bg)' : 'var(--bg-card)',
-                      border: value?.isValue ? '1px solid var(--green-border)' : '1px solid transparent',
-                    }}>
-                      <span style={{ flex: 1, fontWeight: 700 }}>{pr.label}</span>
-                      <span style={{ width: 46, textAlign: 'right', color: 'var(--gold)', fontWeight: 800, flexShrink: 0 }}>{(pr.prob * 100).toFixed(1)}%</span>
-                      <input
-                        value={pickOdds[pr.key] ?? ''}
-                        onChange={e => setPickOdd(pr.key, e.target.value)}
-                        onClick={e => e.stopPropagation()}
-                        placeholder="배당"
-                        inputMode="decimal"
-                        style={{ width: 54, fontSize: 11, padding: '3px 5px', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-primary)', textAlign: 'right', flexShrink: 0 }}
-                      />
-                      {value && (
-                        <span style={{ width: 62, textAlign: 'right', fontSize: 10, fontWeight: 700, color: value.isValue ? 'var(--green)' : 'var(--text-muted)', flexShrink: 0 }}>
-                          {value.isValue ? `+EV ${value.edgePct.toFixed(1)}%` : `${value.edgePct.toFixed(1)}%`}
-                        </span>
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
-            </>
-          )}
           <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 6 }}>
             배당을 입력하면 모델 확률 대비 기대값(EV)을 보여드려요. EV가 양수(초록)면 베팅 가치가 있다는 뜻입니다.
           </div>
