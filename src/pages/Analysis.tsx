@@ -158,13 +158,17 @@ function RecentMatchesPanel({ leagueCode, events, loading, error, teams, onCreat
             }
             const teamScore = resolved.isA ? m.scoreA : m.scoreB
             const oppScore = resolved.isA ? m.scoreB : m.scoreA
+            const codeA = m.codeA || m.teamA
+            const codeB = m.codeB || m.teamB
+            const oppCodeForMatch = resolved.isA ? m.codeB : m.codeA
             const recordCount = (recordedByTeam[resolved.teamId] ?? []).filter(s => {
               const d = dayjs(s.match_start_time)
               const inRange = d.isAfter(dayjs(m.startTime).subtract(1, 'day')) && d.isBefore(dayjs(m.startTime).add(1, 'day'))
-              return inRange && (teamNameMatches({ name: s.team2_name }, resolved.opponent) || teamNameMatches({ name: resolved.opponent }, s.team2_name))
+              return inRange && (
+                (oppCodeForMatch && teamNameMatches({ name: s.team2_name }, oppCodeForMatch)) ||
+                teamNameMatches({ name: s.team2_name }, resolved.opponent) || teamNameMatches({ name: resolved.opponent }, s.team2_name)
+              )
             }).length
-            const codeA = m.codeA || m.teamA
-            const codeB = m.codeB || m.teamB
             return (
               <RecentMatchRow key={m.id} teamId={resolved.teamId} teamName={resolved.teamName}
                 game={{ opponent: resolved.opponent, teamScore, oppScore, startTime: m.startTime, bestOf: m.bestOf }}
@@ -473,7 +477,16 @@ function RecentMatchRow({ teamId, teamName, game, displayA, displayB, scoreA, sc
 
   // 상대팀도 우리가 추적 중인 팀이면(예: DK도 esports_teams에 있으면) 그쪽 team_id도 찾아둔다.
   // 세트 저장 시 양쪽에 다 기록해야 상대팀 체급 점수에도 이 경기가 반영된다.
-  const opponentTeamId = useMemo(() => teams.find(t => teamNameMatches(t, game.opponent))?.id ?? null, [teams, game.opponent])
+  // lolesports API가 간혹 이름(name) 필드를 신뢰할 수 없게 내려줄 때가 있어(예: 두 팀의 name이 같게 나옴),
+  // 코드(약자)가 있으면 코드를 먼저 신뢰하고, 혹시라도 우리 팀 자신과 매칭되면(자기 자신과는 경기를 할 수 없으니)
+  // 데이터 이상으로 보고 매칭을 버린다.
+  const opponentTeamId = useMemo(() => {
+    const found = teams.find(t =>
+      (opponentCode && teamNameMatches(t, opponentCode)) || teamNameMatches(t, game.opponent)
+    )
+    if (!found || found.id === teamId) return null
+    return found.id
+  }, [teams, game.opponent, opponentCode, teamId])
   // team2_name을 저장할 때 매번 다른 원문 표기(대소문자/띄어쓰기 차이)를 그대로 쓰면 같은 상대가
   // 다른 문자열로 여러 번 저장되어 중복 데이터가 생긴다. 추적 중인 팀이면 항상 정식명으로 통일해서 저장한다.
   const canonicalOpponentName = teams.find(t => t.id === opponentTeamId)?.name ?? game.opponent
