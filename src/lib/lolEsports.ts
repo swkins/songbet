@@ -176,24 +176,42 @@ const TEAM_CODE_ALIASES: Record<string, string> = {
   fx: 'fluxo w7m', fur: 'furia', kyd: 'keyd stars', lou: 'loud', pain: 'pain gaming', red: 'red canids', lev: 'leviatán', los: 'los',
 }
 
+// 짧은 문자열(팀 코드류)이 다른 팀명 "중간"에 우연히 걸리는 걸 막기 위한 단어 경계 포함 검사.
+// 예: "NS"가 "DNS Challengers"의 "dNS" 부분에 걸려서 잘못 매칭되는 사고를 방지.
+function wordBoundaryIncludes(haystack: string, needle: string): boolean {
+  if (!needle) return false
+  const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return new RegExp(`(^|[^a-z0-9])${escaped}($|[^a-z0-9])`).test(haystack)
+}
+
 export function teamNameMatches(t: { name: string; code?: string | null }, query: string): boolean {
   const qRaw = query.trim().toLowerCase()
   if (!qRaw) return false
   const nRaw = (t.name ?? '').trim().toLowerCase()
   const cRaw = (t.code ?? '').trim().toLowerCase()
   if (!nRaw && !cRaw) return false
-  if (nRaw === qRaw || cRaw === qRaw || nRaw.includes(qRaw) || qRaw.includes(nRaw)) return true
 
-  // 공백/대소문자/구두점 차이는 정규화해서 다시 비교 ("WeiboGaming" ↔ "Weibo Gaming" 등)
+  // 완전 일치는 항상 가장 먼저, 가장 신뢰도 높게 매칭
+  if (nRaw === qRaw || cRaw === qRaw) return true
+
   const q = normalizeTeamStr(qRaw)
   const n = normalizeTeamStr(nRaw)
   const c = normalizeTeamStr(cRaw)
-  if (n === q || c === q || n.includes(q) || q.includes(n)) return true
+  if (n === q || c === q) return true
+
+  // 4자 이하의 짧은 문자열(코드류)은 부분 포함 매칭을 하면 오탐(예: "NS" ⊂ "DNS")이 생기기 쉬우므로
+  // 원본 표기에서 단어 경계가 있을 때만 포함 매칭을 허용한다.
+  if (qRaw.length <= 4) {
+    if (wordBoundaryIncludes(nRaw, qRaw) || wordBoundaryIncludes(cRaw, qRaw)) return true
+  } else {
+    if (nRaw.includes(qRaw) || qRaw.includes(nRaw) || n.includes(q) || q.includes(n)) return true
+  }
 
   const alias = TEAM_CODE_ALIASES[qRaw] ?? TEAM_CODE_ALIASES[q]
   if (alias) {
     const na = normalizeTeamStr(alias)
-    if (n === na || n.includes(na) || na.includes(n)) return true
+    if (n === na) return true
+    if (qRaw.length > 4 && (n.includes(na) || na.includes(n))) return true
   }
   return false
 }
