@@ -1177,9 +1177,14 @@ function predictSetStats(favAp: AbilityProfile | undefined, dogAp: AbilityProfil
 function LeagueView({ code, label }: { code: string; label: string }) {
   // LCK CL은 기존 LCK/LPL 등과 달리 "글로벌 파워랭킹(GPR)" 기반 리그가 아니라서, 팀에 우연히 gpr_score가
   // 들어있더라도 무시하고 항상 중립값 50점에서 시작한다.
+  // 글로벌 파워랭킹(GPR)이 실제 체감 실력차보다 너무 크게 벌어져 나온다는 피드백 반영:
+  // 방향(누가 더 강한지)은 그대로 살리되, 50점 중립을 기준으로 격차 자체를 절반 정도로 압축해서 시작한다.
+  // 이후 직접 입력한 경기 데이터가 쌓이면 순차 Elo가 그 위에서 실제 결과에 따라 다시 벌리거나 좁힌다.
+  const GPR_COMPRESSION = 0.45
   function baselineGpr(t: EsportsTeam): number {
     if (code === 'LCKCL') return 50
-    return t.gpr_score ?? 50
+    const raw = t.gpr_score ?? 50
+    return 50 + (raw - 50) * GPR_COMPRESSION
   }
   const [teams, setTeams] = useState<EsportsTeam[]>([])
   const [events, setEvents] = useState<RawScheduleEvent[] | null>(null)
