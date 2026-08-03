@@ -194,8 +194,9 @@ function toBookOdds(prob: number, marginPct = 8): string {
   return odds.toFixed(2)
 }
 
-function UpcomingRow({ event, events, teams, powerScores }: {
+function UpcomingRow({ event, events, teams, powerScores, abilityProfiles }: {
   event: RawScheduleEvent; events: RawScheduleEvent[]; teams: EsportsTeam[]; powerScores: Record<string, TeamPowerScore>
+  abilityProfiles: Record<string, AbilityProfile>
 }) {
   const matchTeams = event.match?.teams ?? []
   const teamA = matchTeams[0], teamB = matchTeams[1]
@@ -221,6 +222,14 @@ function UpcomingRow({ event, events, teams, powerScores }: {
   const favLabel = outcome.favIsA ? (teamA?.code || teamA?.name) : (teamB?.code || teamB?.name)
   const underLabel = outcome.favIsA ? (teamB?.code || teamB?.name) : (teamA?.code || teamA?.name)
 
+  // 세트당 예상 게임시간·총 킬수: 강팀 승리 시 스탯과 약팀 패배 시 스탯을 강팀 승률만큼,
+  // 약팀 승리 시 스탯과 강팀 패배 시 스탯을 약팀 승률만큼 가중평균
+  const favId = outcome.favIsA ? idA : idB
+  const dogId = outcome.favIsA ? idB : idA
+  const favAp = favId ? abilityProfiles[favId] : undefined
+  const dogAp = dogId ? abilityProfiles[dogId] : undefined
+  const setPrediction = predictSetStats(favAp, dogAp, outcome.favIsA ? p : 1 - p)
+
   const isToday = dayjs(event.startTime).isSame(dayjs(), 'day')
   const isTomorrow = dayjs(event.startTime).isSame(dayjs().add(1, 'day'), 'day')
   const dateBadge = isToday ? '오늘' : isTomorrow ? '내일' : null
@@ -242,6 +251,11 @@ function UpcomingRow({ event, events, teams, powerScores }: {
         {usePower && powerA && powerB
           ? <div style={{ marginTop: 2 }}>파워랭킹 기반 · {teamA?.code || teamA?.name} {powerA.powerScore.toFixed(1)} : {powerB.powerScore.toFixed(1)} {teamB?.code || teamB?.name}</div>
           : <div style={{ marginTop: 2 }}>파워랭킹 데이터 부족 · lolesports 전적 기반 폴백</div>}
+        {(setPrediction.duration != null || setPrediction.totalKills != null) && (
+          <div style={{ marginTop: 2 }}>
+            세트당 예상 {setPrediction.duration != null ? `게임시간 ${setPrediction.duration.toFixed(1)}분` : ''}{setPrediction.duration != null && setPrediction.totalKills != null ? ' · ' : ''}{setPrediction.totalKills != null ? `총 킬수 ${setPrediction.totalKills.toFixed(1)}` : ''}
+          </div>
+        )}
         {bestOf === 3 && (
           <div style={{ marginTop: 4, paddingTop: 4, borderTop: '1px dashed var(--border)', display: 'flex', flexDirection: 'column', gap: 2, fontWeight: 700, color: 'var(--text-secondary)' }}>
             <div>{underLabel} 1.5 <span style={{ color: 'var(--gold)' }}>{toBookOdds(outcome.underAtLeastOneGameProb)}</span><span style={{ color: 'var(--text-muted)', fontWeight: 500 }}> ({(outcome.underAtLeastOneGameProb * 100).toFixed(0)}%)</span> &nbsp; {favLabel} <span style={{ color: 'var(--gold)' }}>{toBookOdds(outcome.favWinProb)}</span><span style={{ color: 'var(--text-muted)', fontWeight: 500 }}> ({(outcome.favWinProb * 100).toFixed(0)}%)</span></div>
@@ -253,8 +267,9 @@ function UpcomingRow({ event, events, teams, powerScores }: {
   )
 }
 
-function UpcomingPanel({ events, loading, error, teams, powerScores }: {
+function UpcomingPanel({ events, loading, error, teams, powerScores, abilityProfiles }: {
   events: RawScheduleEvent[] | null; loading: boolean; error: boolean; teams: EsportsTeam[]; powerScores: Record<string, TeamPowerScore>
+  abilityProfiles: Record<string, AbilityProfile>
 }) {
   const upcoming = useMemo(() => {
     if (!events) return []
@@ -272,7 +287,7 @@ function UpcomingPanel({ events, loading, error, teams, powerScores }: {
       {!loading && upcoming.length === 0 && !error && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0' }}>예정된 경기가 없습니다</div>}
       {!loading && upcoming.length > 0 && events && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {upcoming.map(e => <UpcomingRow key={e.match!.id ?? e.id} event={e} events={events} teams={teams} powerScores={powerScores} />)}
+          {upcoming.map(e => <UpcomingRow key={e.match!.id ?? e.id} event={e} events={events} teams={teams} powerScores={powerScores} abilityProfiles={abilityProfiles} />)}
         </div>
       )}
     </div>
@@ -974,11 +989,13 @@ interface AbilityProfile {
   winObjRate: number | null; lossObjRate: number | null
   avgWinDurationMin: number | null; subThirtyWinRate: number | null
   avgLossDurationMin: number | null // 패배 시 버티는 능력: 질 때도 오래 끌수록(=쉽게 안 무너질수록) 높은 값
+  avgTotalKillsWin: number | null; avgTotalKillsLoss: number | null // 호전성: 이길 때/질 때 양팀 합산 킬 수
   winCount: number; lossCount: number
   // 멘탈능력: 초반 주도권을 쥐고도 진 비율(초킹)과, 밀리고도 이긴 비율(역전승)
   earlyLeadCount: number; earlyBehindCount: number
   chokeCount: number; comebackCount: number
   chokeRate: number | null; comebackRate: number | null
+  playstyle: 'teamfight' | 'macro' | 'balanced' | null // 교전형/운영형/밸런스형
   scores: {
     laning: number | null; teamfight: number | null; macro: number | null
     objective: number | null; closing: number | null; mental: number | null
@@ -1012,6 +1029,7 @@ function computeAbilityProfile(rows: EsportsGameStat[]): AbilityProfile {
     return vals.length > 0 ? vals.reduce((a, b) => a + b, 0) / vals.length : null
   }
   const killDiff = (r: EsportsGameStat) => (r.team1_kills != null && r.team2_kills != null) ? r.team1_kills - r.team2_kills : null
+  const totalKills = (r: EsportsGameStat) => (r.team1_kills != null && r.team2_kills != null) ? r.team1_kills + r.team2_kills : null
   const towerDiff = (r: EsportsGameStat) => (r.team1_towers != null && r.team2_towers != null) ? r.team1_towers - r.team2_towers : null
   const objRate = (r: EsportsGameStat) => {
     const mine = (r.team1_dragons ?? 0) + (r.team1_barons ?? 0)
@@ -1025,6 +1043,8 @@ function computeAbilityProfile(rows: EsportsGameStat[]): AbilityProfile {
   const subThirtyWinRate = winDurations.length > 0 ? winDurations.filter(d => d <= 1800).length / winDurations.length : null
   const lossDurations = losses.map(r => r.duration_seconds).filter((d): d is number => d != null)
   const avgLossDurationMin = lossDurations.length > 0 ? lossDurations.reduce((a, b) => a + b, 0) / lossDurations.length / 60 : null
+  const avgTotalKillsWin = avg(wins, totalKills)
+  const avgTotalKillsLoss = avg(losses, totalKills)
 
   // 멘탈능력: 초반 마일스톤(퍼스트 1킬/타워/드래곤/내셔/5킬/10킬)로 "누가 초반 주도권을 쥐었는지" 판정
   let earlyLeadCount = 0, earlyBehindCount = 0, chokeCount = 0, comebackCount = 0
@@ -1059,6 +1079,19 @@ function computeAbilityProfile(rows: EsportsGameStat[]): AbilityProfile {
     ? clampScore(50 + (comebackRate ?? 0) * 30 - (chokeRate ?? 0) * 30)
     : null
 
+  const teamfightScore = diffToScore(avgKillDiffAll, 3)
+  const macroScore = diffToScore(avgTowerDiffAll, 6)
+  // 교전형/운영형: 이 팀의 전적을 "결정짓는" 축이 킬 격차 쪽인지 타워 격차 쪽인지로 판단.
+  // (두 점수 다 50 중립 기준 같은 척도라, 50에서 얼마나 멀리 떨어져 있는지를 비교하면 됨)
+  let playstyle: AbilityProfile['playstyle'] = null
+  if (teamfightScore != null && macroScore != null) {
+    const tfMag = Math.abs(teamfightScore - 50)
+    const macroMag = Math.abs(macroScore - 50)
+    if (tfMag > macroMag * 1.15) playstyle = 'teamfight'
+    else if (macroMag > tfMag * 1.15) playstyle = 'macro'
+    else playstyle = 'balanced'
+  }
+
   return {
     n,
     fbRate: rate(fb), fifthKillRate: rate(fifth), firstDragonRate: rate(fdragon), laningRate,
@@ -1066,16 +1099,40 @@ function computeAbilityProfile(rows: EsportsGameStat[]): AbilityProfile {
     winMacroDiff: avg(wins, towerDiff), lossMacroDiff: avg(losses, towerDiff),
     winObjRate: avg(wins, objRate), lossObjRate: avg(losses, objRate),
     avgWinDurationMin, subThirtyWinRate, avgLossDurationMin,
+    avgTotalKillsWin, avgTotalKillsLoss,
     winCount: wins.length, lossCount: losses.length,
     earlyLeadCount, earlyBehindCount, chokeCount, comebackCount, chokeRate, comebackRate,
+    playstyle,
     scores: {
       laning: n > 0 ? rateToScore(laningRate) : null,
-      teamfight: diffToScore(avgKillDiffAll, 3),
-      macro: diffToScore(avgTowerDiffAll, 6),
+      teamfight: teamfightScore,
+      macro: macroScore,
       objective: rateToScore(avgObjRateAll),
       closing: closingScore,
       mental: mentalScore,
     },
+  }
+}
+
+// 세트당 예상 게임시간·총 킬수를 강팀/약팀 능력치 프로필로 추정한다.
+// 강팀이 이길 확률(pFav)만큼 "강팀 승리 시 스탯 + 약팀 패배 시 스탯"의 평균에 가중치를 주고,
+// 약팀이 이길 확률(1-pFav)만큼 "약팀 승리 시 스탯 + 강팀 패배 시 스탯"의 평균에 가중치를 준다.
+// (어느 한쪽 데이터가 없으면 있는 쪽만 쓰고, 둘 다 없으면 그 갈래는 제외)
+function predictSetStats(favAp: AbilityProfile | undefined, dogAp: AbilityProfile | undefined, pFav: number): { duration: number | null; totalKills: number | null } {
+  function branchAvg(a: number | null | undefined, b: number | null | undefined): number | null {
+    const av = a ?? null, bv = b ?? null
+    if (av != null && bv != null) return (av + bv) / 2
+    return av ?? bv ?? null
+  }
+  function blend(favWin: number | null | undefined, dogLoss: number | null | undefined, dogWin: number | null | undefined, favLoss: number | null | undefined): number | null {
+    const favWinBranch = branchAvg(favWin, dogLoss)
+    const dogWinBranch = branchAvg(dogWin, favLoss)
+    if (favWinBranch != null && dogWinBranch != null) return pFav * favWinBranch + (1 - pFav) * dogWinBranch
+    return favWinBranch ?? dogWinBranch ?? null
+  }
+  return {
+    duration: blend(favAp?.avgWinDurationMin, dogAp?.avgLossDurationMin, dogAp?.avgWinDurationMin, favAp?.avgLossDurationMin),
+    totalKills: blend(favAp?.avgTotalKillsWin, dogAp?.avgTotalKillsLoss, dogAp?.avgTotalKillsWin, favAp?.avgTotalKillsLoss),
   }
 }
 
@@ -1298,7 +1355,7 @@ function LeagueView({ code, label }: { code: string; label: string }) {
           <RecentMatchesPanel leagueCode={code} events={combinedEvents} loading={eventsLoading} error={eventsError} teams={teams} onCreateTeam={ensureTeamExists} />
         </div>
         <div style={{ flex: '1 1 320px', minWidth: 280 }}>
-          <UpcomingPanel events={combinedEvents} loading={eventsLoading} error={eventsError} teams={teams} powerScores={powerScores} />
+          <UpcomingPanel events={combinedEvents} loading={eventsLoading} error={eventsError} teams={teams} powerScores={powerScores} abilityProfiles={abilityProfiles} />
         </div>
         <div style={{ flex: '1 1 280px', minWidth: 260 }}>
           <div className="card">
@@ -1365,14 +1422,20 @@ function LeagueView({ code, label }: { code: string; label: string }) {
                         const pct = (v: number | null) => v == null ? '-' : `${(v * 100).toFixed(0)}%`
                         const signed = (v: number | null, digits = 1) => v == null ? '-' : `${v >= 0 ? '+' : ''}${v.toFixed(digits)}`
                         const sc = (v: number | null) => v == null ? null : <b style={{ color: 'var(--gold)', background: 'var(--gold-bg)', border: '1px solid var(--gold-border)', borderRadius: 3, padding: '0px 4px', marginLeft: 4 }}>{v}</b>
+                        const styleLabel = ap.playstyle === 'teamfight' ? '⚔️ 교전형' : ap.playstyle === 'macro' ? '🛡️ 운영형' : ap.playstyle === 'balanced' ? '⚖️ 밸런스형' : null
                         return (
                           <div style={{ marginBottom: 8, padding: '6px 7px', background: 'var(--bg-elevated)', borderRadius: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                            <div style={{ fontWeight: 800, color: 'var(--text-secondary)' }}>능력치 프로필 <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>(n={ap.n}, 승 {ap.winCount}·패 {ap.lossCount})</span></div>
+                            <div style={{ fontWeight: 800, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                              능력치 프로필 <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>(n={ap.n}, 승 {ap.winCount}·패 {ap.lossCount})</span>
+                              {styleLabel && <span style={{ fontSize: 9, fontWeight: 800, color: 'var(--gold)', background: 'var(--gold-bg)', border: '1px solid var(--gold-border)', borderRadius: 4, padding: '1px 6px' }}>{styleLabel}</span>}
+                            </div>
+                            <div>평균 게임시간 <span style={{ color: 'var(--text-muted)' }}>승리 시</span> <b style={{ color: 'var(--gold)' }}>{ap.avgWinDurationMin != null ? `${ap.avgWinDurationMin.toFixed(1)}분` : '-'}</b> <span style={{ color: 'var(--text-muted)' }}>· 패배 시</span> <b style={{ color: 'var(--gold)' }}>{ap.avgLossDurationMin != null ? `${ap.avgLossDurationMin.toFixed(1)}분` : '-'}</b></div>
+                            <div>호전성(양팀 합산 평균 킬) <span style={{ color: 'var(--text-muted)' }}>승리 시</span> <b style={{ color: 'var(--gold)' }}>{ap.avgTotalKillsWin != null ? ap.avgTotalKillsWin.toFixed(1) : '-'}</b> <span style={{ color: 'var(--text-muted)' }}>· 패배 시</span> <b style={{ color: 'var(--gold)' }}>{ap.avgTotalKillsLoss != null ? ap.avgTotalKillsLoss.toFixed(1) : '-'}</b></div>
                             <div>라인전{sc(ap.scores.laning)} <span style={{ color: 'var(--text-muted)' }}>· 퍼스트1킬 {pct(ap.fbRate)} · 5킬선취 {pct(ap.fifthKillRate)} · 퍼스트드래곤 {pct(ap.firstDragonRate)}</span></div>
                             <div>교전능력{sc(ap.scores.teamfight)} <span style={{ color: 'var(--text-muted)' }}>이길 때 킬차</span> <b style={{ color: 'var(--gold)' }}>{signed(ap.winTeamfightDiff)}</b> <span style={{ color: 'var(--text-muted)' }}>· 질 때 킬차</span> <b style={{ color: 'var(--gold)' }}>{signed(ap.lossTeamfightDiff)}</b></div>
                             <div>운영능력{sc(ap.scores.macro)} <span style={{ color: 'var(--text-muted)' }}>이길 때 타워차</span> <b style={{ color: 'var(--gold)' }}>{signed(ap.winMacroDiff)}</b> <span style={{ color: 'var(--text-muted)' }}>· 질 때 타워차</span> <b style={{ color: 'var(--gold)' }}>{signed(ap.lossMacroDiff)}</b></div>
                             <div>오브젝트 관리{sc(ap.scores.objective)} <span style={{ color: 'var(--text-muted)' }}>이길 때 장악률</span> <b style={{ color: 'var(--gold)' }}>{pct(ap.winObjRate)}</b> <span style={{ color: 'var(--text-muted)' }}>· 질 때 장악률</span> <b style={{ color: 'var(--gold)' }}>{pct(ap.lossObjRate)}</b></div>
-                            <div>마무리능력{sc(ap.scores.closing)} <span style={{ color: 'var(--text-muted)' }}>평균 승리시간</span> <b style={{ color: 'var(--gold)' }}>{ap.avgWinDurationMin != null ? `${ap.avgWinDurationMin.toFixed(1)}분` : '-'}</b> <span style={{ color: 'var(--text-muted)' }}>· 30분내 승리</span> <b style={{ color: 'var(--gold)' }}>{pct(ap.subThirtyWinRate)}</b> <span style={{ color: 'var(--text-muted)' }}>· 패배 시 버틴 시간</span> <b style={{ color: 'var(--gold)' }}>{ap.avgLossDurationMin != null ? `${ap.avgLossDurationMin.toFixed(1)}분` : '-'}</b></div>
+                            <div>마무리능력{sc(ap.scores.closing)} <span style={{ color: 'var(--text-muted)' }}>30분내 승리</span> <b style={{ color: 'var(--gold)' }}>{pct(ap.subThirtyWinRate)}</b></div>
                             <div>멘탈능력{sc(ap.scores.mental)} <span style={{ color: 'var(--text-muted)' }}>초반 주도권 잡고 진 비율</span> <b style={{ color: 'var(--gold)' }}>{pct(ap.chokeRate)}</b> <span style={{ color: 'var(--text-muted)' }}>(n={ap.earlyLeadCount})</span> <span style={{ color: 'var(--text-muted)' }}>· 밀리다 이긴 비율(역전승)</span> <b style={{ color: 'var(--gold)' }}>{pct(ap.comebackRate)}</b> <span style={{ color: 'var(--text-muted)' }}>(n={ap.earlyBehindCount})</span></div>
                           </div>
                         )
