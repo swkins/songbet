@@ -418,6 +418,13 @@ function GameStatCard({ stat, teamName, onDelete, onEdit }: { stat: EsportsGameS
   }
   const narrative = classifyGameNarrative(input)
   const winScore = computeBothSidesPerfection(input)
+  // 입력할 때 진영을 바꿔서(side_swapped) 저장한 세트면, 요약도 그때 보던 순서(왼쪽=진영변경 후 왼쪽 팀) 그대로 보여준다.
+  const sw = stat.side_swapped
+  const leftName = sw ? stat.team2_name : teamName
+  const rightName = sw ? teamName : stat.team2_name
+  const leftScore = sw ? winScore.team2 : winScore.team1
+  const rightScore = sw ? winScore.team1 : winScore.team2
+  const pair = (a: number | null, b: number | null) => sw ? `${b ?? '-'}:${a ?? '-'}` : `${a ?? '-'}:${b ?? '-'}`
   return (
     <div style={{ background: 'var(--bg-elevated)', borderRadius: 6, padding: '8px 10px', fontSize: 10 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
@@ -442,10 +449,10 @@ function GameStatCard({ stat, teamName, onDelete, onEdit }: { stat: EsportsGameS
         </div>
       </div>
       <div style={{ color: 'var(--text-secondary)', marginBottom: 4, lineHeight: 1.6 }}>
-        킬 {stat.team1_kills ?? '-'}:{stat.team2_kills ?? '-'} · 내셔 {stat.team1_barons ?? '-'}:{stat.team2_barons ?? '-'} · 드래곤 {stat.team1_dragons ?? '-'}:{stat.team2_dragons ?? '-'} · 타워 {stat.team1_towers ?? '-'}:{stat.team2_towers ?? '-'} · 억제기 {stat.team1_inhibitors ?? '-'}:{stat.team2_inhibitors ?? '-'}{stat.team1_gold != null ? ` · 골드 ${stat.team1_gold}k:${stat.team2_gold}k` : ''}
+        킬 {pair(stat.team1_kills, stat.team2_kills)} · 내셔 {pair(stat.team1_barons, stat.team2_barons)} · 드래곤 {pair(stat.team1_dragons, stat.team2_dragons)} · 타워 {pair(stat.team1_towers, stat.team2_towers)} · 억제기 {pair(stat.team1_inhibitors, stat.team2_inhibitors)}{stat.team1_gold != null ? ` · 골드 ${sw ? stat.team2_gold : stat.team1_gold}k:${sw ? stat.team1_gold : stat.team2_gold}k` : ''}
       </div>
       <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontWeight: 800, color: 'var(--gold)', background: 'var(--gold-bg)', border: '1px solid var(--gold-border)', borderRadius: 4, padding: '2px 6px', marginBottom: 4 }}>
-        플레이 점수 {winScore.team1} : {winScore.team2} <span style={{ fontWeight: 500, color: 'var(--text-muted)' }}>({teamName} : {stat.team2_name})</span>
+        플레이 점수 {leftScore} : {rightScore} <span style={{ fontWeight: 500, color: 'var(--text-muted)' }}>({leftName} : {rightName})</span>
       </div>
       <div style={{ color: 'var(--text-muted)', lineHeight: 1.4 }}>{narrative.detail}</div>
     </div>
@@ -708,29 +715,37 @@ function RecentMatchRow({ teamId, teamName, game, displayA, displayB, scoreA, sc
                 아래는 세트별 개별 비교입니다 (시리즈 전체를 평균내면 세트마다 다른 흐름이 뭉개져서, 세트 단위로 따로 계산했어요). 왼쪽 = {teamName}, 오른쪽 = {game.opponent}.
               </div>
 
-              {seriesAnalysis.perSet.map(p => (
+              {seriesAnalysis.perSet.map(p => {
+                const sw = p.stat.side_swapped
+                const leftLabel = sw ? game.opponent : teamName
+                const rightLabel = sw ? teamName : game.opponent
+                const leftPerfection = sw ? p.perfection.team2 : p.perfection.team1
+                const rightPerfection = sw ? p.perfection.team1 : p.perfection.team2
+                const leftScores = sw ? p.both.team2 : p.both.team1
+                const rightScores = sw ? p.both.team1 : p.both.team2
+                return (
                 <div key={p.gameNumber} style={{ marginBottom: 12, paddingBottom: 10, borderBottom: '1px solid var(--gold-border)' }}>
                   <div style={{ marginBottom: 4 }}>
                     <b>{p.gameNumber}세트</b> · ({p.winnerTeam === 'team1' ? teamName : game.opponent} 승)
                   </div>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 8 }}>
                     <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>플레이 점수</span>
-                    <span style={{ fontSize: 16, fontWeight: 800, color: p.perfection.team1 >= p.perfection.team2 ? 'var(--gold)' : 'var(--text-primary)' }}>{p.perfection.team1}</span>
-                    <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{teamName}</span>
+                    <span style={{ fontSize: 16, fontWeight: 800, color: leftPerfection >= rightPerfection ? 'var(--gold)' : 'var(--text-primary)' }}>{leftPerfection}</span>
+                    <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{leftLabel}</span>
                     <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>:</span>
-                    <span style={{ fontSize: 16, fontWeight: 800, color: p.perfection.team2 >= p.perfection.team1 ? 'var(--gold)' : 'var(--text-primary)' }}>{p.perfection.team2}</span>
-                    <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{game.opponent}</span>
+                    <span style={{ fontSize: 16, fontWeight: 800, color: rightPerfection >= leftPerfection ? 'var(--gold)' : 'var(--text-primary)' }}>{rightPerfection}</span>
+                    <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{rightLabel}</span>
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                     {([
-                      ['라인전', 'laning', p.both.team1.laning, p.both.team2.laning],
-                      ['오브젝트', 'objective', p.both.team1.objectiveControl, p.both.team2.objectiveControl],
-                      ['교전', 'teamfight', p.both.team1.teamfight, p.both.team2.teamfight],
-                      ['운영', 'macro', p.both.team1.macro, p.both.team2.macro],
-                      ['마무리', 'closing', p.both.team1.closing, p.both.team2.closing],
+                      ['라인전', 'laning', leftScores.laning, rightScores.laning],
+                      ['오브젝트', 'objective', leftScores.objectiveControl, rightScores.objectiveControl],
+                      ['교전', 'teamfight', leftScores.teamfight, rightScores.teamfight],
+                      ['운영', 'macro', leftScores.macro, rightScores.macro],
+                      ['마무리', 'closing', leftScores.closing, rightScores.closing],
                     ] as [string, string, number, number][]).map(([label, key, t1, t2]) => {
                       const total = t1 + t2 || 1
-                      const tooltip = metricTooltip(key, p.stat, teamName, game.opponent, p.narrative.earlyLeader)
+                      const tooltip = metricTooltip(key, p.stat, leftLabel, rightLabel, p.narrative.earlyLeader)
                       return (
                         <div key={label} title={tooltip} style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'help' }}>
                           <span style={{ width: 52, flexShrink: 0, color: 'var(--text-secondary)', borderBottom: '1px dotted var(--text-muted)', whiteSpace: 'nowrap' }}>{label}</span>
@@ -745,7 +760,8 @@ function RecentMatchRow({ teamId, teamName, game, displayA, displayB, scoreA, sc
                     })}
                   </div>
                 </div>
-              ))}
+                )
+              })}
             </div>
           )}
           {showForm && (() => {
