@@ -166,12 +166,18 @@ function RecentMatchesPanel({ leagueCode, events, loading, error, teams, onCreat
             const codeA = m.codeA || m.teamA
             const codeB = m.codeB || m.teamB
             const oppCodeForMatch = resolved.isA ? m.codeB : m.codeA
+            // "입력됨 N" 배지: RecentMatchRow 안의 canonicalOpponentName과 똑같은 방식(코드 우선)으로
+            // 상대팀을 다시 확정한 뒤 그 정식 이름으로 비교한다. 그냥 raw 이름/코드로 비교하면
+            // (API가 부정확한 name을 내려주는 경기에서) 실제로 입력된 기록이 있어도 "미입력"으로 잘못 표시된다.
+            const oppTeamForRecord = teams.find(t =>
+              (oppCodeForMatch && teamNameMatches(t, oppCodeForMatch)) || teamNameMatches(t, resolved.opponent)
+            )
+            const canonicalOppNameForRecord = oppTeamForRecord?.name ?? resolved.opponent
             const recordCount = (recordedByTeam[resolved.teamId] ?? []).filter(s => {
               const d = dayjs(s.match_start_time)
               const inRange = d.isAfter(dayjs(m.startTime).subtract(1, 'day')) && d.isBefore(dayjs(m.startTime).add(1, 'day'))
               return inRange && (
-                (oppCodeForMatch && teamNameMatches({ name: s.team2_name }, oppCodeForMatch)) ||
-                teamNameMatches({ name: s.team2_name }, resolved.opponent) || teamNameMatches({ name: resolved.opponent }, s.team2_name)
+                teamNameMatches({ name: s.team2_name }, canonicalOppNameForRecord) || teamNameMatches({ name: canonicalOppNameForRecord }, s.team2_name)
               )
             }).length
             return (
