@@ -522,15 +522,41 @@ function RecentMatchRow({ teamId, teamName, game, displayA, displayB, scoreA, sc
     if (next && sets === null) loadSets()
   }
 
+  // 상단 탭(대시보드/통계 등)으로 갔다가 분석 탭으로 돌아오면 Analysis 컴포넌트 전체가 언마운트→재마운트되어
+  // 저장 안 한 입력 중이던 폼이 그냥 사라지는 문제가 있었다. localStorage에 임시저장(초안)해뒀다가
+  // 같은 세트의 입력 폼을 다시 열 때 자동으로 복원한다.
+  function draftKey(gameNumber: number) {
+    return `sb_set_draft:${teamId}:${game.startTime}:${gameNumber}`
+  }
+  function loadDraft(gameNumber: number): { form: GameStatForm; sideSwapped: boolean } | null {
+    try {
+      const raw = localStorage.getItem(draftKey(gameNumber))
+      if (!raw) return null
+      return JSON.parse(raw)
+    } catch {
+      return null
+    }
+  }
+  function clearDraft(gameNumber: number) {
+    try { localStorage.removeItem(draftKey(gameNumber)) } catch { /* 무시 */ }
+  }
+  useEffect(() => {
+    if (!showForm) return
+    try { localStorage.setItem(draftKey(form.gameNumber), JSON.stringify({ form, sideSwapped })) } catch { /* 무시 */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form, sideSwapped, showForm])
+
   function openAddForm() {
-    setForm(emptyGameStatForm((sets?.length ?? 0) + 1))
-    setSideSwapped(false)
+    const base = emptyGameStatForm((sets?.length ?? 0) + 1)
+    const draft = loadDraft(base.gameNumber)
+    setForm(draft?.form ?? base)
+    setSideSwapped(draft?.sideSwapped ?? false)
     setShowForm(true)
   }
 
   function openEditForm(stat: EsportsGameStat) {
     const toStr = (v: number | null) => v == null ? '' : String(v)
-    setForm({
+    const base: GameStatForm = {
       gameNumber: stat.game_number,
       durationMin: stat.duration_seconds != null ? String(Math.floor(stat.duration_seconds / 60)) : '',
       durationSec: stat.duration_seconds != null ? String(stat.duration_seconds % 60) : '',
@@ -543,8 +569,10 @@ function RecentMatchRow({ teamId, teamName, game, displayA, displayB, scoreA, sc
       firstBloodTeam: stat.first_blood_team ?? '', firstTowerTeam: stat.first_tower_team ?? '',
       firstDragonTeam: stat.first_dragon_team ?? '', firstBaronTeam: stat.first_baron_team ?? '',
       fifthKillTeam: stat.fifth_kill_team ?? '', tenthKillTeam: stat.tenth_kill_team ?? '',
-    })
-    setSideSwapped(stat.side_swapped ?? false)
+    }
+    const draft = loadDraft(base.gameNumber)
+    setForm(draft?.form ?? base)
+    setSideSwapped(draft?.sideSwapped ?? (stat.side_swapped ?? false))
     setShowForm(true)
   }
 
@@ -578,15 +606,27 @@ function RecentMatchRow({ teamId, teamName, game, displayA, displayB, scoreA, sc
       source: 'manual',
       side_swapped: sideSwapped,
     }
-    const { data } = await supabase.from('esports_game_stats')
-      .upsert(payload, { onConflict: 'team_id,team2_name,match_start_time,game_number' })
-      .select().single()
-    if (data) {
-      setSets(prev => {
-        const others = (prev ?? []).filter(s => s.game_number !== (data as EsportsGameStat).game_number)
-        return [...others, data as EsportsGameStat].sort((a, b) => a.game_number - b.game_number)
-      })
-      setShowForm(false)
+    let mainError: string | null = null
+    try {
+      const { data, error } = await supabase.from('esports_game_stats')
+        .upsert(payload, { onConflict: 'team_id,team2_name,match_start_time,game_number' })
+        .select().single()
+      if (error) mainError = error.message
+      if (data) {
+        setSets(prev => {
+          const others = (prev ?? []).filter(s => s.game_number !== (data as EsportsGameStat).game_number)
+          return [...others, data as EsportsGameStat].sort((a, b) => a.game_number - b.game_number)
+        })
+        setShowForm(false)
+        clearDraft(form.gameNumber)
+      }
+    } catch (e) {
+      mainError = e instanceof Error ? e.message : String(e)
+    }
+    if (mainError) {
+      alert(`저장에 실패했습니다: ${mainError}`)
+      setSaving(false)
+      return
     }
 
     // 상대팀도 추적 중인 팀이면, 상대팀 관점(team1=상대팀)으로 뒤집어서 똑같이 저장.
@@ -611,7 +651,13 @@ function RecentMatchRow({ teamId, teamName, game, displayA, displayB, scoreA, sc
         source: 'manual',
         side_swapped: sideSwapped,
       }
-      await supabase.from('esports_game_stats').upsert(mirrorPayload, { onConflict: 'team_id,team2_name,match_start_time,game_number' })
+      const { error: mirrorError } = await supabase.from('esports_game_stats')
+        .upsert(mirrorPayload, { onConflict: 'team_id,team2_name,match_start_time,game_number' })
+      if (mirrorError) {
+        // 내 쪽 기록은 이미 저장됐으니 조용히 넘기지 않고, 상대팀 쪽만 실패했다는 걸 알려준다
+        console.error('상대팀 미러 저장 실패:', mirrorError.message)
+        alert(`내 쪽 기록은 저장됐지만, 상대팀(${oppLabel}) 쪽 기록 저장에는 실패했습니다: ${mirrorError.message}`)
+      }
     }
     setSaving(false)
   }
@@ -843,7 +889,7 @@ function RecentMatchRow({ teamId, teamName, game, displayA, displayB, scoreA, sc
                 </div>
 
                 <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-                  <button onClick={() => setShowForm(false)} className="btn btn-ghost" style={{ padding: '5px 10px', fontSize: 11 }}>취소</button>
+                  <button onClick={() => { clearDraft(form.gameNumber); setShowForm(false) }} className="btn btn-ghost" style={{ padding: '5px 10px', fontSize: 11 }}>취소</button>
                   <button onClick={saveSet} disabled={saving} className="btn btn-primary" style={{ padding: '5px 10px', fontSize: 11 }}>{saving ? '저장 중...' : '저장'}</button>
                 </div>
               </div>
