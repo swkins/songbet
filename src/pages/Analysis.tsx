@@ -1080,6 +1080,12 @@ function computeAbilityProfile(rows: EsportsGameStat[]): AbilityProfile {
 }
 
 function LeagueView({ code, label }: { code: string; label: string }) {
+  // LCK CL은 기존 LCK/LPL 등과 달리 "글로벌 파워랭킹(GPR)" 기반 리그가 아니라서, 팀에 우연히 gpr_score가
+  // 들어있더라도 무시하고 항상 중립값 50점에서 시작한다.
+  function baselineGpr(t: EsportsTeam): number {
+    if (code === 'LCKCL') return 50
+    return t.gpr_score ?? 50
+  }
   const [teams, setTeams] = useState<EsportsTeam[]>([])
   const [events, setEvents] = useState<RawScheduleEvent[] | null>(null)
   const [eventsLoading, setEventsLoading] = useState(false)
@@ -1122,7 +1128,7 @@ function LeagueView({ code, label }: { code: string; label: string }) {
       }
 
       const initialRatings: Record<string, number> = {}
-      for (const t of teamsList) initialRatings[t.id] = t.gpr_score ?? 50
+      for (const t of teamsList) initialRatings[t.id] = baselineGpr(t)
 
       const { finalRatings, log } = simulateLeagueElo(initialRatings, matches)
 
@@ -1132,7 +1138,7 @@ function LeagueView({ code, label }: { code: string; label: string }) {
         const teamLog = log.filter(l => l.teamId === t.id)
         const wins = teamLog.filter(l => l.won).length
         scores[t.id] = {
-          powerScore: finalRatings[t.id] ?? t.gpr_score ?? 50,
+          powerScore: finalRatings[t.id] ?? baselineGpr(t),
           winRate: teamLog.length > 0 ? wins / teamLog.length : 0.5,
           gamesAnalyzed: teamLog.length,
         }
@@ -1333,7 +1339,7 @@ function LeagueView({ code, label }: { code: string; label: string }) {
                         <span style={{ fontWeight: 800, color: 'var(--gold)', width: 40, textAlign: 'right' }}>{ps.powerScore.toFixed(1)}</span>
                       </>
                     ) : (
-                      <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>입력된 경기 없음 (GPR 기본값 {(t.gpr_score ?? 50).toFixed(1)})</span>
+                      <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>입력된 경기 없음 (GPR 기본값 {(baselineGpr(t)).toFixed(1)})</span>
                     )}
                     {recentSets.length > 0 && (
                       <div style={{ display: 'flex', gap: 2, flexShrink: 0 }} title="최근 세트 결과 (최대 5개, 오래된 것→최신)">
@@ -1372,7 +1378,7 @@ function LeagueView({ code, label }: { code: string; label: string }) {
                         )
                       })()}
                       <div style={{ color: 'var(--text-muted)', marginBottom: 6 }}>
-                        GPR 기본값 {(t.gpr_score ?? 50).toFixed(1)}점에서 시작 → 아래 경기를 시간순으로 하나씩 반영(순차 Elo)하며 최종 {ps?.powerScore.toFixed(1)}점까지 도달. 이겼으면 상대가 아무리 약해도 항상 조금은 오르고, 졌으면 항상 조금은 내려갑니다. 항목을 누르면 자세한 사유가 나옵니다.
+                        GPR 기본값 {(baselineGpr(t)).toFixed(1)}점에서 시작 → 아래 경기를 시간순으로 하나씩 반영(순차 Elo)하며 최종 {ps?.powerScore.toFixed(1)}점까지 도달. 이겼으면 상대가 아무리 약해도 항상 조금은 오르고, 졌으면 항상 조금은 내려갑니다. 항목을 누르면 자세한 사유가 나옵니다.
                       </div>
                       {teamLog.length === 0 && <div style={{ color: 'var(--text-muted)' }}>입력된 경기가 없습니다.</div>}
                       {teamLog.length > 0 && (
