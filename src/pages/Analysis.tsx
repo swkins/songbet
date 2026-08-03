@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import dayjs from 'dayjs'
 import { Plus, Trash2, Pencil, ChevronDown, ChevronUp, ExternalLink, RefreshCw, TrendingUp } from 'lucide-react'
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import {
   LEAGUES, fetchScheduleEvents, extractTeamData, computeForm, matchupProbability, filterRecentGames,
   seriesScoreProbabilities, seriesOutcomeSummary, computeOddsValue, teamNameMatches, findTeamCode,
@@ -38,6 +39,7 @@ interface EsportsGameStat {
   tenth_kill_team: NarrativeTeam | null
   notes: string | null
   source: string
+  side_swapped: boolean
 }
 
 // 리그 목록 안에서 어느 팀이 우리가 추적 중인 팀(esports_teams)인지 찾아서
@@ -532,7 +534,7 @@ function RecentMatchRow({ teamId, teamName, game, displayA, displayB, scoreA, sc
       firstDragonTeam: stat.first_dragon_team ?? '', firstBaronTeam: stat.first_baron_team ?? '',
       fifthKillTeam: stat.fifth_kill_team ?? '', tenthKillTeam: stat.tenth_kill_team ?? '',
     })
-    setSideSwapped(false)
+    setSideSwapped(stat.side_swapped ?? false)
     setShowForm(true)
   }
 
@@ -564,6 +566,7 @@ function RecentMatchRow({ teamId, teamName, game, displayA, displayB, scoreA, sc
       fifth_kill_team: form.fifthKillTeam || null,
       tenth_kill_team: form.tenthKillTeam || null,
       source: 'manual',
+      side_swapped: sideSwapped,
     }
     const { data } = await supabase.from('esports_game_stats')
       .upsert(payload, { onConflict: 'team_id,team2_name,match_start_time,game_number' })
@@ -596,6 +599,7 @@ function RecentMatchRow({ teamId, teamName, game, displayA, displayB, scoreA, sc
         fifth_kill_team: flip(payload.fifth_kill_team as NarrativeTeam | null),
         tenth_kill_team: flip(payload.tenth_kill_team as NarrativeTeam | null),
         source: 'manual',
+        side_swapped: sideSwapped,
       }
       await supabase.from('esports_game_stats').upsert(mirrorPayload, { onConflict: 'team_id,team2_name,match_start_time,game_number' })
     }
@@ -947,6 +951,34 @@ function ManualEventPanel({ leagueCode, manualEvents, onChanged, autoOpenHint }:
   )
 }
 
+// 파워랭킹 히스토리를 한눈에 보여주는 소형 라인 차트 (팀 확장 시 상단에 표시)
+function RatingHistoryChart({ teamLog }: { teamLog: EloGameLog[] }) {
+  const data = teamLog.map((h, i) => ({
+    idx: i + 1,
+    date: h.matchStartTime ? dayjs(h.matchStartTime).format('MM/DD') : '',
+    rating: Math.round(h.ratingAfter * 10) / 10,
+  }))
+  const values = data.map(d => d.rating)
+  const min = Math.min(...values), max = Math.max(...values)
+  const pad = Math.max(1, (max - min) * 0.15)
+  return (
+    <div style={{ height: 90, marginBottom: 8 }}>
+      <ResponsiveContainer width="100%" height="100%">
+        <LineChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: -20 }}>
+          <XAxis dataKey="date" tick={{ fontSize: 8, fill: 'var(--text-muted)' }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
+          <YAxis domain={[min - pad, max + pad]} tick={{ fontSize: 8, fill: 'var(--text-muted)' }} axisLine={false} tickLine={false} width={28} />
+          <Tooltip
+            contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 4, fontSize: 10 }}
+            labelStyle={{ color: 'var(--text-muted)' }}
+            formatter={(v: number) => [v.toFixed(1), '점수']}
+          />
+          <Line type="monotone" dataKey="rating" stroke="var(--gold, #d4af37)" strokeWidth={2} dot={{ r: 2 }} activeDot={{ r: 3 }} />
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  )
+}
+
 function LeagueView({ code, label }: { code: string; label: string }) {
   const [teams, setTeams] = useState<EsportsTeam[]>([])
   const [events, setEvents] = useState<RawScheduleEvent[] | null>(null)
@@ -958,7 +990,7 @@ function LeagueView({ code, label }: { code: string; label: string }) {
   const [expandedPowerTeam, setExpandedPowerTeam] = useState<string | null>(null)
   const [expandedHistoryIdx, setExpandedHistoryIdx] = useState<number | null>(null)
   const [powerLoading, setPowerLoading] = useState(false)
-  const [recentSeriesResult, setRecentSeriesResult] = useState<Record<string, { win: boolean; sweep: boolean } | null>>({})
+  const [recentSetResults, setRecentSetResults] = useState<Record<string, boolean[]>>({})
 
   // 팀 체급 점수 계산: 라이엇 GPR 공식(순차 Elo)을 리그 전체 경기에 시간순으로 적용
   async function loadPowerScores(teamsList: EsportsTeam[]) {
@@ -1008,28 +1040,14 @@ function LeagueView({ code, label }: { code: string; label: string }) {
       setPowerScores(scores)
       setPowerLog(logByTeam)
 
-      // 최근 승리 W/L 배지: 세트 단위가 아니라 "가장 최근 시리즈(매치)" 단위로 승패를 판정.
-      // 같은 team_id + team2_name + match_start_time으로 묶이는 세트들을 하나의 시리즈로 취급.
-      const seriesByTeam: Record<string, { matchStartTime: string; wins: number; losses: number }[]> = {}
-      for (const s of rows) {
-        if (!s.match_start_time) continue
-        const arr = seriesByTeam[s.team_id] ?? (seriesByTeam[s.team_id] = [])
-        let entry = arr.find(e => e.matchStartTime === s.match_start_time)
-        if (!entry) { entry = { matchStartTime: s.match_start_time, wins: 0, losses: 0 }; arr.push(entry) }
-        if (s.winner_team === 'team1') entry.wins++
-        else if (s.winner_team === 'team2') entry.losses++
-      }
-      const recent: Record<string, { win: boolean; sweep: boolean } | null> = {}
+      // 최근 W/L 배지: 시리즈가 아니라 "세트" 단위로 최근 5개까지. rows가 이미 시간순(오래된 것→최신) 정렬돼 있으므로
+      // 팀별로 걸러서 뒤에서 5개만 취하면 된다 (배열 순서 그대로 = 오래된 것→최신).
+      const recentSets: Record<string, boolean[]> = {}
       for (const t of teamsList) {
-        const arr = seriesByTeam[t.id] ?? []
-        if (arr.length === 0) { recent[t.id] = null; continue }
-        arr.sort((a, b) => new Date(b.matchStartTime).getTime() - new Date(a.matchStartTime).getTime())
-        const latest = arr[0]
-        const win = latest.wins > latest.losses
-        const sweep = win ? (latest.losses === 0 && latest.wins >= 2) : (latest.wins === 0 && latest.losses >= 2)
-        recent[t.id] = { win, sweep }
+        const teamRows = rows.filter(s => s.team_id === t.id && s.winner_team)
+        recentSets[t.id] = teamRows.slice(-5).map(s => s.winner_team === 'team1')
       }
-      setRecentSeriesResult(recent)
+      setRecentSetResults(recentSets)
     } finally {
       setPowerLoading(false)
     }
@@ -1121,23 +1139,12 @@ function LeagueView({ code, label }: { code: string; label: string }) {
               const expanded = expandedPowerTeam === t.id
               const teamLog = powerLog[t.id] ?? []
               const code2 = teamCodeMap[t.id]
-              const recent = recentSeriesResult[t.id]
+              const recentSets = recentSetResults[t.id] ?? []
               return (
                 <div key={t.id} style={{ marginBottom: 4 }}>
                   <div onClick={() => { setExpandedPowerTeam(expanded ? null : t.id); setExpandedHistoryIdx(null) }}
                     style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, padding: '6px 8px', background: 'var(--bg-elevated)', borderRadius: 6, cursor: 'pointer' }}>
                     {expanded ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
-                    {recent ? (
-                      <span style={{
-                        fontSize: 9, fontWeight: 800, width: 16, textAlign: 'center', borderRadius: 3, padding: '1px 0', flexShrink: 0,
-                        color: recent.win ? 'var(--green, #4ade80)' : 'var(--red, #f87171)',
-                        background: recent.win ? 'var(--green-bg, rgba(74,222,128,0.15))' : 'var(--red-bg, rgba(248,113,113,0.15))',
-                        border: recent.sweep ? `1px solid ${recent.win ? 'var(--green, #4ade80)' : 'var(--red, #f87171)'}` : '1px solid transparent',
-                        boxShadow: recent.sweep ? `0 0 0 1px ${recent.win ? 'var(--green, #4ade80)' : 'var(--red, #f87171)'}` : undefined,
-                      }} title={recent.sweep ? '최근 시리즈 2:0' : '최근 시리즈 결과'}>
-                        {recent.win ? 'W' : 'L'}
-                      </span>
-                    ) : <span style={{ width: 16, flexShrink: 0 }} />}
                     <span style={{ flex: 1, fontWeight: 700 }}>{t.name}{code2 ? <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}> ({code2})</span> : ''}</span>
                     {ps && ps.gamesAnalyzed > 0 ? (
                       <>
@@ -1147,9 +1154,23 @@ function LeagueView({ code, label }: { code: string; label: string }) {
                     ) : (
                       <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>입력된 경기 없음 (GPR 기본값 {(t.gpr_score ?? 50).toFixed(1)})</span>
                     )}
+                    {recentSets.length > 0 && (
+                      <div style={{ display: 'flex', gap: 2, flexShrink: 0 }} title="최근 세트 결과 (최대 5개, 오래된 것→최신)">
+                        {recentSets.map((win, i) => (
+                          <span key={i} style={{
+                            fontSize: 8, fontWeight: 800, width: 12, textAlign: 'center', borderRadius: 2, lineHeight: '13px',
+                            color: win ? 'var(--green, #4ade80)' : '#fff',
+                            background: win ? 'transparent' : 'var(--red, #f87171)',
+                          }}>
+                            {win ? 'W' : 'L'}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
                   {expanded && (
                     <div style={{ padding: '8px 8px', background: 'var(--bg-card)', borderRadius: 6, marginTop: 2, fontSize: 9 }}>
+                      {teamLog.length > 1 && <RatingHistoryChart teamLog={teamLog} />}
                       <div style={{ color: 'var(--text-muted)', marginBottom: 6 }}>
                         GPR 기본값 {(t.gpr_score ?? 50).toFixed(1)}점에서 시작 → 아래 경기를 시간순으로 하나씩 반영(순차 Elo)하며 최종 {ps?.powerScore.toFixed(1)}점까지 도달. 이겼으면 상대가 아무리 약해도 항상 조금은 오르고, 졌으면 항상 조금은 내려갑니다. 항목을 누르면 자세한 사유가 나옵니다.
                       </div>
