@@ -1086,6 +1086,36 @@ function LeagueView({ code, label }: { code: string; label: string }) {
       loadPowerScores([...teams, newTeam])
     }
   }
+  const [registeringAll, setRegisteringAll] = useState(false)
+  // 경기 목록(최근 경기 + 앞으로의 일정)에 등장하는 팀을 한 번에 전부 파워랭킹에 등록.
+  // 매치마다 하나씩 "팀 등록하고 입력" 누르는 게 번거로우니, 왼쪽 목록 기준으로 몰아서 처리하는 용도.
+  async function registerAllTeamsFromSchedule() {
+    if (!combinedEvents || combinedEvents.length === 0) return
+    setRegisteringAll(true)
+    try {
+      const toAdd: string[] = []
+      for (const e of combinedEvents) {
+        for (const t of e.match?.teams ?? []) {
+          if (!t.name || t.name === '?') continue
+          if (teams.find(x => teamNameMatches(x, t.name))) continue
+          if (toAdd.find(n => teamNameMatches({ name: n }, t.name))) continue
+          toAdd.push(t.name)
+        }
+      }
+      if (toAdd.length === 0) return
+      const { data } = await supabase.from('esports_teams')
+        .insert(toAdd.map((name, i) => ({ league: code, name, sort_order: teams.length + i })))
+        .select()
+      if (data) {
+        const newTeams = data as EsportsTeam[]
+        const merged = [...teams, ...newTeams]
+        setTeams(merged)
+        loadPowerScores(merged)
+      }
+    } finally {
+      setRegisteringAll(false)
+    }
+  }
   async function loadEvents(forceRefresh?: boolean) {
     setEventsLoading(true); setEventsError(false)
     try {
@@ -1129,6 +1159,9 @@ function LeagueView({ code, label }: { code: string; label: string }) {
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
         <h2 style={{ fontSize: 18, fontWeight: 800, margin: 0, flex: 1 }}>{label}</h2>
+        <button onClick={registerAllTeamsFromSchedule} disabled={registeringAll || !combinedEvents} className="btn btn-ghost" style={{ padding: '6px 10px', display: 'flex', alignItems: 'center', gap: 4 }}>
+          <Plus size={12} /> {registeringAll ? '등록 중...' : '경기 목록 팀 전체 등록'}
+        </button>
         <button onClick={() => loadEvents(true)} disabled={eventsLoading} className="btn btn-ghost" style={{ padding: '6px 10px', display: 'flex', alignItems: 'center', gap: 4 }}>
           <RefreshCw size={12} style={{ animation: eventsLoading ? 'spin 1s linear infinite' : undefined }} /> 일정 새로고침
         </button>
