@@ -176,7 +176,7 @@ const TEAM_CODE_ALIASES: Record<string, string> = {
   fx: 'fluxo w7m', fur: 'furia', kyd: 'keyd stars', lou: 'loud', pain: 'pain gaming', red: 'red canids', lev: 'leviatán', los: 'los',
 }
 
-export function teamNameMatches(t: { name: string; code?: string }, query: string): boolean {
+export function teamNameMatches(t: { name: string; code?: string | null }, query: string): boolean {
   const qRaw = query.trim().toLowerCase()
   if (!qRaw) return false
   const nRaw = (t.name ?? '').trim().toLowerCase()

@@ -15,6 +15,7 @@ interface EsportsTeam {
   id: string; league: string; name: string; comment: string; sort_order: number
   namuwiki_url: string | null; namuwiki_last_checked: string | null; namuwiki_changed: boolean
   gpr_score: number | null
+  code: string | null
 }
 
 interface EsportsGameStat {
@@ -1140,16 +1141,42 @@ function LeagueView({ code, label }: { code: string; label: string }) {
     return [...events, ...manual]
   }, [events, manualEvents])
 
-  // 파워랭킹 목록에 팀 약자를 괄호로 같이 보여주기 위해 일정 데이터에서 팀별 게임 내 코드를 찾아둔다
+  // 파워랭킹 목록에 팀 약자를 괄호로 같이 보여주기 위해 팀별 코드를 결정한다.
+  // 사용자가 직접 지정한 코드(esports_teams.code)가 있으면 그걸 우선 쓰고, 없을 때만 일정 데이터에서 유추한다.
+  // lolesports API가 새로 생긴 팀(예: LCK CL 소속팀)에 아직 정식 코드를 안 붙여놔서 "TBD"를 내려주는 경우가 있어,
+  // 그런 값은 코드로 쓸모가 없으니 무시한다.
   const teamCodeMap = useMemo(() => {
-    if (!combinedEvents) return {} as Record<string, string>
     const map: Record<string, string> = {}
     for (const t of teams) {
-      const c = findTeamCode(combinedEvents, t.name)
-      if (c) map[t.id] = c
+      if (t.code && t.code.trim()) { map[t.id] = t.code.trim(); continue }
+      const c = combinedEvents ? findTeamCode(combinedEvents, t.name) : null
+      if (c && c.toUpperCase() !== 'TBD') map[t.id] = c
     }
     return map
   }, [combinedEvents, teams])
+
+  const [editingTeamId, setEditingTeamId] = useState<string | null>(null)
+  const [editTeamName, setEditTeamName] = useState('')
+  const [editTeamCode, setEditTeamCode] = useState('')
+  function startEditTeam(t: EsportsTeam) {
+    setEditingTeamId(t.id)
+    setEditTeamName(t.name)
+    setEditTeamCode(t.code ?? teamCodeMap[t.id] ?? '')
+  }
+  async function saveEditTeam() {
+    if (!editingTeamId) return
+    const name = editTeamName.trim()
+    const code = editTeamCode.trim()
+    if (!name) return
+    const { data } = await supabase.from('esports_teams')
+      .update({ name, code: code || null })
+      .eq('id', editingTeamId).select().single()
+    if (data) {
+      const updated = data as EsportsTeam
+      setTeams(prev => prev.map(t => t.id === updated.id ? updated : t))
+    }
+    setEditingTeamId(null)
+  }
 
   const rankedTeams = useMemo(() =>
     [...teams].sort((a, b) => (powerScores[b.id]?.powerScore ?? 50) - (powerScores[a.id]?.powerScore ?? 50)),
@@ -1189,12 +1216,26 @@ function LeagueView({ code, label }: { code: string; label: string }) {
               const teamLog = powerLog[t.id] ?? []
               const code2 = teamCodeMap[t.id]
               const recentSets = recentSetResults[t.id] ?? []
+              const isEditing = editingTeamId === t.id
               return (
                 <div key={t.id} style={{ marginBottom: 4 }}>
+                  {isEditing ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '6px 8px', background: 'var(--bg-elevated)', borderRadius: 6 }}>
+                      <input value={editTeamName} onChange={e => setEditTeamName(e.target.value)} placeholder="팀 이름"
+                        style={{ flex: 1, fontSize: 11, padding: '3px 6px', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text-primary)', minWidth: 0 }} />
+                      <input value={editTeamCode} onChange={e => setEditTeamCode(e.target.value)} placeholder="약자"
+                        style={{ width: 56, fontSize: 11, padding: '3px 6px', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text-primary)' }} />
+                      <button onClick={() => setEditingTeamId(null)} className="btn btn-ghost" style={{ padding: '3px 6px', fontSize: 10, flexShrink: 0 }}>취소</button>
+                      <button onClick={saveEditTeam} className="btn btn-primary" style={{ padding: '3px 6px', fontSize: 10, flexShrink: 0 }}>저장</button>
+                    </div>
+                  ) : (
                   <div onClick={() => { setExpandedPowerTeam(expanded ? null : t.id); setExpandedHistoryIdx(null) }}
                     style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, padding: '6px 8px', background: 'var(--bg-elevated)', borderRadius: 6, cursor: 'pointer' }}>
                     {expanded ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
                     <span style={{ flex: 1, fontWeight: 700 }}>{t.name}{code2 ? <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}> ({code2})</span> : ''}</span>
+                    <button onClick={e => { e.stopPropagation(); startEditTeam(t) }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', flexShrink: 0 }}>
+                      <Pencil size={10} />
+                    </button>
                     {ps && ps.gamesAnalyzed > 0 ? (
                       <>
                         <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>{ps.gamesAnalyzed}경기 · 승률 {(ps.winRate * 100).toFixed(0)}%</span>
@@ -1217,6 +1258,7 @@ function LeagueView({ code, label }: { code: string; label: string }) {
                       </div>
                     )}
                   </div>
+                  )}
                   {expanded && (
                     <div style={{ padding: '8px 8px', background: 'var(--bg-card)', borderRadius: 6, marginTop: 2, fontSize: 9 }}>
                       {teamLog.length > 1 && <RatingHistoryChart teamLog={teamLog} />}
