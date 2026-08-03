@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import dayjs from 'dayjs'
 import { Plus, Trash2, Pencil, ChevronDown, ChevronUp, ExternalLink, RefreshCw, TrendingUp } from 'lucide-react'
@@ -345,10 +345,10 @@ function StatPairInput({ label, valueA, valueB, onChangeA, onChangeB }: {
   )
 }
 
-function MilestoneButton({ selected, onClick, children }: { selected: boolean; onClick: () => void; children: string }) {
+function MilestoneButton({ selected, onClick, children, size }: { selected: boolean; onClick: () => void; children: string; size?: 'sm' | 'lg' }) {
   return (
     <button type="button" onClick={onClick} style={{
-      flex: 1, fontSize: 9, padding: '4px 4px', borderRadius: 4, cursor: 'pointer',
+      flex: 1, fontSize: size === 'lg' ? 11 : 9, padding: size === 'lg' ? '9px 6px' : '4px 4px', borderRadius: 4, cursor: 'pointer',
       border: `1px solid ${selected ? 'var(--gold-border)' : 'var(--border)'}`,
       background: selected ? 'var(--gold)' : 'var(--bg-card)',
       color: selected ? 'var(--bg-card)' : 'var(--text-secondary)',
@@ -466,6 +466,15 @@ function RecentMatchRow({ teamId, teamName, game, displayA, displayB, scoreA, sc
   // 입력 폼에서 좌(블루)/우(레드) 어느 쪽에 어느 팀을 표시할지. 데이터(team1=우리팀/team2=상대팀) 자체는
   // 안 건드리고 순수하게 렌더링 순서만 뒤집는다 — 중계 화면 진영 순서에 맞춰 입력하기 쉽도록.
   const [sideSwapped, setSideSwapped] = useState(false)
+  const durationMinRef = useRef<HTMLInputElement>(null)
+  const durationSecRef = useRef<HTMLInputElement>(null)
+
+  // 세트 기록 입력 폼이 열리면(추가/수정 모두) 바로 게임시간(분) 칸에 커서가 가도록
+  useEffect(() => {
+    if (!showForm) return
+    const t = setTimeout(() => durationMinRef.current?.focus(), 30)
+    return () => clearTimeout(t)
+  }, [showForm])
 
   // 상대팀도 우리가 추적 중인 팀이면(예: DK도 esports_teams에 있으면) 그쪽 team_id도 찾아둔다.
   // 세트 저장 시 양쪽에 다 기록해야 상대팀 체급 점수에도 이 경기가 반영된다.
@@ -760,49 +769,55 @@ function RecentMatchRow({ teamId, teamName, game, displayA, displayB, scoreA, sc
                   </button>
                 </div>
 
-                {/* 게임시간 */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ fontSize: 10, color: 'var(--text-secondary)', width: 46, flexShrink: 0 }}>게임시간</span>
-                  <input value={form.durationMin} onChange={e => setForm(f => ({ ...f, durationMin: e.target.value.replace(/[^0-9]/g, '') }))}
+                {/* 게임시간 (가운데 정렬, 분 2자리 입력하면 자동으로 초 칸으로 이동) */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                  <span style={{ fontSize: 10, color: 'var(--text-secondary)' }}>게임시간</span>
+                  <input ref={durationMinRef} value={form.durationMin}
+                    onChange={e => {
+                      const v = e.target.value.replace(/[^0-9]/g, '').slice(0, 2)
+                      setForm(f => ({ ...f, durationMin: v }))
+                      if (v.length >= 2) durationSecRef.current?.focus()
+                    }}
                     placeholder="분" inputMode="numeric" style={{ width: 40, fontSize: 11, padding: '3px 4px', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text-primary)', textAlign: 'center' }} />
                   <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>분</span>
-                  <input value={form.durationSec} onChange={e => setForm(f => ({ ...f, durationSec: e.target.value.replace(/[^0-9]/g, '') }))}
+                  <input ref={durationSecRef} value={form.durationSec} onChange={e => setForm(f => ({ ...f, durationSec: e.target.value.replace(/[^0-9]/g, '').slice(0, 2) }))}
                     placeholder="초" inputMode="numeric" style={{ width: 40, fontSize: 11, padding: '3px 4px', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text-primary)', textAlign: 'center' }} />
                   <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>초</span>
                 </div>
 
-                {/* 승리팀 */}
+                {/* 승리팀 (버튼 세로로 조금 더 크게) */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <span style={{ fontSize: 9, color: 'var(--text-muted)', width: 60, flexShrink: 0 }}>승리팀</span>
                   <div style={{ display: 'flex', gap: 4, flex: 1 }}>
-                    <MilestoneButton selected={form.winnerTeam === leftValue} onClick={() => setForm(f => ({ ...f, winnerTeam: leftValue }))}>{leftLabel}</MilestoneButton>
-                    <MilestoneButton selected={form.winnerTeam === rightValue} onClick={() => setForm(f => ({ ...f, winnerTeam: rightValue }))}>{rightLabel}</MilestoneButton>
+                    <MilestoneButton size="lg" selected={form.winnerTeam === leftValue} onClick={() => setForm(f => ({ ...f, winnerTeam: leftValue }))}>{leftLabel}</MilestoneButton>
+                    <MilestoneButton size="lg" selected={form.winnerTeam === rightValue} onClick={() => setForm(f => ({ ...f, winnerTeam: rightValue }))}>{rightLabel}</MilestoneButton>
                   </div>
                 </div>
 
-                {/* 킬/내셔/드래곤/타워/억제기 — 좌(블루)/우(레드) 팀명 헤더 */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span style={{ width: 46, flexShrink: 0 }} />
-                    <span style={{ width: 40, fontSize: 9, fontWeight: 700, textAlign: 'center', color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{leftLabel}</span>
-                    <span style={{ width: 9 }} />
-                    <span style={{ width: 40, fontSize: 9, fontWeight: 700, textAlign: 'center', color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{rightLabel}</span>
+                <div style={{ display: 'flex', gap: 10 }}>
+                  {/* 좌측: 킬/내셔/드래곤/타워/억제기 숫자 입력 */}
+                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ width: 46, flexShrink: 0 }} />
+                      <span style={{ width: 40, fontSize: 9, fontWeight: 700, textAlign: 'center', color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{leftLabel}</span>
+                      <span style={{ width: 9 }} />
+                      <span style={{ width: 40, fontSize: 9, fontWeight: 700, textAlign: 'center', color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{rightLabel}</span>
+                    </div>
+                    <StatPairInput label="킬" {...statProps('team1Kills', 'team2Kills')} />
+                    <StatPairInput label="내셔" {...statProps('team1Barons', 'team2Barons')} />
+                    <StatPairInput label="드래곤" {...statProps('team1Dragons', 'team2Dragons')} />
+                    <StatPairInput label="타워" {...statProps('team1Towers', 'team2Towers')} />
+                    <StatPairInput label="억제기" {...statProps('team1Inhibitors', 'team2Inhibitors')} />
                   </div>
-                  <StatPairInput label="킬" {...statProps('team1Kills', 'team2Kills')} />
-                  <StatPairInput label="내셔" {...statProps('team1Barons', 'team2Barons')} />
-                  <StatPairInput label="드래곤" {...statProps('team1Dragons', 'team2Dragons')} />
-                  <StatPairInput label="타워" {...statProps('team1Towers', 'team2Towers')} />
-                  <StatPairInput label="억제기" {...statProps('team1Inhibitors', 'team2Inhibitors')} />
-                </div>
-
-                {/* 마일스톤: 퍼스트 1킬 → 5킬 → 10킬 → 드래곤 → 타워 → 내셔 순으로 세로 나열 */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  <MilestoneSelect label="퍼스트 1킬" value={form.firstBloodTeam} onChange={v => setForm(f => ({ ...f, firstBloodTeam: v }))} leftValue={leftValue} leftLabel={leftLabel} rightValue={rightValue} rightLabel={rightLabel} />
-                  <MilestoneSelect label="퍼스트 5킬" value={form.fifthKillTeam} onChange={v => setForm(f => ({ ...f, fifthKillTeam: v }))} leftValue={leftValue} leftLabel={leftLabel} rightValue={rightValue} rightLabel={rightLabel} />
-                  <MilestoneSelect label="퍼스트 10킬" value={form.tenthKillTeam} onChange={v => setForm(f => ({ ...f, tenthKillTeam: v }))} leftValue={leftValue} leftLabel={leftLabel} rightValue={rightValue} rightLabel={rightLabel} />
-                  <MilestoneSelect label="퍼스트 드래곤" value={form.firstDragonTeam} onChange={v => setForm(f => ({ ...f, firstDragonTeam: v }))} leftValue={leftValue} leftLabel={leftLabel} rightValue={rightValue} rightLabel={rightLabel} />
-                  <MilestoneSelect label="퍼스트 타워" value={form.firstTowerTeam} onChange={v => setForm(f => ({ ...f, firstTowerTeam: v }))} leftValue={leftValue} leftLabel={leftLabel} rightValue={rightValue} rightLabel={rightLabel} />
-                  <MilestoneSelect label="퍼스트 내셔" value={form.firstBaronTeam} onChange={v => setForm(f => ({ ...f, firstBaronTeam: v }))} leftValue={leftValue} leftLabel={leftLabel} rightValue={rightValue} rightLabel={rightLabel} />
+                  {/* 우측: 퍼스트 1킬 → 5킬 → 10킬 → 드래곤 → 타워 → 내셔 */}
+                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
+                    <MilestoneSelect label="퍼스트 1킬" value={form.firstBloodTeam} onChange={v => setForm(f => ({ ...f, firstBloodTeam: v }))} leftValue={leftValue} leftLabel={leftLabel} rightValue={rightValue} rightLabel={rightLabel} />
+                    <MilestoneSelect label="퍼스트 5킬" value={form.fifthKillTeam} onChange={v => setForm(f => ({ ...f, fifthKillTeam: v }))} leftValue={leftValue} leftLabel={leftLabel} rightValue={rightValue} rightLabel={rightLabel} />
+                    <MilestoneSelect label="퍼스트 10킬" value={form.tenthKillTeam} onChange={v => setForm(f => ({ ...f, tenthKillTeam: v }))} leftValue={leftValue} leftLabel={leftLabel} rightValue={rightValue} rightLabel={rightLabel} />
+                    <MilestoneSelect label="퍼스트 드래곤" value={form.firstDragonTeam} onChange={v => setForm(f => ({ ...f, firstDragonTeam: v }))} leftValue={leftValue} leftLabel={leftLabel} rightValue={rightValue} rightLabel={rightLabel} />
+                    <MilestoneSelect label="퍼스트 타워" value={form.firstTowerTeam} onChange={v => setForm(f => ({ ...f, firstTowerTeam: v }))} leftValue={leftValue} leftLabel={leftLabel} rightValue={rightValue} rightLabel={rightLabel} />
+                    <MilestoneSelect label="퍼스트 내셔" value={form.firstBaronTeam} onChange={v => setForm(f => ({ ...f, firstBaronTeam: v }))} leftValue={leftValue} leftLabel={leftLabel} rightValue={rightValue} rightLabel={rightLabel} />
+                  </div>
                 </div>
 
                 <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
