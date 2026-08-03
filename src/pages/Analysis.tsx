@@ -792,14 +792,13 @@ function RecentMatchRow({ teamId, teamName, game, displayA, displayB, scoreA, sc
                   </button>
                 </div>
 
-                {/* 게임시간 (가운데 정렬, 분 2자리 입력하면 자동으로 초 칸으로 이동) */}
+                {/* 게임시간 (가운데 정렬) */}
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
                   <span style={{ fontSize: 10, color: 'var(--text-secondary)' }}>게임시간</span>
                   <input ref={durationMinRef} value={form.durationMin}
                     onChange={e => {
                       const v = e.target.value.replace(/[^0-9]/g, '').slice(0, 2)
                       setForm(f => ({ ...f, durationMin: v }))
-                      if (v.length >= 2) durationSecRef.current?.focus()
                     }}
                     placeholder="분" inputMode="numeric" style={{ width: 40, fontSize: 11, padding: '3px 4px', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text-primary)', textAlign: 'center' }} />
                   <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>분</span>
@@ -1256,11 +1255,11 @@ function LeagueView({ code, label }: { code: string; label: string }) {
       setPowerLog(logByTeam)
 
       // 최근 W/L 배지: 시리즈가 아니라 "세트" 단위로 최근 5개까지. rows가 이미 시간순(오래된 것→최신) 정렬돼 있으므로
-      // 팀별로 걸러서 뒤에서 5개만 취하면 된다 (배열 순서 그대로 = 오래된 것→최신).
+      // 팀별로 걸러서 뒤에서 5개만 취한 뒤, 최신이 맨 왼쪽에 오도록 순서를 뒤집는다.
       const recentSets: Record<string, boolean[]> = {}
       for (const t of teamsList) {
         const teamRows = rows.filter(s => s.team_id === t.id && s.winner_team)
-        recentSets[t.id] = teamRows.slice(-5).map(s => s.winner_team === 'team1')
+        recentSets[t.id] = teamRows.slice(-5).reverse().map(s => s.winner_team === 'team1')
       }
       setRecentSetResults(recentSets)
 
@@ -1450,7 +1449,7 @@ function LeagueView({ code, label }: { code: string; label: string }) {
                       <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>입력된 경기 없음 (GPR 기본값 {(baselineGpr(t)).toFixed(1)})</span>
                     )}
                     {recentSets.length > 0 && (
-                      <div style={{ display: 'flex', gap: 2, flexShrink: 0 }} title="최근 세트 결과 (최대 5개, 오래된 것→최신)">
+                      <div style={{ display: 'flex', gap: 2, flexShrink: 0 }} title="최근 세트 결과 (최대 5개, 최신→오래된 순)">
                         {recentSets.map((win, i) => (
                           <span key={i} style={{
                             fontSize: 8, fontWeight: 800, width: 12, textAlign: 'center', borderRadius: 2, lineHeight: '13px',
