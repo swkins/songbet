@@ -7,6 +7,7 @@ import dayjs from 'dayjs'
 
 export const LEAGUES: { code: string; label: string; slugs: string[] }[] = [
   { code: 'LCK',   label: 'LCK',   slugs: ['lck'] },
+  { code: 'LCKCL', label: 'LCK CL', slugs: ['lck_challengers_league', 'lck-challengers-league', 'lck-cl', 'lckcl', 'challengers_korea', 'lck cl'] },
   { code: 'LPL',   label: 'LPL',   slugs: ['lpl'] },
   { code: 'LEC',   label: 'LEC',   slugs: ['lec'] },
   { code: 'LCS',   label: 'LCS',   slugs: ['lcs'] },
@@ -33,6 +34,39 @@ async function resolveLeagueIds(): Promise<Record<string, string>> {
   }
   leagueIdCache = map
   return map
+}
+
+// ─── 수동 경기 추가 (자동 일정 조회가 안 되는 리그, 예: LCK CL 등의 폴백용) ───
+export interface ManualEsportsEvent {
+  id: string
+  league: string
+  start_time: string
+  state: 'completed' | 'unstarted'
+  team_a_name: string
+  team_a_code: string | null
+  team_b_name: string
+  team_b_code: string | null
+  score_a: number | null
+  score_b: number | null
+  best_of: number
+  created_at: string
+}
+
+// 수동 입력 행을 기존 화면 로직(RawScheduleEvent)이 그대로 소비할 수 있는 형태로 변환
+export function manualEventToRawEvent(m: ManualEsportsEvent): RawScheduleEvent {
+  return {
+    id: `manual-${m.id}`,
+    startTime: m.start_time,
+    state: m.state,
+    match: {
+      id: `manual-${m.id}`,
+      strategy: { type: 'bestOf', count: m.best_of },
+      teams: [
+        { name: m.team_a_name, code: m.team_a_code ?? undefined, result: m.state === 'completed' ? { gameWins: m.score_a ?? 0 } : undefined },
+        { name: m.team_b_name, code: m.team_b_code ?? undefined, result: m.state === 'completed' ? { gameWins: m.score_b ?? 0 } : undefined },
+      ],
+    },
+  }
 }
 
 export interface RawScheduleEvent {

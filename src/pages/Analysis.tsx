@@ -4,10 +4,10 @@ import dayjs from 'dayjs'
 import { Plus, Trash2, Pencil, ChevronDown, ChevronUp, ExternalLink, RefreshCw, TrendingUp } from 'lucide-react'
 import {
   LEAGUES, fetchScheduleEvents, extractTeamData, computeForm, matchupProbability, filterRecentGames,
-  seriesScoreProbabilities, seriesOutcomeSummary, computeOddsValue, teamNameMatches,
+  seriesScoreProbabilities, seriesOutcomeSummary, computeOddsValue, teamNameMatches, findTeamCode,
   classifyGameNarrative, computeBothSidesScores, computeBothSidesPerfection, computePerfectionScore,
-  simulateLeagueElo, powerScoreMatchupProbability,
-  type RawScheduleEvent, type TeamGameRecord, type NarrativeTeam, type TeamPowerScore, type EloMatchRecord, type EloGameLog,
+  simulateLeagueElo, powerScoreMatchupProbability, manualEventToRawEvent,
+  type RawScheduleEvent, type TeamGameRecord, type NarrativeTeam, type TeamPowerScore, type EloMatchRecord, type EloGameLog, type ManualEsportsEvent,
 } from '../lib/lolEsports'
 
 interface EsportsTeam {
@@ -102,9 +102,9 @@ function RecentMatchesPanel({ leagueCode, events, loading, error, teams }: { lea
         </a>
       </div>
       {loading && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0' }}>불러오는 중...</div>}
-      {!loading && error && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0' }}>최근 경기 데이터를 가져올 수 없습니다 (외부 API 접속 제한일 수 있음).</div>}
-      {!loading && !error && matches.length === 0 && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0' }}>최근 완료된 경기가 없습니다</div>}
-      {!loading && !error && matches.length > 0 && (
+      {!loading && matches.length === 0 && error && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0' }}>최근 경기 데이터를 가져올 수 없습니다 (외부 API 접속 제한일 수 있음). 아래 &quot;경기 수동 추가&quot;에서 직접 입력할 수 있어요.</div>}
+      {!loading && matches.length === 0 && !error && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0' }}>최근 완료된 경기가 없습니다</div>}
+      {!loading && matches.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           {visibleMatches.map(m => {
             const auto = resolveMatchTeam(teams, m.teamA, m.teamB, m.codeA, m.codeB)
@@ -284,9 +284,9 @@ function UpcomingPanel({ events, loading, error, teams, powerScores }: {
     <div className="card">
       <div className="card-title">앞으로의 일정 · 승부 예측</div>
       {loading && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0' }}>불러오는 중...</div>}
-      {!loading && error && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0' }}>일정 데이터를 가져올 수 없습니다.</div>}
-      {!loading && !error && upcoming.length === 0 && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0' }}>예정된 경기가 없습니다</div>}
-      {!loading && !error && upcoming.length > 0 && events && (
+      {!loading && upcoming.length === 0 && error && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0' }}>일정 데이터를 가져올 수 없습니다. 아래 &quot;경기 수동 추가&quot;에서 직접 입력할 수 있어요.</div>}
+      {!loading && upcoming.length === 0 && !error && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0' }}>예정된 경기가 없습니다</div>}
+      {!loading && upcoming.length > 0 && events && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           {upcoming.map(e => <UpcomingRow key={e.match!.id ?? e.id} event={e} events={events} teams={teams} powerScores={powerScores} />)}
         </div>
@@ -348,16 +348,17 @@ function MilestoneButton({ selected, onClick, children }: { selected: boolean; o
   )
 }
 
-function MilestoneSelect({ label, value, onChange, teamName, opponentName }: {
-  label: string; value: NarrativeTeam | ''; onChange: (v: NarrativeTeam | '') => void; teamName: string; opponentName: string
+function MilestoneSelect({ label, value, onChange, leftValue, leftLabel, rightValue, rightLabel }: {
+  label: string; value: NarrativeTeam | ''; onChange: (v: NarrativeTeam | '') => void
+  leftValue: NarrativeTeam; leftLabel: string; rightValue: NarrativeTeam; rightLabel: string
 }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-      <span style={{ fontSize: 9, color: 'var(--text-muted)', width: 44, flexShrink: 0 }}>{label}</span>
+      <span style={{ fontSize: 9, color: 'var(--text-muted)', width: 60, flexShrink: 0 }}>{label}</span>
       <div style={{ display: 'flex', gap: 4, flex: 1 }}>
         <MilestoneButton selected={value === ''} onClick={() => onChange('')}>없음</MilestoneButton>
-        <MilestoneButton selected={value === 'team1'} onClick={() => onChange('team1')}>{teamName}</MilestoneButton>
-        <MilestoneButton selected={value === 'team2'} onClick={() => onChange('team2')}>{opponentName}</MilestoneButton>
+        <MilestoneButton selected={value === leftValue} onClick={() => onChange(leftValue)}>{leftLabel}</MilestoneButton>
+        <MilestoneButton selected={value === rightValue} onClick={() => onChange(rightValue)}>{rightLabel}</MilestoneButton>
       </div>
     </div>
   )
@@ -451,6 +452,9 @@ function RecentMatchRow({ teamId, teamName, game, displayA, displayB, scoreA, sc
   const [form, setForm] = useState<GameStatForm>(() => emptyGameStatForm(1))
   const [saving, setSaving] = useState(false)
   const [showAnalysis, setShowAnalysis] = useState(false)
+  // 입력 폼에서 좌(블루)/우(레드) 어느 쪽에 어느 팀을 표시할지. 데이터(team1=우리팀/team2=상대팀) 자체는
+  // 안 건드리고 순수하게 렌더링 순서만 뒤집는다 — 중계 화면 진영 순서에 맞춰 입력하기 쉽도록.
+  const [sideSwapped, setSideSwapped] = useState(false)
 
   // 상대팀도 우리가 추적 중인 팀이면(예: DK도 esports_teams에 있으면) 그쪽 team_id도 찾아둔다.
   // 세트 저장 시 양쪽에 다 기록해야 상대팀 체급 점수에도 이 경기가 반영된다.
@@ -488,6 +492,7 @@ function RecentMatchRow({ teamId, teamName, game, displayA, displayB, scoreA, sc
 
   function openAddForm() {
     setForm(emptyGameStatForm((sets?.length ?? 0) + 1))
+    setSideSwapped(false)
     setShowForm(true)
   }
 
@@ -507,26 +512,14 @@ function RecentMatchRow({ teamId, teamName, game, displayA, displayB, scoreA, sc
       firstDragonTeam: stat.first_dragon_team ?? '', firstBaronTeam: stat.first_baron_team ?? '',
       fifthKillTeam: stat.fifth_kill_team ?? '', tenthKillTeam: stat.tenth_kill_team ?? '',
     })
+    setSideSwapped(false)
     setShowForm(true)
   }
 
-  // 세트 기록 입력 폼의 좌우(팀1/팀2) 위치를 통째로 뒤집는다.
-  // 데이터 출처(중계 화면 등)에서 블루/레드 진영 순서가 기대와 반대로 나올 때, 값을 처음부터 다시
-  // 입력하지 않고 한 번에 좌우를 바꿔줄 수 있도록.
-  function swapFormSides() {
-    const flip = (v: NarrativeTeam | ''): NarrativeTeam | '' => v === 'team1' ? 'team2' : v === 'team2' ? 'team1' : ''
-    setForm(f => ({
-      ...f,
-      team1Kills: f.team2Kills, team2Kills: f.team1Kills,
-      team1Dragons: f.team2Dragons, team2Dragons: f.team1Dragons,
-      team1Towers: f.team2Towers, team2Towers: f.team1Towers,
-      team1Inhibitors: f.team2Inhibitors, team2Inhibitors: f.team1Inhibitors,
-      team1Barons: f.team2Barons, team2Barons: f.team1Barons,
-      winnerTeam: f.winnerTeam === 'team1' ? 'team2' : 'team1',
-      firstBloodTeam: flip(f.firstBloodTeam), firstTowerTeam: flip(f.firstTowerTeam),
-      firstDragonTeam: flip(f.firstDragonTeam), firstBaronTeam: flip(f.firstBaronTeam),
-      fifthKillTeam: flip(f.fifthKillTeam), tenthKillTeam: flip(f.tenthKillTeam),
-    }))
+  // 세트 기록 입력 폼의 좌(블루)/우(레드) 표시 순서를 뒤집는다. team1(우리팀)/team2(상대팀) 데이터 매핑은
+  // 그대로 두고, 어느 쪽 열에 누구 이름과 입력칸을 보여줄지만 바꾼다.
+  function toggleSideSwap() {
+    setSideSwapped(v => !v)
   }
 
   async function saveSet() {
@@ -731,61 +724,194 @@ function RecentMatchRow({ teamId, teamName, game, displayA, displayB, scoreA, sc
               ))}
             </div>
           )}
-          {showForm && (
-            <div style={{ background: 'var(--bg-elevated)', borderRadius: 6, padding: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
-                <div style={{ fontSize: 10, fontWeight: 700 }}>{form.gameNumber}세트 기록 {sets?.some(s => s.game_number === form.gameNumber) ? '수정' : '입력'}</div>
-                <button type="button" onClick={swapFormSides} className="btn btn-ghost" style={{ padding: '3px 7px', fontSize: 9, flexShrink: 0 }}>
-                  🔄 진영 변경 (블루⇄레드)
-                </button>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span style={{ fontSize: 10, color: 'var(--text-secondary)', width: 46 }}>게임시간</span>
-                <input value={form.durationMin} onChange={e => setForm(f => ({ ...f, durationMin: e.target.value.replace(/[^0-9]/g, '') }))}
-                  placeholder="분" inputMode="numeric" style={{ width: 40, fontSize: 11, padding: '3px 4px', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text-primary)', textAlign: 'center' }} />
-                <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>분</span>
-                <input value={form.durationSec} onChange={e => setForm(f => ({ ...f, durationSec: e.target.value.replace(/[^0-9]/g, '') }))}
-                  placeholder="초" inputMode="numeric" style={{ width: 40, fontSize: 11, padding: '3px 4px', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text-primary)', textAlign: 'center' }} />
-                <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>초</span>
-              </div>
+          {showForm && (() => {
+            const leftIsTeam1 = !sideSwapped
+            const leftLabel = leftIsTeam1 ? teamLabel : oppLabel
+            const rightLabel = leftIsTeam1 ? oppLabel : teamLabel
+            const leftValue: NarrativeTeam = leftIsTeam1 ? 'team1' : 'team2'
+            const rightValue: NarrativeTeam = leftIsTeam1 ? 'team2' : 'team1'
+            // team1/team2(우리팀/상대팀) 필드 쌍을 현재 좌/우 배치에 맞춰 매핑해주는 헬퍼
+            function statProps(t1Key: 'team1Kills' | 'team1Barons' | 'team1Dragons' | 'team1Towers' | 'team1Inhibitors', t2Key: 'team2Kills' | 'team2Barons' | 'team2Dragons' | 'team2Towers' | 'team2Inhibitors') {
+              const lKey = leftIsTeam1 ? t1Key : t2Key
+              const rKey = leftIsTeam1 ? t2Key : t1Key
+              return {
+                valueA: form[lKey], valueB: form[rKey],
+                onChangeA: (v: string) => setForm(f => ({ ...f, [lKey]: v })),
+                onChangeB: (v: string) => setForm(f => ({ ...f, [rKey]: v })),
+              }
+            }
+            return (
+              <div style={{ background: 'var(--bg-elevated)', borderRadius: 6, padding: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+                  <div style={{ fontSize: 10, fontWeight: 700 }}>{form.gameNumber}세트 기록 {sets?.some(s => s.game_number === form.gameNumber) ? '수정' : '입력'}</div>
+                  <button type="button" onClick={toggleSideSwap} className="btn btn-ghost" style={{ padding: '3px 7px', fontSize: 9, flexShrink: 0 }}>
+                    🔄 진영 변경 (블루⇄레드)
+                  </button>
+                </div>
 
-              <div style={{ display: 'flex', gap: 10 }}>
-                {/* 좌측: 킬/내셔/드래곤/타워/억제기 숫자 입력 */}
-                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
+                {/* 게임시간 */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ fontSize: 10, color: 'var(--text-secondary)', width: 46, flexShrink: 0 }}>게임시간</span>
+                  <input value={form.durationMin} onChange={e => setForm(f => ({ ...f, durationMin: e.target.value.replace(/[^0-9]/g, '') }))}
+                    placeholder="분" inputMode="numeric" style={{ width: 40, fontSize: 11, padding: '3px 4px', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text-primary)', textAlign: 'center' }} />
+                  <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>분</span>
+                  <input value={form.durationSec} onChange={e => setForm(f => ({ ...f, durationSec: e.target.value.replace(/[^0-9]/g, '') }))}
+                    placeholder="초" inputMode="numeric" style={{ width: 40, fontSize: 11, padding: '3px 4px', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text-primary)', textAlign: 'center' }} />
+                  <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>초</span>
+                </div>
+
+                {/* 승리팀 */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ fontSize: 9, color: 'var(--text-muted)', width: 60, flexShrink: 0 }}>승리팀</span>
+                  <div style={{ display: 'flex', gap: 4, flex: 1 }}>
+                    <MilestoneButton selected={form.winnerTeam === leftValue} onClick={() => setForm(f => ({ ...f, winnerTeam: leftValue }))}>{leftLabel}</MilestoneButton>
+                    <MilestoneButton selected={form.winnerTeam === rightValue} onClick={() => setForm(f => ({ ...f, winnerTeam: rightValue }))}>{rightLabel}</MilestoneButton>
+                  </div>
+                </div>
+
+                {/* 킬/내셔/드래곤/타워/억제기 — 좌(블루)/우(레드) 팀명 헤더 */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     <span style={{ width: 46, flexShrink: 0 }} />
-                    <span style={{ width: 40, fontSize: 9, fontWeight: 700, textAlign: 'center', color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{teamLabel}</span>
+                    <span style={{ width: 40, fontSize: 9, fontWeight: 700, textAlign: 'center', color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{leftLabel}</span>
                     <span style={{ width: 9 }} />
-                    <span style={{ width: 40, fontSize: 9, fontWeight: 700, textAlign: 'center', color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{oppLabel}</span>
+                    <span style={{ width: 40, fontSize: 9, fontWeight: 700, textAlign: 'center', color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{rightLabel}</span>
                   </div>
-                  <StatPairInput label="킬" valueA={form.team1Kills} valueB={form.team2Kills} onChangeA={v => setForm(f => ({ ...f, team1Kills: v }))} onChangeB={v => setForm(f => ({ ...f, team2Kills: v }))} />
-                  <StatPairInput label="내셔" valueA={form.team1Barons} valueB={form.team2Barons} onChangeA={v => setForm(f => ({ ...f, team1Barons: v }))} onChangeB={v => setForm(f => ({ ...f, team2Barons: v }))} />
-                  <StatPairInput label="드래곤" valueA={form.team1Dragons} valueB={form.team2Dragons} onChangeA={v => setForm(f => ({ ...f, team1Dragons: v }))} onChangeB={v => setForm(f => ({ ...f, team2Dragons: v }))} />
-                  <StatPairInput label="타워" valueA={form.team1Towers} valueB={form.team2Towers} onChangeA={v => setForm(f => ({ ...f, team1Towers: v }))} onChangeB={v => setForm(f => ({ ...f, team2Towers: v }))} />
-                  <StatPairInput label="억제기" valueA={form.team1Inhibitors} valueB={form.team2Inhibitors} onChangeA={v => setForm(f => ({ ...f, team1Inhibitors: v }))} onChangeB={v => setForm(f => ({ ...f, team2Inhibitors: v }))} />
+                  <StatPairInput label="킬" {...statProps('team1Kills', 'team2Kills')} />
+                  <StatPairInput label="내셔" {...statProps('team1Barons', 'team2Barons')} />
+                  <StatPairInput label="드래곤" {...statProps('team1Dragons', 'team2Dragons')} />
+                  <StatPairInput label="타워" {...statProps('team1Towers', 'team2Towers')} />
+                  <StatPairInput label="억제기" {...statProps('team1Inhibitors', 'team2Inhibitors')} />
                 </div>
-                {/* 우측: 첫킬/첫드래곤/첫타워/첫내셔/5킬선취/10킬선취 */}
-                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
-                  <MilestoneSelect label="퍼스트 1킬" value={form.firstBloodTeam} onChange={v => setForm(f => ({ ...f, firstBloodTeam: v }))} teamName={teamLabel} opponentName={oppLabel} />
-                  <MilestoneSelect label="퍼스트 드래곤" value={form.firstDragonTeam} onChange={v => setForm(f => ({ ...f, firstDragonTeam: v }))} teamName={teamLabel} opponentName={oppLabel} />
-                  <MilestoneSelect label="퍼스트 타워" value={form.firstTowerTeam} onChange={v => setForm(f => ({ ...f, firstTowerTeam: v }))} teamName={teamLabel} opponentName={oppLabel} />
-                  <MilestoneSelect label="퍼스트 내셔" value={form.firstBaronTeam} onChange={v => setForm(f => ({ ...f, firstBaronTeam: v }))} teamName={teamLabel} opponentName={oppLabel} />
-                  <MilestoneSelect label="퍼스트 5킬" value={form.fifthKillTeam} onChange={v => setForm(f => ({ ...f, fifthKillTeam: v }))} teamName={teamLabel} opponentName={oppLabel} />
-                  <MilestoneSelect label="퍼스트 10킬" value={form.tenthKillTeam} onChange={v => setForm(f => ({ ...f, tenthKillTeam: v }))} teamName={teamLabel} opponentName={oppLabel} />
+
+                {/* 마일스톤: 퍼스트 1킬 → 5킬 → 10킬 → 드래곤 → 타워 → 내셔 순으로 세로 나열 */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <MilestoneSelect label="퍼스트 1킬" value={form.firstBloodTeam} onChange={v => setForm(f => ({ ...f, firstBloodTeam: v }))} leftValue={leftValue} leftLabel={leftLabel} rightValue={rightValue} rightLabel={rightLabel} />
+                  <MilestoneSelect label="퍼스트 5킬" value={form.fifthKillTeam} onChange={v => setForm(f => ({ ...f, fifthKillTeam: v }))} leftValue={leftValue} leftLabel={leftLabel} rightValue={rightValue} rightLabel={rightLabel} />
+                  <MilestoneSelect label="퍼스트 10킬" value={form.tenthKillTeam} onChange={v => setForm(f => ({ ...f, tenthKillTeam: v }))} leftValue={leftValue} leftLabel={leftLabel} rightValue={rightValue} rightLabel={rightLabel} />
+                  <MilestoneSelect label="퍼스트 드래곤" value={form.firstDragonTeam} onChange={v => setForm(f => ({ ...f, firstDragonTeam: v }))} leftValue={leftValue} leftLabel={leftLabel} rightValue={rightValue} rightLabel={rightLabel} />
+                  <MilestoneSelect label="퍼스트 타워" value={form.firstTowerTeam} onChange={v => setForm(f => ({ ...f, firstTowerTeam: v }))} leftValue={leftValue} leftLabel={leftLabel} rightValue={rightValue} rightLabel={rightLabel} />
+                  <MilestoneSelect label="퍼스트 내셔" value={form.firstBaronTeam} onChange={v => setForm(f => ({ ...f, firstBaronTeam: v }))} leftValue={leftValue} leftLabel={leftLabel} rightValue={rightValue} rightLabel={rightLabel} />
+                </div>
+
+                <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                  <button onClick={() => setShowForm(false)} className="btn btn-ghost" style={{ padding: '5px 10px', fontSize: 11 }}>취소</button>
+                  <button onClick={saveSet} disabled={saving} className="btn btn-primary" style={{ padding: '5px 10px', fontSize: 11 }}>{saving ? '저장 중...' : '저장'}</button>
                 </div>
               </div>
+            )
+          })()}
+        </div>
+      )}
+    </div>
+  )
+}
 
+// ─── 경기 수동 추가 (자동 일정 조회가 안 되는 리그의 폴백) ───────────
+function ManualEventPanel({ leagueCode, manualEvents, onChanged, autoOpenHint }: {
+  leagueCode: string; manualEvents: ManualEsportsEvent[]; onChanged: () => void; autoOpenHint: boolean
+}) {
+  const [open, setOpen] = useState(false)
+  const [showForm, setShowForm] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [form, setForm] = useState({
+    state: 'unstarted' as 'completed' | 'unstarted',
+    startTime: '', teamAName: '', teamACode: '', teamBName: '', teamBCode: '',
+    bestOf: '3', scoreA: '', scoreB: '',
+  })
+
+  async function save() {
+    if (!form.teamAName.trim() || !form.teamBName.trim() || !form.startTime) return
+    setSaving(true)
+    const payload = {
+      league: leagueCode,
+      start_time: new Date(form.startTime).toISOString(),
+      state: form.state,
+      team_a_name: form.teamAName.trim(), team_a_code: form.teamACode.trim() || null,
+      team_b_name: form.teamBName.trim(), team_b_code: form.teamBCode.trim() || null,
+      best_of: parseInt(form.bestOf, 10) || 3,
+      score_a: form.state === 'completed' ? (parseInt(form.scoreA, 10) || 0) : null,
+      score_b: form.state === 'completed' ? (parseInt(form.scoreB, 10) || 0) : null,
+    }
+    await supabase.from('esports_manual_events').insert(payload)
+    setSaving(false)
+    setShowForm(false)
+    setForm(f => ({ ...f, teamAName: '', teamACode: '', teamBName: '', teamBCode: '', scoreA: '', scoreB: '' }))
+    onChanged()
+  }
+
+  async function remove(id: string) {
+    await supabase.from('esports_manual_events').delete().eq('id', id)
+    onChanged()
+  }
+
+  const inputStyle = { fontSize: 11, padding: '4px 6px', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text-primary)' }
+
+  return (
+    <div className="card" style={{ marginBottom: 14 }}>
+      <div onClick={() => setOpen(v => !v)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}>
+        <div className="card-title" style={{ marginBottom: 0 }}>
+          경기 수동 추가 {manualEvents.length > 0 ? `· ${manualEvents.length}건 등록됨` : ''}
+          {autoOpenHint && <span style={{ color: 'var(--gold)', fontWeight: 700, marginLeft: 6, fontSize: 10 }}>· 일정 자동 조회 실패 — 여기서 직접 추가해 주세요</span>}
+        </div>
+        {open ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+      </div>
+      {open && (
+        <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {manualEvents.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              {manualEvents.map(m => (
+                <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, padding: '4px 6px', background: 'var(--bg-elevated)', borderRadius: 4 }}>
+                  <span style={{ color: 'var(--text-muted)', width: 76, flexShrink: 0 }}>{dayjs(m.start_time).format('MM/DD HH:mm')}</span>
+                  <span style={{ flex: 1 }}>
+                    {m.team_a_code || m.team_a_name} vs {m.team_b_code || m.team_b_name}
+                    {m.state === 'completed' ? ` (${m.score_a}:${m.score_b})` : ' (예정)'}
+                  </span>
+                  <button onClick={() => remove(m.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex' }}>
+                    <Trash2 size={10} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          {!showForm && (
+            <button onClick={() => setShowForm(true)} className="btn btn-ghost" style={{ padding: '5px 8px', fontSize: 10, alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: 4 }}>
+              <Plus size={10} /> 경기 추가
+            </button>
+          )}
+          {showForm && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, background: 'var(--bg-elevated)', padding: 8, borderRadius: 6 }}>
+              <div style={{ display: 'flex', gap: 4 }}>
+                <MilestoneButton selected={form.state === 'unstarted'} onClick={() => setForm(f => ({ ...f, state: 'unstarted' }))}>예정된 경기</MilestoneButton>
+                <MilestoneButton selected={form.state === 'completed'} onClick={() => setForm(f => ({ ...f, state: 'completed' }))}>완료된 경기</MilestoneButton>
+              </div>
+              <input type="datetime-local" value={form.startTime} onChange={e => setForm(f => ({ ...f, startTime: e.target.value }))} style={inputStyle} />
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input placeholder="팀A 이름" value={form.teamAName} onChange={e => setForm(f => ({ ...f, teamAName: e.target.value }))} style={{ ...inputStyle, flex: 1 }} />
+                <input placeholder="약자" value={form.teamACode} onChange={e => setForm(f => ({ ...f, teamACode: e.target.value }))} style={{ ...inputStyle, width: 56 }} />
+              </div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input placeholder="팀B 이름" value={form.teamBName} onChange={e => setForm(f => ({ ...f, teamBName: e.target.value }))} style={{ ...inputStyle, flex: 1 }} />
+                <input placeholder="약자" value={form.teamBCode} onChange={e => setForm(f => ({ ...f, teamBCode: e.target.value }))} style={{ ...inputStyle, width: 56 }} />
+              </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span style={{ fontSize: 9, color: 'var(--text-muted)', width: 60, flexShrink: 0 }}>승리팀</span>
-                <div style={{ display: 'flex', gap: 4, flex: 1 }}>
-                  <MilestoneButton selected={form.winnerTeam === 'team1'} onClick={() => setForm(f => ({ ...f, winnerTeam: 'team1' }))}>{teamLabel}</MilestoneButton>
-                  <MilestoneButton selected={form.winnerTeam === 'team2'} onClick={() => setForm(f => ({ ...f, winnerTeam: 'team2' }))}>{oppLabel}</MilestoneButton>
-                </div>
+                <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>BO</span>
+                <input value={form.bestOf} onChange={e => setForm(f => ({ ...f, bestOf: e.target.value.replace(/[^0-9]/g, '') }))} inputMode="numeric"
+                  style={{ ...inputStyle, width: 36, textAlign: 'center' }} />
+                {form.state === 'completed' && (
+                  <>
+                    <span style={{ fontSize: 9, color: 'var(--text-muted)', marginLeft: 8 }}>스코어</span>
+                    <input value={form.scoreA} onChange={e => setForm(f => ({ ...f, scoreA: e.target.value.replace(/[^0-9]/g, '') }))} inputMode="numeric"
+                      style={{ ...inputStyle, width: 32, textAlign: 'center' }} />
+                    <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>:</span>
+                    <input value={form.scoreB} onChange={e => setForm(f => ({ ...f, scoreB: e.target.value.replace(/[^0-9]/g, '') }))} inputMode="numeric"
+                      style={{ ...inputStyle, width: 32, textAlign: 'center' }} />
+                  </>
+                )}
               </div>
-
               <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-                <button onClick={() => setShowForm(false)} className="btn btn-ghost" style={{ padding: '5px 10px', fontSize: 11 }}>취소</button>
-                <button onClick={saveSet} disabled={saving} className="btn btn-primary" style={{ padding: '5px 10px', fontSize: 11 }}>{saving ? '저장 중...' : '저장'}</button>
+                <button onClick={() => setShowForm(false)} className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: 10 }}>취소</button>
+                <button onClick={save} disabled={saving} className="btn btn-primary" style={{ padding: '4px 8px', fontSize: 10 }}>{saving ? '저장 중...' : '저장'}</button>
               </div>
             </div>
           )}
@@ -800,10 +926,13 @@ function LeagueView({ code, label }: { code: string; label: string }) {
   const [events, setEvents] = useState<RawScheduleEvent[] | null>(null)
   const [eventsLoading, setEventsLoading] = useState(false)
   const [eventsError, setEventsError] = useState(false)
+  const [manualEvents, setManualEvents] = useState<ManualEsportsEvent[]>([])
   const [powerScores, setPowerScores] = useState<Record<string, TeamPowerScore>>({})
   const [powerLog, setPowerLog] = useState<Record<string, EloGameLog[]>>({})
   const [expandedPowerTeam, setExpandedPowerTeam] = useState<string | null>(null)
+  const [expandedHistoryIdx, setExpandedHistoryIdx] = useState<number | null>(null)
   const [powerLoading, setPowerLoading] = useState(false)
+  const [recentSeriesResult, setRecentSeriesResult] = useState<Record<string, { win: boolean; sweep: boolean } | null>>({})
 
   // 팀 체급 점수 계산: 라이엇 GPR 공식(순차 Elo)을 리그 전체 경기에 시간순으로 적용
   async function loadPowerScores(teamsList: EsportsTeam[]) {
@@ -852,6 +981,29 @@ function LeagueView({ code, label }: { code: string; label: string }) {
       }
       setPowerScores(scores)
       setPowerLog(logByTeam)
+
+      // 최근 승리 W/L 배지: 세트 단위가 아니라 "가장 최근 시리즈(매치)" 단위로 승패를 판정.
+      // 같은 team_id + team2_name + match_start_time으로 묶이는 세트들을 하나의 시리즈로 취급.
+      const seriesByTeam: Record<string, { matchStartTime: string; wins: number; losses: number }[]> = {}
+      for (const s of rows) {
+        if (!s.match_start_time) continue
+        const arr = seriesByTeam[s.team_id] ?? (seriesByTeam[s.team_id] = [])
+        let entry = arr.find(e => e.matchStartTime === s.match_start_time)
+        if (!entry) { entry = { matchStartTime: s.match_start_time, wins: 0, losses: 0 }; arr.push(entry) }
+        if (s.winner_team === 'team1') entry.wins++
+        else if (s.winner_team === 'team2') entry.losses++
+      }
+      const recent: Record<string, { win: boolean; sweep: boolean } | null> = {}
+      for (const t of teamsList) {
+        const arr = seriesByTeam[t.id] ?? []
+        if (arr.length === 0) { recent[t.id] = null; continue }
+        arr.sort((a, b) => new Date(b.matchStartTime).getTime() - new Date(a.matchStartTime).getTime())
+        const latest = arr[0]
+        const win = latest.wins > latest.losses
+        const sweep = win ? (latest.losses === 0 && latest.wins >= 2) : (latest.wins === 0 && latest.losses >= 2)
+        recent[t.id] = { win, sweep }
+      }
+      setRecentSeriesResult(recent)
     } finally {
       setPowerLoading(false)
     }
@@ -873,7 +1025,30 @@ function LeagueView({ code, label }: { code: string; label: string }) {
       setEventsLoading(false)
     }
   }
-  useEffect(() => { load(); loadEvents() }, [code])
+  // 자동 일정 조회가 안 되는 리그(예: LCK CL)나 놓친 경기를 위한 수동 입력 폴백
+  async function loadManualEvents() {
+    const { data } = await supabase.from('esports_manual_events').select('*').eq('league', code).order('start_time', { ascending: false })
+    setManualEvents((data as ManualEsportsEvent[]) ?? [])
+  }
+  useEffect(() => { load(); loadEvents(); loadManualEvents() }, [code])
+
+  // 자동으로 가져온 일정 + 수동으로 추가한 경기를 합쳐서 각 패널에 넘긴다
+  const combinedEvents = useMemo(() => {
+    const manual = manualEvents.map(manualEventToRawEvent)
+    if (!events) return manual.length > 0 ? manual : null
+    return [...events, ...manual]
+  }, [events, manualEvents])
+
+  // 파워랭킹 목록에 팀 약자를 괄호로 같이 보여주기 위해 일정 데이터에서 팀별 게임 내 코드를 찾아둔다
+  const teamCodeMap = useMemo(() => {
+    if (!combinedEvents) return {} as Record<string, string>
+    const map: Record<string, string> = {}
+    for (const t of teams) {
+      const c = findTeamCode(combinedEvents, t.name)
+      if (c) map[t.id] = c
+    }
+    return map
+  }, [combinedEvents, teams])
 
   const rankedTeams = useMemo(() =>
     [...teams].sort((a, b) => (powerScores[b.id]?.powerScore ?? 50) - (powerScores[a.id]?.powerScore ?? 50)),
@@ -888,12 +1063,14 @@ function LeagueView({ code, label }: { code: string; label: string }) {
         </button>
       </div>
 
+      <ManualEventPanel leagueCode={code} manualEvents={manualEvents} onChanged={loadManualEvents} autoOpenHint={eventsError} />
+
       <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'flex-start', marginBottom: 14 }}>
         <div style={{ flex: '1 1 320px', minWidth: 280 }}>
-          <RecentMatchesPanel leagueCode={code} events={events} loading={eventsLoading} error={eventsError} teams={teams} />
+          <RecentMatchesPanel leagueCode={code} events={combinedEvents} loading={eventsLoading} error={eventsError} teams={teams} />
         </div>
         <div style={{ flex: '1 1 320px', minWidth: 280 }}>
-          <UpcomingPanel events={events} loading={eventsLoading} error={eventsError} teams={teams} powerScores={powerScores} />
+          <UpcomingPanel events={combinedEvents} loading={eventsLoading} error={eventsError} teams={teams} powerScores={powerScores} />
         </div>
         <div style={{ flex: '1 1 280px', minWidth: 260 }}>
           <div className="card">
@@ -906,12 +1083,25 @@ function LeagueView({ code, label }: { code: string; label: string }) {
               const ps = powerScores[t.id]
               const expanded = expandedPowerTeam === t.id
               const teamLog = powerLog[t.id] ?? []
+              const code2 = teamCodeMap[t.id]
+              const recent = recentSeriesResult[t.id]
               return (
                 <div key={t.id} style={{ marginBottom: 4 }}>
-                  <div onClick={() => setExpandedPowerTeam(expanded ? null : t.id)}
+                  <div onClick={() => { setExpandedPowerTeam(expanded ? null : t.id); setExpandedHistoryIdx(null) }}
                     style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, padding: '6px 8px', background: 'var(--bg-elevated)', borderRadius: 6, cursor: 'pointer' }}>
                     {expanded ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
-                    <span style={{ flex: 1, fontWeight: 700 }}>{t.name}</span>
+                    {recent ? (
+                      <span style={{
+                        fontSize: 9, fontWeight: 800, width: 16, textAlign: 'center', borderRadius: 3, padding: '1px 0', flexShrink: 0,
+                        color: recent.win ? 'var(--green, #4ade80)' : 'var(--red, #f87171)',
+                        background: recent.win ? 'var(--green-bg, rgba(74,222,128,0.15))' : 'var(--red-bg, rgba(248,113,113,0.15))',
+                        border: recent.sweep ? `1px solid ${recent.win ? 'var(--green, #4ade80)' : 'var(--red, #f87171)'}` : '1px solid transparent',
+                        boxShadow: recent.sweep ? `0 0 0 1px ${recent.win ? 'var(--green, #4ade80)' : 'var(--red, #f87171)'}` : undefined,
+                      }} title={recent.sweep ? '최근 시리즈 2:0' : '최근 시리즈 결과'}>
+                        {recent.win ? 'W' : 'L'}
+                      </span>
+                    ) : <span style={{ width: 16, flexShrink: 0 }} />}
+                    <span style={{ flex: 1, fontWeight: 700 }}>{t.name}{code2 ? <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}> ({code2})</span> : ''}</span>
                     {ps && ps.gamesAnalyzed > 0 ? (
                       <>
                         <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>{ps.gamesAnalyzed}경기 · 승률 {(ps.winRate * 100).toFixed(0)}%</span>
@@ -922,42 +1112,35 @@ function LeagueView({ code, label }: { code: string; label: string }) {
                     )}
                   </div>
                   {expanded && (
-                    <div style={{ padding: '8px 8px', background: 'var(--bg-card)', borderRadius: 6, marginTop: 2, fontSize: 9, overflowX: 'auto' }}>
+                    <div style={{ padding: '8px 8px', background: 'var(--bg-card)', borderRadius: 6, marginTop: 2, fontSize: 9 }}>
                       <div style={{ color: 'var(--text-muted)', marginBottom: 6 }}>
-                        GPR 기본값 {(t.gpr_score ?? 50).toFixed(1)}점에서 시작 → 아래 경기를 시간순으로 하나씩 반영(순차 Elo)하며 최종 {ps?.powerScore.toFixed(1)}점까지 도달. 이겼으면 상대가 아무리 약해도 항상 조금은 오르고, 졌으면 항상 조금은 내려갑니다.
+                        GPR 기본값 {(t.gpr_score ?? 50).toFixed(1)}점에서 시작 → 아래 경기를 시간순으로 하나씩 반영(순차 Elo)하며 최종 {ps?.powerScore.toFixed(1)}점까지 도달. 이겼으면 상대가 아무리 약해도 항상 조금은 오르고, 졌으면 항상 조금은 내려갑니다. 항목을 누르면 자세한 사유가 나옵니다.
                       </div>
                       {teamLog.length === 0 && <div style={{ color: 'var(--text-muted)' }}>입력된 경기가 없습니다.</div>}
                       {teamLog.length > 0 && (
-                        <table style={{ borderCollapse: 'collapse', width: '100%', minWidth: 480 }}>
-                          <thead>
-                            <tr style={{ color: 'var(--text-muted)', textAlign: 'right' }}>
-                              <th style={{ textAlign: 'left', padding: '2px 4px' }}>날짜</th>
-                              <th style={{ textAlign: 'center', padding: '2px 4px' }}>세트</th>
-                              <th style={{ textAlign: 'left', padding: '2px 4px' }}>상대</th>
-                              <th style={{ padding: '2px 4px' }}>결과</th>
-                              <th style={{ padding: '2px 4px' }}>경기 전 점수</th>
-                              <th style={{ padding: '2px 4px' }}>상대 점수</th>
-                              <th style={{ padding: '2px 4px' }}>기대승률</th>
-                              <th style={{ padding: '2px 4px' }}>변화량</th>
-                              <th style={{ padding: '2px 4px', color: 'var(--gold)' }}>경기 후 점수</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {teamLog.map((h, i) => (
-                              <tr key={i} style={{ borderTop: '1px solid var(--border)', textAlign: 'right' }}>
-                                <td style={{ textAlign: 'left', padding: '3px 4px', color: 'var(--text-muted)' }}>{h.matchStartTime ? dayjs(h.matchStartTime).format('MM/DD') : '-'}</td>
-                                <td style={{ textAlign: 'center', padding: '3px 4px', color: 'var(--text-muted)' }}>{h.gameNumber}세트</td>
-                                <td style={{ textAlign: 'left', padding: '3px 4px' }}>{teams.find(x => x.id === h.opponentId)?.name ?? '?'}</td>
-                                <td style={{ padding: '3px 4px', fontWeight: 700, color: h.won ? 'var(--green, #4ade80)' : 'var(--red, #f87171)' }}>{h.won ? '승' : '패'}</td>
-                                <td style={{ padding: '3px 4px', color: 'var(--text-muted)' }}>{h.ratingBefore.toFixed(1)}</td>
-                                <td style={{ padding: '3px 4px', color: 'var(--text-muted)' }}>{h.opponentRatingBefore.toFixed(1)}</td>
-                                <td style={{ padding: '3px 4px' }}>{(h.expected * 100).toFixed(0)}%</td>
-                                <td style={{ padding: '3px 4px', fontWeight: 700, color: h.delta >= 0 ? 'var(--green, #4ade80)' : 'var(--red, #f87171)' }}>{h.delta >= 0 ? '+' : ''}{h.delta.toFixed(2)}</td>
-                                <td style={{ padding: '3px 4px', fontWeight: 800, color: 'var(--gold)' }}>{h.ratingAfter.toFixed(1)}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                          {[...teamLog].reverse().map((h, revIdx) => {
+                            const i = teamLog.length - 1 - revIdx
+                            const rowOpen = expandedHistoryIdx === i
+                            return (
+                              <div key={i}>
+                                <div onClick={() => setExpandedHistoryIdx(rowOpen ? null : i)}
+                                  style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 5px', borderRadius: 4, background: 'var(--bg-elevated)', cursor: 'pointer' }}>
+                                  <span style={{ color: 'var(--text-muted)', width: 34, flexShrink: 0 }}>{h.matchStartTime ? dayjs(h.matchStartTime).format('MM/DD') : '-'}</span>
+                                  <span style={{ fontWeight: 700, color: h.won ? 'var(--green, #4ade80)' : 'var(--red, #f87171)', width: 14, flexShrink: 0 }}>{h.won ? 'W' : 'L'}</span>
+                                  <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{teams.find(x => x.id === h.opponentId)?.name ?? '?'}</span>
+                                  <span style={{ fontWeight: 700, color: h.delta >= 0 ? 'var(--green, #4ade80)' : 'var(--red, #f87171)', width: 40, textAlign: 'right', flexShrink: 0 }}>{h.delta >= 0 ? '+' : ''}{h.delta.toFixed(2)}</span>
+                                  <span style={{ fontWeight: 800, color: 'var(--gold)', width: 34, textAlign: 'right', flexShrink: 0 }}>{h.ratingAfter.toFixed(1)}</span>
+                                </div>
+                                {rowOpen && (
+                                  <div style={{ padding: '4px 6px 6px 45px', color: 'var(--text-muted)', lineHeight: 1.6 }}>
+                                    {h.gameNumber}세트 · 경기 전 점수 {h.ratingBefore.toFixed(1)} vs 상대 {h.opponentRatingBefore.toFixed(1)} · 기대승률 {(h.expected * 100).toFixed(0)}% · 결과 {h.won ? '승' : '패'} · 변화량 {h.delta >= 0 ? '+' : ''}{h.delta.toFixed(2)} → 경기 후 {h.ratingAfter.toFixed(1)}
+                                  </div>
+                                )}
+                              </div>
+                            )
+                          })}
+                        </div>
                       )}
                     </div>
                   )}
