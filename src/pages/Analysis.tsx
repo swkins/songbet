@@ -503,6 +503,10 @@ function RecentMatchRow({ teamId, teamName, game, displayA, displayB, scoreA, sc
     // gol.gg 자동수집 데이터는 상대팀 표기(예: "Gen.G")와 날짜만 있고 정확한 시각/lolesports 표기명("Gen.G Esports")과
     // 일치하지 않으므로, 날짜 ±1일 범위 + 느슨한 팀명 매칭(teamNameMatches)으로 찾는다.
     // 수동 입력 데이터(정확한 team2_name/match_start_time)도 이 범위 안에 포함되므로 함께 잡힌다.
+    // game.opponent(=lolesports API가 방금 이 순간 내려준 raw 이름) 대신 canonicalOpponentName을 기준으로
+    // 비교하는 이유: API가 특정 팀의 name 필드를 부정확하게 내려줄 때가 있어서, raw 이름으로 걸러내면
+    // 방금 정상적으로 저장한 기록이 새로고침 후에는 안 보이는 것처럼 사라지는 문제가 있었다.
+    // canonicalOpponentName은 코드(약자) 우선으로 신뢰성 있게 찾은 등록 팀명이라 안정적이다.
     const dayStart = dayjs(game.startTime).subtract(1, 'day').startOf('day').toISOString()
     const dayEnd = dayjs(game.startTime).add(1, 'day').endOf('day').toISOString()
     const { data } = await supabase.from('esports_game_stats').select('*')
@@ -511,7 +515,9 @@ function RecentMatchRow({ teamId, teamName, game, displayA, displayB, scoreA, sc
       .lte('match_start_time', dayEnd)
       .order('game_number')
     const all = (data as EsportsGameStat[]) ?? []
-    const filtered = all.filter(s => teamNameMatches({ name: s.team2_name }, game.opponent) || teamNameMatches({ name: game.opponent }, s.team2_name))
+    const filtered = all.filter(s =>
+      teamNameMatches({ name: s.team2_name }, canonicalOpponentName) || teamNameMatches({ name: canonicalOpponentName }, s.team2_name)
+    )
     setSets(filtered)
     setLoadingSets(false)
   }
