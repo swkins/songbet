@@ -7,7 +7,6 @@ import dayjs from 'dayjs'
 
 export const LEAGUES: { code: string; label: string; slugs: string[] }[] = [
   { code: 'LCK',   label: 'LCK',   slugs: ['lck'] },
-  { code: 'LCKCL', label: 'LCK CL', slugs: ['lck_challengers_league', 'lck-challengers-league', 'lck-cl', 'lckcl', 'challengers_korea', 'lck cl'] },
   { code: 'LPL',   label: 'LPL',   slugs: ['lpl'] },
   { code: 'LEC',   label: 'LEC',   slugs: ['lec'] },
   { code: 'LCS',   label: 'LCS',   slugs: ['lcs'] },
