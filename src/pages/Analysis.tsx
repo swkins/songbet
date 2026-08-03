@@ -5,7 +5,7 @@ import { Plus, Trash2, Pencil, ChevronDown, ChevronUp, ExternalLink, RefreshCw, 
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import {
   LEAGUES, fetchScheduleEvents, extractTeamData, computeForm, matchupProbability, filterRecentGames,
-  seriesScoreProbabilities, seriesOutcomeSummary, computeOddsValue, teamNameMatches, findTeamCode,
+  seriesScoreProbabilities, seriesOutcomeSummary, teamNameMatches, findTeamCode,
   classifyGameNarrative, computeBothSidesScores, computeBothSidesPerfection, computePerfectionScore,
   simulateLeagueElo, powerScoreMatchupProbability, manualEventToRawEvent,
   type RawScheduleEvent, type TeamGameRecord, type NarrativeTeam, type TeamPowerScore, type EloMatchRecord, type EloGameLog, type ManualEsportsEvent,
@@ -185,11 +185,18 @@ function RecentMatchesPanel({ leagueCode, events, loading, error, teams, onCreat
 }
 
 // ─── 우측: 앞으로의 일정 + 승부 예측 ──────────────────────────────
+// 순수 확률을 "마진 8%가 반영된 배당"으로 환산. 마진은 임플라이드 확률에 균등하게 얹는 방식
+// (implied = p * (1+margin)), 배당 = 1 / implied. 참고용 눈대중 배당이지, 실제 북메이커 배당과는 다를 수 있음.
+function toBookOdds(prob: number, marginPct = 8): string {
+  if (!prob || prob <= 0) return '-'
+  const implied = Math.min(0.99, prob * (1 + marginPct / 100))
+  const odds = 1 / implied
+  return odds.toFixed(2)
+}
+
 function UpcomingRow({ event, events, teams, powerScores }: {
   event: RawScheduleEvent; events: RawScheduleEvent[]; teams: EsportsTeam[]; powerScores: Record<string, TeamPowerScore>
 }) {
-  const [expanded, setExpanded] = useState(false)
-  const [oddsInputs, setOddsInputs] = useState<Record<string, string>>({})
   const matchTeams = event.match?.teams ?? []
   const teamA = matchTeams[0], teamB = matchTeams[1]
   const bestOf = event.match?.strategy?.count ?? 3
@@ -209,83 +216,39 @@ function UpcomingRow({ event, events, teams, powerScores }: {
   const top = scoreProbs[0]
   const topLabel = top.winner === 'A' ? (teamA?.code || teamA?.name) : (teamB?.code || teamB?.name)
 
-  // 강팀/약팀 시리즈 확률 비교 (BO1은 스윕 개념이 의미 없으므로 BO3 이상에서만 표시)
+  // 강팀/약팀 시리즈 확률 비교 (BO1은 스윕 개념이 의미 없으므로 BO3 한정으로만 표시)
   const outcome = seriesOutcomeSummary(p, bestOf)
   const favLabel = outcome.favIsA ? (teamA?.code || teamA?.name) : (teamB?.code || teamB?.name)
   const underLabel = outcome.favIsA ? (teamB?.code || teamB?.name) : (teamA?.code || teamA?.name)
-
-  function setOdds(score: string, v: string) {
-    setOddsInputs(prev => ({ ...prev, [score]: v }))
-  }
 
   const isToday = dayjs(event.startTime).isSame(dayjs(), 'day')
   const isTomorrow = dayjs(event.startTime).isSame(dayjs().add(1, 'day'), 'day')
   const dateBadge = isToday ? '오늘' : isTomorrow ? '내일' : null
 
   return (
-    <div style={{ background: 'var(--bg-elevated)', borderRadius: 6, border: dateBadge ? '1px solid var(--gold-border)' : '1px solid transparent' }}>
-      <div onClick={() => setExpanded(v => !v)} style={{ padding: '8px 8px', cursor: 'pointer' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, marginBottom: 4 }}>
-          {expanded ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
-          <span style={{ color: 'var(--text-muted)', width: 70, flexShrink: 0 }}>{dayjs(event.startTime).format('MM/DD HH:mm')}</span>
-          {dateBadge && (
-            <span style={{ fontSize: 8, fontWeight: 800, color: 'var(--bg-card)', background: 'var(--gold)', borderRadius: 3, padding: '1px 4px', flexShrink: 0 }}>{dateBadge}</span>
-          )}
-          <span style={{ flex: 1, textAlign: 'right', fontWeight: 700 }}>{teamA?.code || teamA?.name}</span>
-          <span style={{ fontSize: 9, color: 'var(--text-muted)', flexShrink: 0 }}>BO{bestOf}</span>
-          <span style={{ flex: 1, fontWeight: 700 }}>{teamB?.code || teamB?.name}</span>
-        </div>
-        <div style={{ fontSize: 10, color: 'var(--text-muted)', textAlign: 'center' }}>
-          예측 승률 <b style={{ color: 'var(--text-secondary)' }}>{(p * 100).toFixed(0)}%</b> : <b style={{ color: 'var(--text-secondary)' }}>{((1 - p) * 100).toFixed(0)}%</b>
-          {' · '}예상 스코어 <b style={{ color: 'var(--gold)' }}>{topLabel} {top.score}</b> ({(top.prob * 100).toFixed(0)}%)
-          {usePower && powerA && powerB
-            ? <div style={{ marginTop: 2 }}>파워랭킹 기반 · {teamA?.code || teamA?.name} {powerA.powerScore.toFixed(1)} : {powerB.powerScore.toFixed(1)} {teamB?.code || teamB?.name}</div>
-            : <div style={{ marginTop: 2 }}>파워랭킹 데이터 부족 · lolesports 전적 기반 폴백</div>}
-          {bestOf === 3 && (
-            <div style={{ marginTop: 4, paddingTop: 4, borderTop: '1px dashed var(--border)', display: 'flex', flexDirection: 'column', gap: 2, fontWeight: 700, color: 'var(--text-secondary)' }}>
-              <div>{underLabel} 1.5 <span style={{ color: 'var(--gold)' }}>{(outcome.underAtLeastOneGameProb * 100).toFixed(0)}%</span> &nbsp; {favLabel} <span style={{ color: 'var(--gold)' }}>{(outcome.favWinProb * 100).toFixed(0)}%</span></div>
-              <div>{favLabel} -1.5 <span style={{ color: 'var(--gold)' }}>{(outcome.favSweepProb * 100).toFixed(0)}%</span> &nbsp; {underLabel} <span style={{ color: 'var(--gold)' }}>{(outcome.underWinProb * 100).toFixed(0)}%</span></div>
-            </div>
-          )}
-        </div>
+    <div style={{ background: 'var(--bg-elevated)', borderRadius: 6, border: dateBadge ? '1px solid var(--gold-border)' : '1px solid transparent', padding: '8px 8px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, marginBottom: 4 }}>
+        <span style={{ color: 'var(--text-muted)', width: 70, flexShrink: 0 }}>{dayjs(event.startTime).format('MM/DD HH:mm')}</span>
+        {dateBadge && (
+          <span style={{ fontSize: 8, fontWeight: 800, color: 'var(--bg-card)', background: 'var(--gold)', borderRadius: 3, padding: '1px 4px', flexShrink: 0 }}>{dateBadge}</span>
+        )}
+        <span style={{ flex: 1, textAlign: 'right', fontWeight: 700 }}>{teamA?.code || teamA?.name}</span>
+        <span style={{ fontSize: 9, color: 'var(--text-muted)', flexShrink: 0 }}>BO{bestOf}</span>
+        <span style={{ flex: 1, fontWeight: 700 }}>{teamB?.code || teamB?.name}</span>
       </div>
-      {expanded && (
-        <div style={{ padding: '0 8px 8px 8px' }}>
-          <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 6 }}>
-            배당을 입력하면 모델 확률 대비 기대값(EV)을 보여드려요. EV가 양수(초록)면 베팅 가치가 있다는 뜻입니다.
+      <div style={{ fontSize: 10, color: 'var(--text-muted)', textAlign: 'center' }}>
+        예측 승률 <b style={{ color: 'var(--text-secondary)' }}>{(p * 100).toFixed(0)}%</b> : <b style={{ color: 'var(--text-secondary)' }}>{((1 - p) * 100).toFixed(0)}%</b>
+        {' · '}예상 스코어 <b style={{ color: 'var(--gold)' }}>{topLabel} {top.score}</b> ({(top.prob * 100).toFixed(0)}%)
+        {usePower && powerA && powerB
+          ? <div style={{ marginTop: 2 }}>파워랭킹 기반 · {teamA?.code || teamA?.name} {powerA.powerScore.toFixed(1)} : {powerB.powerScore.toFixed(1)} {teamB?.code || teamB?.name}</div>
+          : <div style={{ marginTop: 2 }}>파워랭킹 데이터 부족 · lolesports 전적 기반 폴백</div>}
+        {bestOf === 3 && (
+          <div style={{ marginTop: 4, paddingTop: 4, borderTop: '1px dashed var(--border)', display: 'flex', flexDirection: 'column', gap: 2, fontWeight: 700, color: 'var(--text-secondary)' }}>
+            <div>{underLabel} 1.5 <span style={{ color: 'var(--gold)' }}>{toBookOdds(outcome.underAtLeastOneGameProb)}</span><span style={{ color: 'var(--text-muted)', fontWeight: 500 }}> ({(outcome.underAtLeastOneGameProb * 100).toFixed(0)}%)</span> &nbsp; {favLabel} <span style={{ color: 'var(--gold)' }}>{toBookOdds(outcome.favWinProb)}</span><span style={{ color: 'var(--text-muted)', fontWeight: 500 }}> ({(outcome.favWinProb * 100).toFixed(0)}%)</span></div>
+            <div>{favLabel} -1.5 <span style={{ color: 'var(--gold)' }}>{toBookOdds(outcome.favSweepProb)}</span><span style={{ color: 'var(--text-muted)', fontWeight: 500 }}> ({(outcome.favSweepProb * 100).toFixed(0)}%)</span> &nbsp; {underLabel} <span style={{ color: 'var(--gold)' }}>{toBookOdds(outcome.underWinProb)}</span><span style={{ color: 'var(--text-muted)', fontWeight: 500 }}> ({(outcome.underWinProb * 100).toFixed(0)}%)</span></div>
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {scoreProbs.map(sp => {
-              const label = sp.winner === 'A' ? `${teamA?.code || teamA?.name} ${sp.score}` : `${teamB?.code || teamB?.name} ${sp.score}`
-              const odds = parseFloat(oddsInputs[sp.score] ?? '')
-              const value = computeOddsValue(sp.prob, odds)
-              return (
-                <div key={sp.score + sp.winner} style={{
-                  display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, padding: '6px 8px', borderRadius: 6,
-                  background: value?.isValue ? 'var(--green-bg)' : 'var(--bg-card)',
-                  border: value?.isValue ? '1px solid var(--green-border)' : '1px solid transparent',
-                }}>
-                  <span style={{ flex: 1, fontWeight: 700 }}>{label}</span>
-                  <span style={{ width: 46, textAlign: 'right', color: 'var(--gold)', fontWeight: 800, flexShrink: 0 }}>{(sp.prob * 100).toFixed(1)}%</span>
-                  <input
-                    value={oddsInputs[sp.score] ?? ''}
-                    onChange={e => setOdds(sp.score, e.target.value)}
-                    onClick={e => e.stopPropagation()}
-                    placeholder="배당"
-                    inputMode="decimal"
-                    style={{ width: 54, fontSize: 11, padding: '3px 5px', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-primary)', textAlign: 'right', flexShrink: 0 }}
-                  />
-                  {value && (
-                    <span style={{ width: 62, textAlign: 'right', fontSize: 10, fontWeight: 700, color: value.isValue ? 'var(--green)' : 'var(--text-muted)', flexShrink: 0 }}>
-                      {value.isValue ? `+EV ${value.edgePct.toFixed(1)}%` : `${value.edgePct.toFixed(1)}%`}
-                    </span>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   )
 }
