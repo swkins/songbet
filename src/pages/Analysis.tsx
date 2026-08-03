@@ -51,7 +51,7 @@ function resolveMatchTeam(teams: EsportsTeam[], teamAName: string, teamBName: st
 }
 
 // ─── 중앙: 최근 경기 (클릭하면 바로 펼쳐져서 세트 기록 입력 + 분석 가능) ──
-function RecentMatchesPanel({ leagueCode, events, loading, error, teams }: { leagueCode: string; events: RawScheduleEvent[] | null; loading: boolean; error: boolean; teams: EsportsTeam[] }) {
+function RecentMatchesPanel({ leagueCode, events, loading, error, teams, onCreateTeam }: { leagueCode: string; events: RawScheduleEvent[] | null; loading: boolean; error: boolean; teams: EsportsTeam[]; onCreateTeam: (name: string) => Promise<void> }) {
   const matches = useMemo(() => {
     if (!events) return []
     const cutoff = dayjs().subtract(30, 'day')
@@ -116,29 +116,40 @@ function RecentMatchesPanel({ leagueCode, events, loading, error, teams }: { lea
               isA: ov.isA,
             } : null)
             if (!resolved) {
-              // 자동 매칭 실패 (예: lolesports API가 이 경기만 팀 이름을 다르게 내려준 경우) → 수동 선택으로 우회
+              // 자동 매칭 실패 — 대부분은 이 리그에 추적 중인 팀이 아직 하나도 없어서(esports_teams에 미등록) 발생.
+              // 팀을 미리 등록해두라고 요구하는 대신, 버튼 한 번으로 그 팀을 즉시 등록하고 바로 입력으로 넘어가게 한다.
               return (
                 <div key={m.id} style={{ padding: '6px 8px', background: 'var(--bg-elevated)', borderRadius: 6 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, opacity: 0.6 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11 }}>
                     <span style={{ color: 'var(--text-muted)', flexShrink: 0, width: 58 }}>{dayjs(m.startTime).format('MM/DD HH:mm')}</span>
                     <span style={{ flex: 1, textAlign: 'right' }}>{m.codeA || m.teamA}</span>
                     <span style={{ fontWeight: 800, color: 'var(--gold)', flexShrink: 0 }}>{m.scoreA} : {m.scoreB}</span>
                     <span style={{ flex: 1 }}>{m.codeB || m.teamB}</span>
                   </div>
-                  <select
-                    value=""
-                    onChange={e => {
-                      const teamId = e.target.value
-                      if (!teamId) return
-                      const chosen = teams.find(t => t.id === teamId)
-                      const isA = chosen ? (teamNameMatches(chosen, m.teamA) || teamNameMatches(chosen, m.codeA)) : true
-                      setOverrides(prev => ({ ...prev, [m.id]: { teamId, isA } }))
-                    }}
-                    style={{ width: '100%', marginTop: 4, fontSize: 10, padding: '3px 4px', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text-primary)', fontFamily: 'var(--font-body)' }}
-                  >
-                    <option value="">자동 매칭 실패 · 수동으로 팀 선택해서 입력하기</option>
-                    {teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                  </select>
+                  <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
+                    <button onClick={() => onCreateTeam(m.teamA)} className="btn btn-ghost" style={{ flex: 1, fontSize: 9, padding: '4px 4px' }}>
+                      {m.codeA || m.teamA} 팀 등록하고 입력
+                    </button>
+                    <button onClick={() => onCreateTeam(m.teamB)} className="btn btn-ghost" style={{ flex: 1, fontSize: 9, padding: '4px 4px' }}>
+                      {m.codeB || m.teamB} 팀 등록하고 입력
+                    </button>
+                  </div>
+                  {teams.length > 0 && (
+                    <select
+                      value=""
+                      onChange={e => {
+                        const teamId = e.target.value
+                        if (!teamId) return
+                        const chosen = teams.find(t => t.id === teamId)
+                        const isA = chosen ? (teamNameMatches(chosen, m.teamA) || teamNameMatches(chosen, m.codeA)) : true
+                        setOverrides(prev => ({ ...prev, [m.id]: { teamId, isA } }))
+                      }}
+                      style={{ width: '100%', marginTop: 4, fontSize: 10, padding: '3px 4px', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text-primary)', fontFamily: 'var(--font-body)' }}
+                    >
+                      <option value="">또는 이미 등록된 팀에 매칭하기 (이름 표기가 다른 경우)</option>
+                      {teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                    </select>
+                  )}
                 </div>
               )
             }
@@ -1015,6 +1026,17 @@ function LeagueView({ code, label }: { code: string; label: string }) {
     setTeams(teamsList)
     loadPowerScores(teamsList)
   }
+  // 리그에 아직 등록 안 된 팀을 즉시 추적 대상으로 등록한다 (LCK CL처럼 팀을 미리 하나도 안 넣어놨을 때,
+  // "먼저 팀부터 등록하세요" 없이 경기 목록에서 바로 한 번에 등록 + 입력으로 넘어갈 수 있도록).
+  async function ensureTeamExists(name: string) {
+    if (teams.find(t => teamNameMatches(t, name))) return
+    const { data } = await supabase.from('esports_teams').insert({ league: code, name, sort_order: teams.length }).select().single()
+    if (data) {
+      const newTeam = data as EsportsTeam
+      setTeams(prev => [...prev, newTeam])
+      loadPowerScores([...teams, newTeam])
+    }
+  }
   async function loadEvents(forceRefresh?: boolean) {
     setEventsLoading(true); setEventsError(false)
     try {
@@ -1067,7 +1089,7 @@ function LeagueView({ code, label }: { code: string; label: string }) {
 
       <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'flex-start', marginBottom: 14 }}>
         <div style={{ flex: '1 1 320px', minWidth: 280 }}>
-          <RecentMatchesPanel leagueCode={code} events={combinedEvents} loading={eventsLoading} error={eventsError} teams={teams} />
+          <RecentMatchesPanel leagueCode={code} events={combinedEvents} loading={eventsLoading} error={eventsError} teams={teams} onCreateTeam={ensureTeamExists} />
         </div>
         <div style={{ flex: '1 1 320px', minWidth: 280 }}>
           <UpcomingPanel events={combinedEvents} loading={eventsLoading} error={eventsError} teams={teams} powerScores={powerScores} />
