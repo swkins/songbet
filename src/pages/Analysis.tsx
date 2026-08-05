@@ -59,7 +59,7 @@ function resolveMatchTeam(teams: EsportsTeam[], teamAName: string, teamBName: st
 }
 
 // ─── 중앙: 최근 경기 (클릭하면 바로 펼쳐져서 세트 기록 입력 + 분석 가능) ──
-function RecentMatchesPanel({ leagueCode, events, loading, error, teams, onCreateTeam }: { leagueCode: string; events: RawScheduleEvent[] | null; loading: boolean; error: boolean; teams: EsportsTeam[]; onCreateTeam: (name: string) => Promise<void> }) {
+function RecentMatchesPanel({ leagueCode, events, loading, error, errorDetail, teams, onCreateTeam }: { leagueCode: string; events: RawScheduleEvent[] | null; loading: boolean; error: boolean; errorDetail?: string; teams: EsportsTeam[]; onCreateTeam: (name: string) => Promise<void> }) {
   const matches = useMemo(() => {
     if (!events) return []
     const cutoff = dayjs().subtract(30, 'day')
@@ -110,7 +110,12 @@ function RecentMatchesPanel({ leagueCode, events, loading, error, teams, onCreat
         </a>
       </div>
       {loading && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0' }}>불러오는 중...</div>}
-      {!loading && matches.length === 0 && error && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0' }}>최근 경기 데이터를 가져올 수 없습니다 (외부 API 접속 제한일 수 있음). 아래 &quot;경기 수동 추가&quot;에서 직접 입력할 수 있어요.</div>}
+      {!loading && matches.length === 0 && error && (
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0' }}>
+          최근 경기 데이터를 가져올 수 없습니다 (외부 API 접속 제한일 수 있음). 아래 &quot;경기 수동 추가&quot;에서 직접 입력할 수 있어요.
+          {errorDetail && <div style={{ marginTop: 3, fontSize: 10, color: 'var(--red)', fontFamily: 'var(--font-mono)' }}>{errorDetail}</div>}
+        </div>
+      )}
       {!loading && matches.length === 0 && !error && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0' }}>최근 완료된 경기가 없습니다</div>}
       {!loading && matches.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -276,8 +281,8 @@ function UpcomingRow({ event, events, teams, powerScores, abilityProfiles }: {
   )
 }
 
-function UpcomingPanel({ events, loading, error, teams, powerScores, abilityProfiles }: {
-  events: RawScheduleEvent[] | null; loading: boolean; error: boolean; teams: EsportsTeam[]; powerScores: Record<string, TeamPowerScore>
+function UpcomingPanel({ events, loading, error, errorDetail, teams, powerScores, abilityProfiles }: {
+  events: RawScheduleEvent[] | null; loading: boolean; error: boolean; errorDetail?: string; teams: EsportsTeam[]; powerScores: Record<string, TeamPowerScore>
   abilityProfiles: Record<string, AbilityProfile>
 }) {
   const upcoming = useMemo(() => {
@@ -292,7 +297,12 @@ function UpcomingPanel({ events, loading, error, teams, powerScores, abilityProf
     <div className="card">
       <div className="card-title">앞으로의 일정 · 승부 예측</div>
       {loading && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0' }}>불러오는 중...</div>}
-      {!loading && upcoming.length === 0 && error && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0' }}>일정 데이터를 가져올 수 없습니다. 아래 &quot;경기 수동 추가&quot;에서 직접 입력할 수 있어요.</div>}
+      {!loading && upcoming.length === 0 && error && (
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0' }}>
+          일정 데이터를 가져올 수 없습니다. 아래 &quot;경기 수동 추가&quot;에서 직접 입력할 수 있어요.
+          {errorDetail && <div style={{ marginTop: 3, fontSize: 10, color: 'var(--red)', fontFamily: 'var(--font-mono)' }}>{errorDetail}</div>}
+        </div>
+      )}
       {!loading && upcoming.length === 0 && !error && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0' }}>예정된 경기가 없습니다</div>}
       {!loading && upcoming.length > 0 && events && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -1238,6 +1248,7 @@ function LeagueView({ code, label }: { code: string; label: string }) {
   const [events, setEvents] = useState<RawScheduleEvent[] | null>(null)
   const [eventsLoading, setEventsLoading] = useState(false)
   const [eventsError, setEventsError] = useState(false)
+  const [eventsErrorDetail, setEventsErrorDetail] = useState('')
   const [manualEvents, setManualEvents] = useState<ManualEsportsEvent[]>([])
   const [powerScores, setPowerScores] = useState<Record<string, TeamPowerScore>>({})
   const [powerLog, setPowerLog] = useState<Record<string, EloGameLog[]>>({})
@@ -1371,11 +1382,13 @@ function LeagueView({ code, label }: { code: string; label: string }) {
     }
   }
   async function loadEvents(forceRefresh?: boolean) {
-    setEventsLoading(true); setEventsError(false)
+    setEventsLoading(true); setEventsError(false); setEventsErrorDetail('')
     try {
       setEvents(await fetchScheduleEvents(code, { forceRefresh }))
-    } catch {
+    } catch (e) {
       setEventsError(true)
+      setEventsErrorDetail(e instanceof Error ? e.message : String(e))
+      console.error('[Analysis] fetchScheduleEvents 실패:', e)
     } finally {
       setEventsLoading(false)
     }
@@ -1451,10 +1464,10 @@ function LeagueView({ code, label }: { code: string; label: string }) {
 
       <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'flex-start', marginBottom: 14 }}>
         <div style={{ flex: '1 1 320px', minWidth: 280 }}>
-          <RecentMatchesPanel leagueCode={code} events={combinedEvents} loading={eventsLoading} error={eventsError} teams={teams} onCreateTeam={ensureTeamExists} />
+          <RecentMatchesPanel leagueCode={code} events={combinedEvents} loading={eventsLoading} error={eventsError} errorDetail={eventsErrorDetail} teams={teams} onCreateTeam={ensureTeamExists} />
         </div>
         <div style={{ flex: '1 1 320px', minWidth: 280 }}>
-          <UpcomingPanel events={combinedEvents} loading={eventsLoading} error={eventsError} teams={teams} powerScores={powerScores} abilityProfiles={abilityProfiles} />
+          <UpcomingPanel events={combinedEvents} loading={eventsLoading} error={eventsError} errorDetail={eventsErrorDetail} teams={teams} powerScores={powerScores} abilityProfiles={abilityProfiles} />
         </div>
         <div style={{ flex: '1 1 280px', minWidth: 260 }}>
           <div className="card">

@@ -24,7 +24,7 @@ let leagueIdCache: Record<string, string> | null = null
 async function resolveLeagueIds(): Promise<Record<string, string>> {
   if (leagueIdCache) return leagueIdCache
   const res = await fetch(`${LOLESPORTS_API}/getLeagues?hl=en-US`, { headers: { 'x-api-key': LOLESPORTS_KEY } })
-  if (!res.ok) throw new Error('getLeagues failed')
+  if (!res.ok) throw new Error(`getLeagues failed (HTTP ${res.status}${res.status === 429 ? ' - 요청 제한(rate limit)' : ''})`)
   const json = await res.json()
   const leagues: { id: string; slug: string }[] = json?.data?.leagues ?? []
   const map: Record<string, string> = {}
@@ -103,7 +103,12 @@ export async function fetchScheduleEvents(leagueCode: string, opts?: { forceRefr
       ? `${LOLESPORTS_API}/getSchedule?hl=en-US&leagueId=${leagueId}&pageToken=${pageToken}`
       : `${LOLESPORTS_API}/getSchedule?hl=en-US&leagueId=${leagueId}`
     const res = await fetch(url, { headers: { 'x-api-key': LOLESPORTS_KEY } })
-    if (!res.ok) break
+    if (!res.ok) {
+      // 첫 페이지부터 실패하면(레이트리밋 등) 빈 목록을 조용히 반환하지 않고 원인을 알 수 있게 던진다.
+      // 이후 페이지 실패는 이미 받아온 데이터라도 살리기 위해 조용히 중단한다.
+      if (i === 0) throw new Error(`getSchedule failed (HTTP ${res.status}${res.status === 429 ? ' - 요청 제한(rate limit)' : ''})`)
+      break
+    }
     const json = await res.json()
     const pageEvents: RawScheduleEvent[] = json?.data?.schedule?.events ?? []
     events = events.concat(pageEvents)

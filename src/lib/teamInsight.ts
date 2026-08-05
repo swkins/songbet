@@ -94,3 +94,18 @@ export function getTeamInsight(query: string, bets: BetLite[], recentN = 10): Te
 
   return { sport: matched[0].sport, recentN: recent.length, wins, losses, pushes, profit, streakType, streakCount, totalSettled: settled.length }
 }
+
+// LOL(esports)은 야구/축구처럼 고정된 팀→리그 매핑표를 만들 수 없어(팀이 계속 바뀌고 리그도 다양함),
+// 과거에 같은 팀(약자 포함)을 베팅했던 이력에서 리그를 함께 찾아온다.
+// "T1 GEN" 처럼 팀 약자만 입력해도, 경기 내용을 구분자(vs/공백/×/- 등) 기준으로 토큰화해
+// 그 중 하나라도 과거 기록과 일치하면 가장 최근 리그를 반환한다.
+export function getEsportsLeague(query: string, bets: BetLite[]): string {
+  const q = query.trim()
+  if (!q) return ''
+  const tokens = q.split(/[\s/,:·×xX-]+|vs\.?/i).map(t => t.trim()).filter(t => t.length >= 2)
+  const candidates = [q, ...tokens]
+  const matched = [...bets]
+    .filter(b => b.sport === 'esports' && b.league && candidates.some(c => b.match.includes(c)))
+    .sort((a, b) => (b.bet_date + b.created_at).localeCompare(a.bet_date + a.created_at))
+  return matched[0]?.league ?? ''
+}
