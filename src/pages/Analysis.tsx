@@ -9,6 +9,7 @@ import {
   classifyGameNarrative, computeBothSidesScores, computeBothSidesPerfection, computePerfectionScore,
   simulateLeagueElo, powerScoreMatchupProbability, manualEventToRawEvent,
   type RawScheduleEvent, type TeamGameRecord, type NarrativeTeam, type TeamPowerScore, type EloMatchRecord, type EloGameLog, type ManualEsportsEvent,
+  type SeriesOutcomeSummary, type ScoreProb,
 } from '../lib/lolEsports'
 
 interface EsportsTeam {
@@ -198,14 +199,29 @@ function RecentMatchesPanel({ leagueCode, events, loading, error, errorDetail, t
   )
 }
 
-// ─── 우측: 앞으로의 일정 + 승부 예측 ──────────────────────────────
-// 순수 확률을 "마진 8%가 반영된 배당"으로 환산. 마진은 임플라이드 확률에 균등하게 얹는 방식
-// (implied = p * (1+margin)), 배당 = 1 / implied. 참고용 눈대중 배당이지, 실제 북메이커 배당과는 다를 수 있음.
-function toBookOdds(prob: number, marginPct = 8): string {
-  if (!prob || prob <= 0) return '-'
-  const implied = Math.min(0.99, prob * (1 + marginPct / 100))
-  const odds = 1 / implied
-  return odds.toFixed(2)
+// (구) 확률 → 눈대중 배당 변환 함수는 더 이상 화면에 배당을 노출하지 않기로 하면서 제거했다.
+// 필요하면 git 이력에서 toBookOdds(prob, marginPct)로 복원 가능.
+
+// "예상 스코어"를 순수하게 확률이 제일 높은 개별 스코어로 고르면, p>0.5인 이상 수학적으로
+// 항상 강팀의 스윕 스코어(예: 2:0)가 근소하게 1위로 나온다 — 아무리 박빙이어도 그렇다.
+// 그래서 그 대신 "강팀이 스윕할 확률(favSweepProb)"과 "약팀이 최소 한 세트는 따낼 확률
+// (underAtLeastOneGameProb = 1 - favSweepProb)"을 직접 비교해서, 후자가 더 크면(=진짜 스윕이라고
+// 보기 어려운 매치업이면) 스코어를 한 칸 좁혀(예: 2:1) 보여준다.
+function predictedScoreLabel(bestOf: number, outcome: SeriesOutcomeSummary, scoreProbs: ScoreProb[], teamACode: string, teamBCode: string): { label: string; score: string; prob: number } {
+  const bo = bestOf && bestOf > 1 ? bestOf : 1
+  if (bo === 1) {
+    const top = scoreProbs[0]
+    return { label: top.winner === 'A' ? teamACode : teamBCode, score: top.score, prob: top.prob }
+  }
+  const favLabel = outcome.favIsA ? teamACode : teamBCode
+  const favLetter: 'A' | 'B' = outcome.favIsA ? 'A' : 'B'
+  if (outcome.favSweepProb >= outcome.underAtLeastOneGameProb) {
+    return { label: favLabel, score: outcome.sweepScore, prob: outcome.favSweepProb }
+  }
+  const nextBest = scoreProbs
+    .filter(sp => sp.winner === favLetter && sp.score !== outcome.sweepScore)
+    .sort((a, b) => b.prob - a.prob)[0]
+  return { label: favLabel, score: nextBest?.score ?? outcome.sweepScore, prob: nextBest?.prob ?? outcome.favSweepProb }
 }
 
 function UpcomingRow({ event, events, teams, powerScores, abilityProfiles }: {
@@ -228,13 +244,13 @@ function UpcomingRow({ event, events, teams, powerScores, abilityProfiles }: {
 
   const p = usePower && powerA && powerB ? powerScoreMatchupProbability(powerA.powerScore, powerB.powerScore) : matchupProbability(formA, formB)
   const scoreProbs = seriesScoreProbabilities(p, bestOf)
-  const top = scoreProbs[0]
-  const topLabel = top.winner === 'A' ? (teamA?.code || teamA?.name) : (teamB?.code || teamB?.name)
 
   // 강팀/약팀 시리즈 확률 비교 (BO1은 스윕 개념이 의미 없으므로 BO3 한정으로만 표시)
   const outcome = seriesOutcomeSummary(p, bestOf)
   const favLabel = outcome.favIsA ? (teamA?.code || teamA?.name) : (teamB?.code || teamB?.name)
   const underLabel = outcome.favIsA ? (teamB?.code || teamB?.name) : (teamA?.code || teamA?.name)
+
+  const scorePred = predictedScoreLabel(bestOf, outcome, scoreProbs, teamA?.code || teamA?.name || '', teamB?.code || teamB?.name || '')
 
   // 세트당 예상 게임시간·총 킬수: 강팀 승리 시 스탯과 약팀 패배 시 스탯을 강팀 승률만큼,
   // 약팀 승리 시 스탯과 강팀 패배 시 스탯을 약팀 승률만큼 가중평균
@@ -261,7 +277,7 @@ function UpcomingRow({ event, events, teams, powerScores, abilityProfiles }: {
       </div>
       <div style={{ fontSize: 10, color: 'var(--text-muted)', textAlign: 'center' }}>
         예측 승률 <b style={{ color: 'var(--text-secondary)' }}>{(p * 100).toFixed(0)}%</b> : <b style={{ color: 'var(--text-secondary)' }}>{((1 - p) * 100).toFixed(0)}%</b>
-        {' · '}예상 스코어 <b style={{ color: 'var(--gold)' }}>{topLabel} {top.score}</b> ({(top.prob * 100).toFixed(0)}%)
+        {' · '}예상 스코어 <b style={{ color: 'var(--gold)' }}>{scorePred.label} {scorePred.score}</b> ({(scorePred.prob * 100).toFixed(0)}%)
         {usePower && powerA && powerB
           ? <div style={{ marginTop: 2 }}>파워랭킹 기반 · {teamA?.code || teamA?.name} {powerA.powerScore.toFixed(1)} : {powerB.powerScore.toFixed(1)} {teamB?.code || teamB?.name}</div>
           : <div style={{ marginTop: 2 }}>파워랭킹 데이터 부족 · lolesports 전적 기반 폴백</div>}
@@ -272,8 +288,8 @@ function UpcomingRow({ event, events, teams, powerScores, abilityProfiles }: {
         )}
         {bestOf === 3 && (
           <div style={{ marginTop: 4, paddingTop: 4, borderTop: '1px dashed var(--border)', display: 'flex', flexDirection: 'column', gap: 2, fontWeight: 700, color: 'var(--text-secondary)' }}>
-            <div>{underLabel} 1.5 <span style={{ color: 'var(--gold)' }}>{toBookOdds(outcome.underAtLeastOneGameProb)}</span><span style={{ color: 'var(--text-muted)', fontWeight: 500 }}> ({(outcome.underAtLeastOneGameProb * 100).toFixed(0)}%)</span> &nbsp; {favLabel} <span style={{ color: 'var(--gold)' }}>{toBookOdds(outcome.favWinProb)}</span><span style={{ color: 'var(--text-muted)', fontWeight: 500 }}> ({(outcome.favWinProb * 100).toFixed(0)}%)</span></div>
-            <div>{favLabel} -1.5 <span style={{ color: 'var(--gold)' }}>{toBookOdds(outcome.favSweepProb)}</span><span style={{ color: 'var(--text-muted)', fontWeight: 500 }}> ({(outcome.favSweepProb * 100).toFixed(0)}%)</span> &nbsp; {underLabel} <span style={{ color: 'var(--gold)' }}>{toBookOdds(outcome.underWinProb)}</span><span style={{ color: 'var(--text-muted)', fontWeight: 500 }}> ({(outcome.underWinProb * 100).toFixed(0)}%)</span></div>
+            <div>{underLabel} 1.5 <span style={{ color: 'var(--gold)' }}>{(outcome.underAtLeastOneGameProb * 100).toFixed(0)}%</span> &nbsp; {favLabel} <span style={{ color: 'var(--gold)' }}>{(outcome.favWinProb * 100).toFixed(0)}%</span></div>
+            <div>{favLabel} -1.5 <span style={{ color: 'var(--gold)' }}>{(outcome.favSweepProb * 100).toFixed(0)}%</span> &nbsp; {underLabel} <span style={{ color: 'var(--gold)' }}>{(outcome.underWinProb * 100).toFixed(0)}%</span></div>
           </div>
         )}
       </div>
