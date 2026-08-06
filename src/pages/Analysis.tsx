@@ -33,9 +33,9 @@ function formatFreshness(lastFetchAt: number | null, now: number): { text: strin
     text = ageHour < 24 ? `${ageHour}시간 전` : `${Math.floor(ageHour / 24)}일 전`
   }
   const color =
-    ageMs < 15 * 60 * 1000 ? 'var(--green, #4ade80)' :      // 15분 이내: 신선
-    ageMs < 2 * 60 * 60 * 1000 ? '#facc15' :                 // 2시간 이내: 보통
-    'var(--red, #f87171)'                                     // 그 이상: 오래됨
+    ageMs < 12 * 60 * 60 * 1000 ? 'var(--green, #4ade80)' :   // 12시간 이내: 신선
+    ageMs < 24 * 60 * 60 * 1000 ? '#facc15' :                  // 24시간 이내: 보통
+    'var(--red, #f87171)'                                       // 24시간 초과: 오래됨
   return { text: `마지막 호출: ${text}`, color }
 }
 
