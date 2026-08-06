@@ -1672,35 +1672,45 @@ function LeagueView({ code, label }: { code: string; label: string }) {
 }
 
 export default function Analysis() {
-  const [activeLeague, setActiveLeague] = useState<string>(LEAGUES[0].code)
-  const l = LEAGUES.find(x => x.code === activeLeague)!
+  const [activeLeague, setActiveLeague] = useState<string>('ALL')
+  const menuItems = [{ code: 'ALL', label: '전체', icon: '🌐' }, ...LEAGUES.map(lg => ({ code: lg.code, label: lg.label, icon: '🎮' }))]
 
   return (
     <div className="page">
       <h1 className="page-title" style={{ marginBottom: 16 }}>분석</h1>
-      <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
-        <div style={{ width: 168, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 6, position: 'sticky', top: 14 }}>
-          {LEAGUES.map(lg => {
-            const active = lg.code === activeLeague
-            return (
-              <button key={lg.code} onClick={() => setActiveLeague(lg.code)}
-                style={{
-                  textAlign: 'left', padding: '12px 14px', borderRadius: 10,
-                  border: `1px solid ${active ? 'var(--gold-border)' : 'var(--border)'}`,
-                  background: active ? 'var(--gold-bg)' : 'var(--bg-card)',
-                  color: active ? 'var(--gold)' : 'var(--text-primary)',
-                  fontWeight: 800, fontSize: 14, cursor: 'pointer', fontFamily: 'var(--font-body)',
-                  transition: 'all 0.15s',
-                }}>
-                🎮 {lg.label}
-              </button>
-            )
-          })}
-        </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <LeagueView key={l.code} code={l.code} label={l.label} />
-        </div>
+      <div style={{
+        display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 18,
+        position: 'sticky', top: 0, zIndex: 5, background: 'var(--bg)', paddingBottom: 8,
+      }}>
+        {menuItems.map(mi => {
+          const active = mi.code === activeLeague
+          return (
+            <button key={mi.code} onClick={() => setActiveLeague(mi.code)}
+              style={{
+                textAlign: 'center', padding: '10px 16px', borderRadius: 10,
+                border: `1px solid ${active ? 'var(--gold-border)' : 'var(--border)'}`,
+                background: active ? 'var(--gold-bg)' : 'var(--bg-card)',
+                color: active ? 'var(--gold)' : 'var(--text-primary)',
+                fontWeight: 800, fontSize: 14, cursor: 'pointer', fontFamily: 'var(--font-body)',
+                transition: 'all 0.15s', whiteSpace: 'nowrap',
+              }}>
+              {mi.icon} {mi.label}
+            </button>
+          )
+        })}
       </div>
+
+      {activeLeague === 'ALL' ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {LEAGUES.map((lg, i) => (
+            <div key={lg.code} style={{ paddingTop: i === 0 ? 0 : 12, borderTop: i === 0 ? 'none' : '1px solid var(--border)' }}>
+              <LeagueView code={lg.code} label={lg.label} />
+            </div>
+          ))}
+        </div>
+      ) : (
+        <LeagueView key={activeLeague} code={activeLeague} label={LEAGUES.find(x => x.code === activeLeague)!.label} />
+      )}
     </div>
   )
 }
