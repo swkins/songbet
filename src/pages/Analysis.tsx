@@ -1273,6 +1273,27 @@ function LeagueView({ code, label }: { code: string; label: string }) {
   const [powerLoading, setPowerLoading] = useState(false)
   const [recentSetResults, setRecentSetResults] = useState<Record<string, boolean[]>>({})
   const [abilityProfiles, setAbilityProfiles] = useState<Record<string, AbilityProfile>>({})
+  // 파워랭킹 전일 대비 증감/순위변동 표시용: 리그별로 날짜 스냅샷을 저장해두고 비교한다.
+  const [prevSnapshot, setPrevSnapshot] = useState<Record<string, { powerScore: number; rank: number }>>({})
+
+  // "어제 기준" 스냅샷 로드: 오늘보다 이전인 날짜 중 가장 최근 날짜의 값을 비교 기준으로 삼는다.
+  async function loadPrevSnapshot() {
+    const today = dayjs().format('YYYY-MM-DD')
+    const { data } = await supabase.from('esports_power_snapshots')
+      .select('team_id, snapshot_date, power_score, rank')
+      .eq('league', code)
+      .lt('snapshot_date', today)
+      .order('snapshot_date', { ascending: false })
+    const rows = (data as { team_id: string; snapshot_date: string; power_score: number; rank: number }[]) ?? []
+    if (rows.length === 0) { setPrevSnapshot({}); return }
+    const latestDate = rows[0].snapshot_date
+    const map: Record<string, { powerScore: number; rank: number }> = {}
+    for (const r of rows) {
+      if (r.snapshot_date !== latestDate) continue
+      map[r.team_id] = { powerScore: r.power_score, rank: r.rank }
+    }
+    setPrevSnapshot(map)
+  }
 
   // 팀 체급 점수 계산: 라이엇 GPR 공식(순차 Elo)을 리그 전체 경기에 시간순으로 적용
   async function loadPowerScores(teamsList: EsportsTeam[]) {
@@ -1414,7 +1435,7 @@ function LeagueView({ code, label }: { code: string; label: string }) {
     const { data } = await supabase.from('esports_manual_events').select('*').eq('league', code).order('start_time', { ascending: false })
     setManualEvents((data as ManualEsportsEvent[]) ?? [])
   }
-  useEffect(() => { load(); loadEvents(); loadManualEvents() }, [code])
+  useEffect(() => { load(); loadEvents(); loadManualEvents(); loadPrevSnapshot() }, [code])
 
   // 자동으로 가져온 일정 + 수동으로 추가한 경기를 합쳐서 각 패널에 넘긴다
   const combinedEvents = useMemo(() => {
@@ -1464,6 +1485,21 @@ function LeagueView({ code, label }: { code: string; label: string }) {
     [...teams].sort((a, b) => (powerScores[b.id]?.powerScore ?? 50) - (powerScores[a.id]?.powerScore ?? 50)),
   [teams, powerScores])
 
+  // 경기 결과 입력 등으로 파워랭킹이 바뀔 때마다 "오늘" 스냅샷을 계속 최신화해둔다.
+  // (비교 기준이 되는 "어제" 스냅샷은 loadPrevSnapshot에서 별도로 고정해서 갖고 있으므로 덮어써도 무방)
+  useEffect(() => {
+    if (powerLoading || rankedTeams.length === 0) return
+    const today = dayjs().format('YYYY-MM-DD')
+    const rows = rankedTeams.map((t, i) => ({
+      league: code,
+      team_id: t.id,
+      snapshot_date: today,
+      power_score: powerScores[t.id]?.powerScore ?? baselineGpr(t),
+      rank: i + 1,
+    }))
+    supabase.from('esports_power_snapshots').upsert(rows, { onConflict: 'team_id,snapshot_date' })
+  }, [powerLoading, rankedTeams, powerScores, code])
+
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
@@ -1488,17 +1524,21 @@ function LeagueView({ code, label }: { code: string; label: string }) {
         <div style={{ flex: '1 1 280px', minWidth: 260 }}>
           <div className="card">
             <div className="card-title" style={{ marginBottom: 8 }}>
-              파워랭킹 <span style={{ fontWeight: 400, color: 'var(--text-muted)', fontSize: 10 }}>· 수동 입력한 경기(최근일수록 가중치 ↑) 기반, 승부 예측에 사용됨 · 클릭하면 히스토리 보기</span>
+              파워랭킹 <span style={{ fontWeight: 400, color: 'var(--text-muted)', fontSize: 10 }}>· 수동 입력한 경기(최근일수록 가중치 ↑) 기반, 승부 예측에 사용됨 · 클릭하면 히스토리 보기 · 순위 옆 ▲▼는 전일 대비 순위 변동, 점수 옆 숫자는 전일 대비 증감</span>
             </div>
             {powerLoading && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '6px 0' }}>계산 중...</div>}
             {!powerLoading && rankedTeams.length === 0 && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '6px 0' }}>등록된 팀이 없습니다.</div>}
-            {!powerLoading && rankedTeams.map(t => {
+            {!powerLoading && rankedTeams.map((t, rankIdx) => {
               const ps = powerScores[t.id]
               const expanded = expandedPowerTeam === t.id
               const teamLog = powerLog[t.id] ?? []
               const code2 = teamCodeMap[t.id]
               const recentSets = recentSetResults[t.id] ?? []
               const isEditing = editingTeamId === t.id
+              const currentRank = rankIdx + 1
+              const prev = prevSnapshot[t.id]
+              const scoreDelta = ps && prev ? ps.powerScore - prev.powerScore : null
+              const rankDelta = prev ? prev.rank - currentRank : null // 양수면 순위 상승(숫자 감소)
               return (
                 <div key={t.id} style={{ marginBottom: 4 }}>
                   {isEditing ? (
@@ -1514,6 +1554,20 @@ function LeagueView({ code, label }: { code: string; label: string }) {
                   <div onClick={() => { setExpandedPowerTeam(expanded ? null : t.id); setExpandedHistoryIdx(null) }}
                     style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, padding: '6px 8px', background: 'var(--bg-elevated)', borderRadius: 6, cursor: 'pointer' }}>
                     {expanded ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
+                    <span style={{
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                      width: 16, height: 16, borderRadius: 4, fontSize: 9, fontWeight: 800,
+                      background: 'var(--bg-card)', color: 'var(--text-muted)',
+                    }} title="현재 순위">{currentRank}</span>
+                    {rankDelta != null && rankDelta !== 0 && (
+                      <span style={{ fontSize: 8, fontWeight: 800, color: rankDelta > 0 ? 'var(--green, #4ade80)' : 'var(--red, #f87171)', flexShrink: 0 }}
+                        title="어제 대비 순위 변동">
+                        {rankDelta > 0 ? `▲${rankDelta}` : `▼${Math.abs(rankDelta)}`}
+                      </span>
+                    )}
+                    {rankDelta === 0 && (
+                      <span style={{ fontSize: 8, fontWeight: 800, color: 'var(--text-muted)', flexShrink: 0 }} title="어제 대비 순위 변동 없음">–</span>
+                    )}
                     <span style={{ flex: 1, fontWeight: 700 }}>{t.name}{code2 ? <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}> ({code2})</span> : ''}</span>
                     <button onClick={e => { e.stopPropagation(); startEditTeam(t) }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', flexShrink: 0 }}>
                       <Pencil size={10} />
@@ -1522,6 +1576,14 @@ function LeagueView({ code, label }: { code: string; label: string }) {
                       <>
                         <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>{ps.gamesAnalyzed}경기 · 승률 {(ps.winRate * 100).toFixed(0)}%</span>
                         <span style={{ fontWeight: 800, color: 'var(--gold)', width: 40, textAlign: 'right' }}>{ps.powerScore.toFixed(1)}</span>
+                        {scoreDelta != null && Math.abs(scoreDelta) >= 0.05 && (
+                          <span style={{
+                            fontSize: 9, fontWeight: 700, width: 40, textAlign: 'right', flexShrink: 0,
+                            color: scoreDelta > 0 ? 'var(--green, #4ade80)' : 'var(--red, #f87171)',
+                          }} title="어제 대비 파워랭킹 증감">
+                            {scoreDelta > 0 ? '+' : ''}{scoreDelta.toFixed(1)}
+                          </span>
+                        )}
                       </>
                     ) : (
                       <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>입력된 경기 없음 (GPR 기본값 {(baselineGpr(t)).toFixed(1)})</span>
