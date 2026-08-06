@@ -8,6 +8,7 @@ import {
   seriesScoreProbabilities, seriesOutcomeSummary, teamNameMatches, findTeamCode,
   classifyGameNarrative, computeBothSidesScores, computeBothSidesPerfection, computePerfectionScore,
   simulateLeagueElo, powerScoreMatchupProbability, manualEventToRawEvent,
+  getLastLiveFetchAt,
   type RawScheduleEvent, type TeamGameRecord, type NarrativeTeam, type TeamPowerScore, type EloMatchRecord, type EloGameLog, type ManualEsportsEvent,
   type SeriesOutcomeSummary, type ScoreProb,
 } from '../lib/lolEsports'
@@ -17,6 +18,25 @@ interface EsportsTeam {
   namuwiki_url: string | null; namuwiki_last_checked: string | null; namuwiki_changed: boolean
   gpr_score: number | null
   code: string | null
+}
+
+// "마지막 API 호출" 신선도 표시용: 언제 호출했는지 + 얼마나 오래됐는지에 따른 색상
+function formatFreshness(lastFetchAt: number | null, now: number): { text: string; color: string } {
+  if (lastFetchAt == null) return { text: '호출 기록 없음', color: 'var(--text-muted)' }
+  const ageMs = now - lastFetchAt
+  const ageMin = Math.floor(ageMs / 60000)
+  let text: string
+  if (ageMin < 1) text = '방금 전'
+  else if (ageMin < 60) text = `${ageMin}분 전`
+  else {
+    const ageHour = Math.floor(ageMin / 60)
+    text = ageHour < 24 ? `${ageHour}시간 전` : `${Math.floor(ageHour / 24)}일 전`
+  }
+  const color =
+    ageMs < 15 * 60 * 1000 ? 'var(--green, #4ade80)' :      // 15분 이내: 신선
+    ageMs < 2 * 60 * 60 * 1000 ? '#facc15' :                 // 2시간 이내: 보통
+    'var(--red, #f87171)'                                     // 그 이상: 오래됨
+  return { text: `마지막 호출: ${text}`, color }
 }
 
 interface EsportsGameStat {
@@ -1265,6 +1285,12 @@ function LeagueView({ code, label }: { code: string; label: string }) {
   const [eventsLoading, setEventsLoading] = useState(false)
   const [eventsError, setEventsError] = useState(false)
   const [eventsErrorDetail, setEventsErrorDetail] = useState('')
+  const [lastFetchAt, setLastFetchAt] = useState<number | null>(null)
+  const [nowTick, setNowTick] = useState(() => Date.now()) // 신선도 표시를 주기적으로 갱신하기 위한 시계
+  useEffect(() => {
+    const id = setInterval(() => setNowTick(Date.now()), 30_000)
+    return () => clearInterval(id)
+  }, [])
   const [manualEvents, setManualEvents] = useState<ManualEsportsEvent[]>([])
   const [powerScores, setPowerScores] = useState<Record<string, TeamPowerScore>>({})
   const [powerLog, setPowerLog] = useState<Record<string, EloGameLog[]>>({})
@@ -1388,40 +1414,11 @@ function LeagueView({ code, label }: { code: string; label: string }) {
       loadPowerScores([...teams, newTeam])
     }
   }
-  const [registeringAll, setRegisteringAll] = useState(false)
-  // 경기 목록(최근 경기 + 앞으로의 일정)에 등장하는 팀을 한 번에 전부 파워랭킹에 등록.
-  // 매치마다 하나씩 "팀 등록하고 입력" 누르는 게 번거로우니, 왼쪽 목록 기준으로 몰아서 처리하는 용도.
-  async function registerAllTeamsFromSchedule() {
-    if (!combinedEvents || combinedEvents.length === 0) return
-    setRegisteringAll(true)
-    try {
-      const toAdd: string[] = []
-      for (const e of combinedEvents) {
-        for (const t of e.match?.teams ?? []) {
-          if (!t.name || t.name === '?') continue
-          if (teams.find(x => teamNameMatches(x, t.name))) continue
-          if (toAdd.find(n => teamNameMatches({ name: n }, t.name))) continue
-          toAdd.push(t.name)
-        }
-      }
-      if (toAdd.length === 0) return
-      const { data } = await supabase.from('esports_teams')
-        .insert(toAdd.map((name, i) => ({ league: code, name, sort_order: teams.length + i })))
-        .select()
-      if (data) {
-        const newTeams = data as EsportsTeam[]
-        const merged = [...teams, ...newTeams]
-        setTeams(merged)
-        loadPowerScores(merged)
-      }
-    } finally {
-      setRegisteringAll(false)
-    }
-  }
   async function loadEvents(forceRefresh?: boolean) {
     setEventsLoading(true); setEventsError(false); setEventsErrorDetail('')
     try {
       setEvents(await fetchScheduleEvents(code, { forceRefresh }))
+      setLastFetchAt(getLastLiveFetchAt(code))
     } catch (e) {
       setEventsError(true)
       setEventsErrorDetail(e instanceof Error ? e.message : String(e))
@@ -1504,12 +1501,18 @@ function LeagueView({ code, label }: { code: string; label: string }) {
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
         <h2 style={{ fontSize: 18, fontWeight: 800, margin: 0, flex: 1 }}>{label}</h2>
-        <button onClick={registerAllTeamsFromSchedule} disabled={registeringAll || !combinedEvents} className="btn btn-ghost" style={{ padding: '6px 10px', display: 'flex', alignItems: 'center', gap: 4 }}>
-          <Plus size={12} /> {registeringAll ? '등록 중...' : '경기 목록 팀 전체 등록'}
-        </button>
         <button onClick={() => loadEvents(true)} disabled={eventsLoading} className="btn btn-ghost" style={{ padding: '6px 10px', display: 'flex', alignItems: 'center', gap: 4 }}>
-          <RefreshCw size={12} style={{ animation: eventsLoading ? 'spin 1s linear infinite' : undefined }} /> 일정 새로고침
+          <RefreshCw size={12} style={{ animation: eventsLoading ? 'spin 1s linear infinite' : undefined }} /> API 호출
         </button>
+        {(() => {
+          const fresh = formatFreshness(lastFetchAt, nowTick)
+          return (
+            <span style={{ fontSize: 10, color: fresh.color, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: fresh.color, flexShrink: 0 }} />
+              {fresh.text}
+            </span>
+          )
+        })()}
       </div>
 
       <ManualEventPanel leagueCode={code} manualEvents={manualEvents} onChanged={loadManualEvents} autoOpenHint={eventsError} />
@@ -1675,6 +1678,37 @@ export default function Analysis() {
   const [activeLeague, setActiveLeague] = useState<string>('ALL')
   const menuItems = [{ code: 'ALL', label: '전체', icon: '🌐' }, ...LEAGUES.map(lg => ({ code: lg.code, label: lg.label, icon: '🎮' }))]
 
+  const [allRefreshing, setAllRefreshing] = useState(false)
+  const [allRefreshNotice, setAllRefreshNotice] = useState<string | null>(null)
+  const [refreshKey, setRefreshKey] = useState(0) // 전체 호출 후 각 LeagueView를 강제로 다시 마운트시켜 새 캐시를 읽게 함
+
+  // 전체 리그를 순서대로 forceRefresh.
+  async function refreshAllLeagues() {
+    setAllRefreshing(true)
+    setAllRefreshNotice(null)
+    let okCount = 0
+    const errorLeagues: string[] = []
+    for (const lg of LEAGUES) {
+      try {
+        await fetchScheduleEvents(lg.code, { forceRefresh: true })
+        okCount++
+      } catch {
+        errorLeagues.push(lg.label)
+      }
+    }
+    const parts: string[] = []
+    if (okCount > 0) parts.push(`${okCount}개 리그 갱신 완료`)
+    if (errorLeagues.length > 0) parts.push(`호출 실패: ${errorLeagues.join(', ')}`)
+    setAllRefreshNotice(parts.join(' · ') || '완료')
+    setRefreshKey(k => k + 1)
+    setAllRefreshing(false)
+  }
+  useEffect(() => {
+    if (!allRefreshNotice) return
+    const id = setTimeout(() => setAllRefreshNotice(null), 8000)
+    return () => clearTimeout(id)
+  }, [allRefreshNotice])
+
   return (
     <div className="page">
       <h1 className="page-title" style={{ marginBottom: 16 }}>분석</h1>
@@ -1702,9 +1736,17 @@ export default function Analysis() {
 
       {activeLeague === 'ALL' ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <button onClick={refreshAllLeagues} disabled={allRefreshing} className="btn btn-ghost"
+              style={{ padding: '8px 14px', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <RefreshCw size={12} style={{ animation: allRefreshing ? 'spin 1s linear infinite' : undefined }} />
+              {allRefreshing ? '전체 리그 호출 중...' : '전체 리그 API 호출'}
+            </button>
+            {allRefreshNotice && <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{allRefreshNotice}</span>}
+          </div>
           {LEAGUES.map((lg, i) => (
             <div key={lg.code} style={{ paddingTop: i === 0 ? 0 : 12, borderTop: i === 0 ? 'none' : '1px solid var(--border)' }}>
-              <LeagueView code={lg.code} label={lg.label} />
+              <LeagueView key={`${lg.code}-${refreshKey}`} code={lg.code} label={lg.label} />
             </div>
           ))}
         </div>

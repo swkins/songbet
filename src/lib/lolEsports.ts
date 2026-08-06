@@ -4,6 +4,7 @@
 // 팀 단위로 필터링해 최근 전적 · 다음 일정 · 세트(맵) 스코어 확률 분포를 계산한다.
 
 import dayjs from 'dayjs'
+import { supabase } from './supabase'
 
 export const LEAGUES: { code: string; label: string; slugs: string[] }[] = [
   { code: 'LCK',   label: 'LCK',   slugs: ['lck'] },
@@ -83,15 +84,38 @@ export interface RawScheduleEvent {
 
 interface CacheEntry { events: RawScheduleEvent[]; fetchedAt: number }
 const scheduleCache: Record<string, CacheEntry> = {}
-const CACHE_TTL_MS = 3 * 60 * 1000
+const lastLiveFetchAt: Record<string, number> = {} // Supabase에 저장된, 실제로 lolesports API를 호출했던 마지막 시각 (화면에 "마지막 호출" 표시용)
 const FETCH_PAGES = 3 // 최근 폼 계산에 쓸 만큼 과거 경기를 충분히 확보하기 위해 여러 페이지를 이어붙임
 
-// 리그 일정(완료 + 예정 경기)을 페이지네이션으로 모아서 반환. TTL 캐시 적용.
+// 화면에 "마지막 호출 시각"을 보여주기 위한 조회용 (직전에 fetchScheduleEvents를 호출한 적이 있을 때만 값이 있음)
+export function getLastLiveFetchAt(leagueCode: string): number | null {
+  return lastLiveFetchAt[leagueCode] ?? null
+}
+
+// 리그 일정(완료 + 예정 경기) 조회.
+// lolesports API는 요청 제한(rate limit)이 걸리기 쉬워서, 기본적으로는 Supabase에 저장해둔 캐시만 읽는다.
+// 실제 lolesports API 호출은 forceRefresh(= "API 호출" 버튼을 눌렀을 때)일 때만 일어나고,
+// 그 결과를 Supabase에 저장해서 다음 페이지 로드/새로고침(F5) 때는 API를 다시 부르지 않고 Supabase에서만 읽는다.
+// 아직 한 번도 캐시가 만들어진 적 없는 리그(최초 1회)는 빈 화면 대신 API를 한 번 호출해 채워준다.
 export async function fetchScheduleEvents(leagueCode: string, opts?: { forceRefresh?: boolean }): Promise<RawScheduleEvent[]> {
-  const cached = scheduleCache[leagueCode]
-  if (!opts?.forceRefresh && cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS) {
-    return cached.events
+  // 같은 세션 안에서 방금 받아온 값이면 재사용 (짧은 시간 내 중복 호출 방지용, Supabase 왕복도 줄임)
+  const mem = scheduleCache[leagueCode]
+  if (!opts?.forceRefresh && mem && Date.now() - mem.fetchedAt < 15_000) {
+    return mem.events
   }
+
+  if (!opts?.forceRefresh) {
+    const { data } = await supabase.from('esports_schedule_cache')
+      .select('events, fetched_at').eq('league', leagueCode).maybeSingle()
+    if (data?.events) {
+      const cachedEvents = data.events as RawScheduleEvent[]
+      scheduleCache[leagueCode] = { events: cachedEvents, fetchedAt: Date.now() }
+      if (data.fetched_at) lastLiveFetchAt[leagueCode] = new Date(data.fetched_at).getTime()
+      return cachedEvents
+    }
+    // Supabase에 캐시가 전혀 없는 최초 상태 → 아래로 내려가서 API를 한 번 호출해 채운다.
+  }
+
   const ids = await resolveLeagueIds()
   const leagueId = ids[leagueCode]
   if (!leagueId) throw new Error('league id not found')
@@ -125,7 +149,11 @@ export async function fetchScheduleEvents(leagueCode: string, opts?: { forceRefr
     seen.add(key)
     dedup.push(e)
   }
-  scheduleCache[leagueCode] = { events: dedup, fetchedAt: Date.now() }
+  const nowMs = Date.now()
+  scheduleCache[leagueCode] = { events: dedup, fetchedAt: nowMs }
+  lastLiveFetchAt[leagueCode] = nowMs
+  await supabase.from('esports_schedule_cache')
+    .upsert({ league: leagueCode, events: dedup, fetched_at: new Date(nowMs).toISOString() }, { onConflict: 'league' })
   return dedup
 }
 
@@ -375,10 +403,11 @@ export interface RawTeam { code: string; image?: string; name: string; id: strin
 
 interface TeamsCacheEntry { teams: RawTeam[]; fetchedAt: number }
 const teamsCache: Record<string, TeamsCacheEntry> = {}
+const MISC_CACHE_TTL_MS = 3 * 60 * 1000 // fetchLeagueTeams/fetchStandings용 인메모리 TTL (일정 캐시와는 별개)
 
 export async function fetchLeagueTeams(leagueCode: string, opts?: { forceRefresh?: boolean }): Promise<RawTeam[]> {
   const cached = teamsCache[leagueCode]
-  if (!opts?.forceRefresh && cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS) return cached.teams
+  if (!opts?.forceRefresh && cached && Date.now() - cached.fetchedAt < MISC_CACHE_TTL_MS) return cached.teams
   const ids = await resolveLeagueIds()
   const leagueId = ids[leagueCode]
   if (!leagueId) throw new Error('league id not found')
@@ -398,7 +427,7 @@ const standingsCache: Record<string, StandingsCacheEntry> = {}
 
 export async function fetchStandings(leagueCode: string, opts?: { forceRefresh?: boolean }): Promise<StandingEntry[]> {
   const cached = standingsCache[leagueCode]
-  if (!opts?.forceRefresh && cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS) return cached.standings
+  if (!opts?.forceRefresh && cached && Date.now() - cached.fetchedAt < MISC_CACHE_TTL_MS) return cached.standings
   const ids = await resolveLeagueIds()
   const leagueId = ids[leagueCode]
   if (!leagueId) throw new Error('league id not found')
