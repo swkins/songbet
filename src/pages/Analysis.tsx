@@ -488,6 +488,8 @@ function GameStatCard({ stat, teamName, onDelete, onEdit }: { stat: EsportsGameS
   const leftScore = sw ? winScore.team2 : winScore.team1
   const rightScore = sw ? winScore.team1 : winScore.team2
   const pair = (a: number | null, b: number | null) => sw ? `${b ?? '-'}:${a ?? '-'}` : `${a ?? '-'}:${b ?? '-'}`
+  // 실제 승리팀(입력 폼에서 고른 값) 기준으로 왼쪽/오른쪽 중 어느 쪽이 이겼는지 계산 — side_swapped를 감안.
+  const winnerIsLeft = sw ? stat.winner_team === 'team2' : stat.winner_team === 'team1'
   return (
     <div style={{ background: 'var(--bg-elevated)', borderRadius: 6, padding: '8px 10px', fontSize: 10 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
@@ -514,8 +516,27 @@ function GameStatCard({ stat, teamName, onDelete, onEdit }: { stat: EsportsGameS
       <div style={{ color: 'var(--text-secondary)', marginBottom: 4, lineHeight: 1.6 }}>
         킬 {pair(stat.team1_kills, stat.team2_kills)} · 내셔 {pair(stat.team1_barons, stat.team2_barons)} · 드래곤 {pair(stat.team1_dragons, stat.team2_dragons)} · 타워 {pair(stat.team1_towers, stat.team2_towers)} · 억제기 {pair(stat.team1_inhibitors, stat.team2_inhibitors)}{stat.team1_gold != null ? ` · 골드 ${sw ? stat.team2_gold : stat.team1_gold}k:${sw ? stat.team1_gold : stat.team2_gold}k` : ''}
       </div>
-      <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontWeight: 800, color: 'var(--gold)', background: 'var(--gold-bg)', border: '1px solid var(--gold-border)', borderRadius: 4, padding: '2px 6px', marginBottom: 4 }}>
-        플레이 점수 {leftScore} : {rightScore} <span style={{ fontWeight: 500, color: 'var(--text-muted)' }}>({leftName} : {rightName})</span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 9, color: 'var(--text-muted)', marginBottom: 4 }}>
+        <span>플레이 점수</span>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4, flexWrap: 'wrap' }}>
+        <span style={{
+          display: 'inline-flex', alignItems: 'center', gap: 4, fontWeight: 800, borderRadius: 4, padding: '2px 7px',
+          color: winnerIsLeft ? 'var(--green)' : 'var(--text-muted)',
+          background: winnerIsLeft ? 'var(--green-bg)' : 'var(--bg-card)',
+          border: `1px solid ${winnerIsLeft ? 'var(--green-border)' : 'var(--border)'}`,
+        }}>
+          {winnerIsLeft && '🏆 '}{leftName} {leftScore}
+        </span>
+        <span style={{ color: 'var(--text-muted)' }}>:</span>
+        <span style={{
+          display: 'inline-flex', alignItems: 'center', gap: 4, fontWeight: 800, borderRadius: 4, padding: '2px 7px',
+          color: !winnerIsLeft ? 'var(--green)' : 'var(--text-muted)',
+          background: !winnerIsLeft ? 'var(--green-bg)' : 'var(--bg-card)',
+          border: `1px solid ${!winnerIsLeft ? 'var(--green-border)' : 'var(--border)'}`,
+        }}>
+          {rightScore} {rightName}{!winnerIsLeft && ' 🏆'}
+        </span>
       </div>
       <div style={{ color: 'var(--text-muted)', lineHeight: 1.4 }}>{narrative.detail}</div>
     </div>
