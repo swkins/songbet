@@ -8,9 +8,9 @@ import {
   seriesScoreProbabilities, seriesOutcomeSummary, teamNameMatches, findTeamCode,
   classifyGameNarrative, computeBothSidesScores, computeBothSidesPerfection, computePerfectionScore,
   simulateLeagueElo, powerScoreMatchupProbability, manualEventToRawEvent,
-  getLastLiveFetchAt,
+  getLastLiveFetchAt, computeRecentSeriesCount, confidenceFromSeriesCount, buildCompletedSeries, summarizeStrategyBacktest,
   type RawScheduleEvent, type TeamGameRecord, type NarrativeTeam, type TeamPowerScore, type EloMatchRecord, type EloGameLog, type ManualEsportsEvent,
-  type SeriesOutcomeSummary, type ScoreProb,
+  type SeriesOutcomeSummary, type ScoreProb, type CompletedSeriesRecord, type StrategyBacktestSummary, type BacktestCategory,
 } from '../lib/lolEsports'
 
 interface EsportsTeam {
@@ -80,7 +80,16 @@ function resolveMatchTeam(teams: EsportsTeam[], teamAName: string, teamBName: st
 }
 
 // ─── 중앙: 최근 경기 (클릭하면 바로 펼쳐져서 세트 기록 입력 + 분석 가능) ──
-function RecentMatchesPanel({ leagueCode, events, loading, error, errorDetail, teams, onCreateTeam }: { leagueCode: string; events: RawScheduleEvent[] | null; loading: boolean; error: boolean; errorDetail?: string; teams: EsportsTeam[]; onCreateTeam: (name: string) => Promise<void> }) {
+// 세트 기록(EloGameLog)에서 특정 경기(matchStartTime) "시작 전" 레이팅을 찾는다. gol.gg 자동수집 데이터는
+// 날짜만 정확하고 정확한 시각이 안 맞을 수 있어서 ±1일 오차를 허용한다(다른 곳의 날짜 매칭과 동일한 관례).
+function getPreMatchRating(log: EloGameLog[] | undefined, matchStartTime: string): number | null {
+  if (!log) return null
+  const target = dayjs(matchStartTime)
+  const entry = log.find(l => l.gameNumber === 1 && dayjs(l.matchStartTime).isAfter(target.subtract(1, 'day')) && dayjs(l.matchStartTime).isBefore(target.add(1, 'day')))
+  return entry ? entry.ratingBefore : null
+}
+
+function RecentMatchesPanel({ leagueCode, events, loading, error, errorDetail, teams, onCreateTeam, powerLog }: { leagueCode: string; events: RawScheduleEvent[] | null; loading: boolean; error: boolean; errorDetail?: string; teams: EsportsTeam[]; onCreateTeam: (name: string) => Promise<void>; powerLog: Record<string, EloGameLog[]> }) {
   const matches = useMemo(() => {
     if (!events) return []
     const cutoff = dayjs().subtract(30, 'day')
@@ -205,7 +214,7 @@ function RecentMatchesPanel({ leagueCode, events, loading, error, errorDetail, t
               <RecentMatchRow key={m.id} teamId={resolved.teamId} teamName={resolved.teamName}
                 game={{ opponent: resolved.opponent, teamScore, oppScore, startTime: m.startTime, bestOf: m.bestOf }}
                 displayA={codeA} displayB={codeB} scoreA={m.scoreA} scoreB={m.scoreB} teams={teams}
-                recordCount={recordCount}
+                recordCount={recordCount} powerLog={powerLog}
                 teamCode={resolved.isA ? codeA : codeB} opponentCode={resolved.isA ? codeB : codeA} />
             )
           })}
@@ -245,9 +254,9 @@ function predictedScoreLabel(bestOf: number, outcome: SeriesOutcomeSummary, scor
   return { label: favLabel, score: nextBest?.score ?? outcome.sweepScore, prob: nextBest?.prob ?? outcome.favSweepProb }
 }
 
-function UpcomingRow({ event, events, teams, powerScores, abilityProfiles }: {
+function UpcomingRow({ event, events, teams, powerScores, abilityProfiles, powerLog }: {
   event: RawScheduleEvent; events: RawScheduleEvent[]; teams: EsportsTeam[]; powerScores: Record<string, TeamPowerScore>
-  abilityProfiles: Record<string, AbilityProfile>
+  abilityProfiles: Record<string, AbilityProfile>; powerLog: Record<string, EloGameLog[]>
 }) {
   const matchTeams = event.match?.teams ?? []
   const teamA = matchTeams[0], teamB = matchTeams[1]
@@ -285,6 +294,14 @@ function UpcomingRow({ event, events, teams, powerScores, abilityProfiles }: {
   const isTomorrow = dayjs(event.startTime).isSame(dayjs().add(1, 'day'), 'day')
   const dateBadge = isToday ? '오늘' : isTomorrow ? '내일' : null
 
+  // 예측 신뢰도: 두 팀 중 "최근 2개월 시리즈 수"가 더 적은 쪽이 병목이 된다(최소값 기준).
+  // 시즌 종료 후 오래 쉬었다 재개한 팀이 있으면 신뢰도가 낮게 나오고, 경기가 쌓일수록(최대 10경기) 다시 올라간다.
+  const nowIso = useMemo(() => dayjs().toISOString(), [])
+  const seriesCountA = idA ? computeRecentSeriesCount(powerLog[idA] ?? [], idA, nowIso) : 0
+  const seriesCountB = idB ? computeRecentSeriesCount(powerLog[idB] ?? [], idB, nowIso) : 0
+  const confidence = usePower ? confidenceFromSeriesCount(Math.min(seriesCountA, seriesCountB)) : null
+  const confidenceColor = confidence == null ? 'var(--text-muted)' : confidence >= 0.7 ? 'var(--green)' : confidence >= 0.4 ? '#facc15' : 'var(--red)'
+
   return (
     <div style={{ background: 'var(--bg-elevated)', borderRadius: 6, border: dateBadge ? '1px solid var(--gold-border)' : '1px solid transparent', padding: '8px 8px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, marginBottom: 4 }}>
@@ -302,6 +319,11 @@ function UpcomingRow({ event, events, teams, powerScores, abilityProfiles }: {
         {usePower && powerA && powerB
           ? <div style={{ marginTop: 2 }}>파워랭킹 기반 · {teamA?.code || teamA?.name} {powerA.powerScore.toFixed(1)} : {powerB.powerScore.toFixed(1)} {teamB?.code || teamB?.name}</div>
           : <div style={{ marginTop: 2 }}>파워랭킹 데이터 부족 · lolesports 전적 기반 폴백</div>}
+        {confidence != null && (
+          <div style={{ marginTop: 2, fontSize: 9, fontWeight: 700, color: confidenceColor }} title="최근 2개월 안에 두 팀이 각각 치른 시리즈 수(적은 쪽 기준) — 10경기 이상이면 100%, 시즌 재개 직후처럼 최근 데이터가 적으면 낮게 표시됩니다.">
+            예측 신뢰도 {(confidence * 100).toFixed(0)}% (최근 2개월 {Math.min(seriesCountA, seriesCountB)}경기 기준)
+          </div>
+        )}
         {(setPrediction.duration != null || setPrediction.totalKills != null) && (
           <div style={{ marginTop: 2 }}>
             세트당 예상 {setPrediction.duration != null ? `게임시간 ${setPrediction.duration.toFixed(1)}분` : ''}{setPrediction.duration != null && setPrediction.totalKills != null ? ' · ' : ''}{setPrediction.totalKills != null ? `총 킬수 ${setPrediction.totalKills.toFixed(1)}` : ''}
@@ -318,9 +340,9 @@ function UpcomingRow({ event, events, teams, powerScores, abilityProfiles }: {
   )
 }
 
-function UpcomingPanel({ events, loading, error, errorDetail, teams, powerScores, abilityProfiles }: {
+function UpcomingPanel({ events, loading, error, errorDetail, teams, powerScores, abilityProfiles, powerLog }: {
   events: RawScheduleEvent[] | null; loading: boolean; error: boolean; errorDetail?: string; teams: EsportsTeam[]; powerScores: Record<string, TeamPowerScore>
-  abilityProfiles: Record<string, AbilityProfile>
+  abilityProfiles: Record<string, AbilityProfile>; powerLog: Record<string, EloGameLog[]>
 }) {
   const upcoming = useMemo(() => {
     if (!events) return []
@@ -343,7 +365,7 @@ function UpcomingPanel({ events, loading, error, errorDetail, teams, powerScores
       {!loading && upcoming.length === 0 && !error && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0' }}>예정된 경기가 없습니다</div>}
       {!loading && upcoming.length > 0 && events && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {upcoming.map(e => <UpcomingRow key={e.match!.id ?? e.id} event={e} events={events} teams={teams} powerScores={powerScores} abilityProfiles={abilityProfiles} />)}
+          {upcoming.map(e => <UpcomingRow key={e.match!.id ?? e.id} event={e} events={events} teams={teams} powerScores={powerScores} abilityProfiles={abilityProfiles} powerLog={powerLog} />)}
         </div>
       )}
     </div>
@@ -501,11 +523,11 @@ function GameStatCard({ stat, teamName, onDelete, onEdit }: { stat: EsportsGameS
   )
 }
 
-function RecentMatchRow({ teamId, teamName, game, displayA, displayB, scoreA, scoreB, teams, recordCount, teamCode, opponentCode }: {
+function RecentMatchRow({ teamId, teamName, game, displayA, displayB, scoreA, scoreB, teams, recordCount, teamCode, opponentCode, powerLog }: {
   teamId: string; teamName: string; game: TeamGameRecord
   displayA?: string; displayB?: string; scoreA?: number; scoreB?: number
   teams: EsportsTeam[]; recordCount?: number
-  teamCode?: string; opponentCode?: string
+  teamCode?: string; opponentCode?: string; powerLog: Record<string, EloGameLog[]>
 }) {
   const [expanded, setExpanded] = useState(false)
   const [sets, setSets] = useState<EsportsGameStat[] | null>(null)
@@ -544,6 +566,17 @@ function RecentMatchRow({ teamId, teamName, game, displayA, displayB, scoreA, sc
   // 기록 입력 폼에서는 풀네임 대신 약자(코드)를 쓴다. 코드가 없으면 풀네임으로 폴백.
   const teamLabel = teamCode || teamName
   const oppLabel = opponentCode || game.opponent
+
+  // 승부 예측 적중 여부: 이 경기 "시작 전" 레이팅(사후 반영 전)으로 예측했다면 어느 쪽이 이길 것으로
+  // 봤는지 계산하고, 실제 결과(game.teamScore vs oppScore)와 비교한다. 상대팀이 추적 중이 아니면
+  // (opponentTeamId 없음) 비교할 사전 레이팅이 없어서 배지를 표시하지 않는다.
+  const preRatingTeam = getPreMatchRating(powerLog[teamId], game.startTime)
+  const preRatingOpp = opponentTeamId ? getPreMatchRating(powerLog[opponentTeamId], game.startTime) : null
+  const hasPrediction = preRatingTeam != null && preRatingOpp != null
+  const predWinProb = hasPrediction ? powerScoreMatchupProbability(preRatingTeam!, preRatingOpp!) : null
+  const predictedTeamWin = hasPrediction ? preRatingTeam! >= preRatingOpp! : null
+  const actualTeamWin = game.teamScore > game.oppScore
+  const predictionHit = hasPrediction ? predictedTeamWin === actualTeamWin : null
 
   async function loadSets() {
     setLoadingSets(true)
@@ -783,6 +816,18 @@ function RecentMatchRow({ teamId, teamName, game, displayA, displayB, scoreA, sc
             : <span style={{ fontSize: 8, color: 'var(--text-muted)', border: '1px solid var(--border)', borderRadius: 4, padding: '1px 5px', flexShrink: 0 }}>미입력</span>
         )}
         <span style={{ flex: 1, fontWeight: hScoreB > hScoreA ? 800 : 400 }}>{headerB}</span>
+        {predictionHit != null && (
+          <span
+            title={`파워랭킹 기반 사전 예측(경기 시작 전 레이팅): ${teamLabel} 승리 확률 ${(predWinProb! * 100).toFixed(0)}%`}
+            style={{
+              fontSize: 8, fontWeight: 800, flexShrink: 0, borderRadius: 4, padding: '1px 5px',
+              color: predictionHit ? 'var(--green)' : 'var(--red)',
+              background: predictionHit ? 'var(--green-bg)' : 'var(--red-bg)',
+              border: `1px solid ${predictionHit ? 'var(--green-border)' : 'var(--red-border)'}`,
+            }}>
+            {predictionHit ? '예측 적중' : '예측 실패'}
+          </span>
+        )}
       </div>
       {expanded && (
         <div style={{ padding: '8px 8px 8px 22px', display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -892,6 +937,15 @@ function RecentMatchRow({ teamId, teamName, game, displayA, displayB, scoreA, sc
                   </button>
                 </div>
 
+                {/* 승리팀 (버튼 세로로 조금 더 크게) */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ fontSize: 9, color: 'var(--text-muted)', width: 60, flexShrink: 0 }}>승리팀</span>
+                  <div style={{ display: 'flex', gap: 4, flex: 1 }}>
+                    <MilestoneButton size="lg" selected={form.winnerTeam === leftValue} onClick={() => setForm(f => ({ ...f, winnerTeam: leftValue }))}>{leftLabel}</MilestoneButton>
+                    <MilestoneButton size="lg" selected={form.winnerTeam === rightValue} onClick={() => setForm(f => ({ ...f, winnerTeam: rightValue }))}>{rightLabel}</MilestoneButton>
+                  </div>
+                </div>
+
                 {/* 게임시간 (가운데 정렬) */}
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
                   <span style={{ fontSize: 10, color: 'var(--text-secondary)' }}>게임시간</span>
@@ -905,15 +959,6 @@ function RecentMatchRow({ teamId, teamName, game, displayA, displayB, scoreA, sc
                   <input ref={durationSecRef} value={form.durationSec} onChange={e => setForm(f => ({ ...f, durationSec: e.target.value.replace(/[^0-9]/g, '').slice(0, 2) }))}
                     placeholder="초" inputMode="numeric" style={{ width: 40, fontSize: 11, padding: '3px 4px', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text-primary)', textAlign: 'center' }} />
                   <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>초</span>
-                </div>
-
-                {/* 승리팀 (버튼 세로로 조금 더 크게) */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ fontSize: 9, color: 'var(--text-muted)', width: 60, flexShrink: 0 }}>승리팀</span>
-                  <div style={{ display: 'flex', gap: 4, flex: 1 }}>
-                    <MilestoneButton size="lg" selected={form.winnerTeam === leftValue} onClick={() => setForm(f => ({ ...f, winnerTeam: leftValue }))}>{leftLabel}</MilestoneButton>
-                    <MilestoneButton size="lg" selected={form.winnerTeam === rightValue} onClick={() => setForm(f => ({ ...f, winnerTeam: rightValue }))}>{rightLabel}</MilestoneButton>
-                  </div>
                 </div>
 
                 <div style={{ display: 'flex', gap: 10 }}>
@@ -1299,6 +1344,7 @@ function LeagueView({ code, label }: { code: string; label: string }) {
   const [manualEvents, setManualEvents] = useState<ManualEsportsEvent[]>([])
   const [powerScores, setPowerScores] = useState<Record<string, TeamPowerScore>>({})
   const [powerLog, setPowerLog] = useState<Record<string, EloGameLog[]>>({})
+  const [completedSeries, setCompletedSeries] = useState<CompletedSeriesRecord[]>([])
   const [expandedPowerTeam, setExpandedPowerTeam] = useState<string | null>(null)
   const [expandedHistoryIdx, setExpandedHistoryIdx] = useState<number | null>(null)
   const [powerLoading, setPowerLoading] = useState(false)
@@ -1382,6 +1428,7 @@ function LeagueView({ code, label }: { code: string; label: string }) {
       }
       setPowerScores(scores)
       setPowerLog(logByTeam)
+      setCompletedSeries(buildCompletedSeries(matches, log))
 
       // 최근 W/L 배지: 시리즈가 아니라 "세트" 단위로 최근 5개까지. rows가 이미 시간순(오래된 것→최신) 정렬돼 있으므로
       // 팀별로 걸러서 뒤에서 5개만 취한 뒤, 최신이 맨 왼쪽에 오도록 순서를 뒤집는다.
@@ -1461,6 +1508,12 @@ function LeagueView({ code, label }: { code: string; label: string }) {
     return map
   }, [combinedEvents, teams])
 
+  // 강팀/약팀 표기용: 코드가 있으면 코드, 없으면 이름
+  const teamShortName = (id: string) => teamCodeMap[id] || teams.find(t => t.id === id)?.name || '?'
+
+  // 파워랭킹 기반 4가지 베팅 유형(강팀 정배/-1.5, 약팀 역배/+1.5) 백테스트 — BO3로 완결된 시리즈만 대상.
+  const backtestSummary: StrategyBacktestSummary = useMemo(() => summarizeStrategyBacktest(completedSeries), [completedSeries])
+
   const [editingTeamId, setEditingTeamId] = useState<string | null>(null)
   const [editTeamName, setEditTeamName] = useState('')
   const [editTeamCode, setEditTeamCode] = useState('')
@@ -1526,10 +1579,10 @@ function LeagueView({ code, label }: { code: string; label: string }) {
 
       <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'flex-start', marginBottom: 14 }}>
         <div style={{ flex: '1 1 320px', minWidth: 280 }}>
-          <RecentMatchesPanel leagueCode={code} events={combinedEvents} loading={eventsLoading} error={eventsError} errorDetail={eventsErrorDetail} teams={teams} onCreateTeam={ensureTeamExists} />
+          <RecentMatchesPanel leagueCode={code} events={combinedEvents} loading={eventsLoading} error={eventsError} errorDetail={eventsErrorDetail} teams={teams} onCreateTeam={ensureTeamExists} powerLog={powerLog} />
         </div>
         <div style={{ flex: '1 1 320px', minWidth: 280 }}>
-          <UpcomingPanel events={combinedEvents} loading={eventsLoading} error={eventsError} errorDetail={eventsErrorDetail} teams={teams} powerScores={powerScores} abilityProfiles={abilityProfiles} />
+          <UpcomingPanel events={combinedEvents} loading={eventsLoading} error={eventsError} errorDetail={eventsErrorDetail} teams={teams} powerScores={powerScores} abilityProfiles={abilityProfiles} powerLog={powerLog} />
         </div>
         <div style={{ flex: '1 1 280px', minWidth: 260 }}>
           <div className="card">
@@ -1674,6 +1727,64 @@ function LeagueView({ code, label }: { code: string; label: string }) {
                 </div>
               )
             })}
+          </div>
+        </div>
+        <div style={{ flex: '1 1 280px', minWidth: 260 }}>
+          <div className="card">
+            <div className="card-title" style={{ marginBottom: 8 }}>
+              베팅 전략 백테스트 <span style={{ fontWeight: 400, color: 'var(--text-muted)', fontSize: 10 }}>· 파워랭킹(시리즈 시작 전 레이팅) 기반, BO3로 완결된 경기만 대상</span>
+            </div>
+            {completedSeries.length === 0 ? (
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '6px 0' }}>BO3로 완결된(2:0/2:1) 수동 입력 경기가 아직 없습니다.</div>
+            ) : (() => {
+              const pct = (c: BacktestCategory) => c.total > 0 ? (c.hits / c.total * 100) : null
+              const rows: { label: string; cat: BacktestCategory }[] = [
+                { label: '강팀 정배 적중률', cat: backtestSummary.favML },
+                { label: '강팀 -1.5 적중률', cat: backtestSummary.favHandicap },
+                { label: '약팀 역배 적중률', cat: backtestSummary.dogML },
+                { label: '약팀 1.5 플핸 적중률', cat: backtestSummary.dogHandicap },
+              ]
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {rows.map(r => {
+                    const p = pct(r.cat)
+                    return (
+                      <div key={r.label} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, padding: '6px 8px', background: 'var(--bg-elevated)', borderRadius: 6 }}>
+                        <span style={{ flex: 1 }}>{r.label}</span>
+                        <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>{r.cat.hits}/{r.cat.total}</span>
+                        <span style={{ fontWeight: 800, width: 40, textAlign: 'right', color: p == null ? 'var(--text-muted)' : p >= 55 ? 'var(--green)' : p <= 45 ? 'var(--red)' : 'var(--gold)' }}>
+                          {p == null ? '-' : `${p.toFixed(0)}%`}
+                        </span>
+                      </div>
+                    )
+                  })}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, padding: '6px 8px', background: 'var(--bg-elevated)', borderRadius: 6, marginTop: 2, border: '1px dashed var(--border)' }}
+                    title="매 경기마다 (강팀 정배 vs 약팀 +1.5), (강팀 -1.5 vs 약팀 역배) 중 모델 확률이 더 높은 쪽에 모의로 베팅했다고 가정했을 때의 전체 적중률">
+                    <span style={{ flex: 1, fontWeight: 700 }}>확률 높은 쪽 모의베팅 적중률</span>
+                    <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>{backtestSummary.recommended.hits}/{backtestSummary.recommended.total}</span>
+                    <span style={{ fontWeight: 800, width: 40, textAlign: 'right', color: 'var(--gold)' }}>
+                      {pct(backtestSummary.recommended) == null ? '-' : `${pct(backtestSummary.recommended)!.toFixed(0)}%`}
+                    </span>
+                  </div>
+                  <div style={{ marginTop: 4, maxHeight: 220, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 3 }}>
+                    {[...completedSeries].reverse().slice(0, 20).map((s, i) => {
+                      const g1FavPick = s.outcome.favWinProb >= s.outcome.underAtLeastOneGameProb
+                      const g1Hit = g1FavPick ? s.favWonSeries : s.dogCovered
+                      const g2FavPick = s.outcome.favSweepProb >= s.outcome.underWinProb
+                      const g2Hit = g2FavPick ? s.favSwept : !s.favWonSeries
+                      return (
+                        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 9, padding: '4px 6px', background: 'var(--bg-card)', borderRadius: 4 }}>
+                          <span style={{ color: 'var(--text-muted)', width: 42, flexShrink: 0 }}>{dayjs(s.matchStartTime).format('MM/DD')}</span>
+                          <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{teamShortName(s.favTeamId)} {s.favSets}:{s.dogSets} {teamShortName(s.dogTeamId)}</span>
+                          <span title={g1FavPick ? '강팀 정배 픽' : '약팀 +1.5 픽'} style={{ fontWeight: 800, color: g1Hit ? 'var(--green)' : 'var(--red)' }}>{g1Hit ? 'W' : 'L'}</span>
+                          <span title={g2FavPick ? '강팀 -1.5 픽' : '약팀 역배 픽'} style={{ fontWeight: 800, color: g2Hit ? 'var(--green)' : 'var(--red)' }}>{g2Hit ? 'W' : 'L'}</span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )
+            })()}
           </div>
         </div>
       </div>
