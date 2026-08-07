@@ -1310,11 +1310,12 @@ function LeagueView({ code, label }: { code: string; label: string }) {
   // "어제 기준" 스냅샷 로드: 오늘보다 이전인 날짜 중 가장 최근 날짜의 값을 비교 기준으로 삼는다.
   async function loadPrevSnapshot() {
     const today = dayjs().format('YYYY-MM-DD')
-    const { data } = await supabase.from('esports_power_snapshots')
+    const { data, error } = await supabase.from('esports_power_snapshots')
       .select('team_id, snapshot_date, power_score, rank')
       .eq('league', code)
       .lt('snapshot_date', today)
       .order('snapshot_date', { ascending: false })
+    if (error) console.error('[power_snapshots load failed]', error)
     const rows = (data as { team_id: string; snapshot_date: string; power_score: number; rank: number }[]) ?? []
     if (rows.length === 0) { setPrevSnapshot({}); return }
     const latestDate = rows[0].snapshot_date
@@ -1500,6 +1501,7 @@ function LeagueView({ code, label }: { code: string; label: string }) {
       rank: i + 1,
     }))
     supabase.from('esports_power_snapshots').upsert(rows, { onConflict: 'team_id,snapshot_date' })
+      .then(({ error }) => { if (error) console.error('[power_snapshots upsert failed]', error) })
   }, [powerLoading, rankedTeams, powerScores, code])
 
   return (
