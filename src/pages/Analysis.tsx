@@ -7,9 +7,9 @@ import {
   LEAGUES, fetchScheduleEvents, extractTeamData, computeForm, matchupProbability, filterRecentGames,
   seriesScoreProbabilities, seriesOutcomeSummary, teamNameMatches, findTeamCode,
   classifyGameNarrative, computeBothSidesScores, computeBothSidesPerfection, computePerfectionScore,
-  simulateLeagueElo, powerScoreMatchupProbability, manualEventToRawEvent,
+  computeWeightedPowerRatings, powerScoreMatchupProbability, manualEventToRawEvent,
   getLastLiveFetchAt,
-  type RawScheduleEvent, type TeamGameRecord, type NarrativeTeam, type TeamPowerScore, type EloMatchRecord, type EloGameLog, type ManualEsportsEvent,
+  type RawScheduleEvent, type TeamGameRecord, type NarrativeTeam, type TeamPowerScore, type WeightedMatchRecord, type WeightedGameLog, type ManualEsportsEvent,
   type SeriesOutcomeSummary, type ScoreProb,
 } from '../lib/lolEsports'
 
@@ -1113,11 +1113,11 @@ function ManualEventPanel({ leagueCode, manualEvents, onChanged, autoOpenHint }:
 }
 
 // 파워랭킹 히스토리를 한눈에 보여주는 소형 라인 차트 (팀 확장 시 상단에 표시)
-function RatingHistoryChart({ teamLog }: { teamLog: EloGameLog[] }) {
+function RatingHistoryChart({ teamLog }: { teamLog: WeightedGameLog[] }) {
   const data = teamLog.map((h, i) => ({
     idx: i + 1,
     date: h.matchStartTime ? dayjs(h.matchStartTime).format('MM/DD') : '',
-    rating: Math.round(h.ratingAfter * 10) / 10,
+    rating: Math.round(h.ratingAsOf * 10) / 10,
   }))
   const values = data.map(d => d.rating)
   const min = Math.min(...values), max = Math.max(...values)
@@ -1341,7 +1341,7 @@ function LeagueView({ code, label }: { code: string; label: string }) {
   }, [])
   const [manualEvents, setManualEvents] = useState<ManualEsportsEvent[]>([])
   const [powerScores, setPowerScores] = useState<Record<string, TeamPowerScore>>({})
-  const [powerLog, setPowerLog] = useState<Record<string, EloGameLog[]>>({})
+  const [powerLog, setPowerLog] = useState<Record<string, WeightedGameLog[]>>({})
   const [expandedPowerTeam, setExpandedPowerTeam] = useState<string | null>(null)
   const [expandedHistoryIdx, setExpandedHistoryIdx] = useState<number | null>(null)
   const [powerLoading, setPowerLoading] = useState(false)
@@ -1370,7 +1370,7 @@ function LeagueView({ code, label }: { code: string; label: string }) {
     setPrevSnapshot(map)
   }
 
-  // 팀 체급 점수 계산: 라이엇 GPR 공식(순차 Elo)을 리그 전체 경기에 시간순으로 적용
+  // 팀 체급 점수 계산: 모든 세트 기록을 반영하되, 최근일수록(반감기 60일) 가중치를 지수적으로 크게 준다.
   async function loadPowerScores(teamsList: EsportsTeam[]) {
     if (teamsList.length === 0) { setPowerScores({}); return }
     setPowerLoading(true)
@@ -1392,32 +1392,45 @@ function LeagueView({ code, label }: { code: string; label: string }) {
         return teamsList.find(t => t.code && new RegExp(`(^|[^a-z0-9])${t.code.toLowerCase()}($|[^a-z0-9])`).test(lower))
       }
       const seenKeys = new Set<string>()
-      const matches: EloMatchRecord[] = []
+      const matches: WeightedMatchRecord[] = []
       for (const s of rows) {
         const oppTeam = findOpponentTeam(s.team2_name)
-        if (!oppTeam) continue // 추적 안 되는 상대는 시뮬레이션에서 제외 (레이팅 기준점이 없음)
+        if (!oppTeam) continue // 추적 안 되는 상대는 계산에서 제외 (레이팅 기준점이 없음)
         const key = [s.team_id, oppTeam.id].sort().join('|') + `|${s.match_start_time}|${s.game_number}`
         if (seenKeys.has(key)) continue
         seenKeys.add(key)
+        const input = {
+          team1Kills: s.team1_kills ?? 0, team2Kills: s.team2_kills ?? 0,
+          team1Dragons: s.team1_dragons ?? 0, team2Dragons: s.team2_dragons ?? 0,
+          team1Towers: s.team1_towers ?? 0, team2Towers: s.team2_towers ?? 0,
+          team1Inhibitors: s.team1_inhibitors ?? 0, team2Inhibitors: s.team2_inhibitors ?? 0,
+          team1Barons: s.team1_barons ?? 0, team2Barons: s.team2_barons ?? 0,
+          winnerTeam: s.winner_team ?? 'team1' as NarrativeTeam,
+          firstBloodTeam: s.first_blood_team, firstTowerTeam: s.first_tower_team, firstDragonTeam: s.first_dragon_team, firstBaronTeam: s.first_baron_team,
+          fifthKillTeam: s.fifth_kill_team, tenthKillTeam: s.tenth_kill_team,
+          durationSeconds: s.duration_seconds,
+        }
+        const perf = computeBothSidesPerfection(input) // team1=이 행의 team_id(s.team_id) 관점, team2=상대 관점
         matches.push({
           teamAId: s.team_id, teamBId: oppTeam.id,
           winnerIsA: s.winner_team === 'team1',
           matchStartTime: s.match_start_time ?? '', gameNumber: s.game_number,
+          perfectionA: perf.team1, perfectionB: perf.team2,
         })
       }
 
-      const initialRatings: Record<string, number> = {}
-      for (const t of teamsList) initialRatings[t.id] = baselineGpr(t)
+      const fallback: Record<string, number> = {}
+      for (const t of teamsList) fallback[t.id] = baselineGpr(t)
 
-      const { finalRatings, log } = simulateLeagueElo(initialRatings, matches)
+      const { ratings, log } = computeWeightedPowerRatings(matches, fallback)
 
       const scores: Record<string, TeamPowerScore> = {}
-      const logByTeam: Record<string, EloGameLog[]> = {}
+      const logByTeam: Record<string, WeightedGameLog[]> = {}
       for (const t of teamsList) {
-        const teamLog = log.filter(l => l.teamId === t.id)
+        const teamLog = log[t.id] ?? []
         const wins = teamLog.filter(l => l.won).length
         scores[t.id] = {
-          powerScore: finalRatings[t.id] ?? baselineGpr(t),
+          powerScore: ratings[t.id] ?? baselineGpr(t),
           winRate: teamLog.length > 0 ? wins / teamLog.length : 0.5,
           gamesAnalyzed: teamLog.length,
         }
@@ -1686,7 +1699,7 @@ function LeagueView({ code, label }: { code: string; label: string }) {
                         )
                       })()}
                       <div style={{ color: 'var(--text-muted)', marginBottom: 6 }}>
-                        GPR 기본값 {(baselineGpr(t)).toFixed(1)}점에서 시작 → 아래 경기를 시간순으로 하나씩 반영(순차 Elo)하며 최종 {ps?.powerScore.toFixed(1)}점까지 도달. 이겼으면 상대가 아무리 약해도 항상 조금은 오르고, 졌으면 항상 조금은 내려갑니다. 항목을 누르면 자세한 사유가 나옵니다.
+                        모든 경기를 반영하되 최근일수록 가중치를 크게 줍니다(반감기 60일 — 60일 지난 경기는 가중치 절반, 120일 지난 경기는 1/4). 경기 하나의 점수는 승패 + 그 경기 플레이 점수차(얼마나 압도적으로 이기고 졌는지)로 계산해서, 최종 {ps?.powerScore.toFixed(1)}점은 이 경기들의 가중평균입니다. 항목을 누르면 자세한 사유가 나옵니다.
                       </div>
                       {teamLog.length === 0 && <div style={{ color: 'var(--text-muted)' }}>입력된 경기가 없습니다.</div>}
                       {teamLog.length > 0 && (
@@ -1701,12 +1714,13 @@ function LeagueView({ code, label }: { code: string; label: string }) {
                                   <span style={{ color: 'var(--text-muted)', width: 34, flexShrink: 0 }}>{h.matchStartTime ? dayjs(h.matchStartTime).format('MM/DD') : '-'}</span>
                                   <span style={{ fontWeight: 700, color: h.won ? 'var(--green, #4ade80)' : 'var(--red, #f87171)', width: 14, flexShrink: 0 }}>{h.won ? 'W' : 'L'}</span>
                                   <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{teams.find(x => x.id === h.opponentId)?.name ?? '?'}</span>
-                                  <span style={{ fontWeight: 700, color: h.delta >= 0 ? 'var(--green, #4ade80)' : 'var(--red, #f87171)', width: 40, textAlign: 'right', flexShrink: 0 }}>{h.delta >= 0 ? '+' : ''}{h.delta.toFixed(2)}</span>
-                                  <span style={{ fontWeight: 800, color: 'var(--gold)', width: 34, textAlign: 'right', flexShrink: 0 }}>{h.ratingAfter.toFixed(1)}</span>
+                                  <span style={{ fontWeight: 700, color: 'var(--text-secondary)', width: 34, textAlign: 'right', flexShrink: 0 }}>{h.gameScore.toFixed(0)}점</span>
+                                  <span style={{ fontWeight: 700, color: 'var(--text-muted)', width: 34, textAlign: 'right', flexShrink: 0 }}>{(h.weight * 100).toFixed(0)}%</span>
+                                  <span style={{ fontWeight: 800, color: 'var(--gold)', width: 34, textAlign: 'right', flexShrink: 0 }}>{h.ratingAsOf.toFixed(1)}</span>
                                 </div>
                                 {rowOpen && (
                                   <div style={{ padding: '4px 6px 6px 45px', color: 'var(--text-muted)', lineHeight: 1.6 }}>
-                                    {h.gameNumber}세트 · 경기 전 점수 {h.ratingBefore.toFixed(1)} vs 상대 {h.opponentRatingBefore.toFixed(1)} · 기대승률 {(h.expected * 100).toFixed(0)}% · 결과 {h.won ? '승' : '패'} · 변화량 {h.delta >= 0 ? '+' : ''}{h.delta.toFixed(2)} → 경기 후 {h.ratingAfter.toFixed(1)}
+                                    {h.gameNumber}세트 · 결과 {h.won ? '승' : '패'} · 이 경기 체급 점수 {h.gameScore.toFixed(1)}점(승패+플레이 점수차 반영) · {Math.round(h.daysAgo)}일 전 · 지금 기준 가중치 {(h.weight * 100).toFixed(0)}% · 그 시점까지 누적 파워점수 {h.ratingAsOf.toFixed(1)}
                                   </div>
                                 )}
                               </div>
