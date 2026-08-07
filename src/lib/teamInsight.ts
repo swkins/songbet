@@ -99,10 +99,13 @@ export function getTeamInsight(query: string, bets: BetLite[], recentN = 10): Te
 // 과거에 같은 팀(약자 포함)을 베팅했던 이력에서 리그를 함께 찾아온다.
 // "T1 GEN" 처럼 팀 약자만 입력해도, 경기 내용을 구분자(vs/공백/×/- 등) 기준으로 토큰화해
 // 그 중 하나라도 과거 기록과 일치하면 가장 최근 리그를 반환한다.
+// 핸디캡/배당 숫자(예: "-1.5")는 팀 이름과 무관하므로 먼저 제거한다 — 안 지우면 "T1 -1.5"의 "-"가
+// 구분자로 잡혀 "1.5"가 토큰으로 남고, 그 흔한 숫자가 전혀 다른 리그의 과거 베팅과 우연히 일치해
+// 리그가 엉뚱하게 바뀌는 문제가 있었다.
 export function getEsportsLeague(query: string, bets: BetLite[]): string {
-  const q = query.trim()
+  const q = extractTeamCandidate(query).trim()
   if (!q) return ''
-  const tokens = q.split(/[\s/,:·×xX-]+|vs\.?/i).map(t => t.trim()).filter(t => t.length >= 2)
+  const tokens = q.split(/[\s/,:·×xX-]+|vs\.?/i).map(t => t.trim()).filter(t => t.length >= 2 && !/^\d+(\.\d+)?$/.test(t))
   const candidates = [q, ...tokens]
   const matched = [...bets]
     .filter(b => b.sport === 'esports' && b.league && candidates.some(c => b.match.includes(c)))
