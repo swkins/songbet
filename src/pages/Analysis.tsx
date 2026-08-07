@@ -180,12 +180,16 @@ function RecentMatchesPanel({ leagueCode, events, loading, error, errorDetail, t
                     <span style={{ flex: 1 }}>{m.codeB || m.teamB}</span>
                   </div>
                   <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
-                    <button onClick={() => onCreateTeam(m.teamA)} className="btn btn-ghost" style={{ flex: 1, fontSize: 9, padding: '4px 4px' }}>
-                      {m.codeA || m.teamA} 팀 등록하고 입력
-                    </button>
-                    <button onClick={() => onCreateTeam(m.teamB)} className="btn btn-ghost" style={{ flex: 1, fontSize: 9, padding: '4px 4px' }}>
-                      {m.codeB || m.teamB} 팀 등록하고 입력
-                    </button>
+                    {!/^\s*(TBD|TBA|미정)\s*$/i.test(m.teamA) && (
+                      <button onClick={() => onCreateTeam(m.teamA)} className="btn btn-ghost" style={{ flex: 1, fontSize: 9, padding: '4px 4px' }}>
+                        {m.codeA || m.teamA} 팀 등록하고 입력
+                      </button>
+                    )}
+                    {!/^\s*(TBD|TBA|미정)\s*$/i.test(m.teamB) && (
+                      <button onClick={() => onCreateTeam(m.teamB)} className="btn btn-ghost" style={{ flex: 1, fontSize: 9, padding: '4px 4px' }}>
+                        {m.codeB || m.teamB} 팀 등록하고 입력
+                      </button>
+                    )}
                   </div>
                   {teams.length > 0 && (
                     <select
@@ -1451,6 +1455,8 @@ function LeagueView({ code, label }: { code: string; label: string }) {
   // 리그에 아직 등록 안 된 팀을 즉시 추적 대상으로 등록한다 (LCK CL처럼 팀을 미리 하나도 안 넣어놨을 때,
   // "먼저 팀부터 등록하세요" 없이 경기 목록에서 바로 한 번에 등록 + 입력으로 넘어갈 수 있도록).
   async function ensureTeamExists(name: string) {
+    // "TBD"/"TBA" 같은 대진 미정 자리표시자는 실제 팀이 아니므로 추적 팀으로 추가하지 않는다.
+    if (/^\s*(TBD|TBA|미정)\s*$/i.test(name)) return
     if (teams.find(t => teamNameMatches(t, name))) return
     const { data } = await supabase.from('esports_teams').insert({ league: code, name, sort_order: teams.length }).select().single()
     if (data) {
