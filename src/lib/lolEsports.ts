@@ -721,7 +721,10 @@ export interface TeamPowerScore {
 }
 
 const ELO_SCALE = 25   // 파워점수 차이를 승률로 변환할 때 쓰는 로지스틱 기울기(powerScoreMatchupProbability에서 사용)
-export const POWER_HALF_LIFE_DAYS = 60 // 가중치가 절반으로 줄어드는 기간(일)
+export const POWER_HALF_LIFE_DAYS = 60   // 가중치가 절반으로 줄어드는 기간(일)
+export const POWER_WINDOW_DAYS = 180     // 이보다 오래된 경기는 계산에서 제외(6개월 — DB에서 지우진 않고 계산에서만 뺀다)
+export const POWER_RECENT_FORM_WEIGHT = 0.8  // 최종 점수 중 "반감기 가중평균(최근폼)"이 차지하는 비중. 나머지(1-이값)는 그 6개월 구간의 단순평균 — 표본이 적을 때 노이즈를 눌러주는 안정판 역할.
+const YEAR_BOUNDARY_DISCOUNT = 0.6       // 연도가 바뀌면(=로스터 개편이 몰리는 시점) 그 전 연도 경기 가중치에 추가로 곱하는 배율
 
 export interface WeightedMatchRecord {
   teamAId: string
@@ -750,9 +753,15 @@ export interface WeightedPowerResult {
   log: Record<string, WeightedGameLog[]> // 팀별로 시간순 정렬
 }
 
+// 반감기 감쇠 + "연도가 다르면" 추가 할인. LoL은 보통 연말~연초 사이에 로스터 개편이 몰리기 때문에,
+// 단순히 날짜 차이만 보는 것보다 "작년 경기"에 한 번 더 페널티를 주는 게 실제 폼 변화에 더 가깝다.
 function recencyWeight(matchStartTime: string, referenceTimeMs: number, halfLifeDays: number): number {
   const daysAgo = Math.max(0, (referenceTimeMs - new Date(matchStartTime).getTime()) / 86400000)
-  return Math.pow(0.5, daysAgo / halfLifeDays)
+  let w = Math.pow(0.5, daysAgo / halfLifeDays)
+  const matchYear = new Date(matchStartTime).getUTCFullYear()
+  const refYear = new Date(referenceTimeMs).getUTCFullYear()
+  if (matchYear !== refYear) w *= YEAR_BOUNDARY_DISCOUNT
+  return w
 }
 
 // 경기 하나의 "체급 점수"(0~100): 승패를 기본 축으로 삼고(이기면 62점대, 지면 38점대에서 출발),
@@ -770,10 +779,15 @@ export function computeWeightedPowerRatings(
   fallback: Record<string, number>,
   referenceTimeMs: number = Date.now(),
   halfLifeDays: number = POWER_HALF_LIFE_DAYS,
+  windowDays: number = POWER_WINDOW_DAYS,
+  recentFormWeight: number = POWER_RECENT_FORM_WEIGHT,
 ): WeightedPowerResult {
   type Entry = { teamId: string; opponentId: string; matchStartTime: string; gameNumber: number; won: boolean; gameScore: number }
   const byTeam: Record<string, Entry[]> = {}
   for (const m of matches) {
+    // 6개월(windowDays)보다 오래된 경기는 계산에서 아예 제외 — DB에서 지우는 게 아니라 이 계산에서만 뺀다.
+    const daysAgo = (referenceTimeMs - new Date(m.matchStartTime).getTime()) / 86400000
+    if (daysAgo > windowDays) continue
     const scoreA = gameScoreFor(m.winnerIsA, m.perfectionA, m.perfectionB)
     const scoreB = gameScoreFor(!m.winnerIsA, m.perfectionB, m.perfectionA)
     ;(byTeam[m.teamAId] ??= []).push({ teamId: m.teamAId, opponentId: m.teamBId, matchStartTime: m.matchStartTime, gameNumber: m.gameNumber, won: m.winnerIsA, gameScore: scoreA })
@@ -785,23 +799,32 @@ export function computeWeightedPowerRatings(
     const entries = byTeam[teamId].sort((a, b) =>
       new Date(a.matchStartTime).getTime() - new Date(b.matchStartTime).getTime() || a.gameNumber - b.gameNumber
     )
-    let wSum = 0, wScoreSum = 0
+    // 최종 점수 = 반감기 가중평균(recentFormWeight 비중, "최근폼") + 이 구간(6개월) 단순평균(나머지 비중, "기본 체급" 안정판)
+    let wSum = 0, wScoreSum = 0, plainSum = 0
     for (const e of entries) {
       const w = recencyWeight(e.matchStartTime, referenceTimeMs, halfLifeDays)
       wSum += w; wScoreSum += w * e.gameScore
+      plainSum += e.gameScore
     }
-    ratings[teamId] = wSum > 0 ? wScoreSum / wSum : (fallback[teamId] ?? 50)
+    if (wSum > 0) {
+      const weightedAvg = wScoreSum / wSum
+      const plainAvg = plainSum / entries.length
+      ratings[teamId] = recentFormWeight * weightedAvg + (1 - recentFormWeight) * plainAvg
+    } else {
+      ratings[teamId] = fallback[teamId] ?? 50
+    }
 
     // 히스토리(차트/목록용): 각 경기 "그 시점"까지의 데이터만으로 계산한 가중평균 — 시간에 따른 폼 변화를 보여준다.
     const teamLog: WeightedGameLog[] = []
     for (let i = 0; i < entries.length; i++) {
       const refTime = new Date(entries[i].matchStartTime).getTime()
-      let ws = 0, wss = 0
+      let ws = 0, wss = 0, ps = 0
       for (let j = 0; j <= i; j++) {
         const w = recencyWeight(entries[j].matchStartTime, refTime, halfLifeDays)
         ws += w; wss += w * entries[j].gameScore
+        ps += entries[j].gameScore
       }
-      const ratingAsOf = ws > 0 ? wss / ws : (fallback[teamId] ?? 50)
+      const ratingAsOf = ws > 0 ? recentFormWeight * (wss / ws) + (1 - recentFormWeight) * (ps / (i + 1)) : (fallback[teamId] ?? 50)
       teamLog.push({
         teamId, opponentId: entries[i].opponentId, matchStartTime: entries[i].matchStartTime, gameNumber: entries[i].gameNumber,
         won: entries[i].won, gameScore: entries[i].gameScore,
