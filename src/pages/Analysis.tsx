@@ -79,14 +79,23 @@ function resolveMatchTeam(teams: EsportsTeam[], teamAName: string, teamBName: st
   return null
 }
 
-// 저장된 상대팀 표기(team2_name, 보통 정식 팀명)가 이번 경기 상대(oppQuery, 스케줄에서 온 코드/이름)와
-// 같은 팀을 가리키는지 판단한다. team2_name만으로 비교하면 "NS"처럼 짧은 코드가 "Nongshim Esports
-// Academy" 안에서 단어 경계로 안 걸려서(포함 매칭 실패) 놓치는 경우가 있어서, team2_name이 추적 중인
-// 팀(esports_teams)과 매치되면 그 팀의 코드까지 포함해서 다시 비교한다.
+// 저장된 상대팀 표기(team2_name, 보통 정식 팀명)가 이번 경기 상대(oppQuery, 스케줄에서 온 이름/코드)와
+// 같은 팀을 가리키는지 판단한다. team2_name이 추적 중인 팀(esports_teams)과 매치되면 그 팀의 코드까지
+// 포함해서 다시 비교하고, 그래도 안 잡히면 그 팀의 코드가 oppQuery 문자열 안에 단어 경계로 포함돼
+// 있는지 마지막으로 확인한다 — 예: esports_teams에는 "Nongshim Esports Academy"로 등록(사용자가 직접
+// 개명)돼 있는데 lolesports API 스케줄은 여전히 "NS Challengers"로 내려주는 경우, 팀명 자체는 전혀
+// 안 겹치지만 코드 "NS"가 "NS Challengers" 안에 단어 경계로 들어있으므로 이 마지막 단계에서 잡힌다.
 function isSameOpponent(team2Name: string, oppQuery: string, teams: EsportsTeam[]): boolean {
   if (teamNameMatches({ name: team2Name }, oppQuery)) return true
   const tracked = teams.find(t => t.name === team2Name) ?? teams.find(t => teamNameMatches(t, team2Name))
-  return !!tracked && teamNameMatches(tracked, oppQuery)
+  if (!tracked) return false
+  if (teamNameMatches(tracked, oppQuery)) return true
+  const code = (tracked.code ?? '').trim().toLowerCase()
+  if (code && code.length <= 4) {
+    const escaped = code.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    if (new RegExp(`(^|[^a-z0-9])${escaped}($|[^a-z0-9])`, 'i').test(oppQuery)) return true
+  }
+  return false
 }
 
 // ─── 중앙: 최근 경기 (클릭하면 바로 펼쳐져서 세트 기록 입력 + 분석 가능) ──
