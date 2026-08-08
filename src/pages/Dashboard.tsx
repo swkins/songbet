@@ -4,7 +4,7 @@ import { logAction } from '../lib/logger'
 import type { Bet, Site, Sport, Market, BetResult, GameRolling } from '../types'
 import { inferBaseballLeague, inferSoccerLeague, buildLeagueCandidates, suggestLeagueCandidates, type LeagueOverride, type LeagueCandidate } from '../lib/league'
 import { buildTeamCandidates, suggestTeamCandidates, getTeamInsight, getEsportsLeague, type TeamCandidate, type BetLite } from '../lib/teamInsight'
-import { fetchTodayTomorrowLolMatches, type UpcomingLolMatch } from '../lib/lolSchedule'
+import { fetchTodayTomorrowLolMatches, LEAGUES as LOL_LEAGUES, type UpcomingLolMatch } from '../lib/lolSchedule'
 import { sportGlyph } from '../components/SportIcons'
 import dayjs from 'dayjs'
 import isoWeek from 'dayjs/plugin/isoWeek'
@@ -105,7 +105,10 @@ function LolMatchPicker({ match, onSelectMatch, onChangeMatch, pickLabel, onPick
           <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0', textAlign: 'center' }}>오늘·내일 예정된 경기가 없습니다</div>
         )}
         {!loading && matches && matches.length > 0 && (() => {
-          const leagues = Array.from(new Set(matches.map(m => m.league)))
+          // 실제로 오늘·내일 경기가 있는 리그만으로 버튼을 만들면, 경기 없는 날엔 그 리그 버튼 자체가
+          // 안 보여서(예: LCK CL 경기 없는 날) 순서도 매번 들쭉날쭉했다. 고정된 리그 목록(LEAGUES) 순서로
+          // 항상 다 보여주고, 경기 없는 리그를 누르면 그냥 "경기 없습니다"로 안내한다.
+          const leagues = LOL_LEAGUES.map(l => l.code)
           const shown = leagueFilter === 'all' ? matches : matches.filter(m => m.league === leagueFilter)
           return (
             <>

@@ -903,6 +903,15 @@ function RecentMatchRow({ teamId, pendingTeamName, leagueCode, onTeamCreated, te
                   </button>
                 </div>
 
+                {/* 승리팀 (버튼 세로로 조금 더 크게) */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ fontSize: 9, color: 'var(--text-muted)', width: 60, flexShrink: 0 }}>승리팀</span>
+                  <div style={{ display: 'flex', gap: 4, flex: 1 }}>
+                    <MilestoneButton size="lg" selected={form.winnerTeam === leftValue} onClick={() => { setForm(f => ({ ...f, winnerTeam: leftValue })); requestAnimationFrame(() => durationMinRef.current?.focus()) }}>{leftLabel}</MilestoneButton>
+                    <MilestoneButton size="lg" selected={form.winnerTeam === rightValue} onClick={() => { setForm(f => ({ ...f, winnerTeam: rightValue })); requestAnimationFrame(() => durationMinRef.current?.focus()) }}>{rightLabel}</MilestoneButton>
+                  </div>
+                </div>
+
                 {/* 게임시간 (가운데 정렬) */}
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
                   <span style={{ fontSize: 10, color: 'var(--text-secondary)' }}>게임시간</span>
@@ -916,15 +925,6 @@ function RecentMatchRow({ teamId, pendingTeamName, leagueCode, onTeamCreated, te
                   <input ref={durationSecRef} value={form.durationSec} onChange={e => setForm(f => ({ ...f, durationSec: e.target.value.replace(/[^0-9]/g, '').slice(0, 2) }))}
                     placeholder="초" inputMode="numeric" style={{ width: 40, fontSize: 11, padding: '3px 4px', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text-primary)', textAlign: 'center' }} />
                   <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>초</span>
-                </div>
-
-                {/* 승리팀 (버튼 세로로 조금 더 크게) */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ fontSize: 9, color: 'var(--text-muted)', width: 60, flexShrink: 0 }}>승리팀</span>
-                  <div style={{ display: 'flex', gap: 4, flex: 1 }}>
-                    <MilestoneButton size="lg" selected={form.winnerTeam === leftValue} onClick={() => setForm(f => ({ ...f, winnerTeam: leftValue }))}>{leftLabel}</MilestoneButton>
-                    <MilestoneButton size="lg" selected={form.winnerTeam === rightValue} onClick={() => setForm(f => ({ ...f, winnerTeam: rightValue }))}>{rightLabel}</MilestoneButton>
-                  </div>
                 </div>
 
                 <div style={{ display: 'flex', gap: 10 }}>
