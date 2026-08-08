@@ -7,10 +7,10 @@ import {
   LEAGUES, fetchScheduleEvents, extractTeamData, computeForm, matchupProbability, filterRecentGames,
   seriesScoreProbabilities, seriesOutcomeSummary, teamNameMatches, findTeamCode,
   classifyGameNarrative, computeBothSidesScores, computeBothSidesPerfection, computePerfectionScore,
-  simulateLeagueElo, powerScoreMatchupProbability, manualEventToRawEvent,
+  simulateLeagueElo, powerScoreMatchupProbability, manualEventToRawEvent, computeMatchAdjustments,
   getLastLiveFetchAt,
   type RawScheduleEvent, type TeamGameRecord, type NarrativeTeam, type TeamPowerScore, type EloMatchRecord, type EloGameLog, type ManualEsportsEvent,
-  type SeriesOutcomeSummary, type ScoreProb,
+  type SeriesOutcomeSummary, type ScoreProb, type DetailedGameEntry, type MatchAdjustmentResult,
 } from '../lib/lolEsports'
 
 interface EsportsTeam {
@@ -257,9 +257,9 @@ function predictedScoreLabel(bestOf: number, outcome: SeriesOutcomeSummary, scor
   return { label: favLabel, score: nextBest?.score ?? outcome.sweepScore, prob: nextBest?.prob ?? outcome.favSweepProb }
 }
 
-function UpcomingRow({ event, events, teams, powerScores, abilityProfiles }: {
+function UpcomingRow({ event, events, teams, powerScores, abilityProfiles, powerLog, detailedLog }: {
   event: RawScheduleEvent; events: RawScheduleEvent[]; teams: EsportsTeam[]; powerScores: Record<string, TeamPowerScore>
-  abilityProfiles: Record<string, AbilityProfile>
+  abilityProfiles: Record<string, AbilityProfile>; powerLog: Record<string, EloGameLog[]>; detailedLog: DetailedGameEntry[]
 }) {
   const matchTeams = event.match?.teams ?? []
   const teamA = matchTeams[0], teamB = matchTeams[1]
@@ -275,7 +275,16 @@ function UpcomingRow({ event, events, teams, powerScores, abilityProfiles }: {
   const formA = useMemo(() => computeForm(filterRecentGames(extractTeamData(events, teamA?.name ?? '').completed)), [events, teamA?.name])
   const formB = useMemo(() => computeForm(filterRecentGames(extractTeamData(events, teamB?.name ?? '').completed)), [events, teamB?.name])
 
-  const p = usePower && powerA && powerB ? powerScoreMatchupProbability(powerA.powerScore, powerB.powerScore) : matchupProbability(formA, formB)
+  // 부가 신호(직접맞대결/모멘텀/세트순서/오브젝트/공통상대) 보정 — 체급 점수가 둘 다 있을 때만 의미가 있다
+  const adjustment: MatchAdjustmentResult | null = useMemo(() => {
+    if (!idA || !idB) return null
+    const flatLog = [...(powerLog[idA] ?? []), ...(powerLog[idB] ?? [])]
+    return computeMatchAdjustments(idA, idB, flatLog, detailedLog)
+  }, [idA, idB, powerLog, detailedLog])
+
+  const p = usePower && powerA && powerB
+    ? powerScoreMatchupProbability(powerA.powerScore + (adjustment?.totalPoints ?? 0), powerB.powerScore)
+    : matchupProbability(formA, formB)
   const scoreProbs = seriesScoreProbabilities(p, bestOf)
 
   // 강팀/약팀 시리즈 확률 비교 (BO1은 스윕 개념이 의미 없으므로 BO3 한정으로만 표시)
@@ -312,8 +321,16 @@ function UpcomingRow({ event, events, teams, powerScores, abilityProfiles }: {
         예측 승률 <b style={{ color: 'var(--text-secondary)' }}>{(p * 100).toFixed(0)}%</b> : <b style={{ color: 'var(--text-secondary)' }}>{((1 - p) * 100).toFixed(0)}%</b>
         {' · '}예상 스코어 <b style={{ color: 'var(--gold)' }}>{scorePred.label} {scorePred.score}</b> ({(scorePred.prob * 100).toFixed(0)}%)
         {usePower && powerA && powerB
-          ? <div style={{ marginTop: 2 }}>파워랭킹 기반 · {teamA?.code || teamA?.name} {powerA.powerScore.toFixed(1)} : {powerB.powerScore.toFixed(1)} {teamB?.code || teamB?.name}</div>
-          : <div style={{ marginTop: 2 }}>파워랭킹 데이터 부족 · lolesports 전적 기반 폴백</div>}
+          ? <div style={{ marginTop: 2 }}>최근 폼 점수 기반 · {teamA?.code || teamA?.name} {powerA.powerScore.toFixed(1)} : {powerB.powerScore.toFixed(1)} {teamB?.code || teamB?.name}</div>
+          : <div style={{ marginTop: 2 }}>최근 폼 점수 데이터 부족 · lolesports 전적 기반 폴백</div>}
+        {usePower && adjustment && adjustment.items.length > 0 && (
+          <div style={{ marginTop: 2, fontSize: 9 }} title={adjustment.items.map(i => `${i.label}: ${i.points >= 0 ? '+' : ''}${i.points.toFixed(1)}점 (${i.detail})`).join(' / ')}>
+            부가 신호 보정 <span style={{ color: adjustment.totalPoints >= 0 ? 'var(--green, #4ade80)' : 'var(--red, #f87171)', fontWeight: 700 }}>
+              {adjustment.totalPoints >= 0 ? '+' : ''}{adjustment.totalPoints.toFixed(1)}점 ({teamA?.code || teamA?.name} 기준)
+            </span>
+            <span style={{ color: 'var(--text-muted)' }}> — {adjustment.items.map(i => i.label).join(', ')}</span>
+          </div>
+        )}
         {(setPrediction.duration != null || setPrediction.totalKills != null) && (
           <div style={{ marginTop: 2 }}>
             세트당 예상 {setPrediction.duration != null ? `게임시간 ${setPrediction.duration.toFixed(1)}분` : ''}{setPrediction.duration != null && setPrediction.totalKills != null ? ' · ' : ''}{setPrediction.totalKills != null ? `총 킬수 ${setPrediction.totalKills.toFixed(1)}` : ''}
@@ -330,9 +347,9 @@ function UpcomingRow({ event, events, teams, powerScores, abilityProfiles }: {
   )
 }
 
-function UpcomingPanel({ events, loading, error, errorDetail, teams, powerScores, abilityProfiles }: {
+function UpcomingPanel({ events, loading, error, errorDetail, teams, powerScores, abilityProfiles, powerLog, detailedLog }: {
   events: RawScheduleEvent[] | null; loading: boolean; error: boolean; errorDetail?: string; teams: EsportsTeam[]; powerScores: Record<string, TeamPowerScore>
-  abilityProfiles: Record<string, AbilityProfile>
+  abilityProfiles: Record<string, AbilityProfile>; powerLog: Record<string, EloGameLog[]>; detailedLog: DetailedGameEntry[]
 }) {
   const upcoming = useMemo(() => {
     if (!events) return []
@@ -355,7 +372,7 @@ function UpcomingPanel({ events, loading, error, errorDetail, teams, powerScores
       {!loading && upcoming.length === 0 && !error && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0' }}>예정된 경기가 없습니다</div>}
       {!loading && upcoming.length > 0 && events && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {upcoming.map(e => <UpcomingRow key={e.match!.id ?? e.id} event={e} events={events} teams={teams} powerScores={powerScores} abilityProfiles={abilityProfiles} />)}
+          {upcoming.map(e => <UpcomingRow key={e.match!.id ?? e.id} event={e} events={events} teams={teams} powerScores={powerScores} abilityProfiles={abilityProfiles} powerLog={powerLog} detailedLog={detailedLog} />)}
         </div>
       )}
     </div>
@@ -1077,7 +1094,7 @@ function ManualEventPanel({ leagueCode, manualEvents, onChanged, autoOpenHint }:
   )
 }
 
-// 파워랭킹 히스토리를 한눈에 보여주는 소형 라인 차트 (팀 확장 시 상단에 표시)
+// 최근 폼 점수 히스토리를 한눈에 보여주는 소형 라인 차트 (팀 확장 시 상단에 표시)
 function RatingHistoryChart({ teamLog }: { teamLog: EloGameLog[] }) {
   const data = teamLog.map((h, i) => ({
     idx: i + 1,
@@ -1282,9 +1299,9 @@ function predictSetStats(favAp: AbilityProfile | undefined, dogAp: AbilityProfil
 }
 
 function LeagueView({ code, label }: { code: string; label: string }) {
-  // LCK CL은 기존 LCK/LPL 등과 달리 "글로벌 파워랭킹(GPR)" 기반 리그가 아니라서, 팀에 우연히 gpr_score가
+  // LCK CL은 기존 LCK/LPL 등과 달리 "글로벌 최근 폼 점수(GPR)" 기반 리그가 아니라서, 팀에 우연히 gpr_score가
   // 들어있더라도 무시하고 항상 중립값 50점에서 시작한다.
-  // 글로벌 파워랭킹(GPR)이 실제 체감 실력차보다 너무 크게 벌어져 나온다는 피드백 반영:
+  // 글로벌 최근 폼 점수(GPR)이 실제 체감 실력차보다 너무 크게 벌어져 나온다는 피드백 반영:
   // 방향(누가 더 강한지)은 그대로 살리되, 50점 중립을 기준으로 격차 자체를 절반 정도로 압축해서 시작한다.
   // 이후 직접 입력한 경기 데이터가 쌓이면 순차 Elo가 그 위에서 실제 결과에 따라 다시 벌리거나 좁힌다.
   const GPR_COMPRESSION = 0.45
@@ -1307,12 +1324,13 @@ function LeagueView({ code, label }: { code: string; label: string }) {
   const [manualEvents, setManualEvents] = useState<ManualEsportsEvent[]>([])
   const [powerScores, setPowerScores] = useState<Record<string, TeamPowerScore>>({})
   const [powerLog, setPowerLog] = useState<Record<string, EloGameLog[]>>({})
+  const [detailedLog, setDetailedLog] = useState<DetailedGameEntry[]>([])
   const [expandedPowerTeam, setExpandedPowerTeam] = useState<string | null>(null)
   const [expandedHistoryIdx, setExpandedHistoryIdx] = useState<number | null>(null)
   const [powerLoading, setPowerLoading] = useState(false)
   const [recentSetResults, setRecentSetResults] = useState<Record<string, boolean[]>>({})
   const [abilityProfiles, setAbilityProfiles] = useState<Record<string, AbilityProfile>>({})
-  // 파워랭킹 전일 대비 증감/순위변동 표시용: 리그별로 날짜 스냅샷을 저장해두고 비교한다.
+  // 최근 폼 점수 전일 대비 증감/순위변동 표시용: 리그별로 날짜 스냅샷을 저장해두고 비교한다.
   const [prevSnapshot, setPrevSnapshot] = useState<Record<string, { powerScore: number; rank: number }>>({})
 
   // "어제 기준" 스냅샷 로드: 오늘보다 이전인 날짜 중 가장 최근 날짜의 값을 비교 기준으로 삼는다.
@@ -1357,18 +1375,36 @@ function LeagueView({ code, label }: { code: string; label: string }) {
       }
       const seenKeys = new Set<string>()
       const matches: EloMatchRecord[] = []
+      const detailedEntries: DetailedGameEntry[] = []
       for (const s of rows) {
         const oppTeam = findOpponentTeam(s.team2_name)
         if (!oppTeam) continue // 추적 안 되는 상대는 시뮬레이션에서 제외 (레이팅 기준점이 없음)
         const key = [s.team_id, oppTeam.id].sort().join('|') + `|${s.match_start_time}|${s.game_number}`
         if (seenKeys.has(key)) continue
         seenKeys.add(key)
+        const won = s.winner_team === 'team1'
         matches.push({
           teamAId: s.team_id, teamBId: oppTeam.id,
-          winnerIsA: s.winner_team === 'team1',
+          winnerIsA: won,
           matchStartTime: s.match_start_time ?? '', gameNumber: s.game_number,
         })
+        // 부가 예측 신호(모멘텀/세트순서/오브젝트/공통상대)용 상세 로그 — 양팀 관점으로 각각 남긴다
+        detailedEntries.push({
+          teamId: s.team_id, opponentId: oppTeam.id, matchStartTime: s.match_start_time ?? '', gameNumber: s.game_number,
+          won,
+          teamDragons: s.team1_dragons ?? 0, oppDragons: s.team2_dragons ?? 0,
+          teamBarons: s.team1_barons ?? 0, oppBarons: s.team2_barons ?? 0,
+          teamKills: s.team1_kills ?? 0, oppKills: s.team2_kills ?? 0,
+        })
+        detailedEntries.push({
+          teamId: oppTeam.id, opponentId: s.team_id, matchStartTime: s.match_start_time ?? '', gameNumber: s.game_number,
+          won: !won,
+          teamDragons: s.team2_dragons ?? 0, oppDragons: s.team1_dragons ?? 0,
+          teamBarons: s.team2_barons ?? 0, oppBarons: s.team1_barons ?? 0,
+          teamKills: s.team2_kills ?? 0, oppKills: s.team1_kills ?? 0,
+        })
       }
+      setDetailedLog(detailedEntries)
 
       const initialRatings: Record<string, number> = {}
       for (const t of teamsList) initialRatings[t.id] = baselineGpr(t)
@@ -1457,7 +1493,7 @@ function LeagueView({ code, label }: { code: string; label: string }) {
     return [...events, ...manual]
   }, [events, manualEvents])
 
-  // 파워랭킹 목록에 팀 약자를 괄호로 같이 보여주기 위해 팀별 코드를 결정한다.
+  // 최근 폼 점수 목록에 팀 약자를 괄호로 같이 보여주기 위해 팀별 코드를 결정한다.
   // 사용자가 직접 지정한 코드(esports_teams.code)가 있으면 그걸 우선 쓰고, 없을 때만 일정 데이터에서 유추한다.
   // lolesports API가 새로 생긴 팀(예: LCK CL 소속팀)에 아직 정식 코드를 안 붙여놔서 "TBD"를 내려주는 경우가 있어,
   // 그런 값은 코드로 쓸모가 없으니 무시한다.
@@ -1498,7 +1534,7 @@ function LeagueView({ code, label }: { code: string; label: string }) {
     [...teams].sort((a, b) => (powerScores[b.id]?.powerScore ?? 50) - (powerScores[a.id]?.powerScore ?? 50)),
   [teams, powerScores])
 
-  // 경기 결과 입력 등으로 파워랭킹이 바뀔 때마다 "오늘" 스냅샷을 계속 최신화해둔다.
+  // 경기 결과 입력 등으로 최근 폼 점수이 바뀔 때마다 "오늘" 스냅샷을 계속 최신화해둔다.
   // (비교 기준이 되는 "어제" 스냅샷은 loadPrevSnapshot에서 별도로 고정해서 갖고 있으므로 덮어써도 무방)
   useEffect(() => {
     if (powerLoading || rankedTeams.length === 0) return
@@ -1538,12 +1574,12 @@ function LeagueView({ code, label }: { code: string; label: string }) {
           <RecentMatchesPanel leagueCode={code} events={combinedEvents} loading={eventsLoading} error={eventsError} errorDetail={eventsErrorDetail} teams={teams} onCreateTeam={ensureTeamExists} />
         </div>
         <div style={{ flex: '1 1 320px', minWidth: 280 }}>
-          <UpcomingPanel events={combinedEvents} loading={eventsLoading} error={eventsError} errorDetail={eventsErrorDetail} teams={teams} powerScores={powerScores} abilityProfiles={abilityProfiles} />
+          <UpcomingPanel events={combinedEvents} loading={eventsLoading} error={eventsError} errorDetail={eventsErrorDetail} teams={teams} powerScores={powerScores} abilityProfiles={abilityProfiles} powerLog={powerLog} detailedLog={detailedLog} />
         </div>
         <div style={{ flex: '1 1 280px', minWidth: 260 }}>
           <div className="card">
             <div className="card-title" style={{ marginBottom: 8 }}>
-              파워랭킹 <span style={{ fontWeight: 400, color: 'var(--text-muted)', fontSize: 10 }}>· 수동 입력한 경기(최근일수록 가중치 ↑) 기반, 승부 예측에 사용됨 · 클릭하면 히스토리 보기 · 순위 옆 ▲▼는 전일 대비 순위 변동, 점수 옆 숫자는 전일 대비 증감</span>
+              최근 폼 점수 <span style={{ fontWeight: 400, color: 'var(--text-muted)', fontSize: 10 }}>· 수동 입력한 경기(최근일수록 가중치 ↑) 기반, 승부 예측에 사용됨 · 클릭하면 히스토리 보기 · 순위 옆 ▲▼는 전일 대비 순위 변동, 점수 옆 숫자는 전일 대비 증감</span>
             </div>
             {powerLoading && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '6px 0' }}>계산 중...</div>}
             {!powerLoading && rankedTeams.length === 0 && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '6px 0' }}>등록된 팀이 없습니다.</div>}
@@ -1599,7 +1635,7 @@ function LeagueView({ code, label }: { code: string; label: string }) {
                           <span style={{
                             fontSize: 9, fontWeight: 700, width: 40, textAlign: 'right', flexShrink: 0,
                             color: scoreDelta > 0 ? 'var(--green, #4ade80)' : 'var(--red, #f87171)',
-                          }} title="어제 대비 파워랭킹 증감">
+                          }} title="어제 대비 최근 폼 점수 증감">
                             {scoreDelta > 0 ? '+' : ''}{scoreDelta.toFixed(1)}
                           </span>
                         )}

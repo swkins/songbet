@@ -777,6 +777,127 @@ export function simulateLeagueElo(initialRatings: Record<string, number>, matche
 }
 
 // 두 팀의 체급 점수 차이를 승률로 변환 (Elo와 비슷한 로지스틱 곡선, 표본이 적을 수 있어 5~95%로 클램프)
+export interface DetailedGameEntry {
+  teamId: string; opponentId: string; matchStartTime: string; gameNumber: number
+  won: boolean
+  teamDragons: number; oppDragons: number
+  teamBarons: number; oppBarons: number
+  teamKills: number; oppKills: number
+}
+
+function clampNum(v: number, lo: number, hi: number): number {
+  return Math.min(hi, Math.max(lo, v))
+}
+
+export interface MatchAdjustmentItem { label: string; points: number; detail: string }
+export interface MatchAdjustmentResult { totalPoints: number; items: MatchAdjustmentItem[] }
+
+const ADJ_CAP = 20 // 보정 총합 상한(레이팅 점수 단위) — 부가 신호가 기본 체급 추정을 과도하게 뒤집지 않도록
+
+// 두 팀(A/B)의 예측을 보정할 부가 신호 5가지: 직접 맞대결, 최근 모멘텀, 세트 순서별 경향,
+// 오브젝트 장악률, 공통 상대 비교. 전부 "레이팅 점수" 단위(체급 점수와 같은 스케일)로 환산해서
+// 기존 체급 점수 차이에 더해주는 방식 — 표본이 적으면 자동으로 영향이 작아진다.
+export function computeMatchAdjustments(
+  teamAId: string, teamBId: string,
+  eloLog: EloGameLog[], // 리그 전체 로그(양방향)
+  detailedLog: DetailedGameEntry[], // 리그 전체 상세 로그(양방향, 오브젝트 포함)
+): MatchAdjustmentResult {
+  const items: MatchAdjustmentItem[] = []
+  const now = Date.now()
+  const decayWeight = (iso: string) => Math.pow(0.5, Math.max(0, (now - new Date(iso).getTime()) / 86400000) / 60) // 반감기 60일
+
+  // 1) 직접 맞대결(H2H) — 표본이 많을수록(최대 5경기) 확신도를 높여 더 크게 반영
+  const h2h = eloLog.filter(l => l.teamId === teamAId && l.opponentId === teamBId)
+  if (h2h.length > 0) {
+    const wins = h2h.filter(l => l.won).length
+    const winRate = wins / h2h.length
+    const confidence = Math.min(h2h.length, 5) / 5
+    const points = (winRate - 0.5) * 40 * confidence
+    items.push({ label: '직접 맞대결', points, detail: `최근 ${h2h.length}세트 ${wins}승 ${h2h.length - wins}패` })
+  }
+
+  // 2) 최근 모멘텀 — 최근 3세트 승률 대비 그 이전 3세트 승률의 변화(연승/연패 추세)
+  function momentum(teamId: string): number | null {
+    const own = eloLog.filter(l => l.teamId === teamId).sort((a, b) => new Date(a.matchStartTime).getTime() - new Date(b.matchStartTime).getTime())
+    if (own.length < 4) return null
+    const recent = own.slice(-3)
+    const prior = own.slice(-6, -3)
+    if (prior.length === 0) return null
+    return recent.filter(l => l.won).length / recent.length - prior.filter(l => l.won).length / prior.length
+  }
+  const momA = momentum(teamAId), momB = momentum(teamBId)
+  if (momA != null || momB != null) {
+    const a = momA ?? 0, b = momB ?? 0
+    const points = (a - b) * 10
+    items.push({ label: '최근 모멘텀', points, detail: `A ${momA != null ? (momA * 100).toFixed(0) + '%p' : '표본부족'} · B ${momB != null ? (momB * 100).toFixed(0) + '%p' : '표본부족'}` })
+  }
+
+  // 3) 세트 순서별 경향 — 1세트 승률 대비 2세트 이후 승률 변화(적응력/체력 차이)
+  function setTendency(teamId: string): number | null {
+    const own = detailedLog.filter(l => l.teamId === teamId)
+    const g1 = own.filter(l => l.gameNumber === 1)
+    const gLater = own.filter(l => l.gameNumber > 1)
+    if (g1.length < 2 || gLater.length < 2) return null
+    return gLater.filter(l => l.won).length / gLater.length - g1.filter(l => l.won).length / g1.length
+  }
+  const tendA = setTendency(teamAId), tendB = setTendency(teamBId)
+  if (tendA != null || tendB != null) {
+    const a = tendA ?? 0, b = tendB ?? 0
+    const points = (a - b) * 6
+    items.push({ label: '세트 순서별 경향(후반-초반)', points, detail: `A ${tendA != null ? (tendA * 100).toFixed(0) + '%p' : '표본부족'} · B ${tendB != null ? (tendB * 100).toFixed(0) + '%p' : '표본부족'}` })
+  }
+
+  // 4) 오브젝트 장악률 — 드래곤/내셔 획득전 승률(둘 다 획득 시도가 있었던 경기 기준)을 승패와 별개로 지표화
+  function objectiveRate(teamId: string): number | null {
+    const own = detailedLog.filter(l => l.teamId === teamId)
+    let dragonWins = 0, dragonTotal = 0, baronWins = 0, baronTotal = 0
+    for (const l of own) {
+      if (l.teamDragons + l.oppDragons > 0) { dragonTotal++; if (l.teamDragons > l.oppDragons) dragonWins++ }
+      if (l.teamBarons + l.oppBarons > 0) { baronTotal++; if (l.teamBarons > l.oppBarons) baronWins++ }
+    }
+    const parts: number[] = []
+    if (dragonTotal > 0) parts.push(dragonWins / dragonTotal)
+    if (baronTotal > 0) parts.push(baronWins / baronTotal)
+    return parts.length ? parts.reduce((a, b) => a + b, 0) / parts.length : null
+  }
+  const objA = objectiveRate(teamAId), objB = objectiveRate(teamBId)
+  if (objA != null && objB != null) {
+    const points = (objA - objB) * 8
+    items.push({ label: '오브젝트 장악률', points, detail: `A ${(objA * 100).toFixed(0)}% · B ${(objB * 100).toFixed(0)}%` })
+  }
+
+  // 5) 공통 상대 비교 — A와 B가 둘 다 상대한 팀들을 대상으로, 각자 그 상대에게 거둔 성적(승패+킬차)을
+  // 최근일수록 가중치를 크게 줘서(반감기 60일) 비교. A가 공통 상대들에게 더 잘했으면 양수.
+  const oppsA = new Set(eloLog.filter(l => l.teamId === teamAId).map(l => l.opponentId))
+  const oppsB = new Set(eloLog.filter(l => l.teamId === teamBId).map(l => l.opponentId))
+  const common = [...oppsA].filter(id => oppsB.has(id) && id !== teamAId && id !== teamBId)
+  if (common.length > 0) {
+    let wSum = 0, wDiffSum = 0
+    for (const oppId of common) {
+      const aGames = detailedLog.filter(l => l.teamId === teamAId && l.opponentId === oppId)
+      const bGames = detailedLog.filter(l => l.teamId === teamBId && l.opponentId === oppId)
+      for (const g of aGames) {
+        const w = decayWeight(g.matchStartTime)
+        const killDiff = clampNum((g.teamKills - g.oppKills) / 10, -1, 1) // 킬차를 대략 -1~1로 눌러서 승패 신호에 보조적으로 얹음
+        wSum += w; wDiffSum += w * ((g.won ? 1 : -1) * 0.7 + killDiff * 0.3)
+      }
+      for (const g of bGames) {
+        const w = decayWeight(g.matchStartTime)
+        const killDiff = clampNum((g.teamKills - g.oppKills) / 10, -1, 1)
+        wDiffSum -= w * ((g.won ? 1 : -1) * 0.7 + killDiff * 0.3) // B 관점은 반대 부호로 차감(A가 유리하면 결과가 +)
+      }
+    }
+    if (wSum > 0) {
+      const avgDiff = wDiffSum / wSum
+      const points = clampNum(avgDiff * 6, -15, 15)
+      items.push({ label: '공통 상대 비교', points, detail: `공통 상대 ${common.length}팀 기준(승패+킬차 반영)` })
+    }
+  }
+
+  const rawTotal = items.reduce((s, i) => s + i.points, 0)
+  return { totalPoints: clampNum(rawTotal, -ADJ_CAP, ADJ_CAP), items }
+}
+
 export function powerScoreMatchupProbability(powerA: number, powerB: number): number {
   const diff = powerA - powerB
   const raw = 1 / (1 + Math.pow(10, -diff / ELO_SCALE))
