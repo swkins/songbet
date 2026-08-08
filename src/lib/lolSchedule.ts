@@ -65,25 +65,40 @@ async function fetchLiveFromLolesports(): Promise<UpcomingLolMatch[]> {
     const leagueId = ids[l.code]
     if (!leagueId) continue
     try {
-      const res = await fetch(`${LOLESPORTS_API}/getSchedule?hl=en-US&leagueId=${leagueId}`, { headers: { 'x-api-key': LOLESPORTS_KEY } })
-      if (!res.ok) continue
-      anyOk = true
-      const json = await res.json()
-      const events: any[] = json?.data?.schedule?.events ?? []
-      for (const e of events) {
-        if (e.state !== 'unstarted' && e.state !== 'inProgress') continue
-        const t = new Date(e.startTime)
-        if (t < from || t > to) continue
-        const teams = e.match?.teams ?? []
-        if (teams.length < 2) continue
-        results.push({
-          id: e.match?.id ?? e.id,
-          league: l.code, leagueLabel: l.label,
-          startTime: e.startTime,
-          bestOf: e.match?.strategy?.count ?? 3,
-          teamA: teams[0]?.name || 'TBD', teamACode: teams[0]?.code,
-          teamB: teams[1]?.name || 'TBD', teamBCode: teams[1]?.code,
-        })
+      // 기본 페이지(가장 최근 완료 + 다음 예정 몇 경기)만으로는 하루에 경기가 여러 개인 리그(LPL 등)의
+      // 이틀 뒤까지 경기를 다 못 담을 수 있어서, "newer"(미래 방향) 페이지가 있으면 최대 3페이지까지
+      // 더 따라간다. 그래도 시간 범위(from~to)를 벗어나면 그 즉시 멈춘다.
+      let pageToken: string | undefined
+      for (let page = 0; page < 4; page++) {
+        const url = pageToken
+          ? `${LOLESPORTS_API}/getSchedule?hl=en-US&leagueId=${leagueId}&pageToken=${pageToken}`
+          : `${LOLESPORTS_API}/getSchedule?hl=en-US&leagueId=${leagueId}`
+        const res = await fetch(url, { headers: { 'x-api-key': LOLESPORTS_KEY } })
+        if (!res.ok) break
+        anyOk = true
+        const json = await res.json()
+        const events: any[] = json?.data?.schedule?.events ?? []
+        let sawWithinRange = false
+        for (const e of events) {
+          if (e.state !== 'unstarted' && e.state !== 'inProgress') continue
+          const t = new Date(e.startTime)
+          if (t < from || t > to) continue
+          sawWithinRange = true
+          const teams = e.match?.teams ?? []
+          if (teams.length < 2) continue
+          results.push({
+            id: e.match?.id ?? e.id,
+            league: l.code, leagueLabel: l.label,
+            startTime: e.startTime,
+            bestOf: e.match?.strategy?.count ?? 3,
+            teamA: teams[0]?.name || 'TBD', teamACode: teams[0]?.code,
+            teamB: teams[1]?.name || 'TBD', teamBCode: teams[1]?.code,
+          })
+        }
+        const next = json?.data?.schedule?.pages?.newer ?? json?.data?.schedule?.pages?.next
+        // 다음 페이지 토큰이 없거나, 이번 페이지에 범위 안 경기가 하나도 없었으면(이미 범위를 넘어섰다는 뜻) 중단
+        if (!next || (!sawWithinRange && page > 0)) break
+        pageToken = next
       }
     } catch { /* 리그 하나 실패해도 나머지는 계속 진행 */ }
   }
