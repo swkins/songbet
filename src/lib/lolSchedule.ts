@@ -39,10 +39,14 @@ async function resolveLeagueIds(): Promise<Record<string, string>> {
   const leagues: { id: string; slug: string }[] = json?.data?.leagues ?? []
   const map: Record<string, string> = {}
   for (const l of LEAGUES) {
-    const found = leagues.find(x => l.slugs.includes(x.slug))
-    if (found) map[l.code] = found.id
+    // slug가 같은 게 여러 개 내려올 가능성을 대비해 전부 로그로 남긴다 — 그 중 첫 번째를 쓰는데,
+    // 만약 여러 개가 잡히면(예: 지역/시즌별로 리그 엔티티가 분리돼 있는 경우) 엉뚱한 걸 골랐을 수 있음.
+    const matches = leagues.filter(x => l.slugs.includes(x.slug))
+    if (matches.length > 1) console.warn(`[lolSchedule] ${l.code}: slug 일치가 ${matches.length}개 —`, matches)
+    if (matches[0]) map[l.code] = matches[0].id
   }
   leagueIdCache = map
+  console.info('[lolSchedule] 리그 ID 매핑:', map)
   return map
 }
 
@@ -63,7 +67,9 @@ async function fetchLiveFromLolesports(): Promise<UpcomingLolMatch[]> {
   let anyOk = false
   for (const l of LEAGUES) {
     const leagueId = ids[l.code]
-    if (!leagueId) continue
+    // 진단용: 리그 ID를 못 찾으면(=slug 매칭 실패) 바로 알 수 있게 로그를 남긴다.
+    if (!leagueId) { console.warn(`[lolSchedule] ${l.code}: leagueId를 못 찾음 (slug 매칭 실패)`); continue }
+    let total = 0, byState = 0, byDate = 0, byTeams = 0, included = 0
     try {
       // 기본 페이지(가장 최근 완료 + 다음 예정 몇 경기)만으로는 하루에 경기가 여러 개인 리그(LPL 등)의
       // 이틀 뒤까지 경기를 다 못 담을 수 있어서, "newer"(미래 방향) 페이지가 있으면 최대 3페이지까지
@@ -74,18 +80,20 @@ async function fetchLiveFromLolesports(): Promise<UpcomingLolMatch[]> {
           ? `${LOLESPORTS_API}/getSchedule?hl=en-US&leagueId=${leagueId}&pageToken=${pageToken}`
           : `${LOLESPORTS_API}/getSchedule?hl=en-US&leagueId=${leagueId}`
         const res = await fetch(url, { headers: { 'x-api-key': LOLESPORTS_KEY } })
-        if (!res.ok) break
+        if (!res.ok) { console.warn(`[lolSchedule] ${l.code}: getSchedule HTTP ${res.status}`); break }
         anyOk = true
         const json = await res.json()
         const events: any[] = json?.data?.schedule?.events ?? []
+        total += events.length
         let sawWithinRange = false
         for (const e of events) {
-          if (e.state !== 'unstarted' && e.state !== 'inProgress') continue
+          if (e.state !== 'unstarted' && e.state !== 'inProgress') { byState++; continue }
           const t = new Date(e.startTime)
-          if (t < from || t > to) continue
+          if (t < from || t > to) { byDate++; continue }
           sawWithinRange = true
           const teams = e.match?.teams ?? []
-          if (teams.length < 2) continue
+          if (teams.length < 2) { byTeams++; console.warn(`[lolSchedule] ${l.code}: teams 부족으로 제외 -`, e.startTime, teams); continue }
+          included++
           results.push({
             id: e.match?.id ?? e.id,
             league: l.code, leagueLabel: l.label,
@@ -100,7 +108,9 @@ async function fetchLiveFromLolesports(): Promise<UpcomingLolMatch[]> {
         if (!next || (!sawWithinRange && page > 0)) break
         pageToken = next
       }
-    } catch { /* 리그 하나 실패해도 나머지는 계속 진행 */ }
+    } catch (err) { console.warn(`[lolSchedule] ${l.code}: 호출 실패`, err) /* 리그 하나 실패해도 나머지는 계속 진행 */ }
+    // 진단용 요약: 리그별로 몇 개 받아서 몇 개가 어떤 이유로 걸러지고 몇 개가 최종 포함됐는지
+    console.info(`[lolSchedule] ${l.code} (id=${leagueId}): 전체 ${total}건 → 상태제외 ${byState} · 날짜범위제외 ${byDate} · 팀정보부족제외 ${byTeams} · 포함 ${included}`)
   }
   if (!anyOk) throw new Error('일정 조회 실패 (네트워크 또는 API 오류)')
   results.sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime())
