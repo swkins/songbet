@@ -80,7 +80,7 @@ function resolveMatchTeam(teams: EsportsTeam[], teamAName: string, teamBName: st
 }
 
 // ─── 중앙: 최근 경기 (클릭하면 바로 펼쳐져서 세트 기록 입력 + 분석 가능) ──
-function RecentMatchesPanel({ leagueCode, events, loading, error, errorDetail, teams, onCreateTeam }: { leagueCode: string; events: RawScheduleEvent[] | null; loading: boolean; error: boolean; errorDetail?: string; teams: EsportsTeam[]; onCreateTeam: (name: string) => Promise<void> }) {
+function RecentMatchesPanel({ leagueCode, events, loading, error, errorDetail, teams, onTeamCreated }: { leagueCode: string; events: RawScheduleEvent[] | null; loading: boolean; error: boolean; errorDetail?: string; teams: EsportsTeam[]; onTeamCreated: (team: EsportsTeam) => void }) {
   const matches = useMemo(() => {
     if (!events) return []
     const cutoff = dayjs().subtract(30, 'day')
@@ -121,24 +121,9 @@ function RecentMatchesPanel({ leagueCode, events, loading, error, errorDetail, t
     })
   }, [matches, teams])
 
-  // 최근 경기 목록에 나오는 팀인데 아직 추적 중이 아닌 팀은 버튼 클릭 없이 자동으로 전부 등록한다.
-  // (한 번 등록을 시도한 이름은 다시 시도하지 않도록 세션 안에서만 기억 — teams가 업데이트되기 전까지
-  // 렌더링이 여러 번 일어나도 같은 이름으로 중복 삽입을 요청하지 않기 위함)
-  const attemptedRef = useRef<Set<string>>(new Set())
-  useEffect(() => {
-    if (matches.length === 0) return
-    const unresolvedNames = new Set<string>()
-    for (const m of matches) {
-      if (resolveMatchTeam(teams, m.teamA, m.teamB, m.codeA, m.codeB)) continue
-      unresolvedNames.add(m.teamA)
-      unresolvedNames.add(m.teamB)
-    }
-    for (const name of unresolvedNames) {
-      if (attemptedRef.current.has(name)) continue
-      attemptedRef.current.add(name)
-      onCreateTeam(name)
-    }
-  }, [matches, teams, onCreateTeam])
+  // 아직 추적 중이 아닌 팀(둘 다 미등록)이 나온 경기는, 어느 팀 관점으로 기록을 입력할지만 골라두고
+  // (DB에 아무것도 안 씀) 실제 팀 등록은 첫 세트를 저장하는 순간에만 이뤄진다(RecentMatchRow.saveSet).
+  const [trackingChoice, setTrackingChoice] = useState<Record<string, string>>({})
 
   return (
     <div className="card">
@@ -169,35 +154,58 @@ function RecentMatchesPanel({ leagueCode, events, loading, error, errorDetail, t
               isA: ov.isA,
             } : null)
             if (!resolved) {
-              // 자동 매칭 실패 — 최근 경기 목록에 나온 팀은 위 useEffect에서 자동으로 등록을 시도하므로,
-              // 대부분은 등록이 끝나는 즉시(팀 목록 갱신 후) 이 분기 자체가 사라진다.
-              // 등록해도 여전히 안 잡히면(이름 표기가 심하게 다른 경우 등) 기존 팀에 수동 매칭할 수 있게 둔다.
-              return (
-                <div key={m.id} style={{ padding: '6px 8px', background: 'var(--bg-elevated)', borderRadius: 6 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11 }}>
-                    <span style={{ color: 'var(--text-muted)', flexShrink: 0, width: 58 }}>{dayjs(m.startTime).format('MM/DD HH:mm')}</span>
-                    <span style={{ flex: 1, textAlign: 'right' }}>{m.codeA || m.teamA}</span>
-                    <span style={{ fontWeight: 800, color: 'var(--gold)', flexShrink: 0 }}>{m.scoreA} : {m.scoreB}</span>
-                    <span style={{ flex: 1 }}>{m.codeB || m.teamB}</span>
+              const chosenName = trackingChoice[m.id]
+              if (!chosenName) {
+                // 자동 매칭 실패 — 아직 추적 중인 팀이 하나도 없는 경기. 여기서는 절대 팀을 등록하지 않고,
+                // 어느 팀 관점으로 기록을 입력할지만 고르게 한다. 실제 등록은 첫 세트를 저장할 때 일어난다.
+                return (
+                  <div key={m.id} style={{ padding: '6px 8px', background: 'var(--bg-elevated)', borderRadius: 6 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11 }}>
+                      <span style={{ color: 'var(--text-muted)', flexShrink: 0, width: 58 }}>{dayjs(m.startTime).format('MM/DD HH:mm')}</span>
+                      <span style={{ flex: 1, textAlign: 'right' }}>{m.codeA || m.teamA}</span>
+                      <span style={{ fontWeight: 800, color: 'var(--gold)', flexShrink: 0 }}>{m.scoreA} : {m.scoreB}</span>
+                      <span style={{ flex: 1 }}>{m.codeB || m.teamB}</span>
+                    </div>
+                    <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
+                      <button onClick={() => setTrackingChoice(prev => ({ ...prev, [m.id]: m.teamA }))} className="btn btn-ghost" style={{ flex: 1, fontSize: 9, padding: '4px 4px' }}>
+                        {m.codeA || m.teamA} 관점으로 입력
+                      </button>
+                      <button onClick={() => setTrackingChoice(prev => ({ ...prev, [m.id]: m.teamB }))} className="btn btn-ghost" style={{ flex: 1, fontSize: 9, padding: '4px 4px' }}>
+                        {m.codeB || m.teamB} 관점으로 입력
+                      </button>
+                    </div>
+                    {teams.length > 0 && (
+                      <select
+                        value=""
+                        onChange={e => {
+                          const teamId = e.target.value
+                          if (!teamId) return
+                          const chosen = teams.find(t => t.id === teamId)
+                          const isA = chosen ? (teamNameMatches(chosen, m.teamA) || teamNameMatches(chosen, m.codeA)) : true
+                          setOverrides(prev => ({ ...prev, [m.id]: { teamId, isA } }))
+                        }}
+                        style={{ width: '100%', marginTop: 4, fontSize: 10, padding: '3px 4px', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text-primary)', fontFamily: 'var(--font-body)' }}
+                      >
+                        <option value="">또는 이미 등록된 팀에 매칭하기 (이름 표기가 다른 경우)</option>
+                        {teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                      </select>
+                    )}
                   </div>
-                  <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 4 }}>팀 등록 중...</div>
-                  {teams.length > 0 && (
-                    <select
-                      value=""
-                      onChange={e => {
-                        const teamId = e.target.value
-                        if (!teamId) return
-                        const chosen = teams.find(t => t.id === teamId)
-                        const isA = chosen ? (teamNameMatches(chosen, m.teamA) || teamNameMatches(chosen, m.codeA)) : true
-                        setOverrides(prev => ({ ...prev, [m.id]: { teamId, isA } }))
-                      }}
-                      style={{ width: '100%', marginTop: 4, fontSize: 10, padding: '3px 4px', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text-primary)', fontFamily: 'var(--font-body)' }}
-                    >
-                      <option value="">또는 이미 등록된 팀에 매칭하기 (이름 표기가 다른 경우)</option>
-                      {teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                    </select>
-                  )}
-                </div>
+                )
+              }
+              // 관점을 골랐으면(아직 DB엔 등록 안 됨) 바로 기록 입력 화면으로 — 첫 세트를 저장하는 순간에만 팀이 등록된다.
+              const isA = chosenName === m.teamA
+              const pendingTeamScore = isA ? m.scoreA : m.scoreB
+              const pendingOppScore = isA ? m.scoreB : m.scoreA
+              const codeA0 = m.codeA || m.teamA
+              const codeB0 = m.codeB || m.teamB
+              return (
+                <RecentMatchRow key={m.id} teamId={null} pendingTeamName={chosenName} leagueCode={leagueCode} onTeamCreated={onTeamCreated}
+                  teamName={chosenName}
+                  game={{ opponent: isA ? m.teamB : m.teamA, teamScore: pendingTeamScore, oppScore: pendingOppScore, startTime: m.startTime, bestOf: m.bestOf }}
+                  displayA={codeA0} displayB={codeB0} scoreA={m.scoreA} scoreB={m.scoreB} teams={teams}
+                  recordCount={0}
+                  teamCode={isA ? codeA0 : codeB0} opponentCode={isA ? codeB0 : codeA0} />
               )
             }
             const teamScore = resolved.isA ? m.scoreA : m.scoreB
@@ -530,8 +538,9 @@ function GameStatCard({ stat, teamName, onDelete, onEdit }: { stat: EsportsGameS
   )
 }
 
-function RecentMatchRow({ teamId, teamName, game, displayA, displayB, scoreA, scoreB, teams, recordCount, teamCode, opponentCode }: {
-  teamId: string; teamName: string; game: TeamGameRecord
+function RecentMatchRow({ teamId, pendingTeamName, leagueCode, onTeamCreated, teamName, game, displayA, displayB, scoreA, scoreB, teams, recordCount, teamCode, opponentCode }: {
+  teamId: string | null; pendingTeamName?: string; leagueCode?: string; onTeamCreated?: (team: EsportsTeam) => void
+  teamName: string; game: TeamGameRecord
   displayA?: string; displayB?: string; scoreA?: number; scoreB?: number
   teams: EsportsTeam[]; recordCount?: number
   teamCode?: string; opponentCode?: string
@@ -575,6 +584,7 @@ function RecentMatchRow({ teamId, teamName, game, displayA, displayB, scoreA, sc
   const oppLabel = opponentCode || game.opponent
 
   async function loadSets() {
+    if (!teamId) { setSets([]); return } // 아직 팀이 등록 안 됐으면(신규) 기존 세트 기록이 있을 리 없다
     setLoadingSets(true)
     // gol.gg 자동수집 데이터는 상대팀 표기(예: "Gen.G")와 날짜만 있고 정확한 시각/lolesports 표기명("Gen.G Esports")과
     // 일치하지 않으므로, 날짜 ±1일 범위로 찾는다. 수동 입력 데이터(정확한 match_start_time)도 이 범위 안에
@@ -605,7 +615,7 @@ function RecentMatchRow({ teamId, teamName, game, displayA, displayB, scoreA, sc
   // 저장 안 한 입력 중이던 폼이 그냥 사라지는 문제가 있었다. localStorage에 임시저장(초안)해뒀다가
   // 같은 세트의 입력 폼을 다시 열 때 자동으로 복원한다.
   function draftKey(gameNumber: number) {
-    return `sb_set_draft:${teamId}:${game.startTime}:${gameNumber}`
+    return `sb_set_draft:${teamId ?? `pending:${pendingTeamName}`}:${game.startTime}:${gameNumber}`
   }
   function loadDraft(gameNumber: number): { form: GameStatForm; sideSwapped: boolean } | null {
     try {
@@ -663,12 +673,29 @@ function RecentMatchRow({ teamId, teamName, game, displayA, displayB, scoreA, sc
 
   async function saveSet() {
     setSaving(true)
+    // 아직 등록 안 된 팀(신규 발견 경기)이면, 세트를 실제로 저장하는 이 시점에만 팀을 등록한다 —
+    // 목록을 보는 것만으로는 절대 등록되지 않고, 입력을 완료해서 저장을 눌러야만 등록된다.
+    let actualTeamId = teamId
+    if (!actualTeamId) {
+      if (!pendingTeamName) { alert('팀 정보가 없어 저장할 수 없습니다.'); setSaving(false); return }
+      const existing = teams.find(t => teamNameMatches(t, pendingTeamName)) // 그 사이 다른 경기에서 이미 등록됐을 수 있으니 한 번 더 확인
+      if (existing) {
+        actualTeamId = existing.id
+      } else {
+        const { data: newTeam, error: teamErr } = await supabase.from('esports_teams')
+          .insert({ league: leagueCode ?? '', name: pendingTeamName, sort_order: 0 })
+          .select().single()
+        if (teamErr || !newTeam) { alert(`팀 등록 실패: ${teamErr?.message ?? ''}`); setSaving(false); return }
+        actualTeamId = (newTeam as EsportsTeam).id
+        onTeamCreated?.(newTeam as EsportsTeam)
+      }
+    }
     const toInt = (v: string) => v === '' ? null : parseInt(v, 10)
     const duration = (form.durationMin || form.durationSec)
       ? (parseInt(form.durationMin || '0', 10) * 60 + parseInt(form.durationSec || '0', 10))
       : null
     const payload = {
-      team_id: teamId, team2_name: canonicalOpponentName, match_start_time: game.startTime, game_number: form.gameNumber,
+      team_id: actualTeamId, team2_name: canonicalOpponentName, match_start_time: game.startTime, game_number: form.gameNumber,
       duration_seconds: duration,
       team1_kills: toInt(form.team1Kills), team2_kills: toInt(form.team2Kills),
       team1_dragons: toInt(form.team1Dragons), team2_dragons: toInt(form.team2Dragons),
@@ -1454,17 +1481,11 @@ function LeagueView({ code, label }: { code: string; label: string }) {
   }
   // 리그에 아직 등록 안 된 팀을 즉시 추적 대상으로 등록한다 (LCK CL처럼 팀을 미리 하나도 안 넣어놨을 때,
   // "먼저 팀부터 등록하세요" 없이 경기 목록에서 바로 한 번에 등록 + 입력으로 넘어갈 수 있도록).
-  async function ensureTeamExists(name: string) {
-    // "TBD"/"TBA" 같은 대진 미정 자리표시자는 실제 팀이 아니므로 자동 등록하지 않는다
-    // (자동 등록이 버튼 클릭 없이 조용히 일어나기 때문에 이 가드가 특히 중요하다).
-    if (/^\s*(TBD|TBA|미정)\s*$/i.test(name)) return
-    if (teams.find(t => teamNameMatches(t, name))) return
-    const { data } = await supabase.from('esports_teams').insert({ league: code, name, sort_order: teams.length }).select().single()
-    if (data) {
-      const newTeam = data as EsportsTeam
-      setTeams(prev => [...prev, newTeam])
-      loadPowerScores([...teams, newTeam])
-    }
+  // RecentMatchRow가 첫 세트를 저장하면서 새 팀을 만든 뒤 알려주면, 목록에 반영만 한다
+  // (여기서는 절대 팀을 새로 만들지 않는다 — 만드는 주체는 항상 RecentMatchRow.saveSet뿐).
+  function handleTeamCreated(newTeam: EsportsTeam) {
+    setTeams(prev => prev.find(t => t.id === newTeam.id) ? prev : [...prev, newTeam])
+    loadPowerScores([...teams, newTeam])
   }
   async function loadEvents(forceRefresh?: boolean) {
     setEventsLoading(true); setEventsError(false); setEventsErrorDetail('')
@@ -1571,7 +1592,7 @@ function LeagueView({ code, label }: { code: string; label: string }) {
 
       <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'flex-start', marginBottom: 14 }}>
         <div style={{ flex: '1 1 320px', minWidth: 280 }}>
-          <RecentMatchesPanel leagueCode={code} events={combinedEvents} loading={eventsLoading} error={eventsError} errorDetail={eventsErrorDetail} teams={teams} onCreateTeam={ensureTeamExists} />
+          <RecentMatchesPanel leagueCode={code} events={combinedEvents} loading={eventsLoading} error={eventsError} errorDetail={eventsErrorDetail} teams={teams} onTeamCreated={handleTeamCreated} />
         </div>
         <div style={{ flex: '1 1 320px', minWidth: 280 }}>
           <UpcomingPanel events={combinedEvents} loading={eventsLoading} error={eventsError} errorDetail={eventsErrorDetail} teams={teams} powerScores={powerScores} abilityProfiles={abilityProfiles} powerLog={powerLog} detailedLog={detailedLog} />
@@ -1623,7 +1644,7 @@ function LeagueView({ code, label }: { code: string; label: string }) {
                     {rankDelta === 0 && (
                       <span style={{ fontSize: 8, fontWeight: 800, color: 'var(--text-muted)', flexShrink: 0 }} title="어제 대비 순위 변동 없음">–</span>
                     )}
-                    <span style={{ flex: 1, fontWeight: 700 }}>{t.name}{code2 ? <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}> ({code2})</span> : ''}</span>
+                    <span style={{ flex: 1, fontWeight: 700 }}>{code2 || t.name}</span>
                     <button onClick={e => { e.stopPropagation(); startEditTeam(t) }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', flexShrink: 0 }}>
                       <Pencil size={10} />
                     </button>
