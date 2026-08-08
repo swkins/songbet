@@ -5,7 +5,7 @@ import type { Bet, Site, Sport, Market, BetResult, GameRolling } from '../types'
 import { inferBaseballLeague, inferSoccerLeague, buildLeagueCandidates, suggestLeagueCandidates, type LeagueOverride, type LeagueCandidate } from '../lib/league'
 import { buildTeamCandidates, suggestTeamCandidates, getTeamInsight, getEsportsLeague, type TeamCandidate, type BetLite } from '../lib/teamInsight'
 import { fetchTodayTomorrowLolMatches, LEAGUES as LOL_LEAGUES, type UpcomingLolMatch } from '../lib/lolSchedule'
-import { fetchTodayTomorrowSoccerMatches, SOCCER_LEAGUES, type UpcomingSoccerMatch } from '../lib/soccerSchedule'
+import { fetchUpcomingSoccerMatches, SOCCER_LEAGUES, type UpcomingSoccerMatch } from '../lib/soccerSchedule'
 import { sportGlyph } from '../components/SportIcons'
 import dayjs from 'dayjs'
 import isoWeek from 'dayjs/plugin/isoWeek'
@@ -217,23 +217,37 @@ function SoccerMatchPicker({ onSelectMatch }: { onSelectMatch: (m: UpcomingSocce
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(false)
   const [leagueFilter, setLeagueFilter] = useState<string>('all')
+  const [dayTab, setDayTab] = useState<'today' | 'tomorrow' | 'later'>('today')
   const [open, setOpen] = useState(false)
 
   useEffect(() => {
     if (!open || matches !== null) return
     setLoading(true); setError(false)
-    fetchTodayTomorrowSoccerMatches()
+    fetchUpcomingSoccerMatches()
       .then(m => { setMatches(m); setLoading(false) })
       .catch(() => { setError(true); setLoading(false) })
   }, [open, matches])
 
   const leagues = SOCCER_LEAGUES.map(l => l.code)
-  const shown = matches ? (leagueFilter === 'all' ? matches : matches.filter(m => m.league === leagueFilter)) : []
+  const byLeague = matches ? (leagueFilter === 'all' ? matches : matches.filter(m => m.league === leagueFilter)) : []
+
+  const now = new Date()
+  const todayStr = now.toDateString()
+  const tomorrowStr = new Date(Date.now() + 86400000).toDateString()
+  const dayGroups = {
+    today: byLeague.filter(m => new Date(m.startTime).toDateString() === todayStr),
+    tomorrow: byLeague.filter(m => new Date(m.startTime).toDateString() === tomorrowStr),
+    later: byLeague.filter(m => {
+      const s = new Date(m.startTime).toDateString()
+      return s !== todayStr && s !== tomorrowStr
+    }),
+  }
+  const shown = dayGroups[dayTab]
 
   return (
     <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: 8, background: 'var(--bg-elevated)' }}>
       <button type="button" onClick={() => setOpen(p => !p)} style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-body)' }}>
-        오늘·내일 축구 경기에서 고르기
+        축구 경기에서 고르기
         <span>{open ? '접기' : '펼치기'}</span>
       </button>
       {open && (
@@ -246,7 +260,7 @@ function SoccerMatchPicker({ onSelectMatch }: { onSelectMatch: (m: UpcomingSocce
             </div>
           )}
           {!loading && !error && matches && matches.length === 0 && (
-            <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0', textAlign: 'center' }}>오늘·내일 예정된 경기가 없습니다</div>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0', textAlign: 'center' }}>앞으로 10일 안에 예정된 경기가 없습니다</div>
           )}
           {!loading && matches && matches.length > 0 && (
             <>
@@ -263,14 +277,26 @@ function SoccerMatchPicker({ onSelectMatch }: { onSelectMatch: (m: UpcomingSocce
                   ))}
                 </div>
               )}
+              <div style={{ display: 'flex', gap: 4, marginBottom: 6 }}>
+                {([['today', `오늘 (${dayGroups.today.length})`], ['tomorrow', `내일 (${dayGroups.tomorrow.length})`], ['later', `이후 (${dayGroups.later.length})`]] as const).map(([key, label]) => (
+                  <button key={key} type="button" onClick={() => setDayTab(key)}
+                    style={{
+                      flex: 1, fontSize: 10, fontWeight: 700, padding: '5px 0', borderRadius: 5, cursor: 'pointer', fontFamily: 'var(--font-body)',
+                      border: `1px solid ${dayTab === key ? 'var(--gold-border)' : 'var(--border)'}`,
+                      background: dayTab === key ? 'var(--gold-bg)' : 'var(--bg-card)',
+                      color: dayTab === key ? 'var(--gold)' : 'var(--text-muted)',
+                    }}>{label}</button>
+                ))}
+              </div>
               {shown.length === 0 ? (
-                <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0', textAlign: 'center' }}>오늘·내일 이 리그 경기가 없습니다</div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0', textAlign: 'center' }}>해당 구간에 경기가 없습니다</div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 260, overflowY: 'auto' }}>
                   {shown.map(m => {
                     const d = new Date(m.startTime)
-                    const isToday = d.toDateString() === new Date().toDateString()
-                    const timeLabel = `${isToday ? '오늘' : '내일'} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+                    const timeLabel = dayTab === 'later'
+                      ? `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+                      : `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
                     return (
                       <button key={m.id} type="button" onClick={() => { onSelectMatch(m); setOpen(false) }}
                         style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg-card)', cursor: 'pointer', textAlign: 'left', fontFamily: 'var(--font-body)', flexShrink: 0 }}>

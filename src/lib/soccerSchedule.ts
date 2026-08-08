@@ -58,10 +58,13 @@ async function fetchDay(dateStr: string): Promise<any[]> {
 }
 
 async function fetchLiveFromSportsDB(): Promise<UpcomingSoccerMatch[]> {
-  const today = new Date()
-  const tomorrow = new Date(Date.now() + 86400000)
-  const [todayEvents, tomorrowEvents] = await Promise.all([fetchDay(fmtDate(today)), fetchDay(fmtDate(tomorrow))])
-  const all = [...todayEvents, ...tomorrowEvents]
+  // 오늘·내일에 경기가 없는 리그도 있어서(비시즌·라운드 사이 텀 등), 앞으로 10일치를 넉넉히 받아온 뒤
+  // 화면에서 오늘/내일/이후 탭으로 나눠 보여준다. 무료 키라 호출 자체는 하루 한 번(캐시)이라 여러 날짜를
+  // 한 번에 불러도 문제없다.
+  const WINDOW_DAYS = 10
+  const days = Array.from({ length: WINDOW_DAYS }, (_, i) => fmtDate(new Date(Date.now() + i * 86400000)))
+  const perDay = await Promise.all(days.map(fetchDay))
+  const all = perDay.flat()
   const results: UpcomingSoccerMatch[] = []
   for (const e of all) {
     const matched = matchLeague(e?.strLeague)
@@ -90,9 +93,10 @@ async function purgeOldSoccerCache() {
   await supabase.from('soccer_schedule_cache').delete().lt('cache_date', fmtDate(cutoff))
 }
 
-// 오늘·내일(로컬 시각 기준) 경기를 리그 통합해서 가져온다. Supabase에 날짜별로 캐시해서,
+// 앞으로 10일치(로컬 시각 기준) 경기를 리그 통합해서 가져온다. Supabase에 "오늘 날짜" 기준으로 캐시해서,
 // 어느 기기에서 부르든 그날 처음 한 번만 실제 TheSportsDB를 호출하고 나머진 캐시를 읽는다(LOL과 동일 패턴).
-export async function fetchTodayTomorrowSoccerMatches(opts?: { forceRefresh?: boolean }): Promise<UpcomingSoccerMatch[]> {
+// 화면에서 오늘/내일/이후로 나눠 보여주는 건 호출 쪽(Dashboard) 책임 — 여긴 그냥 앞으로 10일치를 다 준다.
+export async function fetchUpcomingSoccerMatches(opts?: { forceRefresh?: boolean }): Promise<UpcomingSoccerMatch[]> {
   const today = todayKey()
   purgeOldSoccerCache() // 기다릴 필요 없어서 백그라운드로 흘려보냄
 
