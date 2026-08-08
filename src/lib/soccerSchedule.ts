@@ -10,22 +10,21 @@ const ESPN_BASE = 'https://site.api.espn.com/apis/site/v2/sports/soccer'
 
 export const SOCCER_LEAGUES: { code: string; label: string; slug: string }[] = [
   // 1티어 — 5대리그
-  { code: 'EPL',       label: 'EPL',            slug: 'eng.1' },
+  { code: 'EPL',       label: '프리미어리그',    slug: 'eng.1' },
   { code: 'LALIGA',    label: '라리가',          slug: 'esp.1' },
   { code: 'BUNDES',    label: '분데스리가',      slug: 'ger.1' },
   { code: 'SERIEA',    label: '세리에A',         slug: 'ita.1' },
   { code: 'LIGUE1',    label: '리그앙',          slug: 'fra.1' },
-  // 2티어 — 배당 마켓이 어느 정도 깊은 리그
-  { code: 'EREDIVISIE',label: '에레디비지에',    slug: 'ned.1' },
-  { code: 'PRIMEIRA',  label: '프리메이라(포르투갈)', slug: 'por.1' },
+  // 2티어 — 배당 마켓이 어느 정도 깊은 리그 (5대리그 외에는 국가명으로 표기)
+  { code: 'EREDIVISIE',label: '네덜란드',        slug: 'ned.1' },
+  { code: 'PRIMEIRA',  label: '포르투갈',        slug: 'por.1' },
   { code: 'BELGIUM',   label: '벨기에',          slug: 'bel.1' },
   { code: 'TURKEY',    label: '튀르키예',        slug: 'tur.1' },
-  { code: 'RUSSIA',    label: '러시아',          slug: 'rus.1' },
-  { code: 'BRASILEIRAO', label: '브라질 세리에A', slug: 'bra.1' },
-  { code: 'MLS',       label: 'MLS',             slug: 'usa.1' },
+  { code: 'BRASILEIRAO', label: '브라질',        slug: 'bra.1' },
+  { code: 'MLS',       label: '미국',            slug: 'usa.1' },
   { code: 'MEXICO',    label: '멕시코',          slug: 'mex.1' },
   { code: 'ARGENTINA', label: '아르헨티나',      slug: 'arg.1' },
-  { code: 'J1',        label: 'J1리그',          slug: 'jpn.1' },
+  { code: 'J1',        label: '일본',            slug: 'jpn.1' },
   { code: 'SAUDI',     label: '사우디',          slug: 'ksa.1' },
 ]
 
