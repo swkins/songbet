@@ -100,6 +100,32 @@ export async function fetchRecentCompletedMatches(leagueCode: string, days = 7):
   return results
 }
 
+// 지정한 리그의 지금 라이브로 진행 중인 경기(있으면)를 가져온다.
+// livestats API에 애초에 데이터가 있는지 없는지를 확인하는 가장 확실한 방법 — 라이브 경기는
+// 지금 중계되고 있는 게 확실하니 데이터가 없을 수 없다(완료된 지 오래된 경기는 만료돼서 사라질 수 있음).
+export async function fetchLiveMatch(leagueCode: string): Promise<CompletedMatch | null> {
+  const ids = await resolveLeagueIds()
+  const leagueId = ids[leagueCode]
+  if (!leagueId) return null
+  const meta = SUPPORTED_LEAGUES.find(l => l.code === leagueCode)!
+  const res = await fetch(`${ESPORTS_API}/getSchedule?hl=en-US&leagueId=${leagueId}`, { headers: { 'x-api-key': API_KEY } })
+  if (!res.ok) return null
+  const json = await res.json()
+  const events: any[] = json?.data?.schedule?.events ?? []
+  const live = events.find(e => e.state === 'inProgress')
+  if (!live) return null
+  const teams = live.match?.teams ?? []
+  if (teams.length < 2) return null
+  return {
+    id: live.match?.id ?? live.id,
+    league: leagueCode, leagueLabel: meta.label,
+    startTime: live.startTime,
+    bestOf: live.match?.strategy?.count ?? 3,
+    teamA: teams[0]?.name || '?', teamACode: teams[0]?.code, scoreA: teams[0]?.result?.gameWins ?? 0,
+    teamB: teams[1]?.name || '?', teamBCode: teams[1]?.code, scoreB: teams[1]?.result?.gameWins ?? 0,
+  }
+}
+
 // 경기(시리즈) 하나의 세트별 game id 목록을 가져온다. getSchedule 응답엔 이 정보가 없어서,
 // 경기 상세 전용 엔드포인트(getEventDetails)를 따로 불러야 한다 — 그래서 목록을 펼칠 때(lazy) 호출한다.
 export async function fetchEventGames(matchId: string): Promise<{ id: string; number: number; state: string }[]> {

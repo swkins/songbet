@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import dayjs from 'dayjs'
 import { ChevronDown, ChevronUp, RefreshCw } from 'lucide-react'
 import {
-  SUPPORTED_LEAGUES, fetchRecentCompletedMatches, fetchEventGames, fetchGameDetailStats,
+  SUPPORTED_LEAGUES, fetchRecentCompletedMatches, fetchLiveMatch, fetchEventGames, fetchGameDetailStats,
   type CompletedMatch, type GameDetailStats,
 } from '../lib/lolResults'
 
@@ -93,6 +93,61 @@ function MatchRow({ m }: { m: CompletedMatch }) {
   )
 }
 
+function LiveTestPanel({ league }: { league: string }) {
+  const [checking, setChecking] = useState(false)
+  const [checked, setChecked] = useState(false)
+  const [live, setLive] = useState<CompletedMatch | null>(null)
+  const [detail, setDetail] = useState<GameDetailStats | null | 'none'>(null)
+  const [loading, setLoading] = useState(false)
+
+  async function check() {
+    setChecking(true); setChecked(false); setLive(null); setDetail(null)
+    const m = await fetchLiveMatch(league).catch(() => null)
+    setLive(m); setChecked(true); setChecking(false)
+  }
+
+  async function testDetail() {
+    if (!live) return
+    setLoading(true)
+    const games = await fetchEventGames(live.id)
+    const target = games.find(g => g.state === 'inProgress') ?? games[games.length - 1]
+    if (!target) { setDetail('none'); setLoading(false); return }
+    const d = await fetchGameDetailStats(target.id)
+    setDetail(d)
+    setLoading(false)
+  }
+
+  return (
+    <div className="card" style={{ marginBottom: 12 }}>
+      <div className="card-title" style={{ marginBottom: 6 }}>
+        라이브 데이터 테스트 <span style={{ fontWeight: 400, color: 'var(--text-muted)', fontSize: 10 }}>· livestats API에 데이터가 애초에 존재하는지 확인용</span>
+      </div>
+      <button className="btn btn-ghost" onClick={check} disabled={checking} style={{ fontSize: 11, marginBottom: 8 }}>
+        {checking ? '확인 중...' : `지금 ${SUPPORTED_LEAGUES.find(l => l.code === league)?.label} 라이브 경기 있는지 확인`}
+      </button>
+      {checked && !live && <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>지금 이 리그에 라이브 경기가 없습니다. 다른 리그로 시도하거나, 경기 시간에 다시 확인해주세요.</div>}
+      {live && (
+        <div>
+          <div style={{ fontSize: 12, marginBottom: 6 }}>🔴 라이브: {live.teamACode || live.teamA} vs {live.teamBCode || live.teamB}</div>
+          <button className="btn btn-primary" onClick={testDetail} disabled={loading} style={{ fontSize: 11, marginBottom: 8 }}>
+            {loading ? '조회 중...' : '이 경기 실시간 통계 가져오기'}
+          </button>
+          {detail === 'none' && <div style={{ fontSize: 11, color: 'var(--red)' }}>진행 중인 게임 ID를 못 찾았습니다.</div>}
+          {detail && detail !== 'none' && (
+            <div style={{ fontSize: 11 }}>
+              {detail.teamA.kills === 0 && detail.teamB.kills === 0 && detail.teamA.totalGold === 0 ? (
+                <div style={{ color: 'var(--red)' }}>라이브인데도 전부 0으로 나옵니다 — 이 리그는 API에 상세 통계 자체가 없는 것으로 보입니다.</div>
+              ) : (
+                <div style={{ color: 'var(--green)' }}>✓ 실시간 데이터 확인됨 — 킬 {detail.teamA.kills}:{detail.teamB.kills} · 골드 {(detail.teamA.totalGold/1000).toFixed(1)}k:{(detail.teamB.totalGold/1000).toFixed(1)}k</div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function Analysis() {
   const [league, setLeague] = useState(SUPPORTED_LEAGUES[0].code)
   const [matches, setMatches] = useState<CompletedMatch[] | null>(null)
@@ -129,6 +184,8 @@ export default function Analysis() {
             }}>{l.label}</button>
         ))}
       </div>
+
+      <LiveTestPanel league={league} />
 
       <div className="card">
         <div className="card-title" style={{ marginBottom: 4 }}>
