@@ -11,6 +11,43 @@ const DRAGON_LABEL: Record<string, string> = {
   hextech: '헥스텍', chemtech: '화학공학', elder: '장로',
 }
 
+function DetailCard({ i, d }: { i: number; d: GameDetailStats | null }) {
+  const [showRaw, setShowRaw] = useState(false)
+  return (
+    <div style={{ background: 'var(--bg-elevated)', borderRadius: 6, padding: '8px 10px', fontSize: 11 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+        <span style={{ fontWeight: 700 }}>
+          {i + 1}세트{d?.durationSeconds ? ` · ${Math.floor(d.durationSeconds / 60)}:${String(d.durationSeconds % 60).padStart(2, '0')}` : ''}
+        </span>
+        {d?.raw != null && (
+          <button type="button" onClick={() => setShowRaw(p => !p)} style={{ fontSize: 9, color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>
+            {showRaw ? '원본 숨기기' : '원본 보기'}
+          </button>
+        )}
+      </div>
+      {!d ? (
+        <div style={{ color: 'var(--text-muted)' }}>상세 통계 없음 (라이브 통계 미제공 경기)</div>
+      ) : (
+        <div style={{ color: 'var(--text-secondary)', lineHeight: 1.7 }}>
+          킬 {d.teamA.kills} : {d.teamB.kills} · 타워 {d.teamA.towers} : {d.teamB.towers} · 억제기 {d.teamA.inhibitors} : {d.teamB.inhibitors} · 내셔 {d.teamA.barons} : {d.teamB.barons}
+          <br />
+          드래곤 {d.teamA.dragons} : {d.teamB.dragons}
+          {(d.teamA.dragonTypes.length > 0 || d.teamB.dragonTypes.length > 0) && (
+            <span style={{ color: 'var(--text-muted)' }}> ({[...d.teamA.dragonTypes, ...d.teamB.dragonTypes].map(t => DRAGON_LABEL[t] ?? t).join(', ')})</span>
+          )}
+          <br />
+          골드 {(d.teamA.totalGold / 1000).toFixed(1)}k : {(d.teamB.totalGold / 1000).toFixed(1)}k
+        </div>
+      )}
+      {showRaw && d?.raw != null && (
+        <pre style={{ marginTop: 6, padding: 6, background: 'var(--bg-card)', borderRadius: 4, fontSize: 9, color: 'var(--text-muted)', overflowX: 'auto', maxHeight: 240, overflowY: 'auto' }}>
+          {JSON.stringify(d.raw, null, 2)}
+        </pre>
+      )}
+    </div>
+  )
+}
+
 function MatchRow({ m }: { m: CompletedMatch }) {
   const [open, setOpen] = useState(false)
   const [details, setDetails] = useState<(GameDetailStats | null)[] | null>(null)
@@ -49,27 +86,7 @@ function MatchRow({ m }: { m: CompletedMatch }) {
             <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>이 경기의 세트별 상세 통계는 제공되지 않습니다.</div>
           )}
           {loading && <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>세트별 상세 통계 불러오는 중...</div>}
-          {!loading && details && details.map((d, i) => (
-            <div key={i} style={{ background: 'var(--bg-elevated)', borderRadius: 6, padding: '8px 10px', fontSize: 11 }}>
-              <div style={{ fontWeight: 700, marginBottom: 4 }}>
-                {i + 1}세트{d?.durationSeconds ? ` · ${Math.floor(d.durationSeconds / 60)}:${String(d.durationSeconds % 60).padStart(2, '0')}` : ''}
-              </div>
-              {!d ? (
-                <div style={{ color: 'var(--text-muted)' }}>상세 통계 없음 (라이브 통계 미제공 경기)</div>
-              ) : (
-                <div style={{ color: 'var(--text-secondary)', lineHeight: 1.7 }}>
-                  킬 {d.teamA.kills} : {d.teamB.kills} · 타워 {d.teamA.towers} : {d.teamB.towers} · 억제기 {d.teamA.inhibitors} : {d.teamB.inhibitors} · 내셔 {d.teamA.barons} : {d.teamB.barons}
-                  <br />
-                  드래곤 {d.teamA.dragons} : {d.teamB.dragons}
-                  {(d.teamA.dragonTypes.length > 0 || d.teamB.dragonTypes.length > 0) && (
-                    <span style={{ color: 'var(--text-muted)' }}> ({[...d.teamA.dragonTypes, ...d.teamB.dragonTypes].map(t => DRAGON_LABEL[t] ?? t).join(', ')})</span>
-                  )}
-                  <br />
-                  골드 {(d.teamA.totalGold / 1000).toFixed(1)}k : {(d.teamB.totalGold / 1000).toFixed(1)}k
-                </div>
-              )}
-            </div>
-          ))}
+          {!loading && details && details.map((d, i) => <DetailCard key={i} i={i} d={d} />)}
         </div>
       )}
     </div>

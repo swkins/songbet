@@ -37,6 +37,7 @@ export interface GameDetailStats {
   durationSeconds: number | null
   teamA: TeamGameStats
   teamB: TeamGameStats
+  raw?: unknown // 디버그용: livestats 원본 응답(마지막 프레임). 화면에서 "원본 보기"로 확인 가능.
 }
 
 let leagueIdCache: Record<string, string> | null = null
@@ -114,17 +115,19 @@ export async function fetchEventGames(matchId: string): Promise<{ id: string; nu
 // 세트 하나(gameId)의 최종 팀 스탯(킬/타워/억제기/내셔/드래곤/골드)을 livestats에서 가져온다.
 // 이 API는 라이브 관전용이라 커버리지가 일정하지 않다 — 실패하거나 데이터가 없으면 null을 반환하고,
 // 호출 쪽에서 "상세 통계 없음"으로 처리한다(에러를 던지지 않음).
+// 원인 확인용으로 실패 상황에서도 원본 응답을 최대한 남긴다(raw 필드 + 콘솔 로그).
 export async function fetchGameDetailStats(gameId: string): Promise<GameDetailStats | null> {
   try {
     const res = await fetch(`${LIVESTATS_API}/window/${gameId}`)
-    if (!res.ok) return null
+    if (!res.ok) { console.warn(`[lolResults] window/${gameId}: HTTP ${res.status}`); return null }
     const json = await res.json()
+    console.info(`[lolResults] window/${gameId} 원본 응답:`, json)
     const frames: any[] = json?.frames ?? []
-    if (frames.length === 0) return null
+    if (frames.length === 0) { console.warn(`[lolResults] window/${gameId}: frames 없음`); return null }
     const last = frames[frames.length - 1]
     const blue = last?.blueTeam
     const red = last?.redTeam
-    if (!blue || !red) return null
+    if (!blue || !red) { console.warn(`[lolResults] window/${gameId}: blueTeam/redTeam 없음 -`, last); return null }
     const toStats = (t: any): TeamGameStats => ({
       kills: t.totalKills ?? 0,
       towers: t.towers ?? 0,
@@ -140,6 +143,7 @@ export async function fetchGameDetailStats(gameId: string): Promise<GameDetailSt
       gameNumber: 0, // 호출 쪽에서 채움
       durationSeconds: isFinite(startMs) && isFinite(endMs) ? Math.round((endMs - startMs) / 1000) : null,
       teamA: toStats(blue), teamB: toStats(red),
+      raw: { frameCount: frames.length, firstFrame: frames[0], lastFrame: last },
     }
   } catch { return null }
 }
