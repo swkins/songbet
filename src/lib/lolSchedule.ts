@@ -1,7 +1,11 @@
 // ─── LoL 오늘/내일 경기 일정 조회 (베팅 등록 폼에서 사용) ─────────────
 // Analysis 탭이 쓰던 lolesports 공개 API를 그대로 쓰되, 여긴 목적이 다르다:
 // 과거 전적/파워랭킹 계산용이 아니라 "지금 베팅할 경기 고르기"가 목적이라
-// 오늘~내일 사이의 경기만 가볍게 가져온다(다중 페이지 순회, DB 캐시 테이블 없음).
+// 오늘~내일 사이의 경기만 가볍게 가져온다.
+// 캐시는 Supabase(lol_schedule_cache, 날짜별 1행)에 저장 — PC/모바일 등 기기가 달라도 같은 날이면
+// 첫 번째로 부른 기기만 실제 lolesports API를 호출하고, 그 이후엔 전부 이 캐시를 읽는다.
+
+import { supabase } from './supabase'
 
 const LEAGUES: { code: string; label: string; slugs: string[] }[] = [
   { code: 'LCK',   label: 'LCK',   slugs: ['lck'] },
@@ -42,12 +46,15 @@ async function resolveLeagueIds(): Promise<Record<string, string>> {
   return map
 }
 
-let cache: { matches: UpcomingLolMatch[]; fetchedAt: number } | null = null
+// 세션 안에서 방금 받아온 값이면(같은 페이지 안에서 폼을 여러 번 열 때) Supabase 왕복도 생략
+let memCache: { date: string; matches: UpcomingLolMatch[] } | null = null
 
-// 오늘 00:00 ~ 내일 23:59(로컬 시각 기준) 사이에 열리는 LoL 경기를 모든 리그 통합해서 가져온다.
-export async function fetchTodayTomorrowLolMatches(opts?: { forceRefresh?: boolean }): Promise<UpcomingLolMatch[]> {
-  if (!opts?.forceRefresh && cache && Date.now() - cache.fetchedAt < 60_000) return cache.matches
+function todayKey(): string {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
 
+async function fetchLiveFromLolesports(): Promise<UpcomingLolMatch[]> {
   const ids = await resolveLeagueIds()
   const from = new Date(); from.setHours(0, 0, 0, 0)
   const to = new Date(); to.setDate(to.getDate() + 1); to.setHours(23, 59, 59, 999)
@@ -82,6 +89,27 @@ export async function fetchTodayTomorrowLolMatches(opts?: { forceRefresh?: boole
   }
   if (!anyOk) throw new Error('일정 조회 실패 (네트워크 또는 API 오류)')
   results.sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime())
-  cache = { matches: results, fetchedAt: Date.now() }
+  return results
+}
+
+// 오늘 00:00 ~ 내일 23:59(로컬 시각 기준) 사이에 열리는 LoL 경기를 모든 리그 통합해서 가져온다.
+// 순서: 세션 메모리 캐시 → Supabase 캐시(오늘 날짜 행) → (둘 다 없을 때만) 실제 lolesports API 호출 후 Supabase에 저장.
+// 날짜가 바뀌면 자동으로 새로 호출된다(cache_date가 today와 안 맞으면 무시).
+export async function fetchTodayTomorrowLolMatches(opts?: { forceRefresh?: boolean }): Promise<UpcomingLolMatch[]> {
+  const today = todayKey()
+
+  if (!opts?.forceRefresh) {
+    if (memCache && memCache.date === today) return memCache.matches
+    const { data } = await supabase.from('lol_schedule_cache').select('matches').eq('cache_date', today).maybeSingle()
+    if (data?.matches) {
+      const matches = data.matches as UpcomingLolMatch[]
+      memCache = { date: today, matches }
+      return matches
+    }
+  }
+
+  const results = await fetchLiveFromLolesports()
+  memCache = { date: today, matches: results }
+  await supabase.from('lol_schedule_cache').upsert({ cache_date: today, matches: results, fetched_at: new Date().toISOString() }, { onConflict: 'cache_date' })
   return results
 }
