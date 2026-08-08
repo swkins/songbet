@@ -649,6 +649,25 @@ function RecentMatchRow({ teamId, pendingTeamName, leagueCode, onTeamCreated, te
         onTeamCreated?.(newTeam as EsportsTeam)
       }
     }
+    // 상대팀도 아직 추적 중이 아니면 똑같이 이 시점에 같이 등록한다 — 한쪽만 등록되면 상대팀 최근 폼
+    // 점수에는 이 경기가 전혀 안 잡히는 문제가 있었다. 양쪽 다 세트 결과를 갖고 있으니 같이 등록하는 게 맞다.
+    let actualOpponentTeamId = opponentTeamId
+    if (!actualOpponentTeamId) {
+      const existingOpp = teams.find(t => teamNameMatches(t, game.opponent))
+      if (existingOpp) {
+        actualOpponentTeamId = existingOpp.id
+      } else {
+        const { data: newOppTeam, error: oppTeamErr } = await supabase.from('esports_teams')
+          .insert({ league: leagueCode ?? '', name: game.opponent, sort_order: 0 })
+          .select().single()
+        if (oppTeamErr) {
+          console.error('상대팀 자동 등록 실패:', oppTeamErr.message) // 실패해도 내 쪽 기록 저장은 계속 진행
+        } else if (newOppTeam) {
+          actualOpponentTeamId = (newOppTeam as EsportsTeam).id
+          onTeamCreated?.(newOppTeam as EsportsTeam)
+        }
+      }
+    }
     const toInt = (v: string) => v === '' ? null : parseInt(v, 10)
     const duration = (form.durationMin || form.durationSec)
       ? (parseInt(form.durationMin || '0', 10) * 60 + parseInt(form.durationSec || '0', 10))
@@ -694,12 +713,12 @@ function RecentMatchRow({ teamId, pendingTeamName, leagueCode, onTeamCreated, te
       return
     }
 
-    // 상대팀도 추적 중인 팀이면, 상대팀 관점(team1=상대팀)으로 뒤집어서 똑같이 저장.
+    // 상대팀도 추적 중이면(방금 같이 등록됐어도 포함) 상대팀 관점(team1=상대팀)으로 뒤집어서 똑같이 저장.
     // 이걸 안 하면 상대팀은 이 경기가 체급 점수 계산에 아예 안 잡힌다.
-    if (opponentTeamId) {
+    if (actualOpponentTeamId) {
       const flip = (v: NarrativeTeam | null) => v === 'team1' ? 'team2' : v === 'team2' ? 'team1' : null
       const mirrorPayload = {
-        team_id: opponentTeamId, team2_name: teamName, match_start_time: game.startTime, game_number: form.gameNumber,
+        team_id: actualOpponentTeamId, team2_name: teamName, match_start_time: game.startTime, game_number: form.gameNumber,
         duration_seconds: duration,
         team1_kills: payload.team2_kills, team2_kills: payload.team1_kills,
         team1_dragons: payload.team2_dragons, team2_dragons: payload.team1_dragons,
