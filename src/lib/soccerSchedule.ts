@@ -9,53 +9,24 @@ import { supabase } from './supabase'
 const ESPN_BASE = 'https://site.api.espn.com/apis/site/v2/sports/soccer'
 
 export const SOCCER_LEAGUES: { code: string; label: string; slug: string }[] = [
-  // 유럽
+  // 1티어 — 5대리그
   { code: 'EPL',       label: 'EPL',            slug: 'eng.1' },
   { code: 'LALIGA',    label: '라리가',          slug: 'esp.1' },
   { code: 'BUNDES',    label: '분데스리가',      slug: 'ger.1' },
   { code: 'SERIEA',    label: '세리에A',         slug: 'ita.1' },
   { code: 'LIGUE1',    label: '리그앙',          slug: 'fra.1' },
+  // 2티어 — 배당 마켓이 어느 정도 깊은 리그
   { code: 'EREDIVISIE',label: '에레디비지에',    slug: 'ned.1' },
-  { code: 'SCOTLAND',  label: '스코틀랜드',      slug: 'sco.1' },
   { code: 'PRIMEIRA',  label: '프리메이라(포르투갈)', slug: 'por.1' },
   { code: 'BELGIUM',   label: '벨기에',          slug: 'bel.1' },
-  { code: 'AUSTRIA',   label: '오스트리아',      slug: 'aut.1' },
-  { code: 'GREECE',    label: '그리스',          slug: 'gre.1' },
   { code: 'TURKEY',    label: '튀르키예',        slug: 'tur.1' },
-  { code: 'DENMARK',   label: '덴마크',          slug: 'den.1' },
-  { code: 'NORWAY',    label: '노르웨이',        slug: 'nor.1' },
-  { code: 'SWEDEN',    label: '스웨덴',          slug: 'swe.1' },
-  { code: 'CYPRUS',    label: '키프로스',        slug: 'cyp.1' },
-  { code: 'IRELAND',   label: '아일랜드',        slug: 'irl.1' },
   { code: 'RUSSIA',    label: '러시아',          slug: 'rus.1' },
-  // 아시아
-  { code: 'J1',        label: 'J1리그',          slug: 'jpn.1' },
-  { code: 'SAUDI',     label: '사우디',          slug: 'ksa.1' },
-  { code: 'CHINA',     label: '중국',            slug: 'chn.1' },
-  { code: 'INDIA',     label: '인도',            slug: 'ind.1' },
-  { code: 'THAILAND',  label: '태국',            slug: 'tha.1' },
-  { code: 'MALAYSIA',  label: '말레이시아',      slug: 'mys.1' },
-  { code: 'INDONESIA', label: '인도네시아',      slug: 'idn.1' },
-  { code: 'SINGAPORE', label: '싱가포르',        slug: 'sgp.1' },
-  { code: 'AUSTRALIA', label: '호주',            slug: 'aus.1' },
-  // 북중미
+  { code: 'BRASILEIRAO', label: '브라질 세리에A', slug: 'bra.1' },
   { code: 'MLS',       label: 'MLS',             slug: 'usa.1' },
   { code: 'MEXICO',    label: '멕시코',          slug: 'mex.1' },
-  // 남미
   { code: 'ARGENTINA', label: '아르헨티나',      slug: 'arg.1' },
-  { code: 'BRASILEIRAO', label: '브라질 세리에A', slug: 'bra.1' },
-  { code: 'CHILE',     label: '칠레',            slug: 'chi.1' },
-  { code: 'COLOMBIA',  label: '콜롬비아',        slug: 'col.1' },
-  { code: 'PARAGUAY',  label: '파라과이',        slug: 'par.1' },
-  { code: 'PERU',      label: '페루',            slug: 'per.1' },
-  { code: 'URUGUAY',   label: '우루과이',        slug: 'uru.1' },
-  { code: 'BOLIVIA',   label: '볼리비아',        slug: 'bol.1' },
-  { code: 'ECUADOR',   label: '에콰도르',        slug: 'ecu.1' },
-  { code: 'VENEZUELA', label: '베네수엘라',      slug: 'ven.1' },
-  // 아프리카
-  { code: 'SOUTHAFRICA', label: '남아공',        slug: 'rsa.1' },
-  { code: 'NIGERIA',   label: '나이지리아',      slug: 'nga.1' },
-  { code: 'GHANA',     label: '가나',            slug: 'gha.1' },
+  { code: 'J1',        label: 'J1리그',          slug: 'jpn.1' },
+  { code: 'SAUDI',     label: '사우디',          slug: 'ksa.1' },
 ]
 
 export interface UpcomingSoccerMatch {
