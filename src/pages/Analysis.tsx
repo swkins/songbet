@@ -121,6 +121,25 @@ function RecentMatchesPanel({ leagueCode, events, loading, error, errorDetail, t
     })
   }, [matches, teams])
 
+  // 최근 경기 목록에 나오는 팀인데 아직 추적 중이 아닌 팀은 버튼 클릭 없이 자동으로 전부 등록한다.
+  // (한 번 등록을 시도한 이름은 다시 시도하지 않도록 세션 안에서만 기억 — teams가 업데이트되기 전까지
+  // 렌더링이 여러 번 일어나도 같은 이름으로 중복 삽입을 요청하지 않기 위함)
+  const attemptedRef = useRef<Set<string>>(new Set())
+  useEffect(() => {
+    if (matches.length === 0) return
+    const unresolvedNames = new Set<string>()
+    for (const m of matches) {
+      if (resolveMatchTeam(teams, m.teamA, m.teamB, m.codeA, m.codeB)) continue
+      unresolvedNames.add(m.teamA)
+      unresolvedNames.add(m.teamB)
+    }
+    for (const name of unresolvedNames) {
+      if (attemptedRef.current.has(name)) continue
+      attemptedRef.current.add(name)
+      onCreateTeam(name)
+    }
+  }, [matches, teams, onCreateTeam])
+
   return (
     <div className="card">
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
@@ -150,8 +169,9 @@ function RecentMatchesPanel({ leagueCode, events, loading, error, errorDetail, t
               isA: ov.isA,
             } : null)
             if (!resolved) {
-              // 자동 매칭 실패 — 대부분은 이 리그에 추적 중인 팀이 아직 하나도 없어서(esports_teams에 미등록) 발생.
-              // 팀을 미리 등록해두라고 요구하는 대신, 버튼 한 번으로 그 팀을 즉시 등록하고 바로 입력으로 넘어가게 한다.
+              // 자동 매칭 실패 — 최근 경기 목록에 나온 팀은 위 useEffect에서 자동으로 등록을 시도하므로,
+              // 대부분은 등록이 끝나는 즉시(팀 목록 갱신 후) 이 분기 자체가 사라진다.
+              // 등록해도 여전히 안 잡히면(이름 표기가 심하게 다른 경우 등) 기존 팀에 수동 매칭할 수 있게 둔다.
               return (
                 <div key={m.id} style={{ padding: '6px 8px', background: 'var(--bg-elevated)', borderRadius: 6 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11 }}>
@@ -160,14 +180,7 @@ function RecentMatchesPanel({ leagueCode, events, loading, error, errorDetail, t
                     <span style={{ fontWeight: 800, color: 'var(--gold)', flexShrink: 0 }}>{m.scoreA} : {m.scoreB}</span>
                     <span style={{ flex: 1 }}>{m.codeB || m.teamB}</span>
                   </div>
-                  <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
-                    <button onClick={() => onCreateTeam(m.teamA)} className="btn btn-ghost" style={{ flex: 1, fontSize: 9, padding: '4px 4px' }}>
-                      {m.codeA || m.teamA} 팀 등록하고 입력
-                    </button>
-                    <button onClick={() => onCreateTeam(m.teamB)} className="btn btn-ghost" style={{ flex: 1, fontSize: 9, padding: '4px 4px' }}>
-                      {m.codeB || m.teamB} 팀 등록하고 입력
-                    </button>
-                  </div>
+                  <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 4 }}>팀 등록 중...</div>
                   {teams.length > 0 && (
                     <select
                       value=""
@@ -1406,6 +1419,9 @@ function LeagueView({ code, label }: { code: string; label: string }) {
   // 리그에 아직 등록 안 된 팀을 즉시 추적 대상으로 등록한다 (LCK CL처럼 팀을 미리 하나도 안 넣어놨을 때,
   // "먼저 팀부터 등록하세요" 없이 경기 목록에서 바로 한 번에 등록 + 입력으로 넘어갈 수 있도록).
   async function ensureTeamExists(name: string) {
+    // "TBD"/"TBA" 같은 대진 미정 자리표시자는 실제 팀이 아니므로 자동 등록하지 않는다
+    // (자동 등록이 버튼 클릭 없이 조용히 일어나기 때문에 이 가드가 특히 중요하다).
+    if (/^\s*(TBD|TBA|미정)\s*$/i.test(name)) return
     if (teams.find(t => teamNameMatches(t, name))) return
     const { data } = await supabase.from('esports_teams').insert({ league: code, name, sort_order: teams.length }).select().single()
     if (data) {
