@@ -47,10 +47,15 @@ function fmtDate(d: Date): string {
 
 async function fetchDay(dateStr: string): Promise<any[]> {
   try {
-    const res = await fetch(`${SPORTSDB_BASE}/${SPORTSDB_KEY}/eventsday.php?d=${dateStr}&s=Soccer`)
-    if (!res.ok) { console.warn(`[soccerSchedule] eventsday ${dateStr}: HTTP ${res.status}`); return [] }
+    const url = `${SPORTSDB_BASE}/${SPORTSDB_KEY}/eventsday.php?d=${dateStr}&s=Soccer`
+    const res = await fetch(url)
+    if (!res.ok) { console.warn(`[soccerSchedule] eventsday ${dateStr}: HTTP ${res.status} (${url})`); return [] }
     const json = await res.json()
-    return json?.events ?? []
+    const events = json?.events ?? []
+    // 진단용: 이 날짜에 실제로 몇 건 왔고, 그중 리그명이 뭐가 찍히는지(중복 제거) 콘솔에 남긴다.
+    const leagueNames = Array.from(new Set(events.map((e: any) => e?.strLeague).filter(Boolean)))
+    console.info(`[soccerSchedule] ${dateStr}: ${events.length}건 수신, 리그 종류:`, leagueNames)
+    return events
   } catch (err) {
     console.warn(`[soccerSchedule] eventsday ${dateStr}: 호출 실패`, err)
     return []
@@ -65,10 +70,12 @@ async function fetchLiveFromSportsDB(): Promise<UpcomingSoccerMatch[]> {
   const days = Array.from({ length: WINDOW_DAYS }, (_, i) => fmtDate(new Date(Date.now() + i * 86400000)))
   const perDay = await Promise.all(days.map(fetchDay))
   const all = perDay.flat()
+  console.info(`[soccerSchedule] 총 ${all.length}건 수신(전 세계 축구, ${WINDOW_DAYS}일치)`)
   const results: UpcomingSoccerMatch[] = []
+  let unmatchedCount = 0
   for (const e of all) {
     const matched = matchLeague(e?.strLeague)
-    if (!matched) continue
+    if (!matched) { unmatchedCount++; continue }
     if (!e.strHomeTeam || !e.strAwayTeam) continue
     const startTime = e.strTimestamp
       ? `${e.strTimestamp}Z`
@@ -78,6 +85,7 @@ async function fetchLiveFromSportsDB(): Promise<UpcomingSoccerMatch[]> {
       startTime, teamA: e.strHomeTeam, teamB: e.strAwayTeam,
     })
   }
+  console.info(`[soccerSchedule] 우리 리그 목록에 매칭된 것 ${results.length}건 · 매칭 안 된 것(다른 리그) ${unmatchedCount}건`)
   results.sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime())
   return results
 }
