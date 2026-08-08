@@ -106,7 +106,8 @@ function LolMatchPicker({ match, onSelectMatch, onChangeMatch, pickLabel, onPick
         )}
         {!loading && matches && matches.length > 0 && (() => {
           const leagues = Array.from(new Set(matches.map(m => m.league)))
-          const shown = leagueFilter === 'all' ? matches : matches.filter(m => m.league === leagueFilter)
+          const filtered = leagueFilter === 'all' ? matches : matches.filter(m => m.league === leagueFilter)
+          const shown = filtered.slice(0, 7) // 예전처럼 최대 7개까지만 노출
           return (
             <>
               {leagues.length > 1 && (
@@ -125,7 +126,7 @@ function LolMatchPicker({ match, onSelectMatch, onChangeMatch, pickLabel, onPick
               {shown.length === 0 ? (
                 <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0', textAlign: 'center' }}>오늘·내일 {leagueFilter} 경기가 없습니다</div>
               ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 320, overflowY: 'auto' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                   {shown.map(m => {
                     const d = new Date(m.startTime)
                     const isToday = d.toDateString() === new Date().toDateString()
