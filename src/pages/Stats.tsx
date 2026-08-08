@@ -9,12 +9,12 @@ import { inferBaseballLeague, inferSoccerLeague, koCompare, type LeagueOverride 
 import { sportGlyph } from '../components/SportIcons'
 
 const SPORTS: { value: Sport; label: string; emoji: string }[] = [
+  { value: 'esports',    label: 'LOL',  emoji: '🎮' },
   { value: 'soccer',     label: '축구', emoji: '⚽' },
   { value: 'baseball',   label: '야구', emoji: '⚾' },
   { value: 'basketball', label: '농구', emoji: '🏀' },
   { value: 'volleyball', label: '배구', emoji: '🏐' },
   { value: 'hockey',     label: '하키', emoji: '🏒' },
-  { value: 'esports',    label: 'LOL',  emoji: '🎮' },
   { value: 'other',      label: '기타', emoji: '📋' },
 ]
 const MARKET_LABELS: Record<Market, string> = {
@@ -1280,7 +1280,7 @@ export default function Stats() {
   const [sites, setSites]     = useState<Site[]>([])
   const [rateMap, setRateMap] = useState<Record<string, number>>({})
   const [period, setPeriod]   = useState<'all' | '7d' | '30d' | '90d'>('all')
-  const [activeSport, setActiveSport] = useState<Sport | 'all' | 'live'>('all')
+  const [activeSport, setActiveSport] = useState<Sport | 'all' | 'live'>('esports')
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null)
   const [leagueOverrides, setLeagueOverrides] = useState<LeagueOverride[]>([])
   const [baseballLeagues, setBaseballLeagues] = useState<string[]>([])
@@ -1549,14 +1549,14 @@ export default function Stats() {
         <>
           <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
             {([
-              { value: 'all' as const, label: '전체', emoji: '📊', cnt: settled.length },
+              { value: 'esports' as const, label: 'LOL', emoji: '🎮', cnt: settled.filter(b => b.sport === 'esports').length },
               { value: 'soccer' as const, label: '축구', emoji: '⚽', cnt: settled.filter(b => b.sport === 'soccer').length },
               { value: 'baseball' as const, label: '야구', emoji: '⚾', cnt: settled.filter(b => b.sport === 'baseball').length },
               { value: 'basketball' as const, label: '농구', emoji: '🏀', cnt: settled.filter(b => b.sport === 'basketball').length },
               { value: 'volleyball' as const, label: '배구', emoji: '🏐', cnt: settled.filter(b => b.sport === 'volleyball').length },
               { value: 'hockey' as const, label: '하키', emoji: '🏒', cnt: settled.filter(b => b.sport === 'hockey').length },
-              { value: 'esports' as const, label: 'LOL', emoji: '🎮', cnt: settled.filter(b => b.sport === 'esports').length },
               { value: 'live' as const, label: '라이브', emoji: '🔴', cnt: periodAll.filter(b => b.is_live && b.result !== 'pending').length },
+              { value: 'all' as const, label: '전체', emoji: '📊', cnt: settled.length },
             ]).map(s => (
               <button key={s.value}
                 onClick={() => setActiveSport(s.value)}

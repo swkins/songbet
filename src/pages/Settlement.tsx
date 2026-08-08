@@ -60,15 +60,16 @@ function DepositSummary({ sites, cashflows, rateInfo }: {
   rateInfo: { rate: number } | null
 }) {
   const today = dayjs().format('YYYY-MM-DD')
-  const [mode, setMode] = useState<'week' | 'month' | 'custom'>('week')
+  const [mode, setMode] = useState<'week' | 'twoWeek' | 'month' | 'custom'>('week')
   const [customFrom, setCustomFrom] = useState(today)
   const [customTo, setCustomTo] = useState(today)
   const weekStart  = dayjs().startOf('isoWeek').format('YYYY-MM-DD')
   const weekEnd    = dayjs().endOf('isoWeek').format('YYYY-MM-DD')
+  const twoWeekStart = dayjs().subtract(13, 'day').format('YYYY-MM-DD') // 오늘 포함 최근 14일
   const monthStart = dayjs().startOf('month').format('YYYY-MM-DD')
   const monthEnd   = dayjs().endOf('month').format('YYYY-MM-DD')
-  const from = mode === 'week' ? weekStart : mode === 'month' ? monthStart : customFrom
-  const to   = mode === 'week' ? weekEnd   : mode === 'month' ? monthEnd   : customTo
+  const from = mode === 'week' ? weekStart : mode === 'twoWeek' ? twoWeekStart : mode === 'month' ? monthStart : customFrom
+  const to   = mode === 'week' ? weekEnd   : mode === 'twoWeek' ? today        : mode === 'month' ? monthEnd   : customTo
   const filtered = cashflows.filter(c => c.type === 'expense' && c.flow_date >= from && c.flow_date <= to)
 
   function toKrwAmt(c: typeof filtered[0]): number {
@@ -84,13 +85,13 @@ function DepositSummary({ sites, cashflows, rateInfo }: {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, flexWrap: 'wrap', gap: 6 }}>
         <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.8px' }}>입금 현황</div>
         <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-          {(['week', 'month', 'custom'] as const).map(m => (
+          {(['week', 'twoWeek', 'month', 'custom'] as const).map(m => (
             <button key={m} onClick={() => setMode(m)} style={{
               fontSize: 9, fontWeight: 700, padding: '2px 7px', borderRadius: 4, border: '1px solid', cursor: 'pointer', fontFamily: 'var(--font-body)',
               background: mode === m ? 'var(--gold-bg)' : 'none',
               borderColor: mode === m ? 'var(--gold-border)' : 'var(--border)',
               color: mode === m ? 'var(--gold)' : 'var(--text-muted)',
-            }}>{m === 'week' ? '이번주' : m === 'month' ? '한달' : '기간설정'}</button>
+            }}>{m === 'week' ? '이번주' : m === 'twoWeek' ? '2주' : m === 'month' ? '한달' : '기간설정'}</button>
           ))}
         </div>
       </div>

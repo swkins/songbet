@@ -4,6 +4,7 @@ import { logAction } from '../lib/logger'
 import type { Bet, Site, Sport, Market, BetResult, GameRolling } from '../types'
 import { inferBaseballLeague, inferSoccerLeague, buildLeagueCandidates, suggestLeagueCandidates, type LeagueOverride, type LeagueCandidate } from '../lib/league'
 import { buildTeamCandidates, suggestTeamCandidates, getTeamInsight, getEsportsLeague, type TeamCandidate, type BetLite } from '../lib/teamInsight'
+import { fetchTodayTomorrowLolMatches, type UpcomingLolMatch } from '../lib/lolSchedule'
 import { sportGlyph } from '../components/SportIcons'
 import dayjs from 'dayjs'
 import isoWeek from 'dayjs/plugin/isoWeek'
@@ -17,12 +18,11 @@ import {
 } from 'lucide-react'
 
 const SPORTS: { value: Sport; label: string }[] = [
+  { value: 'esports',    label: 'LOL'    },
   { value: 'soccer',     label: '축구'   },
   { value: 'baseball',   label: '야구'   },
   { value: 'basketball', label: '농구'   },
   { value: 'volleyball', label: '배구'   },
-  { value: 'hockey',     label: '하키'   },
-  { value: 'esports',    label: 'LOL'    },
   { value: 'other',      label: '기타'   },
 ]
 
@@ -51,6 +51,127 @@ function SportButtonGroup({ value, onChange }: { value: string; onChange: (v: st
           </button>
         )
       })}
+    </div>
+  )
+}
+
+const HANDICAP_LINES_BY_BESTOF: Record<number, number[]> = {
+  3: [1.5],
+  5: [1.5, 2.5],
+}
+
+/* ── LOL 경기 선택 + 마켓(승패/핸디캡/세트별 승) 선택 UI ──
+   기존 "리그 입력 + 경기 내용 자유입력"을 대체한다. 여기서 content/league를 확정하면
+   그 아래(배당/금액 입력·등록 버튼)는 손대지 않고 그대로 이어서 쓴다. */
+function LolMatchPicker({ match, onSelectMatch, onChangeMatch, pickLabel, onPick }: {
+  match: UpcomingLolMatch | null
+  onSelectMatch: (m: UpcomingLolMatch) => void
+  onChangeMatch: () => void
+  pickLabel: string | null
+  onPick: (label: string) => void
+}) {
+  const [matches, setMatches] = useState<UpcomingLolMatch[] | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(false)
+  const [tab, setTab] = useState<'all' | number>('all')
+
+  useEffect(() => {
+    if (match || matches !== null) return
+    setLoading(true); setError(false)
+    fetchTodayTomorrowLolMatches()
+      .then(m => { setMatches(m); setLoading(false) })
+      .catch(() => { setError(true); setLoading(false) })
+  }, [match, matches])
+
+  useEffect(() => { setTab('all') }, [match])
+
+  if (!match) {
+    return (
+      <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: 8, background: 'var(--bg-elevated)' }}>
+        <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 6 }}>오늘·내일 LOL 경기</div>
+        {loading && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0', textAlign: 'center' }}>일정 불러오는 중...</div>}
+        {error && (
+          <div style={{ fontSize: 11, color: 'var(--red)', padding: '8px 0', textAlign: 'center' }}>
+            일정을 불러오지 못했습니다
+            <button type="button" onClick={() => setMatches(null)} style={{ marginLeft: 6, fontSize: 10, color: 'var(--gold)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>재시도</button>
+          </div>
+        )}
+        {!loading && !error && matches && matches.length === 0 && (
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0', textAlign: 'center' }}>오늘·내일 예정된 경기가 없습니다</div>
+        )}
+        {!loading && matches && matches.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 220, overflowY: 'auto' }}>
+            {matches.map(m => {
+              const d = new Date(m.startTime)
+              const isToday = d.toDateString() === new Date().toDateString()
+              const timeLabel = `${isToday ? '오늘' : '내일'} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+              return (
+                <button key={m.id} type="button" onClick={() => onSelectMatch(m)}
+                  style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg-card)', cursor: 'pointer', textAlign: 'left', fontFamily: 'var(--font-body)' }}>
+                  <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--gold)', flexShrink: 0, width: 44 }}>{m.leagueLabel}</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {m.teamACode || m.teamA} vs {m.teamBCode || m.teamB}
+                  </span>
+                  <span style={{ fontSize: 9, color: 'var(--text-muted)', flexShrink: 0 }}>{timeLabel}</span>
+                </button>
+              )
+            })}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  const nameA = match.teamACode || match.teamA
+  const nameB = match.teamBCode || match.teamB
+  const lines = HANDICAP_LINES_BY_BESTOF[match.bestOf] ?? [1.5]
+  const setTabs = Array.from({ length: match.bestOf === 5 ? 5 : 3 }, (_, i) => i + 1)
+
+  function btnStyle(selected: boolean): React.CSSProperties {
+    return {
+      padding: '7px 4px', borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-body)',
+      border: `1px solid ${selected ? 'var(--gold-border)' : 'var(--border)'}`,
+      background: selected ? 'var(--gold-bg)' : 'var(--bg-card)',
+      color: selected ? 'var(--gold)' : 'var(--text-secondary)',
+    }
+  }
+
+  return (
+    <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: 8, background: 'var(--bg-elevated)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+        <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--gold)' }}>{match.leagueLabel}</span>
+        <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-primary)', flex: 1 }}>{nameA} vs {nameB}</span>
+        <button type="button" onClick={onChangeMatch} style={{ fontSize: 9, color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>경기 변경</button>
+      </div>
+      <div style={{ display: 'flex', gap: 4, marginBottom: 6, flexWrap: 'wrap' }}>
+        <button type="button" onClick={() => setTab('all')} style={btnStyle(tab === 'all')}>전체</button>
+        {setTabs.map(n => (
+          <button key={n} type="button" onClick={() => setTab(n)} style={btnStyle(tab === n)}>{n}세트</button>
+        ))}
+      </div>
+
+      {tab === 'all' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
+            <button type="button" onClick={() => onPick(`${nameA} 승`)} style={btnStyle(pickLabel === `${nameA} 승`)}>{nameA} 승</button>
+            <button type="button" onClick={() => onPick(`${nameB} 승`)} style={btnStyle(pickLabel === `${nameB} 승`)}>{nameB} 승</button>
+          </div>
+          {lines.map(line => (
+            <div key={line} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 4 }}>
+              <button type="button" onClick={() => onPick(`${nameA} -${line}`)} style={btnStyle(pickLabel === `${nameA} -${line}`)}>{nameA} -{line}</button>
+              <button type="button" onClick={() => onPick(`${nameA} +${line}`)} style={btnStyle(pickLabel === `${nameA} +${line}`)}>{nameA} +{line}</button>
+              <button type="button" onClick={() => onPick(`${nameB} -${line}`)} style={btnStyle(pickLabel === `${nameB} -${line}`)}>{nameB} -{line}</button>
+              <button type="button" onClick={() => onPick(`${nameB} +${line}`)} style={btnStyle(pickLabel === `${nameB} +${line}`)}>{nameB} +{line}</button>
+            </div>
+          ))}
+        </div>
+      )}
+      {typeof tab === 'number' && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
+          <button type="button" onClick={() => onPick(`${nameA} ${tab}세트 승`)} style={btnStyle(pickLabel === `${nameA} ${tab}세트 승`)}>{nameA} {tab}세트 승</button>
+          <button type="button" onClick={() => onPick(`${nameB} ${tab}세트 승`)} style={btnStyle(pickLabel === `${nameB} ${tab}세트 승`)}>{nameB} {tab}세트 승</button>
+        </div>
+      )}
     </div>
   )
 }
@@ -737,11 +858,14 @@ function SingleBetForm({ site, onClose, onBet, onDoubleBet, defaultSport, baseba
 }) {
   const isusd = site.currency === 'usd'; const unit = isusd ? '$' : '원'
   const defaultAmount = site.default_stake > 0 ? String(site.default_stake) : (isusd ? '5' : '10000')
-  const [sport, setSport]       = useState<string>(defaultSport || 'soccer')
+  const [sport, setSport]       = useState<string>(defaultSport || 'esports')
   const [sportTouched, setSportTouched] = useState(false)
   const [content, setContent]   = useState('')
   const [league, setLeague]     = useState('')
   const [leagueTouched, setLeagueTouched] = useState(false)
+  // LOL 전용: 경기 선택 + 마켓(승패/핸디캡/세트별 승) 선택. 여기서 확정되면 content/league에 반영된다.
+  const [lolMatch, setLolMatch] = useState<UpcomingLolMatch | null>(null)
+  const [lolPick, setLolPick]   = useState<string | null>(null)
   // 경기 내용 우측 + 버튼으로 켜는 두 번째 경기(두폴). 배당/금액은 공유하고 경기 내용·리그만 별도.
   const [showLeg2, setShowLeg2] = useState(false)
   const [content2, setContent2] = useState('')
@@ -778,6 +902,19 @@ function SingleBetForm({ site, onClose, onBet, onDoubleBet, defaultSport, baseba
     if (s) setLeague2(s)
   }, [content2, sport, showLeg2, league2Touched, baseballOverrides, soccerOverrides, allBetsHistory])
 
+  // LOL: 경기 고르면 리그가 바로 정해지고, 마켓(승패/핸디캡/세트승)을 고르면 content가 확정된다.
+  useEffect(() => {
+    if (!lolMatch) return
+    setLeague(lolMatch.league); setLeagueTouched(true)
+  }, [lolMatch])
+  useEffect(() => {
+    if (lolPick != null) setContent(lolPick)
+  }, [lolPick])
+  // 종목을 LOL이 아닌 걸로 바꾸면 선택 상태 초기화 (다시 LOL로 돌아왔을 때 깨끗하게 새로 고르도록)
+  useEffect(() => {
+    if (sport !== 'esports' && (lolMatch || lolPick)) { setLolMatch(null); setLolPick(null); setContent(''); setLeagueTouched(false) }
+  }, [sport, lolMatch, lolPick])
+
   function handleOdds(raw: string) {
     const clean = raw.replace(/[^0-9.]/g, '')
     if (/^\d{3}$/.test(clean)) setOddsRaw((Number(clean) / 100).toFixed(2))
@@ -804,28 +941,40 @@ function SingleBetForm({ site, onClose, onBet, onDoubleBet, defaultSport, baseba
   return (
     <div className="inline-bet-form">
       <SportButtonGroup value={sport} onChange={v => { setSport(v); setSportTouched(true); setLeagueTouched(false); setLeague2Touched(false); contentRef.current?.focus() }} />
-      <LeagueInput placeholder={showLeg2 ? '리그 ①' : '리그 (자동 추론, 직접 입력 가능)'} value={league}
-        onChange={v => { setLeague(v); setLeagueTouched(true) }}
-        candidates={leagueCandidates}
-        style={{ fontSize: 11 }} />
-      <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <TeamContentInput inputRef={contentRef} placeholder="경기 내용" value={content} onChange={setContent}
-            candidates={teamCandidates} allBets={allBetsHistory} autoFocus onEnter={submit} />
-        </div>
-        <button type="button" title={showLeg2 ? '두 번째 경기 제거' : '두 번째 경기 추가 (두폴)'} onClick={toggleLeg2}
-          style={{ width: 34, height: 34, flexShrink: 0, borderRadius: 'var(--radius-sm)', border: `1px solid ${showLeg2 ? 'var(--purple-border)' : 'var(--border)'}`, background: showLeg2 ? 'var(--purple-bg)' : 'var(--bg-elevated)', color: showLeg2 ? 'var(--purple)' : 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <Plus size={15} style={{ transform: showLeg2 ? 'rotate(45deg)' : 'none', transition: 'transform 0.15s' }} />
-        </button>
-      </div>
-      {showLeg2 && (
+      {sport === 'esports' ? (
+        <LolMatchPicker
+          match={lolMatch}
+          onSelectMatch={m => { setLolMatch(m); setLolPick(null); setContent('') }}
+          onChangeMatch={() => { setLolMatch(null); setLolPick(null); setContent(''); setLeagueTouched(false) }}
+          pickLabel={lolPick}
+          onPick={label => setLolPick(label)}
+        />
+      ) : (
         <>
-          <LeagueInput placeholder="리그 ②" value={league2}
-            onChange={v => { setLeague2(v); setLeague2Touched(true) }}
+          <LeagueInput placeholder={showLeg2 ? '리그 ①' : '리그 (자동 추론, 직접 입력 가능)'} value={league}
+            onChange={v => { setLeague(v); setLeagueTouched(true) }}
             candidates={leagueCandidates}
-            style={{ fontSize: 11, marginTop: 4 }} />
-          <TeamContentInput placeholder="경기 내용 ②" value={content2} onChange={setContent2}
-            candidates={teamCandidates} allBets={allBetsHistory} onEnter={submit} />
+            style={{ fontSize: 11 }} />
+          <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <TeamContentInput inputRef={contentRef} placeholder="경기 내용" value={content} onChange={setContent}
+                candidates={teamCandidates} allBets={allBetsHistory} autoFocus onEnter={submit} />
+            </div>
+            <button type="button" title={showLeg2 ? '두 번째 경기 제거' : '두 번째 경기 추가 (두폴)'} onClick={toggleLeg2}
+              style={{ width: 34, height: 34, flexShrink: 0, borderRadius: 'var(--radius-sm)', border: `1px solid ${showLeg2 ? 'var(--purple-border)' : 'var(--border)'}`, background: showLeg2 ? 'var(--purple-bg)' : 'var(--bg-elevated)', color: showLeg2 ? 'var(--purple)' : 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Plus size={15} style={{ transform: showLeg2 ? 'rotate(45deg)' : 'none', transition: 'transform 0.15s' }} />
+            </button>
+          </div>
+          {showLeg2 && (
+            <>
+              <LeagueInput placeholder="리그 ②" value={league2}
+                onChange={v => { setLeague2(v); setLeague2Touched(true) }}
+                candidates={leagueCandidates}
+                style={{ fontSize: 11, marginTop: 4 }} />
+              <TeamContentInput placeholder="경기 내용 ②" value={content2} onChange={setContent2}
+                candidates={teamCandidates} allBets={allBetsHistory} onEnter={submit} />
+            </>
+          )}
         </>
       )}
       <input className="form-input inline-bet-input" placeholder="배당 (125=1.25)" value={oddsRaw}
@@ -1558,7 +1707,7 @@ export default function Dashboard() {
                           ) : openFormType === 'game' ? (
                             <GameRollingForm site={site} onClose={() => setOpenFormSiteId(null)} onSubmit={amt => submitGameRolling(site, amt)} />
                           ) : (
-                            <SingleBetForm site={site} defaultSport={pending.slice(-1)[0]?.sport ?? 'soccer'} onClose={() => setOpenFormSiteId(null)} onBet={(sp,ct,od,amt,lv,lg) => submitBet(site,sp,ct,od,amt,lv,lg)} onDoubleBet={(sp,c1,c2,od,amt,lg1,lg2) => submitDoubleBet(site,sp,c1,c2,od,amt,lg1,lg2)} baseballOverrides={baseballOverrides} soccerOverrides={soccerOverrides} teamCandidates={teamCandidates} allBetsHistory={allBetsHistory} leagueCandidates={leagueCandidates} />
+                            <SingleBetForm site={site} defaultSport={pending.slice(-1)[0]?.sport ?? 'esports'} onClose={() => setOpenFormSiteId(null)} onBet={(sp,ct,od,amt,lv,lg) => submitBet(site,sp,ct,od,amt,lv,lg)} onDoubleBet={(sp,c1,c2,od,amt,lg1,lg2) => submitDoubleBet(site,sp,c1,c2,od,amt,lg1,lg2)} baseballOverrides={baseballOverrides} soccerOverrides={soccerOverrides} teamCandidates={teamCandidates} allBetsHistory={allBetsHistory} leagueCandidates={leagueCandidates} />
                           )}
                         </div>
                       )}
