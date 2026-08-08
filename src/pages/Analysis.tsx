@@ -628,6 +628,7 @@ function RecentMatchRow({ teamId, pendingTeamName, leagueCode, onTeamCreated, te
   // 그대로 두고, 어느 쪽 열에 누구 이름과 입력칸을 보여줄지만 바꾼다.
   function toggleSideSwap() {
     setSideSwapped(v => !v)
+    requestAnimationFrame(() => durationMinRef.current?.focus())
   }
 
   async function saveSet() {
