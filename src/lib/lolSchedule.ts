@@ -92,11 +92,19 @@ async function fetchLiveFromLolesports(): Promise<UpcomingLolMatch[]> {
   return results
 }
 
+// 7일 지난 캐시 행 삭제 (오늘·내일 것만 필요하니 일주일이면 충분히 여유 있게 남겨두는 것)
+async function purgeOldScheduleCache() {
+  const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - 7)
+  const cutoffStr = `${cutoff.getFullYear()}-${String(cutoff.getMonth() + 1).padStart(2, '0')}-${String(cutoff.getDate()).padStart(2, '0')}`
+  await supabase.from('lol_schedule_cache').delete().lt('cache_date', cutoffStr)
+}
+
 // 오늘 00:00 ~ 내일 23:59(로컬 시각 기준) 사이에 열리는 LoL 경기를 모든 리그 통합해서 가져온다.
 // 순서: 세션 메모리 캐시 → Supabase 캐시(오늘 날짜 행) → (둘 다 없을 때만) 실제 lolesports API 호출 후 Supabase에 저장.
 // 날짜가 바뀌면 자동으로 새로 호출된다(cache_date가 today와 안 맞으면 무시).
 export async function fetchTodayTomorrowLolMatches(opts?: { forceRefresh?: boolean }): Promise<UpcomingLolMatch[]> {
   const today = todayKey()
+  purgeOldScheduleCache() // 매번 기다릴 필요 없어서 결과를 기다리지 않고 백그라운드로 흘려보냄
 
   if (!opts?.forceRefresh) {
     if (memCache && memCache.date === today) return memCache.matches
