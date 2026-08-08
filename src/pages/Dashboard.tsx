@@ -134,6 +134,7 @@ function LolMatchPicker({ match, onSelectMatch, onChangeMatch, pickLabel, onPick
                       <button key={m.id} type="button" onClick={() => onSelectMatch(m)}
                         style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg-card)', cursor: 'pointer', textAlign: 'left', fontFamily: 'var(--font-body)', flexShrink: 0 }}>
                         <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--gold)', flexShrink: 0, width: 44 }}>{m.leagueLabel}</span>
+                        <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', flexShrink: 0, background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 3, padding: '1px 4px' }}>BO{m.bestOf}</span>
                         <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           {m.teamACode || m.teamA} vs {m.teamBCode || m.teamB}
                         </span>
@@ -168,7 +169,7 @@ function LolMatchPicker({ match, onSelectMatch, onChangeMatch, pickLabel, onPick
     <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: 8, background: 'var(--bg-elevated)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
         <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--gold)' }}>{match.leagueLabel}</span>
-        <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-primary)', flex: 1 }}>{nameA} vs {nameB}</span>
+        <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-primary)', flex: 1 }}>{nameA} vs {nameB} <span style={{ fontWeight: 700, color: 'var(--text-muted)', fontSize: 9 }}>BO{match.bestOf}</span></span>
         <button type="button" onClick={onChangeMatch} style={{ fontSize: 9, color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>경기 변경</button>
       </div>
       <div style={{ display: 'flex', gap: 4, marginBottom: 6, flexWrap: 'wrap' }}>
@@ -891,6 +892,7 @@ function SingleBetForm({ site, onClose, onBet, onDoubleBet, defaultSport, baseba
   const [isLive, setIsLive]     = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const contentRef = useRef<HTMLInputElement>(null)
+  const oddsRef = useRef<HTMLInputElement>(null)
   const oddsV = parseOdds(oddsRaw)
   const stakeN = isusd ? (Number(amount) || 0) : (Number(amount.replace(/,/g, "")) || 0)
   const hotkeys = isusd ? [5, 10] : [10000, 20000, 50000]
@@ -923,7 +925,11 @@ function SingleBetForm({ site, onClose, onBet, onDoubleBet, defaultSport, baseba
     setLeague(lolMatch.league); setLeagueTouched(true)
   }, [lolMatch])
   useEffect(() => {
-    if (lolPick != null) setContent(lolPick)
+    if (lolPick != null) {
+      setContent(lolPick)
+      // 마켓(승패/핸디캡/세트승)을 고르면 바로 배당을 입력할 수 있게 커서를 옮겨준다
+      requestAnimationFrame(() => oddsRef.current?.focus())
+    }
   }, [lolPick])
   // 종목을 LOL이 아닌 걸로 바꾸면 선택 상태 초기화 (다시 LOL로 돌아왔을 때 깨끗하게 새로 고르도록)
   useEffect(() => {
@@ -992,7 +998,7 @@ function SingleBetForm({ site, onClose, onBet, onDoubleBet, defaultSport, baseba
           )}
         </>
       )}
-      <input className="form-input inline-bet-input" placeholder="배당 (125=1.25)" value={oddsRaw}
+      <input ref={oddsRef} className="form-input inline-bet-input" placeholder="배당 (125=1.25)" value={oddsRaw}
         onChange={e => handleOdds(e.target.value)}
         onKeyDown={e => e.key === 'Enter' && submit()}
         onBlur={e => { const n = parseOdds(e.target.value); if (n > 0) setOddsRaw(n.toFixed(2)) }} />

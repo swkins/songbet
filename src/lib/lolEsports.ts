@@ -708,137 +708,72 @@ export function computeBothSidesPerfection(g: GameStatsInput): { team1: number; 
   return { team1: computePerfectionScore(g), team2: computePerfectionScore(swapPerspective(g)) }
 }
 
-// ─── 팀 체급 점수: 최근일수록 가중치를 더 주는 가중평균 방식 ────────────
-// (기존엔 라이엇 GPR 공식처럼 경기 순서대로 하나씩 누적 갱신했는데, 그러면 최근 경기 하나에 점수가
-// 크게 출렁이는 느낌이 있었다. 대신 "모든 경기를 다 반영하되, 최근 경기일수록 가중치를 지수적으로
-// 크게 준다"는 방식으로 바꿨다 — 반감기(half-life) 60일: 60일 지난 경기는 가중치가 절반, 120일
-// 지난 경기는 1/4... 이렇게 매끄럽게 줄어든다. 계산상 반감기 60일이면 최근 약 2개월 안의 경기가
-// 전체 가중치의 대략 절반을 차지하게 된다.)
+// ─── 팀 체급 점수: 라이엇 공식 GPR 방식(순차 Elo)을 그대로 적용 ──────
+// lolesports.com이 공개한 실제 공식을 그대로 채택:
+//   P_after = P_before + I × (W - We)
+//   We = 1 / (10^(-dr/scale) + 1)      (dr = 나-상대 레이팅 차이)
+// 경기 중요도(I)는 라이엇처럼 플레이인/스테이지/플레이오프로 세분화하지 않고 고정값 하나로 통일했다.
+// 핵심은 "리그 전체 경기를 시간순으로 하나의 타임라인에서 함께 시뮬레이션"한다는 점 —
+// 팀별로 따로 계산하지 않는다. 그래야 매 경기 시점의 상대 레이팅이 정확하고,
+// "이겼는데도 평균이 내려가는" 문제가 구조적으로 사라진다(이기면 항상 최소한 조금은 오름).
 export interface TeamPowerScore {
   powerScore: number // 0~100
   winRate: number
   gamesAnalyzed: number
 }
 
-const ELO_SCALE = 25   // 파워점수 차이를 승률로 변환할 때 쓰는 로지스틱 기울기(powerScoreMatchupProbability에서 사용)
-export const POWER_HALF_LIFE_DAYS = 60   // 가중치가 절반으로 줄어드는 기간(일)
-export const POWER_WINDOW_DAYS = 180     // 이보다 오래된 경기는 계산에서 제외(6개월 — DB에서 지우진 않고 계산에서만 뺀다)
-export const POWER_RECENT_FORM_WEIGHT = 0.8  // 최종 점수 중 "반감기 가중평균(최근폼)"이 차지하는 비중. 나머지(1-이값)는 그 6개월 구간의 단순평균 — 표본이 적을 때 노이즈를 눌러주는 안정판 역할.
-const YEAR_BOUNDARY_DISCOUNT = 0.6       // 연도가 바뀌면(=로스터 개편이 몰리는 시점) 그 전 연도 경기 가중치에 추가로 곱하는 배율
+const ELO_SCALE = 25   // dr(레이팅 차이)를 나누는 값 — 0~100 스케일에 맞춘 로지스틱 기울기
+const ELO_I = 8         // 경기 중요도(고정값, 단계 구분 없음)
 
-export interface WeightedMatchRecord {
+export interface EloMatchRecord {
   teamAId: string
   teamBId: string
+  winnerIsA: boolean
   matchStartTime: string
   gameNumber: number
-  winnerIsA: boolean
-  perfectionA: number // 0~100, computeBothSidesPerfection 결과(팀A 관점 플레이 점수)
-  perfectionB: number
 }
 
-export interface WeightedGameLog {
+export interface EloGameLog {
   teamId: string
   opponentId: string
   matchStartTime: string
   gameNumber: number
   won: boolean
-  gameScore: number   // 이 경기 하나만 놓고 본 체급 점수(0~100) — 승패 + 얼마나 압도적으로 이겼는지
-  weight: number       // "지금" 시점 기준 이 경기의 가중치(0~1, 최신일수록 1에 가까움)
-  daysAgo: number      // 지금으로부터 며칠 전 경기인지
-  ratingAsOf: number   // 그 경기 시점까지의 데이터만으로 계산한 그 시점 기준 파워 점수(히스토리 차트용)
+  ratingBefore: number
+  opponentRatingBefore: number
+  expected: number   // We (기대승률)
+  delta: number       // 이번 경기로 움직인 값
+  ratingAfter: number
 }
 
-export interface WeightedPowerResult {
-  ratings: Record<string, number>
-  log: Record<string, WeightedGameLog[]> // 팀별로 시간순 정렬
+export interface EloSimulationResult {
+  finalRatings: Record<string, number>
+  log: EloGameLog[] // 팀 관점별로 한 줄씩(경기당 2줄), 시간순 정렬됨
 }
 
-// 반감기 감쇠 + "연도가 다르면" 추가 할인. LoL은 보통 연말~연초 사이에 로스터 개편이 몰리기 때문에,
-// 단순히 날짜 차이만 보는 것보다 "작년 경기"에 한 번 더 페널티를 주는 게 실제 폼 변화에 더 가깝다.
-function recencyWeight(matchStartTime: string, referenceTimeMs: number, halfLifeDays: number): number {
-  const daysAgo = Math.max(0, (referenceTimeMs - new Date(matchStartTime).getTime()) / 86400000)
-  let w = Math.pow(0.5, daysAgo / halfLifeDays)
-  const matchYear = new Date(matchStartTime).getUTCFullYear()
-  const refYear = new Date(referenceTimeMs).getUTCFullYear()
-  if (matchYear !== refYear) w *= YEAR_BOUNDARY_DISCOUNT
-  return w
-}
-
-// 경기 하나의 "체급 점수"(0~100): 승패를 기본 축으로 삼고(이기면 62점대, 지면 38점대에서 출발),
-// 그 경기의 플레이 점수 차이(얼마나 압도적으로 이기고 졌는지)를 더해 세분화한다.
-// 압도적인 승리는 신승보다 높게, 신승은 압도적 패배보다는 높게 나온다.
-function gameScoreFor(won: boolean, ownPerfection: number, oppPerfection: number): number {
-  const base = won ? 62 : 38
-  const marginAdj = (ownPerfection - oppPerfection) / 5   // 플레이 점수차(-100~100)를 대략 -20~20으로 눌러서 반영
-  return Math.max(5, Math.min(95, base + marginAdj))
-}
-
-// matches: 리그 전체 세트 기록(중복 없이 한 방향씩만). fallback: 경기가 하나도 없는 팀에 쓸 기본값(GPR 기반).
-export function computeWeightedPowerRatings(
-  matches: WeightedMatchRecord[],
-  fallback: Record<string, number>,
-  referenceTimeMs: number = Date.now(),
-  halfLifeDays: number = POWER_HALF_LIFE_DAYS,
-  windowDays: number = POWER_WINDOW_DAYS,
-  recentFormWeight: number = POWER_RECENT_FORM_WEIGHT,
-): WeightedPowerResult {
-  type Entry = { teamId: string; opponentId: string; matchStartTime: string; gameNumber: number; won: boolean; gameScore: number }
-  const byTeam: Record<string, Entry[]> = {}
-  for (const m of matches) {
-    // 6개월(windowDays)보다 오래된 경기는 계산에서 아예 제외 — DB에서 지우는 게 아니라 이 계산에서만 뺀다.
-    const daysAgo = (referenceTimeMs - new Date(m.matchStartTime).getTime()) / 86400000
-    if (daysAgo > windowDays) continue
-    const scoreA = gameScoreFor(m.winnerIsA, m.perfectionA, m.perfectionB)
-    const scoreB = gameScoreFor(!m.winnerIsA, m.perfectionB, m.perfectionA)
-    ;(byTeam[m.teamAId] ??= []).push({ teamId: m.teamAId, opponentId: m.teamBId, matchStartTime: m.matchStartTime, gameNumber: m.gameNumber, won: m.winnerIsA, gameScore: scoreA })
-    ;(byTeam[m.teamBId] ??= []).push({ teamId: m.teamBId, opponentId: m.teamAId, matchStartTime: m.matchStartTime, gameNumber: m.gameNumber, won: !m.winnerIsA, gameScore: scoreB })
+// initialRatings: 팀별 시작 레이팅(보통 GPR 기반 0~100 정규화 값). matches: 리그 전체 경기(중복 없이 한 방향씩만).
+export function simulateLeagueElo(initialRatings: Record<string, number>, matches: EloMatchRecord[]): EloSimulationResult {
+  const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
+  const ratings: Record<string, number> = { ...initialRatings }
+  const log: EloGameLog[] = []
+  const sorted = [...matches].sort((a, b) =>
+    new Date(a.matchStartTime).getTime() - new Date(b.matchStartTime).getTime() || a.gameNumber - b.gameNumber
+  )
+  for (const m of sorted) {
+    const ra = ratings[m.teamAId] ?? 50
+    const rb = ratings[m.teamBId] ?? 50
+    const dr = ra - rb
+    const we = 1 / (Math.pow(10, -dr / ELO_SCALE) + 1)
+    const w = m.winnerIsA ? 1 : 0
+    const delta = ELO_I * (w - we)
+    const raAfter = clamp(ra + delta, 0, 100)
+    const rbAfter = clamp(rb - delta, 0, 100)
+    ratings[m.teamAId] = raAfter
+    ratings[m.teamBId] = rbAfter
+    log.push({ teamId: m.teamAId, opponentId: m.teamBId, matchStartTime: m.matchStartTime, gameNumber: m.gameNumber, won: m.winnerIsA, ratingBefore: ra, opponentRatingBefore: rb, expected: we, delta, ratingAfter: raAfter })
+    log.push({ teamId: m.teamBId, opponentId: m.teamAId, matchStartTime: m.matchStartTime, gameNumber: m.gameNumber, won: !m.winnerIsA, ratingBefore: rb, opponentRatingBefore: ra, expected: 1 - we, delta: -delta, ratingAfter: rbAfter })
   }
-  const ratings: Record<string, number> = {}
-  const log: Record<string, WeightedGameLog[]> = {}
-  for (const teamId of Object.keys(byTeam)) {
-    const entries = byTeam[teamId].sort((a, b) =>
-      new Date(a.matchStartTime).getTime() - new Date(b.matchStartTime).getTime() || a.gameNumber - b.gameNumber
-    )
-    // 최종 점수 = 반감기 가중평균(recentFormWeight 비중, "최근폼") + 이 구간(6개월) 단순평균(나머지 비중, "기본 체급" 안정판)
-    let wSum = 0, wScoreSum = 0, plainSum = 0
-    for (const e of entries) {
-      const w = recencyWeight(e.matchStartTime, referenceTimeMs, halfLifeDays)
-      wSum += w; wScoreSum += w * e.gameScore
-      plainSum += e.gameScore
-    }
-    if (wSum > 0) {
-      const weightedAvg = wScoreSum / wSum
-      const plainAvg = plainSum / entries.length
-      ratings[teamId] = recentFormWeight * weightedAvg + (1 - recentFormWeight) * plainAvg
-    } else {
-      ratings[teamId] = fallback[teamId] ?? 50
-    }
-
-    // 히스토리(차트/목록용): 각 경기 "그 시점"까지의 데이터만으로 계산한 가중평균 — 시간에 따른 폼 변화를 보여준다.
-    const teamLog: WeightedGameLog[] = []
-    for (let i = 0; i < entries.length; i++) {
-      const refTime = new Date(entries[i].matchStartTime).getTime()
-      let ws = 0, wss = 0, ps = 0
-      for (let j = 0; j <= i; j++) {
-        const w = recencyWeight(entries[j].matchStartTime, refTime, halfLifeDays)
-        ws += w; wss += w * entries[j].gameScore
-        ps += entries[j].gameScore
-      }
-      const ratingAsOf = ws > 0 ? recentFormWeight * (wss / ws) + (1 - recentFormWeight) * (ps / (i + 1)) : (fallback[teamId] ?? 50)
-      teamLog.push({
-        teamId, opponentId: entries[i].opponentId, matchStartTime: entries[i].matchStartTime, gameNumber: entries[i].gameNumber,
-        won: entries[i].won, gameScore: entries[i].gameScore,
-        weight: recencyWeight(entries[i].matchStartTime, referenceTimeMs, halfLifeDays),
-        daysAgo: Math.max(0, (referenceTimeMs - refTime) / 86400000),
-        ratingAsOf,
-      })
-    }
-    log[teamId] = teamLog
-  }
-  for (const teamId of Object.keys(fallback)) {
-    if (!(teamId in ratings)) ratings[teamId] = fallback[teamId]
-  }
-  return { ratings, log }
+  return { finalRatings: ratings, log }
 }
 
 // 두 팀의 체급 점수 차이를 승률로 변환 (Elo와 비슷한 로지스틱 곡선, 표본이 적을 수 있어 5~95%로 클램프)
