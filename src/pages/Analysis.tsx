@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import dayjs from 'dayjs'
 import { ChevronDown, ChevronUp, RefreshCw } from 'lucide-react'
 import {
-  SUPPORTED_LEAGUES, fetchRecentCompletedMatches, fetchGameDetailStats,
+  SUPPORTED_LEAGUES, fetchRecentCompletedMatches, fetchEventGames, fetchGameDetailStats,
   type CompletedMatch, type GameDetailStats,
 } from '../lib/lolResults'
 
@@ -15,14 +15,17 @@ function MatchRow({ m }: { m: CompletedMatch }) {
   const [open, setOpen] = useState(false)
   const [details, setDetails] = useState<(GameDetailStats | null)[] | null>(null)
   const [loading, setLoading] = useState(false)
+  const [noGames, setNoGames] = useState(false)
 
   async function toggle() {
     const next = !open
     setOpen(next)
-    if (next && details === null && m.gameIds.length > 0) {
+    if (next && details === null && !noGames) {
       setLoading(true)
-      const results = await Promise.all(m.gameIds.map(id => fetchGameDetailStats(id)))
-      setDetails(results.map((r, i) => r ? { ...r, gameNumber: i + 1 } : null))
+      const games = (await fetchEventGames(m.id)).filter(g => g.state === 'completed').sort((a, b) => a.number - b.number)
+      if (games.length === 0) { setNoGames(true); setLoading(false); return }
+      const results = await Promise.all(games.map(g => fetchGameDetailStats(g.id)))
+      setDetails(results.map((r, i) => r ? { ...r, gameNumber: games[i].number } : null))
       setLoading(false)
     }
   }
@@ -42,7 +45,7 @@ function MatchRow({ m }: { m: CompletedMatch }) {
       </div>
       {open && (
         <div style={{ padding: '0 4px 12px 26px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {m.gameIds.length === 0 && (
+          {noGames && (
             <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>이 경기의 세트별 상세 통계는 제공되지 않습니다.</div>
           )}
           {loading && <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>세트별 상세 통계 불러오는 중...</div>}

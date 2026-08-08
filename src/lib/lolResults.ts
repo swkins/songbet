@@ -25,7 +25,6 @@ export interface CompletedMatch {
   bestOf: number
   teamA: string; teamACode?: string; scoreA: number
   teamB: string; teamBCode?: string; scoreB: number
-  gameIds: string[] // 세트별 game id, 순서대로 (상세 통계 조회용). 못 얻으면 빈 배열.
 }
 
 export interface TeamGameStats {
@@ -82,7 +81,6 @@ export async function fetchRecentCompletedMatches(leagueCode: string, days = 7):
       sawWithinRange = true
       const teams = e.match?.teams ?? []
       if (teams.length < 2) continue
-      const games: any[] = e.match?.games ?? []
       results.push({
         id: e.match?.id ?? e.id,
         league: leagueCode, leagueLabel: meta.label,
@@ -90,7 +88,6 @@ export async function fetchRecentCompletedMatches(leagueCode: string, days = 7):
         bestOf: e.match?.strategy?.count ?? 3,
         teamA: teams[0]?.name || '?', teamACode: teams[0]?.code, scoreA: teams[0]?.result?.gameWins ?? 0,
         teamB: teams[1]?.name || '?', teamBCode: teams[1]?.code, scoreB: teams[1]?.result?.gameWins ?? 0,
-        gameIds: games.filter(g => g?.state === 'completed').sort((a, b) => (a.number ?? 0) - (b.number ?? 0)).map(g => String(g.id)),
       })
     }
     // 오래된 방향(older) 페이지 — 지정 기간을 다 못 채웠으면 계속 따라간다
@@ -100,6 +97,18 @@ export async function fetchRecentCompletedMatches(leagueCode: string, days = 7):
   }
   results.sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime())
   return results
+}
+
+// 경기(시리즈) 하나의 세트별 game id 목록을 가져온다. getSchedule 응답엔 이 정보가 없어서,
+// 경기 상세 전용 엔드포인트(getEventDetails)를 따로 불러야 한다 — 그래서 목록을 펼칠 때(lazy) 호출한다.
+export async function fetchEventGames(matchId: string): Promise<{ id: string; number: number; state: string }[]> {
+  try {
+    const res = await fetch(`${ESPORTS_API}/getEventDetails?hl=en-US&id=${matchId}`, { headers: { 'x-api-key': API_KEY } })
+    if (!res.ok) return []
+    const json = await res.json()
+    const games: any[] = json?.data?.event?.match?.games ?? []
+    return games.map(g => ({ id: String(g.id), number: g.number ?? 0, state: g.state }))
+  } catch { return [] }
 }
 
 // 세트 하나(gameId)의 최종 팀 스탯(킬/타워/억제기/내셔/드래곤/골드)을 livestats에서 가져온다.
