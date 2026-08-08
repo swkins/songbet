@@ -121,10 +121,6 @@ function RecentMatchesPanel({ leagueCode, events, loading, error, errorDetail, t
     })
   }, [matches, teams])
 
-  // 아직 추적 중이 아닌 팀(둘 다 미등록)이 나온 경기는, 어느 팀 관점으로 기록을 입력할지만 골라두고
-  // (DB에 아무것도 안 씀) 실제 팀 등록은 첫 세트를 저장하는 순간에만 이뤄진다(RecentMatchRow.saveSet).
-  const [trackingChoice, setTrackingChoice] = useState<Record<string, string>>({})
-
   return (
     <div className="card">
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
@@ -154,58 +150,21 @@ function RecentMatchesPanel({ leagueCode, events, loading, error, errorDetail, t
               isA: ov.isA,
             } : null)
             if (!resolved) {
-              const chosenName = trackingChoice[m.id]
-              if (!chosenName) {
-                // 자동 매칭 실패 — 아직 추적 중인 팀이 하나도 없는 경기. 여기서는 절대 팀을 등록하지 않고,
-                // 어느 팀 관점으로 기록을 입력할지만 고르게 한다. 실제 등록은 첫 세트를 저장할 때 일어난다.
-                return (
-                  <div key={m.id} style={{ padding: '6px 8px', background: 'var(--bg-elevated)', borderRadius: 6 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11 }}>
-                      <span style={{ color: 'var(--text-muted)', flexShrink: 0, width: 58 }}>{dayjs(m.startTime).format('MM/DD HH:mm')}</span>
-                      <span style={{ flex: 1, textAlign: 'right' }}>{m.codeA || m.teamA}</span>
-                      <span style={{ fontWeight: 800, color: 'var(--gold)', flexShrink: 0 }}>{m.scoreA} : {m.scoreB}</span>
-                      <span style={{ flex: 1 }}>{m.codeB || m.teamB}</span>
-                    </div>
-                    <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
-                      <button onClick={() => setTrackingChoice(prev => ({ ...prev, [m.id]: m.teamA }))} className="btn btn-ghost" style={{ flex: 1, fontSize: 9, padding: '4px 4px' }}>
-                        {m.codeA || m.teamA} 팀 등록하고 입력
-                      </button>
-                      <button onClick={() => setTrackingChoice(prev => ({ ...prev, [m.id]: m.teamB }))} className="btn btn-ghost" style={{ flex: 1, fontSize: 9, padding: '4px 4px' }}>
-                        {m.codeB || m.teamB} 팀 등록하고 입력
-                      </button>
-                    </div>
-                    {teams.length > 0 && (
-                      <select
-                        value=""
-                        onChange={e => {
-                          const teamId = e.target.value
-                          if (!teamId) return
-                          const chosen = teams.find(t => t.id === teamId)
-                          const isA = chosen ? (teamNameMatches(chosen, m.teamA) || teamNameMatches(chosen, m.codeA)) : true
-                          setOverrides(prev => ({ ...prev, [m.id]: { teamId, isA } }))
-                        }}
-                        style={{ width: '100%', marginTop: 4, fontSize: 10, padding: '3px 4px', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text-primary)', fontFamily: 'var(--font-body)' }}
-                      >
-                        <option value="">또는 이미 등록된 팀에 매칭하기 (이름 표기가 다른 경우)</option>
-                        {teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                      </select>
-                    )}
-                  </div>
-                )
-              }
-              // 관점을 골랐으면(아직 DB엔 등록 안 됨) 바로 기록 입력 화면으로 — 첫 세트를 저장하는 순간에만 팀이 등록된다.
-              const isA = chosenName === m.teamA
-              const pendingTeamScore = isA ? m.scoreA : m.scoreB
-              const pendingOppScore = isA ? m.scoreB : m.scoreA
+              // 자동 매칭 실패 — 아직 추적 중인 팀이 하나도 없는 경기. 버튼이나 선택 단계 없이,
+              // 다른 경기와 완전히 똑같이 바로 세트 기록 입력 화면으로 들어간다(팀A 관점 기본).
+              // 팀은 여기서 등록하지 않고, 첫 세트를 저장하는 순간에만 등록된다(RecentMatchRow.saveSet) —
+              // 이미 등록된 팀이면 그 팀을 그대로 쓰고 새로 만들지 않는다.
+              const pendingTeamScore = m.scoreA
+              const pendingOppScore = m.scoreB
               const codeA0 = m.codeA || m.teamA
               const codeB0 = m.codeB || m.teamB
               return (
-                <RecentMatchRow key={m.id} teamId={null} pendingTeamName={chosenName} leagueCode={leagueCode} onTeamCreated={onTeamCreated}
-                  teamName={chosenName}
-                  game={{ opponent: isA ? m.teamB : m.teamA, teamScore: pendingTeamScore, oppScore: pendingOppScore, startTime: m.startTime, bestOf: m.bestOf }}
+                <RecentMatchRow key={m.id} teamId={null} pendingTeamName={m.teamA} leagueCode={leagueCode} onTeamCreated={onTeamCreated}
+                  teamName={m.teamA}
+                  game={{ opponent: m.teamB, teamScore: pendingTeamScore, oppScore: pendingOppScore, startTime: m.startTime, bestOf: m.bestOf }}
                   displayA={codeA0} displayB={codeB0} scoreA={m.scoreA} scoreB={m.scoreB} teams={teams}
                   recordCount={0}
-                  teamCode={isA ? codeA0 : codeB0} opponentCode={isA ? codeB0 : codeA0} />
+                  teamCode={codeA0} opponentCode={codeB0} />
               )
             }
             const teamScore = resolved.isA ? m.scoreA : m.scoreB
