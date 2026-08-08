@@ -776,21 +776,8 @@ function InlineBetEditForm({ bet, site, onClose, onSave, baseballOverrides, socc
           예상 +{isusd ? '$' : ''}{(isusd ? (stakeN * (oddsV - 1)).toFixed(2) : Math.round(stakeN * (oddsV - 1)).toLocaleString())}{isusd ? '' : '원'}
         </div>
       )}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
-        <label onClick={() => setIsLive(p => !p)} style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', userSelect: 'none' }}>
-          <div style={{
-            width: 17, height: 17, borderRadius: 4, flexShrink: 0,
-            background: isLive ? '#f87171' : 'transparent',
-            border: `2px solid ${isLive ? '#f87171' : 'var(--border)'}`,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}>
-            {isLive && <span style={{ color: '#000', fontSize: 11, fontWeight: 900, lineHeight: 1 }}>✓</span>}
-          </div>
-          <span style={{ fontSize: 13, fontWeight: 700, color: isLive ? '#f87171' : 'var(--text-secondary)' }}>{isLive ? '🔴 라이브' : '라이브'}</span>
-        </label>
-      </div>
       <div style={{ display: 'flex', gap: 5 }}>
-        <button className="btn btn-primary" style={{ flex: 1, fontSize: 12, padding: '7px 0', justifyContent: 'center', background: isLive ? 'rgba(248,113,113,0.15)' : undefined, borderColor: isLive ? '#f87171' : undefined, color: isLive ? '#f87171' : undefined }}
+        <button className="btn btn-primary" style={{ flex: 1, fontSize: 12, padding: '7px 0', justifyContent: 'center' }}
           onClick={submit} disabled={!content || oddsV <= 0 || stakeN <= 0 || submitting}>
           {submitting ? '저장중...' : '수정 저장'}
         </button>
@@ -1041,25 +1028,10 @@ function SingleBetForm({ site, onClose, onBet, onDoubleBet, defaultSport, baseba
           예상 +{isusd ? '$' : ''}{(isusd ? (stakeN * (oddsV - 1)).toFixed(2) : Math.round(stakeN * (oddsV - 1)).toLocaleString())}{isusd ? '' : '원'}
         </div>
       )}
-      {!showLeg2 && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
-          <label onClick={() => setIsLive(p => !p)} style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', userSelect: 'none' }}>
-            <div style={{
-              width: 17, height: 17, borderRadius: 4, flexShrink: 0,
-              background: isLive ? '#f87171' : 'transparent',
-              border: `2px solid ${isLive ? '#f87171' : 'var(--border)'}`,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}>
-              {isLive && <span style={{ color: '#000', fontSize: 11, fontWeight: 900, lineHeight: 1 }}>✓</span>}
-            </div>
-            <span style={{ fontSize: 13, fontWeight: 700, color: isLive ? '#f87171' : 'var(--text-secondary)' }}>라이브</span>
-          </label>
-        </div>
-      )}
       <div style={{ display: 'flex', gap: 5 }}>
-        <button className="btn btn-primary" style={{ flex: 1, fontSize: 12, padding: '7px 0', justifyContent: 'center', background: isLive && !showLeg2 ? 'rgba(248,113,113,0.15)' : undefined, borderColor: isLive && !showLeg2 ? '#f87171' : undefined, color: isLive && !showLeg2 ? '#f87171' : undefined }}
+        <button className="btn btn-primary" style={{ flex: 1, fontSize: 12, padding: '7px 0', justifyContent: 'center' }}
           onClick={submit} disabled={!content || (showLeg2 && !content2) || oddsV <= 0 || stakeN <= 0 || submitting}>
-          {isLive && !showLeg2 ? '🔴 라이브 등록' : '등록'}
+          등록
         </button>
         <button className="btn btn-ghost" style={{ padding: '7px 10px' }} onClick={onClose}><X size={12} /></button>
       </div>
