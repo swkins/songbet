@@ -5,6 +5,7 @@ import type { Bet, Site, Sport, Market, BetResult, GameRolling } from '../types'
 import { inferBaseballLeague, inferSoccerLeague, buildLeagueCandidates, suggestLeagueCandidates, type LeagueOverride, type LeagueCandidate } from '../lib/league'
 import { buildTeamCandidates, suggestTeamCandidates, getTeamInsight, getEsportsLeague, type TeamCandidate, type BetLite } from '../lib/teamInsight'
 import { fetchTodayTomorrowLolMatches, LEAGUES as LOL_LEAGUES, type UpcomingLolMatch } from '../lib/lolSchedule'
+import { fetchTodayTomorrowSoccerMatches, SOCCER_LEAGUES, type UpcomingSoccerMatch } from '../lib/soccerSchedule'
 import { sportGlyph } from '../components/SportIcons'
 import dayjs from 'dayjs'
 import isoWeek from 'dayjs/plugin/isoWeek'
@@ -202,6 +203,89 @@ function LolMatchPicker({ match, onSelectMatch, onChangeMatch, pickLabel, onPick
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
           <button type="button" onClick={() => onPick(`${nameA} ${tab}세트 승`)} style={btnStyle(pickLabel === `${nameA} ${tab}세트 승`)}>{nameA} {tab}세트 승</button>
           <button type="button" onClick={() => onPick(`${nameB} ${tab}세트 승`)} style={btnStyle(pickLabel === `${nameB} ${tab}세트 승`)}>{nameB} {tab}세트 승</button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ── 축구 경기 선택 UI (LOL 방식과 동일하게 오늘·내일 일정에서 고르기) ──
+   LOL과 달리 마켓(1X2/핸디캡/오버언더)이 워낙 다양해서 여기선 "경기 고르기"까지만 도와주고,
+   실제 배당·마켓 디테일은 기존 자유입력 칸에서 이어서 쓴다(그 칸에 팀명이 자동으로 채워짐). */
+function SoccerMatchPicker({ onSelectMatch }: { onSelectMatch: (m: UpcomingSoccerMatch) => void }) {
+  const [matches, setMatches] = useState<UpcomingSoccerMatch[] | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(false)
+  const [leagueFilter, setLeagueFilter] = useState<string>('all')
+  const [open, setOpen] = useState(false)
+
+  useEffect(() => {
+    if (!open || matches !== null) return
+    setLoading(true); setError(false)
+    fetchTodayTomorrowSoccerMatches()
+      .then(m => { setMatches(m); setLoading(false) })
+      .catch(() => { setError(true); setLoading(false) })
+  }, [open, matches])
+
+  const leagues = SOCCER_LEAGUES.map(l => l.code)
+  const shown = matches ? (leagueFilter === 'all' ? matches : matches.filter(m => m.league === leagueFilter)) : []
+
+  return (
+    <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: 8, background: 'var(--bg-elevated)' }}>
+      <button type="button" onClick={() => setOpen(p => !p)} style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-body)' }}>
+        오늘·내일 축구 경기에서 고르기
+        <span>{open ? '접기' : '펼치기'}</span>
+      </button>
+      {open && (
+        <div style={{ marginTop: 6 }}>
+          {loading && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0', textAlign: 'center' }}>일정 불러오는 중...</div>}
+          {error && (
+            <div style={{ fontSize: 11, color: 'var(--red)', padding: '8px 0', textAlign: 'center' }}>
+              일정을 불러오지 못했습니다
+              <button type="button" onClick={() => setMatches(null)} style={{ marginLeft: 6, fontSize: 10, color: 'var(--gold)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>재시도</button>
+            </div>
+          )}
+          {!loading && !error && matches && matches.length === 0 && (
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0', textAlign: 'center' }}>오늘·내일 예정된 경기가 없습니다</div>
+          )}
+          {!loading && matches && matches.length > 0 && (
+            <>
+              {leagues.length > 1 && (
+                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 6 }}>
+                  {[...leagues, 'all'].map(l => (
+                    <button key={l} type="button" onClick={() => setLeagueFilter(l)}
+                      style={{
+                        fontSize: 9, fontWeight: 700, padding: '3px 7px', borderRadius: 4, cursor: 'pointer', fontFamily: 'var(--font-body)',
+                        border: `1px solid ${leagueFilter === l ? 'var(--gold-border)' : 'var(--border)'}`,
+                        background: leagueFilter === l ? 'var(--gold-bg)' : 'var(--bg-card)',
+                        color: leagueFilter === l ? 'var(--gold)' : 'var(--text-muted)',
+                      }}>{l === 'all' ? '전체' : SOCCER_LEAGUES.find(x => x.code === l)?.label ?? l}</button>
+                  ))}
+                </div>
+              )}
+              {shown.length === 0 ? (
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0', textAlign: 'center' }}>오늘·내일 이 리그 경기가 없습니다</div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 260, overflowY: 'auto' }}>
+                  {shown.map(m => {
+                    const d = new Date(m.startTime)
+                    const isToday = d.toDateString() === new Date().toDateString()
+                    const timeLabel = `${isToday ? '오늘' : '내일'} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+                    return (
+                      <button key={m.id} type="button" onClick={() => { onSelectMatch(m); setOpen(false) }}
+                        style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg-card)', cursor: 'pointer', textAlign: 'left', fontFamily: 'var(--font-body)', flexShrink: 0 }}>
+                        <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--gold)', flexShrink: 0, width: 52 }}>{m.leagueLabel}</span>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {m.teamA} vs {m.teamB}
+                        </span>
+                        <span style={{ fontSize: 9, color: 'var(--text-muted)', flexShrink: 0 }}>{timeLabel}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+            </>
+          )}
         </div>
       )}
     </div>
@@ -975,6 +1059,13 @@ function SingleBetForm({ site, onClose, onBet, onDoubleBet, defaultSport, baseba
         />
       ) : (
         <>
+          {sport === 'soccer' && (
+            <SoccerMatchPicker onSelectMatch={m => {
+              setContent(`${m.teamA} vs ${m.teamB}`)
+              setLeague(SOCCER_LEAGUES.find(l => l.code === m.league)?.label ?? m.leagueLabel)
+              setLeagueTouched(true)
+            }} />
+          )}
           <LeagueInput placeholder={showLeg2 ? '리그 ①' : '리그 (자동 추론, 직접 입력 가능)'} value={league}
             onChange={v => { setLeague(v); setLeagueTouched(true) }}
             candidates={leagueCandidates}
