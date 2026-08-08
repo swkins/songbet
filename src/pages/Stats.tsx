@@ -855,11 +855,56 @@ interface LeagueSectionProps {
   onDeleteLeague: (name: string) => Promise<void>
 }
 
+// LOL 베팅 내용(match 텍스트)을 베팅 옵션(일반승/핸디캡/세트승)으로 분류.
+// "N세트 승"이 "일반승"보다 먼저 걸려야 한다(둘 다 "승"으로 끝나므로 세트 패턴을 먼저 체크).
+function classifyLolOption(content: string): '일반승' | '핸디캡' | '세트승' | '기타' {
+  const s = content.trim()
+  if (/\d+세트\s*승\s*$/.test(s)) return '세트승'
+  if (/[+-]?\d+(\.\d+)?\s*$/.test(s)) return '핸디캡'
+  if (/승\s*$/.test(s)) return '일반승'
+  return '기타'
+}
+
+function extractHandicapSign(pick: string): '+' | '-' | null {
+  const m = pick?.match(/([+-])\s*\d+\.?\d*\s*$/)
+  return m ? (m[1] as '+' | '-') : null
+}
+
+// ─── LOL(e스포츠) 전용: 베팅 옵션별 — 일반승/마핸/플핸/세트승 각각 0.1단위 배당 구간별 성적 ──
+function EsportsMarketTypeSection({ bets }: { bets: Bet[] }) {
+  const settled = bets.filter(b => b.result !== 'pending')
+  const ml = settled.filter(b => classifyLolOption(b.match) === '일반승')
+  const setWin = settled.filter(b => classifyLolOption(b.match) === '세트승')
+  const hcap = settled.filter(b => classifyLolOption(b.match) === '핸디캡')
+  const hcapMinus = hcap.filter(b => extractHandicapSign(b.match) === '-') // 마핸(강팀)
+  const hcapPlus = hcap.filter(b => extractHandicapSign(b.match) === '+') // 플핸(약팀)
+
+  const tables = [
+    { title: '🎮 일반승 — 0.1단위 배당 구간별', rows: oddsBinRows(ml) },
+    { title: '🎮 마이너스 핸디캡(강팀) — 0.1단위 배당 구간별', rows: oddsBinRows(hcapMinus) },
+    { title: '🎮 플러스 핸디캡(약팀) — 0.1단위 배당 구간별', rows: oddsBinRows(hcapPlus) },
+    { title: '🎮 세트승 — 0.1단위 배당 구간별', rows: oddsBinRows(setWin) },
+  ].filter(t => t.rows.length > 0)
+
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <div className="card-title" style={{ marginBottom: 8 }}>🎮 베팅 옵션별 성적 (배당 0.1단위 구간)</div>
+      {tables.length > 0 ? (
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          {tables.map(t => <RuleStatsTable key={t.title} title={t.title} rows={t.rows} />)}
+        </div>
+      ) : (
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '12px 0' }}>정산된 LOL 베팅이 없습니다.</div>
+      )}
+    </div>
+  )
+}
+
 function EsportsDetailPanel(props: LeagueSectionProps) {
   return (
     <div>
       <GenericLeagueSection emoji="🎮" currentSport="esports" leaguePlaceholder="새 리그 이름 (예: LCK)" {...props} />
-      <GenericDetailPanel bets={props.bets} />
+      <EsportsMarketTypeSection bets={props.bets} />
     </div>
   )
 }
