@@ -9,16 +9,53 @@ import { supabase } from './supabase'
 const ESPN_BASE = 'https://site.api.espn.com/apis/site/v2/sports/soccer'
 
 export const SOCCER_LEAGUES: { code: string; label: string; slug: string }[] = [
-  { code: 'EPL',         label: 'EPL',          slug: 'eng.1' },
-  { code: 'LALIGA',      label: '라리가',        slug: 'esp.1' },
-  { code: 'BUNDES',      label: '분데스리가',    slug: 'ger.1' },
-  { code: 'SERIEA',      label: '세리에A',       slug: 'ita.1' },
-  { code: 'LIGUE1',      label: '리그앙',        slug: 'fra.1' },
-  { code: 'J1',          label: 'J1리그',        slug: 'jpn.1' },
-  { code: 'EREDIVISIE',  label: '에레디비지에',  slug: 'ned.1' },
-  { code: 'PRIMEIRA',    label: '프리메이라',    slug: 'por.1' },
-  { code: 'BRASILEIRAO', label: '브라질레이랑',  slug: 'bra.1' },
-  { code: 'MLS',         label: 'MLS',           slug: 'usa.1' },
+  // 유럽
+  { code: 'EPL',       label: 'EPL',            slug: 'eng.1' },
+  { code: 'LALIGA',    label: '라리가',          slug: 'esp.1' },
+  { code: 'BUNDES',    label: '분데스리가',      slug: 'ger.1' },
+  { code: 'SERIEA',    label: '세리에A',         slug: 'ita.1' },
+  { code: 'LIGUE1',    label: '리그앙',          slug: 'fra.1' },
+  { code: 'EREDIVISIE',label: '에레디비지에',    slug: 'ned.1' },
+  { code: 'SCOTLAND',  label: '스코틀랜드',      slug: 'sco.1' },
+  { code: 'PRIMEIRA',  label: '프리메이라(포르투갈)', slug: 'por.1' },
+  { code: 'BELGIUM',   label: '벨기에',          slug: 'bel.1' },
+  { code: 'AUSTRIA',   label: '오스트리아',      slug: 'aut.1' },
+  { code: 'GREECE',    label: '그리스',          slug: 'gre.1' },
+  { code: 'TURKEY',    label: '튀르키예',        slug: 'tur.1' },
+  { code: 'DENMARK',   label: '덴마크',          slug: 'den.1' },
+  { code: 'NORWAY',    label: '노르웨이',        slug: 'nor.1' },
+  { code: 'SWEDEN',    label: '스웨덴',          slug: 'swe.1' },
+  { code: 'CYPRUS',    label: '키프로스',        slug: 'cyp.1' },
+  { code: 'IRELAND',   label: '아일랜드',        slug: 'irl.1' },
+  { code: 'RUSSIA',    label: '러시아',          slug: 'rus.1' },
+  // 아시아
+  { code: 'J1',        label: 'J1리그',          slug: 'jpn.1' },
+  { code: 'SAUDI',     label: '사우디',          slug: 'ksa.1' },
+  { code: 'CHINA',     label: '중국',            slug: 'chn.1' },
+  { code: 'INDIA',     label: '인도',            slug: 'ind.1' },
+  { code: 'THAILAND',  label: '태국',            slug: 'tha.1' },
+  { code: 'MALAYSIA',  label: '말레이시아',      slug: 'mys.1' },
+  { code: 'INDONESIA', label: '인도네시아',      slug: 'idn.1' },
+  { code: 'SINGAPORE', label: '싱가포르',        slug: 'sgp.1' },
+  { code: 'AUSTRALIA', label: '호주',            slug: 'aus.1' },
+  // 북중미
+  { code: 'MLS',       label: 'MLS',             slug: 'usa.1' },
+  { code: 'MEXICO',    label: '멕시코',          slug: 'mex.1' },
+  // 남미
+  { code: 'ARGENTINA', label: '아르헨티나',      slug: 'arg.1' },
+  { code: 'BRASILEIRAO', label: '브라질 세리에A', slug: 'bra.1' },
+  { code: 'CHILE',     label: '칠레',            slug: 'chi.1' },
+  { code: 'COLOMBIA',  label: '콜롬비아',        slug: 'col.1' },
+  { code: 'PARAGUAY',  label: '파라과이',        slug: 'par.1' },
+  { code: 'PERU',      label: '페루',            slug: 'per.1' },
+  { code: 'URUGUAY',   label: '우루과이',        slug: 'uru.1' },
+  { code: 'BOLIVIA',   label: '볼리비아',        slug: 'bol.1' },
+  { code: 'ECUADOR',   label: '에콰도르',        slug: 'ecu.1' },
+  { code: 'VENEZUELA', label: '베네수엘라',      slug: 'ven.1' },
+  // 아프리카
+  { code: 'SOUTHAFRICA', label: '남아공',        slug: 'rsa.1' },
+  { code: 'NIGERIA',   label: '나이지리아',      slug: 'nga.1' },
+  { code: 'GHANA',     label: '가나',            slug: 'gha.1' },
 ]
 
 export interface UpcomingSoccerMatch {
@@ -53,33 +90,36 @@ async function fetchLeagueDay(slug: string, dateCompact: string): Promise<any[]>
 async function fetchLiveFromESPN(): Promise<UpcomingSoccerMatch[]> {
   const WINDOW_DAYS = 10
   const days = Array.from({ length: WINDOW_DAYS }, (_, i) => new Date(Date.now() + i * 86400000))
-  const results: UpcomingSoccerMatch[] = []
+  const dateCompacts = days.map(fmtDateCompact)
 
-  for (const l of SOCCER_LEAGUES) {
-    let leagueCount = 0
-    for (const d of days) {
-      const events = await fetchLeagueDay(l.slug, fmtDateCompact(d))
-      for (const e of events) {
-        const comp = e?.competitions?.[0]
-        const competitors: any[] = comp?.competitors ?? []
-        const home = competitors.find(c => c.homeAway === 'home')
-        const away = competitors.find(c => c.homeAway === 'away')
-        if (!home?.team || !away?.team) continue
-        // 이미 끝난 경기는 제외 (완료 상태만 걸러내고, 예정/진행중은 포함)
-        const state = comp?.status?.type?.state
-        if (state === 'post') continue
-        results.push({
-          id: String(e.id),
-          league: l.code, leagueLabel: l.label,
-          startTime: e.date,
-          teamA: home.team.displayName || home.team.shortDisplayName || home.team.name,
-          teamB: away.team.displayName || away.team.shortDisplayName || away.team.name,
-        })
-        leagueCount++
-      }
+  // 리그(약 40개) × 날짜(10일) = 약 400건 호출. 순차로 하면 너무 오래 걸려서(하루 한 번뿐이긴 하지만)
+  // 리그 단위로 묶어 병렬 처리한다 — 브라우저가 알아서 동시 연결 수를 조절해 순번대로 처리해준다.
+  const perLeague = await Promise.all(SOCCER_LEAGUES.map(async l => {
+    const perDay = await Promise.all(dateCompacts.map(d => fetchLeagueDay(l.slug, d)))
+    const events = perDay.flat()
+    const matches: UpcomingSoccerMatch[] = []
+    for (const e of events) {
+      const comp = e?.competitions?.[0]
+      const competitors: any[] = comp?.competitors ?? []
+      const home = competitors.find(c => c.homeAway === 'home')
+      const away = competitors.find(c => c.homeAway === 'away')
+      if (!home?.team || !away?.team) continue
+      // 이미 끝난 경기는 제외 (완료 상태만 걸러내고, 예정/진행중은 포함)
+      const state = comp?.status?.type?.state
+      if (state === 'post') continue
+      matches.push({
+        id: String(e.id),
+        league: l.code, leagueLabel: l.label,
+        startTime: e.date,
+        teamA: home.team.displayName || home.team.shortDisplayName || home.team.name,
+        teamB: away.team.displayName || away.team.shortDisplayName || away.team.name,
+      })
     }
-    console.info(`[soccerSchedule] ${l.label}(${l.slug}): ${leagueCount}건`)
-  }
+    console.info(`[soccerSchedule] ${l.label}(${l.slug}): ${matches.length}건`)
+    return matches
+  }))
+
+  const results = perLeague.flat()
   // 같은 경기가 여러 날짜 조회에 중복으로 안 잡히게 id 기준 중복 제거
   const seen = new Set<string>()
   const deduped = results.filter(r => {
