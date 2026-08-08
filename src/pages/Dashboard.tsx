@@ -74,7 +74,7 @@ function LolMatchPicker({ match, onSelectMatch, onChangeMatch, pickLabel, onPick
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(false)
   const [tab, setTab] = useState<'all' | number>('all')
-  const [leagueFilter, setLeagueFilter] = useState<string>('all')
+  const [leagueFilter, setLeagueFilter] = useState<string>('LCK')
 
   useEffect(() => {
     if (match || matches !== null) return
@@ -106,13 +106,12 @@ function LolMatchPicker({ match, onSelectMatch, onChangeMatch, pickLabel, onPick
         )}
         {!loading && matches && matches.length > 0 && (() => {
           const leagues = Array.from(new Set(matches.map(m => m.league)))
-          const filtered = leagueFilter === 'all' ? matches : matches.filter(m => m.league === leagueFilter)
-          const shown = filtered.slice(0, 7) // 예전처럼 최대 7개까지만 노출
+          const shown = leagueFilter === 'all' ? matches : matches.filter(m => m.league === leagueFilter)
           return (
             <>
               {leagues.length > 1 && (
                 <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 6 }}>
-                  {['all', ...leagues].map(l => (
+                  {[...leagues, 'all'].map(l => (
                     <button key={l} type="button" onClick={() => setLeagueFilter(l)}
                       style={{
                         fontSize: 9, fontWeight: 700, padding: '3px 7px', borderRadius: 4, cursor: 'pointer', fontFamily: 'var(--font-body)',
@@ -126,7 +125,7 @@ function LolMatchPicker({ match, onSelectMatch, onChangeMatch, pickLabel, onPick
               {shown.length === 0 ? (
                 <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0', textAlign: 'center' }}>오늘·내일 {leagueFilter} 경기가 없습니다</div>
               ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 320, overflowY: 'auto' }}>
                   {shown.map(m => {
                     const d = new Date(m.startTime)
                     const isToday = d.toDateString() === new Date().toDateString()

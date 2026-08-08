@@ -1749,38 +1749,7 @@ function LeagueView({ code, label }: { code: string; label: string }) {
 
 export default function Analysis() {
   const [activeLeague, setActiveLeague] = useState<string>(LEAGUES[0].code) // LEAGUES[0] = LCK
-  const menuItems = [...LEAGUES.map(lg => ({ code: lg.code, label: lg.label, icon: '🎮' })), { code: 'ALL', label: '전체', icon: '🌐' }]
-
-  const [allRefreshing, setAllRefreshing] = useState(false)
-  const [allRefreshNotice, setAllRefreshNotice] = useState<string | null>(null)
-  const [refreshKey, setRefreshKey] = useState(0) // 전체 호출 후 각 LeagueView를 강제로 다시 마운트시켜 새 캐시를 읽게 함
-
-  // 전체 리그를 순서대로 forceRefresh.
-  async function refreshAllLeagues() {
-    setAllRefreshing(true)
-    setAllRefreshNotice(null)
-    let okCount = 0
-    const errorLeagues: string[] = []
-    for (const lg of LEAGUES) {
-      try {
-        await fetchScheduleEvents(lg.code, { forceRefresh: true })
-        okCount++
-      } catch {
-        errorLeagues.push(lg.label)
-      }
-    }
-    const parts: string[] = []
-    if (okCount > 0) parts.push(`${okCount}개 리그 갱신 완료`)
-    if (errorLeagues.length > 0) parts.push(`호출 실패: ${errorLeagues.join(', ')}`)
-    setAllRefreshNotice(parts.join(' · ') || '완료')
-    setRefreshKey(k => k + 1)
-    setAllRefreshing(false)
-  }
-  useEffect(() => {
-    if (!allRefreshNotice) return
-    const id = setTimeout(() => setAllRefreshNotice(null), 8000)
-    return () => clearTimeout(id)
-  }, [allRefreshNotice])
+  const menuItems = LEAGUES.map(lg => ({ code: lg.code, label: lg.label, icon: '🎮' }))
 
   return (
     <div className="page">
@@ -1807,25 +1776,7 @@ export default function Analysis() {
         })}
       </div>
 
-      {activeLeague === 'ALL' ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <button onClick={refreshAllLeagues} disabled={allRefreshing} className="btn btn-ghost"
-              style={{ padding: '8px 14px', display: 'flex', alignItems: 'center', gap: 6 }}>
-              <RefreshCw size={12} style={{ animation: allRefreshing ? 'spin 1s linear infinite' : undefined }} />
-              {allRefreshing ? '전체 리그 호출 중...' : '전체 리그 API 호출'}
-            </button>
-            {allRefreshNotice && <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{allRefreshNotice}</span>}
-          </div>
-          {LEAGUES.map((lg, i) => (
-            <div key={lg.code} style={{ paddingTop: i === 0 ? 0 : 12, borderTop: i === 0 ? 'none' : '1px solid var(--border)' }}>
-              <LeagueView key={`${lg.code}-${refreshKey}`} code={lg.code} label={lg.label} />
-            </div>
-          ))}
-        </div>
-      ) : (
-        <LeagueView key={activeLeague} code={activeLeague} label={LEAGUES.find(x => x.code === activeLeague)!.label} />
-      )}
+      <LeagueView key={activeLeague} code={activeLeague} label={LEAGUES.find(x => x.code === activeLeague)!.label} />
     </div>
   )
 }
