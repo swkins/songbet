@@ -168,10 +168,10 @@ function RecentMatchesPanel({ leagueCode, events, loading, error, errorDetail, t
                     </div>
                     <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
                       <button onClick={() => setTrackingChoice(prev => ({ ...prev, [m.id]: m.teamA }))} className="btn btn-ghost" style={{ flex: 1, fontSize: 9, padding: '4px 4px' }}>
-                        {m.codeA || m.teamA} 관점으로 입력
+                        {m.codeA || m.teamA} 팀 등록하고 입력
                       </button>
                       <button onClick={() => setTrackingChoice(prev => ({ ...prev, [m.id]: m.teamB }))} className="btn btn-ghost" style={{ flex: 1, fontSize: 9, padding: '4px 4px' }}>
-                        {m.codeB || m.teamB} 관점으로 입력
+                        {m.codeB || m.teamB} 팀 등록하고 입력
                       </button>
                     </div>
                     {teams.length > 0 && (
