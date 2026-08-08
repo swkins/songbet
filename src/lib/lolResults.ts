@@ -113,37 +113,69 @@ export async function fetchEventGames(matchId: string): Promise<{ id: string; nu
 }
 
 // 세트 하나(gameId)의 최종 팀 스탯(킬/타워/억제기/내셔/드래곤/골드)을 livestats에서 가져온다.
-// 이 API는 라이브 관전용이라 커버리지가 일정하지 않다 — 실패하거나 데이터가 없으면 null을 반환하고,
+// 이 API는 startingTime을 안 주면 "기록이 시작되는 맨 처음"(로딩/밴픽 직후, 전부 0)부터 10개씩 끊어서
+// 준다는 걸 실제 응답으로 확인했다 — 그래서 마지막 프레임의 시각을 다음 요청의 startingTime으로 계속
+// 밀어가며(페이지네이션) gameState가 더 이상 "in_game"이 아니게 되거나(경기 종료) 더 진행이 안 될 때까지
+// 따라간 뒤, 마지막으로 얻은 프레임을 "최종 스탯"으로 쓴다.
+// 여전히 커버리지가 일정하지 않을 수 있어서, 실패하거나 데이터가 없으면 null을 반환하고
 // 호출 쪽에서 "상세 통계 없음"으로 처리한다(에러를 던지지 않음).
-// 원인 확인용으로 실패 상황에서도 원본 응답을 최대한 남긴다(raw 필드 + 콘솔 로그).
 export async function fetchGameDetailStats(gameId: string): Promise<GameDetailStats | null> {
+  let startingTime: string | undefined
+  let frames: any[] = []
+  let firstEverFrame: any = null
+  const seenTimestamps = new Set<string>()
+  let prevTsMs: number | null = null
+  let stallCount = 0
   try {
-    const res = await fetch(`${LIVESTATS_API}/window/${gameId}`)
-    if (!res.ok) { console.warn(`[lolResults] window/${gameId}: HTTP ${res.status}`); return null }
-    const json = await res.json()
-    console.info(`[lolResults] window/${gameId} 원본 응답:`, json)
-    const frames: any[] = json?.frames ?? []
-    if (frames.length === 0) { console.warn(`[lolResults] window/${gameId}: frames 없음`); return null }
-    const last = frames[frames.length - 1]
-    const blue = last?.blueTeam
-    const red = last?.redTeam
-    if (!blue || !red) { console.warn(`[lolResults] window/${gameId}: blueTeam/redTeam 없음 -`, last); return null }
-    const toStats = (t: any): TeamGameStats => ({
-      kills: t.totalKills ?? 0,
-      towers: t.towers ?? 0,
-      inhibitors: t.inhibitors ?? 0,
-      barons: t.barons ?? 0,
-      dragons: Array.isArray(t.dragons) ? t.dragons.length : 0,
-      dragonTypes: Array.isArray(t.dragons) ? t.dragons : [],
-      totalGold: t.totalGold ?? 0,
-    })
-    const startMs = new Date(frames[0]?.rfc460Timestamp).getTime()
-    const endMs = new Date(last?.rfc460Timestamp).getTime()
-    return {
-      gameNumber: 0, // 호출 쪽에서 채움
-      durationSeconds: isFinite(startMs) && isFinite(endMs) ? Math.round((endMs - startMs) / 1000) : null,
-      teamA: toStats(blue), teamB: toStats(red),
-      raw: { frameCount: frames.length, firstFrame: frames[0], lastFrame: last },
+    for (let iter = 0; iter < 50; iter++) {
+      const url = startingTime
+        ? `${LIVESTATS_API}/window/${gameId}?startingTime=${encodeURIComponent(startingTime)}`
+        : `${LIVESTATS_API}/window/${gameId}`
+      const res = await fetch(url)
+      if (!res.ok) { if (iter === 0) console.warn(`[lolResults] window/${gameId}: HTTP ${res.status}`); break }
+      const json = await res.json()
+      const batch: any[] = json?.frames ?? []
+      if (iter === 0) console.info(`[lolResults] window/${gameId} 첫 응답:`, json)
+      if (batch.length === 0) break // 이 이상은 데이터가 없다는 뜻 -> 지금까지 모은 frames를 최종으로 씀
+      if (!firstEverFrame) firstEverFrame = batch[0]
+      frames = batch
+      const last = batch[batch.length - 1]
+      if (last?.gameState && last.gameState !== 'in_game') break // 경기 종료 상태 도달 -> 여기서 멈춤
+      const lastTs = last?.rfc460Timestamp
+      if (!lastTs || seenTimestamps.has(lastTs)) break // 더 진행이 안 되면(같은 시각 반복) 무한루프 방지로 중단
+      seenTimestamps.add(lastTs)
+
+      // 초반(로딩/밴픽 단계)엔 프레임 간격이 극도로 촘촘해서(실제로 확인된 사례: 10개가 19ms 안에 다 몰림)
+      // 매번 마지막 시각으로만 전진하면 사실상 제자리걸음이 된다. 그래서 진행이 2초 미만으로 3번
+      // 연속 정체되면 30초씩 강제로 앞으로 점프해서 그 구간을 빠르게 빠져나간다.
+      const lastTsMs = new Date(lastTs).getTime()
+      if (prevTsMs != null && lastTsMs - prevTsMs < 2000) stallCount++
+      else stallCount = 0
+      prevTsMs = lastTsMs
+      startingTime = stallCount >= 3 ? new Date(lastTsMs + 30_000).toISOString() : lastTs
     }
-  } catch { return null }
+  } catch (err) { console.warn(`[lolResults] window/${gameId}: 호출 실패`, err); return null }
+
+  if (frames.length === 0) { console.warn(`[lolResults] window/${gameId}: frames 없음`); return null }
+  const last = frames[frames.length - 1]
+  const blue = last?.blueTeam
+  const red = last?.redTeam
+  if (!blue || !red) { console.warn(`[lolResults] window/${gameId}: blueTeam/redTeam 없음 -`, last); return null }
+  const toStats = (t: any): TeamGameStats => ({
+    kills: t.totalKills ?? 0,
+    towers: t.towers ?? 0,
+    inhibitors: t.inhibitors ?? 0,
+    barons: t.barons ?? 0,
+    dragons: Array.isArray(t.dragons) ? t.dragons.length : 0,
+    dragonTypes: Array.isArray(t.dragons) ? t.dragons : [],
+    totalGold: t.totalGold ?? 0,
+  })
+  const startMs = new Date(firstEverFrame?.rfc460Timestamp).getTime()
+  const endMs = new Date(last?.rfc460Timestamp).getTime()
+  return {
+    gameNumber: 0, // 호출 쪽에서 채움
+    durationSeconds: isFinite(startMs) && isFinite(endMs) ? Math.round((endMs - startMs) / 1000) : null,
+    teamA: toStats(blue), teamB: toStats(red),
+    raw: { finalFrameCount: frames.length, lastFrame: last },
+  }
 }
