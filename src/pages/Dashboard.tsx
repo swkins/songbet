@@ -74,6 +74,7 @@ function LolMatchPicker({ match, onSelectMatch, onChangeMatch, pickLabel, onPick
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(false)
   const [tab, setTab] = useState<'all' | number>('all')
+  const [leagueFilter, setLeagueFilter] = useState<string>('all')
 
   useEffect(() => {
     if (match || matches !== null) return
@@ -88,7 +89,11 @@ function LolMatchPicker({ match, onSelectMatch, onChangeMatch, pickLabel, onPick
   if (!match) {
     return (
       <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: 8, background: 'var(--bg-elevated)' }}>
-        <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 6 }}>오늘·내일 LOL 경기</div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+          <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)' }}>오늘·내일 LOL 경기</span>
+          <button type="button" onClick={() => { setLoading(true); setError(false); fetchTodayTomorrowLolMatches({ forceRefresh: true }).then(m => { setMatches(m); setLoading(false) }).catch(() => { setError(true); setLoading(false) }) }}
+            style={{ fontSize: 9, color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>새로고침</button>
+        </div>
         {loading && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0', textAlign: 'center' }}>일정 불러오는 중...</div>}
         {error && (
           <div style={{ fontSize: 11, color: 'var(--red)', padding: '8px 0', textAlign: 'center' }}>
@@ -99,25 +104,48 @@ function LolMatchPicker({ match, onSelectMatch, onChangeMatch, pickLabel, onPick
         {!loading && !error && matches && matches.length === 0 && (
           <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0', textAlign: 'center' }}>오늘·내일 예정된 경기가 없습니다</div>
         )}
-        {!loading && matches && matches.length > 0 && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 220, overflowY: 'auto' }}>
-            {matches.map(m => {
-              const d = new Date(m.startTime)
-              const isToday = d.toDateString() === new Date().toDateString()
-              const timeLabel = `${isToday ? '오늘' : '내일'} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
-              return (
-                <button key={m.id} type="button" onClick={() => onSelectMatch(m)}
-                  style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg-card)', cursor: 'pointer', textAlign: 'left', fontFamily: 'var(--font-body)' }}>
-                  <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--gold)', flexShrink: 0, width: 44 }}>{m.leagueLabel}</span>
-                  <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {m.teamACode || m.teamA} vs {m.teamBCode || m.teamB}
-                  </span>
-                  <span style={{ fontSize: 9, color: 'var(--text-muted)', flexShrink: 0 }}>{timeLabel}</span>
-                </button>
-              )
-            })}
-          </div>
-        )}
+        {!loading && matches && matches.length > 0 && (() => {
+          const leagues = Array.from(new Set(matches.map(m => m.league)))
+          const shown = leagueFilter === 'all' ? matches : matches.filter(m => m.league === leagueFilter)
+          return (
+            <>
+              {leagues.length > 1 && (
+                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 6 }}>
+                  {['all', ...leagues].map(l => (
+                    <button key={l} type="button" onClick={() => setLeagueFilter(l)}
+                      style={{
+                        fontSize: 9, fontWeight: 700, padding: '3px 7px', borderRadius: 4, cursor: 'pointer', fontFamily: 'var(--font-body)',
+                        border: `1px solid ${leagueFilter === l ? 'var(--gold-border)' : 'var(--border)'}`,
+                        background: leagueFilter === l ? 'var(--gold-bg)' : 'var(--bg-card)',
+                        color: leagueFilter === l ? 'var(--gold)' : 'var(--text-muted)',
+                      }}>{l === 'all' ? '전체' : l}</button>
+                  ))}
+                </div>
+              )}
+              {shown.length === 0 ? (
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0', textAlign: 'center' }}>오늘·내일 {leagueFilter} 경기가 없습니다</div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 320, overflowY: 'auto' }}>
+                  {shown.map(m => {
+                    const d = new Date(m.startTime)
+                    const isToday = d.toDateString() === new Date().toDateString()
+                    const timeLabel = `${isToday ? '오늘' : '내일'} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+                    return (
+                      <button key={m.id} type="button" onClick={() => onSelectMatch(m)}
+                        style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg-card)', cursor: 'pointer', textAlign: 'left', fontFamily: 'var(--font-body)', flexShrink: 0 }}>
+                        <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--gold)', flexShrink: 0, width: 44 }}>{m.leagueLabel}</span>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {m.teamACode || m.teamA} vs {m.teamBCode || m.teamB}
+                        </span>
+                        <span style={{ fontSize: 9, color: 'var(--text-muted)', flexShrink: 0 }}>{timeLabel}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+            </>
+          )
+        })()}
       </div>
     )
   }
