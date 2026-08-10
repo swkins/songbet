@@ -1274,7 +1274,7 @@ function SingleBetForm({ site, onClose, onBet, onDoubleBet, defaultSport, baseba
   return (
     <div className="inline-bet-form">
       <SportButtonGroup value={sport} onChange={v => { setSport(v); setSportTouched(true); setLeagueTouched(false); setLeague2Touched(false); contentRef.current?.focus() }} />
-      {sport === 'esports' ? (
+      {sport === 'esports' && (
         <LolMatchPicker
           match={lolMatch}
           onSelectMatch={m => { setLolMatch(m); setLolPick(null); setContent('') }}
@@ -1282,65 +1282,62 @@ function SingleBetForm({ site, onClose, onBet, onDoubleBet, defaultSport, baseba
           pickLabel={lolPick}
           onPick={label => setLolPick(label)}
         />
-      ) : (
+      )}
+      {sport === 'soccer' && (
+        <SoccerMatchPicker
+          match={soccerMatch}
+          onSelectMatch={m => { setSoccerMatch(m); setSoccerPick(null); setContent('') }}
+          onChangeMatch={() => { setSoccerMatch(null); setSoccerPick(null); setContent(''); setLeagueTouched(false) }}
+          pickLabel={soccerPick}
+          onPick={label => setSoccerPick(label)}
+        />
+      )}
+      {sport === 'baseball' && (
+        <SimpleMatchPicker
+          title="야구 경기에서 고르기 (MLB)"
+          leagues={BASEBALL_LEAGUES}
+          fetchFn={fetchUpcomingBaseballMatches}
+          onSelectMatch={(m: UpcomingBaseballMatch) => {
+            setContent(`${m.teamA} vs ${m.teamB}`)
+            setLeague(BASEBALL_LEAGUES.find(l => l.code === m.league)?.label ?? m.leagueLabel)
+            setLeagueTouched(true)
+          }}
+        />
+      )}
+      {sport === 'basketball' && (
+        <SimpleMatchPicker
+          title="농구 경기에서 고르기 (NBA)"
+          leagues={BASKETBALL_LEAGUES}
+          fetchFn={fetchUpcomingBasketballMatches}
+          onSelectMatch={(m: UpcomingBasketballMatch) => {
+            setContent(`${m.teamA} vs ${m.teamB}`)
+            setLeague(BASKETBALL_LEAGUES.find(l => l.code === m.league)?.label ?? m.leagueLabel)
+            setLeagueTouched(true)
+          }}
+        />
+      )}
+      <LeagueInput placeholder={showLeg2 ? '리그 ①' : (sport === 'esports' ? '리그 (자동 추론, LCK CL 외 다른 리그 등은 여기 직접 입력)' : '리그 (자동 추론, 직접 입력 가능, KBO/NPB/KBL 등은 여기 직접 입력)')} value={league}
+        onChange={v => { setLeague(v); setLeagueTouched(true) }}
+        candidates={leagueCandidates}
+        style={{ fontSize: 11 }} />
+      <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <TeamContentInput inputRef={contentRef} placeholder="경기 내용" value={content} onChange={setContent}
+            candidates={teamCandidates} allBets={allBetsHistory} autoFocus onEnter={submit} />
+        </div>
+        <button type="button" title={showLeg2 ? '두 번째 경기 제거' : '두 번째 경기 추가 (두폴)'} onClick={toggleLeg2}
+          style={{ width: 34, height: 34, flexShrink: 0, borderRadius: 'var(--radius-sm)', border: `1px solid ${showLeg2 ? 'var(--purple-border)' : 'var(--border)'}`, background: showLeg2 ? 'var(--purple-bg)' : 'var(--bg-elevated)', color: showLeg2 ? 'var(--purple)' : 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <Plus size={15} style={{ transform: showLeg2 ? 'rotate(45deg)' : 'none', transition: 'transform 0.15s' }} />
+        </button>
+      </div>
+      {showLeg2 && (
         <>
-          {sport === 'soccer' && (
-            <SoccerMatchPicker
-              match={soccerMatch}
-              onSelectMatch={m => { setSoccerMatch(m); setSoccerPick(null); setContent('') }}
-              onChangeMatch={() => { setSoccerMatch(null); setSoccerPick(null); setContent(''); setLeagueTouched(false) }}
-              pickLabel={soccerPick}
-              onPick={label => setSoccerPick(label)}
-            />
-          )}
-          {sport === 'baseball' && (
-            <SimpleMatchPicker
-              title="야구 경기에서 고르기 (MLB)"
-              leagues={BASEBALL_LEAGUES}
-              fetchFn={fetchUpcomingBaseballMatches}
-              onSelectMatch={(m: UpcomingBaseballMatch) => {
-                setContent(`${m.teamA} vs ${m.teamB}`)
-                setLeague(BASEBALL_LEAGUES.find(l => l.code === m.league)?.label ?? m.leagueLabel)
-                setLeagueTouched(true)
-              }}
-            />
-          )}
-          {sport === 'basketball' && (
-            <SimpleMatchPicker
-              title="농구 경기에서 고르기 (NBA)"
-              leagues={BASKETBALL_LEAGUES}
-              fetchFn={fetchUpcomingBasketballMatches}
-              onSelectMatch={(m: UpcomingBasketballMatch) => {
-                setContent(`${m.teamA} vs ${m.teamB}`)
-                setLeague(BASKETBALL_LEAGUES.find(l => l.code === m.league)?.label ?? m.leagueLabel)
-                setLeagueTouched(true)
-              }}
-            />
-          )}
-          <LeagueInput placeholder={showLeg2 ? '리그 ①' : '리그 (자동 추론, 직접 입력 가능, KBO/NPB/KBL 등은 여기 직접 입력)'} value={league}
-            onChange={v => { setLeague(v); setLeagueTouched(true) }}
+          <LeagueInput placeholder="리그 ②" value={league2}
+            onChange={v => { setLeague2(v); setLeague2Touched(true) }}
             candidates={leagueCandidates}
-            style={{ fontSize: 11 }} />
-          <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <TeamContentInput inputRef={contentRef} placeholder="경기 내용" value={content} onChange={setContent}
-                candidates={teamCandidates} allBets={allBetsHistory} autoFocus onEnter={submit} />
-            </div>
-            <button type="button" title={showLeg2 ? '두 번째 경기 제거' : '두 번째 경기 추가 (두폴)'} onClick={toggleLeg2}
-              style={{ width: 34, height: 34, flexShrink: 0, borderRadius: 'var(--radius-sm)', border: `1px solid ${showLeg2 ? 'var(--purple-border)' : 'var(--border)'}`, background: showLeg2 ? 'var(--purple-bg)' : 'var(--bg-elevated)', color: showLeg2 ? 'var(--purple)' : 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <Plus size={15} style={{ transform: showLeg2 ? 'rotate(45deg)' : 'none', transition: 'transform 0.15s' }} />
-            </button>
-          </div>
-          {showLeg2 && (
-            <>
-              <LeagueInput placeholder="리그 ②" value={league2}
-                onChange={v => { setLeague2(v); setLeague2Touched(true) }}
-                candidates={leagueCandidates}
-                style={{ fontSize: 11, marginTop: 4 }} />
-              <TeamContentInput placeholder="경기 내용 ②" value={content2} onChange={setContent2}
-                candidates={teamCandidates} allBets={allBetsHistory} onEnter={submit} />
-            </>
-          )}
+            style={{ fontSize: 11, marginTop: 4 }} />
+          <TeamContentInput placeholder="경기 내용 ②" value={content2} onChange={setContent2}
+            candidates={teamCandidates} allBets={allBetsHistory} onEnter={submit} />
         </>
       )}
       <input ref={oddsRef} className="form-input inline-bet-input" placeholder="배당 (125=1.25)" value={oddsRaw}
