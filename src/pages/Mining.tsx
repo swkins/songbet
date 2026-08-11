@@ -1,21 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
-import { supabase } from '../lib/supabase'
+import { useMemo, useState } from 'react'
 import dayjs, { type Dayjs } from 'dayjs'
 import { Plus, Trash2, Pencil, Check, X, ClipboardPaste, ChevronLeft, ChevronRight, CalendarDays, LayoutList } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
-
-interface MiningEntry {
-  id: string
-  created_at: string
-  entry_date: string
-  site_name: string
-  start_point: number
-  target_point: number
-  current_point: number
-  sort_order: number
-}
-
-const HISTORY_DAYS = 59 // 오늘 포함 60일치 (달력 2개월 안팎 + 그래프 30일 + 일평균 계산용)
+import { useMiningData, fmtMining as fmt, minedOf as mined, type MiningEntry } from '../lib/useMining'
 
 const labelSt: React.CSSProperties = {
   fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.5px',
@@ -27,15 +14,9 @@ const inputSt: React.CSSProperties = {
   fontFamily: 'var(--font-body)', outline: 'none', boxSizing: 'border-box',
 }
 
-function fmt(n: number) { return Math.round(n).toLocaleString('ko-KR') }
-function mined(e: MiningEntry) { return e.current_point - e.start_point }
-
 export default function Mining() {
-  const today = dayjs().format('YYYY-MM-DD')
+  const { today, entries, history, loading, knownSites, addEntry: addEntryToDb, updateField, deleteEntry: deleteEntryFromDb } = useMiningData()
 
-  const [entries, setEntries] = useState<MiningEntry[]>([])
-  const [history, setHistory] = useState<MiningEntry[]>([]) // 최근 60일치 전체 (오늘 포함) — 달력/그래프/일평균에 공용으로 쓴다
-  const [loading, setLoading] = useState(true)
   const [viewMode, setViewMode] = useState<'today' | 'calendar'>('today')
   const [calendarMonth, setCalendarMonth] = useState<Dayjs>(() => dayjs().startOf('month'))
   const [addModalOpen, setAddModalOpen] = useState(false)
@@ -70,56 +51,6 @@ export default function Mining() {
       // 클립보드 접근 실패 (권한 거부 등) — 무시하고 직접 입력하도록 둔다
     }
   }
-
-  useEffect(() => { init() }, []) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // 오늘 데이터를 불러오면서, 어제(혹은 그 이전 마지막 기록일)의 마지막 현재 포인트를
-  // 오늘의 시작 포인트로 자동 승계한다 — 아직 오늘 기록이 없는 사이트만 대상.
-  async function init() {
-    setLoading(true)
-    const from = dayjs().subtract(HISTORY_DAYS, 'day').format('YYYY-MM-DD')
-    const { data } = await supabase
-      .from('mining_entries').select('*')
-      .gte('entry_date', from)
-      .order('entry_date', { ascending: false })
-      .order('created_at', { ascending: true })
-
-    const all = (data ?? []) as MiningEntry[]
-    const todays = all.filter(e => e.entry_date === today)
-    const todaySites = new Set(todays.map(e => e.site_name))
-
-    const seen = new Set<string>()
-    const toInsert: Array<Omit<MiningEntry, 'id' | 'created_at'>> = []
-    for (const e of all) {
-      if (e.entry_date >= today) continue
-      if (todaySites.has(e.site_name) || seen.has(e.site_name)) continue
-      seen.add(e.site_name)
-      toInsert.push({
-        entry_date: today,
-        site_name: e.site_name,
-        start_point: e.current_point,
-        target_point: e.target_point,
-        current_point: e.current_point,
-        sort_order: e.sort_order,
-      })
-    }
-
-    let finalToday = todays
-    let finalAll = all
-    if (toInsert.length > 0) {
-      const { data: inserted } = await supabase.from('mining_entries').insert(toInsert).select()
-      if (inserted) {
-        finalToday = [...todays, ...(inserted as MiningEntry[])]
-        finalAll = [...(inserted as MiningEntry[]), ...all]
-      }
-    }
-    setEntries(finalToday.sort((a, b) => a.sort_order - b.sort_order || a.created_at.localeCompare(b.created_at)))
-    setHistory(finalAll)
-    setLoading(false)
-  }
-
-  // 사이트명 자동완성용 — 최근 60일 내 등장한 사이트명 목록
-  const knownSites = useMemo(() => Array.from(new Set(history.map(h => h.site_name))), [history])
 
   // 날짜별 총 채굴량 (모든 사이트 합산) — 달력/그래프 공용
   const dailyTotals = useMemo(() => {
@@ -176,24 +107,11 @@ export default function Mining() {
     setSaving(true)
     const startNum = Number(newStart.replace(/,/g, '')) || 0
     const targetNum = Number(newTarget.replace(/,/g, '')) || 0
-    const maxOrder = entries.reduce((a, e) => Math.max(a, e.sort_order), 0)
-    const { data, error } = await supabase
-      .from('mining_entries')
-      .insert({
-        entry_date: today,
-        site_name: newName.trim(),
-        start_point: startNum,
-        target_point: targetNum,
-        current_point: startNum,
-        sort_order: maxOrder + 1,
-      })
-      .select().single()
-    if (!error && data) {
-      setEntries(prev => [...prev, data as MiningEntry])
-      setHistory(prev => [data as MiningEntry, ...prev])
+    const result = await addEntryToDb(newName.trim(), startNum, targetNum)
+    if (result === 'ok') {
       setNewName(''); setNewStart(''); setNewTarget('')
       setAddModalOpen(false)
-    } else if (error?.code === '23505') {
+    } else if (result === 'duplicate') {
       alert('오늘 이미 등록된 사이트입니다.')
     }
     setSaving(false)
@@ -204,20 +122,13 @@ export default function Mining() {
     const num = Number(editVal.replace(/,/g, ''))
     if (Number.isNaN(num) || editVal === '') { cancelEdit(); return }
     const column = editing.field === 'start' ? 'start_point' : editing.field === 'target' ? 'target_point' : 'current_point'
-    const { data } = await supabase
-      .from('mining_entries').update({ [column]: num }).eq('id', entry.id).select().single()
-    if (data) {
-      setEntries(prev => prev.map(e => e.id === entry.id ? (data as MiningEntry) : e))
-      setHistory(prev => prev.map(e => e.id === entry.id ? (data as MiningEntry) : e))
-    }
+    await updateField(entry, column, num)
     cancelEdit()
   }
 
   async function deleteEntry(id: string) {
     if (!confirm('삭제하시겠습니까?')) return
-    await supabase.from('mining_entries').delete().eq('id', id)
-    setEntries(prev => prev.filter(e => e.id !== id))
-    setHistory(prev => prev.filter(e => e.id !== id))
+    await deleteEntryFromDb(id)
   }
 
   const totals = useMemo(() => {

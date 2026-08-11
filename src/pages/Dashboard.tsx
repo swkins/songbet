@@ -6,6 +6,7 @@ import { inferBaseballLeague, inferSoccerLeague, inferLeagueByKeyword, buildLeag
 import { buildTeamCandidates, suggestTeamCandidates, getTeamInsight, getEsportsLeague, type TeamCandidate, type BetLite } from '../lib/teamInsight'
 import { fetchTodayTomorrowLolMatches, LEAGUES as LOL_LEAGUES, type UpcomingLolMatch } from '../lib/lolSchedule'
 import { sportGlyph } from '../components/SportIcons'
+import MiningWidget from '../components/MiningWidget'
 import dayjs from 'dayjs'
 import isoWeek from 'dayjs/plugin/isoWeek'
 dayjs.extend(isoWeek)
@@ -1615,6 +1616,11 @@ export default function Dashboard() {
   return (
     <div className="page">
       <div className="dashboard-main">
+
+        {/* ── 채굴 현황 (좌측) */}
+        <div className="dashboard-side">
+          <MiningWidget />
+        </div>
 
         {/* ── 베팅 현황 (전체) */}
         <div className="dashboard-bets">
