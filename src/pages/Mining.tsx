@@ -206,12 +206,14 @@ export default function Mining() {
           </div>
         )}
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 12 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           {entries.map(e => {
             const mined = e.current_point - e.start_point
             const remaining = Math.max(0, e.target_point - mined)
             const pct = e.target_point > 0 ? Math.min(100, Math.max(0, mined / e.target_point * 100)) : 0
             const done = e.target_point > 0 && mined >= e.target_point
+            const tickStep = 10000
+            const tickCount = e.target_point > tickStep ? Math.floor(e.target_point / tickStep) : 0
             const isEditingTarget = editing?.id === e.id && editing.field === 'target'
             const isEditingStart = editing?.id === e.id && editing.field === 'start'
             const isEditingCurrent = editing?.id === e.id && editing.field === 'current'
@@ -252,12 +254,27 @@ export default function Mining() {
                   )}
                 </div>
 
-                <div className="deposit-progress-bar">
+                <div className="deposit-progress-bar" style={{ position: 'relative' }}>
                   <div className="deposit-progress-fill" style={{ width: `${pct}%`, background: done ? 'var(--green)' : undefined }} />
+                  {Array.from({ length: tickCount }, (_, i) => i + 1).map(i => {
+                    const tickPct = (tickStep * i / e.target_point) * 100
+                    const passed = mined >= tickStep * i
+                    return (
+                      <div key={i} title={`${fmt(tickStep * i)}`} style={{
+                        position: 'absolute', left: `${tickPct}%`, top: 0, bottom: 0, width: 1,
+                        background: passed ? 'rgba(0,0,0,0.55)' : 'rgba(255,255,255,0.35)',
+                      }} />
+                    )
+                  })}
                 </div>
 
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8, fontSize: 10, color: 'var(--text-muted)' }}>
-                  <span>{pct.toFixed(0)}% · 남음 {fmt(remaining)}</span>
+                  <span>
+                    {pct.toFixed(0)}% · 남음 {fmt(remaining)}
+                    {Math.floor(mined / tickStep) > 0 && (
+                      <span style={{ marginLeft: 6, color: 'var(--gold)', fontWeight: 700 }}>· 1만 돌파 {Math.floor(mined / tickStep)}회</span>
+                    )}
+                  </span>
                   {isEditingStart ? (
                     <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                       <span>시작</span>
