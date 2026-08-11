@@ -43,6 +43,9 @@ export function inferSoccerLeague(matchText: string, overrides?: LeagueOverride[
   return hit ? hit.league : null
 }
 
+// 축구와 동일한 방식(키워드 매핑만으로 판별)을 농구·배구 등 다른 종목에도 그대로 재사용한다.
+export const inferLeagueByKeyword = inferSoccerLeague
+
 // 가나다(한글) 순 정렬 비교자
 export function koCompare(a: string, b: string): number {
   return a.localeCompare(b, 'ko')
