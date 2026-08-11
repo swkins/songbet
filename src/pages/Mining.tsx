@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import dayjs from 'dayjs'
-import { Plus, Trash2, Pencil, Check, X } from 'lucide-react'
+import { Plus, Trash2, Pencil, Check, X, ClipboardPaste } from 'lucide-react'
 
 interface MiningEntry {
   id: string
@@ -38,9 +38,30 @@ export default function Mining() {
   const [newTarget, setNewTarget] = useState('')
   const [saving, setSaving] = useState(false)
 
-  // 현재 포인트 인라인 편집
-  const [editingId, setEditingId] = useState<string | null>(null)
+  // 인라인 편집 (시작/목표/현재 포인트 공통)
+  type EditField = 'start' | 'target' | 'current'
+  const [editing, setEditing] = useState<{ id: string; field: EditField } | null>(null)
   const [editVal, setEditVal] = useState('')
+
+  function startEdit(entry: MiningEntry, field: EditField) {
+    setEditing({ id: entry.id, field })
+    if (field === 'current') {
+      setEditVal('') // 현재 포인트는 수정 시 빈칸으로 시작
+    } else {
+      setEditVal(String(field === 'start' ? entry.start_point : entry.target_point))
+    }
+  }
+  function cancelEdit() { setEditing(null); setEditVal('') }
+
+  async function pasteToEdit() {
+    try {
+      const text = await navigator.clipboard.readText()
+      const digits = text.replace(/[^\d]/g, '')
+      if (digits) setEditVal(digits)
+    } catch {
+      // 클립보드 접근 실패 (권한 거부 등) — 무시하고 직접 입력하도록 둔다
+    }
+  }
 
   useEffect(() => { loadEntries() }, [])
 
@@ -95,13 +116,15 @@ export default function Mining() {
     setSaving(false)
   }
 
-  async function updateCurrent(entry: MiningEntry, value: string) {
-    const num = Number(value.replace(/,/g, ''))
-    if (Number.isNaN(num)) return
+  async function saveEdit(entry: MiningEntry) {
+    if (!editing || editing.id !== entry.id) return
+    const num = Number(editVal.replace(/,/g, ''))
+    if (Number.isNaN(num) || editVal === '') { cancelEdit(); return }
+    const column = editing.field === 'start' ? 'start_point' : editing.field === 'target' ? 'target_point' : 'current_point'
     const { data } = await supabase
-      .from('mining_entries').update({ current_point: num }).eq('id', entry.id).select().single()
+      .from('mining_entries').update({ [column]: num }).eq('id', entry.id).select().single()
     if (data) setEntries(prev => prev.map(e => e.id === entry.id ? (data as MiningEntry) : e))
-    setEditingId(null)
+    cancelEdit()
   }
 
   async function deleteEntry(id: string) {
@@ -183,18 +206,20 @@ export default function Mining() {
           </div>
         )}
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 12 }}>
           {entries.map(e => {
             const mined = e.current_point - e.start_point
             const remaining = Math.max(0, e.target_point - mined)
             const pct = e.target_point > 0 ? Math.min(100, Math.max(0, mined / e.target_point * 100)) : 0
             const done = e.target_point > 0 && mined >= e.target_point
-            const isEditing = editingId === e.id
+            const isEditingTarget = editing?.id === e.id && editing.field === 'target'
+            const isEditingStart = editing?.id === e.id && editing.field === 'start'
+            const isEditingCurrent = editing?.id === e.id && editing.field === 'current'
 
             return (
               <div key={e.id} style={{
                 background: 'var(--bg-card)', border: `1px solid ${done ? 'var(--green-border)' : 'var(--border)'}`,
-                borderRadius: 10, padding: '12px 14px',
+                borderRadius: 10, padding: '14px 16px',
               }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                   <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>{e.site_name}</span>
@@ -206,13 +231,25 @@ export default function Mining() {
                   </div>
                 </div>
 
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
                   <span style={{ fontFamily: 'var(--font-num)', fontSize: 18, fontWeight: 700, color: done ? 'var(--green)' : 'var(--gold)' }}>
                     {fmt(mined)}
                   </span>
-                  <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: 'var(--font-num)' }}>
-                    / {fmt(e.target_point)}
-                  </span>
+                  {isEditingTarget ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>/</span>
+                      <input autoFocus style={{ width: 90, background: 'var(--bg-elevated)', border: '1px solid var(--gold-border)', borderRadius: 6, padding: '3px 6px', fontSize: 11, color: 'var(--text-primary)', fontFamily: 'var(--font-num)', outline: 'none', boxSizing: 'border-box' }}
+                        inputMode="numeric" value={editVal}
+                        onChange={ev => { const raw = ev.target.value.replace(/,/g, ''); if (raw === '' || /^\d+$/.test(raw)) setEditVal(raw) }}
+                        onKeyDown={ev => ev.key === 'Enter' && saveEdit(e)} />
+                      <button onClick={() => saveEdit(e)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--green)', display: 'flex' }}><Check size={13} /></button>
+                      <button onClick={cancelEdit} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex' }}><X size={13} /></button>
+                    </div>
+                  ) : (
+                    <span onClick={() => startEdit(e, 'target')} style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: 'var(--font-num)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 3 }}>
+                      / {fmt(e.target_point)} <Pencil size={10} />
+                    </span>
+                  )}
                 </div>
 
                 <div className="deposit-progress-bar">
@@ -221,24 +258,40 @@ export default function Mining() {
 
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8, fontSize: 10, color: 'var(--text-muted)' }}>
                   <span>{pct.toFixed(0)}% · 남음 {fmt(remaining)}</span>
-                  <span>시작 {fmt(e.start_point)}</span>
+                  {isEditingStart ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <span>시작</span>
+                      <input autoFocus style={{ width: 90, background: 'var(--bg-elevated)', border: '1px solid var(--gold-border)', borderRadius: 6, padding: '3px 6px', fontSize: 11, color: 'var(--text-primary)', fontFamily: 'var(--font-num)', outline: 'none', boxSizing: 'border-box' }}
+                        inputMode="numeric" value={editVal}
+                        onChange={ev => { const raw = ev.target.value.replace(/,/g, ''); if (raw === '' || /^\d+$/.test(raw)) setEditVal(raw) }}
+                        onKeyDown={ev => ev.key === 'Enter' && saveEdit(e)} />
+                      <button onClick={() => saveEdit(e)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--green)', display: 'flex' }}><Check size={13} /></button>
+                      <button onClick={cancelEdit} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex' }}><X size={13} /></button>
+                    </div>
+                  ) : (
+                    <span onClick={() => startEdit(e, 'start')} style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 3 }}>
+                      시작 {fmt(e.start_point)} <Pencil size={9} />
+                    </span>
+                  )}
                 </div>
 
                 <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
                   <span style={{ fontSize: 10, color: 'var(--text-muted)', flexShrink: 0 }}>현재 포인트</span>
-                  {isEditing ? (
+                  {isEditingCurrent ? (
                     <>
                       <input autoFocus style={{ ...inputSt, padding: '5px 8px', fontSize: 12 }} inputMode="numeric"
+                        placeholder="붙여넣기 또는 입력"
                         value={editVal}
                         onChange={ev => { const raw = ev.target.value.replace(/,/g, ''); if (raw === '' || /^\d+$/.test(raw)) setEditVal(raw) }}
-                        onKeyDown={ev => ev.key === 'Enter' && updateCurrent(e, editVal)} />
-                      <button onClick={() => updateCurrent(e, editVal)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--green)', display: 'flex' }}><Check size={14} /></button>
-                      <button onClick={() => setEditingId(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex' }}><X size={14} /></button>
+                        onKeyDown={ev => ev.key === 'Enter' && saveEdit(e)} />
+                      <button onClick={pasteToEdit} title="클립보드에서 붙여넣기" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--gold)', display: 'flex' }}><ClipboardPaste size={14} /></button>
+                      <button onClick={() => saveEdit(e)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--green)', display: 'flex' }}><Check size={14} /></button>
+                      <button onClick={cancelEdit} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex' }}><X size={14} /></button>
                     </>
                   ) : (
                     <>
                       <span style={{ flex: 1, fontFamily: 'var(--font-num)', fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>{fmt(e.current_point)}</span>
-                      <button onClick={() => { setEditingId(e.id); setEditVal(String(e.current_point)) }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex' }}><Pencil size={12} /></button>
+                      <button onClick={() => startEdit(e, 'current')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex' }}><Pencil size={12} /></button>
                     </>
                   )}
                 </div>
