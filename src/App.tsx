@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import type { Tab, ActionLog, Todo } from './types'
 import Dashboard from './pages/Dashboard'
 import Settlement from './pages/Settlement'
+import Mining from './pages/Mining'
 import Stats from './pages/Stats'
 import { supabase } from './lib/supabase'
 import { purgeOldLogs } from './lib/logger'
@@ -12,6 +13,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'dashboard', label: '대시보드' },
   { id: 'stats', label: '통계' },
   { id: 'settlement', label: '결산' },
+  { id: 'mining', label: '채굴' },
 ]
 
 const WIDTH_OPTIONS: { label: string; value: string }[] = [
@@ -620,6 +622,7 @@ export default function App() {
           {tab === 'dashboard' && <Dashboard />}
           {tab === 'stats' && <Stats />}
           {tab === 'settlement' && <Settlement />}
+          {tab === 'mining' && <Mining />}
         </div>
       </div>
 

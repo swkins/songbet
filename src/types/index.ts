@@ -48,4 +48,4 @@ export interface ActionLog {
 export interface GameRolling {
   id: string; created_at: string; site_id: string; amount: number
 }
-export type Tab = 'dashboard' | 'stats' | 'settlement' | 'simul' | 'rulebook'
+export type Tab = 'dashboard' | 'stats' | 'settlement' | 'mining' | 'simul' | 'rulebook'
