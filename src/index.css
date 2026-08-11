@@ -543,21 +543,6 @@ tr:hover td { background: var(--bg-hover); }
 @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 
 /* ── 채굴 페이지 ── */
-.mining-add-panel { width: 300px; flex-shrink: 0; border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow-y: auto; padding: 14px 12px; }
-.mining-panel-close { display: none; }
-.mining-fab { display: none; }
 @media (max-width: 640px) {
-  .mining-add-panel { display: none; }
-  .mining-add-panel.mobile-open {
-    display: flex; position: fixed; inset: 0; z-index: 200; background: var(--bg);
-    width: auto; border-right: none; padding: 16px;
-  }
-  .mining-panel-close { display: flex; }
-  .mining-fab {
-    display: flex; position: fixed; right: 18px; bottom: 22px; z-index: 150;
-    width: 52px; height: 52px; border-radius: 50%; align-items: center; justify-content: center;
-    background: var(--gold); color: #000; border: none; cursor: pointer;
-    box-shadow: 0 8px 24px rgba(245,166,35,0.45);
-  }
-  .mining-content { padding: 12px !important; padding-bottom: 90px !important; }
+  .mining-content { padding: 12px !important; }
 }

@@ -38,7 +38,7 @@ export default function Mining() {
   const [loading, setLoading] = useState(true)
   const [viewMode, setViewMode] = useState<'today' | 'calendar'>('today')
   const [calendarMonth, setCalendarMonth] = useState<Dayjs>(() => dayjs().startOf('month'))
-  const [mobileFormOpen, setMobileFormOpen] = useState(false)
+  const [addModalOpen, setAddModalOpen] = useState(false)
 
   // 추가 폼
   const [newName, setNewName] = useState('')
@@ -192,7 +192,7 @@ export default function Mining() {
       setEntries(prev => [...prev, data as MiningEntry])
       setHistory(prev => [data as MiningEntry, ...prev])
       setNewName(''); setNewStart(''); setNewTarget('')
-      setMobileFormOpen(false)
+      setAddModalOpen(false)
     } else if (error?.code === '23505') {
       alert('오늘 이미 등록된 사이트입니다.')
     }
@@ -229,71 +229,10 @@ export default function Mining() {
   return (
     <div style={{ display: 'flex', height: 'calc(100vh - 58px)', overflow: 'hidden', background: 'var(--bg)' }}>
 
-      {/* ═══ 좌: 추가 폼 (모바일에서는 +버튼으로만 열림) ═══ */}
-      <div className={`mining-add-panel${mobileFormOpen ? ' mobile-open' : ''}`}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.8px' }}>
-            {dayjs(today).format('MM.DD')} 채굴 추가
-          </div>
-          <button className="mining-panel-close" onClick={() => setMobileFormOpen(false)}
-            style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 8, width: 30, height: 30, alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'var(--text-secondary)' }}>
-            <X size={15} />
-          </button>
-        </div>
-
-        <div style={{ marginBottom: 10 }}>
-          <div style={labelSt}>사이트명</div>
-          <input style={inputSt} placeholder="사이트 이름"
-            list="mining-known-sites"
-            value={newName} onChange={e => setNewName(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && addEntry()} />
-          <datalist id="mining-known-sites">
-            {knownSites.map(n => <option key={n} value={n} />)}
-          </datalist>
-        </div>
-
-        <div style={{ marginBottom: 10 }}>
-          <div style={labelSt}>오늘 최초 시작 포인트</div>
-          <input style={inputSt} inputMode="numeric" placeholder="0"
-            value={newStart ? Number(newStart.replace(/,/g, '')).toLocaleString('ko-KR') : ''}
-            onChange={e => { const raw = e.target.value.replace(/,/g, ''); if (raw === '' || /^\d+$/.test(raw)) setNewStart(raw) }}
-            onKeyDown={e => e.key === 'Enter' && addEntry()} />
-        </div>
-
-        <div style={{ marginBottom: 14 }}>
-          <div style={labelSt}>목표량</div>
-          <input style={inputSt} inputMode="numeric" placeholder="0"
-            value={newTarget ? Number(newTarget.replace(/,/g, '')).toLocaleString('ko-KR') : ''}
-            onChange={e => { const raw = e.target.value.replace(/,/g, ''); if (raw === '' || /^\d+$/.test(raw)) setNewTarget(raw) }}
-            onKeyDown={e => e.key === 'Enter' && addEntry()} />
-        </div>
-
-        <button onClick={addEntry} disabled={!newName.trim() || saving} style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-          padding: '10px 0', borderRadius: 8, border: 'none', cursor: newName.trim() ? 'pointer' : 'not-allowed',
-          background: 'var(--gold)', color: '#000', fontWeight: 700, fontSize: 13, fontFamily: 'var(--font-body)',
-          opacity: newName.trim() ? 1 : 0.5,
-        }}>
-          <Plus size={14} /> 채굴 시작
-        </button>
-
-        {entries.length > 0 && (
-          <div style={{ marginTop: 20, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
-            <div style={labelSt}>오늘 합계</div>
-            <div style={{ fontFamily: 'var(--font-num)', fontSize: 20, fontWeight: 700, color: 'var(--gold)' }}>
-              {fmt(totals.mined)} <span style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 500 }}>/ {fmt(totals.target)}</span>
-            </div>
-            <div className="deposit-progress-bar" style={{ marginTop: 6 }}>
-              <div className="deposit-progress-fill" style={{ width: `${totals.target > 0 ? Math.min(100, totals.mined / totals.target * 100) : 0}%` }} />
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* ═══ 우: 사이트별 진행현황 / 달력·그래프 ═══ */}
+      {/* ═══ 사이트별 진행현황 / 달력·그래프 ═══ */}
       <div className="mining-content" style={{ flex: 1, overflowY: 'auto', padding: '18px 20px' }}>
 
-        <div style={{ display: 'flex', gap: 6, marginBottom: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 16 }}>
           <button onClick={() => setViewMode('today')} style={{
             display: 'flex', alignItems: 'center', gap: 5, padding: '7px 12px', borderRadius: 8, cursor: 'pointer', fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-body)',
             border: `1px solid ${viewMode === 'today' ? 'var(--gold-border)' : 'var(--border)'}`,
@@ -306,6 +245,18 @@ export default function Mining() {
             background: viewMode === 'calendar' ? 'var(--gold-bg)' : 'var(--bg-elevated)',
             color: viewMode === 'calendar' ? 'var(--gold)' : 'var(--text-secondary)',
           }}><CalendarDays size={13} /> 달력·그래프</button>
+
+          {viewMode === 'today' && entries.length > 0 && (
+            <span style={{ marginLeft: 4, fontSize: 12, color: 'var(--text-muted)' }}>
+              오늘 합계 <b style={{ color: 'var(--gold)', fontFamily: 'var(--font-num)' }}>{fmt(totals.mined)}</b>
+              <span style={{ color: 'var(--text-muted)' }}> / {fmt(totals.target)}</span>
+            </span>
+          )}
+
+          <button onClick={() => setAddModalOpen(true)} style={{
+            marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 5, padding: '7px 14px', borderRadius: 8, cursor: 'pointer',
+            fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-body)', border: 'none', background: 'var(--gold)', color: '#000',
+          }}><Plus size={14} /> 사이트 추가</button>
         </div>
 
         {viewMode === 'today' ? (
@@ -401,7 +352,8 @@ export default function Mining() {
                       </span>
                     </div>
 
-                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 6 }}>
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 14, marginTop: 12, borderTop: '1px solid var(--border)', paddingTop: 10, flexWrap: 'wrap' }}>
+                      {/* 시작 포인트 */}
                       {isEditingStart ? (
                         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                           <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>시작</span>
@@ -413,17 +365,21 @@ export default function Mining() {
                           <button onClick={cancelEdit} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex' }}><X size={13} /></button>
                         </div>
                       ) : (
-                        <span onClick={() => startEdit(e, 'start')} style={{ fontSize: 11, color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 3 }}>
-                          시작 {fmt(e.start_point)} <Pencil size={9} />
+                        <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                          <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>시작</span>
+                          <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', fontFamily: 'var(--font-num)' }}>{fmt(e.start_point)}</span>
+                          <button onClick={() => startEdit(e, 'start')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', padding: 0 }}><Pencil size={10} /></button>
                         </span>
                       )}
-                    </div>
 
-                    <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 6, borderTop: '1px solid var(--border)', paddingTop: 10 }}>
-                      <span style={{ fontSize: 10, color: 'var(--text-muted)', flexShrink: 0 }}>현재 포인트</span>
+                      <div style={{ width: 1, height: 14, background: 'var(--border)' }} />
+
+                      {/* 현재 포인트 */}
                       {isEditingCurrent ? (
-                        <>
-                          <input autoFocus style={{ ...inputSt, padding: '5px 8px', fontSize: 12 }} inputMode="numeric"
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>현재</span>
+                          <input autoFocus style={{ width: 120, background: 'var(--bg-elevated)', border: '1px solid var(--gold-border)', borderRadius: 6, padding: '5px 8px', fontSize: 12, color: 'var(--text-primary)', fontFamily: 'var(--font-num)', outline: 'none', boxSizing: 'border-box' }}
+                            inputMode="numeric"
                             placeholder="붙여넣기 또는 입력"
                             value={editVal}
                             onChange={ev => { const raw = ev.target.value.replace(/,/g, ''); if (raw === '' || /^\d+$/.test(raw)) setEditVal(raw) }}
@@ -431,12 +387,13 @@ export default function Mining() {
                           <button onClick={pasteToEdit} title="클립보드에서 붙여넣기" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--gold)', display: 'flex' }}><ClipboardPaste size={14} /></button>
                           <button onClick={() => saveEdit(e)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--green)', display: 'flex' }}><Check size={14} /></button>
                           <button onClick={cancelEdit} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex' }}><X size={14} /></button>
-                        </>
+                        </div>
                       ) : (
-                        <>
-                          <span style={{ flex: 1, fontFamily: 'var(--font-num)', fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>{fmt(e.current_point)}</span>
-                          <button onClick={() => startEdit(e, 'current')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex' }}><Pencil size={12} /></button>
-                        </>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                          <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>현재</span>
+                          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', fontFamily: 'var(--font-num)' }}>{fmt(e.current_point)}</span>
+                          <button onClick={() => startEdit(e, 'current')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', padding: 0 }}><Pencil size={12} /></button>
+                        </span>
                       )}
                     </div>
                   </div>
@@ -527,10 +484,64 @@ export default function Mining() {
         )}
       </div>
 
-      {/* ═══ 모바일 전용 사이트 추가 버튼 ═══ */}
-      <button className="mining-fab" onClick={() => setMobileFormOpen(true)} title="사이트 추가">
-        <Plus size={24} />
-      </button>
+      {/* ═══ 사이트 추가 모달 — 평소엔 숨겨져 있고 버튼으로만 열림 ═══ */}
+      {addModalOpen && (
+        <div onClick={() => setAddModalOpen(false)} style={{
+          position: 'fixed', inset: 0, zIndex: 300, background: 'rgba(0,0,0,0.6)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+        }}>
+          <div onClick={ev => ev.stopPropagation()} style={{
+            width: '100%', maxWidth: 360, background: 'var(--bg-card)', border: '1px solid var(--border)',
+            borderRadius: 14, padding: 20, boxShadow: '0 20px 60px rgba(0,0,0,0.6)',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>
+                {dayjs(today).format('MM.DD')} 채굴 사이트 추가
+              </div>
+              <button onClick={() => setAddModalOpen(false)}
+                style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 8, width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'var(--text-secondary)' }}>
+                <X size={14} />
+              </button>
+            </div>
+
+            <div style={{ marginBottom: 10 }}>
+              <div style={labelSt}>사이트명</div>
+              <input autoFocus style={inputSt} placeholder="사이트 이름"
+                list="mining-known-sites"
+                value={newName} onChange={e => setNewName(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && addEntry()} />
+              <datalist id="mining-known-sites">
+                {knownSites.map(n => <option key={n} value={n} />)}
+              </datalist>
+            </div>
+
+            <div style={{ marginBottom: 10 }}>
+              <div style={labelSt}>오늘 최초 시작 포인트</div>
+              <input style={inputSt} inputMode="numeric" placeholder="0"
+                value={newStart ? Number(newStart.replace(/,/g, '')).toLocaleString('ko-KR') : ''}
+                onChange={e => { const raw = e.target.value.replace(/,/g, ''); if (raw === '' || /^\d+$/.test(raw)) setNewStart(raw) }}
+                onKeyDown={e => e.key === 'Enter' && addEntry()} />
+            </div>
+
+            <div style={{ marginBottom: 16 }}>
+              <div style={labelSt}>목표량</div>
+              <input style={inputSt} inputMode="numeric" placeholder="0"
+                value={newTarget ? Number(newTarget.replace(/,/g, '')).toLocaleString('ko-KR') : ''}
+                onChange={e => { const raw = e.target.value.replace(/,/g, ''); if (raw === '' || /^\d+$/.test(raw)) setNewTarget(raw) }}
+                onKeyDown={e => e.key === 'Enter' && addEntry()} />
+            </div>
+
+            <button onClick={addEntry} disabled={!newName.trim() || saving} style={{
+              width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+              padding: '11px 0', borderRadius: 8, border: 'none', cursor: newName.trim() ? 'pointer' : 'not-allowed',
+              background: 'var(--gold)', color: '#000', fontWeight: 700, fontSize: 13, fontFamily: 'var(--font-body)',
+              opacity: newName.trim() ? 1 : 0.5,
+            }}>
+              <Plus size={14} /> 채굴 시작
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
