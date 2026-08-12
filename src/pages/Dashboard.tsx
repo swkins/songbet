@@ -625,20 +625,17 @@ function BasketballMatchPicker({ match, onSelectMatch, onChangeMatch, pickLabel,
   )
 }
 
-/* ── 야구 전용 "일정에서 고르기" 피커 ──
-   야구는 사이트마다 마켓 표기가 워낙 달라서(선발/불펜 라인업에 따라 배당이 계속 바뀌는 등)
-   기존처럼 자유입력 칸에서 팀명 뒤에 이어서 직접 마켓을 적는 방식을 유지한다.
-   경기를 고르면 리그란·경기 내용란에 자동으로 채워지고, 그 아래 자유입력 칸에서 이어서 편집 가능. */
-function SimpleMatchPicker<M extends { id: string; league: string; leagueLabel: string; startTime: string; teamA: string; teamB: string }>({
-  title, sportKey, leagues, fetchFn, onSelectMatch,
-}: {
-  title: string
-  sportKey: string
-  leagues: { code: string; label: string }[]
-  fetchFn: (opts?: { forceRefresh?: boolean }) => Promise<M[]>
-  onSelectMatch: (m: M) => void
+/* ── 야구 경기 선택 + 마켓(승리팀) 선택 UI ──
+   마켓 표기가 사이트마다 워낙 다양해서(선발/불펜 라인업에 따라 배당이 계속 바뀌는 등) 승패만
+   버튼으로 제공하고, 그 외 마켓(언더오버·핸디캡 등)은 기존처럼 자유입력 칸에서 이어서 적는다. */
+function BaseballMatchPicker({ match, onSelectMatch, onChangeMatch, pickLabel, onPick }: {
+  match: UpcomingBaseballMatch | null
+  onSelectMatch: (m: UpcomingBaseballMatch) => void
+  onChangeMatch: () => void
+  pickLabel: string | null
+  onPick: (label: string) => void
 }) {
-  const [matches, setMatches] = useState<M[] | null>(null)
+  const [matches, setMatches] = useState<UpcomingBaseballMatch[] | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(false)
   const [leagueFilter, setLeagueFilter] = useState<string>('all')
@@ -646,16 +643,16 @@ function SimpleMatchPicker<M extends { id: string; league: string; leagueLabel: 
   const [translations, setTranslations] = useState<Record<string, string>>({})
 
   useEffect(() => {
-    fetchTeamTranslations(sportKey).then(setTranslations)
-  }, [sportKey])
+    fetchTeamTranslations('baseball').then(setTranslations)
+  }, [])
 
   useEffect(() => {
-    if (matches !== null) return
+    if (match || matches !== null) return
     setLoading(true); setError(false)
-    fetchFn()
+    fetchUpcomingBaseballMatches()
       .then(m => { setMatches(m); setLoading(false) })
       .catch(() => { setError(true); setLoading(false) })
-  }, [matches])
+  }, [match, matches])
 
   function translate(name: string) { return translations[name] ?? name }
 
@@ -665,11 +662,47 @@ function SimpleMatchPicker<M extends { id: string; league: string; leagueLabel: 
     if (next == null) return
     const trimmed = next.trim()
     if (!trimmed || trimmed === cur) return
-    await saveTeamTranslation(sportKey, original, trimmed)
+    await saveTeamTranslation('baseball', original, trimmed)
     setTranslations(p => ({ ...p, [original]: trimmed }))
   }
 
+  if (match) {
+    const nameA = translate(match.teamA)
+    const nameB = translate(match.teamB)
+
+    function btnStyle(selected: boolean): React.CSSProperties {
+      return {
+        padding: '7px 4px', borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-body)',
+        border: `1px solid ${selected ? 'var(--gold-border)' : 'var(--border)'}`,
+        background: selected ? 'var(--gold-bg)' : 'var(--bg-card)',
+        color: selected ? 'var(--gold)' : 'var(--text-secondary)',
+      }
+    }
+
+    return (
+      <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: 8, background: 'var(--bg-elevated)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+          <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--gold)' }}>{match.leagueLabel}</span>
+          <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-primary)', flex: 1, display: 'flex', alignItems: 'center', gap: 3, minWidth: 0 }}>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{nameA}</span>
+            <button type="button" onClick={() => renameTeam(match.teamA)} title="홈팀 이름 한글로 수정" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', flexShrink: 0, padding: 0 }}><Pencil size={9} /></button>
+            <span style={{ flexShrink: 0 }}>vs</span>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{nameB}</span>
+            <button type="button" onClick={() => renameTeam(match.teamB)} title="원정팀 이름 한글로 수정" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', flexShrink: 0, padding: 0 }}><Pencil size={9} /></button>
+          </span>
+          <button type="button" onClick={onChangeMatch} style={{ fontSize: 9, color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline', flexShrink: 0 }}>경기 변경</button>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
+          <button type="button" onClick={() => onPick(`${nameA} 승`)} style={btnStyle(pickLabel === `${nameA} 승`)}>{nameA} 승</button>
+          <button type="button" onClick={() => onPick(`${nameB} 승`)} style={btnStyle(pickLabel === `${nameB} 승`)}>{nameB} 승</button>
+        </div>
+      </div>
+    )
+  }
+
+  const leagues = BASEBALL_LEAGUES.map(l => l.code)
   const byLeague = matches ? (leagueFilter === 'all' ? matches : matches.filter(m => m.league === leagueFilter)) : []
+
   const now = new Date()
   const todayStr = now.toDateString()
   const tomorrowStr = new Date(Date.now() + 86400000).toDateString()
@@ -685,7 +718,7 @@ function SimpleMatchPicker<M extends { id: string; league: string; leagueLabel: 
 
   return (
     <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: 8, background: 'var(--bg-elevated)' }}>
-      <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 6 }}>{title}</div>
+      <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 6 }}>야구 경기에서 고르기 (MLB)</div>
       {loading && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0', textAlign: 'center' }}>일정 불러오는 중...</div>}
       {error && (
         <div style={{ fontSize: 11, color: 'var(--red)', padding: '8px 0', textAlign: 'center' }}>
@@ -700,7 +733,7 @@ function SimpleMatchPicker<M extends { id: string; league: string; leagueLabel: 
         <>
           {leagues.length > 1 && (
             <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 6 }}>
-              {[...leagues.map(l => l.code), 'all'].map(l => {
+              {[...leagues, 'all'].map(l => {
                 const cnt = l === 'all' ? matches.length : matches.filter(m => m.league === l).length
                 return (
                   <button key={l} type="button" onClick={() => setLeagueFilter(l)}
@@ -709,7 +742,7 @@ function SimpleMatchPicker<M extends { id: string; league: string; leagueLabel: 
                       border: `1px solid ${leagueFilter === l ? 'var(--gold-border)' : 'var(--border)'}`,
                       background: leagueFilter === l ? 'var(--gold-bg)' : 'var(--bg-card)',
                       color: leagueFilter === l ? 'var(--gold)' : 'var(--text-muted)',
-                    }}>{l === 'all' ? '전체' : leagues.find(x => x.code === l)?.label ?? l} ({cnt})</button>
+                    }}>{l === 'all' ? '전체' : BASEBALL_LEAGUES.find(x => x.code === l)?.label ?? l} ({cnt})</button>
                 )
               })}
             </div>
@@ -758,7 +791,6 @@ function SimpleMatchPicker<M extends { id: string; league: string; leagueLabel: 
     </div>
   )
 }
-
 
 function parseOdds(raw: string): number {
   const n = Number(raw.trim())
@@ -1427,6 +1459,9 @@ function SingleBetForm({ site, onClose, onBet, onDoubleBet, defaultSport, baseba
   // 농구 전용: 경기 선택 + 마켓(승/핸디캡, 라인 직접입력) 선택
   const [basketballMatch, setBasketballMatch] = useState<UpcomingBasketballMatch | null>(null)
   const [basketballPick, setBasketballPick]   = useState<string | null>(null)
+  // 야구 전용: 경기 선택 + 마켓(승리팀) 선택
+  const [baseballMatch, setBaseballMatch] = useState<UpcomingBaseballMatch | null>(null)
+  const [baseballPick, setBaseballPick]   = useState<string | null>(null)
   // 베팅 모드: 단폴 / 두폴. 두폴은 리그 없이 경기 내용 2개 + 배당/금액 공유.
   const [mode, setMode] = useState<'single' | 'double'>('single')
   const [content2, setContent2] = useState('')
@@ -1504,6 +1539,22 @@ function SingleBetForm({ site, onClose, onBet, onDoubleBet, defaultSport, baseba
     if (sport !== 'basketball' && (basketballMatch || basketballPick)) { setBasketballMatch(null); setBasketballPick(null) }
   }, [sport, basketballMatch, basketballPick])
 
+  // 야구: 경기 고르면 리그가 바로 정해지고, 승리팀을 고르면 content가 확정된다.
+  useEffect(() => {
+    if (!baseballMatch) return
+    setLeague(BASEBALL_LEAGUES.find(l => l.code === baseballMatch.league)?.label ?? baseballMatch.leagueLabel)
+    setLeagueTouched(true)
+  }, [baseballMatch])
+  useEffect(() => {
+    if (baseballPick != null) {
+      setContent(baseballPick)
+      requestAnimationFrame(() => oddsRef.current?.focus())
+    }
+  }, [baseballPick])
+  useEffect(() => {
+    if (sport !== 'baseball' && (baseballMatch || baseballPick)) { setBaseballMatch(null); setBaseballPick(null) }
+  }, [sport, baseballMatch, baseballPick])
+
   function handleOdds(raw: string) {
     const clean = raw.replace(/[^0-9.]/g, '')
     if (/^\d{3}$/.test(clean)) setOddsRaw((Number(clean) / 100).toFixed(2))
@@ -1560,16 +1611,12 @@ function SingleBetForm({ site, onClose, onBet, onDoubleBet, defaultSport, baseba
         />
       )}
       {sport === 'baseball' && mode === 'single' && (
-        <SimpleMatchPicker
-          title="야구 경기에서 고르기 (MLB)"
-          sportKey="baseball"
-          leagues={BASEBALL_LEAGUES}
-          fetchFn={fetchUpcomingBaseballMatches}
-          onSelectMatch={(m: UpcomingBaseballMatch) => {
-            setContent(`${m.teamA} vs ${m.teamB}`)
-            setLeague(BASEBALL_LEAGUES.find(l => l.code === m.league)?.label ?? m.leagueLabel)
-            setLeagueTouched(true)
-          }}
+        <BaseballMatchPicker
+          match={baseballMatch}
+          onSelectMatch={m => { setBaseballMatch(m); setBaseballPick(null); setContent('') }}
+          onChangeMatch={() => { setBaseballMatch(null); setBaseballPick(null); setContent(''); setLeagueTouched(false) }}
+          pickLabel={baseballPick}
+          onPick={label => setBaseballPick(label)}
         />
       )}
       {sport === 'basketball' && mode === 'single' && (
