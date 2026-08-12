@@ -8,6 +8,7 @@ import { fetchTodayTomorrowLolMatches, LEAGUES as LOL_LEAGUES, type UpcomingLolM
 import { fetchUpcomingSoccerMatches, SOCCER_LEAGUES, type UpcomingSoccerMatch } from '../lib/soccerSchedule'
 import { fetchUpcomingBaseballMatches, BASEBALL_LEAGUES, type UpcomingBaseballMatch } from '../lib/baseballSchedule'
 import { fetchUpcomingBasketballMatches, BASKETBALL_LEAGUES, type UpcomingBasketballMatch } from '../lib/basketballSchedule'
+import { fetchTeamTranslations, saveTeamTranslation } from '../lib/teamTranslations'
 import { sportGlyph } from '../components/SportIcons'
 import MiningWidget from '../components/MiningWidget'
 import dayjs from 'dayjs'
@@ -271,19 +272,35 @@ function SoccerMatchPicker({ match, onSelectMatch, onChangeMatch, pickLabel, onP
   const [error, setError] = useState(false)
   const [leagueFilter, setLeagueFilter] = useState<string>('all')
   const [dayTab, setDayTab] = useState<'today' | 'tomorrow' | 'later'>('today')
-  const [open, setOpen] = useState(false)
+  const [translations, setTranslations] = useState<Record<string, string>>({})
 
   useEffect(() => {
-    if (match || !open || matches !== null) return
+    fetchTeamTranslations('soccer').then(setTranslations)
+  }, [])
+
+  useEffect(() => {
+    if (match || matches !== null) return
     setLoading(true); setError(false)
     fetchUpcomingSoccerMatches()
       .then(m => { setMatches(m); setLoading(false) })
       .catch(() => { setError(true); setLoading(false) })
-  }, [match, open, matches])
+  }, [match, matches])
+
+  function translate(name: string) { return translations[name] ?? name }
+
+  async function renameTeam(original: string) {
+    const cur = translate(original)
+    const next = prompt(`"${cur}" 팀의 한글 이름을 입력하세요`, cur)
+    if (next == null) return
+    const trimmed = next.trim()
+    if (!trimmed || trimmed === cur) return
+    await saveTeamTranslation('soccer', original, trimmed)
+    setTranslations(p => ({ ...p, [original]: trimmed }))
+  }
 
   if (match) {
-    const nameA = match.teamA
-    const nameB = match.teamB
+    const nameA = translate(match.teamA)
+    const nameB = translate(match.teamB)
 
     function btnStyle(selected: boolean): React.CSSProperties {
       return {
@@ -299,6 +316,7 @@ function SoccerMatchPicker({ match, onSelectMatch, onChangeMatch, pickLabel, onP
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
           <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--gold)' }}>{match.leagueLabel}</span>
           <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-primary)', flex: 1 }}>{nameA} vs {nameB}</span>
+          <button type="button" onClick={() => renameTeam(match.teamA)} title="팀 이름 한글로 수정" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex' }}><Pencil size={11} /></button>
           <button type="button" onClick={onChangeMatch} style={{ fontSize: 9, color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>경기 변경</button>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -342,76 +360,75 @@ function SoccerMatchPicker({ match, onSelectMatch, onChangeMatch, pickLabel, onP
 
   return (
     <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: 8, background: 'var(--bg-elevated)' }}>
-      <button type="button" onClick={() => setOpen(p => !p)} style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-body)' }}>
-        축구 경기에서 고르기
-        <span>{open ? '접기' : '펼치기'}</span>
-      </button>
-      {open && (
-        <div style={{ marginTop: 6 }}>
-          {loading && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0', textAlign: 'center' }}>일정 불러오는 중...</div>}
-          {error && (
-            <div style={{ fontSize: 11, color: 'var(--red)', padding: '8px 0', textAlign: 'center' }}>
-              일정을 불러오지 못했습니다
-              <button type="button" onClick={() => setMatches(null)} style={{ marginLeft: 6, fontSize: 10, color: 'var(--gold)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>재시도</button>
+      <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 6 }}>축구 경기에서 고르기</div>
+      {loading && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0', textAlign: 'center' }}>일정 불러오는 중...</div>}
+      {error && (
+        <div style={{ fontSize: 11, color: 'var(--red)', padding: '8px 0', textAlign: 'center' }}>
+          일정을 불러오지 못했습니다
+          <button type="button" onClick={() => setMatches(null)} style={{ marginLeft: 6, fontSize: 10, color: 'var(--gold)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>재시도</button>
+        </div>
+      )}
+      {!loading && !error && matches && matches.length === 0 && (
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0', textAlign: 'center' }}>앞으로 10일 안에 예정된 경기가 없습니다</div>
+      )}
+      {!loading && matches && matches.length > 0 && (
+        <>
+          {leagues.length > 1 && (
+            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 6 }}>
+              {[...leagues, 'all'].map(l => {
+                const cnt = l === 'all' ? matches.length : matches.filter(m => m.league === l).length
+                return (
+                  <button key={l} type="button" onClick={() => setLeagueFilter(l)}
+                    style={{
+                      fontSize: 9, fontWeight: 700, padding: '3px 7px', borderRadius: 4, cursor: 'pointer', fontFamily: 'var(--font-body)',
+                      border: `1px solid ${leagueFilter === l ? 'var(--gold-border)' : 'var(--border)'}`,
+                      background: leagueFilter === l ? 'var(--gold-bg)' : 'var(--bg-card)',
+                      color: leagueFilter === l ? 'var(--gold)' : 'var(--text-muted)',
+                    }}>{l === 'all' ? '전체' : SOCCER_LEAGUES.find(x => x.code === l)?.label ?? l} ({cnt})</button>
+                )
+              })}
             </div>
           )}
-          {!loading && !error && matches && matches.length === 0 && (
-            <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0', textAlign: 'center' }}>앞으로 10일 안에 예정된 경기가 없습니다</div>
+          <div style={{ display: 'flex', gap: 4, marginBottom: 6 }}>
+            {([['today', `오늘 (${dayGroups.today.length})`], ['tomorrow', `내일 (${dayGroups.tomorrow.length})`], ['later', `이후 (${dayGroups.later.length})`]] as const).map(([key, label]) => (
+              <button key={key} type="button" onClick={() => setDayTab(key)}
+                style={{
+                  flex: 1, fontSize: 10, fontWeight: 700, padding: '5px 0', borderRadius: 5, cursor: 'pointer', fontFamily: 'var(--font-body)',
+                  border: `1px solid ${dayTab === key ? 'var(--gold-border)' : 'var(--border)'}`,
+                  background: dayTab === key ? 'var(--gold-bg)' : 'var(--bg-card)',
+                  color: dayTab === key ? 'var(--gold)' : 'var(--text-muted)',
+                }}>{label}</button>
+            ))}
+          </div>
+          {shown.length === 0 ? (
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0', textAlign: 'center' }}>해당 구간에 경기가 없습니다</div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 260, overflowY: 'auto' }}>
+              {shown.map(m => {
+                const d = new Date(m.startTime)
+                const timeLabel = dayTab === 'later'
+                  ? `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+                  : `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+                return (
+                  <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+                    <button type="button" onClick={() => onSelectMatch({ ...m, teamA: translate(m.teamA), teamB: translate(m.teamB) })}
+                      style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg-card)', cursor: 'pointer', textAlign: 'left', fontFamily: 'var(--font-body)' }}>
+                      <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--gold)', flexShrink: 0, width: 52 }}>{m.leagueLabel}</span>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {translate(m.teamA)} vs {translate(m.teamB)}
+                      </span>
+                      <span style={{ fontSize: 9, color: 'var(--text-muted)', flexShrink: 0 }}>{timeLabel}</span>
+                    </button>
+                    <button type="button" onClick={() => renameTeam(m.teamA)} title="홈팀 이름 한글로 수정"
+                      style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 5, cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', flexShrink: 0, padding: 5 }}>
+                      <Pencil size={10} />
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
           )}
-          {!loading && matches && matches.length > 0 && (
-            <>
-              {leagues.length > 1 && (
-                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 6 }}>
-                  {[...leagues, 'all'].map(l => {
-                    const cnt = l === 'all' ? matches.length : matches.filter(m => m.league === l).length
-                    return (
-                      <button key={l} type="button" onClick={() => setLeagueFilter(l)}
-                        style={{
-                          fontSize: 9, fontWeight: 700, padding: '3px 7px', borderRadius: 4, cursor: 'pointer', fontFamily: 'var(--font-body)',
-                          border: `1px solid ${leagueFilter === l ? 'var(--gold-border)' : 'var(--border)'}`,
-                          background: leagueFilter === l ? 'var(--gold-bg)' : 'var(--bg-card)',
-                          color: leagueFilter === l ? 'var(--gold)' : 'var(--text-muted)',
-                        }}>{l === 'all' ? '전체' : SOCCER_LEAGUES.find(x => x.code === l)?.label ?? l} ({cnt})</button>
-                    )
-                  })}
-                </div>
-              )}
-              <div style={{ display: 'flex', gap: 4, marginBottom: 6 }}>
-                {([['today', `오늘 (${dayGroups.today.length})`], ['tomorrow', `내일 (${dayGroups.tomorrow.length})`], ['later', `이후 (${dayGroups.later.length})`]] as const).map(([key, label]) => (
-                  <button key={key} type="button" onClick={() => setDayTab(key)}
-                    style={{
-                      flex: 1, fontSize: 10, fontWeight: 700, padding: '5px 0', borderRadius: 5, cursor: 'pointer', fontFamily: 'var(--font-body)',
-                      border: `1px solid ${dayTab === key ? 'var(--gold-border)' : 'var(--border)'}`,
-                      background: dayTab === key ? 'var(--gold-bg)' : 'var(--bg-card)',
-                      color: dayTab === key ? 'var(--gold)' : 'var(--text-muted)',
-                    }}>{label}</button>
-                ))}
-              </div>
-              {shown.length === 0 ? (
-                <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0', textAlign: 'center' }}>해당 구간에 경기가 없습니다</div>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 260, overflowY: 'auto' }}>
-                  {shown.map(m => {
-                    const d = new Date(m.startTime)
-                    const timeLabel = dayTab === 'later'
-                      ? `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
-                      : `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
-                    return (
-                      <button key={m.id} type="button" onClick={() => { onSelectMatch(m); setOpen(false) }}
-                        style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg-card)', cursor: 'pointer', textAlign: 'left', fontFamily: 'var(--font-body)', flexShrink: 0 }}>
-                        <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--gold)', flexShrink: 0, width: 52 }}>{m.leagueLabel}</span>
-                        <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {m.teamA} vs {m.teamB}
-                        </span>
-                        <span style={{ fontSize: 9, color: 'var(--text-muted)', flexShrink: 0 }}>{timeLabel}</span>
-                      </button>
-                    )
-                  })}
-                </div>
-              )}
-            </>
-          )}
-        </div>
+        </>
       )}
     </div>
   )
@@ -431,20 +448,36 @@ function BasketballMatchPicker({ match, onSelectMatch, onChangeMatch, pickLabel,
   const [error, setError] = useState(false)
   const [leagueFilter, setLeagueFilter] = useState<string>('all')
   const [dayTab, setDayTab] = useState<'today' | 'tomorrow' | 'later'>('today')
-  const [open, setOpen] = useState(false)
   const [handicapLine, setHandicapLine] = useState('')
+  const [translations, setTranslations] = useState<Record<string, string>>({})
 
   useEffect(() => {
-    if (match || !open || matches !== null) return
+    fetchTeamTranslations('basketball').then(setTranslations)
+  }, [])
+
+  useEffect(() => {
+    if (match || matches !== null) return
     setLoading(true); setError(false)
     fetchUpcomingBasketballMatches()
       .then(m => { setMatches(m); setLoading(false) })
       .catch(() => { setError(true); setLoading(false) })
-  }, [match, open, matches])
+  }, [match, matches])
+
+  function translate(name: string) { return translations[name] ?? name }
+
+  async function renameTeam(original: string) {
+    const cur = translate(original)
+    const next = prompt(`"${cur}" 팀의 한글 이름을 입력하세요`, cur)
+    if (next == null) return
+    const trimmed = next.trim()
+    if (!trimmed || trimmed === cur) return
+    await saveTeamTranslation('basketball', original, trimmed)
+    setTranslations(p => ({ ...p, [original]: trimmed }))
+  }
 
   if (match) {
-    const nameA = match.teamA
-    const nameB = match.teamB
+    const nameA = translate(match.teamA)
+    const nameB = translate(match.teamB)
 
     function btnStyle(selected: boolean): React.CSSProperties {
       return {
@@ -465,6 +498,7 @@ function BasketballMatchPicker({ match, onSelectMatch, onChangeMatch, pickLabel,
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
           <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--gold)' }}>{match.leagueLabel}</span>
           <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-primary)', flex: 1 }}>{nameA} vs {nameB}</span>
+          <button type="button" onClick={() => renameTeam(match.teamA)} title="팀 이름 한글로 수정" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex' }}><Pencil size={11} /></button>
           <button type="button" onClick={onChangeMatch} style={{ fontSize: 9, color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>경기 변경</button>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -507,76 +541,75 @@ function BasketballMatchPicker({ match, onSelectMatch, onChangeMatch, pickLabel,
 
   return (
     <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: 8, background: 'var(--bg-elevated)' }}>
-      <button type="button" onClick={() => setOpen(p => !p)} style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-body)' }}>
-        농구 경기에서 고르기 (NBA/WNBA 등)
-        <span>{open ? '접기' : '펼치기'}</span>
-      </button>
-      {open && (
-        <div style={{ marginTop: 6 }}>
-          {loading && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0', textAlign: 'center' }}>일정 불러오는 중...</div>}
-          {error && (
-            <div style={{ fontSize: 11, color: 'var(--red)', padding: '8px 0', textAlign: 'center' }}>
-              일정을 불러오지 못했습니다
-              <button type="button" onClick={() => setMatches(null)} style={{ marginLeft: 6, fontSize: 10, color: 'var(--gold)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>재시도</button>
+      <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 6 }}>농구 경기에서 고르기 (NBA/WNBA)</div>
+      {loading && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0', textAlign: 'center' }}>일정 불러오는 중...</div>}
+      {error && (
+        <div style={{ fontSize: 11, color: 'var(--red)', padding: '8px 0', textAlign: 'center' }}>
+          일정을 불러오지 못했습니다
+          <button type="button" onClick={() => setMatches(null)} style={{ marginLeft: 6, fontSize: 10, color: 'var(--gold)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>재시도</button>
+        </div>
+      )}
+      {!loading && !error && matches && matches.length === 0 && (
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0', textAlign: 'center' }}>앞으로 며칠 안에 예정된 경기가 없습니다</div>
+      )}
+      {!loading && matches && matches.length > 0 && (
+        <>
+          {leagues.length > 1 && (
+            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 6 }}>
+              {[...leagues, 'all'].map(l => {
+                const cnt = l === 'all' ? matches.length : matches.filter(m => m.league === l).length
+                return (
+                  <button key={l} type="button" onClick={() => setLeagueFilter(l)}
+                    style={{
+                      fontSize: 9, fontWeight: 700, padding: '3px 7px', borderRadius: 4, cursor: 'pointer', fontFamily: 'var(--font-body)',
+                      border: `1px solid ${leagueFilter === l ? 'var(--gold-border)' : 'var(--border)'}`,
+                      background: leagueFilter === l ? 'var(--gold-bg)' : 'var(--bg-card)',
+                      color: leagueFilter === l ? 'var(--gold)' : 'var(--text-muted)',
+                    }}>{l === 'all' ? '전체' : BASKETBALL_LEAGUES.find(x => x.code === l)?.label ?? l} ({cnt})</button>
+                )
+              })}
             </div>
           )}
-          {!loading && !error && matches && matches.length === 0 && (
-            <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0', textAlign: 'center' }}>앞으로 며칠 안에 예정된 경기가 없습니다</div>
+          <div style={{ display: 'flex', gap: 4, marginBottom: 6 }}>
+            {([['today', `오늘 (${dayGroups.today.length})`], ['tomorrow', `내일 (${dayGroups.tomorrow.length})`], ['later', `이후 (${dayGroups.later.length})`]] as const).map(([key, label]) => (
+              <button key={key} type="button" onClick={() => setDayTab(key)}
+                style={{
+                  flex: 1, fontSize: 10, fontWeight: 700, padding: '5px 0', borderRadius: 5, cursor: 'pointer', fontFamily: 'var(--font-body)',
+                  border: `1px solid ${dayTab === key ? 'var(--gold-border)' : 'var(--border)'}`,
+                  background: dayTab === key ? 'var(--gold-bg)' : 'var(--bg-card)',
+                  color: dayTab === key ? 'var(--gold)' : 'var(--text-muted)',
+                }}>{label}</button>
+            ))}
+          </div>
+          {shown.length === 0 ? (
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0', textAlign: 'center' }}>해당 구간에 경기가 없습니다</div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 260, overflowY: 'auto' }}>
+              {shown.map(m => {
+                const d = new Date(m.startTime)
+                const timeLabel = dayTab === 'later'
+                  ? `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+                  : `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+                return (
+                  <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+                    <button type="button" onClick={() => onSelectMatch({ ...m, teamA: translate(m.teamA), teamB: translate(m.teamB) })}
+                      style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg-card)', cursor: 'pointer', textAlign: 'left', fontFamily: 'var(--font-body)' }}>
+                      <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--gold)', flexShrink: 0, width: 52 }}>{m.leagueLabel}</span>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {translate(m.teamA)} vs {translate(m.teamB)}
+                      </span>
+                      <span style={{ fontSize: 9, color: 'var(--text-muted)', flexShrink: 0 }}>{timeLabel}</span>
+                    </button>
+                    <button type="button" onClick={() => renameTeam(m.teamA)} title="홈팀 이름 한글로 수정"
+                      style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 5, cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', flexShrink: 0, padding: 5 }}>
+                      <Pencil size={10} />
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
           )}
-          {!loading && matches && matches.length > 0 && (
-            <>
-              {leagues.length > 1 && (
-                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 6 }}>
-                  {[...leagues, 'all'].map(l => {
-                    const cnt = l === 'all' ? matches.length : matches.filter(m => m.league === l).length
-                    return (
-                      <button key={l} type="button" onClick={() => setLeagueFilter(l)}
-                        style={{
-                          fontSize: 9, fontWeight: 700, padding: '3px 7px', borderRadius: 4, cursor: 'pointer', fontFamily: 'var(--font-body)',
-                          border: `1px solid ${leagueFilter === l ? 'var(--gold-border)' : 'var(--border)'}`,
-                          background: leagueFilter === l ? 'var(--gold-bg)' : 'var(--bg-card)',
-                          color: leagueFilter === l ? 'var(--gold)' : 'var(--text-muted)',
-                        }}>{l === 'all' ? '전체' : BASKETBALL_LEAGUES.find(x => x.code === l)?.label ?? l} ({cnt})</button>
-                    )
-                  })}
-                </div>
-              )}
-              <div style={{ display: 'flex', gap: 4, marginBottom: 6 }}>
-                {([['today', `오늘 (${dayGroups.today.length})`], ['tomorrow', `내일 (${dayGroups.tomorrow.length})`], ['later', `이후 (${dayGroups.later.length})`]] as const).map(([key, label]) => (
-                  <button key={key} type="button" onClick={() => setDayTab(key)}
-                    style={{
-                      flex: 1, fontSize: 10, fontWeight: 700, padding: '5px 0', borderRadius: 5, cursor: 'pointer', fontFamily: 'var(--font-body)',
-                      border: `1px solid ${dayTab === key ? 'var(--gold-border)' : 'var(--border)'}`,
-                      background: dayTab === key ? 'var(--gold-bg)' : 'var(--bg-card)',
-                      color: dayTab === key ? 'var(--gold)' : 'var(--text-muted)',
-                    }}>{label}</button>
-                ))}
-              </div>
-              {shown.length === 0 ? (
-                <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0', textAlign: 'center' }}>해당 구간에 경기가 없습니다</div>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 260, overflowY: 'auto' }}>
-                  {shown.map(m => {
-                    const d = new Date(m.startTime)
-                    const timeLabel = dayTab === 'later'
-                      ? `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
-                      : `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
-                    return (
-                      <button key={m.id} type="button" onClick={() => { onSelectMatch(m); setOpen(false) }}
-                        style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg-card)', cursor: 'pointer', textAlign: 'left', fontFamily: 'var(--font-body)', flexShrink: 0 }}>
-                        <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--gold)', flexShrink: 0, width: 52 }}>{m.leagueLabel}</span>
-                        <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {m.teamA} vs {m.teamB}
-                        </span>
-                        <span style={{ fontSize: 9, color: 'var(--text-muted)', flexShrink: 0 }}>{timeLabel}</span>
-                      </button>
-                    )
-                  })}
-                </div>
-              )}
-            </>
-          )}
-        </div>
+        </>
       )}
     </div>
   )
@@ -587,9 +620,10 @@ function BasketballMatchPicker({ match, onSelectMatch, onChangeMatch, pickLabel,
    기존처럼 자유입력 칸에서 팀명 뒤에 이어서 직접 마켓을 적는 방식을 유지한다.
    경기를 고르면 리그란·경기 내용란에 자동으로 채워지고, 그 아래 자유입력 칸에서 이어서 편집 가능. */
 function SimpleMatchPicker<M extends { id: string; league: string; leagueLabel: string; startTime: string; teamA: string; teamB: string }>({
-  title, leagues, fetchFn, onSelectMatch,
+  title, sportKey, leagues, fetchFn, onSelectMatch,
 }: {
   title: string
+  sportKey: string
   leagues: { code: string; label: string }[]
   fetchFn: (opts?: { forceRefresh?: boolean }) => Promise<M[]>
   onSelectMatch: (m: M) => void
@@ -599,15 +633,31 @@ function SimpleMatchPicker<M extends { id: string; league: string; leagueLabel: 
   const [error, setError] = useState(false)
   const [leagueFilter, setLeagueFilter] = useState<string>('all')
   const [dayTab, setDayTab] = useState<'today' | 'tomorrow' | 'later'>('today')
-  const [open, setOpen] = useState(false)
+  const [translations, setTranslations] = useState<Record<string, string>>({})
 
   useEffect(() => {
-    if (!open || matches !== null) return
+    fetchTeamTranslations(sportKey).then(setTranslations)
+  }, [sportKey])
+
+  useEffect(() => {
+    if (matches !== null) return
     setLoading(true); setError(false)
     fetchFn()
       .then(m => { setMatches(m); setLoading(false) })
       .catch(() => { setError(true); setLoading(false) })
-  }, [open, matches])
+  }, [matches])
+
+  function translate(name: string) { return translations[name] ?? name }
+
+  async function renameTeam(original: string) {
+    const cur = translate(original)
+    const next = prompt(`"${cur}" 팀의 한글 이름을 입력하세요`, cur)
+    if (next == null) return
+    const trimmed = next.trim()
+    if (!trimmed || trimmed === cur) return
+    await saveTeamTranslation(sportKey, original, trimmed)
+    setTranslations(p => ({ ...p, [original]: trimmed }))
+  }
 
   const byLeague = matches ? (leagueFilter === 'all' ? matches : matches.filter(m => m.league === leagueFilter)) : []
   const now = new Date()
@@ -625,76 +675,75 @@ function SimpleMatchPicker<M extends { id: string; league: string; leagueLabel: 
 
   return (
     <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: 8, background: 'var(--bg-elevated)' }}>
-      <button type="button" onClick={() => setOpen(p => !p)} style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-body)' }}>
-        {title}
-        <span>{open ? '접기' : '펼치기'}</span>
-      </button>
-      {open && (
-        <div style={{ marginTop: 6 }}>
-          {loading && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0', textAlign: 'center' }}>일정 불러오는 중...</div>}
-          {error && (
-            <div style={{ fontSize: 11, color: 'var(--red)', padding: '8px 0', textAlign: 'center' }}>
-              일정을 불러오지 못했습니다
-              <button type="button" onClick={() => setMatches(null)} style={{ marginLeft: 6, fontSize: 10, color: 'var(--gold)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>재시도</button>
+      <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 6 }}>{title}</div>
+      {loading && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0', textAlign: 'center' }}>일정 불러오는 중...</div>}
+      {error && (
+        <div style={{ fontSize: 11, color: 'var(--red)', padding: '8px 0', textAlign: 'center' }}>
+          일정을 불러오지 못했습니다
+          <button type="button" onClick={() => setMatches(null)} style={{ marginLeft: 6, fontSize: 10, color: 'var(--gold)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>재시도</button>
+        </div>
+      )}
+      {!loading && !error && matches && matches.length === 0 && (
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0', textAlign: 'center' }}>앞으로 며칠 안에 예정된 경기가 없습니다</div>
+      )}
+      {!loading && matches && matches.length > 0 && (
+        <>
+          {leagues.length > 1 && (
+            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 6 }}>
+              {[...leagues.map(l => l.code), 'all'].map(l => {
+                const cnt = l === 'all' ? matches.length : matches.filter(m => m.league === l).length
+                return (
+                  <button key={l} type="button" onClick={() => setLeagueFilter(l)}
+                    style={{
+                      fontSize: 9, fontWeight: 700, padding: '3px 7px', borderRadius: 4, cursor: 'pointer', fontFamily: 'var(--font-body)',
+                      border: `1px solid ${leagueFilter === l ? 'var(--gold-border)' : 'var(--border)'}`,
+                      background: leagueFilter === l ? 'var(--gold-bg)' : 'var(--bg-card)',
+                      color: leagueFilter === l ? 'var(--gold)' : 'var(--text-muted)',
+                    }}>{l === 'all' ? '전체' : leagues.find(x => x.code === l)?.label ?? l} ({cnt})</button>
+                )
+              })}
             </div>
           )}
-          {!loading && !error && matches && matches.length === 0 && (
-            <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0', textAlign: 'center' }}>앞으로 며칠 안에 예정된 경기가 없습니다</div>
+          <div style={{ display: 'flex', gap: 4, marginBottom: 6 }}>
+            {([['today', `오늘 (${dayGroups.today.length})`], ['tomorrow', `내일 (${dayGroups.tomorrow.length})`], ['later', `이후 (${dayGroups.later.length})`]] as const).map(([key, label]) => (
+              <button key={key} type="button" onClick={() => setDayTab(key)}
+                style={{
+                  flex: 1, fontSize: 10, fontWeight: 700, padding: '5px 0', borderRadius: 5, cursor: 'pointer', fontFamily: 'var(--font-body)',
+                  border: `1px solid ${dayTab === key ? 'var(--gold-border)' : 'var(--border)'}`,
+                  background: dayTab === key ? 'var(--gold-bg)' : 'var(--bg-card)',
+                  color: dayTab === key ? 'var(--gold)' : 'var(--text-muted)',
+                }}>{label}</button>
+            ))}
+          </div>
+          {shown.length === 0 ? (
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0', textAlign: 'center' }}>해당 구간에 경기가 없습니다</div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 260, overflowY: 'auto' }}>
+              {shown.map(m => {
+                const d = new Date(m.startTime)
+                const timeLabel = dayTab === 'later'
+                  ? `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+                  : `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+                return (
+                  <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+                    <button type="button" onClick={() => onSelectMatch({ ...m, teamA: translate(m.teamA), teamB: translate(m.teamB) })}
+                      style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg-card)', cursor: 'pointer', textAlign: 'left', fontFamily: 'var(--font-body)' }}>
+                      <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--gold)', flexShrink: 0, width: 52 }}>{m.leagueLabel}</span>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {translate(m.teamA)} vs {translate(m.teamB)}
+                      </span>
+                      <span style={{ fontSize: 9, color: 'var(--text-muted)', flexShrink: 0 }}>{timeLabel}</span>
+                    </button>
+                    <button type="button" onClick={() => renameTeam(m.teamA)} title="홈팀 이름 한글로 수정"
+                      style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 5, cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', flexShrink: 0, padding: 5 }}>
+                      <Pencil size={10} />
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
           )}
-          {!loading && matches && matches.length > 0 && (
-            <>
-              {leagues.length > 1 && (
-                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 6 }}>
-                  {[...leagues.map(l => l.code), 'all'].map(l => {
-                    const cnt = l === 'all' ? matches.length : matches.filter(m => m.league === l).length
-                    return (
-                      <button key={l} type="button" onClick={() => setLeagueFilter(l)}
-                        style={{
-                          fontSize: 9, fontWeight: 700, padding: '3px 7px', borderRadius: 4, cursor: 'pointer', fontFamily: 'var(--font-body)',
-                          border: `1px solid ${leagueFilter === l ? 'var(--gold-border)' : 'var(--border)'}`,
-                          background: leagueFilter === l ? 'var(--gold-bg)' : 'var(--bg-card)',
-                          color: leagueFilter === l ? 'var(--gold)' : 'var(--text-muted)',
-                        }}>{l === 'all' ? '전체' : leagues.find(x => x.code === l)?.label ?? l} ({cnt})</button>
-                    )
-                  })}
-                </div>
-              )}
-              <div style={{ display: 'flex', gap: 4, marginBottom: 6 }}>
-                {([['today', `오늘 (${dayGroups.today.length})`], ['tomorrow', `내일 (${dayGroups.tomorrow.length})`], ['later', `이후 (${dayGroups.later.length})`]] as const).map(([key, label]) => (
-                  <button key={key} type="button" onClick={() => setDayTab(key)}
-                    style={{
-                      flex: 1, fontSize: 10, fontWeight: 700, padding: '5px 0', borderRadius: 5, cursor: 'pointer', fontFamily: 'var(--font-body)',
-                      border: `1px solid ${dayTab === key ? 'var(--gold-border)' : 'var(--border)'}`,
-                      background: dayTab === key ? 'var(--gold-bg)' : 'var(--bg-card)',
-                      color: dayTab === key ? 'var(--gold)' : 'var(--text-muted)',
-                    }}>{label}</button>
-                ))}
-              </div>
-              {shown.length === 0 ? (
-                <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0', textAlign: 'center' }}>해당 구간에 경기가 없습니다</div>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 260, overflowY: 'auto' }}>
-                  {shown.map(m => {
-                    const d = new Date(m.startTime)
-                    const timeLabel = dayTab === 'later'
-                      ? `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
-                      : `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
-                    return (
-                      <button key={m.id} type="button" onClick={() => { onSelectMatch(m); setOpen(false) }}
-                        style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg-card)', cursor: 'pointer', textAlign: 'left', fontFamily: 'var(--font-body)', flexShrink: 0 }}>
-                        <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--gold)', flexShrink: 0, width: 52 }}>{m.leagueLabel}</span>
-                        <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {m.teamA} vs {m.teamB}
-                        </span>
-                        <span style={{ fontSize: 9, color: 'var(--text-muted)', flexShrink: 0 }}>{timeLabel}</span>
-                      </button>
-                    )
-                  })}
-                </div>
-              )}
-            </>
-          )}
-        </div>
+        </>
       )}
     </div>
   )
@@ -1503,6 +1552,7 @@ function SingleBetForm({ site, onClose, onBet, onDoubleBet, defaultSport, baseba
       {sport === 'baseball' && mode === 'single' && (
         <SimpleMatchPicker
           title="야구 경기에서 고르기 (MLB)"
+          sportKey="baseball"
           leagues={BASEBALL_LEAGUES}
           fetchFn={fetchUpcomingBaseballMatches}
           onSelectMatch={(m: UpcomingBaseballMatch) => {

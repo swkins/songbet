@@ -26,6 +26,12 @@ export const SOCCER_LEAGUES: { code: string; label: string; slug: string }[] = [
   { code: 'ARGENTINA', label: '아르헨티나',      slug: 'arg.1' },
   { code: 'J1',        label: '일본',            slug: 'jpn.1' },
   { code: 'SAUDI',     label: '사우디',          slug: 'ksa.1' },
+  // 2부리그 — 5대리그의 2부 (ESPN 히든 API 슬러그 확인됨: pseudo-r/Public-ESPN-API 문서 기준)
+  { code: 'CHAMPIONSHIP', label: '챔피언십(잉글랜드 2부)', slug: 'eng.2' },
+  { code: 'LALIGA2',   label: '라리가2(스페인 2부)', slug: 'esp.2' },
+  { code: 'BUNDES2',   label: '분데스리가2(독일 2부)', slug: 'ger.2' },
+  { code: 'SERIEB',    label: '세리에B(이탈리아 2부)', slug: 'ita.2' },
+  { code: 'LIGUE2',    label: '리그2(프랑스 2부)', slug: 'fra.2' },
 ]
 
 export interface UpcomingSoccerMatch {
