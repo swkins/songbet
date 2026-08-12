@@ -26,6 +26,7 @@ export interface Bet {
   is_live: boolean              // 라이브 베팅 여부
   is_pinned: boolean            // 마감 시 고정 유지
   usd_krw_rate: number | null   // 달러 사이트 베팅 결과처리 시점의 환율 (통계 원화 환산용)
+  cashout_amount: number | null // 캐시아웃한 경우 그 금액 (되돌리기 시 잔액/롤링 복원용)
 }
 export interface Todo {
   id: string; created_at: string; todo_date: string; content: string

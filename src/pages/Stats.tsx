@@ -1379,8 +1379,11 @@ export default function Stats() {
     const days = period === '7d' ? 7 : period === '30d' ? 30 : 90
     return dayjs(b.bet_date).isAfter(dayjs().subtract(days, 'day'))
   })
-  // 두폴(합산) 베팅은 개별 다리로 중복 집계되지 않도록 일반/종목별 통계에서는 제외
+  // 두폴(합산) 베팅은 개별 다리로 중복 집계되지 않도록 일반/종목별 통계에서는 제외하고, 별도로 집계한다.
   const periodFiltered = periodAll.filter(b => b.parlay_group === null)
+  // 두폴은 leg1에만 실제 stake/profit이 기록되므로 leg1만 뽑아서 "두폴 한 건" 단위로 집계
+  const parlayLegs = periodAll.filter(b => b.parlay_group !== null && b.parlay_leg === 1)
+  const parlayStats = calcStats(parlayLegs)
 
   const stats   = calcStats(periodFiltered)
   const settled = periodFiltered.filter(b => b.result !== 'pending')
@@ -1447,6 +1450,26 @@ export default function Stats() {
                   </div>
                 ))}
               </div>
+
+              {parlayStats.total > 0 && (
+                <div>
+                  <div className="card-title" style={{ marginBottom: 8 }}>두폴(합산) 베팅 — 별도 집계</div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                    {[
+                      { label: '승률', value: `${parlayStats.winRate.toFixed(1)}%`, sub: `${parlayStats.wins.length}W ${parlayStats.losses.length}L ${parlayStats.pushes.length}P`, cls: parlayStats.winRate >= 50 ? 'profit-pos' : 'profit-neg' },
+                      { label: '총 손익', value: `${parlayStats.profit >= 0 ? '+' : ''}${parlayStats.profit.toLocaleString()}`, sub: `${parlayStats.total}건`, cls: parlayStats.profit >= 0 ? 'profit-pos' : 'profit-neg' },
+                      { label: 'ROI', value: `${parlayStats.roi >= 0 ? '+' : ''}${parlayStats.roi.toFixed(1)}%`, sub: `${parlayStats.stake.toLocaleString()}`, cls: parlayStats.roi >= 0 ? 'profit-pos' : 'profit-neg' },
+                      { label: '평균 배당', value: parlayStats.avgOdds.toFixed(2), sub: '', cls: '' },
+                    ].map(t => (
+                      <div key={t.label} className="card stat-tile" style={{ flex: '1 0 120px', maxWidth: 180, borderColor: 'var(--purple-border)' }}>
+                        <div className={`stat-value ${t.cls}`}>{t.value}</div>
+                        <div className="stat-label">{t.label}</div>
+                        {t.sub && <div style={{ fontSize: 10, color: 'var(--text-secondary)', marginTop: 4 }}>{t.sub}</div>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <div>
                 <div className="card-title" style={{ marginBottom: 8 }}>종목별 수익률</div>

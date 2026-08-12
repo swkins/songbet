@@ -894,11 +894,9 @@ function SingleBetForm({ site, onClose, onBet, onDoubleBet, defaultSport, baseba
   // LOL 전용: 경기 선택 + 마켓(승패/핸디캡/세트별 승) 선택. 여기서 확정되면 content/league에 반영된다.
   const [lolMatch, setLolMatch] = useState<UpcomingLolMatch | null>(null)
   const [lolPick, setLolPick]   = useState<string | null>(null)
-  // 경기 내용 우측 + 버튼으로 켜는 두 번째 경기(두폴). 배당/금액은 공유하고 경기 내용·리그만 별도.
-  const [showLeg2, setShowLeg2] = useState(false)
+  // 베팅 모드: 단폴 / 두폴. 두폴은 리그 없이 경기 내용 2개 + 배당/금액 공유.
+  const [mode, setMode] = useState<'single' | 'double'>('single')
   const [content2, setContent2] = useState('')
-  const [league2, setLeague2]   = useState('')
-  const [league2Touched, setLeague2Touched] = useState(false)
   const [oddsRaw, setOddsRaw]   = useState('')
   const [amount, setAmount]     = useState(defaultAmount)
   const [isLive, setIsLive]     = useState(false)
@@ -924,13 +922,6 @@ function SingleBetForm({ site, onClose, onBet, onDoubleBet, defaultSport, baseba
     if (s) setLeague(s)
   }, [content, sport, leagueTouched, baseballOverrides, soccerOverrides, allBetsHistory])
 
-  // 두 번째 경기(두폴)도 같은 방식으로 리그 자동 추론
-  useEffect(() => {
-    if (!showLeg2 || league2Touched) return
-    const s = suggestLeague(sport, content2, baseballOverrides, soccerOverrides, allBetsHistory)
-    if (s) setLeague2(s)
-  }, [content2, sport, showLeg2, league2Touched, baseballOverrides, soccerOverrides, allBetsHistory])
-
   // LOL: 경기 고르면 리그가 바로 정해지고, 마켓(승패/핸디캡/세트승)을 고르면 content가 확정된다.
   useEffect(() => {
     if (!lolMatch) return
@@ -953,19 +944,12 @@ function SingleBetForm({ site, onClose, onBet, onDoubleBet, defaultSport, baseba
     if (/^\d{3}$/.test(clean)) setOddsRaw((Number(clean) / 100).toFixed(2))
     else setOddsRaw(clean)
   }
-  function toggleLeg2() {
-    setShowLeg2(p => {
-      const next = !p
-      if (!next) { setContent2(''); setLeague2(''); setLeague2Touched(false) }
-      return next
-    })
-  }
   async function submit() {
     if (!content || oddsV <= 0 || stakeN <= 0) return
-    if (showLeg2 && !content2) return
+    if (mode === 'double' && !content2) return
     setSubmitting(true)
-    const ok = showLeg2
-      ? await onDoubleBet(sport, content, content2, oddsV, stakeN, league, league2)
+    const ok = mode === 'double'
+      ? await onDoubleBet(sport, content, content2, oddsV, stakeN, '', '')
       : await onBet(sport, content, oddsV, stakeN, isLive, league)
     setSubmitting(false)
     if (ok) onClose()
@@ -973,8 +957,24 @@ function SingleBetForm({ site, onClose, onBet, onDoubleBet, defaultSport, baseba
 
   return (
     <div className="inline-bet-form">
-      <SportButtonGroup value={sport} onChange={v => { setSport(v); setSportTouched(true); setLeagueTouched(false); setLeague2Touched(false); contentRef.current?.focus() }} />
-      {sport === 'esports' && (
+      <div style={{ display: 'flex', gap: 4, marginBottom: 4 }}>
+        <button type="button" onClick={() => setMode('single')} style={{
+          flex: 1, padding: '6px 0', borderRadius: 'var(--radius-sm)', cursor: 'pointer',
+          fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-body)',
+          border: `1px solid ${mode === 'single' ? 'var(--gold-border)' : 'var(--border)'}`,
+          background: mode === 'single' ? 'var(--gold-bg)' : 'var(--bg-elevated)',
+          color: mode === 'single' ? 'var(--gold)' : 'var(--text-secondary)',
+        }}>단폴</button>
+        <button type="button" onClick={() => setMode('double')} style={{
+          flex: 1, padding: '6px 0', borderRadius: 'var(--radius-sm)', cursor: 'pointer',
+          fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-body)',
+          border: `1px solid ${mode === 'double' ? 'var(--purple-border)' : 'var(--border)'}`,
+          background: mode === 'double' ? 'var(--purple-bg)' : 'var(--bg-elevated)',
+          color: mode === 'double' ? 'var(--purple)' : 'var(--text-secondary)',
+        }}>두폴</button>
+      </div>
+      <SportButtonGroup value={sport} onChange={v => { setSport(v); setSportTouched(true); setLeagueTouched(false); contentRef.current?.focus() }} />
+      {sport === 'esports' && mode === 'single' && (
         <LolMatchPicker
           match={lolMatch}
           onSelectMatch={m => { setLolMatch(m); setLolPick(null); setContent('') }}
@@ -983,29 +983,17 @@ function SingleBetForm({ site, onClose, onBet, onDoubleBet, defaultSport, baseba
           onPick={label => setLolPick(label)}
         />
       )}
-      <LeagueInput placeholder={showLeg2 ? '리그 ①' : (sport === 'esports' ? '리그 (자동 추론, LCK CL 외 다른 리그 등은 여기 직접 입력)' : '리그 (자동 추론, 직접 입력 가능, KBO/NPB/KBL 등은 여기 직접 입력)')} value={league}
-        onChange={v => { setLeague(v); setLeagueTouched(true) }}
-        candidates={leagueCandidates}
-        style={{ fontSize: 11 }} />
-      <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <TeamContentInput inputRef={contentRef} placeholder="경기 내용" value={content} onChange={setContent}
-            candidates={teamCandidates} allBets={allBetsHistory} autoFocus onEnter={submit} />
-        </div>
-        <button type="button" title={showLeg2 ? '두 번째 경기 제거' : '두 번째 경기 추가 (두폴)'} onClick={toggleLeg2}
-          style={{ width: 34, height: 34, flexShrink: 0, borderRadius: 'var(--radius-sm)', border: `1px solid ${showLeg2 ? 'var(--purple-border)' : 'var(--border)'}`, background: showLeg2 ? 'var(--purple-bg)' : 'var(--bg-elevated)', color: showLeg2 ? 'var(--purple)' : 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <Plus size={15} style={{ transform: showLeg2 ? 'rotate(45deg)' : 'none', transition: 'transform 0.15s' }} />
-        </button>
-      </div>
-      {showLeg2 && (
-        <>
-          <LeagueInput placeholder="리그 ②" value={league2}
-            onChange={v => { setLeague2(v); setLeague2Touched(true) }}
-            candidates={leagueCandidates}
-            style={{ fontSize: 11, marginTop: 4 }} />
-          <TeamContentInput placeholder="경기 내용 ②" value={content2} onChange={setContent2}
-            candidates={teamCandidates} allBets={allBetsHistory} onEnter={submit} />
-        </>
+      {mode === 'single' && (
+        <LeagueInput placeholder={sport === 'esports' ? '리그 (자동 추론, LCK CL 외 다른 리그 등은 여기 직접 입력)' : '리그 (자동 추론, 직접 입력 가능, KBO/NPB/KBL 등은 여기 직접 입력)'} value={league}
+          onChange={v => { setLeague(v); setLeagueTouched(true) }}
+          candidates={leagueCandidates}
+          style={{ fontSize: 11 }} />
+      )}
+      <TeamContentInput inputRef={contentRef} placeholder={mode === 'double' ? '경기 내용 ①' : '경기 내용'} value={content} onChange={setContent}
+        candidates={teamCandidates} allBets={allBetsHistory} autoFocus onEnter={submit} />
+      {mode === 'double' && (
+        <TeamContentInput placeholder="경기 내용 ②" value={content2} onChange={setContent2}
+          candidates={teamCandidates} allBets={allBetsHistory} onEnter={submit} />
       )}
       <input ref={oddsRef} className="form-input inline-bet-input" placeholder="배당 (125=1.25)" value={oddsRaw}
         onChange={e => handleOdds(e.target.value)}
@@ -1045,7 +1033,7 @@ function SingleBetForm({ site, onClose, onBet, onDoubleBet, defaultSport, baseba
       )}
       <div style={{ display: 'flex', gap: 5 }}>
         <button className="btn btn-primary" style={{ flex: 1, fontSize: 12, padding: '7px 0', justifyContent: 'center' }}
-          onClick={submit} disabled={!content || (showLeg2 && !content2) || oddsV <= 0 || stakeN <= 0 || submitting}>
+          onClick={submit} disabled={!content || (mode === 'double' && !content2) || oddsV <= 0 || stakeN <= 0 || submitting}>
           등록
         </button>
         <button className="btn btn-ghost" style={{ padding: '7px 10px' }} onClick={onClose}><X size={12} /></button>
@@ -1466,7 +1454,7 @@ export default function Dashboard() {
     const updatedList: Bet[] = []
     for (let i = 0; i < groupBets.length; i++) {
       const legProfit = i === 0 ? profit : 0  // leg1만 profit, 나머지 0
-      const { data } = await supabase.from('bets').update({ result, profit: legProfit, usd_krw_rate: rateAtSettlement }).eq('id', groupBets[i].id).select().single()
+      const { data } = await supabase.from('bets').update({ result, profit: legProfit, usd_krw_rate: rateAtSettlement, cashout_amount: null }).eq('id', groupBets[i].id).select().single()
       if (data) updatedList.push(data)
     }
     if (!updatedList.length) return
@@ -1485,9 +1473,10 @@ export default function Dashboard() {
     if (!confirm('두폴 결과 처리를 취소하고 대기 목록으로 되돌릴까요?')) return
     const site = sites.find(s => s.id === groupBets[0].site_id)
     const wasWin = groupBets[0].result === 'win'
+    const wasCashout = groupBets[0].cashout_amount != null
     const updatedList: Bet[] = []
     for (const gb of groupBets) {
-      const { data } = await supabase.from('bets').update({ result: 'pending', profit: 0 }).eq('id', gb.id).select().single()
+      const { data } = await supabase.from('bets').update({ result: 'pending', profit: 0, cashout_amount: null }).eq('id', gb.id).select().single()
       if (data) updatedList.push(data)
     }
     if (!updatedList.length) return
@@ -1497,6 +1486,14 @@ export default function Dashboard() {
       const profit = groupBets[0].profit  // leg1에만 저장된 profit
       const { data: sd } = await supabase.from('sites').update({
         balance: Math.max(0, site.balance - stake - profit),
+      }).eq('id', site.id).select().single()
+      if (sd) setSites(p => p.map(s => s.id === sd.id ? sd : s))
+    } else if (site && wasCashout) {
+      const co = groupBets[0].cashout_amount!
+      const { data: sd } = await supabase.from('sites').update({
+        balance: Math.max(0, site.balance - co),
+        rolling_done: site.rolling_done + co,
+        deposit_bet_done: (site.deposit_bet_done ?? 0) + co,
       }).eq('id', site.id).select().single()
       if (sd) setSites(p => p.map(s => s.id === sd.id ? sd : s))
     }
@@ -1510,7 +1507,8 @@ export default function Dashboard() {
     if (result === 'revert') {
       if (!confirm('결과 처리를 취소하고 대기 목록으로 되돌릴까요?')) return
       const wasWin = bet.result === 'win'
-      const { data } = await supabase.from('bets').update({ result: 'pending', profit: 0 }).eq('id', bet.id).select().single()
+      const wasCashout = bet.cashout_amount != null
+      const { data } = await supabase.from('bets').update({ result: 'pending', profit: 0, cashout_amount: null }).eq('id', bet.id).select().single()
       if (data) {
         setBets(p => p.map(b => b.id === data.id ? data : b))
         if (site && wasWin) {
@@ -1518,6 +1516,15 @@ export default function Dashboard() {
           const returnedProfit = bet.profit  // 양수
           const { data: sd } = await supabase.from('sites').update({
             balance: Math.max(0, site.balance - bet.stake - returnedProfit),
+          }).eq('id', site.id).select().single()
+          if (sd) setSites(p => p.map(s => s.id === sd.id ? sd : s))
+        } else if (site && wasCashout) {
+          // 캐시아웃 처리 시 받았던 캐시아웃 금액을 회수하고, 그만큼 남은 롤링을 다시 원복
+          const co = bet.cashout_amount!
+          const { data: sd } = await supabase.from('sites').update({
+            balance: Math.max(0, site.balance - co),
+            rolling_done: site.rolling_done + co,
+            deposit_bet_done: (site.deposit_bet_done ?? 0) + co,
           }).eq('id', site.id).select().single()
           if (sd) setSites(p => p.map(s => s.id === sd.id ? sd : s))
         }
@@ -1543,7 +1550,7 @@ export default function Dashboard() {
       ? (isusd ? Math.round(rawProfit * 100) / 100 : Math.round(rawProfit))
       : result === 'loss' ? -bet.stake : 0
     const rateAtSettlement = isusd ? await getUsdKrwRate() : null
-    const { data } = await supabase.from('bets').update({ result, profit, usd_krw_rate: rateAtSettlement }).eq('id', bet.id).select().single()
+    const { data } = await supabase.from('bets').update({ result, profit, usd_krw_rate: rateAtSettlement, cashout_amount: null }).eq('id', bet.id).select().single()
     if (data) {
       await logAction({ action_type: 'update', table_name: 'bets', record_id: data.id, before_data: bet as never, after_data: data as never, description: `결과: ${bet.match} → ${result}` })
       const updatedBets = bets.map(b => b.id === data.id ? data : b)
@@ -1553,6 +1560,72 @@ export default function Dashboard() {
         if (sd) setSites(p => p.map(s => s.id === sd.id ? sd : s))
       }
     }
+  }
+
+  /* ── 캐시아웃 (단폴): 베팅금액 중 일부만 회수 — 나머지는 손실로 처리하고,
+     회수한 금액만큼은 롤링을 채우지 못한 것으로 보고 남은 롤링에 다시 되돌려준다 ── */
+  async function applyCashout(bet: Bet) {
+    const site = sites.find(s => s.id === bet.site_id)
+    if (!site) return
+    const unit = site.currency === 'usd' ? '$' : '원'
+    const raw = prompt(`캐시아웃 금액을 입력하세요 (베팅금액: ${bet.stake.toLocaleString()}${unit})`)
+    if (raw == null) return
+    const cashoutAmount = Number(raw.replace(/[^0-9.]/g, ''))
+    if (!Number.isFinite(cashoutAmount) || cashoutAmount < 0 || cashoutAmount > bet.stake) {
+      alert('캐시아웃 금액이 올바르지 않습니다 (0 ~ 베팅금액 사이여야 합니다).')
+      return
+    }
+    const profit = -(bet.stake - cashoutAmount)
+    const isusd = site.currency === 'usd'
+    const rateAtSettlement = isusd ? await getUsdKrwRate() : null
+    const memo = bet.memo ? `${bet.memo} · 캐시아웃 ${cashoutAmount.toLocaleString()}` : `캐시아웃 ${cashoutAmount.toLocaleString()}`
+    const { data } = await supabase.from('bets').update({ result: 'loss', profit, usd_krw_rate: rateAtSettlement, memo, cashout_amount: cashoutAmount }).eq('id', bet.id).select().single()
+    if (data) {
+      await logAction({ action_type: 'update', table_name: 'bets', record_id: data.id, before_data: bet as never, after_data: data as never, description: `캐시아웃: ${bet.match} → ${cashoutAmount.toLocaleString()}` })
+      setBets(p => p.map(b => b.id === data.id ? data : b))
+      const { data: sd } = await supabase.from('sites').update({
+        balance: site.balance + cashoutAmount,
+        rolling_done: Math.max(0, site.rolling_done - cashoutAmount),
+        deposit_bet_done: Math.max(0, (site.deposit_bet_done ?? 0) - cashoutAmount),
+      }).eq('id', site.id).select().single()
+      if (sd) setSites(p => p.map(s => s.id === sd.id ? sd : s))
+    }
+  }
+
+  /* ── 캐시아웃 (두폴): 전체 stake 기준으로 부분 회수, leg1에만 profit 기록 ── */
+  async function applyParlayCashout(groupBets: Bet[]) {
+    if (!groupBets.length) return
+    const site = sites.find(s => s.id === groupBets[0].site_id)
+    if (!site) return
+    const stake = groupBets[0].stake
+    const unit = site.currency === 'usd' ? '$' : '원'
+    const raw = prompt(`캐시아웃 금액을 입력하세요 (베팅금액: ${stake.toLocaleString()}${unit})`)
+    if (raw == null) return
+    const cashoutAmount = Number(raw.replace(/[^0-9.]/g, ''))
+    if (!Number.isFinite(cashoutAmount) || cashoutAmount < 0 || cashoutAmount > stake) {
+      alert('캐시아웃 금액이 올바르지 않습니다 (0 ~ 베팅금액 사이여야 합니다).')
+      return
+    }
+    const profit = -(stake - cashoutAmount)
+    const isusd = site.currency === 'usd'
+    const rateAtSettlement = isusd ? await getUsdKrwRate() : null
+    const updatedList: Bet[] = []
+    for (let i = 0; i < groupBets.length; i++) {
+      const legProfit = i === 0 ? profit : 0
+      const legMemo = i === 0
+        ? (groupBets[i].memo ? `${groupBets[i].memo} · 캐시아웃 ${cashoutAmount.toLocaleString()}` : `캐시아웃 ${cashoutAmount.toLocaleString()}`)
+        : groupBets[i].memo
+      const { data } = await supabase.from('bets').update({ result: 'loss', profit: legProfit, usd_krw_rate: rateAtSettlement, memo: legMemo, cashout_amount: i === 0 ? cashoutAmount : null }).eq('id', groupBets[i].id).select().single()
+      if (data) updatedList.push(data)
+    }
+    if (!updatedList.length) return
+    setBets(p => p.map(b => updatedList.find(u => u.id === b.id) ?? b))
+    const { data: sd } = await supabase.from('sites').update({
+      balance: site.balance + cashoutAmount,
+      rolling_done: Math.max(0, site.rolling_done - cashoutAmount),
+      deposit_bet_done: Math.max(0, (site.deposit_bet_done ?? 0) - cashoutAmount),
+    }).eq('id', site.id).select().single()
+    if (sd) setSites(p => p.map(s => s.id === sd.id ? sd : s))
   }
 
   /* ── 베팅 수정 (인라인) ── */
@@ -1820,6 +1893,10 @@ export default function Dashboard() {
                                             onClick={() => { if (confirm('적특으로 처리하시겠습니까?')) applyParlayResult(groupBets, 'push') }}>
                                             <MinusCircle size={22} />
                                           </button>
+                                          <button className="bet-action-btn" title="캐시아웃" style={{ width: 34, height: 34, color: 'var(--purple)', borderColor: 'var(--purple-border)' }}
+                                            onClick={() => applyParlayCashout(groupBets)}>
+                                            <DollarSign size={20} />
+                                          </button>
                                         </div>
                                       </div>
                                     )}
@@ -1892,6 +1969,11 @@ export default function Dashboard() {
                                           onClick={() => { if (confirm('적특으로 처리하시겠습니까?')) applyResult(bet, 'push') }}
                                           style={{ width: 34, height: 34, color: 'var(--blue)', borderColor: 'var(--blue-border)' }}>
                                           <MinusCircle size={22} />
+                                        </button>
+                                        <button className="bet-action-btn" title="캐시아웃"
+                                          onClick={() => applyCashout(bet)}
+                                          style={{ width: 34, height: 34, color: 'var(--purple)', borderColor: 'var(--purple-border)' }}>
+                                          <DollarSign size={20} />
                                         </button>
                                       </div>
                                     </div>
