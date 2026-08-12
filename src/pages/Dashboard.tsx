@@ -76,6 +76,11 @@ function LolMatchPicker({ match, onSelectMatch, onChangeMatch, pickLabel, onPick
   const [error, setError] = useState(false)
   const [tab, setTab] = useState<'all' | number>('all')
   const [leagueFilter, setLeagueFilter] = useState<string>('LCK')
+  const [killLine, setKillLine] = useState('')
+  const [towerLine, setTowerLine] = useState('')
+  const [dragonLine, setDragonLine] = useState('')
+  const [inhibLine, setInhibLine] = useState('')
+  const [timeLine, setTimeLine] = useState('')
 
   useEffect(() => {
     if (match || matches !== null) return
@@ -172,6 +177,24 @@ function LolMatchPicker({ match, onSelectMatch, onChangeMatch, pickLabel, onPick
     }
   }
 
+  // 킬/타워/드래곤/억제기(+세트별 게임시간) 오버언더 — 라인은 직접 입력
+  function statRow(label: string, line: string, setLine: (v: string) => void, prefix: string) {
+    const overLabel = `${prefix}${label} 오버 ${line}`
+    const underLabel = `${prefix}${label} 언더 ${line}`
+    return (
+      <div key={label} style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+        <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', width: 44, flexShrink: 0 }}>{label}</span>
+        <input type="text" inputMode="decimal" placeholder="라인" value={line}
+          onChange={ev => setLine(ev.target.value.replace(/[^0-9.]/g, ''))}
+          style={{ width: 54, flexShrink: 0, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 5, padding: '6px 6px', fontSize: 11, color: 'var(--text-primary)', fontFamily: 'var(--font-num)', outline: 'none', boxSizing: 'border-box' }} />
+        <button type="button" disabled={!line} onClick={() => onPick(overLabel)}
+          style={{ ...btnStyle(pickLabel === overLabel), flex: 1, opacity: line ? 1 : 0.4, cursor: line ? 'pointer' : 'not-allowed' }}>오버</button>
+        <button type="button" disabled={!line} onClick={() => onPick(underLabel)}
+          style={{ ...btnStyle(pickLabel === underLabel), flex: 1, opacity: line ? 1 : 0.4, cursor: line ? 'pointer' : 'not-allowed' }}>언더</button>
+      </div>
+    )
+  }
+
   return (
     <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: 8, background: 'var(--bg-elevated)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
@@ -200,12 +223,27 @@ function LolMatchPicker({ match, onSelectMatch, onChangeMatch, pickLabel, onPick
               <button type="button" onClick={() => onPick(`${nameB} +${line}`)} style={btnStyle(pickLabel === `${nameB} +${line}`)}>{nameB} +{line}</button>
             </div>
           ))}
+          <div style={{ borderTop: '1px solid var(--border)', marginTop: 2, paddingTop: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {statRow('킬', killLine, setKillLine, '')}
+            {statRow('타워', towerLine, setTowerLine, '')}
+            {statRow('드래곤', dragonLine, setDragonLine, '')}
+            {statRow('억제기', inhibLine, setInhibLine, '')}
+          </div>
         </div>
       )}
       {typeof tab === 'number' && (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
-          <button type="button" onClick={() => onPick(`${nameA} ${tab}세트 승`)} style={btnStyle(pickLabel === `${nameA} ${tab}세트 승`)}>{nameA} {tab}세트 승</button>
-          <button type="button" onClick={() => onPick(`${nameB} ${tab}세트 승`)} style={btnStyle(pickLabel === `${nameB} ${tab}세트 승`)}>{nameB} {tab}세트 승</button>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
+            <button type="button" onClick={() => onPick(`${nameA} ${tab}세트 승`)} style={btnStyle(pickLabel === `${nameA} ${tab}세트 승`)}>{nameA} {tab}세트 승</button>
+            <button type="button" onClick={() => onPick(`${nameB} ${tab}세트 승`)} style={btnStyle(pickLabel === `${nameB} ${tab}세트 승`)}>{nameB} {tab}세트 승</button>
+          </div>
+          <div style={{ borderTop: '1px solid var(--border)', marginTop: 2, paddingTop: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {statRow('킬', killLine, setKillLine, `${tab}세트 `)}
+            {statRow('타워', towerLine, setTowerLine, `${tab}세트 `)}
+            {statRow('드래곤', dragonLine, setDragonLine, `${tab}세트 `)}
+            {statRow('억제기', inhibLine, setInhibLine, `${tab}세트 `)}
+            {statRow('게임시간', timeLine, setTimeLine, `${tab}세트 `)}
+          </div>
         </div>
       )}
     </div>

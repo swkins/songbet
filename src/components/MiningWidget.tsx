@@ -172,7 +172,7 @@ export default function MiningWidget() {
                 ) : (
                   <span onClick={() => startEdit(e, 'start')} style={{ display: 'flex', alignItems: 'center', gap: 3, cursor: 'pointer' }}>
                     <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>시작</span>
-                    <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-secondary)', fontFamily: 'var(--font-num)', textDecoration: 'underline', textDecorationStyle: 'dotted', textUnderlineOffset: 2 }}>{fmt(e.start_point)}</span>
+                    <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--text-secondary)', fontFamily: 'var(--font-num)', textDecoration: 'underline', textDecorationStyle: 'dotted', textUnderlineOffset: 2 }}>{fmt(e.start_point)}</span>
                   </span>
                 )}
                 <div style={{ width: 1, height: 12, background: 'var(--border)' }} />
@@ -189,7 +189,7 @@ export default function MiningWidget() {
                 ) : (
                   <span onClick={() => startEdit(e, 'current')} style={{ display: 'flex', alignItems: 'center', gap: 3, cursor: 'pointer' }}>
                     <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>현재</span>
-                    <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)', fontFamily: 'var(--font-num)', textDecoration: 'underline', textDecorationStyle: 'dotted', textUnderlineOffset: 2 }}>{fmt(e.current_point)}</span>
+                    <span style={{ fontSize: 15, fontWeight: 800, color: 'var(--text-primary)', fontFamily: 'var(--font-num)', textDecoration: 'underline', textDecorationStyle: 'dotted', textUnderlineOffset: 2 }}>{fmt(e.current_point)}</span>
                   </span>
                 )}
               </div>

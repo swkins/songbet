@@ -61,6 +61,15 @@ export default function Mining() {
     return map
   }, [history])
 
+  // 날짜별 총 목표량 — 일별 목표 달성률 계산용
+  const dailyTargets = useMemo(() => {
+    const map = new Map<string, number>()
+    for (const e of history) {
+      map.set(e.entry_date, (map.get(e.entry_date) ?? 0) + e.target_point)
+    }
+    return map
+  }, [history])
+
   // 사이트별 일일 평균 채굴량 (최근 60일 기록 기준)
   const siteAverages = useMemo(() => {
     const sums = new Map<string, { total: number; count: number }>()
@@ -278,7 +287,7 @@ export default function Mining() {
                       ) : (
                         <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
                           <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>시작</span>
-                          <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', fontFamily: 'var(--font-num)' }}>{fmt(e.start_point)}</span>
+                          <span style={{ fontSize: 16, fontWeight: 800, color: 'var(--text-secondary)', fontFamily: 'var(--font-num)' }}>{fmt(e.start_point)}</span>
                           <button onClick={() => startEdit(e, 'start')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', padding: 0 }}><Pencil size={10} /></button>
                         </span>
                       )}
@@ -302,7 +311,7 @@ export default function Mining() {
                       ) : (
                         <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
                           <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>현재</span>
-                          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', fontFamily: 'var(--font-num)' }}>{fmt(e.current_point)}</span>
+                          <span style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-primary)', fontFamily: 'var(--font-num)' }}>{fmt(e.current_point)}</span>
                           <button onClick={() => startEdit(e, 'current')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', padding: 0 }}><Pencil size={12} /></button>
                         </span>
                       )}
@@ -339,23 +348,44 @@ export default function Mining() {
                     if (!d) return <div key={di} />
                     const dateStr = d.format('YYYY-MM-DD')
                     const total = dailyTotals.get(dateStr) ?? 0
+                    const target = dailyTargets.get(dateStr) ?? 0
+                    const pct = target > 0 ? Math.round(total / target * 100) : null
                     const isToday = dateStr === today
+                    const achieved = pct !== null && pct >= 100
+                    const cellBg = pct === null ? 'var(--bg-elevated)'
+                      : achieved ? 'var(--green-bg)'
+                      : pct >= 50 ? 'var(--gold-bg)'
+                      : total > 0 ? 'var(--bg-elevated)' : 'var(--bg-elevated)'
+                    const pctColor = pct === null ? 'var(--text-muted)'
+                      : achieved ? 'var(--green)'
+                      : pct >= 50 ? 'var(--gold)'
+                      : 'var(--text-secondary)'
                     return (
                       <div key={di} style={{
-                        borderRadius: 8, padding: '6px 4px', minHeight: 52,
-                        background: total > 0 ? 'var(--gold-bg)' : 'var(--bg-elevated)',
-                        border: `1px solid ${isToday ? 'var(--gold-border)' : 'transparent'}`,
-                        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
+                        borderRadius: 8, padding: '6px 4px', minHeight: 56,
+                        background: cellBg,
+                        border: `1px solid ${isToday ? 'var(--gold-border)' : (achieved ? 'var(--green-border)' : 'transparent')}`,
+                        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
                       }}>
                         <span style={{ fontSize: 10, color: isToday ? 'var(--gold)' : 'var(--text-muted)', fontWeight: isToday ? 700 : 500 }}>{d.date()}</span>
-                        <span style={{ fontSize: 10, fontFamily: 'var(--font-num)', fontWeight: 700, color: total > 0 ? 'var(--gold)' : 'var(--text-muted)', textAlign: 'center', wordBreak: 'keep-all' }}>
-                          {total > 0 ? fmt(total) : '-'}
+                        <span style={{ fontSize: 12, fontFamily: 'var(--font-num)', fontWeight: 800, color: pctColor }}>
+                          {pct === null ? '-' : `${pct}%`}
                         </span>
+                        {total > 0 && (
+                          <span style={{ fontSize: 8, fontFamily: 'var(--font-num)', color: 'var(--text-muted)', textAlign: 'center', wordBreak: 'keep-all' }}>
+                            {fmt(total)}
+                          </span>
+                        )}
                       </div>
                     )
                   })}
                 </div>
               ))}
+              <div style={{ display: 'flex', gap: 10, marginTop: 8, fontSize: 9, color: 'var(--text-muted)' }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><span style={{ width: 8, height: 8, borderRadius: 2, background: 'var(--green-bg)', border: '1px solid var(--green-border)' }} />목표 달성</span>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><span style={{ width: 8, height: 8, borderRadius: 2, background: 'var(--gold-bg)', border: '1px solid var(--border)' }} />50% 이상</span>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><span style={{ width: 8, height: 8, borderRadius: 2, background: 'var(--bg-elevated)', border: '1px solid var(--border)' }} />50% 미만</span>
+              </div>
             </div>
 
             {/* ─ 그래프 (최근 30일) ─ */}
