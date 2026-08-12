@@ -1146,7 +1146,7 @@ export default function Stats() {
   const [sites, setSites]     = useState<Site[]>([])
   const [rateMap, setRateMap] = useState<Record<string, number>>({})
   const [period, setPeriod]   = useState<'all' | '7d' | '30d' | '90d'>('all')
-  const [activeSport, setActiveSport] = useState<Sport | 'all'>('esports')
+  const [activeSport, setActiveSport] = useState<Sport | 'all' | 'parlay'>('esports')
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null)
   const [leagueOverrides, setLeagueOverrides] = useState<LeagueOverride[]>([])
   const [baseballLeagues, setBaseballLeagues] = useState<string[]>([])
@@ -1424,12 +1424,13 @@ export default function Stats() {
               { value: 'basketball' as const, label: '농구', emoji: '🏀', cnt: settled.filter(b => b.sport === 'basketball').length },
               { value: 'volleyball' as const, label: '배구', emoji: '🏐', cnt: settled.filter(b => b.sport === 'volleyball').length },
               { value: 'hockey' as const, label: '하키', emoji: '🏒', cnt: settled.filter(b => b.sport === 'hockey').length },
+              { value: 'parlay' as const, label: '두폴', emoji: '🔗', cnt: parlayStats.total },
               { value: 'all' as const, label: '전체', emoji: '📊', cnt: settled.length },
             ]).map(s => (
               <button key={s.value}
                 onClick={() => setActiveSport(s.value)}
                 style={{ padding: '10px 20px', borderRadius: 8, border: activeSport === s.value ? '2px solid var(--gold)' : '1px solid var(--border)', background: activeSport === s.value ? 'var(--gold-bg)' : 'var(--bg-card)', color: activeSport === s.value ? 'var(--gold)' : 'var(--text-secondary)', fontWeight: 700, fontSize: 14, cursor: 'pointer', fontFamily: 'var(--font-body)', transition: 'all 0.15s' }}>
-                {sportGlyph(s.value, '1.3em') ?? <span style={{ fontSize: 17 }}>{s.emoji}</span>} {s.label} <span style={{ opacity: 0.7, fontSize: 12 }}>({s.cnt})</span>
+                {s.value === 'parlay' ? <span style={{ fontSize: 17 }}>{s.emoji}</span> : (sportGlyph(s.value as Sport, '1.3em') ?? <span style={{ fontSize: 17 }}>{s.emoji}</span>)} {s.label} <span style={{ opacity: 0.7, fontSize: 12 }}>({s.cnt})</span>
               </button>
             ))}
           </div>
@@ -1450,26 +1451,6 @@ export default function Stats() {
                   </div>
                 ))}
               </div>
-
-              {parlayStats.total > 0 && (
-                <div>
-                  <div className="card-title" style={{ marginBottom: 8 }}>두폴(합산) 베팅 — 별도 집계</div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                    {[
-                      { label: '승률', value: `${parlayStats.winRate.toFixed(1)}%`, sub: `${parlayStats.wins.length}W ${parlayStats.losses.length}L ${parlayStats.pushes.length}P`, cls: parlayStats.winRate >= 50 ? 'profit-pos' : 'profit-neg' },
-                      { label: '총 손익', value: `${parlayStats.profit >= 0 ? '+' : ''}${parlayStats.profit.toLocaleString()}`, sub: `${parlayStats.total}건`, cls: parlayStats.profit >= 0 ? 'profit-pos' : 'profit-neg' },
-                      { label: 'ROI', value: `${parlayStats.roi >= 0 ? '+' : ''}${parlayStats.roi.toFixed(1)}%`, sub: `${parlayStats.stake.toLocaleString()}`, cls: parlayStats.roi >= 0 ? 'profit-pos' : 'profit-neg' },
-                      { label: '평균 배당', value: parlayStats.avgOdds.toFixed(2), sub: '', cls: '' },
-                    ].map(t => (
-                      <div key={t.label} className="card stat-tile" style={{ flex: '1 0 120px', maxWidth: 180, borderColor: 'var(--purple-border)' }}>
-                        <div className={`stat-value ${t.cls}`}>{t.value}</div>
-                        <div className="stat-label">{t.label}</div>
-                        {t.sub && <div style={{ fontSize: 10, color: 'var(--text-secondary)', marginTop: 4 }}>{t.sub}</div>}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
 
               <div>
                 <div className="card-title" style={{ marginBottom: 8 }}>종목별 수익률</div>
@@ -1553,7 +1534,50 @@ export default function Stats() {
               })()}
             </div>
           )}
-          {activeSport !== 'all' && (
+          {activeSport === 'parlay' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              {parlayStats.total === 0 ? (
+                <div className="card"><div className="empty"><div className="empty-icon">🔗</div>결과 처리된 두폴 베팅이 없습니다</div></div>
+              ) : (
+                <>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                    {[
+                      { label: '승률', value: `${parlayStats.winRate.toFixed(1)}%`, sub: `${parlayStats.wins.length}W ${parlayStats.losses.length}L ${parlayStats.pushes.length}P`, cls: parlayStats.winRate >= 50 ? 'profit-pos' : 'profit-neg' },
+                      { label: '총 손익', value: `${parlayStats.profit >= 0 ? '+' : ''}${parlayStats.profit.toLocaleString()}`, sub: `${parlayStats.total}건`, cls: parlayStats.profit >= 0 ? 'profit-pos' : 'profit-neg' },
+                      { label: 'ROI', value: `${parlayStats.roi >= 0 ? '+' : ''}${parlayStats.roi.toFixed(1)}%`, sub: `${parlayStats.stake.toLocaleString()}`, cls: parlayStats.roi >= 0 ? 'profit-pos' : 'profit-neg' },
+                      { label: '평균 배당', value: parlayStats.avgOdds.toFixed(2), sub: '', cls: '' },
+                    ].map(t => (
+                      <div key={t.label} className="card stat-tile" style={{ flex: '1 0 120px', maxWidth: 180 }}>
+                        <div className={`stat-value ${t.cls}`}>{t.value}</div>
+                        <div className="stat-label">{t.label}</div>
+                        {t.sub && <div style={{ fontSize: 10, color: 'var(--text-secondary)', marginTop: 4 }}>{t.sub}</div>}
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="card">
+                    <div className="card-title" style={{ marginBottom: 8 }}>두폴 베팅 목록</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {parlayLegs.filter(b => b.result !== 'pending').sort((a, b) => b.bet_date.localeCompare(a.bet_date)).map(b => {
+                        const legs = periodAll.filter(x => x.parlay_group === b.parlay_group).sort((x, y) => x.parlay_leg - y.parlay_leg)
+                        return (
+                          <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', background: 'var(--bg-elevated)', borderRadius: 8, fontSize: 12 }}>
+                            <span style={{ color: 'var(--text-muted)', width: 78, flexShrink: 0 }}>{b.bet_date}</span>
+                            <span style={{ flex: 1, color: 'var(--text-primary)' }}>{legs.map(l => l.match).join(' × ')}</span>
+                            <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>{b.odds.toFixed(2)}</span>
+                            <span style={{ fontFamily: 'var(--font-num)', fontWeight: 700, color: b.profit >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                              {b.profit >= 0 ? '+' : ''}{b.profit.toLocaleString()}
+                            </span>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+          {activeSport !== 'all' && activeSport !== 'parlay' && (
             <SportPanel
               bets={periodFiltered}
               sport={SPORTS.find(s => s.value === activeSport)!}

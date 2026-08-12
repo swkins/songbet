@@ -170,10 +170,9 @@ export default function MiningWidget() {
                     <button onClick={cancelEdit} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex' }}><X size={11} /></button>
                   </div>
                 ) : (
-                  <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+                  <span onClick={() => startEdit(e, 'start')} style={{ display: 'flex', alignItems: 'center', gap: 3, cursor: 'pointer' }}>
                     <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>시작</span>
-                    <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-secondary)', fontFamily: 'var(--font-num)' }}>{fmt(e.start_point)}</span>
-                    <button onClick={() => startEdit(e, 'start')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', padding: 0 }}><Pencil size={9} /></button>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-secondary)', fontFamily: 'var(--font-num)', textDecoration: 'underline', textDecorationStyle: 'dotted', textUnderlineOffset: 2 }}>{fmt(e.start_point)}</span>
                   </span>
                 )}
                 <div style={{ width: 1, height: 12, background: 'var(--border)' }} />
@@ -188,10 +187,9 @@ export default function MiningWidget() {
                     <button onClick={cancelEdit} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex' }}><X size={12} /></button>
                   </div>
                 ) : (
-                  <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+                  <span onClick={() => startEdit(e, 'current')} style={{ display: 'flex', alignItems: 'center', gap: 3, cursor: 'pointer' }}>
                     <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>현재</span>
-                    <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)', fontFamily: 'var(--font-num)' }}>{fmt(e.current_point)}</span>
-                    <button onClick={() => startEdit(e, 'current')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', padding: 0 }}><Pencil size={10} /></button>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)', fontFamily: 'var(--font-num)', textDecoration: 'underline', textDecorationStyle: 'dotted', textUnderlineOffset: 2 }}>{fmt(e.current_point)}</span>
                   </span>
                 )}
               </div>

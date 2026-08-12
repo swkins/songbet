@@ -800,39 +800,23 @@ function InlineBetEditForm({ bet, site, onClose, onSave, baseballOverrides, socc
 }
 
 /* ── 인라인 두폴 수정폼 ── */
-function InlineParlayEditForm({ groupBets, site, onClose, onSave, soccerOverrides, teamCandidates, allBetsHistory, leagueCandidates }: {
+function InlineParlayEditForm({ groupBets, site, onClose, onSave, teamCandidates, allBetsHistory }: {
   groupBets: Bet[]; site: Site
   onClose: () => void
   onSave: (c1: string, c2: string, odds: number, stake: number, league1: string, league2: string) => Promise<void>
-  soccerOverrides: LeagueOverride[]
-  teamCandidates: TeamCandidate[]; allBetsHistory: BetLite[]; leagueCandidates: LeagueCandidate[]
+  teamCandidates: TeamCandidate[]; allBetsHistory: BetLite[]
 }) {
   const isusd = site.currency === 'usd'
   const leg1 = groupBets.find(b => b.parlay_leg === 1)
   const leg2 = groupBets.find(b => b.parlay_leg === 2)
   const [c1, setC1]           = useState(leg1?.match ?? '')
   const [c2, setC2]           = useState(leg2?.match ?? '')
-  const [league1, setLeague1] = useState(leg1?.league ?? '')
-  const [league2, setLeague2] = useState(leg2?.league ?? '')
-  const [league1Touched, setLeague1Touched] = useState(!!leg1?.league)
-  const [league2Touched, setLeague2Touched] = useState(!!leg2?.league)
   const [oddsRaw, setOddsRaw] = useState((leg1?.odds ?? 1).toFixed(2))
   const [amount, setAmount]   = useState(String(leg1?.stake ?? 0))
   const [submitting, setSubmitting] = useState(false)
   const oddsV  = parseOdds(oddsRaw)
   const stakeN = isusd ? (Number(amount) || 0) : (Number(amount.replace(/,/g, '')) || 0)
   const labelSt: React.CSSProperties = { fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.6px', color: 'var(--text-muted)', marginBottom: 2 }
-
-  useEffect(() => {
-    if (league1Touched) return
-    const s = suggestLeague('soccer', c1, [], soccerOverrides)
-    if (s) setLeague1(s)
-  }, [c1, league1Touched, soccerOverrides])
-  useEffect(() => {
-    if (league2Touched) return
-    const s = suggestLeague('soccer', c2, [], soccerOverrides)
-    if (s) setLeague2(s)
-  }, [c2, league2Touched, soccerOverrides])
 
   function handleOdds(raw: string) {
     const clean = raw.replace(/[^0-9.]/g, '')
@@ -841,17 +825,13 @@ function InlineParlayEditForm({ groupBets, site, onClose, onSave, soccerOverride
   }
   async function submit() {
     if (!c1 || !c2 || oddsV <= 0 || stakeN <= 0) return
-    setSubmitting(true); await onSave(c1, c2, oddsV, stakeN, league1, league2); setSubmitting(false)
+    setSubmitting(true); await onSave(c1, c2, oddsV, stakeN, '', ''); setSubmitting(false)
   }
   return (
     <div className="inline-bet-form" style={{ borderColor: 'var(--gold-border)', background: 'var(--gold-bg)' }}>
       <div style={labelSt}>① 축</div>
-      <LeagueInput placeholder="리그 ①" value={league1}
-        onChange={v => { setLeague1(v); setLeague1Touched(true) }} candidates={leagueCandidates} style={{ fontSize: 11, marginBottom: 3 }} />
       <TeamContentInput placeholder="경기 내용 ①" value={c1} onChange={setC1} candidates={teamCandidates} allBets={allBetsHistory} autoFocus onEnter={submit} />
       <div style={{ ...labelSt, marginTop: 4 }}>② 날개</div>
-      <LeagueInput placeholder="리그 ②" value={league2}
-        onChange={v => { setLeague2(v); setLeague2Touched(true) }} candidates={leagueCandidates} style={{ fontSize: 11, marginBottom: 3 }} />
       <TeamContentInput placeholder="경기 내용 ②" value={c2} onChange={setC2} candidates={teamCandidates} allBets={allBetsHistory} onEnter={submit} />
       <input className="form-input inline-bet-input" placeholder="배당 (125=1.25)" value={oddsRaw}
         onChange={e => handleOdds(e.target.value)}
@@ -1844,10 +1824,8 @@ export default function Dashboard() {
                                     site={site}
                                     onClose={() => setInlineEditBetId(null)}
                                     onSave={(c1, c2, odds, stake, lg1, lg2) => saveInlineParlay(groupBets, c1, c2, odds, stake, lg1, lg2)}
-                                    soccerOverrides={soccerOverrides}
                                     teamCandidates={teamCandidates}
                                     allBetsHistory={allBetsHistory}
-                                    leagueCandidates={leagueCandidates}
                                   />
                                 ) : (
                                   <div style={{ display: 'flex', gap: 6, alignItems: 'stretch' }}>
@@ -1871,6 +1849,10 @@ export default function Dashboard() {
                                     {hoverBetId === bet.parlay_group && (
                                       <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flexShrink: 0, alignSelf: 'center' }}>
                                         <div style={{ display: 'flex', gap: 3, justifyContent: 'flex-end' }}>
+                                          <button className="bet-action-btn" title="캐시아웃" style={{ color: 'var(--purple)', width: 20, height: 20 }}
+                                            onClick={() => applyParlayCashout(groupBets)}>
+                                            <DollarSign size={12} />
+                                          </button>
                                           <button className="bet-action-btn" title="수정" style={{ color: 'var(--gold)', width: 20, height: 20 }}
                                             onClick={() => { setInlineEditBetId(bet.parlay_group); setHoverBetId(null) }}>
                                             <Pencil size={11} />
@@ -1892,10 +1874,6 @@ export default function Dashboard() {
                                           <button className="bet-action-btn" title="적특" style={{ width: 34, height: 34, color: 'var(--blue)', borderColor: 'var(--blue-border)' }}
                                             onClick={() => { if (confirm('적특으로 처리하시겠습니까?')) applyParlayResult(groupBets, 'push') }}>
                                             <MinusCircle size={22} />
-                                          </button>
-                                          <button className="bet-action-btn" title="캐시아웃" style={{ width: 34, height: 34, color: 'var(--purple)', borderColor: 'var(--purple-border)' }}
-                                            onClick={() => applyParlayCashout(groupBets)}>
-                                            <DollarSign size={20} />
                                           </button>
                                         </div>
                                       </div>
@@ -1940,8 +1918,13 @@ export default function Dashboard() {
                                   {/* 우: 결과 버튼 (hover 시만) */}
                                   {hoverBetId === bet.id && (
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flexShrink: 0, alignSelf: 'center' }}>
-                                      {/* 소형: 수정 / 베팅취소 */}
+                                      {/* 소형: 캐시아웃 / 수정 / 베팅취소 */}
                                       <div style={{ display: 'flex', gap: 3, justifyContent: 'flex-end' }}>
+                                        <button className="bet-action-btn" title="캐시아웃"
+                                          onClick={() => applyCashout(bet)}
+                                          style={{ color: 'var(--purple)', width: 20, height: 20 }}>
+                                          <DollarSign size={12} />
+                                        </button>
                                         <button className="bet-action-btn" title="수정"
                                           onClick={() => { setInlineEditBetId(bet.id); setHoverBetId(null) }}
                                           style={{ color: 'var(--gold)', width: 20, height: 20 }}>
@@ -1969,11 +1952,6 @@ export default function Dashboard() {
                                           onClick={() => { if (confirm('적특으로 처리하시겠습니까?')) applyResult(bet, 'push') }}
                                           style={{ width: 34, height: 34, color: 'var(--blue)', borderColor: 'var(--blue-border)' }}>
                                           <MinusCircle size={22} />
-                                        </button>
-                                        <button className="bet-action-btn" title="캐시아웃"
-                                          onClick={() => applyCashout(bet)}
-                                          style={{ width: 34, height: 34, color: 'var(--purple)', borderColor: 'var(--purple-border)' }}>
-                                          <DollarSign size={20} />
                                         </button>
                                       </div>
                                     </div>
