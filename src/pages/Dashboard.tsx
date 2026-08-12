@@ -177,10 +177,11 @@ function LolMatchPicker({ match, onSelectMatch, onChangeMatch, pickLabel, onPick
     }
   }
 
-  // 킬/타워/드래곤/억제기(+세트별 게임시간) 오버언더 — 라인은 직접 입력
+  // 킬/타워/드래곤/억제기(+세트별 게임시간) 오버언더 — 라인은 직접 입력.
+  // 경기내용에 "어떤 경기"인지 바로 보이도록 팀명을 항상 앞에 붙인다.
   function statRow(label: string, line: string, setLine: (v: string) => void, prefix: string) {
-    const overLabel = `${prefix}${label} 오버 ${line}`
-    const underLabel = `${prefix}${label} 언더 ${line}`
+    const overLabel = `${nameA} vs ${nameB} ${prefix}${label} 오버 ${line}`
+    const underLabel = `${nameA} vs ${nameB} ${prefix}${label} 언더 ${line}`
     return (
       <div key={label} style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
         <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', width: 44, flexShrink: 0 }}>{label}</span>
