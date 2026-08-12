@@ -64,8 +64,8 @@ const HANDICAP_LINES_BY_BESTOF: Record<number, number[]> = {
   5: [1.5, 2.5],
 }
 
-// 축구 핸디캡 마켓에 쓸 고정 라인 (요청: -1.5 / 0.5 / 1.5 를 각 팀 기준으로 제공)
-const SOCCER_HANDICAP_LINES = ['-1.5', '0.5', '1.5']
+// 축구 핸디캡 마켓에 쓸 고정 라인 (각 팀 기준 -/+ 버튼을 모두 제공)
+const SOCCER_HANDICAP_LINES = [0.5, 1.5]
 const SOCCER_OU_LINE = '2.5'
 
 /* ── LOL 경기 선택 + 마켓(승패/핸디캡/세트별 승) 선택 UI ──
@@ -308,14 +308,16 @@ function SoccerMatchPicker({ match, onSelectMatch, onChangeMatch, pickLabel, onP
             <button type="button" onClick={() => onPick(`${nameB} 승`)} style={btnStyle(pickLabel === `${nameB} 승`)}>{nameB} 승</button>
           </div>
           {SOCCER_HANDICAP_LINES.map(line => (
-            <div key={line} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
-              <button type="button" onClick={() => onPick(`${nameA} ${line}`)} style={btnStyle(pickLabel === `${nameA} ${line}`)}>{nameA} {line}</button>
-              <button type="button" onClick={() => onPick(`${nameB} ${line}`)} style={btnStyle(pickLabel === `${nameB} ${line}`)}>{nameB} {line}</button>
+            <div key={line} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 4 }}>
+              <button type="button" onClick={() => onPick(`${nameA} -${line}`)} style={btnStyle(pickLabel === `${nameA} -${line}`)}>{nameA} -{line}</button>
+              <button type="button" onClick={() => onPick(`${nameA} +${line}`)} style={btnStyle(pickLabel === `${nameA} +${line}`)}>{nameA} +{line}</button>
+              <button type="button" onClick={() => onPick(`${nameB} -${line}`)} style={btnStyle(pickLabel === `${nameB} -${line}`)}>{nameB} -{line}</button>
+              <button type="button" onClick={() => onPick(`${nameB} +${line}`)} style={btnStyle(pickLabel === `${nameB} +${line}`)}>{nameB} +{line}</button>
             </div>
           ))}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
-            <button type="button" onClick={() => onPick(`오버 ${SOCCER_OU_LINE}`)} style={btnStyle(pickLabel === `오버 ${SOCCER_OU_LINE}`)}>오버 {SOCCER_OU_LINE}</button>
-            <button type="button" onClick={() => onPick(`언더 ${SOCCER_OU_LINE}`)} style={btnStyle(pickLabel === `언더 ${SOCCER_OU_LINE}`)}>언더 {SOCCER_OU_LINE}</button>
+            <button type="button" onClick={() => onPick(`${nameA} vs ${nameB} 오버 ${SOCCER_OU_LINE}`)} style={btnStyle(pickLabel === `${nameA} vs ${nameB} 오버 ${SOCCER_OU_LINE}`)}>오버 {SOCCER_OU_LINE}</button>
+            <button type="button" onClick={() => onPick(`${nameA} vs ${nameB} 언더 ${SOCCER_OU_LINE}`)} style={btnStyle(pickLabel === `${nameA} vs ${nameB} 언더 ${SOCCER_OU_LINE}`)}>언더 {SOCCER_OU_LINE}</button>
           </div>
         </div>
       </div>
@@ -415,9 +417,173 @@ function SoccerMatchPicker({ match, onSelectMatch, onChangeMatch, pickLabel, onP
   )
 }
 
-/* ── 야구/농구 공용 "일정에서 고르기" 피커 ──
-   LOL·축구처럼 마켓(승/핸디캡 등)까지 구조화하진 않고 "경기 고르기"까지만 도와준다 —
-   야구·농구는 사이트마다 마켓 표기가 워낙 달라서(선발/불펜 라인업에 따라 배당이 계속 바뀌는 등)
+/* ── 농구 경기 선택 + 마켓(승, 마이너스/플러스 핸디캡) 선택 UI ──
+   핸디캡 라인은 팀마다 자주 달라서 축구처럼 고정 라인이 아니라 직접 입력하게 한다. */
+function BasketballMatchPicker({ match, onSelectMatch, onChangeMatch, pickLabel, onPick }: {
+  match: UpcomingBasketballMatch | null
+  onSelectMatch: (m: UpcomingBasketballMatch) => void
+  onChangeMatch: () => void
+  pickLabel: string | null
+  onPick: (label: string) => void
+}) {
+  const [matches, setMatches] = useState<UpcomingBasketballMatch[] | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(false)
+  const [leagueFilter, setLeagueFilter] = useState<string>('all')
+  const [dayTab, setDayTab] = useState<'today' | 'tomorrow' | 'later'>('today')
+  const [open, setOpen] = useState(false)
+  const [handicapLine, setHandicapLine] = useState('')
+
+  useEffect(() => {
+    if (match || !open || matches !== null) return
+    setLoading(true); setError(false)
+    fetchUpcomingBasketballMatches()
+      .then(m => { setMatches(m); setLoading(false) })
+      .catch(() => { setError(true); setLoading(false) })
+  }, [match, open, matches])
+
+  if (match) {
+    const nameA = match.teamA
+    const nameB = match.teamB
+
+    function btnStyle(selected: boolean): React.CSSProperties {
+      return {
+        padding: '7px 4px', borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-body)',
+        border: `1px solid ${selected ? 'var(--gold-border)' : 'var(--border)'}`,
+        background: selected ? 'var(--gold-bg)' : 'var(--bg-card)',
+        color: selected ? 'var(--gold)' : 'var(--text-secondary)',
+      }
+    }
+
+    const minusA = `${nameA} vs ${nameB} ${nameA} -${handicapLine}`
+    const plusA  = `${nameA} vs ${nameB} ${nameA} +${handicapLine}`
+    const minusB = `${nameA} vs ${nameB} ${nameB} -${handicapLine}`
+    const plusB  = `${nameA} vs ${nameB} ${nameB} +${handicapLine}`
+
+    return (
+      <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: 8, background: 'var(--bg-elevated)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+          <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--gold)' }}>{match.leagueLabel}</span>
+          <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-primary)', flex: 1 }}>{nameA} vs {nameB}</span>
+          <button type="button" onClick={onChangeMatch} style={{ fontSize: 9, color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>경기 변경</button>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
+            <button type="button" onClick={() => onPick(`${nameA} 승`)} style={btnStyle(pickLabel === `${nameA} 승`)}>{nameA} 승</button>
+            <button type="button" onClick={() => onPick(`${nameB} 승`)} style={btnStyle(pickLabel === `${nameB} 승`)}>{nameB} 승</button>
+          </div>
+          <div style={{ display: 'flex', gap: 4, alignItems: 'center', marginTop: 2 }}>
+            <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', width: 44, flexShrink: 0 }}>핸디캡</span>
+            <input type="text" inputMode="decimal" placeholder="라인 (예: 6.5)" value={handicapLine}
+              onChange={ev => setHandicapLine(ev.target.value.replace(/[^0-9.]/g, ''))}
+              style={{ flex: 1, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 5, padding: '6px 6px', fontSize: 11, color: 'var(--text-primary)', fontFamily: 'var(--font-num)', outline: 'none', boxSizing: 'border-box' }} />
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 4 }}>
+            <button type="button" disabled={!handicapLine} onClick={() => onPick(minusA)} style={{ ...btnStyle(pickLabel === minusA), opacity: handicapLine ? 1 : 0.4, cursor: handicapLine ? 'pointer' : 'not-allowed' }}>{nameA} -{handicapLine || '_'}</button>
+            <button type="button" disabled={!handicapLine} onClick={() => onPick(plusA)} style={{ ...btnStyle(pickLabel === plusA), opacity: handicapLine ? 1 : 0.4, cursor: handicapLine ? 'pointer' : 'not-allowed' }}>{nameA} +{handicapLine || '_'}</button>
+            <button type="button" disabled={!handicapLine} onClick={() => onPick(minusB)} style={{ ...btnStyle(pickLabel === minusB), opacity: handicapLine ? 1 : 0.4, cursor: handicapLine ? 'pointer' : 'not-allowed' }}>{nameB} -{handicapLine || '_'}</button>
+            <button type="button" disabled={!handicapLine} onClick={() => onPick(plusB)} style={{ ...btnStyle(pickLabel === plusB), opacity: handicapLine ? 1 : 0.4, cursor: handicapLine ? 'pointer' : 'not-allowed' }}>{nameB} +{handicapLine || '_'}</button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  const leagues = BASKETBALL_LEAGUES.map(l => l.code)
+  const byLeague = matches ? (leagueFilter === 'all' ? matches : matches.filter(m => m.league === leagueFilter)) : []
+
+  const now = new Date()
+  const todayStr = now.toDateString()
+  const tomorrowStr = new Date(Date.now() + 86400000).toDateString()
+  const dayGroups = {
+    today: byLeague.filter(m => new Date(m.startTime).toDateString() === todayStr),
+    tomorrow: byLeague.filter(m => new Date(m.startTime).toDateString() === tomorrowStr),
+    later: byLeague.filter(m => {
+      const s = new Date(m.startTime).toDateString()
+      return s !== todayStr && s !== tomorrowStr
+    }),
+  }
+  const shown = dayGroups[dayTab]
+
+  return (
+    <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: 8, background: 'var(--bg-elevated)' }}>
+      <button type="button" onClick={() => setOpen(p => !p)} style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-body)' }}>
+        농구 경기에서 고르기 (NBA/WNBA 등)
+        <span>{open ? '접기' : '펼치기'}</span>
+      </button>
+      {open && (
+        <div style={{ marginTop: 6 }}>
+          {loading && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0', textAlign: 'center' }}>일정 불러오는 중...</div>}
+          {error && (
+            <div style={{ fontSize: 11, color: 'var(--red)', padding: '8px 0', textAlign: 'center' }}>
+              일정을 불러오지 못했습니다
+              <button type="button" onClick={() => setMatches(null)} style={{ marginLeft: 6, fontSize: 10, color: 'var(--gold)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>재시도</button>
+            </div>
+          )}
+          {!loading && !error && matches && matches.length === 0 && (
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0', textAlign: 'center' }}>앞으로 며칠 안에 예정된 경기가 없습니다</div>
+          )}
+          {!loading && matches && matches.length > 0 && (
+            <>
+              {leagues.length > 1 && (
+                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 6 }}>
+                  {[...leagues, 'all'].map(l => {
+                    const cnt = l === 'all' ? matches.length : matches.filter(m => m.league === l).length
+                    return (
+                      <button key={l} type="button" onClick={() => setLeagueFilter(l)}
+                        style={{
+                          fontSize: 9, fontWeight: 700, padding: '3px 7px', borderRadius: 4, cursor: 'pointer', fontFamily: 'var(--font-body)',
+                          border: `1px solid ${leagueFilter === l ? 'var(--gold-border)' : 'var(--border)'}`,
+                          background: leagueFilter === l ? 'var(--gold-bg)' : 'var(--bg-card)',
+                          color: leagueFilter === l ? 'var(--gold)' : 'var(--text-muted)',
+                        }}>{l === 'all' ? '전체' : BASKETBALL_LEAGUES.find(x => x.code === l)?.label ?? l} ({cnt})</button>
+                    )
+                  })}
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: 4, marginBottom: 6 }}>
+                {([['today', `오늘 (${dayGroups.today.length})`], ['tomorrow', `내일 (${dayGroups.tomorrow.length})`], ['later', `이후 (${dayGroups.later.length})`]] as const).map(([key, label]) => (
+                  <button key={key} type="button" onClick={() => setDayTab(key)}
+                    style={{
+                      flex: 1, fontSize: 10, fontWeight: 700, padding: '5px 0', borderRadius: 5, cursor: 'pointer', fontFamily: 'var(--font-body)',
+                      border: `1px solid ${dayTab === key ? 'var(--gold-border)' : 'var(--border)'}`,
+                      background: dayTab === key ? 'var(--gold-bg)' : 'var(--bg-card)',
+                      color: dayTab === key ? 'var(--gold)' : 'var(--text-muted)',
+                    }}>{label}</button>
+                ))}
+              </div>
+              {shown.length === 0 ? (
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0', textAlign: 'center' }}>해당 구간에 경기가 없습니다</div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 260, overflowY: 'auto' }}>
+                  {shown.map(m => {
+                    const d = new Date(m.startTime)
+                    const timeLabel = dayTab === 'later'
+                      ? `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+                      : `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+                    return (
+                      <button key={m.id} type="button" onClick={() => { onSelectMatch(m); setOpen(false) }}
+                        style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg-card)', cursor: 'pointer', textAlign: 'left', fontFamily: 'var(--font-body)', flexShrink: 0 }}>
+                        <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--gold)', flexShrink: 0, width: 52 }}>{m.leagueLabel}</span>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {m.teamA} vs {m.teamB}
+                        </span>
+                        <span style={{ fontSize: 9, color: 'var(--text-muted)', flexShrink: 0 }}>{timeLabel}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ── 야구 전용 "일정에서 고르기" 피커 ──
+   야구는 사이트마다 마켓 표기가 워낙 달라서(선발/불펜 라인업에 따라 배당이 계속 바뀌는 등)
    기존처럼 자유입력 칸에서 팀명 뒤에 이어서 직접 마켓을 적는 방식을 유지한다.
    경기를 고르면 리그란·경기 내용란에 자동으로 채워지고, 그 아래 자유입력 칸에서 이어서 편집 가능. */
 function SimpleMatchPicker<M extends { id: string; league: string; leagueLabel: string; startTime: string; teamA: string; teamB: string }>({
@@ -1199,6 +1365,9 @@ function SingleBetForm({ site, onClose, onBet, onDoubleBet, defaultSport, baseba
   // 축구 전용: LOL과 동일한 방식 — 경기 선택 + 마켓(일반승/무/핸디캡/오버언더) 선택
   const [soccerMatch, setSoccerMatch] = useState<UpcomingSoccerMatch | null>(null)
   const [soccerPick, setSoccerPick]   = useState<string | null>(null)
+  // 농구 전용: 경기 선택 + 마켓(승/핸디캡, 라인 직접입력) 선택
+  const [basketballMatch, setBasketballMatch] = useState<UpcomingBasketballMatch | null>(null)
+  const [basketballPick, setBasketballPick]   = useState<string | null>(null)
   // 베팅 모드: 단폴 / 두폴. 두폴은 리그 없이 경기 내용 2개 + 배당/금액 공유.
   const [mode, setMode] = useState<'single' | 'double'>('single')
   const [content2, setContent2] = useState('')
@@ -1260,6 +1429,22 @@ function SingleBetForm({ site, onClose, onBet, onDoubleBet, defaultSport, baseba
     if (sport !== 'soccer' && (soccerMatch || soccerPick)) { setSoccerMatch(null); setSoccerPick(null) }
   }, [sport, soccerMatch, soccerPick])
 
+  // 농구: 경기 고르면 리그가 바로 정해지고, 마켓을 고르면 content가 확정된다.
+  useEffect(() => {
+    if (!basketballMatch) return
+    setLeague(BASKETBALL_LEAGUES.find(l => l.code === basketballMatch.league)?.label ?? basketballMatch.leagueLabel)
+    setLeagueTouched(true)
+  }, [basketballMatch])
+  useEffect(() => {
+    if (basketballPick != null) {
+      setContent(basketballPick)
+      requestAnimationFrame(() => oddsRef.current?.focus())
+    }
+  }, [basketballPick])
+  useEffect(() => {
+    if (sport !== 'basketball' && (basketballMatch || basketballPick)) { setBasketballMatch(null); setBasketballPick(null) }
+  }, [sport, basketballMatch, basketballPick])
+
   function handleOdds(raw: string) {
     const clean = raw.replace(/[^0-9.]/g, '')
     if (/^\d{3}$/.test(clean)) setOddsRaw((Number(clean) / 100).toFixed(2))
@@ -1286,7 +1471,7 @@ function SingleBetForm({ site, onClose, onBet, onDoubleBet, defaultSport, baseba
           background: mode === 'single' ? 'var(--gold-bg)' : 'var(--bg-elevated)',
           color: mode === 'single' ? 'var(--gold)' : 'var(--text-secondary)',
         }}>단폴</button>
-        <button type="button" onClick={() => setMode('double')} style={{
+        <button type="button" onClick={() => { setMode('double'); setSport('other') }} style={{
           flex: 1, padding: '6px 0', borderRadius: 'var(--radius-sm)', cursor: 'pointer',
           fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-body)',
           border: `1px solid ${mode === 'double' ? 'var(--purple-border)' : 'var(--border)'}`,
@@ -1294,7 +1479,9 @@ function SingleBetForm({ site, onClose, onBet, onDoubleBet, defaultSport, baseba
           color: mode === 'double' ? 'var(--purple)' : 'var(--text-secondary)',
         }}>두폴</button>
       </div>
-      <SportButtonGroup value={sport} onChange={v => { setSport(v); setSportTouched(true); setLeagueTouched(false); contentRef.current?.focus() }} />
+      {mode === 'single' && (
+        <SportButtonGroup value={sport} onChange={v => { setSport(v); setSportTouched(true); setLeagueTouched(false); contentRef.current?.focus() }} />
+      )}
       {sport === 'esports' && mode === 'single' && (
         <LolMatchPicker
           match={lolMatch}
@@ -1326,15 +1513,12 @@ function SingleBetForm({ site, onClose, onBet, onDoubleBet, defaultSport, baseba
         />
       )}
       {sport === 'basketball' && mode === 'single' && (
-        <SimpleMatchPicker
-          title="농구 경기에서 고르기 (NBA/WNBA 등)"
-          leagues={BASKETBALL_LEAGUES}
-          fetchFn={fetchUpcomingBasketballMatches}
-          onSelectMatch={(m: UpcomingBasketballMatch) => {
-            setContent(`${m.teamA} vs ${m.teamB}`)
-            setLeague(BASKETBALL_LEAGUES.find(l => l.code === m.league)?.label ?? m.leagueLabel)
-            setLeagueTouched(true)
-          }}
+        <BasketballMatchPicker
+          match={basketballMatch}
+          onSelectMatch={m => { setBasketballMatch(m); setBasketballPick(null); setContent('') }}
+          onChangeMatch={() => { setBasketballMatch(null); setBasketballPick(null); setContent(''); setLeagueTouched(false) }}
+          pickLabel={basketballPick}
+          onPick={label => setBasketballPick(label)}
         />
       )}
       {mode === 'single' && (
