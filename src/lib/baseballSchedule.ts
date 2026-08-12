@@ -33,27 +33,26 @@ function fmtDateCompact(d: Date): string {
   return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`
 }
 
-async function fetchLeagueDay(slug: string, dateCompact: string): Promise<any[]> {
+async function fetchLeagueRange(slug: string, fromCompact: string, toCompact: string): Promise<any[]> {
   try {
-    const url = `${ESPN_BASE}/${slug}/scoreboard?dates=${dateCompact}&limit=100`
+    const url = `${ESPN_BASE}/${slug}/scoreboard?dates=${fromCompact}-${toCompact}&limit=200`
     const res = await fetch(url)
-    if (!res.ok) { console.warn(`[baseballSchedule] ${slug} ${dateCompact}: HTTP ${res.status}`); return [] }
+    if (!res.ok) { console.warn(`[baseballSchedule] ${slug} ${fromCompact}-${toCompact}: HTTP ${res.status}`); return [] }
     const json = await res.json()
     return json?.events ?? []
   } catch (err) {
-    console.warn(`[baseballSchedule] ${slug} ${dateCompact}: 호출 실패`, err)
+    console.warn(`[baseballSchedule] ${slug} ${fromCompact}-${toCompact}: 호출 실패`, err)
     return []
   }
 }
 
 async function fetchLiveFromESPN(): Promise<UpcomingBaseballMatch[]> {
   const WINDOW_DAYS = 5
-  const days = Array.from({ length: WINDOW_DAYS }, (_, i) => new Date(Date.now() + i * 86400000))
-  const dateCompacts = days.map(fmtDateCompact)
+  const from = fmtDateCompact(new Date())
+  const to = fmtDateCompact(new Date(Date.now() + (WINDOW_DAYS - 1) * 86400000))
 
   const perLeague = await Promise.all(BASEBALL_LEAGUES.map(async l => {
-    const perDay = await Promise.all(dateCompacts.map(d => fetchLeagueDay(l.slug, d)))
-    const events = perDay.flat()
+    const events = await fetchLeagueRange(l.slug, from, to)
     const matches: UpcomingBaseballMatch[] = []
     for (const e of events) {
       const comp = e?.competitions?.[0]

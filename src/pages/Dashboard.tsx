@@ -315,9 +315,14 @@ function SoccerMatchPicker({ match, onSelectMatch, onChangeMatch, pickLabel, onP
       <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: 8, background: 'var(--bg-elevated)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
           <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--gold)' }}>{match.leagueLabel}</span>
-          <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-primary)', flex: 1 }}>{nameA} vs {nameB}</span>
-          <button type="button" onClick={() => renameTeam(match.teamA)} title="팀 이름 한글로 수정" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex' }}><Pencil size={11} /></button>
-          <button type="button" onClick={onChangeMatch} style={{ fontSize: 9, color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>경기 변경</button>
+          <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-primary)', flex: 1, display: 'flex', alignItems: 'center', gap: 3, minWidth: 0 }}>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{nameA}</span>
+            <button type="button" onClick={() => renameTeam(match.teamA)} title="홈팀 이름 한글로 수정" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', flexShrink: 0, padding: 0 }}><Pencil size={9} /></button>
+            <span style={{ flexShrink: 0 }}>vs</span>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{nameB}</span>
+            <button type="button" onClick={() => renameTeam(match.teamB)} title="원정팀 이름 한글로 수정" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', flexShrink: 0, padding: 0 }}><Pencil size={9} /></button>
+          </span>
+          <button type="button" onClick={onChangeMatch} style={{ fontSize: 9, color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline', flexShrink: 0 }}>경기 변경</button>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 4 }}>
@@ -410,19 +415,19 @@ function SoccerMatchPicker({ match, onSelectMatch, onChangeMatch, pickLabel, onP
                   ? `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
                   : `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
                 return (
-                  <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
-                    <button type="button" onClick={() => onSelectMatch({ ...m, teamA: translate(m.teamA), teamB: translate(m.teamB) })}
-                      style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg-card)', cursor: 'pointer', textAlign: 'left', fontFamily: 'var(--font-body)' }}>
-                      <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--gold)', flexShrink: 0, width: 52 }}>{m.leagueLabel}</span>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {translate(m.teamA)} vs {translate(m.teamB)}
-                      </span>
-                      <span style={{ fontSize: 9, color: 'var(--text-muted)', flexShrink: 0 }}>{timeLabel}</span>
-                    </button>
-                    <button type="button" onClick={() => renameTeam(m.teamA)} title="홈팀 이름 한글로 수정"
-                      style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 5, cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', flexShrink: 0, padding: 5 }}>
-                      <Pencil size={10} />
-                    </button>
+                  <div key={m.id} onClick={() => onSelectMatch({ ...m, teamA: translate(m.teamA), teamB: translate(m.teamB) })}
+                    style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg-card)', cursor: 'pointer', fontFamily: 'var(--font-body)', flexShrink: 0 }}>
+                    <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--gold)', flexShrink: 0, width: 52 }}>{m.leagueLabel}</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)', flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 3 }}>
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{translate(m.teamA)}</span>
+                      <button type="button" onClick={ev => { ev.stopPropagation(); renameTeam(m.teamA) }} title="홈팀 이름 한글로 수정"
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', flexShrink: 0, padding: 0 }}><Pencil size={9} /></button>
+                      <span style={{ flexShrink: 0 }}>vs</span>
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{translate(m.teamB)}</span>
+                      <button type="button" onClick={ev => { ev.stopPropagation(); renameTeam(m.teamB) }} title="원정팀 이름 한글로 수정"
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', flexShrink: 0, padding: 0 }}><Pencil size={9} /></button>
+                    </span>
+                    <span style={{ fontSize: 9, color: 'var(--text-muted)', flexShrink: 0 }}>{timeLabel}</span>
                   </div>
                 )
               })}
@@ -497,9 +502,14 @@ function BasketballMatchPicker({ match, onSelectMatch, onChangeMatch, pickLabel,
       <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: 8, background: 'var(--bg-elevated)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
           <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--gold)' }}>{match.leagueLabel}</span>
-          <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-primary)', flex: 1 }}>{nameA} vs {nameB}</span>
-          <button type="button" onClick={() => renameTeam(match.teamA)} title="팀 이름 한글로 수정" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex' }}><Pencil size={11} /></button>
-          <button type="button" onClick={onChangeMatch} style={{ fontSize: 9, color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>경기 변경</button>
+          <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-primary)', flex: 1, display: 'flex', alignItems: 'center', gap: 3, minWidth: 0 }}>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{nameA}</span>
+            <button type="button" onClick={() => renameTeam(match.teamA)} title="홈팀 이름 한글로 수정" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', flexShrink: 0, padding: 0 }}><Pencil size={9} /></button>
+            <span style={{ flexShrink: 0 }}>vs</span>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{nameB}</span>
+            <button type="button" onClick={() => renameTeam(match.teamB)} title="원정팀 이름 한글로 수정" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', flexShrink: 0, padding: 0 }}><Pencil size={9} /></button>
+          </span>
+          <button type="button" onClick={onChangeMatch} style={{ fontSize: 9, color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline', flexShrink: 0 }}>경기 변경</button>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
@@ -591,19 +601,19 @@ function BasketballMatchPicker({ match, onSelectMatch, onChangeMatch, pickLabel,
                   ? `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
                   : `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
                 return (
-                  <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
-                    <button type="button" onClick={() => onSelectMatch({ ...m, teamA: translate(m.teamA), teamB: translate(m.teamB) })}
-                      style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg-card)', cursor: 'pointer', textAlign: 'left', fontFamily: 'var(--font-body)' }}>
-                      <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--gold)', flexShrink: 0, width: 52 }}>{m.leagueLabel}</span>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {translate(m.teamA)} vs {translate(m.teamB)}
-                      </span>
-                      <span style={{ fontSize: 9, color: 'var(--text-muted)', flexShrink: 0 }}>{timeLabel}</span>
-                    </button>
-                    <button type="button" onClick={() => renameTeam(m.teamA)} title="홈팀 이름 한글로 수정"
-                      style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 5, cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', flexShrink: 0, padding: 5 }}>
-                      <Pencil size={10} />
-                    </button>
+                  <div key={m.id} onClick={() => onSelectMatch({ ...m, teamA: translate(m.teamA), teamB: translate(m.teamB) })}
+                    style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg-card)', cursor: 'pointer', fontFamily: 'var(--font-body)', flexShrink: 0 }}>
+                    <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--gold)', flexShrink: 0, width: 52 }}>{m.leagueLabel}</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)', flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 3 }}>
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{translate(m.teamA)}</span>
+                      <button type="button" onClick={ev => { ev.stopPropagation(); renameTeam(m.teamA) }} title="홈팀 이름 한글로 수정"
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', flexShrink: 0, padding: 0 }}><Pencil size={9} /></button>
+                      <span style={{ flexShrink: 0 }}>vs</span>
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{translate(m.teamB)}</span>
+                      <button type="button" onClick={ev => { ev.stopPropagation(); renameTeam(m.teamB) }} title="원정팀 이름 한글로 수정"
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', flexShrink: 0, padding: 0 }}><Pencil size={9} /></button>
+                    </span>
+                    <span style={{ fontSize: 9, color: 'var(--text-muted)', flexShrink: 0 }}>{timeLabel}</span>
                   </div>
                 )
               })}
@@ -725,19 +735,19 @@ function SimpleMatchPicker<M extends { id: string; league: string; leagueLabel: 
                   ? `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
                   : `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
                 return (
-                  <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
-                    <button type="button" onClick={() => onSelectMatch({ ...m, teamA: translate(m.teamA), teamB: translate(m.teamB) })}
-                      style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg-card)', cursor: 'pointer', textAlign: 'left', fontFamily: 'var(--font-body)' }}>
-                      <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--gold)', flexShrink: 0, width: 52 }}>{m.leagueLabel}</span>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {translate(m.teamA)} vs {translate(m.teamB)}
-                      </span>
-                      <span style={{ fontSize: 9, color: 'var(--text-muted)', flexShrink: 0 }}>{timeLabel}</span>
-                    </button>
-                    <button type="button" onClick={() => renameTeam(m.teamA)} title="홈팀 이름 한글로 수정"
-                      style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 5, cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', flexShrink: 0, padding: 5 }}>
-                      <Pencil size={10} />
-                    </button>
+                  <div key={m.id} onClick={() => onSelectMatch({ ...m, teamA: translate(m.teamA), teamB: translate(m.teamB) })}
+                    style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg-card)', cursor: 'pointer', fontFamily: 'var(--font-body)', flexShrink: 0 }}>
+                    <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--gold)', flexShrink: 0, width: 52 }}>{m.leagueLabel}</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)', flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 3 }}>
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{translate(m.teamA)}</span>
+                      <button type="button" onClick={ev => { ev.stopPropagation(); renameTeam(m.teamA) }} title="홈팀 이름 한글로 수정"
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', flexShrink: 0, padding: 0 }}><Pencil size={9} /></button>
+                      <span style={{ flexShrink: 0 }}>vs</span>
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{translate(m.teamB)}</span>
+                      <button type="button" onClick={ev => { ev.stopPropagation(); renameTeam(m.teamB) }} title="원정팀 이름 한글로 수정"
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', flexShrink: 0, padding: 0 }}><Pencil size={9} /></button>
+                    </span>
+                    <span style={{ fontSize: 9, color: 'var(--text-muted)', flexShrink: 0 }}>{timeLabel}</span>
                   </div>
                 )
               })}

@@ -15,11 +15,21 @@ export const SOCCER_LEAGUES: { code: string; label: string; slug: string }[] = [
   { code: 'BUNDES',    label: '분데스리가',      slug: 'ger.1' },
   { code: 'SERIEA',    label: '세리에A',         slug: 'ita.1' },
   { code: 'LIGUE1',    label: '리그앙',          slug: 'fra.1' },
-  // 2티어 — 배당 마켓이 어느 정도 깊은 리그 (5대리그 외에는 국가명으로 표기)
+  // 유럽 1부리그 — 대부분 포함 (ESPN 히든 API 슬러그 확인됨: pseudo-r/Public-ESPN-API 문서 기준)
   { code: 'EREDIVISIE',label: '네덜란드',        slug: 'ned.1' },
   { code: 'PRIMEIRA',  label: '포르투갈',        slug: 'por.1' },
   { code: 'BELGIUM',   label: '벨기에',          slug: 'bel.1' },
   { code: 'TURKEY',    label: '튀르키예',        slug: 'tur.1' },
+  { code: 'SCOTLAND',  label: '스코틀랜드',      slug: 'sco.1' },
+  { code: 'AUSTRIA',   label: '오스트리아',      slug: 'aut.1' },
+  { code: 'GREECE',    label: '그리스',          slug: 'gre.1' },
+  { code: 'DENMARK',   label: '덴마크',          slug: 'den.1' },
+  { code: 'NORWAY',    label: '노르웨이',        slug: 'nor.1' },
+  { code: 'SWEDEN',    label: '스웨덴',          slug: 'swe.1' },
+  { code: 'CYPRUS',    label: '키프로스',        slug: 'cyp.1' },
+  { code: 'IRELAND',   label: '아일랜드',        slug: 'irl.1' },
+  { code: 'RUSSIA',    label: '러시아',          slug: 'rus.1' },
+  // 그 외 주요 시장 리그
   { code: 'BRASILEIRAO', label: '브라질',        slug: 'bra.1' },
   { code: 'MLS',       label: '미국',            slug: 'usa.1' },
   { code: 'MEXICO',    label: '멕시코',          slug: 'mex.1' },
@@ -50,29 +60,29 @@ function fmtDateCompact(d: Date): string {
   return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`
 }
 
-async function fetchLeagueDay(slug: string, dateCompact: string): Promise<any[]> {
+async function fetchLeagueRange(slug: string, fromCompact: string, toCompact: string): Promise<any[]> {
   try {
-    const url = `${ESPN_BASE}/${slug}/scoreboard?dates=${dateCompact}&limit=100`
+    const url = `${ESPN_BASE}/${slug}/scoreboard?dates=${fromCompact}-${toCompact}&limit=200`
     const res = await fetch(url)
-    if (!res.ok) { console.warn(`[soccerSchedule] ${slug} ${dateCompact}: HTTP ${res.status}`); return [] }
+    if (!res.ok) { console.warn(`[soccerSchedule] ${slug} ${fromCompact}-${toCompact}: HTTP ${res.status}`); return [] }
     const json = await res.json()
     return json?.events ?? []
   } catch (err) {
-    console.warn(`[soccerSchedule] ${slug} ${dateCompact}: 호출 실패`, err)
+    console.warn(`[soccerSchedule] ${slug} ${fromCompact}-${toCompact}: 호출 실패`, err)
     return []
   }
 }
 
 async function fetchLiveFromESPN(): Promise<UpcomingSoccerMatch[]> {
   const WINDOW_DAYS = 10
-  const days = Array.from({ length: WINDOW_DAYS }, (_, i) => new Date(Date.now() + i * 86400000))
-  const dateCompacts = days.map(fmtDateCompact)
+  // 예전엔 리그마다 날짜별로 따로 호출해서(리그수 × 10일) 한 번에 200건 넘는 요청이 동시에 나갔다 —
+  // 뒤쪽에 있는 리그(2부리그 등)일수록 응답이 비거나 누락되는 문제가 있었음. ESPN scoreboard가
+  // dates=시작-끝 형태의 날짜 "구간" 파라미터를 지원하므로, 리그당 요청을 1건으로 줄여서 훨씬 안정적으로 받는다.
+  const from = fmtDateCompact(new Date())
+  const to = fmtDateCompact(new Date(Date.now() + (WINDOW_DAYS - 1) * 86400000))
 
-  // 리그(약 40개) × 날짜(10일) = 약 400건 호출. 순차로 하면 너무 오래 걸려서(하루 한 번뿐이긴 하지만)
-  // 리그 단위로 묶어 병렬 처리한다 — 브라우저가 알아서 동시 연결 수를 조절해 순번대로 처리해준다.
   const perLeague = await Promise.all(SOCCER_LEAGUES.map(async l => {
-    const perDay = await Promise.all(dateCompacts.map(d => fetchLeagueDay(l.slug, d)))
-    const events = perDay.flat()
+    const events = await fetchLeagueRange(l.slug, from, to)
     const matches: UpcomingSoccerMatch[] = []
     for (const e of events) {
       const comp = e?.competitions?.[0]
@@ -96,7 +106,7 @@ async function fetchLiveFromESPN(): Promise<UpcomingSoccerMatch[]> {
   }))
 
   const results = perLeague.flat()
-  // 같은 경기가 여러 날짜 조회에 중복으로 안 잡히게 id 기준 중복 제거
+  // 같은 경기가 중복으로 안 잡히게 id 기준 중복 제거
   const seen = new Set<string>()
   const deduped = results.filter(r => {
     if (seen.has(r.id)) return false

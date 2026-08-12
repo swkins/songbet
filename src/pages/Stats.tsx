@@ -4,7 +4,7 @@ import { logAction } from '../lib/logger'
 import type { Bet, Sport, Market, Site } from '../types'
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, BarChart, Bar, ResponsiveContainer, Cell, LineChart, Line, Legend } from 'recharts'
 import dayjs from 'dayjs'
-import { Trash2, X, Plus, Check, Pencil, ChevronUp, ChevronDown } from 'lucide-react'
+import { Trash2, X, Plus, Check, Pencil } from 'lucide-react'
 import { inferBaseballLeague, inferSoccerLeague, koCompare, type LeagueOverride } from '../lib/league'
 import { sportGlyph } from '../components/SportIcons'
 
@@ -39,18 +39,9 @@ function calcStats(bets: Bet[]) {
 // ─── 축구·야구·농구 "리그별" 신규 통계 ─────────────────────────────
 // 최근 도입한 일정 API(리그가 자동으로 채워짐) 기준으로 새로 집계한다.
 // 기존 SportPanel(팀/마켓 세부 통계)은 당장은 숨겨두고 이 화면을 기본으로 보여준다.
-function classifyMarket(content: string): string {
-  if (/오버/.test(content)) return '오버'
-  if (/언더/.test(content)) return '언더'
-  if (content.trim() === '무') return '무승부'
-  if (/[+-]\d+(\.\d+)?/.test(content)) return '핸디캡'
-  if (/승/.test(content)) return '승패'
-  return '기타'
-}
+// 모든 리그를 한 표에 나란히 놓고 비교할 수 있도록 한다 (리그별로 펼치고 접는 방식이 아님).
 
 function LeagueBreakdownPanel({ bets, sportValue }: { bets: Bet[]; sportValue: Sport }) {
-  const [openLeague, setOpenLeague] = useState<string | null>(null)
-
   const settled = useMemo(
     () => bets.filter(b => b.sport === sportValue && b.result !== 'pending'),
     [bets, sportValue]
@@ -65,8 +56,8 @@ function LeagueBreakdownPanel({ bets, sportValue }: { bets: Bet[]; sportValue: S
       map.set(key, arr)
     }
     return Array.from(map.entries())
-      .map(([league, list]) => ({ league, list, stats: calcStats(list) }))
-      .sort((a, b) => b.list.length - a.list.length)
+      .map(([league, list]) => ({ league, stats: calcStats(list) }))
+      .sort((a, b) => b.stats.total - a.stats.total)
   }, [settled])
 
   if (byLeague.length === 0) {
@@ -74,54 +65,39 @@ function LeagueBreakdownPanel({ bets, sportValue }: { bets: Bet[]; sportValue: S
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      {byLeague.map(({ league, list, stats }) => {
-        const isOpen = openLeague === league
-        const byMarket = (() => {
-          const m = new Map<string, Bet[]>()
-          for (const b of list) {
-            const k = classifyMarket(b.match)
-            const arr = m.get(k) ?? []
-            arr.push(b); m.set(k, arr)
-          }
-          return Array.from(m.entries())
-            .map(([market, ml]) => ({ market, stats: calcStats(ml) }))
-            .sort((a, b) => b.stats.total - a.stats.total)
-        })()
-        return (
-          <div key={league} className="card" style={{ padding: 0, overflow: 'hidden' }}>
-            <button onClick={() => setOpenLeague(isOpen ? null : league)}
-              style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 14px', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left', fontFamily: 'var(--font-body)' }}>
-              <span style={{ fontWeight: 700, fontSize: 13, color: 'var(--text-primary)' }}>{league}</span>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 11 }}>
-                <span style={{ color: 'var(--text-muted)' }}>{stats.total}건</span>
+    <div className="card" style={{ padding: '12px 14px' }}>
+      <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+        <thead>
+          <tr style={{ borderBottom: '1px solid var(--border)' }}>
+            <th style={{ textAlign: 'left', padding: '5px 8px', fontSize: 10, color: 'var(--text-secondary)', fontWeight: 700 }}>리그</th>
+            <th style={{ textAlign: 'center', padding: '5px 6px', fontSize: 10, color: 'var(--text-secondary)', fontWeight: 700 }}>건</th>
+            <th style={{ textAlign: 'center', padding: '5px 6px', fontSize: 10, color: 'var(--text-secondary)', fontWeight: 700 }}>승률</th>
+            <th style={{ textAlign: 'center', padding: '5px 6px', fontSize: 10, color: 'var(--text-secondary)', fontWeight: 700 }}>평균배당</th>
+            <th style={{ textAlign: 'center', padding: '5px 6px', fontSize: 10, color: 'var(--text-secondary)', fontWeight: 700 }}>ROI</th>
+            <th style={{ textAlign: 'right', padding: '5px 8px', fontSize: 10, color: 'var(--text-secondary)', fontWeight: 700 }}>손익</th>
+          </tr>
+        </thead>
+        <tbody>
+          {byLeague.map(({ league, stats }) => (
+            <tr key={league} style={{ borderBottom: '1px solid var(--border-light)' }}>
+              <td style={{ padding: '7px 8px', fontWeight: 700, color: 'var(--text-primary)' }}>{league}</td>
+              <td style={{ textAlign: 'center', padding: '7px 6px', color: 'var(--text-secondary)' }}>{stats.total}</td>
+              <td style={{ textAlign: 'center', padding: '7px 6px' }}>
                 <span className={stats.winRate >= 50 ? 'profit-pos' : 'profit-neg'} style={{ fontWeight: 700 }}>{stats.winRate.toFixed(1)}%</span>
+              </td>
+              <td style={{ textAlign: 'center', padding: '7px 6px', color: 'var(--text-secondary)', fontFamily: 'var(--font-num)' }}>{stats.avgOdds.toFixed(2)}</td>
+              <td style={{ textAlign: 'center', padding: '7px 6px' }}>
+                <span className={stats.roi >= 0 ? 'profit-pos' : 'profit-neg'}>{stats.roi >= 0 ? '+' : ''}{stats.roi.toFixed(1)}%</span>
+              </td>
+              <td style={{ textAlign: 'right', padding: '7px 8px' }}>
                 <span className={stats.profit >= 0 ? 'profit-pos' : 'profit-neg'} style={{ fontFamily: 'var(--font-num)', fontWeight: 700 }}>
                   {stats.profit >= 0 ? '+' : ''}{stats.profit.toLocaleString()}
                 </span>
-                {isOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-              </div>
-            </button>
-            {isOpen && (
-              <div style={{ padding: '0 14px 12px', display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {byMarket.map(({ market, stats: ms }) => (
-                  <div key={market} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 10px', background: 'var(--bg-elevated)', borderRadius: 8, fontSize: 12 }}>
-                    <span style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>{market}</span>
-                    <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                      <span style={{ color: 'var(--text-muted)' }}>{ms.total}건</span>
-                      <span className={ms.winRate >= 50 ? 'profit-pos' : 'profit-neg'}>{ms.winRate.toFixed(1)}%</span>
-                      <span className={ms.roi >= 0 ? 'profit-pos' : 'profit-neg'}>{ms.roi >= 0 ? '+' : ''}{ms.roi.toFixed(1)}%</span>
-                      <span className={ms.profit >= 0 ? 'profit-pos' : 'profit-neg'} style={{ fontFamily: 'var(--font-num)' }}>
-                        {ms.profit >= 0 ? '+' : ''}{ms.profit.toLocaleString()}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )
-      })}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   )
 }
