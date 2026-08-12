@@ -287,7 +287,7 @@ export default function Mining() {
                       ) : (
                         <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
                           <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>시작</span>
-                          <span style={{ fontSize: 16, fontWeight: 800, color: 'var(--text-secondary)', fontFamily: 'var(--font-num)' }}>{fmt(e.start_point)}</span>
+                          <span style={{ fontSize: 17, fontWeight: 800, color: 'var(--text-secondary)', fontFamily: 'var(--font-num)' }}>{fmt(e.start_point)}</span>
                           <button onClick={() => startEdit(e, 'start')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', padding: 0 }}><Pencil size={10} /></button>
                         </span>
                       )}
@@ -311,7 +311,7 @@ export default function Mining() {
                       ) : (
                         <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
                           <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>현재</span>
-                          <span style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-primary)', fontFamily: 'var(--font-num)' }}>{fmt(e.current_point)}</span>
+                          <span style={{ fontSize: 17, fontWeight: 800, color: 'var(--text-primary)', fontFamily: 'var(--font-num)' }}>{fmt(e.current_point)}</span>
                           <button onClick={() => startEdit(e, 'current')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', padding: 0 }}><Pencil size={12} /></button>
                         </span>
                       )}

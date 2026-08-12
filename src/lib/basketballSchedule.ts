@@ -1,19 +1,20 @@
 // ─── 농구 경기 일정 조회 (베팅 등록 폼에서 사용, ESPN 히든 API 기반) ─────
 // LOL/축구/야구와 동일한 패턴: site.api.espn.com/apis/site/v2/sports/basketball/{리그}/scoreboard
 //
-// ⚠️ KBL·WKBL·CBA·B리그(일본)·유로리그 관련 조사 결과: ESPN 히든 API가 실제로 제공하는 농구 리그는
-// NBA, WNBA, G리그, NCAA 남/여, 호주 NBL, FIBA World Cup 뿐이고(github.com/pseudo-r/Public-ESPN-API 확인),
-// 아시아 국내리그(KBL/WKBL/CBA/B리그)나 유로리그는 슬러그 자체가 없다. 유로리그는 자체 공개 API가 있긴 하지만
-// (euroleaguebasketball.net) 브라우저에서 바로 호출 가능한 무인증 엔드포인트가 아니라 LOL/축구와 "같은 방식"의
-// 요구조건에 맞지 않아 이번엔 제외했다. 요청하신 대로 이번엔 NBA만 이 방식으로 가져온다.
-// KBL·WKBL·CBA·B리그·유로리그는 기존처럼 리그란에 직접 입력해서 쓰면 된다.
+// ESPN 히든 API가 실제로 제공하는 프로 농구 리그: NBA, WNBA, G리그, 호주 NBL 정도
+// (NCAA 남/여, FIBA World Cup도 있지만 국내 베팅 마켓과는 거리가 있어 제외).
+// KBL·WKBL·CBA·B리그(일본)·유로리그는 이 API에 슬러그 자체가 없어서(github.com/pseudo-r/Public-ESPN-API 확인)
+// 여전히 못 가져온다 — 기존처럼 리그란에 직접 입력해서 쓰면 된다.
 
 import { supabase } from './supabase'
 
 const ESPN_BASE = 'https://site.api.espn.com/apis/site/v2/sports/basketball'
 
 export const BASKETBALL_LEAGUES: { code: string; label: string; slug: string }[] = [
-  { code: 'NBA', label: 'NBA', slug: 'nba' },
+  { code: 'NBA',  label: 'NBA',  slug: 'nba' },
+  { code: 'WNBA', label: 'WNBA', slug: 'wnba' },
+  { code: 'GLEAGUE', label: 'G리그', slug: 'nba-development' },
+  { code: 'NBL',  label: '호주 NBL', slug: 'nbl' },
   // KBL, WKBL, CBA, B리그, 유로리그: ESPN 히든 API에 리그 자체가 없어서 못 넣음 (위 주석 참고)
 ]
 
