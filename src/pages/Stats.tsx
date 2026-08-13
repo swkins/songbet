@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { logAction } from '../lib/logger'
 import type { Bet, Sport, Market, Site } from '../types'
@@ -35,74 +35,6 @@ function calcStats(bets: Bet[]) {
   const avgOdds = total > 0 ? settled.reduce((s, b) => s + b.odds, 0) / total : 0
   return { settled, wins, losses, pushes, total, winRate, stake, profit, roi, avgOdds }
 }
-
-// ─── 축구·야구·농구 "리그별" 신규 통계 ─────────────────────────────
-// 최근 도입한 일정 API(리그가 자동으로 채워짐) 기준으로 새로 집계한다.
-// 기존 SportPanel(팀/마켓 세부 통계)은 당장은 숨겨두고 이 화면을 기본으로 보여준다.
-// 모든 리그를 한 표에 나란히 놓고 비교할 수 있도록 한다 (리그별로 펼치고 접는 방식이 아님).
-
-function LeagueBreakdownPanel({ bets, sportValue }: { bets: Bet[]; sportValue: Sport }) {
-  const settled = useMemo(
-    () => bets.filter(b => b.sport === sportValue && b.result !== 'pending'),
-    [bets, sportValue]
-  )
-
-  const byLeague = useMemo(() => {
-    const map = new Map<string, Bet[]>()
-    for (const b of settled) {
-      const key = b.league?.trim() || '(리그 미지정)'
-      const arr = map.get(key) ?? []
-      arr.push(b)
-      map.set(key, arr)
-    }
-    return Array.from(map.entries())
-      .map(([league, list]) => ({ league, stats: calcStats(list) }))
-      .sort((a, b) => b.stats.total - a.stats.total)
-  }, [settled])
-
-  if (byLeague.length === 0) {
-    return <div className="card"><div className="empty"><div className="empty-icon">🏆</div>결과 처리된 베팅이 없습니다</div></div>
-  }
-
-  return (
-    <div className="card" style={{ padding: '12px 14px' }}>
-      <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
-        <thead>
-          <tr style={{ borderBottom: '1px solid var(--border)' }}>
-            <th style={{ textAlign: 'left', padding: '5px 8px', fontSize: 10, color: 'var(--text-secondary)', fontWeight: 700 }}>리그</th>
-            <th style={{ textAlign: 'center', padding: '5px 6px', fontSize: 10, color: 'var(--text-secondary)', fontWeight: 700 }}>건</th>
-            <th style={{ textAlign: 'center', padding: '5px 6px', fontSize: 10, color: 'var(--text-secondary)', fontWeight: 700 }}>승률</th>
-            <th style={{ textAlign: 'center', padding: '5px 6px', fontSize: 10, color: 'var(--text-secondary)', fontWeight: 700 }}>평균배당</th>
-            <th style={{ textAlign: 'center', padding: '5px 6px', fontSize: 10, color: 'var(--text-secondary)', fontWeight: 700 }}>ROI</th>
-            <th style={{ textAlign: 'right', padding: '5px 8px', fontSize: 10, color: 'var(--text-secondary)', fontWeight: 700 }}>손익</th>
-          </tr>
-        </thead>
-        <tbody>
-          {byLeague.map(({ league, stats }) => (
-            <tr key={league} style={{ borderBottom: '1px solid var(--border-light)' }}>
-              <td style={{ padding: '7px 8px', fontWeight: 700, color: 'var(--text-primary)' }}>{league}</td>
-              <td style={{ textAlign: 'center', padding: '7px 6px', color: 'var(--text-secondary)' }}>{stats.total}</td>
-              <td style={{ textAlign: 'center', padding: '7px 6px' }}>
-                <span className={stats.winRate >= 50 ? 'profit-pos' : 'profit-neg'} style={{ fontWeight: 700 }}>{stats.winRate.toFixed(1)}%</span>
-              </td>
-              <td style={{ textAlign: 'center', padding: '7px 6px', color: 'var(--text-secondary)', fontFamily: 'var(--font-num)' }}>{stats.avgOdds.toFixed(2)}</td>
-              <td style={{ textAlign: 'center', padding: '7px 6px' }}>
-                <span className={stats.roi >= 0 ? 'profit-pos' : 'profit-neg'}>{stats.roi >= 0 ? '+' : ''}{stats.roi.toFixed(1)}%</span>
-              </td>
-              <td style={{ textAlign: 'right', padding: '7px 8px' }}>
-                <span className={stats.profit >= 0 ? 'profit-pos' : 'profit-neg'} style={{ fontFamily: 'var(--font-num)', fontWeight: 700 }}>
-                  {stats.profit >= 0 ? '+' : ''}{stats.profit.toLocaleString()}
-                </span>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  )
-}
-
-
 
 // ─── 룰북 기반 통계 행 ─────────────────────────────────────────────
 type RowColor = 'S' | 'A' | 'B' | 'none'
@@ -1213,9 +1145,6 @@ export default function Stats() {
   const [rateMap, setRateMap] = useState<Record<string, number>>({})
   const [period, setPeriod]   = useState<'all' | '7d' | '30d' | '90d'>('all')
   const [activeSport, setActiveSport] = useState<Sport | 'all' | 'parlay'>('esports')
-  // 축구/야구/농구는 새 일정-API 리그 로직 기준 "리그별" 통계가 기본, 기존 세부 통계는 토글로 임시 보관
-  const [statsViewMode, setStatsViewMode] = useState<'league' | 'legacy'>('league')
-  const LEAGUE_STATS_SPORTS: Sport[] = ['soccer', 'baseball', 'basketball']
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null)
   const [leagueOverrides, setLeagueOverrides] = useState<LeagueOverride[]>([])
   const [baseballLeagues, setBaseballLeagues] = useState<string[]>([])
@@ -1646,68 +1575,7 @@ export default function Stats() {
               )}
             </div>
           )}
-          {activeSport !== 'all' && activeSport !== 'parlay' && LEAGUE_STATS_SPORTS.includes(activeSport) && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <div style={{ display: 'flex', gap: 6 }}>
-                <button onClick={() => setStatsViewMode('league')} style={{
-                  padding: '7px 14px', borderRadius: 8, cursor: 'pointer', fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-body)',
-                  border: `1px solid ${statsViewMode === 'league' ? 'var(--gold-border)' : 'var(--border)'}`,
-                  background: statsViewMode === 'league' ? 'var(--gold-bg)' : 'var(--bg-card)',
-                  color: statsViewMode === 'league' ? 'var(--gold)' : 'var(--text-secondary)',
-                }}>리그별 통계</button>
-                <button onClick={() => setStatsViewMode('legacy')} style={{
-                  padding: '7px 14px', borderRadius: 8, cursor: 'pointer', fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-body)',
-                  border: `1px solid ${statsViewMode === 'legacy' ? 'var(--gold-border)' : 'var(--border)'}`,
-                  background: statsViewMode === 'legacy' ? 'var(--gold-bg)' : 'var(--bg-card)',
-                  color: statsViewMode === 'legacy' ? 'var(--gold)' : 'var(--text-secondary)',
-                }}>상세 통계 (기존, 임시보관)</button>
-              </div>
-              {statsViewMode === 'league' ? (
-                <LeagueBreakdownPanel bets={periodFiltered} sportValue={activeSport} />
-              ) : (
-                <SportPanel
-                  bets={periodFiltered}
-                  sport={SPORTS.find(s => s.value === activeSport)!}
-                  leagueOverrides={leagueOverrides}
-                  onAddLeagueOverride={addLeagueOverride}
-                  baseballLeagues={baseballLeagues}
-                  onAddBaseballLeague={addBaseballLeague}
-                  onRenameBaseballLeague={renameBaseballLeague}
-                  onDeleteBaseballLeague={deleteBaseballLeague}
-                  soccerOverrides={soccerOverrides}
-                  soccerLeagues={soccerLeagues}
-                  onAddSoccerOverride={addSoccerLeagueOverride}
-                  onAddSoccerLeague={addSoccerLeague}
-                  esportsOverrides={esportsOverrides}
-                  esportsLeagues={esportsLeagues}
-                  onAddEsportsOverride={addEsportsLeagueOverride}
-                  onAddEsportsLeague={addEsportsLeague}
-                  onChangeSport={changeBetsSport}
-                  onRenameSoccerLeague={renameSoccerLeague}
-                  onDeleteSoccerLeague={deleteSoccerLeague}
-                  onRenameEsportsLeague={renameEsportsLeague}
-                  onDeleteEsportsLeague={deleteEsportsLeague}
-                  basketballOverrides={basketballOverrides}
-                  basketballLeagues={basketballLeagues}
-                  onAddBasketballOverride={addBasketballLeagueOverride}
-                  onAddBasketballLeague={addBasketballLeague}
-                  onRenameBasketballLeague={renameBasketballLeague}
-                  onDeleteBasketballLeague={deleteBasketballLeague}
-                  volleyballOverrides={volleyballOverrides}
-                  volleyballLeagues={volleyballLeagues}
-                  onAddVolleyballOverride={addVolleyballLeagueOverride}
-                  onAddVolleyballLeague={addVolleyballLeague}
-                  onRenameVolleyballLeague={renameVolleyballLeague}
-                  onDeleteVolleyballLeague={deleteVolleyballLeague}
-                  onDeleteRequest={() => {
-                    const sp = SPORTS.find(s => s.value === activeSport)!
-                    setDeleteTarget({ label: sp.label, emoji: sp.emoji, matchFn: b => b.sport === sp.value && b.parlay_group === null })
-                  }}
-                />
-              )}
-            </div>
-          )}
-          {activeSport !== 'all' && activeSport !== 'parlay' && !LEAGUE_STATS_SPORTS.includes(activeSport) && (
+          {activeSport !== 'all' && activeSport !== 'parlay' && (
             <SportPanel
               bets={periodFiltered}
               sport={SPORTS.find(s => s.value === activeSport)!}
