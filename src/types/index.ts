@@ -11,7 +11,7 @@ export interface Site {
   point_deposit: number
   total_withdrawal: number
   currency: 'krw' | 'usd'
-  bet_type: 'single' | 'double'   // 단폴 or 두폴
+  bet_type: 'single' | 'double'   // 단폴 or 다폴
   settlement_only: boolean          // 결산 전용 사이트 (대시보드 베팅현황에 미표시)
   default_stake: number             // 기본 베팅 금액 (0이면 통화별 폴백)
   carry_pnl: number                 // 마감 시 진행중 베팅이 남아있으면 이월되는 누적 수익률 (진행중 베팅 없이 마감되면 0으로 초기화)
@@ -21,7 +21,7 @@ export interface Bet {
   league: string; match: string; market: Market; pick: string
   odds: number; stake: number; result: BetResult; profit: number; memo: string
   site_id: string | null
-  parlay_group: string | null   // 두폴 그룹 uuid
+  parlay_group: string | null   // 다폴 그룹 uuid
   parlay_leg: number            // 1 or 2
   is_live: boolean              // 라이브 베팅 여부
   is_pinned: boolean            // 마감 시 고정 유지

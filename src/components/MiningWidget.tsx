@@ -1,7 +1,10 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import dayjs from 'dayjs'
-import { Plus, Trash2, Pencil, Check, X, ClipboardPaste } from 'lucide-react'
-import { useMiningData, fmtMining as fmt, minedOf as mined, type MiningEntry } from '../lib/useMining'
+import { Plus, Trash2, Pencil, Check, X, ClipboardPaste, DollarSign, Target } from 'lucide-react'
+import { supabase } from '../lib/supabase'
+import { useMiningData, fmtMining as fmt, minedOf as mined, periodLabel, type MiningEntry, type MiningCashout } from '../lib/useMining'
+
+interface ActiveSite { id: string; name: string; deposit_bet_done: number }
 
 const labelSt: React.CSSProperties = {
   fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.5px',
@@ -13,16 +16,205 @@ const inputSt: React.CSSProperties = {
   fontFamily: 'var(--font-body)', outline: 'none', boxSizing: 'border-box',
 }
 
+/** 채굴 사이트별 현금교환 모달: (1) 특정 베팅사이트들의 실적(입금 총액 증가분) 목표 설정,
+ *  (2) 목표 달성 + 2주 쿨다운을 만족하면 현금교환 실행 — 현재가에서 교환액만큼 빼서 시작가/현재가를 새로 설정한다. */
+function CashoutModal({ entry, cashout, onClose, onSetGoal, onCashout }: {
+  entry: MiningEntry
+  cashout: MiningCashout | undefined
+  onClose: () => void
+  onSetGoal: (siteIds: string[], amount: number, period: '2w' | '1m', baseline: number) => Promise<void>
+  onCashout: (amount: number) => Promise<void>
+}) {
+  const [activeSites, setActiveSites] = useState<ActiveSite[]>([])
+  const [sitesLoading, setSitesLoading] = useState(true)
+  const hasGoal = !!cashout?.goal_period && !!cashout.goal_deadline
+  const [editingGoal, setEditingGoal] = useState(!hasGoal)
+  const [selectedIds, setSelectedIds] = useState<string[]>(cashout?.goal_site_ids ?? [])
+  const [goalAmount, setGoalAmount] = useState(cashout?.goal_amount ? String(cashout.goal_amount) : '')
+  const [goalPeriod, setGoalPeriod] = useState<'2w' | '1m'>(cashout?.goal_period ?? '2w')
+  const [savingGoal, setSavingGoal] = useState(false)
+  const [amount, setAmount] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+
+  useEffect(() => {
+    (async () => {
+      setSitesLoading(true)
+      const { data } = await supabase.from('sites').select('id,name,deposit_bet_done').eq('active', true).order('sort_order')
+      if (data) setActiveSites(data as ActiveSite[])
+      setSitesLoading(false)
+    })()
+  }, [])
+
+  const now = dayjs()
+  const deadline = cashout?.goal_deadline ? dayjs(cashout.goal_deadline) : null
+  const goalExpired = hasGoal && deadline ? now.isAfter(deadline) : false
+  const goalSiteIds = cashout?.goal_site_ids ?? []
+  const goalSiteNames = activeSites.filter(s => goalSiteIds.includes(s.id)).map(s => s.name)
+  const currentSum = activeSites.filter(s => goalSiteIds.includes(s.id)).reduce((a, s) => a + s.deposit_bet_done, 0)
+  const progress = hasGoal ? Math.max(0, currentSum - (cashout?.goal_baseline ?? 0)) : 0
+  const goalMet = hasGoal && !goalExpired && progress >= (cashout?.goal_amount ?? 0)
+
+  const cooldownUntil = cashout?.next_allowed_at ? dayjs(cashout.next_allowed_at) : null
+  const inCooldown = !!cooldownUntil && now.isBefore(cooldownUntil)
+
+  const canExchange = goalMet && !inCooldown
+  const amountN = Number(amount.replace(/,/g, '')) || 0
+  const amountValid = amountN > 0 && amountN <= entry.current_point
+
+  function toggleSite(id: string) {
+    setSelectedIds(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id])
+  }
+
+  async function saveGoal() {
+    if (selectedIds.length === 0 || !goalAmount || savingGoal) return
+    setSavingGoal(true)
+    const baseline = activeSites.filter(s => selectedIds.includes(s.id)).reduce((a, s) => a + s.deposit_bet_done, 0)
+    await onSetGoal(selectedIds, Number(goalAmount.replace(/,/g, '')) || 0, goalPeriod, baseline)
+    setSavingGoal(false)
+    setEditingGoal(false)
+  }
+
+  async function submitCashout() {
+    if (!canExchange || !amountValid || submitting) return
+    if (!confirm(`${fmt(amountN)} 만큼 현금교환하시겠습니까? 현재가에서 차감되어 시작가/현재가가 ${fmt(entry.current_point - amountN)}(으)로 재설정됩니다.`)) return
+    setSubmitting(true)
+    await onCashout(amountN)
+    setSubmitting(false)
+    onClose()
+  }
+
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 300, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+      <div onClick={ev => ev.stopPropagation()} style={{ width: '100%', maxWidth: 380, maxHeight: '85vh', overflowY: 'auto', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 20, boxShadow: '0 20px 60px rgba(0,0,0,0.6)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>{entry.site_name} 현금교환</div>
+          <button onClick={onClose} style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 8, width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'var(--text-secondary)' }}><X size={14} /></button>
+        </div>
+
+        {/* 목표 섹션 */}
+        <div style={{ marginBottom: 14, padding: 10, background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)' }}>
+              <Target size={12} /> 현금교환 목표 (사이트 실적)
+            </div>
+            {hasGoal && !editingGoal && (
+              <button onClick={() => setEditingGoal(true)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--gold)', fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-body)', display: 'flex', alignItems: 'center', gap: 2 }}>
+                <Pencil size={10} /> 재설정
+              </button>
+            )}
+          </div>
+
+          {!editingGoal && hasGoal ? (
+            <div>
+              <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 4 }}>
+                {goalSiteNames.length > 0 ? goalSiteNames.join(', ') : '선택된 사이트'} · {periodLabel(cashout!.goal_period!)}
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: goalMet ? 'var(--green)' : 'var(--text-primary)', fontFamily: 'var(--font-num)' }}>
+                  {fmt(progress)} / {fmt(cashout!.goal_amount)}
+                </span>
+                <span style={{ fontSize: 9, fontWeight: 700, color: goalExpired ? 'var(--red)' : 'var(--text-muted)' }}>
+                  {goalExpired ? '기간 만료' : `~${deadline!.format('MM.DD')}`}
+                </span>
+              </div>
+              <div style={{ height: 5, background: 'var(--bg-card)', borderRadius: 3, overflow: 'hidden' }}>
+                <div style={{ height: '100%', width: `${Math.min(100, cashout!.goal_amount > 0 ? progress / cashout!.goal_amount * 100 : 0)}%`, background: goalMet ? 'var(--green)' : 'var(--gold)', borderRadius: 3 }} />
+              </div>
+              {goalExpired && <div style={{ fontSize: 10, color: 'var(--red)', marginTop: 5 }}>목표 기간이 지났습니다. 목표를 재설정해주세요.</div>}
+            </div>
+          ) : (
+            <div>
+              {sitesLoading ? (
+                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>사이트 불러오는 중...</div>
+              ) : activeSites.length === 0 ? (
+                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>활성화된 베팅사이트가 없습니다.</div>
+              ) : (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 8 }}>
+                  {activeSites.map(s => (
+                    <button key={s.id} type="button" onClick={() => toggleSite(s.id)} style={{
+                      fontSize: 10, fontWeight: 700, padding: '4px 8px', borderRadius: 5, cursor: 'pointer', fontFamily: 'var(--font-body)',
+                      border: `1px solid ${selectedIds.includes(s.id) ? 'var(--gold-border)' : 'var(--border)'}`,
+                      background: selectedIds.includes(s.id) ? 'var(--gold-bg)' : 'var(--bg-card)',
+                      color: selectedIds.includes(s.id) ? 'var(--gold)' : 'var(--text-secondary)',
+                    }}>{s.name}</button>
+                  ))}
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
+                <button type="button" onClick={() => setGoalPeriod('2w')} style={{
+                  flex: 1, padding: '6px 0', borderRadius: 6, cursor: 'pointer', fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-body)',
+                  border: `1px solid ${goalPeriod === '2w' ? 'var(--gold-border)' : 'var(--border)'}`,
+                  background: goalPeriod === '2w' ? 'var(--gold-bg)' : 'var(--bg-card)',
+                  color: goalPeriod === '2w' ? 'var(--gold)' : 'var(--text-secondary)',
+                }}>2주</button>
+                <button type="button" onClick={() => setGoalPeriod('1m')} style={{
+                  flex: 1, padding: '6px 0', borderRadius: 6, cursor: 'pointer', fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-body)',
+                  border: `1px solid ${goalPeriod === '1m' ? 'var(--gold-border)' : 'var(--border)'}`,
+                  background: goalPeriod === '1m' ? 'var(--gold-bg)' : 'var(--bg-card)',
+                  color: goalPeriod === '1m' ? 'var(--gold)' : 'var(--text-secondary)',
+                }}>1개월</button>
+              </div>
+              <input style={{ ...inputSt, marginBottom: 8, fontSize: 12, padding: '7px 9px' }} inputMode="numeric" placeholder="목표 실적 금액 (원)"
+                value={goalAmount ? Number(goalAmount.replace(/,/g, '')).toLocaleString('ko-KR') : ''}
+                onChange={ev => { const raw = ev.target.value.replace(/,/g, ''); if (raw === '' || /^\d+$/.test(raw)) setGoalAmount(raw) }} />
+              <div style={{ display: 'flex', gap: 5 }}>
+                <button onClick={saveGoal} disabled={selectedIds.length === 0 || !goalAmount || savingGoal} style={{
+                  flex: 1, padding: '7px 0', borderRadius: 6, border: 'none', cursor: selectedIds.length && goalAmount ? 'pointer' : 'not-allowed',
+                  background: 'var(--gold)', color: '#000', fontWeight: 700, fontSize: 11, fontFamily: 'var(--font-body)',
+                  opacity: selectedIds.length && goalAmount ? 1 : 0.5,
+                }}>{savingGoal ? '저장중...' : '목표 저장'}</button>
+                {hasGoal && (
+                  <button onClick={() => setEditingGoal(false)} style={{ padding: '7px 12px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-body)' }}>취소</button>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* 쿨다운 안내 */}
+        {inCooldown && (
+          <div style={{ fontSize: 11, color: 'var(--red)', marginBottom: 10, padding: '7px 9px', background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 6 }}>
+            다음 현금교환 가능일: {cooldownUntil!.format('YYYY.MM.DD')} (2주 쿨다운)
+          </div>
+        )}
+        {!inCooldown && hasGoal && !goalMet && (
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 10, padding: '7px 9px', background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 6 }}>
+            목표 실적을 달성해야 현금교환이 가능합니다.
+          </div>
+        )}
+
+        {/* 교환 실행 */}
+        <div style={labelSt}>교환할 금액 (현재가에서 차감)</div>
+        <input style={{ ...inputSt, marginBottom: 4 }} inputMode="numeric" placeholder="0"
+          disabled={!canExchange}
+          value={amount ? Number(amount.replace(/,/g, '')).toLocaleString('ko-KR') : ''}
+          onChange={ev => { const raw = ev.target.value.replace(/,/g, ''); if (raw === '' || /^\d+$/.test(raw)) setAmount(raw) }} />
+        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 14 }}>현재가 {fmt(entry.current_point)} 중 최대 {fmt(entry.current_point)}까지</div>
+
+        <button onClick={submitCashout} disabled={!canExchange || !amountValid || submitting} style={{
+          width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+          padding: '11px 0', borderRadius: 8, border: 'none', cursor: canExchange && amountValid ? 'pointer' : 'not-allowed',
+          background: 'var(--purple)', color: '#fff', fontWeight: 700, fontSize: 13, fontFamily: 'var(--font-body)',
+          opacity: canExchange && amountValid ? 1 : 0.5,
+        }}>
+          <DollarSign size={14} /> {submitting ? '처리중...' : '현금교환 실행'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 /** 대시보드 좌측에 얹는 채굴 현황 위젯. 전체 로직(오늘 데이터 로딩/자동 승계/추가/수정/삭제)은
  *  useMiningData 훅을 통해 Mining.tsx(채굴 탭)와 그대로 공유한다 — 달력/그래프는 여기선 생략. */
 export default function MiningWidget() {
-  const { today, entries, loading, knownSites, addEntry: addEntryToDb, updateField, deleteEntry: deleteEntryFromDb } = useMiningData()
+  const { today, entries, loading, knownSites, addEntry: addEntryToDb, updateField, deleteEntry: deleteEntryFromDb, cashoutFor, setCashoutGoal, doCashout } = useMiningData()
 
   const [addModalOpen, setAddModalOpen] = useState(false)
   const [newName, setNewName] = useState('')
   const [newStart, setNewStart] = useState('')
   const [newTarget, setNewTarget] = useState('')
   const [saving, setSaving] = useState(false)
+  const [cashoutEntry, setCashoutEntry] = useState<MiningEntry | null>(null)
 
   type EditField = 'start' | 'target' | 'current'
   const [editing, setEditing] = useState<{ id: string; field: EditField } | null>(null)
@@ -117,6 +309,9 @@ export default function MiningWidget() {
                 <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}>{e.site_name}</span>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   {done && <span style={{ fontSize: 8, fontWeight: 700, color: 'var(--green)', background: 'var(--green-bg)', border: '1px solid var(--green-border)', padding: '1px 5px', borderRadius: 4 }}>완료</span>}
+                  <button onClick={() => setCashoutEntry(e)} title="현금교환" style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, cursor: 'pointer', color: 'var(--purple)', display: 'flex', alignItems: 'center', gap: 3, padding: '2px 6px', fontSize: 9, fontWeight: 700, fontFamily: 'var(--font-body)' }}>
+                    <DollarSign size={10} /> 현금교환
+                  </button>
                   <button onClick={() => deleteEntry(e.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', padding: 0 }}>
                     <Trash2 size={11} />
                   </button>
@@ -160,35 +355,36 @@ export default function MiningWidget() {
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8, marginTop: 6, borderTop: '1px solid var(--border)', paddingTop: 6, flexWrap: 'wrap' }}>
                 {isEditingStart ? (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-                    <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>시작</span>
-                    <input autoFocus style={{ width: 70, background: 'var(--bg-card)', border: '1px solid var(--gold-border)', borderRadius: 5, padding: '3px 5px', fontSize: 10, color: 'var(--text-primary)', fontFamily: 'var(--font-num)', outline: 'none', boxSizing: 'border-box' }}
-                      inputMode="numeric" value={editVal}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-muted)' }}>시작</span>
+                    <input autoFocus style={{ width: 110, background: 'var(--bg-card)', border: '1px solid var(--gold-border)', borderRadius: 5, padding: '4px 6px', fontSize: 14, fontWeight: 800, color: 'var(--text-primary)', fontFamily: 'var(--font-num)', outline: 'none', boxSizing: 'border-box' }}
+                      inputMode="numeric" value={editVal ? Number(editVal.replace(/,/g, '')).toLocaleString('ko-KR') : ''}
                       onChange={ev => { const raw = ev.target.value.replace(/,/g, ''); if (raw === '' || /^\d+$/.test(raw)) setEditVal(raw) }}
                       onKeyDown={ev => ev.key === 'Enter' && saveEdit(e)} />
-                    <button onClick={() => saveEdit(e)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--green)', display: 'flex' }}><Check size={11} /></button>
-                    <button onClick={cancelEdit} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex' }}><X size={11} /></button>
+                    <button onClick={() => saveEdit(e)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--green)', display: 'flex' }}><Check size={13} /></button>
+                    <button onClick={cancelEdit} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex' }}><X size={13} /></button>
                   </div>
                 ) : (
-                  <span onClick={() => startEdit(e, 'start')} style={{ display: 'flex', alignItems: 'center', gap: 3, cursor: 'pointer' }}>
-                    <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>시작</span>
+                  <span onClick={() => startEdit(e, 'start')} style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+                    <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-muted)' }}>시작</span>
                     <span style={{ fontSize: 14, fontWeight: 800, color: 'var(--text-secondary)', fontFamily: 'var(--font-num)', textDecoration: 'underline', textDecorationStyle: 'dotted', textUnderlineOffset: 2 }}>{fmt(e.start_point)}</span>
                   </span>
                 )}
                 <div style={{ width: 1, height: 12, background: 'var(--border)' }} />
                 {isEditingCurrent ? (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-                    <input autoFocus style={{ width: 90, background: 'var(--bg-card)', border: '1px solid var(--gold-border)', borderRadius: 5, padding: '4px 6px', fontSize: 11, color: 'var(--text-primary)', fontFamily: 'var(--font-num)', outline: 'none', boxSizing: 'border-box' }}
-                      inputMode="numeric" placeholder="붙여넣기/입력" value={editVal}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-muted)' }}>현재</span>
+                    <input autoFocus style={{ width: 120, background: 'var(--bg-card)', border: '1px solid var(--gold-border)', borderRadius: 5, padding: '4px 6px', fontSize: 14, fontWeight: 800, color: 'var(--text-primary)', fontFamily: 'var(--font-num)', outline: 'none', boxSizing: 'border-box' }}
+                      inputMode="numeric" placeholder="붙여넣기/입력" value={editVal ? Number(editVal.replace(/,/g, '')).toLocaleString('ko-KR') : ''}
                       onChange={ev => { const raw = ev.target.value.replace(/,/g, ''); if (raw === '' || /^\d+$/.test(raw)) setEditVal(raw) }}
                       onKeyDown={ev => ev.key === 'Enter' && saveEdit(e)} />
-                    <button onClick={pasteToEdit} title="클립보드에서 붙여넣기" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--gold)', display: 'flex' }}><ClipboardPaste size={12} /></button>
-                    <button onClick={() => saveEdit(e)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--green)', display: 'flex' }}><Check size={12} /></button>
-                    <button onClick={cancelEdit} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex' }}><X size={12} /></button>
+                    <button onClick={pasteToEdit} title="클립보드에서 붙여넣기" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--gold)', display: 'flex' }}><ClipboardPaste size={13} /></button>
+                    <button onClick={() => saveEdit(e)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--green)', display: 'flex' }}><Check size={13} /></button>
+                    <button onClick={cancelEdit} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex' }}><X size={13} /></button>
                   </div>
                 ) : (
-                  <span onClick={() => startEdit(e, 'current')} style={{ display: 'flex', alignItems: 'center', gap: 3, cursor: 'pointer' }}>
-                    <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>현재</span>
+                  <span onClick={() => startEdit(e, 'current')} style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+                    <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-muted)' }}>현재</span>
                     <span style={{ fontSize: 14, fontWeight: 800, color: 'var(--text-primary)', fontFamily: 'var(--font-num)', textDecoration: 'underline', textDecorationStyle: 'dotted', textUnderlineOffset: 2 }}>{fmt(e.current_point)}</span>
                   </span>
                 )}
@@ -255,6 +451,17 @@ export default function MiningWidget() {
             </button>
           </div>
         </div>
+      )}
+
+      {/* 현금교환 모달 */}
+      {cashoutEntry && (
+        <CashoutModal
+          entry={cashoutEntry}
+          cashout={cashoutFor(cashoutEntry.site_name)}
+          onClose={() => setCashoutEntry(null)}
+          onSetGoal={(siteIds, amount, period, baseline) => setCashoutGoal(cashoutEntry.site_name, siteIds, amount, period, baseline)}
+          onCashout={amount => doCashout(cashoutEntry, amount)}
+        />
       )}
     </div>
   )

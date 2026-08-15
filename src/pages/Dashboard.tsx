@@ -77,9 +77,7 @@ function LolMatchPicker({ match, onSelectMatch, onChangeMatch, pickLabel, onPick
   const [tab, setTab] = useState<'all' | number>('all')
   const [leagueFilter, setLeagueFilter] = useState<string>('LCK')
   const [killLine, setKillLine] = useState('')
-  const [towerLine, setTowerLine] = useState('')
   const [dragonLine, setDragonLine] = useState('')
-  const [inhibLine, setInhibLine] = useState('')
   const [timeLine, setTimeLine] = useState('')
 
   useEffect(() => {
@@ -234,10 +232,8 @@ function LolMatchPicker({ match, onSelectMatch, onChangeMatch, pickLabel, onPick
           </div>
           <div style={{ borderTop: '1px solid var(--border)', marginTop: 2, paddingTop: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
             {statRow('킬', killLine, setKillLine, `${tab}세트 `)}
-            {statRow('타워', towerLine, setTowerLine, `${tab}세트 `)}
             {statRow('드래곤', dragonLine, setDragonLine, `${tab}세트 `)}
-            {statRow('억제기', inhibLine, setInhibLine, `${tab}세트 `)}
-            {statRow('게임시간', timeLine, setTimeLine, `${tab}세트 `)}
+            {statRow('시간', timeLine, setTimeLine, `${tab}세트 `)}
           </div>
         </div>
       )}
