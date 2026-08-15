@@ -246,22 +246,31 @@ export default function MiningWidget() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 8 }}>
         {entries.map(e => {
           const m = mined(e)
-          const remaining = e.target_point - m
+          // 목표량은 "현재 포인트 총량" 기준 — 오늘 오른 양(m)이 아니라 e.current_point를 target_point와 직접 비교한다
+          const remaining = e.target_point - e.current_point
           const isExcess = e.target_point > 0 && remaining < 0
-          const pct = e.target_point > 0 ? Math.min(100, Math.max(0, m / e.target_point * 100)) : 0
-          const done = e.target_point > 0 && m >= e.target_point
+          const pct = e.target_point > 0 ? Math.min(100, Math.max(0, e.current_point / e.target_point * 100)) : 0
+          const done = e.target_point > 0 && e.current_point >= e.target_point
           const isEditingCurrent = editing?.id === e.id && editing.field === 'current'
           const isEditingTarget = editing?.id === e.id && editing.field === 'target'
 
-          // 채굴 눈금 게이지: 현금교환 목표 날짜가 설정돼 있으면, 남은 일수만큼 눈금을 나누고
-          // 눈금 하나(=하루)당 필요한 채굴량 = 목표량 ÷ 남은 일수. 현재 채굴량(m)만큼 눈금이 아래에서부터 채워진다.
+          // 채굴 눈금 게이지: 현금교환 목표 날짜가 설정돼 있으면 남은 일수만큼 눈금을 나눠서 보여준다.
+          // 눈금은 "목표 대비 현재 얼마나 채웠는지"를 왼쪽부터 채우는 용도일 뿐, 하루 한 칸씩 순서대로 채우는 게 아니다
+          // (하루에 여러 날치를 몰아서 채워도 상관없음). 색은 "이 페이스면 목표일까지 도달 가능한지"를 보여준다:
+          // 남은 목표량을 남은 일수로 나눈 하루 필요량과 오늘 오른 양(m)을 비교해 초록(여유)/주황(빠듯)/빨강(부족)으로 표시.
           const cashout = cashoutFor(e.site_name)
           const goalDate = cashout?.goal_date
           const remainingDays = goalDate ? Math.max(0, dayjs(goalDate).startOf('day').diff(dayjs().startOf('day'), 'day')) : 0
           const tickCount = goalDate ? Math.max(1, remainingDays) : 0
-          const perTick = goalDate && e.target_point > 0 ? e.target_point / tickCount : 0
-          const filledTicks = perTick > 0 ? Math.min(tickCount, Math.floor(m / perTick)) : 0
-          const partialFill = perTick > 0 ? Math.min(1, Math.max(0, (m - filledTicks * perTick) / perTick)) : 0
+          const remainingAmount = Math.max(0, e.target_point - e.current_point)
+          const requiredPerDay = tickCount > 0 ? remainingAmount / tickCount : remainingAmount
+          const paceColor = remainingAmount <= 0 ? 'var(--green)'
+            : m >= requiredPerDay ? 'var(--green)'
+            : m >= requiredPerDay * 0.5 ? 'var(--orange)'
+            : 'var(--red)'
+          const filledCount = tickCount > 0 ? (pct / 100) * tickCount : 0
+          const fullTicks = Math.floor(filledCount)
+          const partialFill = filledCount - fullTicks
 
           return (
             <div key={e.id} style={{
@@ -325,15 +334,17 @@ export default function MiningWidget() {
                 <div>
                   <div style={{ display: 'flex', gap: 2 }}>
                     {Array.from({ length: tickCount }, (_, i) => {
-                      const fillPct = i < filledTicks ? 100 : i === filledTicks ? partialFill * 100 : 0
+                      const fillPct = i < fullTicks ? 100 : i === fullTicks ? partialFill * 100 : 0
                       return (
-                        <div key={i} title={`${fmt(perTick)}/일`} style={{ flex: 1, height: 14, background: 'var(--bg-card)', borderRadius: 2, overflow: 'hidden', border: '1px solid var(--border)', position: 'relative' }}>
-                          <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: `${fillPct}%`, background: done ? 'var(--green)' : 'var(--gold)', transition: 'height 0.3s' }} />
+                        <div key={i} title={`목표까지 ${tickCount}일`} style={{ flex: 1, height: 14, background: 'var(--bg-card)', borderRadius: 2, overflow: 'hidden', border: '1px solid var(--border)', position: 'relative' }}>
+                          <div style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: `${fillPct}%`, background: paceColor, transition: 'width 0.3s' }} />
                         </div>
                       )
                     })}
                   </div>
-                  <div style={{ fontSize: 8, color: 'var(--text-muted)', marginTop: 2 }}>하루 {fmt(perTick)} · {tickCount}일 남음</div>
+                  <div style={{ fontSize: 8, color: 'var(--text-muted)', marginTop: 2 }}>
+                    {remainingAmount <= 0 ? '목표 달성' : `하루 ${fmt(requiredPerDay)} 필요 · ${tickCount}일 남음`}
+                  </div>
                 </div>
               ) : (
                 <div style={{ height: 6, background: 'var(--bg-card)', borderRadius: 3, overflow: 'hidden' }}>
