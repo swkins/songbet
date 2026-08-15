@@ -1,10 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import dayjs from 'dayjs'
 import { Plus, Trash2, Pencil, Check, X, ClipboardPaste, DollarSign, Target } from 'lucide-react'
-import { supabase } from '../lib/supabase'
-import { useMiningData, fmtMining as fmt, minedOf as mined, periodLabel, periodStartFrom, type MiningEntry, type MiningCashout } from '../lib/useMining'
-
-interface SelectableSite { id: string; name: string }
+import { useMiningData, fmtMining as fmt, minedOf as mined, type MiningEntry, type MiningCashout } from '../lib/useMining'
 
 const labelSt: React.CSSProperties = {
   fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.5px',
@@ -16,84 +13,68 @@ const inputSt: React.CSSProperties = {
   fontFamily: 'var(--font-body)', outline: 'none', boxSizing: 'border-box',
 }
 
-/** 채굴 사이트별 현금교환 모달: (1) 베팅현황에 있는 사이트(결산 전용 제외, 비활성 포함)를 골라
- *  실적(입금) 목표 설정, (2) 오늘 기준 과거 2주/1개월 동안의 실제 입금 합계로 달성 여부를 매번 새로 계산해서
- *  목표 달성 + 2주 쿨다운을 만족하면 현금교환 실행 — 현재가에서 교환액만큼 빼서 시작가/현재가를 새로 설정한다. */
-function CashoutModal({ entry, cashout, onClose, onSetGoal, onCashout }: {
+/** 채굴 사이트별 현금교환 모달: 목표 날짜 + 목표 금액을 직접 설정하고, 현재 진행 금액을 수동으로 입력한다.
+ *  진행률은 "목표 날짜까지 남은 일수" 만큼의 눈금으로 표시되고, 눈금 하나 = 하루치 필요 금액(목표금액 ÷ 남은 일수)이다.
+ *  목표 달성(진행금액 ≥ 목표금액) + 2주 쿨다운을 만족하면 현금교환 실행 — 현재가에서 교환액만큼 빼서 시작가/현재가를 새로 설정한다. */
+function CashoutModal({ entry, cashout, onClose, onSetGoal, onSetCurrent, onSetAuto, onCashout }: {
   entry: MiningEntry
   cashout: MiningCashout | undefined
   onClose: () => void
-  onSetGoal: (siteIds: string[], amount: number, period: '2w' | '1m') => Promise<void>
+  onSetGoal: (goalDate: string, amount: number) => Promise<void>
+  onSetCurrent: (amount: number) => Promise<void>
+  onSetAuto: (enabled: boolean) => Promise<void>
   onCashout: (amount: number) => Promise<void>
 }) {
-  const [selectableSites, setSelectableSites] = useState<SelectableSite[]>([])
-  const [sitesLoading, setSitesLoading] = useState(true)
-  const hasGoal = !!cashout?.goal_period
+  const hasGoal = !!cashout?.goal_date
   const [editingGoal, setEditingGoal] = useState(!hasGoal)
-  const [selectedIds, setSelectedIds] = useState<string[]>(cashout?.goal_site_ids ?? [])
+  const [goalDate, setGoalDate] = useState(cashout?.goal_date ?? dayjs().add(14, 'day').format('YYYY-MM-DD'))
   const [goalAmount, setGoalAmount] = useState(cashout?.goal_amount ? String(cashout.goal_amount) : '')
-  const [goalPeriod, setGoalPeriod] = useState<'2w' | '1m'>(cashout?.goal_period ?? '2w')
   const [savingGoal, setSavingGoal] = useState(false)
+
+  const [editingCurrent, setEditingCurrent] = useState(false)
+  const [currentVal, setCurrentVal] = useState(String(cashout?.current_amount ?? 0))
+  const [savingCurrent, setSavingCurrent] = useState(false)
+
   const [amount, setAmount] = useState('')
   const [submitting, setSubmitting] = useState(false)
-  const [progress, setProgress] = useState(0)
-  const [progressLoading, setProgressLoading] = useState(false)
-
-  // 베팅현황(대시보드)에 있는 사이트 전부 — 결산 전용(settlement_only)으로 넘긴 사이트만 제외, 비활성(마감) 사이트는 포함
-  useEffect(() => {
-    (async () => {
-      setSitesLoading(true)
-      const { data } = await supabase.from('sites').select('id,name,active,settlement_only').order('sort_order')
-      if (data) setSelectableSites((data as { id: string; name: string; active: boolean; settlement_only: boolean }[]).filter(s => !s.settlement_only).map(s => ({ id: s.id, name: s.name })))
-      setSitesLoading(false)
-    })()
-  }, [])
+  const autoOn = cashout?.auto_set_2w ?? true
 
   const now = dayjs()
-  const goalSiteIds = cashout?.goal_site_ids ?? []
-  const goalSiteNames = selectableSites.filter(s => goalSiteIds.includes(s.id)).map(s => s.name)
-  const periodStart = hasGoal ? periodStartFrom(now, cashout!.goal_period!) : null
+  const currentAmount = cashout?.current_amount ?? 0
+  const remainingDays = hasGoal ? Math.max(0, dayjs(cashout!.goal_date!).startOf('day').diff(now.startOf('day'), 'day')) : 0
+  const tickCount = hasGoal ? Math.max(1, remainingDays) : 0
+  const perTick = hasGoal && cashout!.goal_amount > 0 ? cashout!.goal_amount / tickCount : 0
+  const filledTicks = perTick > 0 ? Math.min(tickCount, Math.floor(currentAmount / perTick)) : 0
+  const partialFill = perTick > 0 ? Math.min(1, (currentAmount - filledTicks * perTick) / perTick) : 0
 
-  // 실적 = 선택된 사이트들의 "오늘 기준 과거 기간(2주/1개월)" 실제 입금(cashflows) 합계 — 매번 다시 조회
-  useEffect(() => {
-    if (!hasGoal || goalSiteIds.length === 0) { setProgress(0); return }
-    (async () => {
-      setProgressLoading(true)
-      const { data } = await supabase.from('cashflows').select('amount_krw,amount')
-        .eq('category', '베팅입금')
-        .in('site_id', goalSiteIds)
-        .gte('flow_date', periodStart!.format('YYYY-MM-DD'))
-        .lte('flow_date', now.format('YYYY-MM-DD'))
-      const sum = (data ?? []).reduce((a: number, c: { amount_krw: number | null; amount: number }) => a + (c.amount_krw ?? c.amount), 0)
-      setProgress(sum)
-      setProgressLoading(false)
-    })()
-  }, [hasGoal, cashout?.goal_period, JSON.stringify(goalSiteIds)]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  const goalMet = hasGoal && progress >= (cashout?.goal_amount ?? 0)
-
+  const goalMet = hasGoal && currentAmount >= (cashout?.goal_amount ?? 0)
   const cooldownUntil = cashout?.next_allowed_at ? dayjs(cashout.next_allowed_at) : null
   const inCooldown = !!cooldownUntil && now.isBefore(cooldownUntil)
-
   const canExchange = goalMet && !inCooldown
+
   const amountN = Number(amount.replace(/,/g, '')) || 0
   const amountValid = amountN > 0 && amountN <= entry.current_point
 
-  function toggleSite(id: string) {
-    setSelectedIds(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id])
-  }
-
   async function saveGoal() {
-    if (selectedIds.length === 0 || !goalAmount || savingGoal) return
+    if (!goalDate || !goalAmount || savingGoal) return
     setSavingGoal(true)
-    await onSetGoal(selectedIds, Number(goalAmount.replace(/,/g, '')) || 0, goalPeriod)
+    await onSetGoal(goalDate, Number(goalAmount.replace(/,/g, '')) || 0)
     setSavingGoal(false)
     setEditingGoal(false)
   }
 
+  async function saveCurrent() {
+    if (savingCurrent) return
+    const n = Number(currentVal.replace(/,/g, '')) || 0
+    setSavingCurrent(true)
+    await onSetCurrent(n)
+    setSavingCurrent(false)
+    setEditingCurrent(false)
+  }
+
   async function submitCashout() {
     if (!canExchange || !amountValid || submitting) return
-    if (!confirm(`${fmt(amountN)} 만큼 현금교환하시겠습니까? 현재가에서 차감되어 시작가/현재가가 ${fmt(entry.current_point - amountN)}(으)로 재설정됩니다.`)) return
+    if (!confirm(`${fmt(amountN)} 만큼 현금교환하시겠습니까? 현재가에서 차감되어 시작가/현재가가 ${fmt(entry.current_point - amountN)}(으)로 재설정됩니다.${autoOn ? ` (목표 날짜는 자동으로 ${now.add(14, 'day').format('MM.DD')}로 설정됩니다)` : ''}`)) return
     setSubmitting(true)
     await onCashout(amountN)
     setSubmitting(false)
@@ -112,70 +93,51 @@ function CashoutModal({ entry, cashout, onClose, onSetGoal, onCashout }: {
         <div style={{ marginBottom: 14, padding: 10, background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 8 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)' }}>
-              <Target size={12} /> 현금교환 목표 (사이트 실적)
+              <Target size={12} /> 현금교환 목표
             </div>
-            {hasGoal && !editingGoal && (
-              <button onClick={() => setEditingGoal(true)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--gold)', fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-body)', display: 'flex', alignItems: 'center', gap: 2 }}>
-                <Pencil size={10} /> 재설정
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <button type="button" onClick={() => onSetAuto(!autoOn)} title="현금교환 실행 시 목표 날짜를 2주 뒤로 자동 설정" style={{
+                display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', cursor: 'pointer',
+                fontSize: 9, fontWeight: 700, fontFamily: 'var(--font-body)', color: autoOn ? 'var(--gold)' : 'var(--text-muted)',
+              }}>
+                <span style={{
+                  width: 26, height: 15, borderRadius: 999, position: 'relative', transition: 'background 0.15s',
+                  background: autoOn ? 'var(--gold)' : 'var(--border)', flexShrink: 0,
+                }}>
+                  <span style={{
+                    position: 'absolute', top: 2, left: autoOn ? 13 : 2, width: 11, height: 11, borderRadius: '50%',
+                    background: '#fff', transition: 'left 0.15s',
+                  }} />
+                </span>
+                2주 자동설정
               </button>
-            )}
+              {hasGoal && !editingGoal && (
+                <button onClick={() => setEditingGoal(true)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--gold)', fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-body)', display: 'flex', alignItems: 'center', gap: 2 }}>
+                  <Pencil size={10} /> 재설정
+                </button>
+              )}
+            </div>
           </div>
 
           {!editingGoal && hasGoal ? (
-            <div>
-              <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 4 }}>
-                {goalSiteNames.length > 0 ? goalSiteNames.join(', ') : '선택된 사이트'} · {periodLabel(cashout!.goal_period!)}
-                {periodStart && <span style={{ color: 'var(--text-muted)' }}> ({periodStart.format('MM.DD')}~{now.format('MM.DD')})</span>}
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                <span style={{ fontSize: 12, fontWeight: 700, color: goalMet ? 'var(--green)' : 'var(--text-primary)', fontFamily: 'var(--font-num)' }}>
-                  {progressLoading ? '계산중...' : `${fmt(progress)} / ${fmt(cashout!.goal_amount)}`}
-                </span>
-              </div>
-              <div style={{ height: 5, background: 'var(--bg-card)', borderRadius: 3, overflow: 'hidden' }}>
-                <div style={{ height: '100%', width: `${Math.min(100, cashout!.goal_amount > 0 ? progress / cashout!.goal_amount * 100 : 0)}%`, background: goalMet ? 'var(--green)' : 'var(--gold)', borderRadius: 3 }} />
-              </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)', fontFamily: 'var(--font-num)' }}>{fmt(cashout!.goal_amount)}</span>
+              <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)' }}>~{dayjs(cashout!.goal_date!).format('YYYY.MM.DD')} ({remainingDays}일 남음)</span>
             </div>
           ) : (
             <div>
-              {sitesLoading ? (
-                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>사이트 불러오는 중...</div>
-              ) : selectableSites.length === 0 ? (
-                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>베팅현황에 등록된 사이트가 없습니다.</div>
-              ) : (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 8 }}>
-                  {selectableSites.map(s => (
-                    <button key={s.id} type="button" onClick={() => toggleSite(s.id)} style={{
-                      fontSize: 10, fontWeight: 700, padding: '4px 8px', borderRadius: 5, cursor: 'pointer', fontFamily: 'var(--font-body)',
-                      border: `1px solid ${selectedIds.includes(s.id) ? 'var(--gold-border)' : 'var(--border)'}`,
-                      background: selectedIds.includes(s.id) ? 'var(--gold-bg)' : 'var(--bg-card)',
-                      color: selectedIds.includes(s.id) ? 'var(--gold)' : 'var(--text-secondary)',
-                    }}>{s.name}</button>
-                  ))}
-                </div>
-              )}
-              <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
-                <button type="button" onClick={() => setGoalPeriod('2w')} style={{
-                  flex: 1, padding: '6px 0', borderRadius: 6, cursor: 'pointer', fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-body)',
-                  border: `1px solid ${goalPeriod === '2w' ? 'var(--gold-border)' : 'var(--border)'}`,
-                  background: goalPeriod === '2w' ? 'var(--gold-bg)' : 'var(--bg-card)',
-                  color: goalPeriod === '2w' ? 'var(--gold)' : 'var(--text-secondary)',
-                }}>2주</button>
-                <button type="button" onClick={() => setGoalPeriod('1m')} style={{
-                  flex: 1, padding: '6px 0', borderRadius: 6, cursor: 'pointer', fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-body)',
-                  border: `1px solid ${goalPeriod === '1m' ? 'var(--gold-border)' : 'var(--border)'}`,
-                  background: goalPeriod === '1m' ? 'var(--gold-bg)' : 'var(--bg-card)',
-                  color: goalPeriod === '1m' ? 'var(--gold)' : 'var(--text-secondary)',
-                }}>1개월</button>
+              <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+                <input type="date" style={{ ...inputSt, fontSize: 12, padding: '7px 9px', flex: 1 }} value={goalDate}
+                  onChange={ev => setGoalDate(ev.target.value)} />
               </div>
-              <input style={{ ...inputSt, marginBottom: 8, fontSize: 12, padding: '7px 9px' }} inputMode="numeric" placeholder="목표 실적 금액 (원)"
+              <input style={{ ...inputSt, marginBottom: 8, fontSize: 12, padding: '7px 9px' }} inputMode="numeric" placeholder="목표 금액 (원)"
                 value={goalAmount ? Number(goalAmount.replace(/,/g, '')).toLocaleString('ko-KR') : ''}
                 onChange={ev => { const raw = ev.target.value.replace(/,/g, ''); if (raw === '' || /^\d+$/.test(raw)) setGoalAmount(raw) }} />
               <div style={{ display: 'flex', gap: 5 }}>
-                <button onClick={saveGoal} disabled={selectedIds.length === 0 || !goalAmount || savingGoal} style={{
-                  flex: 1, padding: '7px 0', borderRadius: 6, border: 'none', cursor: selectedIds.length && goalAmount ? 'pointer' : 'not-allowed',
+                <button onClick={saveGoal} disabled={!goalDate || !goalAmount || savingGoal} style={{
+                  flex: 1, padding: '7px 0', borderRadius: 6, border: 'none', cursor: goalDate && goalAmount ? 'pointer' : 'not-allowed',
                   background: 'var(--gold)', color: '#000', fontWeight: 700, fontSize: 11, fontFamily: 'var(--font-body)',
-                  opacity: selectedIds.length && goalAmount ? 1 : 0.5,
+                  opacity: goalDate && goalAmount ? 1 : 0.5,
                 }}>{savingGoal ? '저장중...' : '목표 저장'}</button>
                 {hasGoal && (
                   <button onClick={() => setEditingGoal(false)} style={{ padding: '7px 12px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-body)' }}>취소</button>
@@ -185,6 +147,49 @@ function CashoutModal({ entry, cashout, onClose, onSetGoal, onCashout }: {
           )}
         </div>
 
+        {/* 진행 금액 (수동 입력) */}
+        {hasGoal && (
+          <div style={{ marginBottom: 10 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+              <span style={labelSt}>진행 금액</span>
+              {!editingCurrent && (
+                <button onClick={() => { setCurrentVal(String(currentAmount)); setEditingCurrent(true) }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--gold)', fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-body)', display: 'flex', alignItems: 'center', gap: 2 }}>
+                  <Pencil size={10} /> 수정
+                </button>
+              )}
+            </div>
+            {editingCurrent ? (
+              <div style={{ display: 'flex', gap: 5, marginBottom: 8 }}>
+                <input autoFocus style={{ ...inputSt, fontSize: 13, padding: '7px 9px' }} inputMode="numeric" value={currentVal ? Number(currentVal.replace(/,/g, '')).toLocaleString('ko-KR') : ''}
+                  onChange={ev => { const raw = ev.target.value.replace(/,/g, ''); if (raw === '' || /^\d+$/.test(raw)) setCurrentVal(raw) }}
+                  onKeyDown={ev => ev.key === 'Enter' && saveCurrent()} />
+                <button onClick={saveCurrent} disabled={savingCurrent} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 6, cursor: 'pointer', color: 'var(--green)', display: 'flex', alignItems: 'center', padding: '0 10px' }}><Check size={14} /></button>
+                <button onClick={() => setEditingCurrent(false)} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 6, cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', padding: '0 10px' }}><X size={14} /></button>
+              </div>
+            ) : (
+              <div style={{ fontSize: 14, fontWeight: 800, color: goalMet ? 'var(--green)' : 'var(--text-primary)', fontFamily: 'var(--font-num)', marginBottom: 8 }}>
+                {fmt(currentAmount)} <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)' }}>/ {fmt(cashout!.goal_amount)}</span>
+              </div>
+            )}
+
+            {/* 눈금 게이지: 눈금 하나 = 하루, 하루당 필요 금액 = 목표금액 ÷ 남은 일수 */}
+            <div style={{ display: 'flex', gap: 2 }}>
+              {Array.from({ length: tickCount }, (_, i) => {
+                const fillPct = i < filledTicks ? 100 : i === filledTicks ? partialFill * 100 : 0
+                return (
+                  <div key={i} title={`${fmt(perTick)}/일`} style={{ flex: 1, height: 16, background: 'var(--bg-card)', borderRadius: 2, overflow: 'hidden', border: '1px solid var(--border)', position: 'relative' }}>
+                    <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: `${fillPct}%`, background: goalMet ? 'var(--green)' : 'var(--gold)', transition: 'height 0.3s' }} />
+                  </div>
+                )
+              })}
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
+              <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>하루 {fmt(perTick)}원 · {tickCount}일</span>
+              <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>{fmt(Math.max(0, cashout!.goal_amount - currentAmount))} 남음</span>
+            </div>
+          </div>
+        )}
+
         {/* 쿨다운 안내 */}
         {inCooldown && (
           <div style={{ fontSize: 11, color: 'var(--red)', marginBottom: 10, padding: '7px 9px', background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 6 }}>
@@ -193,7 +198,7 @@ function CashoutModal({ entry, cashout, onClose, onSetGoal, onCashout }: {
         )}
         {!inCooldown && hasGoal && !goalMet && (
           <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 10, padding: '7px 9px', background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 6 }}>
-            목표 실적을 달성해야 현금교환이 가능합니다.
+            목표 금액을 달성해야 현금교환이 가능합니다.
           </div>
         )}
 
@@ -221,7 +226,7 @@ function CashoutModal({ entry, cashout, onClose, onSetGoal, onCashout }: {
 /** 대시보드 좌측에 얹는 채굴 현황 위젯. 전체 로직(오늘 데이터 로딩/자동 승계/추가/수정/삭제)은
  *  useMiningData 훅을 통해 Mining.tsx(채굴 탭)와 그대로 공유한다 — 달력/그래프는 여기선 생략. */
 export default function MiningWidget() {
-  const { today, entries, loading, knownSites, addEntry: addEntryToDb, updateField, deleteEntry: deleteEntryFromDb, cashoutFor, setCashoutGoal, doCashout } = useMiningData()
+  const { today, entries, loading, knownSites, addEntry: addEntryToDb, updateField, deleteEntry: deleteEntryFromDb, cashoutFor, setCashGoal, setCashCurrent, setAutoSet2w, doCashout } = useMiningData()
 
   const [addModalOpen, setAddModalOpen] = useState(false)
   const [newName, setNewName] = useState('')
@@ -320,12 +325,14 @@ export default function MiningWidget() {
               borderRadius: 8, padding: '9px 10px',
             }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
-                <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}>{e.site_name}</span>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  {done && <span style={{ fontSize: 8, fontWeight: 700, color: 'var(--green)', background: 'var(--green-bg)', border: '1px solid var(--green-border)', padding: '1px 5px', borderRadius: 4 }}>완료</span>}
-                  <button onClick={() => setCashoutEntry(e)} title="현금교환" style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, cursor: 'pointer', color: 'var(--purple)', display: 'flex', alignItems: 'center', gap: 3, padding: '2px 6px', fontSize: 9, fontWeight: 700, fontFamily: 'var(--font-body)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}>{e.site_name}</span>
+                  <button onClick={() => setCashoutEntry(e)} title="현금교환" style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, cursor: 'pointer', color: 'var(--purple)', display: 'flex', alignItems: 'center', gap: 3, padding: '2px 6px', fontSize: 9, fontWeight: 700, fontFamily: 'var(--font-body)', flexShrink: 0 }}>
                     <DollarSign size={10} /> 현금교환
                   </button>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                  {done && <span style={{ fontSize: 8, fontWeight: 700, color: 'var(--green)', background: 'var(--green-bg)', border: '1px solid var(--green-border)', padding: '1px 5px', borderRadius: 4 }}>완료</span>}
                   <button onClick={() => deleteEntry(e.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', padding: 0 }}>
                     <Trash2 size={11} />
                   </button>
@@ -473,7 +480,9 @@ export default function MiningWidget() {
           entry={cashoutEntry}
           cashout={cashoutFor(cashoutEntry.site_name)}
           onClose={() => setCashoutEntry(null)}
-          onSetGoal={(siteIds, amount, period) => setCashoutGoal(cashoutEntry.site_name, siteIds, amount, period)}
+          onSetGoal={(goalDate, amount) => setCashGoal(cashoutEntry.site_name, goalDate, amount)}
+          onSetCurrent={amount => setCashCurrent(cashoutEntry.site_name, amount)}
+          onSetAuto={enabled => setAutoSet2w(cashoutEntry.site_name, enabled)}
           onCashout={amount => doCashout(cashoutEntry, amount)}
         />
       )}
