@@ -224,12 +224,6 @@ function LolMatchPicker({ match, onSelectMatch, onChangeMatch, pickLabel, onPick
               <button type="button" onClick={() => onPick(`${nameB} +${line}`)} style={btnStyle(pickLabel === `${nameB} +${line}`)}>{nameB} +{line}</button>
             </div>
           ))}
-          <div style={{ borderTop: '1px solid var(--border)', marginTop: 2, paddingTop: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
-            {statRow('킬', killLine, setKillLine, '')}
-            {statRow('타워', towerLine, setTowerLine, '')}
-            {statRow('드래곤', dragonLine, setDragonLine, '')}
-            {statRow('억제기', inhibLine, setInhibLine, '')}
-          </div>
         </div>
       )}
       {typeof tab === 'number' && (
@@ -839,23 +833,23 @@ function InlineBetEditForm({ bet, site, onClose, onSave, baseballOverrides, socc
   )
 }
 
-/* ── 인라인 두폴 수정폼 ── */
+/* ── 인라인 다폴 수정폼 (2~4다리) ── */
 function InlineParlayEditForm({ groupBets, site, onClose, onSave, teamCandidates, allBetsHistory }: {
   groupBets: Bet[]; site: Site
   onClose: () => void
-  onSave: (c1: string, c2: string, odds: number, stake: number, league1: string, league2: string) => Promise<void>
+  onSave: (contents: string[], odds: number, stake: number, leagues: string[]) => Promise<void>
   teamCandidates: TeamCandidate[]; allBetsHistory: BetLite[]
 }) {
   const isusd = site.currency === 'usd'
-  const leg1 = groupBets.find(b => b.parlay_leg === 1)
-  const leg2 = groupBets.find(b => b.parlay_leg === 2)
-  const [c1, setC1]           = useState(leg1?.match ?? '')
-  const [c2, setC2]           = useState(leg2?.match ?? '')
+  const sortedLegs = [...groupBets].sort((a, b) => a.parlay_leg - b.parlay_leg)
+  const leg1 = sortedLegs[0]
+  const [contents, setContents] = useState<string[]>(sortedLegs.map(b => b.match))
   const [oddsRaw, setOddsRaw] = useState((leg1?.odds ?? 1).toFixed(2))
   const [amount, setAmount]   = useState(String(leg1?.stake ?? 0))
   const [submitting, setSubmitting] = useState(false)
   const oddsV  = parseOdds(oddsRaw)
   const stakeN = isusd ? (Number(amount) || 0) : (Number(amount.replace(/,/g, '')) || 0)
+  const allFilled = contents.every(c => !!c)
   const labelSt: React.CSSProperties = { fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.6px', color: 'var(--text-muted)', marginBottom: 2 }
 
   function handleOdds(raw: string) {
@@ -863,16 +857,43 @@ function InlineParlayEditForm({ groupBets, site, onClose, onSave, teamCandidates
     if (/^\d{3}$/.test(clean)) setOddsRaw((Number(clean) / 100).toFixed(2))
     else setOddsRaw(clean)
   }
+  function addLeg() {
+    setContents(p => p.length >= MULTI_MAX_LEGS ? p : [...p, ''])
+  }
+  function removeLeg(idx: number) {
+    setContents(p => p.length <= 2 ? p : p.filter((_, i) => i !== idx))
+  }
   async function submit() {
-    if (!c1 || !c2 || oddsV <= 0 || stakeN <= 0) return
-    setSubmitting(true); await onSave(c1, c2, oddsV, stakeN, '', ''); setSubmitting(false)
+    if (!allFilled || oddsV <= 0 || stakeN <= 0) return
+    setSubmitting(true); await onSave(contents, oddsV, stakeN, contents.map(() => '')); setSubmitting(false)
   }
   return (
     <div className="inline-bet-form" style={{ borderColor: 'var(--gold-border)', background: 'var(--gold-bg)' }}>
-      <div style={labelSt}>① 축</div>
-      <TeamContentInput placeholder="경기 내용 ①" value={c1} onChange={setC1} candidates={teamCandidates} allBets={allBetsHistory} autoFocus onEnter={submit} />
-      <div style={{ ...labelSt, marginTop: 4 }}>② 날개</div>
-      <TeamContentInput placeholder="경기 내용 ②" value={c2} onChange={setC2} candidates={teamCandidates} allBets={allBetsHistory} onEnter={submit} />
+      {contents.map((c, i) => (
+        <div key={i}>
+          <div style={{ ...labelSt, marginTop: i === 0 ? 0 : 4 }}>{LEG_MARKS[i] ?? i + 1}</div>
+          <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <TeamContentInput placeholder={`경기 내용 ${LEG_MARKS[i] ?? i + 1}`} value={c}
+                onChange={v => setContents(p => p.map((pc, pi) => pi === i ? v : pc))}
+                candidates={teamCandidates} allBets={allBetsHistory} autoFocus={i === 0} onEnter={submit} />
+            </div>
+            {i === contents.length - 1 && contents.length < MULTI_MAX_LEGS ? (
+              <button type="button" onClick={addLeg} title="다리 추가" style={{
+                width: 34, height: 34, flexShrink: 0, borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)',
+                background: 'var(--bg-elevated)', color: 'var(--text-secondary)', cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}><Plus size={14} /></button>
+            ) : contents.length > 2 ? (
+              <button type="button" onClick={() => removeLeg(i)} title="다리 삭제" style={{
+                width: 34, height: 34, flexShrink: 0, borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)',
+                background: 'var(--bg-elevated)', color: 'var(--text-muted)', cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}><X size={14} /></button>
+            ) : <div style={{ width: 34, flexShrink: 0 }} />}
+          </div>
+        </div>
+      ))}
       <input className="form-input inline-bet-input" placeholder="배당 (125=1.25)" value={oddsRaw}
         onChange={e => handleOdds(e.target.value)}
         onKeyDown={e => e.key === 'Enter' && submit()}
@@ -886,7 +907,7 @@ function InlineParlayEditForm({ groupBets, site, onClose, onSave, teamCandidates
       )}
       <div style={{ display: 'flex', gap: 5 }}>
         <button className="btn btn-primary" style={{ flex: 1, fontSize: 12, padding: '7px 0', justifyContent: 'center' }}
-          onClick={submit} disabled={!c1 || !c2 || oddsV <= 0 || stakeN <= 0 || submitting}>
+          onClick={submit} disabled={!allFilled || oddsV <= 0 || stakeN <= 0 || submitting}>
           {submitting ? '저장중...' : '수정 저장'}
         </button>
         <button className="btn btn-ghost" style={{ padding: '7px 10px' }} onClick={onClose}><X size={12} /></button>
@@ -895,11 +916,15 @@ function InlineParlayEditForm({ groupBets, site, onClose, onSave, teamCandidates
   )
 }
 
-/* ── 인라인 베팅폼 (단폴 / + 버튼으로 두폴 전환) ── */
-function SingleBetForm({ site, onClose, onBet, onDoubleBet, defaultSport, baseballOverrides, soccerOverrides, basketballOverrides, volleyballOverrides, teamCandidates, allBetsHistory, leagueCandidates }: {
+/* ── 인라인 베팅폼 (단폴 / + 버튼으로 다폴 전환) ── */
+// 다폴 최대 다리 수 (경기 내용 ① + 추가 다리 최대 3개 = 최대 4폴)
+const MULTI_MAX_LEGS = 4
+const LEG_MARKS = ['①', '②', '③', '④']
+
+function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, baseballOverrides, soccerOverrides, basketballOverrides, volleyballOverrides, teamCandidates, allBetsHistory, leagueCandidates }: {
   site: Site; onClose: () => void; defaultSport: string
   onBet: (sport: string, content: string, odds: number, amount: number, isLive: boolean, league: string) => Promise<boolean>
-  onDoubleBet: (sport: string, content1: string, content2: string, odds: number, amount: number, league1: string, league2: string) => Promise<boolean>
+  onMultiBet: (sport: string, contents: string[], odds: number, amount: number, leagues: string[]) => Promise<boolean>
   baseballOverrides: LeagueOverride[]; soccerOverrides: LeagueOverride[]
   basketballOverrides: LeagueOverride[]; volleyballOverrides: LeagueOverride[]
   teamCandidates: TeamCandidate[]; allBetsHistory: BetLite[]; leagueCandidates: LeagueCandidate[]
@@ -914,9 +939,10 @@ function SingleBetForm({ site, onClose, onBet, onDoubleBet, defaultSport, baseba
   // LOL 전용: 경기 선택 + 마켓(승패/핸디캡/세트별 승) 선택. 여기서 확정되면 content/league에 반영된다.
   const [lolMatch, setLolMatch] = useState<UpcomingLolMatch | null>(null)
   const [lolPick, setLolPick]   = useState<string | null>(null)
-  // 베팅 모드: 단폴 / 두폴. 두폴은 리그 없이 경기 내용 2개 + 배당/금액 공유.
-  const [mode, setMode] = useState<'single' | 'double'>('single')
-  const [content2, setContent2] = useState('')
+  // 베팅 모드: 단폴 / 다폴. 다폴은 리그 없이 경기 내용 여러 개(최대 4개) + 배당/금액 공유.
+  const [mode, setMode] = useState<'single' | 'multi'>('single')
+  // 경기 내용 ①은 content, 나머지(②③④)는 extraContents에 담는다
+  const [extraContents, setExtraContents] = useState<string[]>([''])
   const [oddsRaw, setOddsRaw]   = useState('')
   const [amount, setAmount]     = useState(defaultAmount)
   const [isLive, setIsLive]     = useState(false)
@@ -964,12 +990,22 @@ function SingleBetForm({ site, onClose, onBet, onDoubleBet, defaultSport, baseba
     if (/^\d{3}$/.test(clean)) setOddsRaw((Number(clean) / 100).toFixed(2))
     else setOddsRaw(clean)
   }
+  const multiContents = [content, ...extraContents]
+  const multiFilled = multiContents.every(c => !!c)
+
+  function addLeg() {
+    setExtraContents(p => p.length + 1 >= MULTI_MAX_LEGS ? p : [...p, ''])
+  }
+  function removeLeg(idx: number) {
+    setExtraContents(p => p.filter((_, i) => i !== idx))
+  }
+
   async function submit() {
     if (!content || oddsV <= 0 || stakeN <= 0) return
-    if (mode === 'double' && !content2) return
+    if (mode === 'multi' && !multiFilled) return
     setSubmitting(true)
-    const ok = mode === 'double'
-      ? await onDoubleBet(sport, content, content2, oddsV, stakeN, '', '')
+    const ok = mode === 'multi'
+      ? await onMultiBet(sport, multiContents, oddsV, stakeN, multiContents.map(() => ''))
       : await onBet(sport, content, oddsV, stakeN, isLive, league)
     setSubmitting(false)
     if (ok) onClose()
@@ -985,13 +1021,13 @@ function SingleBetForm({ site, onClose, onBet, onDoubleBet, defaultSport, baseba
           background: mode === 'single' ? 'var(--gold-bg)' : 'var(--bg-elevated)',
           color: mode === 'single' ? 'var(--gold)' : 'var(--text-secondary)',
         }}>단폴</button>
-        <button type="button" onClick={() => { setMode('double'); setSport('other') }} style={{
+        <button type="button" onClick={() => { setMode('multi'); setSport('other') }} style={{
           flex: 1, padding: '6px 0', borderRadius: 'var(--radius-sm)', cursor: 'pointer',
           fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-body)',
-          border: `1px solid ${mode === 'double' ? 'var(--purple-border)' : 'var(--border)'}`,
-          background: mode === 'double' ? 'var(--purple-bg)' : 'var(--bg-elevated)',
-          color: mode === 'double' ? 'var(--purple)' : 'var(--text-secondary)',
-        }}>두폴</button>
+          border: `1px solid ${mode === 'multi' ? 'var(--purple-border)' : 'var(--border)'}`,
+          background: mode === 'multi' ? 'var(--purple-bg)' : 'var(--bg-elevated)',
+          color: mode === 'multi' ? 'var(--purple)' : 'var(--text-secondary)',
+        }}>다폴</button>
       </div>
       {mode === 'single' && (
         <SportButtonGroup value={sport} onChange={v => { setSport(v); setSportTouched(true); setLeagueTouched(false); contentRef.current?.focus() }} />
@@ -1011,12 +1047,30 @@ function SingleBetForm({ site, onClose, onBet, onDoubleBet, defaultSport, baseba
           candidates={leagueCandidates}
           style={{ fontSize: 11 }} />
       )}
-      <TeamContentInput inputRef={contentRef} placeholder={mode === 'double' ? '경기 내용 ①' : '경기 내용'} value={content} onChange={setContent}
+      <TeamContentInput inputRef={contentRef} placeholder={mode === 'multi' ? `경기 내용 ${LEG_MARKS[0]}` : '경기 내용'} value={content} onChange={setContent}
         candidates={teamCandidates} allBets={allBetsHistory} autoFocus onEnter={submit} />
-      {mode === 'double' && (
-        <TeamContentInput placeholder="경기 내용 ②" value={content2} onChange={setContent2}
-          candidates={teamCandidates} allBets={allBetsHistory} onEnter={submit} />
-      )}
+      {mode === 'multi' && extraContents.map((c, i) => (
+        <div key={i} style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <TeamContentInput placeholder={`경기 내용 ${LEG_MARKS[i + 1] ?? i + 2}`} value={c}
+              onChange={v => setExtraContents(p => p.map((pc, pi) => pi === i ? v : pc))}
+              candidates={teamCandidates} allBets={allBetsHistory} onEnter={submit} />
+          </div>
+          {i === extraContents.length - 1 && extraContents.length + 1 < MULTI_MAX_LEGS ? (
+            <button type="button" onClick={addLeg} title="다리 추가" style={{
+              width: 34, height: 34, flexShrink: 0, borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)',
+              background: 'var(--bg-elevated)', color: 'var(--text-secondary)', cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}><Plus size={14} /></button>
+          ) : extraContents.length > 1 ? (
+            <button type="button" onClick={() => removeLeg(i)} title="다리 삭제" style={{
+              width: 34, height: 34, flexShrink: 0, borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)',
+              background: 'var(--bg-elevated)', color: 'var(--text-muted)', cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}><X size={14} /></button>
+          ) : <div style={{ width: 34, flexShrink: 0 }} />}
+        </div>
+      ))}
       <input ref={oddsRef} className="form-input inline-bet-input" placeholder="배당 (125=1.25)" value={oddsRaw}
         onChange={e => handleOdds(e.target.value)}
         onKeyDown={e => e.key === 'Enter' && submit()}
@@ -1055,7 +1109,7 @@ function SingleBetForm({ site, onClose, onBet, onDoubleBet, defaultSport, baseba
       )}
       <div style={{ display: 'flex', gap: 5 }}>
         <button className="btn btn-primary" style={{ flex: 1, fontSize: 12, padding: '7px 0', justifyContent: 'center' }}
-          onClick={submit} disabled={!content || (mode === 'double' && !content2) || oddsV <= 0 || stakeN <= 0 || submitting}>
+          onClick={submit} disabled={!content || (mode === 'multi' && !multiFilled) || oddsV <= 0 || stakeN <= 0 || submitting}>
           등록
         </button>
         <button className="btn btn-ghost" style={{ padding: '7px 10px' }} onClick={onClose}><X size={12} /></button>
@@ -1399,18 +1453,20 @@ export default function Dashboard() {
     }
     return false
   }
-  async function submitDoubleBet(site: Site, sport: string, c1: string, c2: string, odds: number, stake: number, league1 = '', league2 = ''): Promise<boolean> {
+  /* ── 다폴 제출 (2~4다리, 리그 없이 경기 내용 여러 개 + 배당/금액 공유) ── */
+  async function submitMultiBet(site: Site, sport: string, contents: string[], odds: number, stake: number, leagues: string[] = []): Promise<boolean> {
+    if (contents.length < 2) return false
     const groupId = crypto.randomUUID()
-    const { market: m1, pick: p1 } = autoMarket(c1); const { market: m2, pick: p2 } = autoMarket(c2)
-    const { data: betsData } = await supabase.from('bets').insert([
-      { bet_date: today, sport: sport as Sport, league: league1, match: c1, market: m1, pick: p1, odds, stake, result: 'pending' as BetResult, profit: 0, memo: '', site_id: site.id, parlay_group: groupId, parlay_leg: 1 },
-      { bet_date: today, sport: sport as Sport, league: league2, match: c2, market: m2, pick: p2, odds, stake, result: 'pending' as BetResult, profit: 0, memo: '', site_id: site.id, parlay_group: groupId, parlay_leg: 2 },
-    ]).select()
-    if (!betsData || betsData.length < 2) return false
-    // 두폴은 한 건 베팅 - stake 한 번만 차감
+    const rows = contents.map((c, i) => {
+      const { market, pick } = autoMarket(c)
+      return { bet_date: today, sport: sport as Sport, league: leagues[i] ?? '', match: c, market, pick, odds, stake, result: 'pending' as BetResult, profit: 0, memo: '', site_id: site.id, parlay_group: groupId, parlay_leg: i + 1 }
+    })
+    const { data: betsData } = await supabase.from('bets').insert(rows).select()
+    if (!betsData || betsData.length < contents.length) return false
+    // 다폴은 한 건 베팅 - stake 한 번만 차감
     const { data: siteData } = await supabase.from('sites').update({ balance: site.balance - stake, rolling_done: site.rolling_done + stake, deposit_bet_done: (site.deposit_bet_done ?? 0) + stake }).eq('id', site.id).select().single()
     if (siteData) {
-      await logAction({ action_type: 'insert', table_name: 'bets', record_id: betsData[0].id, after_data: betsData[0] as never, description: `[${site.name}] 두폴 ${c1}×${c2} / ${stake.toLocaleString()}` })
+      await logAction({ action_type: 'insert', table_name: 'bets', record_id: betsData[0].id, after_data: betsData[0] as never, description: `[${site.name}] 다폴 ${contents.join('×')} / ${stake.toLocaleString()}` })
       setBets(p => [...p, ...betsData]); setSites(p => p.map(s => s.id === siteData.id ? siteData : s))
       setAllBetsHistory(p => [...betsData.map(b => ({ sport: b.sport, match: b.match, result: b.result, profit: b.profit, bet_date: b.bet_date, created_at: b.created_at })), ...p])
       return true
@@ -1444,18 +1500,18 @@ export default function Dashboard() {
     }
   }
 
-  /* ── 두폴 결과 처리 (두 leg 동시, stake 한 번만) ── */
+  /* ── 다폴 결과 처리 (두 leg 동시, stake 한 번만) ── */
   async function applyParlayResult(groupBets: Bet[], result: BetResult | 'cancel') {
     if (!groupBets.length) return
     const site = sites.find(s => s.id === groupBets[0].site_id)
-    const stake = groupBets[0].stake  // 두폴 전체 금액 (leg마다 동일)
+    const stake = groupBets[0].stake  // 다폴 전체 금액 (leg마다 동일)
 
     if (result === 'cancel') {
-      if (!confirm('두폴 베팅을 취소하고 잔액/롤링을 복원할까요?')) return
+      if (!confirm('다폴 베팅을 취소하고 잔액/롤링을 복원할까요?')) return
       for (const gb of groupBets) await supabase.from('bets').delete().eq('id', gb.id)
       setBets(p => p.filter(b => !groupBets.some(gb => gb.id === b.id)))
       if (site) {
-        // stake 한 번만 복원 (두폴은 한 건 베팅)
+        // stake 한 번만 복원 (다폴은 한 건 베팅)
         const { data: sd } = await supabase.from('sites').update({
           balance: site.balance + stake,
           rolling_done: Math.max(0, site.rolling_done - stake),
@@ -1490,9 +1546,9 @@ export default function Dashboard() {
     }
   }
 
-  /* ── 두폴 처리취소: 완료→pending 복원 ── */
+  /* ── 다폴 처리취소: 완료→pending 복원 ── */
   async function applyParlayRevert(groupBets: Bet[]) {
-    if (!confirm('두폴 결과 처리를 취소하고 대기 목록으로 되돌릴까요?')) return
+    if (!confirm('다폴 결과 처리를 취소하고 대기 목록으로 되돌릴까요?')) return
     const site = sites.find(s => s.id === groupBets[0].site_id)
     const wasWin = groupBets[0].result === 'win'
     const wasCashout = groupBets[0].cashout_amount != null
@@ -1614,7 +1670,7 @@ export default function Dashboard() {
     }
   }
 
-  /* ── 캐시아웃 (두폴): 전체 stake 기준으로 부분 회수, leg1에만 profit 기록 ── */
+  /* ── 캐시아웃 (다폴): 전체 stake 기준으로 부분 회수, leg1에만 profit 기록 ── */
   async function applyParlayCashout(groupBets: Bet[]) {
     if (!groupBets.length) return
     const site = sites.find(s => s.id === groupBets[0].site_id)
@@ -1678,21 +1734,45 @@ export default function Dashboard() {
     setInlineEditBetId(null)
   }
 
-  async function saveInlineParlay(groupBets: Bet[], c1: string, c2: string, odds: number, stake: number, league1: string, league2: string) {
-    if (!c1 || !c2 || odds <= 0 || stake <= 0) return
-    const leg1 = groupBets.find(b => b.parlay_leg === 1)
-    const leg2 = groupBets.find(b => b.parlay_leg === 2)
-    if (!leg1 || !leg2) return
-    const { market: m1, pick: p1 } = autoMarket(c1)
-    const { market: m2, pick: p2 } = autoMarket(c2)
-    const [r1, r2] = await Promise.all([
-      supabase.from('bets').update({ match: c1, market: m1, pick: p1, odds, stake, league: league1 }).eq('id', leg1.id).select().single(),
-      supabase.from('bets').update({ match: c2, market: m2, pick: p2, odds, stake, league: league2 }).eq('id', leg2.id).select().single(),
-    ])
-    if (r1.data) setBets(p => p.map(b => b.id === r1.data!.id ? r1.data! : b))
-    if (r2.data) setBets(p => p.map(b => b.id === r2.data!.id ? r2.data! : b))
-    await logAction({ action_type: 'update', table_name: 'bets', record_id: leg1.id, before_data: leg1 as never, after_data: r1.data as never, description: `두폴 수정: ${c1}×${c2}` })
-    // 두폴은 stake가 한 번만 차감되므로, 변경분도 한 번만 사이트에 반영 (남은 롤링 즉시 갱신)
+  /* ── 다폴 수정 (2~4다리, 다리 수가 늘거나 줄어도 처리) ── */
+  async function saveInlineParlay(groupBets: Bet[], contents: string[], odds: number, stake: number, leagues: string[]) {
+    if (contents.length < 2 || contents.some(c => !c) || odds <= 0 || stake <= 0) return
+    const sortedLegs = [...groupBets].sort((a, b) => a.parlay_leg - b.parlay_leg)
+    const leg1 = sortedLegs[0]
+    if (!leg1) return
+    const groupId = leg1.parlay_group!
+    const updatedList: Bet[] = []
+
+    // 기존 다리(최소 개수만큼)는 update, 새로 늘어난 다리는 insert, 줄어든 다리는 delete
+    for (let i = 0; i < Math.min(sortedLegs.length, contents.length); i++) {
+      const { market, pick } = autoMarket(contents[i])
+      const { data } = await supabase.from('bets').update({ match: contents[i], market, pick, odds, stake, league: leagues[i] ?? '' }).eq('id', sortedLegs[i].id).select().single()
+      if (data) updatedList.push(data)
+    }
+    let removedIds: string[] = []
+    if (contents.length > sortedLegs.length) {
+      const rows = contents.slice(sortedLegs.length).map((c, j) => {
+        const { market, pick } = autoMarket(c)
+        const i = sortedLegs.length + j
+        return { bet_date: leg1.bet_date, sport: leg1.sport, league: leagues[i] ?? '', match: c, market, pick, odds, stake, result: 'pending' as BetResult, profit: 0, memo: '', site_id: leg1.site_id, parlay_group: groupId, parlay_leg: i + 1 }
+      })
+      const { data } = await supabase.from('bets').insert(rows).select()
+      if (data) updatedList.push(...data)
+    } else if (contents.length < sortedLegs.length) {
+      const toRemove = sortedLegs.slice(contents.length)
+      removedIds = toRemove.map(gb => gb.id)
+      for (const gb of toRemove) await supabase.from('bets').delete().eq('id', gb.id)
+    }
+
+    setBets(p => {
+      const filtered = p.filter(b => !removedIds.includes(b.id))
+      const withUpdates = filtered.map(b => updatedList.find(u => u.id === b.id) ?? b)
+      const existingIds = new Set(withUpdates.map(b => b.id))
+      const newOnes = updatedList.filter(u => !existingIds.has(u.id))
+      return [...withUpdates, ...newOnes]
+    })
+    await logAction({ action_type: 'update', table_name: 'bets', record_id: leg1.id, before_data: leg1 as never, after_data: (updatedList[0] ?? leg1) as never, description: `다폴 수정: ${contents.join('×')}` })
+    // 다폴은 stake가 한 번만 차감되므로, 변경분도 한 번만 사이트에 반영 (남은 롤링 즉시 갱신)
     const parlayDelta = stake - leg1.stake
     if (parlayDelta !== 0) {
       const site = sites.find(s => s.id === leg1.site_id)
@@ -1828,7 +1908,7 @@ export default function Dashboard() {
                           ) : openFormType === 'game' ? (
                             <GameRollingForm site={site} onClose={() => setOpenFormSiteId(null)} onSubmit={amt => submitGameRolling(site, amt)} />
                           ) : (
-                            <SingleBetForm site={site} defaultSport={pending.slice(-1)[0]?.sport ?? 'esports'} onClose={() => setOpenFormSiteId(null)} onBet={(sp,ct,od,amt,lv,lg) => submitBet(site,sp,ct,od,amt,lv,lg)} onDoubleBet={(sp,c1,c2,od,amt,lg1,lg2) => submitDoubleBet(site,sp,c1,c2,od,amt,lg1,lg2)} baseballOverrides={baseballOverrides} soccerOverrides={soccerOverrides} basketballOverrides={basketballOverrides} volleyballOverrides={volleyballOverrides} teamCandidates={teamCandidates} allBetsHistory={allBetsHistory} leagueCandidates={leagueCandidates} />
+                            <SingleBetForm site={site} defaultSport={pending.slice(-1)[0]?.sport ?? 'esports'} onClose={() => setOpenFormSiteId(null)} onBet={(sp,ct,od,amt,lv,lg) => submitBet(site,sp,ct,od,amt,lv,lg)} onMultiBet={(sp,cs,od,amt,lgs) => submitMultiBet(site,sp,cs,od,amt,lgs)} baseballOverrides={baseballOverrides} soccerOverrides={soccerOverrides} basketballOverrides={basketballOverrides} volleyballOverrides={volleyballOverrides} teamCandidates={teamCandidates} allBetsHistory={allBetsHistory} leagueCandidates={leagueCandidates} />
                           )}
                         </div>
                       )}
@@ -1865,7 +1945,7 @@ export default function Dashboard() {
                                     groupBets={groupBets}
                                     site={site}
                                     onClose={() => setInlineEditBetId(null)}
-                                    onSave={(c1, c2, odds, stake, lg1, lg2) => saveInlineParlay(groupBets, c1, c2, odds, stake, lg1, lg2)}
+                                    onSave={(contents, odds, stake, leagues) => saveInlineParlay(groupBets, contents, odds, stake, leagues)}
                                     teamCandidates={teamCandidates}
                                     allBetsHistory={allBetsHistory}
                                   />
@@ -1877,7 +1957,7 @@ export default function Dashboard() {
                                         <div key={gb.id} style={{ marginBottom: 2 }}>
                                           {gb.league && <div style={{ paddingLeft: 20, fontSize: 9, color: 'var(--text-muted)', fontWeight: 700 }}>{gb.league}</div>}
                                           <div style={{ display: 'flex', gap: 4 }}>
-                                            <span style={{ fontSize: 10, color: 'var(--text-muted)', width: 16, textAlign: 'center', flexShrink: 0 }}>{idx===0?'①':'②'}</span>
+                                            <span style={{ fontSize: 10, color: 'var(--text-muted)', width: 16, textAlign: 'center', flexShrink: 0 }}>{LEG_MARKS[idx] ?? idx+1}</span>
                                             <span className="site-bet-match" style={{ flex: 1, marginBottom: 0, fontSize: 13 }}>{gb.match}</span>
                                           </div>
                                         </div>
@@ -2030,7 +2110,7 @@ export default function Dashboard() {
                                       <div key={gb.id} style={{ marginBottom: 2 }}>
                                         {gb.league && <div style={{ paddingLeft: 23, fontSize: 9, color: 'var(--text-muted)', fontWeight: 700 }}>{gb.league}</div>}
                                         <div style={{ display: 'flex', gap: 5 }}>
-                                          <span style={{ fontSize: 10, color: 'var(--text-muted)', width: 18, textAlign: 'center', flexShrink: 0 }}>{idx===0?'①':'②'}</span>
+                                          <span style={{ fontSize: 10, color: 'var(--text-muted)', width: 18, textAlign: 'center', flexShrink: 0 }}>{LEG_MARKS[idx] ?? idx+1}</span>
                                           <span className="site-bet-match" style={{ flex: 1, marginBottom: 0, fontSize: 12, color: isWin ? 'var(--green)' : isLoss ? 'var(--red)' : 'var(--text-secondary)' }}>{gb.match}</span>
                                         </div>
                                       </div>
