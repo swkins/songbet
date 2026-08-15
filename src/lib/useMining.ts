@@ -20,6 +20,9 @@ export interface MiningCashout {
   next_allowed_at: string | null
   goal_date: string | null   // 'YYYY-MM-DD' — 현금교환 목표 날짜 (= 채굴 눈금 게이지의 마감일)
   auto_set_2w: boolean       // on이면 현금교환 실행 시 목표 날짜를 자동으로 2주 뒤로 설정
+  perf_site_ids: string[]    // 실적현황 대상 베팅사이트 id 목록
+  perf_period: '2w' | '1m' | null // 목표 날짜로부터 얼마나 이전 시기까지의 실적을 볼지
+  perf_amount: number        // 실적 목표 금액
 }
 
 export const MINING_HISTORY_DAYS = 59 // 오늘 포함 60일치 (달력 2개월 안팎 + 그래프 30일 + 일평균 계산용)
@@ -152,6 +155,16 @@ export function useMiningData() {
     if (data) setCashouts(prev => existing ? prev.map(c => c.id === (data as MiningCashout).id ? (data as MiningCashout) : c) : [...prev, data as MiningCashout])
   }
 
+  /** 실적현황 목표 설정: 베팅사이트 목록 + 기간(목표 날짜로부터 얼마나 이전까지) + 목표 금액. */
+  async function setPerfGoal(siteName: string, siteIds: string[], period: '2w' | '1m', amount: number) {
+    const existing = cashoutFor(siteName)
+    const payload = { site_name: siteName, perf_site_ids: siteIds, perf_period: period, perf_amount: amount }
+    const { data } = existing
+      ? await supabase.from('mining_cashouts').update(payload).eq('id', existing.id).select().single()
+      : await supabase.from('mining_cashouts').insert(payload).select().single()
+    if (data) setCashouts(prev => existing ? prev.map(c => c.id === (data as MiningCashout).id ? (data as MiningCashout) : c) : [...prev, data as MiningCashout])
+  }
+
   /** 현금교환 실행: 오늘 기록의 현재가에서 교환한 만큼을 빼고, 그 값을 시작가/현재가로 새로 설정한다.
    *  자동 설정이 켜져 있으면 목표 날짜를 오늘로부터 2주 뒤로 자동 설정한다. */
   async function doCashout(entry: MiningEntry, amount: number) {
@@ -177,5 +190,5 @@ export function useMiningData() {
     if (cd) setCashouts(prev => existing ? prev.map(c => c.id === (cd as MiningCashout).id ? (cd as MiningCashout) : c) : [...prev, cd as MiningCashout])
   }
 
-  return { today, entries, history, loading, knownSites, addEntry, updateField, deleteEntry, cashouts, cashoutFor, setCashGoal, setAutoSet2w, doCashout }
+  return { today, entries, history, loading, knownSites, addEntry, updateField, deleteEntry, cashouts, cashoutFor, setCashGoal, setAutoSet2w, setPerfGoal, doCashout }
 }

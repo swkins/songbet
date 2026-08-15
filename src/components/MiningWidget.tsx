@@ -1,7 +1,10 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import dayjs from 'dayjs'
-import { Plus, Trash2, Pencil, Check, X, ClipboardPaste, DollarSign, Target } from 'lucide-react'
+import { Plus, Trash2, Pencil, Check, X, ClipboardPaste, DollarSign, Target, TrendingUp } from 'lucide-react'
+import { supabase } from '../lib/supabase'
 import { useMiningData, fmtMining as fmt, minedOf as mined, type MiningEntry, type MiningCashout } from '../lib/useMining'
+
+interface SelectableSite { id: string; name: string }
 
 const labelSt: React.CSSProperties = {
   fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.5px',
@@ -16,18 +19,38 @@ const inputSt: React.CSSProperties = {
 /** 채굴 사이트별 현금교환 모달: 목표 날짜만 직접 설정한다 (2주 자동설정 토글로 실행 후 자동 갱신 가능).
  *  실제 채굴 진행 눈금 게이지는 사이트 카드 쪽에 표시되고, 여기서는 목표 달성 여부(채굴 목표량 도달) + 2주 쿨다운을
  *  만족하면 현금교환을 실행 — 현재가에서 교환액만큼 빼서 시작가/현재가를 새로 설정한다. */
-function CashoutModal({ entry, cashout, onClose, onSetGoal, onSetAuto, onCashout }: {
+function CashoutModal({ entry, cashout, onClose, onSetGoal, onSetAuto, onSetPerfGoal, onCashout }: {
   entry: MiningEntry
   cashout: MiningCashout | undefined
   onClose: () => void
   onSetGoal: (goalDate: string) => Promise<void>
   onSetAuto: (enabled: boolean) => Promise<void>
+  onSetPerfGoal: (siteIds: string[], period: '2w' | '1m', amount: number) => Promise<void>
   onCashout: (amount: number) => Promise<void>
 }) {
   const hasGoal = !!cashout?.goal_date
   const [editingGoal, setEditingGoal] = useState(!hasGoal)
   const [goalDate, setGoalDate] = useState(cashout?.goal_date ?? dayjs().add(14, 'day').format('YYYY-MM-DD'))
   const [savingGoal, setSavingGoal] = useState(false)
+
+  const hasPerfGoal = !!cashout?.perf_period && (cashout?.perf_site_ids?.length ?? 0) > 0
+  const [editingPerf, setEditingPerf] = useState(!hasPerfGoal)
+  const [selectableSites, setSelectableSites] = useState<SelectableSite[]>([])
+  const [sitesLoading, setSitesLoading] = useState(true)
+  const [perfSiteIds, setPerfSiteIds] = useState<string[]>(cashout?.perf_site_ids ?? [])
+  const [perfPeriod, setPerfPeriod] = useState<'2w' | '1m'>(cashout?.perf_period ?? '2w')
+  const [perfAmount, setPerfAmount] = useState(cashout?.perf_amount ? String(cashout.perf_amount) : '')
+  const [savingPerf, setSavingPerf] = useState(false)
+
+  // 베팅현황(대시보드)에 있는 사이트 전부 — 결산 전용(settlement_only)으로 넘긴 사이트만 제외, 비활성(마감) 사이트도 포함
+  useEffect(() => {
+    (async () => {
+      setSitesLoading(true)
+      const { data } = await supabase.from('sites').select('id,name,settlement_only').order('sort_order')
+      if (data) setSelectableSites((data as { id: string; name: string; settlement_only: boolean }[]).filter(s => !s.settlement_only).map(s => ({ id: s.id, name: s.name })))
+      setSitesLoading(false)
+    })()
+  }, [])
 
   const [amount, setAmount] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -44,6 +67,11 @@ function CashoutModal({ entry, cashout, onClose, onSetGoal, onSetAuto, onCashout
 
   const amountN = Number(amount.replace(/,/g, '')) || 0
   const amountValid = amountN > 0 && amountN <= entry.current_point
+  const perfSiteNames = selectableSites.filter(s => perfSiteIds.includes(s.id)).map(s => s.name)
+
+  function togglePerfSite(id: string) {
+    setPerfSiteIds(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id])
+  }
 
   async function saveGoal() {
     if (!goalDate || savingGoal) return
@@ -51,6 +79,14 @@ function CashoutModal({ entry, cashout, onClose, onSetGoal, onSetAuto, onCashout
     await onSetGoal(goalDate)
     setSavingGoal(false)
     setEditingGoal(false)
+  }
+
+  async function savePerfGoal() {
+    if (perfSiteIds.length === 0 || !perfAmount || savingPerf) return
+    setSavingPerf(true)
+    await onSetPerfGoal(perfSiteIds, perfPeriod, Number(perfAmount.replace(/,/g, '')) || 0)
+    setSavingPerf(false)
+    setEditingPerf(false)
   }
 
   async function submitCashout() {
@@ -125,6 +161,73 @@ function CashoutModal({ entry, cashout, onClose, onSetGoal, onSetAuto, onCashout
           )}
         </div>
 
+        {/* 실적현황 목표 섹션 — 선택한 베팅사이트들의 목표 날짜로부터 얼마나 이전까지의 입금 실적을 볼지 설정 */}
+        <div style={{ marginBottom: 14, padding: 10, background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)' }}>
+              <TrendingUp size={12} /> 실적현황 목표
+            </div>
+            {hasPerfGoal && !editingPerf && (
+              <button onClick={() => setEditingPerf(true)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--gold)', fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-body)', display: 'flex', alignItems: 'center', gap: 2 }}>
+                <Pencil size={10} /> 재설정
+              </button>
+            )}
+          </div>
+
+          {!editingPerf && hasPerfGoal ? (
+            <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
+              {perfSiteNames.length > 0 ? perfSiteNames.join(', ') : '선택된 사이트'} · 목표 날짜로부터 {cashout!.perf_period === '2w' ? '2주' : '1개월'} 전까지 · 목표 {fmt(cashout!.perf_amount)}
+            </div>
+          ) : (
+            <div>
+              {sitesLoading ? (
+                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>사이트 불러오는 중...</div>
+              ) : selectableSites.length === 0 ? (
+                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>베팅현황에 등록된 사이트가 없습니다.</div>
+              ) : (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 8 }}>
+                  {selectableSites.map(s => (
+                    <button key={s.id} type="button" onClick={() => togglePerfSite(s.id)} style={{
+                      fontSize: 10, fontWeight: 700, padding: '4px 8px', borderRadius: 5, cursor: 'pointer', fontFamily: 'var(--font-body)',
+                      border: `1px solid ${perfSiteIds.includes(s.id) ? 'var(--gold-border)' : 'var(--border)'}`,
+                      background: perfSiteIds.includes(s.id) ? 'var(--gold-bg)' : 'var(--bg-card)',
+                      color: perfSiteIds.includes(s.id) ? 'var(--gold)' : 'var(--text-secondary)',
+                    }}>{s.name}</button>
+                  ))}
+                </div>
+              )}
+              <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 6 }}>목표 날짜({hasGoal ? dayjs(goalDate).format('MM.DD') : '미설정'})로부터 얼마나 이전까지의 실적을 볼지</div>
+              <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
+                <button type="button" onClick={() => setPerfPeriod('2w')} style={{
+                  flex: 1, padding: '6px 0', borderRadius: 6, cursor: 'pointer', fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-body)',
+                  border: `1px solid ${perfPeriod === '2w' ? 'var(--gold-border)' : 'var(--border)'}`,
+                  background: perfPeriod === '2w' ? 'var(--gold-bg)' : 'var(--bg-card)',
+                  color: perfPeriod === '2w' ? 'var(--gold)' : 'var(--text-secondary)',
+                }}>2주 전까지</button>
+                <button type="button" onClick={() => setPerfPeriod('1m')} style={{
+                  flex: 1, padding: '6px 0', borderRadius: 6, cursor: 'pointer', fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-body)',
+                  border: `1px solid ${perfPeriod === '1m' ? 'var(--gold-border)' : 'var(--border)'}`,
+                  background: perfPeriod === '1m' ? 'var(--gold-bg)' : 'var(--bg-card)',
+                  color: perfPeriod === '1m' ? 'var(--gold)' : 'var(--text-secondary)',
+                }}>1개월 전까지</button>
+              </div>
+              <input style={{ ...inputSt, marginBottom: 8, fontSize: 12, padding: '7px 9px' }} inputMode="numeric" placeholder="목표 실적 금액 (원)"
+                value={perfAmount ? Number(perfAmount.replace(/,/g, '')).toLocaleString('ko-KR') : ''}
+                onChange={ev => { const raw = ev.target.value.replace(/,/g, ''); if (raw === '' || /^\d+$/.test(raw)) setPerfAmount(raw) }} />
+              <div style={{ display: 'flex', gap: 5 }}>
+                <button onClick={savePerfGoal} disabled={perfSiteIds.length === 0 || !perfAmount || savingPerf} style={{
+                  flex: 1, padding: '7px 0', borderRadius: 6, border: 'none', cursor: perfSiteIds.length && perfAmount ? 'pointer' : 'not-allowed',
+                  background: 'var(--gold)', color: '#000', fontWeight: 700, fontSize: 11, fontFamily: 'var(--font-body)',
+                  opacity: perfSiteIds.length && perfAmount ? 1 : 0.5,
+                }}>{savingPerf ? '저장중...' : '실적 목표 저장'}</button>
+                {hasPerfGoal && (
+                  <button onClick={() => setEditingPerf(false)} style={{ padding: '7px 12px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-body)' }}>취소</button>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
         {/* 쿨다운/목표 안내 */}
         {inCooldown && (
           <div style={{ fontSize: 11, color: 'var(--red)', marginBottom: 10, padding: '7px 9px', background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 6 }}>
@@ -161,7 +264,7 @@ function CashoutModal({ entry, cashout, onClose, onSetGoal, onSetAuto, onCashout
 /** 대시보드 좌측에 얹는 채굴 현황 위젯. 전체 로직(오늘 데이터 로딩/자동 승계/추가/수정/삭제)은
  *  useMiningData 훅을 통해 Mining.tsx(채굴 탭)와 그대로 공유한다 — 달력/그래프는 여기선 생략. */
 export default function MiningWidget() {
-  const { today, entries, loading, knownSites, addEntry: addEntryToDb, updateField, deleteEntry: deleteEntryFromDb, cashoutFor, setCashGoal, setAutoSet2w, doCashout } = useMiningData()
+  const { today, entries, loading, knownSites, addEntry: addEntryToDb, updateField, deleteEntry: deleteEntryFromDb, cashouts, cashoutFor, setCashGoal, setAutoSet2w, setPerfGoal, doCashout } = useMiningData()
 
   const [addModalOpen, setAddModalOpen] = useState(false)
   const [newName, setNewName] = useState('')
@@ -169,6 +272,30 @@ export default function MiningWidget() {
   const [newTarget, setNewTarget] = useState('')
   const [saving, setSaving] = useState(false)
   const [cashoutEntry, setCashoutEntry] = useState<MiningEntry | null>(null)
+  const [perfProgress, setPerfProgress] = useState<Record<string, number>>({})
+
+  // 실적현황: 목표(사이트/기간/금액)가 설정된 항목마다, 목표 날짜로부터 기간만큼 이전 ~ 오늘(또는 목표 날짜, 더 이른 쪽)까지의
+  // 실제 입금(cashflows) 합계를 조회한다. cashouts가 바뀔 때마다 다시 계산한다.
+  useEffect(() => {
+    const targets = cashouts.filter(c => c.goal_date && c.perf_period && c.perf_site_ids?.length > 0)
+    if (targets.length === 0) { setPerfProgress({}); return }
+    (async () => {
+      const results: Record<string, number> = {}
+      for (const c of targets) {
+        const goalDay = dayjs(c.goal_date!)
+        const end = dayjs().isBefore(goalDay) ? dayjs() : goalDay
+        const start = c.perf_period === '2w' ? goalDay.subtract(14, 'day') : goalDay.subtract(1, 'month')
+        const { data } = await supabase.from('cashflows').select('amount_krw,amount')
+          .eq('category', '베팅입금')
+          .in('site_id', c.perf_site_ids)
+          .gte('flow_date', start.format('YYYY-MM-DD'))
+          .lte('flow_date', end.format('YYYY-MM-DD'))
+        const sum = (data ?? []).reduce((a: number, cf: { amount_krw: number | null; amount: number }) => a + (cf.amount_krw ?? cf.amount), 0)
+        results[c.site_name] = sum
+      }
+      setPerfProgress(results)
+    })()
+  }, [JSON.stringify(cashouts.map(c => ({ s: c.site_name, g: c.goal_date, p: c.perf_period, ids: c.perf_site_ids, a: c.perf_amount })))]) // eslint-disable-line react-hooks/exhaustive-deps
 
   type EditField = 'target' | 'current'
   const [editing, setEditing] = useState<{ id: string; field: EditField } | null>(null)
@@ -224,7 +351,7 @@ export default function MiningWidget() {
     <div className="card" style={{ padding: '10px 14px' }}>
       <div className="flex-between mb-10">
         <span className="card-title" style={{ margin: 0 }}>
-          채굴 현황
+          사이트 현황
           {entries.length > 0 && (
             <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 600, color: 'var(--text-muted)' }}>
               <b style={{ color: 'var(--gold)', fontFamily: 'var(--font-num)' }}>{fmt(totals)}</b> / {fmt(totalsTarget)}
@@ -330,6 +457,7 @@ export default function MiningWidget() {
                 )}
               </div>
 
+              <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 2 }}>채굴현황</div>
               {goalDate ? (
                 <div>
                   <div style={{ display: 'flex', gap: 2 }}>
@@ -364,6 +492,28 @@ export default function MiningWidget() {
                   {isExcess ? `초과 ${fmt(-remaining)}` : `남음 ${fmt(Math.max(0, remaining))}`}
                 </span>
               </div>
+
+              {/* 실적현황: 선택한 베팅사이트들의 (목표 날짜로부터 지정한 기간 이전까지) 입금 실적 진행률 */}
+              {(() => {
+                const c = cashoutFor(e.site_name)
+                if (!c?.perf_period || !(c.perf_site_ids?.length > 0) || !c.perf_amount) return null
+                const progress = perfProgress[e.site_name] ?? 0
+                const perfPct = c.perf_amount > 0 ? Math.min(100, Math.max(0, progress / c.perf_amount * 100)) : 0
+                const perfDone = progress >= c.perf_amount
+                return (
+                  <div style={{ marginTop: 8, borderTop: '1px solid var(--border)', paddingTop: 6 }}>
+                    <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 2 }}>실적현황</div>
+                    <div style={{ height: 6, background: 'var(--bg-card)', borderRadius: 3, overflow: 'hidden' }}>
+                      <div style={{ height: '100%', width: `${perfPct}%`, borderRadius: 3, transition: 'width 0.4s ease',
+                        background: perfDone ? 'var(--green)' : 'linear-gradient(90deg, var(--purple), #B388FF)' }} />
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>
+                      <span style={{ fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-num)', color: perfDone ? 'var(--green)' : 'var(--text-secondary)' }}>{fmt(progress)} / {fmt(c.perf_amount)}</span>
+                      <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)' }}>{perfPct.toFixed(0)}%</span>
+                    </div>
+                  </div>
+                )
+              })()}
 
             </div>
           )
@@ -437,6 +587,7 @@ export default function MiningWidget() {
           onClose={() => setCashoutEntry(null)}
           onSetGoal={goalDate => setCashGoal(cashoutEntry.site_name, goalDate)}
           onSetAuto={enabled => setAutoSet2w(cashoutEntry.site_name, enabled)}
+          onSetPerfGoal={(siteIds, period, amount) => setPerfGoal(cashoutEntry.site_name, siteIds, period, amount)}
           onCashout={amount => doCashout(cashoutEntry, amount)}
         />
       )}
