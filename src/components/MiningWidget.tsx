@@ -2,9 +2,9 @@ import { useEffect, useState } from 'react'
 import dayjs from 'dayjs'
 import { Plus, Trash2, Pencil, Check, X, ClipboardPaste, DollarSign, Target } from 'lucide-react'
 import { supabase } from '../lib/supabase'
-import { useMiningData, fmtMining as fmt, minedOf as mined, periodLabel, type MiningEntry, type MiningCashout } from '../lib/useMining'
+import { useMiningData, fmtMining as fmt, minedOf as mined, periodLabel, periodStartFrom, type MiningEntry, type MiningCashout } from '../lib/useMining'
 
-interface ActiveSite { id: string; name: string; deposit_bet_done: number }
+interface SelectableSite { id: string; name: string }
 
 const labelSt: React.CSSProperties = {
   fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.5px',
@@ -16,18 +16,19 @@ const inputSt: React.CSSProperties = {
   fontFamily: 'var(--font-body)', outline: 'none', boxSizing: 'border-box',
 }
 
-/** 채굴 사이트별 현금교환 모달: (1) 특정 베팅사이트들의 실적(입금 총액 증가분) 목표 설정,
- *  (2) 목표 달성 + 2주 쿨다운을 만족하면 현금교환 실행 — 현재가에서 교환액만큼 빼서 시작가/현재가를 새로 설정한다. */
+/** 채굴 사이트별 현금교환 모달: (1) 베팅현황에 있는 사이트(결산 전용 제외, 비활성 포함)를 골라
+ *  실적(입금) 목표 설정, (2) 오늘 기준 과거 2주/1개월 동안의 실제 입금 합계로 달성 여부를 매번 새로 계산해서
+ *  목표 달성 + 2주 쿨다운을 만족하면 현금교환 실행 — 현재가에서 교환액만큼 빼서 시작가/현재가를 새로 설정한다. */
 function CashoutModal({ entry, cashout, onClose, onSetGoal, onCashout }: {
   entry: MiningEntry
   cashout: MiningCashout | undefined
   onClose: () => void
-  onSetGoal: (siteIds: string[], amount: number, period: '2w' | '1m', baseline: number) => Promise<void>
+  onSetGoal: (siteIds: string[], amount: number, period: '2w' | '1m') => Promise<void>
   onCashout: (amount: number) => Promise<void>
 }) {
-  const [activeSites, setActiveSites] = useState<ActiveSite[]>([])
+  const [selectableSites, setSelectableSites] = useState<SelectableSite[]>([])
   const [sitesLoading, setSitesLoading] = useState(true)
-  const hasGoal = !!cashout?.goal_period && !!cashout.goal_deadline
+  const hasGoal = !!cashout?.goal_period
   const [editingGoal, setEditingGoal] = useState(!hasGoal)
   const [selectedIds, setSelectedIds] = useState<string[]>(cashout?.goal_site_ids ?? [])
   const [goalAmount, setGoalAmount] = useState(cashout?.goal_amount ? String(cashout.goal_amount) : '')
@@ -35,24 +36,41 @@ function CashoutModal({ entry, cashout, onClose, onSetGoal, onCashout }: {
   const [savingGoal, setSavingGoal] = useState(false)
   const [amount, setAmount] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [progress, setProgress] = useState(0)
+  const [progressLoading, setProgressLoading] = useState(false)
 
+  // 베팅현황(대시보드)에 있는 사이트 전부 — 결산 전용(settlement_only)으로 넘긴 사이트만 제외, 비활성(마감) 사이트는 포함
   useEffect(() => {
     (async () => {
       setSitesLoading(true)
-      const { data } = await supabase.from('sites').select('id,name,deposit_bet_done').eq('active', true).order('sort_order')
-      if (data) setActiveSites(data as ActiveSite[])
+      const { data } = await supabase.from('sites').select('id,name,active,settlement_only').order('sort_order')
+      if (data) setSelectableSites((data as { id: string; name: string; active: boolean; settlement_only: boolean }[]).filter(s => !s.settlement_only).map(s => ({ id: s.id, name: s.name })))
       setSitesLoading(false)
     })()
   }, [])
 
   const now = dayjs()
-  const deadline = cashout?.goal_deadline ? dayjs(cashout.goal_deadline) : null
-  const goalExpired = hasGoal && deadline ? now.isAfter(deadline) : false
   const goalSiteIds = cashout?.goal_site_ids ?? []
-  const goalSiteNames = activeSites.filter(s => goalSiteIds.includes(s.id)).map(s => s.name)
-  const currentSum = activeSites.filter(s => goalSiteIds.includes(s.id)).reduce((a, s) => a + s.deposit_bet_done, 0)
-  const progress = hasGoal ? Math.max(0, currentSum - (cashout?.goal_baseline ?? 0)) : 0
-  const goalMet = hasGoal && !goalExpired && progress >= (cashout?.goal_amount ?? 0)
+  const goalSiteNames = selectableSites.filter(s => goalSiteIds.includes(s.id)).map(s => s.name)
+  const periodStart = hasGoal ? periodStartFrom(now, cashout!.goal_period!) : null
+
+  // 실적 = 선택된 사이트들의 "오늘 기준 과거 기간(2주/1개월)" 실제 입금(cashflows) 합계 — 매번 다시 조회
+  useEffect(() => {
+    if (!hasGoal || goalSiteIds.length === 0) { setProgress(0); return }
+    (async () => {
+      setProgressLoading(true)
+      const { data } = await supabase.from('cashflows').select('amount_krw,amount')
+        .eq('category', '베팅입금')
+        .in('site_id', goalSiteIds)
+        .gte('flow_date', periodStart!.format('YYYY-MM-DD'))
+        .lte('flow_date', now.format('YYYY-MM-DD'))
+      const sum = (data ?? []).reduce((a: number, c: { amount_krw: number | null; amount: number }) => a + (c.amount_krw ?? c.amount), 0)
+      setProgress(sum)
+      setProgressLoading(false)
+    })()
+  }, [hasGoal, cashout?.goal_period, JSON.stringify(goalSiteIds)]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const goalMet = hasGoal && progress >= (cashout?.goal_amount ?? 0)
 
   const cooldownUntil = cashout?.next_allowed_at ? dayjs(cashout.next_allowed_at) : null
   const inCooldown = !!cooldownUntil && now.isBefore(cooldownUntil)
@@ -68,8 +86,7 @@ function CashoutModal({ entry, cashout, onClose, onSetGoal, onCashout }: {
   async function saveGoal() {
     if (selectedIds.length === 0 || !goalAmount || savingGoal) return
     setSavingGoal(true)
-    const baseline = activeSites.filter(s => selectedIds.includes(s.id)).reduce((a, s) => a + s.deposit_bet_done, 0)
-    await onSetGoal(selectedIds, Number(goalAmount.replace(/,/g, '')) || 0, goalPeriod, baseline)
+    await onSetGoal(selectedIds, Number(goalAmount.replace(/,/g, '')) || 0, goalPeriod)
     setSavingGoal(false)
     setEditingGoal(false)
   }
@@ -108,29 +125,26 @@ function CashoutModal({ entry, cashout, onClose, onSetGoal, onCashout }: {
             <div>
               <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 4 }}>
                 {goalSiteNames.length > 0 ? goalSiteNames.join(', ') : '선택된 사이트'} · {periodLabel(cashout!.goal_period!)}
+                {periodStart && <span style={{ color: 'var(--text-muted)' }}> ({periodStart.format('MM.DD')}~{now.format('MM.DD')})</span>}
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
                 <span style={{ fontSize: 12, fontWeight: 700, color: goalMet ? 'var(--green)' : 'var(--text-primary)', fontFamily: 'var(--font-num)' }}>
-                  {fmt(progress)} / {fmt(cashout!.goal_amount)}
-                </span>
-                <span style={{ fontSize: 9, fontWeight: 700, color: goalExpired ? 'var(--red)' : 'var(--text-muted)' }}>
-                  {goalExpired ? '기간 만료' : `~${deadline!.format('MM.DD')}`}
+                  {progressLoading ? '계산중...' : `${fmt(progress)} / ${fmt(cashout!.goal_amount)}`}
                 </span>
               </div>
               <div style={{ height: 5, background: 'var(--bg-card)', borderRadius: 3, overflow: 'hidden' }}>
                 <div style={{ height: '100%', width: `${Math.min(100, cashout!.goal_amount > 0 ? progress / cashout!.goal_amount * 100 : 0)}%`, background: goalMet ? 'var(--green)' : 'var(--gold)', borderRadius: 3 }} />
               </div>
-              {goalExpired && <div style={{ fontSize: 10, color: 'var(--red)', marginTop: 5 }}>목표 기간이 지났습니다. 목표를 재설정해주세요.</div>}
             </div>
           ) : (
             <div>
               {sitesLoading ? (
                 <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>사이트 불러오는 중...</div>
-              ) : activeSites.length === 0 ? (
-                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>활성화된 베팅사이트가 없습니다.</div>
+              ) : selectableSites.length === 0 ? (
+                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>베팅현황에 등록된 사이트가 없습니다.</div>
               ) : (
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 8 }}>
-                  {activeSites.map(s => (
+                  {selectableSites.map(s => (
                     <button key={s.id} type="button" onClick={() => toggleSite(s.id)} style={{
                       fontSize: 10, fontWeight: 700, padding: '4px 8px', borderRadius: 5, cursor: 'pointer', fontFamily: 'var(--font-body)',
                       border: `1px solid ${selectedIds.includes(s.id) ? 'var(--gold-border)' : 'var(--border)'}`,
@@ -459,7 +473,7 @@ export default function MiningWidget() {
           entry={cashoutEntry}
           cashout={cashoutFor(cashoutEntry.site_name)}
           onClose={() => setCashoutEntry(null)}
-          onSetGoal={(siteIds, amount, period, baseline) => setCashoutGoal(cashoutEntry.site_name, siteIds, amount, period, baseline)}
+          onSetGoal={(siteIds, amount, period) => setCashoutGoal(cashoutEntry.site_name, siteIds, amount, period)}
           onCashout={amount => doCashout(cashoutEntry, amount)}
         />
       )}

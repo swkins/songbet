@@ -31,8 +31,9 @@ export const MINING_HISTORY_DAYS = 59 // 오늘 포함 60일치 (달력 2개월 
 export function fmtMining(n: number) { return Math.round(n).toLocaleString('ko-KR') }
 export function minedOf(e: MiningEntry) { return e.current_point - e.start_point }
 export function periodLabel(p: '2w' | '1m') { return p === '2w' ? '2주' : '1개월' }
-export function goalDeadlineFrom(setAt: dayjs.Dayjs, period: '2w' | '1m') {
-  return period === '2w' ? setAt.add(14, 'day') : setAt.add(1, 'month')
+// 실적 집계 기간: 오늘을 기준으로 과거 2주 또는 1개월 (예: 오늘 8/15, 1개월 → 7/16~8/15)
+export function periodStartFrom(end: dayjs.Dayjs, period: '2w' | '1m') {
+  return period === '2w' ? end.subtract(14, 'day') : end.subtract(1, 'month')
 }
 
 /** 채굴 데이터 로딩/승계/추가/수정/삭제 공용 훅. Mining.tsx(전체 페이지)와
@@ -140,20 +141,16 @@ export function useMiningData() {
     return cashouts.find(c => c.site_name === siteName)
   }
 
-  /** 현금교환 목표 설정: 선택한 베팅사이트들의 "지금 시점" 실적 합계를 기준선으로 저장해두고,
-   *  이후 진행률은 (현재 합계 - 기준선)으로 계산한다. */
-  async function setCashoutGoal(siteName: string, goalSiteIds: string[], goalAmount: number, goalPeriod: '2w' | '1m', baseline: number) {
-    const now = dayjs()
-    const deadline = goalDeadlineFrom(now, goalPeriod)
+  /** 현금교환 목표 설정: 선택한 베팅사이트들의 실적(입금) 목표만 저장한다.
+   *  달성 여부는 저장 시점이 아니라, 확인하는 "지금" 기준 과거 기간(2주/1개월)의 실제 입금 합계로 매번 새로 계산한다. */
+  async function setCashoutGoal(siteName: string, goalSiteIds: string[], goalAmount: number, goalPeriod: '2w' | '1m') {
     const existing = cashoutFor(siteName)
     const payload = {
       site_name: siteName,
       goal_site_ids: goalSiteIds,
       goal_amount: goalAmount,
       goal_period: goalPeriod,
-      goal_set_at: now.toISOString(),
-      goal_deadline: deadline.toISOString(),
-      goal_baseline: baseline,
+      goal_set_at: dayjs().toISOString(),
     }
     const { data } = existing
       ? await supabase.from('mining_cashouts').update(payload).eq('id', existing.id).select().single()
