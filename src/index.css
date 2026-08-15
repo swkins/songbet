@@ -529,16 +529,10 @@ tr:hover td { background: var(--bg-hover); }
   }
 }
 
-/* ── 대시보드 메인 레이아웃 ── */
+/* ── 대시보드 메인 레이아웃 (채굴현황 위, 베팅현황 아래로 항상 세로 배치) ── */
 .dashboard-main { display: flex; flex-direction: column; gap: 10px; width: 100%; }
 .dashboard-side { display: flex; flex-direction: column; gap: 10px; width: 100%; }
 .dashboard-bets { width: 100%; }
-
-@media (min-width: 641px) {
-  .dashboard-main { flex-direction: row; align-items: start; }
-  .dashboard-side { width: 320px; flex-shrink: 0; }
-  .dashboard-bets { flex: 1; min-width: 0; }
-}
 
 @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 

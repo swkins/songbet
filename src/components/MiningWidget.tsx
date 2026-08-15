@@ -97,7 +97,7 @@ export default function MiningWidget() {
         </div>
       )}
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 8 }}>
         {entries.map(e => {
           const m = mined(e)
           const remaining = e.target_point - m
