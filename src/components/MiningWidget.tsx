@@ -284,7 +284,27 @@ export default function MiningWidget() {
               </div>
 
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                <span style={{ fontFamily: 'var(--font-num)', fontSize: 16, fontWeight: 800, color: done ? 'var(--green)' : 'var(--gold)' }}>{fmt(m)}</span>
+                {isEditingCurrent ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <input autoFocus style={{ width: 120, background: 'var(--bg-card)', border: '1px solid var(--gold-border)', borderRadius: 5, padding: '3px 6px', fontSize: 16, fontWeight: 800, color: done ? 'var(--green)' : 'var(--gold)', fontFamily: 'var(--font-num)', outline: 'none', boxSizing: 'border-box' }}
+                      inputMode="numeric" placeholder="붙여넣기/입력" value={editVal ? Number(editVal.replace(/,/g, '')).toLocaleString('ko-KR') : ''}
+                      onChange={ev => { const raw = ev.target.value.replace(/,/g, ''); if (raw === '' || /^\d+$/.test(raw)) setEditVal(raw) }}
+                      onKeyDown={ev => ev.key === 'Enter' && saveEdit(e)} />
+                    <button onClick={pasteToEdit} title="클립보드에서 붙여넣기" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--gold)', display: 'flex' }}><ClipboardPaste size={13} /></button>
+                    <button onClick={() => saveEdit(e)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--green)', display: 'flex' }}><Check size={13} /></button>
+                    <button onClick={cancelEdit} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex' }}><X size={13} /></button>
+                  </div>
+                ) : (
+                  <span onClick={() => startEdit(e, 'current')} style={{ display: 'flex', alignItems: 'baseline', gap: 5, cursor: 'pointer' }}>
+                    <span style={{ fontFamily: 'var(--font-num)', fontSize: 16, fontWeight: 800, color: done ? 'var(--green)' : 'var(--gold)' }}>{fmt(e.current_point)}</span>
+                    {m !== 0 && (
+                      <span style={{ fontFamily: 'var(--font-num)', fontSize: 11, fontWeight: 700, color: m > 0 ? 'var(--green)' : 'var(--red)' }}>
+                        ({m > 0 ? '+' : ''}{fmt(m)})
+                      </span>
+                    )}
+                    <Pencil size={9} style={{ color: 'var(--text-muted)' }} />
+                  </span>
+                )}
                 {isEditingTarget ? (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
                     <input autoFocus style={{ width: 70, background: 'var(--bg-card)', border: '1px solid var(--gold-border)', borderRadius: 5, padding: '3px 5px', fontSize: 11, color: 'var(--text-primary)', fontFamily: 'var(--font-num)', outline: 'none', boxSizing: 'border-box' }}
@@ -334,25 +354,6 @@ export default function MiningWidget() {
                 </span>
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8, marginTop: 6, borderTop: '1px solid var(--border)', paddingTop: 6, flexWrap: 'wrap' }}>
-                {isEditingCurrent ? (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-muted)' }}>현재 포인트</span>
-                    <input autoFocus style={{ width: 120, background: 'var(--bg-card)', border: '1px solid var(--gold-border)', borderRadius: 5, padding: '4px 6px', fontSize: 14, fontWeight: 800, color: 'var(--text-primary)', fontFamily: 'var(--font-num)', outline: 'none', boxSizing: 'border-box' }}
-                      inputMode="numeric" placeholder="붙여넣기/입력" value={editVal ? Number(editVal.replace(/,/g, '')).toLocaleString('ko-KR') : ''}
-                      onChange={ev => { const raw = ev.target.value.replace(/,/g, ''); if (raw === '' || /^\d+$/.test(raw)) setEditVal(raw) }}
-                      onKeyDown={ev => ev.key === 'Enter' && saveEdit(e)} />
-                    <button onClick={pasteToEdit} title="클립보드에서 붙여넣기" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--gold)', display: 'flex' }}><ClipboardPaste size={13} /></button>
-                    <button onClick={() => saveEdit(e)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--green)', display: 'flex' }}><Check size={13} /></button>
-                    <button onClick={cancelEdit} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex' }}><X size={13} /></button>
-                  </div>
-                ) : (
-                  <span onClick={() => startEdit(e, 'current')} style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
-                    <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-muted)' }}>현재 포인트</span>
-                    <span style={{ fontSize: 14, fontWeight: 800, color: 'var(--text-primary)', fontFamily: 'var(--font-num)', textDecoration: 'underline', textDecorationStyle: 'dotted', textUnderlineOffset: 2 }}>{fmt(e.current_point)}</span>
-                  </span>
-                )}
-              </div>
             </div>
           )
         })}
