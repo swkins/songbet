@@ -13,63 +13,44 @@ const inputSt: React.CSSProperties = {
   fontFamily: 'var(--font-body)', outline: 'none', boxSizing: 'border-box',
 }
 
-/** 채굴 사이트별 현금교환 모달: 목표 날짜 + 목표 금액을 직접 설정하고, 현재 진행 금액을 수동으로 입력한다.
- *  진행률은 "목표 날짜까지 남은 일수" 만큼의 눈금으로 표시되고, 눈금 하나 = 하루치 필요 금액(목표금액 ÷ 남은 일수)이다.
- *  목표 달성(진행금액 ≥ 목표금액) + 2주 쿨다운을 만족하면 현금교환 실행 — 현재가에서 교환액만큼 빼서 시작가/현재가를 새로 설정한다. */
-function CashoutModal({ entry, cashout, onClose, onSetGoal, onSetCurrent, onSetAuto, onCashout }: {
+/** 채굴 사이트별 현금교환 모달: 목표 날짜만 직접 설정한다 (2주 자동설정 토글로 실행 후 자동 갱신 가능).
+ *  실제 채굴 진행 눈금 게이지는 사이트 카드 쪽에 표시되고, 여기서는 목표 달성 여부(채굴 목표량 도달) + 2주 쿨다운을
+ *  만족하면 현금교환을 실행 — 현재가에서 교환액만큼 빼서 시작가/현재가를 새로 설정한다. */
+function CashoutModal({ entry, cashout, onClose, onSetGoal, onSetAuto, onCashout }: {
   entry: MiningEntry
   cashout: MiningCashout | undefined
   onClose: () => void
-  onSetGoal: (goalDate: string, amount: number) => Promise<void>
-  onSetCurrent: (amount: number) => Promise<void>
+  onSetGoal: (goalDate: string) => Promise<void>
   onSetAuto: (enabled: boolean) => Promise<void>
   onCashout: (amount: number) => Promise<void>
 }) {
   const hasGoal = !!cashout?.goal_date
   const [editingGoal, setEditingGoal] = useState(!hasGoal)
   const [goalDate, setGoalDate] = useState(cashout?.goal_date ?? dayjs().add(14, 'day').format('YYYY-MM-DD'))
-  const [goalAmount, setGoalAmount] = useState(cashout?.goal_amount ? String(cashout.goal_amount) : '')
   const [savingGoal, setSavingGoal] = useState(false)
-
-  const [editingCurrent, setEditingCurrent] = useState(false)
-  const [currentVal, setCurrentVal] = useState(String(cashout?.current_amount ?? 0))
-  const [savingCurrent, setSavingCurrent] = useState(false)
 
   const [amount, setAmount] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const autoOn = cashout?.auto_set_2w ?? true
 
   const now = dayjs()
-  const currentAmount = cashout?.current_amount ?? 0
   const remainingDays = hasGoal ? Math.max(0, dayjs(cashout!.goal_date!).startOf('day').diff(now.startOf('day'), 'day')) : 0
-  const tickCount = hasGoal ? Math.max(1, remainingDays) : 0
-  const perTick = hasGoal && cashout!.goal_amount > 0 ? cashout!.goal_amount / tickCount : 0
-  const filledTicks = perTick > 0 ? Math.min(tickCount, Math.floor(currentAmount / perTick)) : 0
-  const partialFill = perTick > 0 ? Math.min(1, (currentAmount - filledTicks * perTick) / perTick) : 0
+  const m = mined(entry)
+  const goalReached = entry.target_point > 0 && m >= entry.target_point
 
-  const goalMet = hasGoal && currentAmount >= (cashout?.goal_amount ?? 0)
   const cooldownUntil = cashout?.next_allowed_at ? dayjs(cashout.next_allowed_at) : null
   const inCooldown = !!cooldownUntil && now.isBefore(cooldownUntil)
-  const canExchange = goalMet && !inCooldown
+  const canExchange = goalReached && !inCooldown
 
   const amountN = Number(amount.replace(/,/g, '')) || 0
   const amountValid = amountN > 0 && amountN <= entry.current_point
 
   async function saveGoal() {
-    if (!goalDate || !goalAmount || savingGoal) return
+    if (!goalDate || savingGoal) return
     setSavingGoal(true)
-    await onSetGoal(goalDate, Number(goalAmount.replace(/,/g, '')) || 0)
+    await onSetGoal(goalDate)
     setSavingGoal(false)
     setEditingGoal(false)
-  }
-
-  async function saveCurrent() {
-    if (savingCurrent) return
-    const n = Number(currentVal.replace(/,/g, '')) || 0
-    setSavingCurrent(true)
-    await onSetCurrent(n)
-    setSavingCurrent(false)
-    setEditingCurrent(false)
   }
 
   async function submitCashout() {
@@ -89,11 +70,11 @@ function CashoutModal({ entry, cashout, onClose, onSetGoal, onSetCurrent, onSetA
           <button onClick={onClose} style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 8, width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'var(--text-secondary)' }}><X size={14} /></button>
         </div>
 
-        {/* 목표 섹션 */}
+        {/* 목표 날짜 섹션 — 이 날짜가 사이트 카드의 채굴 눈금 게이지 마감일로 쓰인다 */}
         <div style={{ marginBottom: 14, padding: 10, background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 8 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)' }}>
-              <Target size={12} /> 현금교환 목표
+              <Target size={12} /> 현금교환 목표 날짜
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <button type="button" onClick={() => onSetAuto(!autoOn)} title="현금교환 실행 시 목표 날짜를 2주 뒤로 자동 설정" style={{
@@ -121,8 +102,8 @@ function CashoutModal({ entry, cashout, onClose, onSetGoal, onSetCurrent, onSetA
 
           {!editingGoal && hasGoal ? (
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)', fontFamily: 'var(--font-num)' }}>{fmt(cashout!.goal_amount)}</span>
-              <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)' }}>~{dayjs(cashout!.goal_date!).format('YYYY.MM.DD')} ({remainingDays}일 남음)</span>
+              <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)', fontFamily: 'var(--font-num)' }}>{dayjs(cashout!.goal_date!).format('YYYY.MM.DD')}</span>
+              <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)' }}>{remainingDays}일 남음</span>
             </div>
           ) : (
             <div>
@@ -130,15 +111,12 @@ function CashoutModal({ entry, cashout, onClose, onSetGoal, onSetCurrent, onSetA
                 <input type="date" style={{ ...inputSt, fontSize: 12, padding: '7px 9px', flex: 1 }} value={goalDate}
                   onChange={ev => setGoalDate(ev.target.value)} />
               </div>
-              <input style={{ ...inputSt, marginBottom: 8, fontSize: 12, padding: '7px 9px' }} inputMode="numeric" placeholder="목표 금액 (원)"
-                value={goalAmount ? Number(goalAmount.replace(/,/g, '')).toLocaleString('ko-KR') : ''}
-                onChange={ev => { const raw = ev.target.value.replace(/,/g, ''); if (raw === '' || /^\d+$/.test(raw)) setGoalAmount(raw) }} />
               <div style={{ display: 'flex', gap: 5 }}>
-                <button onClick={saveGoal} disabled={!goalDate || !goalAmount || savingGoal} style={{
-                  flex: 1, padding: '7px 0', borderRadius: 6, border: 'none', cursor: goalDate && goalAmount ? 'pointer' : 'not-allowed',
+                <button onClick={saveGoal} disabled={!goalDate || savingGoal} style={{
+                  flex: 1, padding: '7px 0', borderRadius: 6, border: 'none', cursor: goalDate ? 'pointer' : 'not-allowed',
                   background: 'var(--gold)', color: '#000', fontWeight: 700, fontSize: 11, fontFamily: 'var(--font-body)',
-                  opacity: goalDate && goalAmount ? 1 : 0.5,
-                }}>{savingGoal ? '저장중...' : '목표 저장'}</button>
+                  opacity: goalDate ? 1 : 0.5,
+                }}>{savingGoal ? '저장중...' : '목표 날짜 저장'}</button>
                 {hasGoal && (
                   <button onClick={() => setEditingGoal(false)} style={{ padding: '7px 12px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-body)' }}>취소</button>
                 )}
@@ -147,58 +125,15 @@ function CashoutModal({ entry, cashout, onClose, onSetGoal, onSetCurrent, onSetA
           )}
         </div>
 
-        {/* 진행 금액 (수동 입력) */}
-        {hasGoal && (
-          <div style={{ marginBottom: 10 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-              <span style={labelSt}>진행 금액</span>
-              {!editingCurrent && (
-                <button onClick={() => { setCurrentVal(String(currentAmount)); setEditingCurrent(true) }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--gold)', fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-body)', display: 'flex', alignItems: 'center', gap: 2 }}>
-                  <Pencil size={10} /> 수정
-                </button>
-              )}
-            </div>
-            {editingCurrent ? (
-              <div style={{ display: 'flex', gap: 5, marginBottom: 8 }}>
-                <input autoFocus style={{ ...inputSt, fontSize: 13, padding: '7px 9px' }} inputMode="numeric" value={currentVal ? Number(currentVal.replace(/,/g, '')).toLocaleString('ko-KR') : ''}
-                  onChange={ev => { const raw = ev.target.value.replace(/,/g, ''); if (raw === '' || /^\d+$/.test(raw)) setCurrentVal(raw) }}
-                  onKeyDown={ev => ev.key === 'Enter' && saveCurrent()} />
-                <button onClick={saveCurrent} disabled={savingCurrent} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 6, cursor: 'pointer', color: 'var(--green)', display: 'flex', alignItems: 'center', padding: '0 10px' }}><Check size={14} /></button>
-                <button onClick={() => setEditingCurrent(false)} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 6, cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', padding: '0 10px' }}><X size={14} /></button>
-              </div>
-            ) : (
-              <div style={{ fontSize: 14, fontWeight: 800, color: goalMet ? 'var(--green)' : 'var(--text-primary)', fontFamily: 'var(--font-num)', marginBottom: 8 }}>
-                {fmt(currentAmount)} <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)' }}>/ {fmt(cashout!.goal_amount)}</span>
-              </div>
-            )}
-
-            {/* 눈금 게이지: 눈금 하나 = 하루, 하루당 필요 금액 = 목표금액 ÷ 남은 일수 */}
-            <div style={{ display: 'flex', gap: 2 }}>
-              {Array.from({ length: tickCount }, (_, i) => {
-                const fillPct = i < filledTicks ? 100 : i === filledTicks ? partialFill * 100 : 0
-                return (
-                  <div key={i} title={`${fmt(perTick)}/일`} style={{ flex: 1, height: 16, background: 'var(--bg-card)', borderRadius: 2, overflow: 'hidden', border: '1px solid var(--border)', position: 'relative' }}>
-                    <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: `${fillPct}%`, background: goalMet ? 'var(--green)' : 'var(--gold)', transition: 'height 0.3s' }} />
-                  </div>
-                )
-              })}
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
-              <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>하루 {fmt(perTick)}원 · {tickCount}일</span>
-              <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>{fmt(Math.max(0, cashout!.goal_amount - currentAmount))} 남음</span>
-            </div>
-          </div>
-        )}
-
-        {/* 쿨다운 안내 */}
+        {/* 쿨다운/목표 안내 */}
         {inCooldown && (
           <div style={{ fontSize: 11, color: 'var(--red)', marginBottom: 10, padding: '7px 9px', background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 6 }}>
             다음 현금교환 가능일: {cooldownUntil!.format('YYYY.MM.DD')} (2주 쿨다운)
           </div>
         )}
-        {!inCooldown && hasGoal && !goalMet && (
+        {!inCooldown && !goalReached && (
           <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 10, padding: '7px 9px', background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 6 }}>
-            목표 금액을 달성해야 현금교환이 가능합니다.
+            채굴 목표량({fmt(entry.target_point)})을 달성해야 현금교환이 가능합니다. (현재 {fmt(m)})
           </div>
         )}
 
@@ -226,7 +161,7 @@ function CashoutModal({ entry, cashout, onClose, onSetGoal, onSetCurrent, onSetA
 /** 대시보드 좌측에 얹는 채굴 현황 위젯. 전체 로직(오늘 데이터 로딩/자동 승계/추가/수정/삭제)은
  *  useMiningData 훅을 통해 Mining.tsx(채굴 탭)와 그대로 공유한다 — 달력/그래프는 여기선 생략. */
 export default function MiningWidget() {
-  const { today, entries, loading, knownSites, addEntry: addEntryToDb, updateField, deleteEntry: deleteEntryFromDb, cashoutFor, setCashGoal, setCashCurrent, setAutoSet2w, doCashout } = useMiningData()
+  const { today, entries, loading, knownSites, addEntry: addEntryToDb, updateField, deleteEntry: deleteEntryFromDb, cashoutFor, setCashGoal, setAutoSet2w, doCashout } = useMiningData()
 
   const [addModalOpen, setAddModalOpen] = useState(false)
   const [newName, setNewName] = useState('')
@@ -235,13 +170,13 @@ export default function MiningWidget() {
   const [saving, setSaving] = useState(false)
   const [cashoutEntry, setCashoutEntry] = useState<MiningEntry | null>(null)
 
-  type EditField = 'start' | 'target' | 'current'
+  type EditField = 'target' | 'current'
   const [editing, setEditing] = useState<{ id: string; field: EditField } | null>(null)
   const [editVal, setEditVal] = useState('')
 
   function startEdit(entry: MiningEntry, field: EditField) {
     setEditing({ id: entry.id, field })
-    setEditVal(field === 'current' ? '' : String(field === 'start' ? entry.start_point : entry.target_point))
+    setEditVal(field === 'current' ? '' : String(entry.target_point))
   }
   function cancelEdit() { setEditing(null); setEditVal('') }
 
@@ -272,7 +207,7 @@ export default function MiningWidget() {
     if (!editing || editing.id !== entry.id) return
     const num = Number(editVal.replace(/,/g, ''))
     if (Number.isNaN(num) || editVal === '') { cancelEdit(); return }
-    const column = editing.field === 'start' ? 'start_point' : editing.field === 'target' ? 'target_point' : 'current_point'
+    const column = editing.field === 'target' ? 'target_point' : 'current_point'
     await updateField(entry, column, num)
     cancelEdit()
   }
@@ -316,8 +251,17 @@ export default function MiningWidget() {
           const pct = e.target_point > 0 ? Math.min(100, Math.max(0, m / e.target_point * 100)) : 0
           const done = e.target_point > 0 && m >= e.target_point
           const isEditingCurrent = editing?.id === e.id && editing.field === 'current'
-          const isEditingStart = editing?.id === e.id && editing.field === 'start'
           const isEditingTarget = editing?.id === e.id && editing.field === 'target'
+
+          // 채굴 눈금 게이지: 현금교환 목표 날짜가 설정돼 있으면, 남은 일수만큼 눈금을 나누고
+          // 눈금 하나(=하루)당 필요한 채굴량 = 목표량 ÷ 남은 일수. 현재 채굴량(m)만큼 눈금이 아래에서부터 채워진다.
+          const cashout = cashoutFor(e.site_name)
+          const goalDate = cashout?.goal_date
+          const remainingDays = goalDate ? Math.max(0, dayjs(goalDate).startOf('day').diff(dayjs().startOf('day'), 'day')) : 0
+          const tickCount = goalDate ? Math.max(1, remainingDays) : 0
+          const perTick = goalDate && e.target_point > 0 ? e.target_point / tickCount : 0
+          const filledTicks = perTick > 0 ? Math.min(tickCount, Math.floor(m / perTick)) : 0
+          const partialFill = perTick > 0 ? Math.min(1, Math.max(0, (m - filledTicks * perTick) / perTick)) : 0
 
           return (
             <div key={e.id} style={{
@@ -357,10 +301,26 @@ export default function MiningWidget() {
                 )}
               </div>
 
-              <div style={{ height: 6, background: 'var(--bg-card)', borderRadius: 3, overflow: 'hidden' }}>
-                <div style={{ height: '100%', width: `${pct}%`, borderRadius: 3, transition: 'width 0.4s ease',
-                  background: done ? 'var(--green)' : 'linear-gradient(90deg, var(--orange), #FFAD42)' }} />
-              </div>
+              {goalDate ? (
+                <div>
+                  <div style={{ display: 'flex', gap: 2 }}>
+                    {Array.from({ length: tickCount }, (_, i) => {
+                      const fillPct = i < filledTicks ? 100 : i === filledTicks ? partialFill * 100 : 0
+                      return (
+                        <div key={i} title={`${fmt(perTick)}/일`} style={{ flex: 1, height: 14, background: 'var(--bg-card)', borderRadius: 2, overflow: 'hidden', border: '1px solid var(--border)', position: 'relative' }}>
+                          <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: `${fillPct}%`, background: done ? 'var(--green)' : 'var(--gold)', transition: 'height 0.3s' }} />
+                        </div>
+                      )
+                    })}
+                  </div>
+                  <div style={{ fontSize: 8, color: 'var(--text-muted)', marginTop: 2 }}>하루 {fmt(perTick)} · {tickCount}일 남음</div>
+                </div>
+              ) : (
+                <div style={{ height: 6, background: 'var(--bg-card)', borderRadius: 3, overflow: 'hidden' }}>
+                  <div style={{ height: '100%', width: `${pct}%`, borderRadius: 3, transition: 'width 0.4s ease',
+                    background: done ? 'var(--green)' : 'linear-gradient(90deg, var(--orange), #FFAD42)' }} />
+                </div>
+              )}
 
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 5 }}>
                 <span style={{ fontSize: 11, fontWeight: 800, fontFamily: 'var(--font-num)', color: done ? 'var(--green)' : 'var(--text-secondary)' }}>{pct.toFixed(0)}%</span>
@@ -375,26 +335,9 @@ export default function MiningWidget() {
               </div>
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8, marginTop: 6, borderTop: '1px solid var(--border)', paddingTop: 6, flexWrap: 'wrap' }}>
-                {isEditingStart ? (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-muted)' }}>시작</span>
-                    <input autoFocus style={{ width: 110, background: 'var(--bg-card)', border: '1px solid var(--gold-border)', borderRadius: 5, padding: '4px 6px', fontSize: 14, fontWeight: 800, color: 'var(--text-primary)', fontFamily: 'var(--font-num)', outline: 'none', boxSizing: 'border-box' }}
-                      inputMode="numeric" value={editVal ? Number(editVal.replace(/,/g, '')).toLocaleString('ko-KR') : ''}
-                      onChange={ev => { const raw = ev.target.value.replace(/,/g, ''); if (raw === '' || /^\d+$/.test(raw)) setEditVal(raw) }}
-                      onKeyDown={ev => ev.key === 'Enter' && saveEdit(e)} />
-                    <button onClick={() => saveEdit(e)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--green)', display: 'flex' }}><Check size={13} /></button>
-                    <button onClick={cancelEdit} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex' }}><X size={13} /></button>
-                  </div>
-                ) : (
-                  <span onClick={() => startEdit(e, 'start')} style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
-                    <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-muted)' }}>시작</span>
-                    <span style={{ fontSize: 14, fontWeight: 800, color: 'var(--text-secondary)', fontFamily: 'var(--font-num)', textDecoration: 'underline', textDecorationStyle: 'dotted', textUnderlineOffset: 2 }}>{fmt(e.start_point)}</span>
-                  </span>
-                )}
-                <div style={{ width: 1, height: 12, background: 'var(--border)' }} />
                 {isEditingCurrent ? (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-muted)' }}>현재</span>
+                    <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-muted)' }}>현재 포인트</span>
                     <input autoFocus style={{ width: 120, background: 'var(--bg-card)', border: '1px solid var(--gold-border)', borderRadius: 5, padding: '4px 6px', fontSize: 14, fontWeight: 800, color: 'var(--text-primary)', fontFamily: 'var(--font-num)', outline: 'none', boxSizing: 'border-box' }}
                       inputMode="numeric" placeholder="붙여넣기/입력" value={editVal ? Number(editVal.replace(/,/g, '')).toLocaleString('ko-KR') : ''}
                       onChange={ev => { const raw = ev.target.value.replace(/,/g, ''); if (raw === '' || /^\d+$/.test(raw)) setEditVal(raw) }}
@@ -405,7 +348,7 @@ export default function MiningWidget() {
                   </div>
                 ) : (
                   <span onClick={() => startEdit(e, 'current')} style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
-                    <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-muted)' }}>현재</span>
+                    <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-muted)' }}>현재 포인트</span>
                     <span style={{ fontSize: 14, fontWeight: 800, color: 'var(--text-primary)', fontFamily: 'var(--font-num)', textDecoration: 'underline', textDecorationStyle: 'dotted', textUnderlineOffset: 2 }}>{fmt(e.current_point)}</span>
                   </span>
                 )}
@@ -480,8 +423,7 @@ export default function MiningWidget() {
           entry={cashoutEntry}
           cashout={cashoutFor(cashoutEntry.site_name)}
           onClose={() => setCashoutEntry(null)}
-          onSetGoal={(goalDate, amount) => setCashGoal(cashoutEntry.site_name, goalDate, amount)}
-          onSetCurrent={amount => setCashCurrent(cashoutEntry.site_name, amount)}
+          onSetGoal={goalDate => setCashGoal(cashoutEntry.site_name, goalDate)}
           onSetAuto={enabled => setAutoSet2w(cashoutEntry.site_name, enabled)}
           onCashout={amount => doCashout(cashoutEntry, amount)}
         />

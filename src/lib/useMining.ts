@@ -18,9 +18,7 @@ export interface MiningCashout {
   site_name: string
   last_cashout_at: string | null
   next_allowed_at: string | null
-  goal_amount: number
-  goal_date: string | null   // 'YYYY-MM-DD' — 현금교환 목표 날짜
-  current_amount: number     // 목표 금액 대비 현재 진행 금액 (수동 입력)
+  goal_date: string | null   // 'YYYY-MM-DD' — 현금교환 목표 날짜 (= 채굴 눈금 게이지의 마감일)
   auto_set_2w: boolean       // on이면 현금교환 실행 시 목표 날짜를 자동으로 2주 뒤로 설정
 }
 
@@ -134,20 +132,10 @@ export function useMiningData() {
     return cashouts.find(c => c.site_name === siteName)
   }
 
-  /** 현금교환 목표 설정: 목표 날짜 + 목표 금액을 직접 지정한다. */
-  async function setCashGoal(siteName: string, goalDate: string, goalAmount: number) {
+  /** 현금교환 목표 날짜 설정. */
+  async function setCashGoal(siteName: string, goalDate: string) {
     const existing = cashoutFor(siteName)
-    const payload = { site_name: siteName, goal_date: goalDate, goal_amount: goalAmount }
-    const { data } = existing
-      ? await supabase.from('mining_cashouts').update(payload).eq('id', existing.id).select().single()
-      : await supabase.from('mining_cashouts').insert(payload).select().single()
-    if (data) setCashouts(prev => existing ? prev.map(c => c.id === (data as MiningCashout).id ? (data as MiningCashout) : c) : [...prev, data as MiningCashout])
-  }
-
-  /** 목표 대비 현재 진행 금액을 수동으로 갱신한다. */
-  async function setCashCurrent(siteName: string, currentAmount: number) {
-    const existing = cashoutFor(siteName)
-    const payload = { site_name: siteName, current_amount: currentAmount }
+    const payload = { site_name: siteName, goal_date: goalDate }
     const { data } = existing
       ? await supabase.from('mining_cashouts').update(payload).eq('id', existing.id).select().single()
       : await supabase.from('mining_cashouts').insert(payload).select().single()
@@ -165,7 +153,7 @@ export function useMiningData() {
   }
 
   /** 현금교환 실행: 오늘 기록의 현재가에서 교환한 만큼을 빼고, 그 값을 시작가/현재가로 새로 설정한다.
-   *  자동 설정이 켜져 있으면 목표 날짜를 오늘로부터 2주 뒤로 자동 설정하고, 진행 금액은 다음 목표를 위해 0으로 초기화한다. */
+   *  자동 설정이 켜져 있으면 목표 날짜를 오늘로부터 2주 뒤로 자동 설정한다. */
   async function doCashout(entry: MiningEntry, amount: number) {
     const newPoint = entry.current_point - amount
     const { data } = await supabase.from('mining_entries')
@@ -181,7 +169,6 @@ export function useMiningData() {
       site_name: entry.site_name,
       last_cashout_at: now.toISOString(),
       next_allowed_at: now.add(14, 'day').toISOString(),
-      current_amount: 0,
     }
     if (autoOn) payload.goal_date = now.add(14, 'day').format('YYYY-MM-DD')
     const { data: cd } = existing
@@ -190,5 +177,5 @@ export function useMiningData() {
     if (cd) setCashouts(prev => existing ? prev.map(c => c.id === (cd as MiningCashout).id ? (cd as MiningCashout) : c) : [...prev, cd as MiningCashout])
   }
 
-  return { today, entries, history, loading, knownSites, addEntry, updateField, deleteEntry, cashouts, cashoutFor, setCashGoal, setCashCurrent, setAutoSet2w, doCashout }
+  return { today, entries, history, loading, knownSites, addEntry, updateField, deleteEntry, cashouts, cashoutFor, setCashGoal, setAutoSet2w, doCashout }
 }
