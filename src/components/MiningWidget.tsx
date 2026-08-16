@@ -6,6 +6,23 @@ import { useMiningData, fmtMining as fmt, minedOf as mined, type MiningEntry, ty
 
 interface SelectableSite { id: string; name: string }
 
+/** 2주(14일) 사이클 기준 페이스 계산: 사이클 시작(=목표일-기간)부터 오늘까지 경과일 비율만큼
+ *  목표치를 채웠어야 한다고 보고, 실제 달성치를 그 "날짜대비 목표치"와 비교한 퍼센트를 반환한다.
+ *  (하루 채굴량이 아니라 날짜 경과 대비 누적 달성도를 보는 것 — 오늘 하나도 안 채워도 이미 앞서 있으면 초록으로 나옴) */
+function paceRatio(progress: number, target: number, elapsedDays: number, periodDays: number) {
+  const paceTarget = periodDays > 0 ? target * Math.min(1, Math.max(0, elapsedDays / periodDays)) : target
+  if (paceTarget <= 0) return progress > 0 ? 200 : 100
+  return (progress / paceTarget) * 100
+}
+/** 날짜대비 목표치 달성률에 따른 색상 5단계: 150%+ 시안 / 120%+ 골드 / 100%+ 초록 / 80%+(달성 직전) 주황 / 그 외 빨강 */
+function paceColorForRatio(ratio: number) {
+  if (ratio >= 150) return 'var(--cyan)'
+  if (ratio >= 120) return 'var(--gold)'
+  if (ratio >= 100) return 'var(--green)'
+  if (ratio >= 80) return 'var(--orange)'
+  return 'var(--red)'
+}
+
 const labelSt: React.CSSProperties = {
   fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.5px',
   textTransform: 'uppercase', marginBottom: 4,
@@ -381,10 +398,11 @@ export default function MiningWidget() {
           const isEditingCurrent = editing?.id === e.id && editing.field === 'current'
           const isEditingTarget = editing?.id === e.id && editing.field === 'target'
 
-          // 채굴 눈금 게이지: 현금교환 목표 날짜가 설정돼 있으면 남은 일수만큼 눈금을 나눠서 보여준다.
-          // 눈금은 "목표 대비 현재 얼마나 채웠는지"를 왼쪽부터 채우는 용도일 뿐, 하루 한 칸씩 순서대로 채우는 게 아니다
-          // (하루에 여러 날치를 몰아서 채워도 상관없음). 색은 "이 페이스면 목표일까지 도달 가능한지"를 보여준다:
-          // 남은 목표량을 남은 일수로 나눈 하루 필요량과 오늘 오른 양(m)을 비교해 초록(여유)/주황(빠듯)/빨강(부족)으로 표시.
+          // 채굴 눈금 게이지: 현금교환 목표 날짜가 설정돼 있으면 항상 14칸으로 나눠서 "목표 대비 현재 얼마나
+          // 채웠는지"를 왼쪽부터 채운다 (하루 한 칸씩 순서대로 채우는 게 아니라 그냥 진행률 표시).
+          // 색은 "2주 사이클 날짜대비 누적 달성률"로 정한다 (오늘 하루치 채굴량이 아니라 사이클 시작일부터
+          // 오늘까지 경과한 날짜 비율만큼 목표를 채웠어야 한다고 보고 실제 달성치와 비교):
+          // 150%+ 시안 · 120%+ 골드 · 100%+ 초록(날짜대비 목표 달성) · 80%+ 주황(달성 임박) · 그 외 빨강(많이 부족)
           const cashout = cashoutFor(e.site_name)
           const goalDate = cashout?.goal_date
           const remainingDays = goalDate ? Math.max(0, dayjs(goalDate).startOf('day').diff(dayjs().startOf('day'), 'day')) : 0
@@ -394,10 +412,11 @@ export default function MiningWidget() {
           const tickCount = goalDate ? TICK_COUNT : 0
           const remainingAmount = Math.max(0, e.target_point - e.current_point)
           const requiredPerDay = remainingDays > 0 ? remainingAmount / remainingDays : remainingAmount
-          const paceColor = remainingAmount <= 0 ? 'var(--green)'
-            : m >= requiredPerDay ? 'var(--green)'
-            : m >= requiredPerDay * 0.5 ? 'var(--orange)'
-            : 'var(--red)'
+          // 색상은 "오늘 채굴량"이 아니라 2주 사이클 날짜대비 누적 달성률 기준 (사이클 시작 = 목표일 - 14일)
+          const cycleStart = goalDate ? dayjs(goalDate).subtract(14, 'day') : null
+          const elapsedDays = cycleStart ? Math.min(14, Math.max(0, dayjs().startOf('day').diff(cycleStart.startOf('day'), 'day'))) : 0
+          const ratio = goalDate ? paceRatio(e.current_point, e.target_point, elapsedDays, 14) : 100
+          const paceColor = paceColorForRatio(ratio)
           const filledCount = tickCount > 0 ? (pct / 100) * tickCount : 0
           const fullTicks = Math.floor(filledCount)
           const partialFill = filledCount - fullTicks
@@ -497,7 +516,7 @@ export default function MiningWidget() {
               </div>
 
               {/* 실적현황: 선택한 베팅사이트들의 (목표 날짜로부터 지정한 기간 이전까지) 입금 실적 진행률
-                  채굴현황과 크기/간격/퍼센트 위치를 동일하게 맞춰서 최대한 붙여 보여준다 */}
+                  채굴현황과 크기/간격/퍼센트 위치/눈금/색상 로직을 동일하게 맞춰서 최대한 붙여 보여준다 */}
               {(() => {
                 const c = cashoutFor(e.site_name)
                 if (!c?.perf_period || !(c.perf_site_ids?.length > 0) || !c.perf_amount) return null
@@ -505,12 +524,32 @@ export default function MiningWidget() {
                 const perfPct = c.perf_amount > 0 ? Math.min(100, Math.max(0, progress / c.perf_amount * 100)) : 0
                 const perfDone = progress >= c.perf_amount
                 const perfExcess = progress > c.perf_amount
+                const perfRemaining = c.perf_amount - progress
+
+                // 실적현황도 채굴현황과 동일하게 "기간 대비 경과일" 기준 페이스 색상 사용
+                const periodDays = c.perf_period === '2w' ? 14 : dayjs(c.goal_date!).diff(dayjs(c.goal_date!).subtract(1, 'month'), 'day')
+                const perfStart = c.perf_period === '2w' ? dayjs(c.goal_date!).subtract(14, 'day') : dayjs(c.goal_date!).subtract(1, 'month')
+                const perfElapsedDays = Math.min(periodDays, Math.max(0, dayjs().startOf('day').diff(perfStart.startOf('day'), 'day')))
+                const perfRatio = paceRatio(progress, c.perf_amount, perfElapsedDays, periodDays)
+                const perfPaceColor = paceColorForRatio(perfRatio)
+
+                const PERF_TICK_COUNT = 14
+                const perfFilledCount = (perfPct / 100) * PERF_TICK_COUNT
+                const perfFullTicks = Math.floor(perfFilledCount)
+                const perfPartialFill = perfFilledCount - perfFullTicks
+
                 return (
                   <div style={{ marginTop: 4, paddingTop: 4 }}>
                     <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 2 }}>실적현황</div>
-                    <div style={{ height: 8, background: 'var(--bg-card)', borderRadius: 3, overflow: 'hidden' }}>
-                      <div style={{ height: '100%', width: `${perfPct}%`, borderRadius: 3, transition: 'width 0.4s ease',
-                        background: perfDone ? 'var(--green)' : 'linear-gradient(90deg, var(--purple), #B388FF)' }} />
+                    <div style={{ display: 'flex', gap: 2 }}>
+                      {Array.from({ length: PERF_TICK_COUNT }, (_, i) => {
+                        const fillPct = i < perfFullTicks ? 100 : i === perfFullTicks ? perfPartialFill * 100 : 0
+                        return (
+                          <div key={i} style={{ flex: 1, height: 8, background: 'var(--bg-card)', borderRadius: 2, overflow: 'hidden', border: '1px solid var(--border)', position: 'relative' }}>
+                            <div style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: `${fillPct}%`, background: perfPaceColor, transition: 'width 0.3s' }} />
+                          </div>
+                        )
+                      })}
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>
                       <span style={{
@@ -519,7 +558,7 @@ export default function MiningWidget() {
                         color: perfExcess ? 'var(--green)' : 'var(--text-muted)',
                         border: `1px solid ${perfExcess ? 'var(--green-border)' : 'var(--border)'}`,
                       }}>
-                        {fmt(progress)} / {fmt(c.perf_amount)}
+                        {perfExcess ? `초과 ${fmt(-perfRemaining)}` : `남음 ${fmt(Math.max(0, perfRemaining))}`}
                       </span>
                       <span style={{ fontSize: 11, fontWeight: 800, fontFamily: 'var(--font-num)', color: perfDone ? 'var(--green)' : 'var(--text-secondary)' }}>{perfPct.toFixed(0)}%</span>
                     </div>
