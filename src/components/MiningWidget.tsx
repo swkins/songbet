@@ -482,15 +482,31 @@ export default function MiningWidget() {
               <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 2 }}>채굴현황</div>
               {goalDate ? (
                 <div>
-                  <div style={{ display: 'flex', gap: 2 }}>
-                    {Array.from({ length: tickCount }, (_, i) => {
-                      const fillPct = i < fullTicks ? 100 : i === fullTicks ? partialFill * 100 : 0
-                      return (
-                        <div key={i} title={`목표까지 ${remainingDays}일`} style={{ flex: 1, height: 8, background: 'var(--bg-card)', borderRadius: 2, overflow: 'hidden', border: '1px solid var(--border)', position: 'relative' }}>
-                          <div style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: `${fillPct}%`, background: paceColor, transition: 'width 0.3s' }} />
-                        </div>
-                      )
-                    })}
+                  <div style={{ position: 'relative' }}>
+                    <div style={{ display: 'flex', gap: 2 }}>
+                      {Array.from({ length: tickCount }, (_, i) => {
+                        const fillPct = i < fullTicks ? 100 : i === fullTicks ? partialFill * 100 : 0
+                        return (
+                          <div key={i} title={`목표까지 ${remainingDays}일`} style={{ flex: 1, height: 8, background: 'var(--bg-card)', borderRadius: 2, overflow: 'hidden', border: '1px solid var(--border)', position: 'relative' }}>
+                            <div style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: `${fillPct}%`, background: paceColor, transition: 'width 0.3s' }} />
+                          </div>
+                        )
+                      })}
+                    </div>
+                    {/* 오늘 위치 마커: 14일 사이클 중 경과일만큼 우측으로 이동. 14일 남음(경과 0일)=맨 왼쪽, 하루 지날 때마다 한 칸씩 우측 이동.
+                        채워진 눈금(진행률)과 이 마커(경과 시간) 위치를 비교하면 지금 밀리고 있는지 바로 보인다 */}
+                    <div title={`오늘 · 사이클 ${elapsedDays}/14일 경과`} style={{
+                      position: 'absolute', top: -4, bottom: -4,
+                      left: `${Math.min(100, Math.max(0, (elapsedDays / 14) * 100))}%`,
+                      width: 2, background: 'var(--text-primary)', transform: 'translateX(-1px)',
+                      transition: 'left 0.3s', pointerEvents: 'none',
+                    }}>
+                      <div style={{
+                        position: 'absolute', top: -5, left: '50%', transform: 'translateX(-50%)',
+                        width: 0, height: 0, borderLeft: '4px solid transparent', borderRight: '4px solid transparent',
+                        borderTop: '5px solid var(--text-primary)',
+                      }} />
+                    </div>
                   </div>
                   <div style={{ fontSize: 8, color: 'var(--text-muted)', marginTop: 2 }}>
                     {remainingAmount <= 0 ? '목표 달성' : `하루 ${fmt(requiredPerDay)} 필요 · ${remainingDays}일 남음`}
@@ -533,7 +549,7 @@ export default function MiningWidget() {
                 const perfRatio = paceRatio(progress, c.perf_amount, perfElapsedDays, periodDays)
                 const perfPaceColor = paceColorForRatio(perfRatio)
 
-                const PERF_TICK_COUNT = 14
+                const PERF_TICK_COUNT = 14 // 눈금 개수는 채굴현황과 동일하게 항상 14칸 고정 (보기 편하도록) — 다만 색상/페이스 계산은 아래 periodDays(1개월이면 실제 그 달 일수)를 그대로 써서 기간 자체는 정확하게 반영한다. 즉 눈금 칸 수와 "기간 계산"은 서로 다른 개념: 14칸은 그냥 표시용 스케일이고, 달성률 계산은 실제 2주/1개월 기준으로 정확히 이루어짐
                 const perfFilledCount = (perfPct / 100) * PERF_TICK_COUNT
                 const perfFullTicks = Math.floor(perfFilledCount)
                 const perfPartialFill = perfFilledCount - perfFullTicks
@@ -541,15 +557,30 @@ export default function MiningWidget() {
                 return (
                   <div style={{ marginTop: 4, paddingTop: 4 }}>
                     <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 2 }}>실적현황</div>
-                    <div style={{ display: 'flex', gap: 2 }}>
-                      {Array.from({ length: PERF_TICK_COUNT }, (_, i) => {
-                        const fillPct = i < perfFullTicks ? 100 : i === perfFullTicks ? perfPartialFill * 100 : 0
-                        return (
-                          <div key={i} style={{ flex: 1, height: 8, background: 'var(--bg-card)', borderRadius: 2, overflow: 'hidden', border: '1px solid var(--border)', position: 'relative' }}>
-                            <div style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: `${fillPct}%`, background: perfPaceColor, transition: 'width 0.3s' }} />
-                          </div>
-                        )
-                      })}
+                    <div style={{ position: 'relative' }}>
+                      <div style={{ display: 'flex', gap: 2 }}>
+                        {Array.from({ length: PERF_TICK_COUNT }, (_, i) => {
+                          const fillPct = i < perfFullTicks ? 100 : i === perfFullTicks ? perfPartialFill * 100 : 0
+                          return (
+                            <div key={i} style={{ flex: 1, height: 8, background: 'var(--bg-card)', borderRadius: 2, overflow: 'hidden', border: '1px solid var(--border)', position: 'relative' }}>
+                              <div style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: `${fillPct}%`, background: perfPaceColor, transition: 'width 0.3s' }} />
+                            </div>
+                          )
+                        })}
+                      </div>
+                      {/* 오늘 위치 마커 — 채굴현황과 동일하게 기간(2주/1개월) 대비 경과 비율만큼 우측 이동 */}
+                      <div title={`오늘 · 기간 ${perfElapsedDays}/${periodDays}일 경과`} style={{
+                        position: 'absolute', top: -4, bottom: -4,
+                        left: `${Math.min(100, Math.max(0, (perfElapsedDays / periodDays) * 100))}%`,
+                        width: 2, background: 'var(--text-primary)', transform: 'translateX(-1px)',
+                        transition: 'left 0.3s', pointerEvents: 'none',
+                      }}>
+                        <div style={{
+                          position: 'absolute', top: -5, left: '50%', transform: 'translateX(-50%)',
+                          width: 0, height: 0, borderLeft: '4px solid transparent', borderRight: '4px solid transparent',
+                          borderTop: '5px solid var(--text-primary)',
+                        }} />
+                      </div>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>
                       <span style={{
