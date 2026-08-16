@@ -388,9 +388,12 @@ export default function MiningWidget() {
           const cashout = cashoutFor(e.site_name)
           const goalDate = cashout?.goal_date
           const remainingDays = goalDate ? Math.max(0, dayjs(goalDate).startOf('day').diff(dayjs().startOf('day'), 'day')) : 0
-          const tickCount = goalDate ? Math.max(1, remainingDays) : 0
+          // 눈금 개수는 남은 일수와 무관하게 항상 14(2주) 기준 고정 — 목표일이 며칠 남았든 같은 스케일로 보여줘야
+          // 지금 얼마나 밀렸는지 한눈에 비교가 됨 (남은 일수로 눈금이 늘었다 줄었다 하면 기준이 흔들려서 비교가 안 됨)
+          const TICK_COUNT = 14
+          const tickCount = goalDate ? TICK_COUNT : 0
           const remainingAmount = Math.max(0, e.target_point - e.current_point)
-          const requiredPerDay = tickCount > 0 ? remainingAmount / tickCount : remainingAmount
+          const requiredPerDay = remainingDays > 0 ? remainingAmount / remainingDays : remainingAmount
           const paceColor = remainingAmount <= 0 ? 'var(--green)'
             : m >= requiredPerDay ? 'var(--green)'
             : m >= requiredPerDay * 0.5 ? 'var(--orange)'
@@ -464,25 +467,24 @@ export default function MiningWidget() {
                     {Array.from({ length: tickCount }, (_, i) => {
                       const fillPct = i < fullTicks ? 100 : i === fullTicks ? partialFill * 100 : 0
                       return (
-                        <div key={i} title={`목표까지 ${tickCount}일`} style={{ flex: 1, height: 14, background: 'var(--bg-card)', borderRadius: 2, overflow: 'hidden', border: '1px solid var(--border)', position: 'relative' }}>
+                        <div key={i} title={`목표까지 ${remainingDays}일`} style={{ flex: 1, height: 8, background: 'var(--bg-card)', borderRadius: 2, overflow: 'hidden', border: '1px solid var(--border)', position: 'relative' }}>
                           <div style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: `${fillPct}%`, background: paceColor, transition: 'width 0.3s' }} />
                         </div>
                       )
                     })}
                   </div>
                   <div style={{ fontSize: 8, color: 'var(--text-muted)', marginTop: 2 }}>
-                    {remainingAmount <= 0 ? '목표 달성' : `하루 ${fmt(requiredPerDay)} 필요 · ${tickCount}일 남음`}
+                    {remainingAmount <= 0 ? '목표 달성' : `하루 ${fmt(requiredPerDay)} 필요 · ${remainingDays}일 남음`}
                   </div>
                 </div>
               ) : (
-                <div style={{ height: 6, background: 'var(--bg-card)', borderRadius: 3, overflow: 'hidden' }}>
+                <div style={{ height: 8, background: 'var(--bg-card)', borderRadius: 3, overflow: 'hidden' }}>
                   <div style={{ height: '100%', width: `${pct}%`, borderRadius: 3, transition: 'width 0.4s ease',
                     background: done ? 'var(--green)' : 'linear-gradient(90deg, var(--orange), #FFAD42)' }} />
                 </div>
               )}
 
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 5 }}>
-                <span style={{ fontSize: 11, fontWeight: 800, fontFamily: 'var(--font-num)', color: done ? 'var(--green)' : 'var(--text-secondary)' }}>{pct.toFixed(0)}%</span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>
                 <span style={{
                   fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-num)', padding: '2px 7px', borderRadius: 999,
                   background: isExcess ? 'var(--green-bg)' : 'var(--bg-card)',
@@ -491,25 +493,35 @@ export default function MiningWidget() {
                 }}>
                   {isExcess ? `초과 ${fmt(-remaining)}` : `남음 ${fmt(Math.max(0, remaining))}`}
                 </span>
+                <span style={{ fontSize: 11, fontWeight: 800, fontFamily: 'var(--font-num)', color: done ? 'var(--green)' : 'var(--text-secondary)' }}>{pct.toFixed(0)}%</span>
               </div>
 
-              {/* 실적현황: 선택한 베팅사이트들의 (목표 날짜로부터 지정한 기간 이전까지) 입금 실적 진행률 */}
+              {/* 실적현황: 선택한 베팅사이트들의 (목표 날짜로부터 지정한 기간 이전까지) 입금 실적 진행률
+                  채굴현황과 크기/간격/퍼센트 위치를 동일하게 맞춰서 최대한 붙여 보여준다 */}
               {(() => {
                 const c = cashoutFor(e.site_name)
                 if (!c?.perf_period || !(c.perf_site_ids?.length > 0) || !c.perf_amount) return null
                 const progress = perfProgress[e.site_name] ?? 0
                 const perfPct = c.perf_amount > 0 ? Math.min(100, Math.max(0, progress / c.perf_amount * 100)) : 0
                 const perfDone = progress >= c.perf_amount
+                const perfExcess = progress > c.perf_amount
                 return (
-                  <div style={{ marginTop: 8, borderTop: '1px solid var(--border)', paddingTop: 6 }}>
+                  <div style={{ marginTop: 4, paddingTop: 4 }}>
                     <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 2 }}>실적현황</div>
-                    <div style={{ height: 6, background: 'var(--bg-card)', borderRadius: 3, overflow: 'hidden' }}>
+                    <div style={{ height: 8, background: 'var(--bg-card)', borderRadius: 3, overflow: 'hidden' }}>
                       <div style={{ height: '100%', width: `${perfPct}%`, borderRadius: 3, transition: 'width 0.4s ease',
                         background: perfDone ? 'var(--green)' : 'linear-gradient(90deg, var(--purple), #B388FF)' }} />
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>
-                      <span style={{ fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-num)', color: perfDone ? 'var(--green)' : 'var(--text-secondary)' }}>{fmt(progress)} / {fmt(c.perf_amount)}</span>
-                      <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)' }}>{perfPct.toFixed(0)}%</span>
+                      <span style={{
+                        fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-num)', padding: '2px 7px', borderRadius: 999,
+                        background: perfExcess ? 'var(--green-bg)' : 'var(--bg-card)',
+                        color: perfExcess ? 'var(--green)' : 'var(--text-muted)',
+                        border: `1px solid ${perfExcess ? 'var(--green-border)' : 'var(--border)'}`,
+                      }}>
+                        {fmt(progress)} / {fmt(c.perf_amount)}
+                      </span>
+                      <span style={{ fontSize: 11, fontWeight: 800, fontFamily: 'var(--font-num)', color: perfDone ? 'var(--green)' : 'var(--text-secondary)' }}>{perfPct.toFixed(0)}%</span>
                     </div>
                   </div>
                 )

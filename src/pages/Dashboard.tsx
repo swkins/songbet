@@ -1371,7 +1371,16 @@ export default function Dashboard() {
   async function doPoint(amount: number) {
     if (!depositSite) return
     const before = { ...depositSite }
-    const { data } = await supabase.from('sites').update({ balance: depositSite.balance + amount, point_deposit: (depositSite.point_deposit ?? 0) + amount, active: true }).eq('id', depositSite.id).select().single()
+    // 입금과 동일한 로직: 포인트가 추가되면 그만큼 남은 롤링이 다시 생겨야 함 (롤링완료 상태였어도 추가된 포인트만큼은 롤링 필요)
+    const newTotalPoint = (depositSite.point_deposit ?? 0) + amount
+    const newTotalRolling = (depositSite.last_deposit ?? 0) + newTotalPoint
+    const currentDone = depositSite.deposit_bet_done ?? 0
+    const newDone = currentDone > (newTotalRolling - amount) ? newTotalRolling - amount : currentDone
+    const { data } = await supabase.from('sites').update({
+      balance: depositSite.balance + amount, active: true,
+      point_deposit: newTotalPoint,
+      deposit_bet_done: Math.max(0, newDone),
+    }).eq('id', depositSite.id).select().single()
     if (data) { await logAction({ action_type: 'update', table_name: 'sites', record_id: data.id, before_data: before as never, after_data: data as never, description: `${depositSite.name} 포인트 +${amount.toLocaleString()}P` }); setSites(p => p.map(s => s.id === data.id ? data : s)) }
     setDepositSite(null)
   }
