@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from './supabase'
+import { logAction } from './logger'
 import dayjs from 'dayjs'
 
 export interface MiningEntry {
@@ -166,7 +167,8 @@ export function useMiningData() {
   }
 
   /** 현금교환 실행: 오늘 기록의 현재가에서 교환한 만큼을 빼고, 그 값을 시작가/현재가로 새로 설정한다.
-   *  자동 설정이 켜져 있으면 목표 날짜를 오늘로부터 2주 뒤로 자동 설정한다. */
+   *  자동 설정이 켜져 있으면 목표 날짜를 오늘로부터 2주 뒤로 자동 설정한다.
+   *  결산(cashflows)에도 "현금교환" 카테고리로 수입 기록을 남긴다. */
   async function doCashout(entry: MiningEntry, amount: number) {
     const newPoint = entry.current_point - amount
     const { data } = await supabase.from('mining_entries')
@@ -188,6 +190,18 @@ export function useMiningData() {
       ? await supabase.from('mining_cashouts').update(payload).eq('id', existing.id).select().single()
       : await supabase.from('mining_cashouts').insert(payload).select().single()
     if (cd) setCashouts(prev => existing ? prev.map(c => c.id === (cd as MiningCashout).id ? (cd as MiningCashout) : c) : [...prev, cd as MiningCashout])
+
+    const { data: cf } = await supabase.from('cashflows').insert({
+      flow_date: today, type: 'income', category: '현금교환',
+      description: `${entry.site_name} 채굴 현금교환`, amount,
+      site_id: null, currency: 'krw', usd_krw_rate: null, amount_krw: amount,
+    }).select().single()
+    await logAction({
+      action_type: 'update', table_name: 'mining_entries', record_id: entry.id,
+      before_data: entry as never, after_data: (data ?? entry) as never,
+      description: `${entry.site_name} 채굴 현금교환 +${amount.toLocaleString()}`,
+      cashflow_id: cf?.id ?? null,
+    })
   }
 
   return { today, entries, history, loading, knownSites, addEntry, updateField, deleteEntry, cashouts, cashoutFor, setCashGoal, setAutoSet2w, setPerfGoal, doCashout }

@@ -14,10 +14,9 @@ function paceRatio(progress: number, target: number, elapsedDays: number, period
   if (paceTarget <= 0) return progress > 0 ? 200 : 100
   return (progress / paceTarget) * 100
 }
-/** 날짜대비 목표치 달성률에 따른 색상 5단계: 150%+ 시안 / 120%+ 골드 / 100%+ 초록 / 80%+(달성 직전) 주황 / 그 외 빨강 */
+/** 날짜대비 목표치 달성률에 따른 색상 4단계: 120%+ 시안(청록) / 100%+ 초록 / 80%+(달성 직전) 주황 / 그 외 빨강 */
 function paceColorForRatio(ratio: number) {
-  if (ratio >= 150) return 'var(--cyan)'
-  if (ratio >= 120) return 'var(--gold)'
+  if (ratio >= 120) return 'var(--cyan)'
   if (ratio >= 100) return 'var(--green)'
   if (ratio >= 80) return 'var(--orange)'
   return 'var(--red)'
@@ -75,8 +74,9 @@ function CashoutModal({ entry, cashout, onClose, onSetGoal, onSetAuto, onSetPerf
 
   const now = dayjs()
   const remainingDays = hasGoal ? Math.max(0, dayjs(cashout!.goal_date!).startOf('day').diff(now.startOf('day'), 'day')) : 0
-  const m = mined(entry)
-  const goalReached = entry.target_point > 0 && m >= entry.target_point
+  // 목표 달성 여부는 "오늘 채굴한 증가분"이 아니라 누적 채굴 잔액(current_point) 기준으로 봐야 함.
+  // 오늘 채굴한 증가분으로 체크하면 오늘 채굴을 안 한 날은 이미 목표를 훨씬 넘겼어도 교환이 막히는 버그가 있었음.
+  const goalReached = entry.target_point > 0 && entry.current_point >= entry.target_point
 
   const cooldownUntil = cashout?.next_allowed_at ? dayjs(cashout.next_allowed_at) : null
   const inCooldown = !!cooldownUntil && now.isBefore(cooldownUntil)
@@ -253,7 +253,7 @@ function CashoutModal({ entry, cashout, onClose, onSetGoal, onSetAuto, onSetPerf
         )}
         {!inCooldown && !goalReached && (
           <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 10, padding: '7px 9px', background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 6 }}>
-            채굴 목표량({fmt(entry.target_point)})을 달성해야 현금교환이 가능합니다. (현재 {fmt(m)})
+            채굴 목표량({fmt(entry.target_point)})을 달성해야 현금교환이 가능합니다. (현재 {fmt(entry.current_point)})
           </div>
         )}
 
@@ -479,7 +479,14 @@ export default function MiningWidget() {
                 )}
               </div>
 
-              <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 2 }}>채굴현황</div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 2 }}>
+                <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)' }}>채굴현황</span>
+                {goalDate && (
+                  <span style={{ fontSize: 8, color: 'var(--text-muted)' }}>
+                    {remainingAmount <= 0 ? '목표 달성' : `하루 ${fmt(requiredPerDay)} 필요 · ${remainingDays}일 남음`}
+                  </span>
+                )}
+              </div>
               {goalDate ? (
                 <div>
                   <div style={{ position: 'relative' }}>
@@ -507,9 +514,6 @@ export default function MiningWidget() {
                         borderTop: '5px solid var(--text-primary)',
                       }} />
                     </div>
-                  </div>
-                  <div style={{ fontSize: 8, color: 'var(--text-muted)', marginTop: 2 }}>
-                    {remainingAmount <= 0 ? '목표 달성' : `하루 ${fmt(requiredPerDay)} 필요 · ${remainingDays}일 남음`}
                   </div>
                 </div>
               ) : (
@@ -553,10 +557,17 @@ export default function MiningWidget() {
                 const perfFilledCount = (perfPct / 100) * PERF_TICK_COUNT
                 const perfFullTicks = Math.floor(perfFilledCount)
                 const perfPartialFill = perfFilledCount - perfFullTicks
+                const perfDaysLeft = Math.max(0, periodDays - perfElapsedDays)
+                const perfRequiredPerDay = perfDaysLeft > 0 ? Math.max(0, perfRemaining) / perfDaysLeft : Math.max(0, perfRemaining)
 
                 return (
                   <div style={{ marginTop: 4, paddingTop: 4 }}>
-                    <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 2 }}>실적현황</div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 2 }}>
+                      <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)' }}>실적현황</span>
+                      <span style={{ fontSize: 8, color: 'var(--text-muted)' }}>
+                        {perfRemaining <= 0 ? '목표 달성' : `하루 ${fmt(perfRequiredPerDay)} 필요 · ${perfDaysLeft}일 남음`}
+                      </span>
+                    </div>
                     <div style={{ position: 'relative' }}>
                       <div style={{ display: 'flex', gap: 2 }}>
                         {Array.from({ length: PERF_TICK_COUNT }, (_, i) => {
