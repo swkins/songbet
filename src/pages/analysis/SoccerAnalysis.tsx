@@ -82,6 +82,12 @@ const MARKET_GROUP: Record<PickKey, string> = {
 export default function SoccerAnalysis() {
   // ── 입력 폼 상태 ──
   const [league, setLeague] = useState('')
+  // 홈팀/원정팀 이름은 순전히 "나중에 결과 입력할 때 어떤 경기인지 알아보기 쉽게" 표시용이다.
+  // 계산(확률/보정)에는 절대 쓰지 않는다 — analyzeSoccerOdds에는 표시 라벨로만 전달되고,
+  // buildCalibration은 팀 이름을 아예 받지 않고 픽 유형(마켓)별로만 집계하므로
+  // 특정 팀의 연승/연패가 확률에 영향을 주지 않는다.
+  const [homeTeam, setHomeTeam] = useState('')
+  const [awayTeam, setAwayTeam] = useState('')
   const [matchDate, setMatchDate] = useState(dayjs().format('YYYY-MM-DD'))
   const [oddsHome, setOddsHome] = useState('')
   const [oddsDraw, setOddsDraw] = useState('')
@@ -108,7 +114,9 @@ export default function SoccerAnalysis() {
     oddsOU25: { over: num(oddsOver), under: num(oddsUnder) },
     oddsAH05: { home: num(oddsAh05Home), away: num(oddsAh05Away) },
     oddsAH15: { home: num(oddsAh15Home), away: num(oddsAh15Away) },
-  }), [oddsHome, oddsDraw, oddsAway, oddsOver, oddsUnder, oddsAh05Home, oddsAh05Away, oddsAh15Home, oddsAh15Away])
+    // 표시용 라벨일 뿐 — 확률 계산식 어디에도 들어가지 않는다.
+    homeLabel: homeTeam, awayLabel: awayTeam,
+  }), [oddsHome, oddsDraw, oddsAway, oddsOver, oddsUnder, oddsAh05Home, oddsAh05Away, oddsAh15Home, oddsAh15Away, homeTeam, awayTeam])
 
   // ── 저장된 기록 목록 ──
   const [logs, setLogs] = useState<SoccerOddsLog[]>([])
@@ -131,6 +139,7 @@ export default function SoccerAnalysis() {
   useEffect(() => { loadLogs() }, [])
 
   function resetForm() {
+    setHomeTeam(''); setAwayTeam('')
     setOddsHome(''); setOddsDraw(''); setOddsAway('')
     setOddsOver(''); setOddsUnder('')
     setOddsAh05Home(''); setOddsAh05Away('')
@@ -144,7 +153,7 @@ export default function SoccerAnalysis() {
     const best = result.best
     const payload = {
       match_date: matchDate || null,
-      league: league.trim(),
+      league: league.trim(), home_team: homeTeam.trim(), away_team: awayTeam.trim(),
       odds_home: num(oddsHome) ?? null, odds_draw: num(oddsDraw) ?? null, odds_away: num(oddsAway) ?? null,
       odds_over25: num(oddsOver) ?? null, odds_under25: num(oddsUnder) ?? null,
       odds_ah05_home: num(oddsAh05Home) ?? null, odds_ah05_away: num(oddsAh05Away) ?? null,
@@ -228,6 +237,17 @@ export default function SoccerAnalysis() {
             <div style={{ width: 118 }}>
               <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 4 }}>날짜</div>
               <input className="form-input" type="date" value={matchDate} onChange={e => setMatchDate(e.target.value)} style={{ fontSize: 12, padding: '7px 6px' }} />
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 4 }}>홈팀 <span style={{ fontWeight: 400, textTransform: 'none', color: 'var(--text-muted)' }}>(기록용, 계산엔 안 씀)</span></div>
+              <input className="form-input" value={homeTeam} onChange={e => setHomeTeam(e.target.value)} placeholder="홈팀 이름" style={{ fontSize: 12, padding: '7px 8px' }} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 4 }}>원정팀</div>
+              <input className="form-input" value={awayTeam} onChange={e => setAwayTeam(e.target.value)} placeholder="원정팀 이름" style={{ fontSize: 12, padding: '7px 8px' }} />
             </div>
           </div>
 
@@ -376,7 +396,7 @@ export default function SoccerAnalysis() {
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                 <thead>
                   <tr>
-                    <th>날짜</th><th>리그</th><th>입력 배당</th><th>추천</th><th>확률</th><th>결과</th><th>적중</th><th></th>
+                    <th>날짜</th><th>리그</th><th>매치</th><th>추천</th><th>확률</th><th>결과</th><th>적중</th><th></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -389,13 +409,7 @@ export default function SoccerAnalysis() {
                       <tr key={log.id}>
                         <td style={{ whiteSpace: 'nowrap' }}>{log.match_date ? dayjs(log.match_date).format('MM/DD') : '-'}</td>
                         <td>{log.league || '-'}</td>
-                        <td style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--font-num)', whiteSpace: 'nowrap' }}>
-                          {[
-                            log.odds_home != null && log.odds_draw != null && log.odds_away != null ? `1X2 ${log.odds_home}/${log.odds_draw}/${log.odds_away}` : null,
-                            log.odds_ah05_home != null && log.odds_ah05_away != null ? `0.5H ${log.odds_ah05_home}/${log.odds_ah05_away}` : null,
-                            log.odds_ah15_home != null && log.odds_ah15_away != null ? `1.5H ${log.odds_ah15_home}/${log.odds_ah15_away}` : null,
-                          ].filter(Boolean).join('  ') || '-'}
-                        </td>
+                        <td style={{ whiteSpace: 'nowrap' }}>{(log.home_team || '홈')} vs {(log.away_team || '원정')}</td>
                         <td style={{ color: 'var(--gold)', fontWeight: 600, whiteSpace: 'nowrap' }}>{log.recommended_label ?? '-'}</td>
                         <td style={{ fontFamily: 'var(--font-num)' }}>{log.recommended_prob != null ? log.recommended_prob.toFixed(1) + '%' : '-'}</td>
                         <td>
