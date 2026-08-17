@@ -333,8 +333,9 @@ export default function SoccerAnalysis() {
               )}
 
               {result.consistency05 && (
-                <div style={{ fontSize: 10, color: 'var(--text-muted)', borderTop: '1px solid var(--border-light)', paddingTop: 8, marginTop: 4 }}>
-                  일반승-홈 {pct(result.consistency05.mlProb)} vs 0.5핸디-홈 {pct(result.consistency05.ahProb)} (차이 {result.consistency05.diffPct.toFixed(1)}%p)<br />
+                <div style={{ fontSize: 10, color: result.consistency05.blended ? 'var(--green)' : 'var(--text-muted)', borderTop: '1px solid var(--border-light)', paddingTop: 8, marginTop: 4 }}>
+                  일반승-홈 {pct(result.consistency05.mlProb)} vs 0.5핸디-홈 {pct(result.consistency05.ahProb)}
+                  {!result.consistency05.blended && ` (차이 ${result.consistency05.diffPct.toFixed(1)}%p)`}<br />
                   {result.consistency05.note}
                 </div>
               )}

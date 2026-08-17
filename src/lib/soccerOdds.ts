@@ -96,6 +96,7 @@ export interface ConsistencyCheck {
   mlProb: number
   ahProb: number
   diffPct: number
+  blended: boolean   // 홈 배당이 두 마켓에서 동일해서 확률을 하나로 통일했는지
   note: string
 }
 
@@ -145,15 +146,56 @@ export function analyzeSoccerOdds(input: SoccerAnalysisInput, calibration?: Cali
     candidates.push({ key, marketLabel, side, sideLabel, odds, rawProb: implied(odds), noVigProb, finalProb, calibration: cal })
   }
 
-  // ── 1X2 (승무패) ──
+  // ── 1X2 (승무패) + 0.5 핸디캡 ──
+  // 일반승-홈과 0.5핸디-홈은 실제로는 완전히 같은 사건(홈팀이 그냥 이기면 적중)이다.
+  // 그런데 승무패는 홈/무/원정 세 값을 더해서 마진을 제거하고, 0.5핸디캡은 홈/원정(+0.5)
+  // 두 값만 더해서 마진을 제거하기 때문에, 홈 배당이 똑같은 숫자로 입력돼도 정규화 분모가
+  // 달라서 확률이 서로 다르게 나올 수 있다 — "무"가 껴 있는 3자 마켓과 아닌 2자 마켓은
+  // 마진 구조 자체가 다르기 때문. 홈 배당이 두 마켓에서 실제로 동일하게 입력됐다면(오타가
+  // 아니라 진짜 같은 값이라면) 그건 "같은 사건에 같은 가격"이라는 뜻이므로, 두 마켓의
+  // 홈 확률 추정치를 평균 내어 하나로 통일하고, 남은 확률(무/원정 쪽)은 각 마켓 안에서
+  // 원래 비율대로 재분배한다. 그래야 헷갈리지 않게 "배당이 같으면 확률도 같다"가 지켜진다.
   const o1x2 = input.odds1x2
-  if (o1x2 && isValidOdds(o1x2.home) && isValidOdds(o1x2.draw) && isValidOdds(o1x2.away)) {
-    const [pHome, pDraw, pAway] = devig3(o1x2.home, o1x2.draw, o1x2.away)
+  const oAH05 = input.oddsAH05
+  const has1x2 = !!o1x2 && isValidOdds(o1x2.home) && isValidOdds(o1x2.draw) && isValidOdds(o1x2.away)
+  const hasAH05 = !!oAH05 && isValidOdds(oAH05.home) && isValidOdds(oAH05.away)
+  let homeBlended = false
+
+  if (has1x2) {
+    let [pHome, pDraw, pAway] = devig3(o1x2!.home!, o1x2!.draw!, o1x2!.away!)
+    let pHome05: number | null = null, pAway05: number | null = null
+    if (hasAH05) [pHome05, pAway05] = devig2(oAH05!.home!, oAH05!.away!)
+
+    if (hasAH05 && pHome05 !== null && Math.abs(o1x2!.home! - oAH05!.home!) < 0.005) {
+      // 홈 배당이 두 마켓에서 동일 → 두 추정치를 평균 내어 통일하고, 나머지는 비율대로 재분배
+      const blended = (pHome + pHome05) / 2
+      const restRatioSum = pDraw + pAway
+      pDraw = restRatioSum > 0 ? (1 - blended) * (pDraw / restRatioSum) : (1 - blended) / 2
+      pAway = restRatioSum > 0 ? (1 - blended) * (pAway / restRatioSum) : (1 - blended) / 2
+      pHome = blended
+      pHome05 = blended
+      pAway05 = 1 - blended
+      homeBlended = true
+    }
+
     drawProb = pDraw
     mlHomeProb = pHome
-    push('ml_home', '일반승', 'home', homeLabel, o1x2.home, pHome)
-    push('ml_away', '일반승', 'away', awayLabel, o1x2.away, pAway)
-    margins.push({ marketLabel: '승무패', pct: marginPct(o1x2.home, o1x2.draw, o1x2.away) })
+    push('ml_home', '일반승', 'home', homeLabel, o1x2!.home!, pHome)
+    push('ml_away', '일반승', 'away', awayLabel, o1x2!.away!, pAway)
+    margins.push({ marketLabel: '승무패', pct: marginPct(o1x2!.home!, o1x2!.draw!, o1x2!.away!) })
+
+    if (hasAH05 && pHome05 !== null && pAway05 !== null) {
+      ah05HomeProb = pHome05
+      push('ah05_home', '0.5 핸디캡', 'home', homeLabel, oAH05!.home!, pHome05)
+      push('ah05_away', '0.5 핸디캡', 'away', awayLabel, oAH05!.away!, pAway05)
+      margins.push({ marketLabel: '0.5 핸디캡', pct: marginPct(oAH05!.home!, oAH05!.away!) })
+    }
+  } else if (hasAH05) {
+    const [pHome, pAway] = devig2(oAH05!.home!, oAH05!.away!)
+    ah05HomeProb = pHome
+    push('ah05_home', '0.5 핸디캡', 'home', homeLabel, oAH05!.home!, pHome)
+    push('ah05_away', '0.5 핸디캡', 'away', awayLabel, oAH05!.away!, pAway)
+    margins.push({ marketLabel: '0.5 핸디캡', pct: marginPct(oAH05!.home!, oAH05!.away!) })
   }
 
   // ── 2.5 오버/언더 (참고용 — 직접 베팅 후보는 아니지만 득점 성향 참고) ──
@@ -164,16 +206,6 @@ export function analyzeSoccerOdds(input: SoccerAnalysisInput, calibration?: Cali
     const lean = pOver >= 0.53 ? 'over' : pUnder >= 0.53 ? 'under' : 'even'
     ou25 = { overProb: pOver, underProb: pUnder, lean }
     margins.push({ marketLabel: '2.5 오버언더', pct: marginPct(oOU.over, oOU.under) })
-  }
-
-  // ── 0.5 핸디캡 ──
-  const oAH05 = input.oddsAH05
-  if (oAH05 && isValidOdds(oAH05.home) && isValidOdds(oAH05.away)) {
-    const [pHome, pAway] = devig2(oAH05.home, oAH05.away)
-    ah05HomeProb = pHome
-    push('ah05_home', '0.5 핸디캡', 'home', homeLabel, oAH05.home, pHome)
-    push('ah05_away', '0.5 핸디캡', 'away', awayLabel, oAH05.away, pAway)
-    margins.push({ marketLabel: '0.5 핸디캡', pct: marginPct(oAH05.home, oAH05.away) })
   }
 
   // ── 1.5 핸디캡 ──
@@ -193,8 +225,10 @@ export function analyzeSoccerOdds(input: SoccerAnalysisInput, calibration?: Cali
   if (mlHomeProb !== null && ah05HomeProb !== null) {
     const diffPct = Math.abs(mlHomeProb - ah05HomeProb) * 100
     consistency05 = {
-      mlProb: mlHomeProb, ahProb: ah05HomeProb, diffPct,
-      note: diffPct >= 4
+      mlProb: mlHomeProb, ahProb: ah05HomeProb, diffPct, blended: homeBlended,
+      note: homeBlended
+        ? '홈 배당이 두 마켓에서 동일하게 입력돼서, 일반승-홈과 0.5핸디-홈 확률을 하나로 통일했습니다.'
+        : diffPct >= 4
         ? '두 마켓의 홈 승리 확률 추정치 차이가 큽니다 — 배당 입력을 다시 확인하거나, 마켓 간 가격 차이(가치 베팅) 가능성을 살펴보세요.'
         : '일반승-홈과 0.5핸디-홈은 원래 같은 조건(홈팀이 이기면 적중)이라 확률이 비슷하게 나오는 것이 정상입니다.',
     }
