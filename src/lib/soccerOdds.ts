@@ -32,8 +32,63 @@ export interface SoccerCandidate {
   sideLabel: string      // 팀 이름 or '홈'/'원정'
   odds: number
   rawProb: number         // 마진 제거 전 (1/odds)
-  noVigProb: number       // 마진 제거 후 확률 (0~1)
+  noVigProb: number       // 마진 제거 후 시장 확률 (0~1) — 배당만 보고 계산한 값
+  finalProb: number       // 실제로 추천/정렬에 쓰이는 최종 확률. 보정 데이터가 없으면 noVigProb와 동일
+  calibration: PickCalibration | null   // 이 픽 유형의 축적된 실측 성적 (있으면)
 }
+
+// ─── 실측 기반 보정 ───────────────────────────────────────────────
+// 저장된 기록에 결과(스코어)가 쌓이면, 같은 픽 유형(예: "0.5핸디-원정")이
+// 실제로 시장 확률보다 더 자주/덜 자주 맞았는지 계산해서 다음 추천 확률에
+// 조금씩 반영한다. 표본이 적을 때는 거의 반영하지 않고(shrink가 0에 가까움),
+// 기록이 쌓일수록(shrink가 1에 가까워짐) 실측치 쪽으로 더 끌려간다 —
+// 그래서 "몇 건 안 되는 우연"에 확률이 요동치지 않는다.
+const PRIOR_STRENGTH = 12 // 이 정도 표본이 쌓여야 실측치 영향력이 절반(shrink=0.5)이 됨
+
+export interface PickCalibration {
+  n: number            // 이 픽 유형의 결과 입력된 기록 수
+  avgPredicted: number  // 그 기록들 당시 시장(노비그) 확률의 평균
+  hitRate: number        // 실제 적중 비율
+  shrink: number          // 0~1, 표본이 많을수록 1에 가까움
+}
+export type CalibrationMap = Partial<Record<PickKey, PickCalibration>>
+
+export interface HistoricalOddsRecord {
+  odds_home: number | null; odds_draw: number | null; odds_away: number | null
+  odds_ah05_home: number | null; odds_ah05_away: number | null
+  odds_ah15_home: number | null; odds_ah15_away: number | null
+  result_home_score: number | null; result_away_score: number | null
+}
+
+// 저장된 기록들(결과 입력된 것만)을 훑어서 픽 유형별 실측 성적표를 만든다.
+// 한 경기에 승무패/0.5핸디/1.5핸디 배당이 모두 있었다면 최대 6개 픽 유형 각각에
+// (그 경기 당시 시장확률, 적중 여부) 한 쌍씩 기여한다 — 저장된 추천픽 하나만이 아니라
+// 입력해둔 배당 전체를 다 활용하는 것이라 같은 기록 수로도 더 빨리 쌓인다.
+export function buildCalibration(logs: HistoricalOddsRecord[]): CalibrationMap {
+  const acc: Partial<Record<PickKey, { sum: number; hits: number; n: number }>> = {}
+  for (const log of logs) {
+    if (log.result_home_score == null || log.result_away_score == null) continue
+    const { candidates } = analyzeSoccerOdds({
+      odds1x2: { home: log.odds_home ?? undefined, draw: log.odds_draw ?? undefined, away: log.odds_away ?? undefined },
+      oddsAH05: { home: log.odds_ah05_home ?? undefined, away: log.odds_ah05_away ?? undefined },
+      oddsAH15: { home: log.odds_ah15_home ?? undefined, away: log.odds_ah15_away ?? undefined },
+    })
+    for (const c of candidates) {
+      const bucket = acc[c.key] ?? (acc[c.key] = { sum: 0, hits: 0, n: 0 })
+      bucket.sum += c.noVigProb
+      bucket.n += 1
+      if (evaluateSoccerPick(c.key, log.result_home_score, log.result_away_score) === 'win') bucket.hits += 1
+    }
+  }
+  const out: CalibrationMap = {}
+  for (const key of Object.keys(acc) as PickKey[]) {
+    const b = acc[key]!
+    out[key] = { n: b.n, avgPredicted: b.sum / b.n, hitRate: b.hits / b.n, shrink: b.n / (b.n + PRIOR_STRENGTH) }
+  }
+  return out
+}
+
+function clamp01(n: number): number { return Math.min(0.99, Math.max(0.01, n)) }
 
 export interface MarginInfo { marketLabel: string; pct: number }
 
@@ -72,7 +127,7 @@ function marginPct(...odds: number[]): number {
   return (odds.reduce((s, o) => s + implied(o), 0) - 1) * 100
 }
 
-export function analyzeSoccerOdds(input: SoccerAnalysisInput): SoccerAnalysisResult {
+export function analyzeSoccerOdds(input: SoccerAnalysisInput, calibration?: CalibrationMap): SoccerAnalysisResult {
   const homeLabel = input.homeLabel?.trim() || '홈'
   const awayLabel = input.awayLabel?.trim() || '원정'
   const candidates: SoccerCandidate[] = []
@@ -81,14 +136,23 @@ export function analyzeSoccerOdds(input: SoccerAnalysisInput): SoccerAnalysisRes
   let mlHomeProb: number | null = null
   let ah05HomeProb: number | null = null
 
+  // 시장 확률(noVigProb)에 실측 보정(있으면)을 얹어 finalProb을 만드는 공용 헬퍼.
+  // finalProb = noVigProb + shrink * (실측 적중률 - 그 표본들 당시 평균 예측확률)
+  // 표본이 적으면 shrink가 0에 가까워서 사실상 시장확률 그대로 쓰인다.
+  function push(key: PickKey, marketLabel: string, side: 'home' | 'away', sideLabel: string, odds: number, noVigProb: number) {
+    const cal = calibration?.[key] ?? null
+    const finalProb = cal ? clamp01(noVigProb + cal.shrink * (cal.hitRate - cal.avgPredicted)) : noVigProb
+    candidates.push({ key, marketLabel, side, sideLabel, odds, rawProb: implied(odds), noVigProb, finalProb, calibration: cal })
+  }
+
   // ── 1X2 (승무패) ──
   const o1x2 = input.odds1x2
   if (o1x2 && isValidOdds(o1x2.home) && isValidOdds(o1x2.draw) && isValidOdds(o1x2.away)) {
     const [pHome, pDraw, pAway] = devig3(o1x2.home, o1x2.draw, o1x2.away)
     drawProb = pDraw
     mlHomeProb = pHome
-    candidates.push({ key: 'ml_home', marketLabel: '일반승', side: 'home', sideLabel: homeLabel, odds: o1x2.home, rawProb: implied(o1x2.home), noVigProb: pHome })
-    candidates.push({ key: 'ml_away', marketLabel: '일반승', side: 'away', sideLabel: awayLabel, odds: o1x2.away, rawProb: implied(o1x2.away), noVigProb: pAway })
+    push('ml_home', '일반승', 'home', homeLabel, o1x2.home, pHome)
+    push('ml_away', '일반승', 'away', awayLabel, o1x2.away, pAway)
     margins.push({ marketLabel: '승무패', pct: marginPct(o1x2.home, o1x2.draw, o1x2.away) })
   }
 
@@ -107,8 +171,8 @@ export function analyzeSoccerOdds(input: SoccerAnalysisInput): SoccerAnalysisRes
   if (oAH05 && isValidOdds(oAH05.home) && isValidOdds(oAH05.away)) {
     const [pHome, pAway] = devig2(oAH05.home, oAH05.away)
     ah05HomeProb = pHome
-    candidates.push({ key: 'ah05_home', marketLabel: '0.5 핸디캡', side: 'home', sideLabel: homeLabel, odds: oAH05.home, rawProb: implied(oAH05.home), noVigProb: pHome })
-    candidates.push({ key: 'ah05_away', marketLabel: '0.5 핸디캡', side: 'away', sideLabel: awayLabel, odds: oAH05.away, rawProb: implied(oAH05.away), noVigProb: pAway })
+    push('ah05_home', '0.5 핸디캡', 'home', homeLabel, oAH05.home, pHome)
+    push('ah05_away', '0.5 핸디캡', 'away', awayLabel, oAH05.away, pAway)
     margins.push({ marketLabel: '0.5 핸디캡', pct: marginPct(oAH05.home, oAH05.away) })
   }
 
@@ -116,12 +180,14 @@ export function analyzeSoccerOdds(input: SoccerAnalysisInput): SoccerAnalysisRes
   const oAH15 = input.oddsAH15
   if (oAH15 && isValidOdds(oAH15.home) && isValidOdds(oAH15.away)) {
     const [pHome, pAway] = devig2(oAH15.home, oAH15.away)
-    candidates.push({ key: 'ah15_home', marketLabel: '1.5 핸디캡', side: 'home', sideLabel: homeLabel, odds: oAH15.home, rawProb: implied(oAH15.home), noVigProb: pHome })
-    candidates.push({ key: 'ah15_away', marketLabel: '1.5 핸디캡', side: 'away', sideLabel: awayLabel, odds: oAH15.away, rawProb: implied(oAH15.away), noVigProb: pAway })
+    push('ah15_home', '1.5 핸디캡', 'home', homeLabel, oAH15.home, pHome)
+    push('ah15_away', '1.5 핸디캡', 'away', awayLabel, oAH15.away, pAway)
     margins.push({ marketLabel: '1.5 핸디캡', pct: marginPct(oAH15.home, oAH15.away) })
   }
 
-  candidates.sort((a, b) => b.noVigProb - a.noVigProb)
+  // 실측 보정이 반영된 finalProb 기준으로 정렬 — 보정 데이터가 없으면 noVigProb와 같으므로
+  // 기존 동작(시장확률 순)과 동일하게 작동한다.
+  candidates.sort((a, b) => b.finalProb - a.finalProb)
 
   let consistency05: ConsistencyCheck | null = null
   if (mlHomeProb !== null && ah05HomeProb !== null) {

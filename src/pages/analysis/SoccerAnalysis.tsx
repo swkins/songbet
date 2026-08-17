@@ -4,7 +4,7 @@ import { Save, Trash2, ChevronDown, ChevronUp, Check, X, TrendingUp, TrendingDow
 import { supabase } from '../../lib/supabase'
 import type { SoccerOddsLog } from '../../types'
 import {
-  analyzeSoccerOdds, evaluateSoccerPick, outcomeFromScore, PICK_LABELS,
+  analyzeSoccerOdds, evaluateSoccerPick, outcomeFromScore, buildCalibration, PICK_LABELS,
   type SoccerAnalysisInput, type SoccerCandidate, type PickKey,
 } from '../../lib/soccerOdds'
 
@@ -40,7 +40,10 @@ function num(v: string): number | undefined {
 function pct(n: number): string { return (n * 100).toFixed(1) + '%' }
 
 // ─── 후보 확률 막대 ──
+// finalProb(=시장확률 + 실측 보정)을 기준으로 막대/퍼센트를 그리고, 보정이 실제로
+// 확률을 옮긴 경우에는 "시장확률 → 보정확률 (n건)"을 작게 같이 보여준다.
 function CandidateBar({ c, isBest, teamLabel }: { c: SoccerCandidate; isBest: boolean; teamLabel: string }) {
+  const adjusted = c.calibration && Math.abs(c.finalProb - c.noVigProb) >= 0.003
   return (
     <div style={{
       display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 'var(--radius-sm)',
@@ -51,11 +54,18 @@ function CandidateBar({ c, isBest, teamLabel }: { c: SoccerCandidate; isBest: bo
         <div style={{ fontSize: 11, fontWeight: 700, color: isBest ? 'var(--gold)' : 'var(--text-primary)' }}>{c.marketLabel}</div>
         <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{teamLabel}</div>
       </div>
-      <div style={{ flex: 1, height: 8, borderRadius: 4, background: 'var(--bg)', overflow: 'hidden' }}>
-        <div style={{ width: `${Math.min(100, c.noVigProb * 100)}%`, height: '100%', background: isBest ? 'var(--gold)' : 'var(--cyan)', transition: 'width 0.2s' }} />
+      <div style={{ flex: 1 }}>
+        <div style={{ height: 8, borderRadius: 4, background: 'var(--bg)', overflow: 'hidden' }}>
+          <div style={{ width: `${Math.min(100, c.finalProb * 100)}%`, height: '100%', background: isBest ? 'var(--gold)' : 'var(--cyan)', transition: 'width 0.2s' }} />
+        </div>
+        {adjusted && (
+          <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 2 }}>
+            시장확률 {pct(c.noVigProb)} → 실측 보정 {pct(c.finalProb)} (n={c.calibration!.n}, 실측 적중 {pct(c.calibration!.hitRate)})
+          </div>
+        )}
       </div>
       <div style={{ width: 54, textAlign: 'right', fontFamily: 'var(--font-num)', fontWeight: 800, fontSize: 13, color: isBest ? 'var(--gold)' : 'var(--text-primary)' }}>
-        {pct(c.noVigProb)}
+        {pct(c.finalProb)}
       </div>
       <div style={{ width: 44, textAlign: 'right', fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--font-num)' }}>@{c.odds.toFixed(2)}</div>
       {isBest && <span style={{ fontSize: 9, fontWeight: 800, color: 'var(--gold)', background: 'var(--gold-bg)', border: '1px solid var(--gold-border)', borderRadius: 4, padding: '2px 6px', flexShrink: 0 }}>추천</span>}
@@ -72,8 +82,6 @@ const MARKET_GROUP: Record<PickKey, string> = {
 export default function SoccerAnalysis() {
   // ── 입력 폼 상태 ──
   const [league, setLeague] = useState('')
-  const [homeTeam, setHomeTeam] = useState('')
-  const [awayTeam, setAwayTeam] = useState('')
   const [matchDate, setMatchDate] = useState(dayjs().format('YYYY-MM-DD'))
   const [oddsHome, setOddsHome] = useState('')
   const [oddsDraw, setOddsDraw] = useState('')
@@ -100,10 +108,7 @@ export default function SoccerAnalysis() {
     oddsOU25: { over: num(oddsOver), under: num(oddsUnder) },
     oddsAH05: { home: num(oddsAh05Home), away: num(oddsAh05Away) },
     oddsAH15: { home: num(oddsAh15Home), away: num(oddsAh15Away) },
-    homeLabel: homeTeam, awayLabel: awayTeam,
-  }), [oddsHome, oddsDraw, oddsAway, oddsOver, oddsUnder, oddsAh05Home, oddsAh05Away, oddsAh15Home, oddsAh15Away, homeTeam, awayTeam])
-
-  const result = useMemo(() => analyzeSoccerOdds(analysisInput), [analysisInput])
+  }), [oddsHome, oddsDraw, oddsAway, oddsOver, oddsUnder, oddsAh05Home, oddsAh05Away, oddsAh15Home, oddsAh15Away])
 
   // ── 저장된 기록 목록 ──
   const [logs, setLogs] = useState<SoccerOddsLog[]>([])
@@ -112,6 +117,10 @@ export default function SoccerAnalysis() {
   const [resultEditId, setResultEditId] = useState<string | null>(null)
   const [scoreHomeDraft, setScoreHomeDraft] = useState('')
   const [scoreAwayDraft, setScoreAwayDraft] = useState('')
+
+  // 결과가 입력된 기록들로부터 픽 유형별 실측 성적표를 계산 — logs가 바뀔 때만 다시 계산.
+  const calibration = useMemo(() => buildCalibration(logs), [logs])
+  const result = useMemo(() => analyzeSoccerOdds(analysisInput, calibration), [analysisInput, calibration])
 
   async function loadLogs() {
     setLoadingLogs(true)
@@ -135,14 +144,14 @@ export default function SoccerAnalysis() {
     const best = result.best
     const payload = {
       match_date: matchDate || null,
-      league: league.trim(), home_team: homeTeam.trim(), away_team: awayTeam.trim(),
+      league: league.trim(),
       odds_home: num(oddsHome) ?? null, odds_draw: num(oddsDraw) ?? null, odds_away: num(oddsAway) ?? null,
       odds_over25: num(oddsOver) ?? null, odds_under25: num(oddsUnder) ?? null,
       odds_ah05_home: num(oddsAh05Home) ?? null, odds_ah05_away: num(oddsAh05Away) ?? null,
       odds_ah15_home: num(oddsAh15Home) ?? null, odds_ah15_away: num(oddsAh15Away) ?? null,
       recommended_key: best?.key ?? null,
       recommended_label: best ? `${best.marketLabel} · ${best.sideLabel}` : null,
-      recommended_prob: best ? Math.round(best.noVigProb * 1000) / 10 : null,
+      recommended_prob: best ? Math.round(best.finalProb * 1000) / 10 : null,
       memo: memo.trim(),
     }
     const { data, error } = await supabase.from('soccer_odds_logs').insert(payload).select().single()
@@ -222,17 +231,6 @@ export default function SoccerAnalysis() {
             </div>
           </div>
 
-          <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 4 }}>홈팀</div>
-              <input className="form-input" value={homeTeam} onChange={e => setHomeTeam(e.target.value)} placeholder="홈" style={{ fontSize: 12, padding: '7px 8px' }} />
-            </div>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 4 }}>원정팀</div>
-              <input className="form-input" value={awayTeam} onChange={e => setAwayTeam(e.target.value)} placeholder="원정" style={{ fontSize: 12, padding: '7px 8px' }} />
-            </div>
-          </div>
-
           <div style={{ borderTop: '1px solid var(--border-light)', paddingTop: 10, marginBottom: 10 }}>
             <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 6 }}>승무패 (1X2)</div>
             <div style={{ display: 'flex', gap: 6 }}>
@@ -276,6 +274,11 @@ export default function SoccerAnalysis() {
         {/* 실시간 추천 결과 */}
         <div className="card">
           <div className="card-title">확률 비교 · 추천</div>
+          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: -4, marginBottom: 10 }}>
+            {Object.keys(calibration).length === 0
+              ? '아직 결과가 입력된 기록이 없어 시장 배당 확률만으로 추천합니다. 결과를 입력할수록 실측 적중률이 자동으로 반영돼요.'
+              : `실측 보정 반영 중 — 픽 유형 ${Object.keys(calibration).length}/6개에 데이터 있음 (표본 늘수록 반영 비중 커짐)`}
+          </div>
           {result.candidates.length === 0 ? (
             <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '20px 0', textAlign: 'center' }}>
               승무패 / 0.5핸디 / 1.5핸디 중 배당을 입력하면 자동으로 확률을 비교합니다.
@@ -290,7 +293,7 @@ export default function SoccerAnalysis() {
 
               {result.best && (
                 <div style={{ padding: '10px 12px', borderRadius: 'var(--radius-sm)', background: 'var(--gold-bg)', border: '1px solid var(--gold-border)', marginBottom: 10, fontSize: 12, color: 'var(--gold)', fontWeight: 600 }}>
-                  ★ 추천: <b>{result.best.marketLabel} · {result.best.sideLabel}</b> — 확률 {pct(result.best.noVigProb)} (배당 @{result.best.odds.toFixed(2)})
+                  ★ 추천: <b>{result.best.marketLabel} · {result.best.sideLabel}</b> — 확률 {pct(result.best.finalProb)} (배당 @{result.best.odds.toFixed(2)})
                 </div>
               )}
 
@@ -373,7 +376,7 @@ export default function SoccerAnalysis() {
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                 <thead>
                   <tr>
-                    <th>날짜</th><th>리그</th><th>매치</th><th>추천</th><th>확률</th><th>결과</th><th>적중</th><th></th>
+                    <th>날짜</th><th>리그</th><th>입력 배당</th><th>추천</th><th>확률</th><th>결과</th><th>적중</th><th></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -386,7 +389,13 @@ export default function SoccerAnalysis() {
                       <tr key={log.id}>
                         <td style={{ whiteSpace: 'nowrap' }}>{log.match_date ? dayjs(log.match_date).format('MM/DD') : '-'}</td>
                         <td>{log.league || '-'}</td>
-                        <td>{(log.home_team || '홈')} vs {(log.away_team || '원정')}</td>
+                        <td style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--font-num)', whiteSpace: 'nowrap' }}>
+                          {[
+                            log.odds_home != null && log.odds_draw != null && log.odds_away != null ? `1X2 ${log.odds_home}/${log.odds_draw}/${log.odds_away}` : null,
+                            log.odds_ah05_home != null && log.odds_ah05_away != null ? `0.5H ${log.odds_ah05_home}/${log.odds_ah05_away}` : null,
+                            log.odds_ah15_home != null && log.odds_ah15_away != null ? `1.5H ${log.odds_ah15_home}/${log.odds_ah15_away}` : null,
+                          ].filter(Boolean).join('  ') || '-'}
+                        </td>
                         <td style={{ color: 'var(--gold)', fontWeight: 600, whiteSpace: 'nowrap' }}>{log.recommended_label ?? '-'}</td>
                         <td style={{ fontFamily: 'var(--font-num)' }}>{log.recommended_prob != null ? log.recommended_prob.toFixed(1) + '%' : '-'}</td>
                         <td>
