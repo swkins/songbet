@@ -3,6 +3,7 @@ import type { Tab, ActionLog, Todo } from './types'
 import Dashboard from './pages/Dashboard'
 import Settlement from './pages/Settlement'
 import Mining from './pages/Mining'
+import AnalysisPage from './pages/AnalysisPage'
 import Stats from './pages/Stats'
 import { supabase } from './lib/supabase'
 import { purgeOldLogs } from './lib/logger'
@@ -14,6 +15,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'stats', label: '통계' },
   { id: 'settlement', label: '결산' },
   { id: 'mining', label: '채굴' },
+  { id: 'analysis', label: '분석' },
 ]
 
 const WIDTH_OPTIONS: { label: string; value: string }[] = [
@@ -623,6 +625,7 @@ export default function App() {
           {tab === 'stats' && <Stats />}
           {tab === 'settlement' && <Settlement />}
           {tab === 'mining' && <Mining />}
+          {tab === 'analysis' && <AnalysisPage />}
         </div>
       </div>
 

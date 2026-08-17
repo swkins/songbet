@@ -49,4 +49,18 @@ export interface ActionLog {
 export interface GameRolling {
   id: string; created_at: string; site_id: string; amount: number
 }
-export type Tab = 'dashboard' | 'stats' | 'settlement' | 'mining' | 'simul' | 'rulebook'
+export interface SoccerOddsLog {
+  id: string; created_at: string
+  match_date: string | null
+  league: string; home_team: string; away_team: string
+  odds_home: number | null; odds_draw: number | null; odds_away: number | null
+  odds_over25: number | null; odds_under25: number | null
+  odds_ah05_home: number | null; odds_ah05_away: number | null
+  odds_ah15_home: number | null; odds_ah15_away: number | null
+  recommended_key: string | null; recommended_label: string | null; recommended_prob: number | null
+  memo: string
+  result_home_score: number | null; result_away_score: number | null
+  result_outcome: 'home_win' | 'draw' | 'away_win' | null
+  result_updated_at: string | null
+}
+export type Tab = 'dashboard' | 'stats' | 'settlement' | 'mining' | 'analysis' | 'simul' | 'rulebook'
