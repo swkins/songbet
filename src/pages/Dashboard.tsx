@@ -520,7 +520,7 @@ function DepositModal({ site, onClose, onDeposit, onPoint }: {
         </div>
         {!isusd && (
           <div style={{ display: 'flex', gap: 6, marginBottom: 12, marginTop: -6 }}>
-            {[50000, 100000].map(hk => (
+            {[10000, 50000, 100000].map(hk => (
               <button key={hk} type="button" className="hotkey-btn" onClick={() => {
                 const cur = Number(amount.replace(/,/g, '')) || 0
                 setAmount(String(cur + hk))
@@ -728,7 +728,7 @@ function SiteMgrModal({ sites, onClose, onAdd, onDelete, onToggleCurrency, onReo
 function EditFormAmountRow({ isusd, amount, setAmount }: { isusd: boolean; amount: string; setAmount: (v: string) => void }) {
   const unit = isusd ? '$' : '원'
   const stakeN = isusd ? (Number(amount) || 0) : (Number(amount.replace(/,/g, '')) || 0)
-  const hotkeys = isusd ? [5, 10] : [10000, 20000, 50000]
+  const hotkeys = isusd ? [5, 10] : [5000, 10000, 20000]
   return (
     <>
       <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
@@ -947,7 +947,7 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
   const oddsRef = useRef<HTMLInputElement>(null)
   const oddsV = parseOdds(oddsRaw)
   const stakeN = isusd ? (Number(amount) || 0) : (Number(amount.replace(/,/g, "")) || 0)
-  const hotkeys = isusd ? [5, 10] : [10000, 20000, 50000]
+  const hotkeys = isusd ? [5, 10] : [5000, 10000, 20000]
 
   // 경기 내용(팀 이름)만으로 최근에 이 팀을 어느 종목으로 베팅했는지 찾아 종목을 자동 선택
   // (예: "휴스턴"만 써도 최근 베팅 기록이 야구였다면 야구로 전환. 직접 종목을 고른 뒤에는 덮어쓰지 않음)
@@ -1244,6 +1244,8 @@ export default function Dashboard() {
   const [hoverBetId, setHoverBetId]     = useState<string | null>(null)
   const [expandedSettled, setExpandedSettled] = useState<Record<string, boolean>>({})
   const [inlineEditBetId, setInlineEditBetId] = useState<string | null>(null)
+  // 다폴 진행중 개별 leg 적중 체크 상태 (leg bet id → checked). 하나라도 실패면 즉시 전체 실패 처리하므로 여기엔 "적중" 체크만 임시 보관한다.
+  const [parlayLegWinChecks, setParlayLegWinChecks] = useState<Record<string, boolean>>({})
   const [baseballOverrides, setBaseballOverrides] = useState<LeagueOverride[]>([])
   const [soccerOverrides, setSoccerOverrides]     = useState<LeagueOverride[]>([])
   const [basketballOverrides, setBasketballOverrides] = useState<LeagueOverride[]>([])
@@ -1549,6 +1551,27 @@ export default function Dashboard() {
       const { data: sd } = await supabase.from('sites').update({ balance: site.balance + stake + profit }).eq('id', site.id).select().single()
       if (sd) setSites(p => p.map(s => s.id === sd.id ? sd : s))
     }
+
+    // 처리 끝났으니 해당 그룹의 개별 leg 체크 상태는 정리
+    setParlayLegWinChecks(p => {
+      const next = { ...p }
+      for (const gb of groupBets) delete next[gb.id]
+      return next
+    })
+  }
+
+  /* ── 다폴 개별 leg 체크: 실패는 즉시 전체 실패 처리, 적중은 전체가 다 체크됐을 때만 전체 적중 처리 ── */
+  function toggleParlayLegWin(groupBets: Bet[], legId: string) {
+    const next = { ...parlayLegWinChecks, [legId]: true }
+    const allChecked = groupBets.every(gb => next[gb.id])
+    if (allChecked) {
+      applyParlayResult(groupBets, 'win')
+    } else {
+      setParlayLegWinChecks(next)
+    }
+  }
+  function applyParlayLegLoss(groupBets: Bet[]) {
+    applyParlayResult(groupBets, 'loss')
   }
 
   /* ── 다폴 처리취소: 완료→pending 복원 ── */
@@ -1958,21 +1981,37 @@ export default function Dashboard() {
                                   <div style={{ display: 'flex', gap: 6, alignItems: 'stretch' }}>
                                     {/* 좌: 경기 내용 */}
                                     <div style={{ flex: 1, minWidth: 0 }}>
-                                      {groupBets.map((gb, idx) => (
-                                        <div key={gb.id} style={{ marginBottom: 2 }}>
-                                          {gb.league && <div style={{ paddingLeft: 20, fontSize: 9, color: 'var(--text-muted)', fontWeight: 700 }}>{gb.league}</div>}
-                                          <div style={{ display: 'flex', gap: 4 }}>
-                                            <span style={{ fontSize: 10, color: 'var(--text-muted)', width: 16, textAlign: 'center', flexShrink: 0 }}>{LEG_MARKS[idx] ?? idx+1}</span>
-                                            <span className="site-bet-match" style={{ flex: 1, marginBottom: 0, fontSize: 13 }}>{gb.match}</span>
+                                      {groupBets.map((gb, idx) => {
+                                        const legChecked = !!parlayLegWinChecks[gb.id]
+                                        return (
+                                          <div key={gb.id} style={{ marginBottom: 2 }}>
+                                            {gb.league && <div style={{ paddingLeft: 20, fontSize: 9, color: 'var(--text-muted)', fontWeight: 700 }}>{gb.league}</div>}
+                                            <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                                              <span style={{ fontSize: 10, color: 'var(--text-muted)', width: 16, textAlign: 'center', flexShrink: 0 }}>{LEG_MARKS[idx] ?? idx+1}</span>
+                                              <span className="site-bet-match" style={{ flex: 1, marginBottom: 0, fontSize: 13, color: legChecked ? 'var(--green)' : undefined }}>{gb.match}</span>
+                                              {hoverBetId === bet.parlay_group && (
+                                                <div style={{ display: 'flex', gap: 3, flexShrink: 0 }}>
+                                                  <button className="bet-action-btn bet-action-win" title="적중" style={{ width: 22, height: 22, opacity: legChecked ? 0.5 : 1 }}
+                                                    disabled={legChecked}
+                                                    onClick={() => toggleParlayLegWin(groupBets, gb.id)}>
+                                                    <CheckCircle size={14} />
+                                                  </button>
+                                                  <button className="bet-action-btn bet-action-loss" title="실패" style={{ width: 22, height: 22 }}
+                                                    onClick={() => applyParlayLegLoss(groupBets)}>
+                                                    <XCircle size={14} />
+                                                  </button>
+                                                </div>
+                                              )}
+                                            </div>
                                           </div>
-                                        </div>
-                                      ))}
+                                        )
+                                      })}
                                       <div style={{ paddingLeft: 20, marginTop: 3 }}>
                                         <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-secondary)' }}>{bet.odds.toFixed(2)} / {pfx}{bet.stake.toLocaleString()}{sfx}</span>
                                       {isBigStake(bet.stake, isusd) && <Flame size={13} style={{ marginLeft: 5, color: 'var(--gold)', fill: 'var(--gold)', filter: 'drop-shadow(0 0 3px var(--gold))' }} />}
                                       </div>
                                     </div>
-                                    {/* 우: 결과 버튼 */}
+                                    {/* 우: 결과 버튼 (경기별 적중/실패는 좌측 각 경기 행에 개별 표시) */}
                                     {hoverBetId === bet.parlay_group && (
                                       <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flexShrink: 0, alignSelf: 'center' }}>
                                         <div style={{ display: 'flex', gap: 3, justifyContent: 'flex-end' }}>
@@ -1988,19 +2027,9 @@ export default function Dashboard() {
                                             onClick={() => applyParlayResult(groupBets, 'cancel')}>
                                             <Ban size={11} />
                                           </button>
-                                        </div>
-                                        <div style={{ display: 'flex', gap: 3 }}>
-                                          <button className="bet-action-btn bet-action-win" title="적중" style={{ width: 34, height: 34 }}
-                                            onClick={() => applyParlayResult(groupBets, 'win')}>
-                                            <CheckCircle size={22} />
-                                          </button>
-                                          <button className="bet-action-btn bet-action-loss" title="실패" style={{ width: 34, height: 34 }}
-                                            onClick={() => applyParlayResult(groupBets, 'loss')}>
-                                            <XCircle size={22} />
-                                          </button>
-                                          <button className="bet-action-btn" title="적특" style={{ width: 34, height: 34, color: 'var(--blue)', borderColor: 'var(--blue-border)' }}
+                                          <button className="bet-action-btn" title="적특" style={{ width: 20, height: 20, color: 'var(--blue)', borderColor: 'var(--blue-border)' }}
                                             onClick={() => { if (confirm('적특으로 처리하시겠습니까?')) applyParlayResult(groupBets, 'push') }}>
-                                            <MinusCircle size={22} />
+                                            <MinusCircle size={12} />
                                           </button>
                                         </div>
                                       </div>
