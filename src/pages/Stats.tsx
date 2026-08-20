@@ -5,7 +5,7 @@ import type { Bet, Sport, Market, Site } from '../types'
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, BarChart, Bar, ResponsiveContainer, Cell, LineChart, Line, Legend } from 'recharts'
 import dayjs from 'dayjs'
 import { Trash2, X, Plus, Check, Pencil } from 'lucide-react'
-import { inferBaseballLeague, inferSoccerLeague, koCompare, type LeagueOverride } from '../lib/league'
+import { inferBaseballLeague, inferSoccerLeague, koCompare, KBO_TEAMS, MLB_TEAMS, NPB_TEAMS, type LeagueOverride } from '../lib/league'
 import { sportGlyph } from '../components/SportIcons'
 
 const SPORTS: { value: Sport; label: string; emoji: string }[] = [
@@ -149,6 +149,15 @@ function extractTotalLine(pick: string): number | null {
 }
 function formatLine(n: number): string { return n.toFixed(1).replace(/\.0$/, '') }
 
+// 오버 픽 텍스트에 포함된 야구 팀 이름 개수 — 1개면 팀오버(특정 팀의 득점 오버), 2개면 전체(양팀 합산) 오버로 판별
+function countBaseballTeamNames(text: string): number {
+  if (!text) return 0
+  const all = [...KBO_TEAMS, ...MLB_TEAMS, ...NPB_TEAMS]
+  const matched = new Set<string>()
+  for (const t of all) if (text.includes(t)) matched.add(t)
+  return matched.size
+}
+
 // 핸디캡(+N.N / -N.N / 부호없는 N.N) 픽 텍스트에서 라인 숫자 추출 (부호 무관, 절대값)
 // 부호가 없는 경우 문자열 끝의 숫자를 라인으로 간주 (예: "수원삼성 1.5" → 1.5)
 function extractHandicapLine(pick: string): number | null {
@@ -233,11 +242,32 @@ function BaseballDetailPanel({ bets, overrides, knownLeagues, onAddOverride, onA
     .map(({ league, label }) => ({ league, label, ...calcStats(allSettled.filter(b => leagueKeyOf(b) === league)) }))
     .filter(r => r.total > 0)
 
+  // 핸디캡 1.5/2.5 플핸, 팀오버 1.5/2.5/3.5/4.5 — 리그 구분 없이 전체 야구 베팅 기준으로 0.1단위 배당구간별 표시.
+  // (역배 승패 대신 최근 주로 가는 마켓이라 여기서 별도로 집계한다. 오버 픽은 팀 이름이 하나면 팀오버, 두 개면 전체(양팀합산) 오버로 판별)
+  const hcapBets = allSettled.filter(b => b.market === 'handicap')
+  const hcap15 = hcapBets.filter(b => extractHandicapLine(b.pick) === 1.5)
+  const hcap25 = hcapBets.filter(b => extractHandicapLine(b.pick) === 2.5)
+  const overBets = allSettled.filter(b => b.market === 'over')
+  const teamOverBets = overBets.filter(b => countBaseballTeamNames(b.pick) === 1)
+  const teamOver15 = teamOverBets.filter(b => extractTotalLine(b.pick) === 1.5)
+  const teamOver25 = teamOverBets.filter(b => extractTotalLine(b.pick) === 2.5)
+  const teamOver35 = teamOverBets.filter(b => extractTotalLine(b.pick) === 3.5)
+  const teamOver45 = teamOverBets.filter(b => extractTotalLine(b.pick) === 4.5)
+  const newMarketTables = [
+    { title: '⚾ 핸디캡 1.5 플핸 — 0.1단위 배당 구간별', rows: oddsBinRows(hcap15) },
+    { title: '⚾ 핸디캡 2.5 플핸 — 0.1단위 배당 구간별', rows: oddsBinRows(hcap25) },
+    { title: '⚾ 팀오버 1.5 — 0.1단위 배당 구간별', rows: oddsBinRows(teamOver15) },
+    { title: '⚾ 팀오버 2.5 — 0.1단위 배당 구간별', rows: oddsBinRows(teamOver25) },
+    { title: '⚾ 팀오버 3.5 — 0.1단위 배당 구간별', rows: oddsBinRows(teamOver35) },
+    { title: '⚾ 팀오버 4.5 — 0.1단위 배당 구간별', rows: oddsBinRows(teamOver45) },
+  ].filter(t => t.rows.length > 0)
+  const newMarketIds = new Set(newMarketTables.flatMap(t => t.rows.flatMap(r => r.bets)).map(b => b.id))
+
   // KBO / MLB / NPB / CPBL / LMB — 승패(2.1~2.9) 배당구간별 적중률·수익률을 클릭 없이 바로 표시 (기존과 동일하게 유지)
   const leagueTables = leagueSummary.map(({ league, label }) => {
     const leagueBets = allSettled.filter(b => leagueKeyOf(b) === league)
     const mlBets = leagueBets.filter(b => b.market === 'moneyline')
-    const otherBets = leagueBets.filter(b => b.market !== 'moneyline')
+    const otherBets = leagueBets.filter(b => b.market !== 'moneyline' && !newMarketIds.has(b.id))
     return { league, label, rows: baseballMlRows(mlBets), otherBets }
   }).filter(t => t.rows.some(r => r.bets.length > 0) || t.otherBets.length > 0)
 
@@ -272,6 +302,16 @@ function BaseballDetailPanel({ bets, overrides, knownLeagues, onAddOverride, onA
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* 핸디캡 1.5/2.5 플핸, 팀오버 1.5/2.5/3.5/4.5 — 리그 구분 없이 전체 기준 */}
+      {newMarketTables.length > 0 && (
+        <div style={{ marginBottom: 14 }}>
+          <div className="card-title" style={{ marginBottom: 8 }}>⚾ 핸디캡 / 팀오버 — 0.1단위 배당 구간별</div>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            {newMarketTables.map(t => <RuleStatsTable key={t.title} title={t.title} rows={t.rows} />)}
+          </div>
         </div>
       )}
 
@@ -587,8 +627,9 @@ function LeagueRankColumn({ rows, startRank, columnSize, yesterdayRankMap }: {
   )
 }
 
-type SoccerMarketTab = 'hcap15' | 'moneyline'
+type SoccerMarketTab = 'hcap05' | 'hcap15' | 'moneyline'
 const SOCCER_MARKET_TABS: { value: SoccerMarketTab; label: string }[] = [
+  { value: 'hcap05', label: '0.5 플핸' },
   { value: 'hcap15', label: '1.5 플핸' },
   { value: 'moneyline', label: '일반승' },
 ]
@@ -609,7 +650,7 @@ function SoccerLeagueSection({ bets, overrides, knownLeagues, onAddOverride, onA
 
   const filterByMarket = (list: Bet[]) => marketTab === 'moneyline'
     ? list.filter(b => b.market === 'moneyline')
-    : list.filter(b => b.market === 'handicap' && extractHandicapLine(b.pick) === 1.5)
+    : list.filter(b => b.market === 'handicap' && extractHandicapLine(b.pick) === (marketTab === 'hcap05' ? 0.5 : 1.5))
 
   const marketBets = filterByMarket(allSettled)
   const today = dayjs().format('YYYY-MM-DD')
@@ -700,13 +741,15 @@ function SoccerDetailPanel({ bets, overrides, knownLeagues, onAddOverride, onAdd
   const settled = bets.filter(b => b.result !== 'pending')
   const ml = settled.filter(b => b.market === 'moneyline')
   const hcap = settled.filter(b => b.market === 'handicap')
+  const hcap05 = hcap.filter(b => extractHandicapLine(b.pick) === 0.5)
   const hcap15 = hcap.filter(b => extractHandicapLine(b.pick) === 1.5)
   const hcap25 = hcap.filter(b => extractHandicapLine(b.pick) === 2.5)
 
-  // 베팅을 일반승(승무패) / 핸디캡 1.5 플핸 / 핸디캡 2.5 플핸 세 가지로 구분,
+  // 베팅을 일반승(승무패) / 핸디캡 0.5 플핸 / 핸디캡 1.5 플핸 / 핸디캡 2.5 플핸 네 가지로 구분,
   // 각각 0.1단위 배당 구간별 적중률·수익률을 표시. 그 외(다른 라인, 오버/언더 등)는 룰북 외로 이동.
   const tables = [
     { title: '⚽ 일반승(승무패) — 0.1단위 배당 구간별', rows: oddsBinRows(ml) },
+    { title: '⚽ 핸디캡 0.5 플핸 — 0.1단위 배당 구간별', rows: oddsBinRows(hcap05) },
     { title: '⚽ 핸디캡 1.5 플핸 — 0.1단위 배당 구간별', rows: oddsBinRows(hcap15) },
     { title: '⚽ 핸디캡 2.5 플핸 — 0.1단위 배당 구간별', rows: oddsBinRows(hcap25) },
   ].filter(t => t.rows.length > 0)
