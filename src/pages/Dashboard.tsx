@@ -21,8 +21,8 @@ const SPORTS: { value: Sport; label: string }[] = [
   { value: 'soccer',     label: '축구'   },
   { value: 'baseball',   label: '야구'   },
   { value: 'basketball', label: '농구'   },
-  { value: 'esports',    label: 'LOL'    },
   { value: 'volleyball', label: '배구'   },
+  { value: 'esports',    label: 'LOL'    },
   { value: 'other',      label: '기타'   },
 ]
 
@@ -918,16 +918,16 @@ function SportMatchPicker({ sport, leagues, teams, onAddLeague, onRenameLeague, 
   const [team, setTeam] = useState('')
   const [side, setSide] = useState<'홈' | '원정'>('홈')
   const [option, setOption] = useState('')
-  const [bo, setBo] = useState<EsportsBo | ''>('')
+  const [bo, setBo] = useState<EsportsBo | ''>('bo3')
 
-  useEffect(() => { setTeam(''); setOption(''); setBo('') }, [league])
+  useEffect(() => { setTeam(''); setOption(''); setBo('bo3') }, [league])
 
   const teamOptions = teams.filter(t => t.league === league).map(t => t.name)
 
   useEffect(() => {
     if (!team) return
     // LOL BO1은 별도 마켓이 없어서 팀만 고르면 바로 확정
-    if (sport === 'esports' && bo === 'bo1') { onResult(`${team} BO1`, league); return }
+    if (sport === 'esports' && bo === 'bo1') { onResult(`${team} (BO1)`, league); return }
     if (!option) return
     let match = ''
     if (sport === 'soccer') {
@@ -944,11 +944,12 @@ function SportMatchPicker({ sport, leagues, teams, onAddLeague, onRenameLeague, 
     } else if (sport === 'esports') {
       const boLabel = bo === 'bo3' ? 'BO3' : bo === 'bo5' ? 'BO5' : ''
       if (!boLabel) return
-      if (option === 'ml') match = `${team} ${boLabel}`
-      else if (option === 'h15') match = `${team} ${boLabel} 1.5`
-      else if (option === 'hm15') match = `${team} ${boLabel} -1.5`
-      else if (option === 'so25') match = `${team} ${boLabel} 2.5세트오버`
-      else if (option === 'so35') match = `${team} ${boLabel} 3.5세트오버`
+      // 세트 방식(BO3/BO5)은 문구 우측 괄호로 표시: "팀 마켓 (BO3)"
+      if (option === 'ml') match = `${team} (${boLabel})`
+      else if (option === 'h15') match = `${team} 1.5 (${boLabel})`
+      else if (option === 'hm15') match = `${team} -1.5 (${boLabel})`
+      else if (option === 'so25') match = `${team} 2.5세트오버 (${boLabel})`
+      else if (option === 'so35') match = `${team} 3.5세트오버 (${boLabel})`
     }
     if (match) onResult(match, league)
   }, [team, option, side, bo, sport, league])

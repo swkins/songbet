@@ -9,11 +9,11 @@ import { inferBaseballLeague, inferSoccerLeague, koCompare, KBO_TEAMS, MLB_TEAMS
 import { sportGlyph } from '../components/SportIcons'
 
 const SPORTS: { value: Sport; label: string; emoji: string }[] = [
-  { value: 'esports',    label: 'LOL',  emoji: '🎮' },
   { value: 'soccer',     label: '축구', emoji: '⚽' },
   { value: 'baseball',   label: '야구', emoji: '⚾' },
   { value: 'basketball', label: '농구', emoji: '🏀' },
   { value: 'volleyball', label: '배구', emoji: '🏐' },
+  { value: 'esports',    label: 'LOL',  emoji: '🎮' },
   { value: 'hockey',     label: '하키', emoji: '🏒' },
   { value: 'other',      label: '기타', emoji: '📋' },
 ]
@@ -38,10 +38,11 @@ const RULEBOOK_SUMMARY: Partial<Record<Sport, string[]>> = {
     '배당이 1.90에 가장 가까운 라인 선택 (밴드 1.40~1.99 내)',
   ],
   esports: [
-    'BO3, 모든 리그·상시 적용',
-    '언더독 +1.5 배당 1.40~1.99 → 그대로 진입',
-    '언더독 +1.5 배당 2.00 이상 → 정배 -1.5(2:0 스윕), 배당 1.40~1.99 필요',
-    '언더독 +1.5 배당 1.40 미만(박빙) → 총 세트 2.5 오버 (테스트, 배당 1.40~1.99)',
+    'BO1 / BO3 / BO5 선택에 따라 베팅 옵션이 달라짐 (기본값 BO3)',
+    'BO1: 별도 마켓 없이 팀 선택만으로 확정',
+    'BO3: 1.5 플핸 / -1.5 핸디캡 / 2.5 세트오버 / 일반승 중 선택',
+    'BO5: -1.5 핸디캡 / 1.5 플핸 / 2.5 세트오버 / 3.5 세트오버 / 일반승 중 선택',
+    '모든 리그·상시 적용, 배당은 공통 밴드 1.40~1.99',
   ],
 }
 
@@ -1228,7 +1229,7 @@ export default function Stats() {
   const [sites, setSites]     = useState<Site[]>([])
   const [rateMap, setRateMap] = useState<Record<string, number>>({})
   const [period, setPeriod]   = useState<'all' | '7d' | '30d' | '90d'>('all')
-  const [activeSport, setActiveSport] = useState<Sport | 'all' | 'parlay'>('esports')
+  const [activeSport, setActiveSport] = useState<Sport | 'all' | 'parlay'>('soccer')
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null)
   const [leagueOverrides, setLeagueOverrides] = useState<LeagueOverride[]>([])
   const [baseballLeagues, setBaseballLeagues] = useState<string[]>([])
@@ -1505,17 +1506,14 @@ export default function Stats() {
         </div>
       </div>
 
-      {settled.length === 0 ? (
-        <div className="card"><div className="empty"><div className="empty-icon">📊</div>결과 처리된 베팅이 없습니다</div></div>
-      ) : (
-        <>
+      <>
           <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
             {([
-              { value: 'esports' as const, label: 'LOL', emoji: '🎮', cnt: settled.filter(b => b.sport === 'esports').length },
               { value: 'soccer' as const, label: '축구', emoji: '⚽', cnt: settled.filter(b => b.sport === 'soccer').length },
               { value: 'baseball' as const, label: '야구', emoji: '⚾', cnt: settled.filter(b => b.sport === 'baseball').length },
               { value: 'basketball' as const, label: '농구', emoji: '🏀', cnt: settled.filter(b => b.sport === 'basketball').length },
               { value: 'volleyball' as const, label: '배구', emoji: '🏐', cnt: settled.filter(b => b.sport === 'volleyball').length },
+              { value: 'esports' as const, label: 'LOL', emoji: '🎮', cnt: settled.filter(b => b.sport === 'esports').length },
               { value: 'hockey' as const, label: '하키', emoji: '🏒', cnt: settled.filter(b => b.sport === 'hockey').length },
               { value: 'parlay' as const, label: '다폴', emoji: '🔗', cnt: parlayStats.total },
               { value: 'all' as const, label: '전체', emoji: '📊', cnt: settled.length },
@@ -1731,7 +1729,6 @@ export default function Stats() {
             />
           )}
         </>
-      )}
 
       {/* 데이터 삭제 모달 (종목 공용) */}
       {deleteTarget && (
