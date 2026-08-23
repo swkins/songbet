@@ -261,136 +261,42 @@ function baseballLeagueKeyOf(b: Bet, overrides: LeagueOverride[]): string {
   return inferLeague(b.match, overrides) ?? 'ETC'
 }
 
-function BaseballDetailPanel({ bets, overrides, knownLeagues, onAddOverride, onAddLeague, onChangeSport, onRenameLeague, onDeleteLeague }: {
-  bets: Bet[]
-  overrides: LeagueOverride[]; knownLeagues: string[]
-  onAddOverride: (keyword: string, league: string) => Promise<void>
-  onAddLeague: (name: string) => Promise<void>
-  onChangeSport: (bets: Bet[], newSport: Sport) => Promise<void>
-  onRenameLeague: (oldName: string, newName: string) => Promise<void>
-  onDeleteLeague: (name: string) => Promise<void>
-}) {
-  const allSettled = bets.filter(b => b.result !== 'pending')
-  const leagueKeyOf = (b: Bet) => baseballLeagueKeyOf(b, overrides)
-  const FIXED = ['KBO', 'MLB', 'NPB', 'CPBL', 'LMB']
+function BaseballDetailPanel({ bets }: { bets: Bet[] }) {
+  const settled = bets.filter(b => b.result !== 'pending')
+  const hcap = settled.filter(b => b.market === 'handicap')
+  const hcap15 = hcap.filter(b => extractHandicapLine(b.pick) === 1.5)
+  const hcap25 = hcap.filter(b => extractHandicapLine(b.pick) === 2.5)
+  const overBets = settled.filter(b => b.market === 'over')
+  const over15 = overBets.filter(b => extractTotalLine(b.pick) === 1.5)
+  const over25 = overBets.filter(b => extractTotalLine(b.pick) === 2.5)
+  const over35 = overBets.filter(b => extractTotalLine(b.pick) === 3.5)
+  const over45 = overBets.filter(b => extractTotalLine(b.pick) === 4.5)
+  const over55 = overBets.filter(b => extractTotalLine(b.pick) === 5.5)
 
-  const leagueSummary: { league: string; label: string } [] = [
-    { league: 'KBO', label: '🇰🇷 KBO' }, { league: 'MLB', label: '🇺🇸 MLB' }, { league: 'NPB', label: '🇯🇵 NPB' },
-    { league: 'CPBL', label: '🇹🇼 CPBL' }, { league: 'LMB', label: '🇲🇽 LMB' },
-  ]
-  const leagueStats = leagueSummary
-    .map(({ league, label }) => ({ league, label, ...calcStats(allSettled.filter(b => leagueKeyOf(b) === league)) }))
-    .filter(r => r.total > 0)
-
-  // 핸디캡 1.5/2.5 플핸, 팀오버 1.5/2.5/3.5/4.5 — 리그 구분 없이 전체 야구 베팅 기준으로 0.1단위 배당구간별 표시.
-  // (역배 승패 대신 최근 주로 가는 마켓이라 여기서 별도로 집계한다. 오버 픽은 팀 이름이 하나면 팀오버, 두 개면 전체(양팀합산) 오버로 판별)
-  const hcapBets = allSettled.filter(b => b.market === 'handicap')
-  const hcap15 = hcapBets.filter(b => extractHandicapLine(b.pick) === 1.5)
-  const hcap25 = hcapBets.filter(b => extractHandicapLine(b.pick) === 2.5)
-  const overBets = allSettled.filter(b => b.market === 'over')
-  const teamOverBets = overBets.filter(b => countBaseballTeamNames(b.pick) === 1)
-  const teamOver15 = teamOverBets.filter(b => extractTotalLine(b.pick) === 1.5)
-  const teamOver25 = teamOverBets.filter(b => extractTotalLine(b.pick) === 2.5)
-  const teamOver35 = teamOverBets.filter(b => extractTotalLine(b.pick) === 3.5)
-  const teamOver45 = teamOverBets.filter(b => extractTotalLine(b.pick) === 4.5)
-  const newMarketTables = [
-    { title: '⚾ 핸디캡 1.5 플핸 — 0.1단위 배당 구간별', rows: oddsBinRows(hcap15) },
-    { title: '⚾ 핸디캡 2.5 플핸 — 0.1단위 배당 구간별', rows: oddsBinRows(hcap25) },
-    { title: '⚾ 팀오버 1.5 — 0.1단위 배당 구간별', rows: oddsBinRows(teamOver15) },
-    { title: '⚾ 팀오버 2.5 — 0.1단위 배당 구간별', rows: oddsBinRows(teamOver25) },
-    { title: '⚾ 팀오버 3.5 — 0.1단위 배당 구간별', rows: oddsBinRows(teamOver35) },
-    { title: '⚾ 팀오버 4.5 — 0.1단위 배당 구간별', rows: oddsBinRows(teamOver45) },
+  // 룰북 기준 7분류: 핸디캡 1.5/2.5, 팀오버 1.5/2.5/3.5/4.5/5.5 — 각각 0.1단위 배당 구간별
+  const tables = [
+    { title: '⚾ 핸디캡 1.5 — 0.1단위 배당 구간별', rows: oddsBinRows(hcap15) },
+    { title: '⚾ 핸디캡 2.5 — 0.1단위 배당 구간별', rows: oddsBinRows(hcap25) },
+    { title: '⚾ 팀오버 1.5 — 0.1단위 배당 구간별', rows: oddsBinRows(over15) },
+    { title: '⚾ 팀오버 2.5 — 0.1단위 배당 구간별', rows: oddsBinRows(over25) },
+    { title: '⚾ 팀오버 3.5 — 0.1단위 배당 구간별', rows: oddsBinRows(over35) },
+    { title: '⚾ 팀오버 4.5 — 0.1단위 배당 구간별', rows: oddsBinRows(over45) },
+    { title: '⚾ 팀오버 5.5 — 0.1단위 배당 구간별', rows: oddsBinRows(over55) },
   ].filter(t => t.rows.length > 0)
-  const newMarketIds = new Set(newMarketTables.flatMap(t => t.rows.flatMap(r => r.bets)).map(b => b.id))
 
-  // KBO / MLB / NPB / CPBL / LMB — 승패(2.1~2.9) 배당구간별 적중률·수익률을 클릭 없이 바로 표시 (기존과 동일하게 유지)
-  const leagueTables = leagueSummary.map(({ league, label }) => {
-    const leagueBets = allSettled.filter(b => leagueKeyOf(b) === league)
-    const mlBets = leagueBets.filter(b => b.market === 'moneyline')
-    const otherBets = leagueBets.filter(b => b.market !== 'moneyline' && !newMarketIds.has(b.id))
-    return { league, label, rows: baseballMlRows(mlBets), otherBets }
-  }).filter(t => t.rows.some(r => r.bets.length > 0) || t.otherBets.length > 0)
-
-  // 추가로 등록한 리그(KBO/MLB/NPB/CPBL/LMB 외) — 축구/농구 등과 동일하게 승률·ROI·손익 표로 표시
-  const customLeagueNames = Array.from(new Set(allSettled.map(leagueKeyOf).filter(l => l !== 'ETC' && !FIXED.includes(l)))).sort(koCompare)
-  const customRows: RuleRow[] = customLeagueNames.map(l => ({ label: l, tier: 'none', bets: allSettled.filter(b => leagueKeyOf(b) === l) }))
-
-  // 기타(리그 미확인) — 어떤 경기명이 원인인지 보여주고 리그로 재배정 (KBO/MLB/NPB 및 등록된 리그 전부 선택 가능)
-  const etcBets = allSettled.filter(b => leagueKeyOf(b) === 'ETC')
-  const etcGroups = Array.from(
-    etcBets.reduce((map, b) => {
-      if (!map.has(b.match)) map.set(b.match, [])
-      map.get(b.match)!.push(b)
-      return map
-    }, new Map<string, Bet[]>())
-  ).sort((a, b) => b[1].length - a[1].length)
-
-  const allKnownLeagues = Array.from(new Set([...FIXED, ...knownLeagues]))
+  const ruleIds = new Set(tables.flatMap(t => t.rows.flatMap(r => r.bets)).map(b => b.id))
+  const otherBets = settled.filter(b => !ruleIds.has(b.id))
 
   return (
     <div>
-      {/* 리그별 요약 카드 */}
-      {leagueStats.length > 0 && (
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
-          {leagueStats.map(r => (
-            <div key={r.league} style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 12px', minWidth: 130 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 4 }}>{r.label}</div>
-              <div style={{ display: 'flex', gap: 10, alignItems: 'baseline' }}>
-                <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{r.total}건</span>
-                <span style={{ fontSize: 12, fontWeight: 700 }} className={r.winRate >= 50 ? 'profit-pos' : 'profit-neg'}>{r.winRate.toFixed(0)}%</span>
-                <span style={{ fontSize: 11, fontWeight: 700 }} className={r.profit >= 0 ? 'profit-pos' : 'profit-neg'}>{r.profit >= 0 ? '+' : ''}{r.profit.toLocaleString()}</span>
-              </div>
-            </div>
-          ))}
+      {tables.length > 0 ? (
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          {tables.map(t => <RuleStatsTable key={t.title} title={t.title} rows={t.rows} />)}
         </div>
+      ) : (
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '20px 0' }}>정산된 야구 베팅이 없습니다.</div>
       )}
-
-      {/* 핸디캡 1.5/2.5 플핸, 팀오버 1.5/2.5/3.5/4.5 — 리그 구분 없이 전체 기준 */}
-      {newMarketTables.length > 0 && (
-        <div style={{ marginBottom: 14 }}>
-          <div className="card-title" style={{ marginBottom: 8 }}>⚾ 핸디캡 / 팀오버 — 0.1단위 배당 구간별</div>
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            {newMarketTables.map(t => <RuleStatsTable key={t.title} title={t.title} rows={t.rows} />)}
-          </div>
-        </div>
-      )}
-
-      {/* KBO / MLB / NPB 승패 배당구간별 테이블 — 바로 표시 (기존과 동일) */}
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-        {leagueTables.length === 0 && (
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '20px 0' }}>데이터 없음</div>
-        )}
-        {leagueTables.map(t => (
-          <RuleStatsTable key={t.league} title={t.label} rows={t.rows} />
-        ))}
-      </div>
-      {leagueTables.some(t => t.otherBets.length > 0) && (
-        <OtherBetsPanel bets={leagueTables.flatMap(t => t.otherBets)} />
-      )}
-
-      {/* 추가 등록 리그 — 축구/농구 등과 동일한 방식(리그별 승률·ROI·손익 + 리그 추가/관리) */}
-      <div style={{ marginTop: 14 }}>
-        <div className="card-title" style={{ marginBottom: 8 }}>⚾ 추가 리그 (KBO/MLB/NPB 외)</div>
-        {customRows.length > 0
-          ? <RuleStatsTable title="리그별 승률·ROI·손익" rows={customRows} />
-          : <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0' }}>등록된 추가 리그가 없습니다. 아래에서 리그를 추가해 보세요.</div>}
-        <div style={{ marginTop: 10 }}>
-          <AddLeagueInput onAdd={onAddLeague} placeholder="새 리그 이름 (예: 대만 CPBL)" />
-          <LeagueManageList leagues={knownLeagues} onRename={onRenameLeague} onDelete={onDeleteLeague} />
-        </div>
-      </div>
-
-      {/* 기타(리그 미확인) — 원인 확인 및 재배정 */}
-      {etcGroups.length > 0 && (
-        <div style={{ marginTop: 14 }}>
-          <div className="card-title" style={{ marginBottom: 8 }}>❓ 기타(리그 미확인) — {etcBets.length}건, 팀 이름 확인 후 리그 재배정</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {etcGroups.map(([matchText, groupBets]) => (
-              <UnmatchedFreeLeagueGroup key={matchText} matchText={matchText} bets={groupBets} knownLeagues={allKnownLeagues} onAssign={onAddOverride} currentSport="baseball" onChangeSport={onChangeSport} />
-            ))}
-          </div>
-        </div>
-      )}
+      <OtherBetsPanel bets={otherBets} />
     </div>
   )
 }
@@ -769,29 +675,18 @@ function SoccerLeagueSection({ bets, overrides, knownLeagues, onAddOverride, onA
 }
 
 // ─── 축구 상세 통계 (배당 흐름 기반 — 마켓별 0.1단위 구간 통계) ──────
-function SoccerDetailPanel({ bets, overrides, knownLeagues, onAddOverride, onAddLeague, onChangeSport, onRenameLeague, onDeleteLeague }: {
-  bets: Bet[]
-  overrides: LeagueOverride[]; knownLeagues: string[]
-  onAddOverride: (keyword: string, league: string) => Promise<void>
-  onAddLeague: (name: string) => Promise<void>
-  onChangeSport: (bets: Bet[], newSport: Sport) => Promise<void>
-  onRenameLeague: (oldName: string, newName: string) => Promise<void>
-  onDeleteLeague: (name: string) => Promise<void>
-}) {
+function SoccerDetailPanel({ bets }: { bets: Bet[] }) {
   const settled = bets.filter(b => b.result !== 'pending')
-  const ml = settled.filter(b => b.market === 'moneyline')
   const hcap = settled.filter(b => b.market === 'handicap')
-  const hcap05 = hcap.filter(b => extractHandicapLine(b.pick) === 0.5)
-  const hcap15 = hcap.filter(b => extractHandicapLine(b.pick) === 1.5)
-  const hcap25 = hcap.filter(b => extractHandicapLine(b.pick) === 2.5)
+  const hcapNeg15 = hcap.filter(b => extractHandicapLine(b.pick) === 1.5 && extractHandicapSign(b.pick) === '-')
+  const hcap05 = hcap.filter(b => extractHandicapLine(b.pick) === 0.5 && extractHandicapSign(b.pick) !== '-')
+  const hcap15 = hcap.filter(b => extractHandicapLine(b.pick) === 1.5 && extractHandicapSign(b.pick) !== '-')
 
-  // 베팅을 일반승(승무패) / 핸디캡 0.5 플핸 / 핸디캡 1.5 플핸 / 핸디캡 2.5 플핸 네 가지로 구분,
-  // 각각 0.1단위 배당 구간별 적중률·수익률을 표시. 그 외(다른 라인, 오버/언더 등)는 룰북 외로 이동.
+  // 룰북 기준 3분류: -1.5 핸디캡(정배) / 0.5 핸디캡(역배) / 1.5 핸디캡(역배) — 각각 0.1단위 배당 구간별
   const tables = [
-    { title: '⚽ 일반승(승무패) — 0.1단위 배당 구간별', rows: oddsBinRows(ml) },
-    { title: '⚽ 핸디캡 0.5 플핸 — 0.1단위 배당 구간별', rows: oddsBinRows(hcap05) },
-    { title: '⚽ 핸디캡 1.5 플핸 — 0.1단위 배당 구간별', rows: oddsBinRows(hcap15) },
-    { title: '⚽ 핸디캡 2.5 플핸 — 0.1단위 배당 구간별', rows: oddsBinRows(hcap25) },
+    { title: '⚽ -1.5 핸디캡 (정배) — 0.1단위 배당 구간별', rows: oddsBinRows(hcapNeg15) },
+    { title: '⚽ 0.5 핸디캡 (역배) — 0.1단위 배당 구간별', rows: oddsBinRows(hcap05) },
+    { title: '⚽ 1.5 핸디캡 (역배) — 0.1단위 배당 구간별', rows: oddsBinRows(hcap15) },
   ].filter(t => t.rows.length > 0)
 
   const ruleIds = new Set(tables.flatMap(t => t.rows.flatMap(r => r.bets)).map(b => b.id))
@@ -799,48 +694,37 @@ function SoccerDetailPanel({ bets, overrides, knownLeagues, onAddOverride, onAdd
 
   return (
     <div>
-      <SoccerLeagueSection bets={bets} overrides={overrides} knownLeagues={knownLeagues} onAddOverride={onAddOverride} onAddLeague={onAddLeague} onChangeSport={onChangeSport} onRenameLeague={onRenameLeague} onDeleteLeague={onDeleteLeague} />
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-        {tables.map(t => <RuleStatsTable key={t.title} title={t.title} rows={t.rows} />)}
-      </div>
+      {tables.length > 0 ? (
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          {tables.map(t => <RuleStatsTable key={t.title} title={t.title} rows={t.rows} />)}
+        </div>
+      ) : (
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '20px 0' }}>정산된 축구 베팅이 없습니다.</div>
+      )}
       <OtherBetsPanel bets={otherBets} />
     </div>
   )
 }
 
-// ─── 농구 상세 통계 (배당 흐름 기반 — 마켓별 0.1단위 구간 통계) ──────
+// ─── 농구 상세 통계 (룰북 기반 — 핸디캡 라인별 0.1단위, 4.5~14.5) ──────
 function BasketballDetailPanel({ bets }: { bets: Bet[] }) {
   const settled = bets.filter(b => b.result !== 'pending')
-  const ml = settled.filter(b => b.market === 'moneyline')
   const hcap = settled.filter(b => b.market === 'handicap')
-  const overBets = settled.filter(b => b.market === 'over')
-  const underBets = settled.filter(b => b.market === 'under')
+  const lineOf = (b: Bet) => extractHandicapLine(b.pick)
+  const inRange = hcap.filter(b => { const l = lineOf(b); return l !== null && l >= 4.5 && l <= 14.5 })
+  const lines = Array.from(new Set(inRange.map(b => lineOf(b) as number))).sort((a, b) => a - b)
+  const rows: RuleRow[] = lines.map(l => ({ label: formatLine(l), tier: 'none', bets: inRange.filter(b => lineOf(b) === l) }))
 
-  // 핸디캡 — 라인별(4.5 ~ 13.5, 1.0단위) 적중률/수익률
-  const hcapLineRows: RuleRow[] = (() => {
-    const rows: RuleRow[] = []
-    for (let line = 4.5; line <= 13.5 + 1e-9; line = Math.round((line + 1.0) * 10) / 10) {
-      const lineBets = hcap.filter(b => extractHandicapLine(b.pick) === line)
-      rows.push({ label: formatLine(line), tier: 'none', bets: lineBets })
-    }
-    return rows
-  })()
-
-  const tables = [
-    { title: '🏀 승패 — 0.1단위 배당 구간별', rows: oddsBinRows(ml) },
-    { title: '🏀 오버 — 0.1단위 배당 구간별', rows: oddsBinRows(overBets) },
-    { title: '🏀 언더 — 0.1단위 배당 구간별', rows: oddsBinRows(underBets) },
-  ].filter(t => t.rows.length > 0)
-
-  const ruleIds = new Set([...tables.flatMap(t => t.rows.flatMap(r => r.bets)), ...hcapLineRows.flatMap(r => r.bets)].map(b => b.id))
+  const ruleIds = new Set(inRange.map(b => b.id))
   const otherBets = settled.filter(b => !ruleIds.has(b.id))
 
   return (
     <div>
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-        <RuleStatsTable title="🏀 핸디캡 — 라인별(4.5~13.5) 적중률" rows={hcapLineRows} />
-        {tables.map(t => <RuleStatsTable key={t.title} title={t.title} rows={t.rows} />)}
-      </div>
+      {rows.length > 0 ? (
+        <RuleStatsTable title="🏀 핸디캡 라인별(4.5~14.5) 적중률·ROI·손익" rows={rows} />
+      ) : (
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '20px 0' }}>정산된 농구 베팅이 없습니다.</div>
+      )}
       <OtherBetsPanel bets={otherBets} />
     </div>
   )
@@ -936,14 +820,18 @@ interface LeagueSectionProps {
   onDeleteLeague: (name: string) => Promise<void>
 }
 
-// LOL 베팅 내용(match 텍스트)을 베팅 옵션(일반승/핸디캡/세트승)으로 분류.
-// "N세트 승"이 "일반승"보다 먼저 걸려야 한다(둘 다 "승"으로 끝나므로 세트 패턴을 먼저 체크).
-function classifyLolOption(content: string): '일반승' | '핸디캡' | '세트승' | '기타' {
-  const s = content.trim()
-  if (/\d+세트\s*승\s*$/.test(s)) return '세트승'
-  if (/[+-]?\d+(\.\d+)?\s*$/.test(s)) return '핸디캡'
-  if (/승\s*$/.test(s)) return '일반승'
-  return '기타'
+// LOL 베팅 내용(match 텍스트)을 룰북 5분류로 분류. (BO1/BO3/BO5 태그는 "(BO3)"처럼 뒤에 붙으므로 무시하고 판별)
+function classifyEsportsCategory(match: string): '일반승' | '-1.5 핸디' | '1.5 핸디' | '2.5 세트오버' | '3.5 세트오버' | null {
+  const s = (match ?? '').trim()
+  const setOver = s.match(/(\d+(?:\.\d+)?)\s*세트오버/)
+  if (setOver) {
+    if (setOver[1] === '2.5') return '2.5 세트오버'
+    if (setOver[1] === '3.5') return '3.5 세트오버'
+    return null
+  }
+  if (/-1\.5/.test(s)) return '-1.5 핸디'
+  if (/(?<!-)1\.5/.test(s)) return '1.5 핸디'
+  return '일반승'
 }
 
 function extractHandicapSign(pick: string): '+' | '-' | null {
@@ -951,52 +839,32 @@ function extractHandicapSign(pick: string): '+' | '-' | null {
   return m ? (m[1] as '+' | '-') : null
 }
 
-// ─── LOL(e스포츠) 전용: 베팅 옵션별 — 일반승/마핸/플핸/세트승 각각 0.1단위 배당 구간별 성적 ──
-function EsportsMarketTypeSection({ bets }: { bets: Bet[] }) {
+// ─── LOL(e스포츠) 상세 통계 (룰북 기반 — 일반승/-1.5핸디/1.5핸디/2.5세트오버/3.5세트오버, 각각 0.1단위 배당 구간별) ──
+function EsportsDetailPanel({ bets }: { bets: Bet[] }) {
   const settled = bets.filter(b => b.result !== 'pending')
-  const ml = settled.filter(b => classifyLolOption(b.match) === '일반승')
-  const setWin = settled.filter(b => classifyLolOption(b.match) === '세트승')
-  const hcap = settled.filter(b => classifyLolOption(b.match) === '핸디캡')
-  const hcapMinus = hcap.filter(b => extractHandicapSign(b.match) === '-') // 마핸(강팀)
-  const hcapPlus = hcap.filter(b => extractHandicapSign(b.match) === '+') // 플핸(약팀)
+  const cats = ['일반승', '-1.5 핸디', '1.5 핸디', '2.5 세트오버', '3.5 세트오버'] as const
+  const byCat = (c: string) => settled.filter(b => classifyEsportsCategory(b.match) === c)
+  const tables = cats.map(c => ({ title: `🎮 ${c} — 0.1단위 배당 구간별`, rows: oddsBinRows(byCat(c)) })).filter(t => t.rows.length > 0)
 
-  const tables = [
-    { title: '🎮 일반승 — 0.1단위 배당 구간별', rows: oddsBinRows(ml) },
-    { title: '🎮 마이너스 핸디캡(강팀) — 0.1단위 배당 구간별', rows: oddsBinRows(hcapMinus) },
-    { title: '🎮 플러스 핸디캡(약팀) — 0.1단위 배당 구간별', rows: oddsBinRows(hcapPlus) },
-    { title: '🎮 세트승 — 0.1단위 배당 구간별', rows: oddsBinRows(setWin) },
-  ].filter(t => t.rows.length > 0)
+  const ruleIds = new Set(tables.flatMap(t => t.rows.flatMap(r => r.bets)).map(b => b.id))
+  const otherBets = settled.filter(b => !ruleIds.has(b.id))
 
   return (
-    <div style={{ marginBottom: 14 }}>
-      <div className="card-title" style={{ marginBottom: 8 }}>🎮 베팅 옵션별 성적 (배당 0.1단위 구간)</div>
+    <div>
       {tables.length > 0 ? (
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           {tables.map(t => <RuleStatsTable key={t.title} title={t.title} rows={t.rows} />)}
         </div>
       ) : (
-        <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '12px 0' }}>정산된 LOL 베팅이 없습니다.</div>
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '20px 0' }}>정산된 LOL 베팅이 없습니다.</div>
       )}
+      <OtherBetsPanel bets={otherBets} />
     </div>
   )
 }
 
-function EsportsDetailPanel(props: LeagueSectionProps) {
-  return (
-    <div>
-      <GenericLeagueSection emoji="🎮" currentSport="esports" leaguePlaceholder="새 리그 이름 (예: LCK)" {...props} />
-      <EsportsMarketTypeSection bets={props.bets} />
-    </div>
-  )
-}
-
-function BasketballLeagueDetailPanel(props: LeagueSectionProps) {
-  return (
-    <div>
-      <GenericLeagueSection emoji="🏀" currentSport="basketball" leaguePlaceholder="새 리그 이름 (예: NBA)" {...props} />
-      <BasketballDetailPanel bets={props.bets} />
-    </div>
-  )
+function BasketballLeagueDetailPanel({ bets }: { bets: Bet[] }) {
+  return <BasketballDetailPanel bets={bets} />
 }
 
 function VolleyballDetailPanel(props: LeagueSectionProps) {
@@ -1191,10 +1059,10 @@ function SportPanel({ bets, sport, onDeleteRequest, leagueOverrides, onAddLeague
             </table>
           </div>
         )}
-        {sport.value === 'baseball'   && <BaseballDetailPanel bets={periodBets} overrides={leagueOverrides} knownLeagues={baseballLeagues} onAddOverride={onAddLeagueOverride} onAddLeague={onAddBaseballLeague} onChangeSport={onChangeSport} onRenameLeague={onRenameBaseballLeague} onDeleteLeague={onDeleteBaseballLeague} />}
-        {sport.value === 'soccer'     && <SoccerDetailPanel bets={periodBets} overrides={soccerOverrides} knownLeagues={soccerLeagues} onAddOverride={onAddSoccerOverride} onAddLeague={onAddSoccerLeague} onChangeSport={onChangeSport} onRenameLeague={onRenameSoccerLeague} onDeleteLeague={onDeleteSoccerLeague} />}
-        {sport.value === 'basketball' && <BasketballLeagueDetailPanel bets={periodBets} overrides={basketballOverrides} knownLeagues={basketballLeagues} onAddOverride={onAddBasketballOverride} onAddLeague={onAddBasketballLeague} onChangeSport={onChangeSport} onRenameLeague={onRenameBasketballLeague} onDeleteLeague={onDeleteBasketballLeague} />}
-        {sport.value === 'esports'    && <EsportsDetailPanel bets={periodBets} overrides={esportsOverrides} knownLeagues={esportsLeagues} onAddOverride={onAddEsportsOverride} onAddLeague={onAddEsportsLeague} onChangeSport={onChangeSport} onRenameLeague={onRenameEsportsLeague} onDeleteLeague={onDeleteEsportsLeague} />}
+        {sport.value === 'baseball'   && <BaseballDetailPanel bets={periodBets} />}
+        {sport.value === 'soccer'     && <SoccerDetailPanel bets={periodBets} />}
+        {sport.value === 'basketball' && <BasketballLeagueDetailPanel bets={periodBets} />}
+        {sport.value === 'esports'    && <EsportsDetailPanel bets={periodBets} />}
         {sport.value === 'volleyball' && <VolleyballDetailPanel bets={periodBets} overrides={volleyballOverrides} knownLeagues={volleyballLeagues} onAddOverride={onAddVolleyballOverride} onAddLeague={onAddVolleyballLeague} onChangeSport={onChangeSport} onRenameLeague={onRenameVolleyballLeague} onDeleteLeague={onDeleteVolleyballLeague} />}
         {!['baseball','soccer','basketball','esports','volleyball'].includes(sport.value) && <GenericDetailPanel bets={periodBets} />}
       </div>
@@ -1229,7 +1097,7 @@ export default function Stats() {
   const [sites, setSites]     = useState<Site[]>([])
   const [rateMap, setRateMap] = useState<Record<string, number>>({})
   const [period, setPeriod]   = useState<'all' | '7d' | '30d' | '90d'>('all')
-  const [activeSport, setActiveSport] = useState<Sport | 'all' | 'parlay'>('soccer')
+  const [activeSport, setActiveSport] = useState<Sport | 'all' | 'parlay'>('all')
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null)
   const [leagueOverrides, setLeagueOverrides] = useState<LeagueOverride[]>([])
   const [baseballLeagues, setBaseballLeagues] = useState<string[]>([])
@@ -1509,6 +1377,7 @@ export default function Stats() {
       <>
           <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
             {([
+              { value: 'all' as const, label: '전체', emoji: '📊', cnt: settled.length },
               { value: 'soccer' as const, label: '축구', emoji: '⚽', cnt: settled.filter(b => b.sport === 'soccer').length },
               { value: 'baseball' as const, label: '야구', emoji: '⚾', cnt: settled.filter(b => b.sport === 'baseball').length },
               { value: 'basketball' as const, label: '농구', emoji: '🏀', cnt: settled.filter(b => b.sport === 'basketball').length },
@@ -1516,7 +1385,6 @@ export default function Stats() {
               { value: 'esports' as const, label: 'LOL', emoji: '🎮', cnt: settled.filter(b => b.sport === 'esports').length },
               { value: 'hockey' as const, label: '하키', emoji: '🏒', cnt: settled.filter(b => b.sport === 'hockey').length },
               { value: 'parlay' as const, label: '다폴', emoji: '🔗', cnt: parlayStats.total },
-              { value: 'all' as const, label: '전체', emoji: '📊', cnt: settled.length },
             ]).map(s => (
               <button key={s.value}
                 onClick={() => setActiveSport(s.value)}
