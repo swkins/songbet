@@ -40,8 +40,8 @@ const RULEBOOK_SUMMARY: Partial<Record<Sport, string[]>> = {
   esports: [
     'BO1 / BO3 / BO5 선택에 따라 베팅 옵션이 달라짐 (기본값 BO3)',
     'BO1: 별도 마켓 없이 팀 선택만으로 확정',
-    'BO3: 1.5 플핸 / -1.5 핸디캡 / 2.5 세트오버 / 일반승 중 선택',
-    'BO5: -1.5 핸디캡 / 1.5 플핸 / 2.5 세트오버 / 3.5 세트오버 / 일반승 중 선택',
+    'BO3: 1.5 플핸 / -1.5 핸디캡 / 일반승 중 선택',
+    'BO5: -1.5 핸디캡 / 1.5 플핸 / 3.5 세트오버 / 일반승 중 선택',
     '모든 리그·상시 적용, 배당은 공통 밴드 1.40~1.99',
   ],
 }
@@ -1093,6 +1093,90 @@ function DeleteBetsModal({ target, bets, onClose, onDeleted }: {
 }
 
 
+// ─── 라이브 베팅 전용 통계 (모든 종목 통합, 종목별/체결 로그 병행 표시) ──
+function LivePanel({ bets, onDeleteRequest }: { bets: Bet[]; onDeleteRequest: () => void }) {
+  const settled = bets.filter(b => b.result !== 'pending')
+  const stats = calcStats(settled)
+  const bySport = SPORTS.map(s => ({ ...s, ...calcStats(settled.filter(b => b.sport === s.value)) })).filter(r => r.total > 0)
+
+  if (stats.total === 0) return (
+    <div>
+      <div style={{ padding: '24px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>🔴 결과 처리된 라이브 베팅이 없습니다</div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
+        <button onClick={onDeleteRequest} className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--red)', borderColor: 'var(--red-border)', display: 'flex', alignItems: 'center', gap: 4 }}>
+          <Trash2 size={11} /> 데이터 삭제
+        </button>
+      </div>
+    </div>
+  )
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'flex-start' }}>
+        {[
+          { label: '승률', value: `${stats.winRate.toFixed(1)}%`, sub: `${stats.wins.length}W ${stats.losses.length}L`, cls: stats.winRate >= 50 ? 'profit-pos' : 'profit-neg' },
+          { label: '총 손익', value: `${stats.profit >= 0 ? '+' : ''}${stats.profit.toLocaleString()}`, sub: `${stats.total}건`, cls: stats.profit >= 0 ? 'profit-pos' : 'profit-neg' },
+          { label: 'ROI', value: `${stats.roi >= 0 ? '+' : ''}${stats.roi.toFixed(1)}%`, sub: `${stats.stake.toLocaleString()}`, cls: stats.roi >= 0 ? 'profit-pos' : 'profit-neg' },
+          { label: '평균 배당', value: stats.avgOdds.toFixed(2), sub: '', cls: '' },
+        ].map(t => (
+          <div key={t.label} className="card stat-tile" style={{ flex: '1 0 110px', maxWidth: 160, padding: '10px 12px' }}>
+            <div className={`stat-value ${t.cls}`} style={{ fontSize: 16 }}>{t.value}</div>
+            <div className="stat-label">{t.label}</div>
+            {t.sub && <div style={{ fontSize: 9, color: 'var(--text-secondary)', marginTop: 2 }}>{t.sub}</div>}
+          </div>
+        ))}
+        <button onClick={onDeleteRequest} className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--red)', borderColor: 'var(--red-border)', alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: 4, padding: '6px 10px' }}>
+          <Trash2 size={11} /> 데이터 삭제
+        </button>
+      </div>
+
+      {bySport.length > 0 && (
+        <div className="card" style={{ width: 320 }}>
+          <div className="card-title">종목별 성적</div>
+          <table style={{ width: '100%' }}>
+            <thead><tr><th>종목</th><th className="td-right">건</th><th className="td-right">승률</th><th className="td-right">ROI</th><th className="td-right">손익</th></tr></thead>
+            <tbody>
+              {bySport.map(r => (
+                <tr key={r.value}>
+                  <td style={{ fontWeight: 700, fontSize: 11 }}>{r.emoji} {r.label}</td>
+                  <td className="td-right" style={{ color: 'var(--text-secondary)', fontSize: 11, whiteSpace: 'nowrap' }}>{r.total}</td>
+                  <td className="td-right" style={{ whiteSpace: 'nowrap' }}><span className={r.winRate >= 50 ? 'profit-pos' : 'profit-neg'} style={{ fontSize: 11, fontWeight: 700 }}>{r.winRate.toFixed(0)}%</span></td>
+                  <td className="td-right" style={{ whiteSpace: 'nowrap' }}><span className={r.roi >= 0 ? 'profit-pos' : 'profit-neg'} style={{ fontSize: 11, fontWeight: 700 }}>{r.roi >= 0 ? '+' : ''}{r.roi.toFixed(1)}%</span></td>
+                  <td className="td-right" style={{ whiteSpace: 'nowrap' }}><span className={r.profit >= 0 ? 'profit-pos' : 'profit-neg'} style={{ fontSize: 11, fontWeight: 700 }}>{r.profit >= 0 ? '+' : ''}{r.profit.toLocaleString()}</span></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {settled.length > 0 && (
+        <div className="card">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)' }}>🔴 라이브 베팅 내역</div>
+            <span style={{ fontSize: 9, color: 'var(--text-muted)', background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 4, padding: '1px 6px' }}>{settled.length}건</span>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 260, overflowY: 'auto' }}>
+            {settled.slice().sort((a, b) => b.bet_date.localeCompare(a.bet_date)).slice(0, 50).map(b => (
+              <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 10, padding: '4px 6px', background: 'var(--bg-elevated)', borderRadius: 5 }}>
+                <span style={{ color: 'var(--text-muted)', flexShrink: 0 }}>{b.bet_date.slice(5)}</span>
+                <span style={{ flexShrink: 0 }}>{sportGlyph(b.sport) ?? '📋'}</span>
+                <span style={{ flex: 1, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.pick}</span>
+                <span style={{ color: 'var(--text-secondary)', flexShrink: 0 }}>@{b.odds.toFixed(2)}</span>
+                <span style={{ fontWeight: 700, flexShrink: 0, color: b.result === 'win' ? '#4ade80' : b.result === 'loss' ? '#f87171' : 'var(--text-muted)' }}>
+                  {b.result === 'win' ? `+${b.profit.toLocaleString()}` : b.result === 'loss' ? `-${b.stake.toLocaleString()}` : 'PUSH'}
+                </span>
+              </div>
+            ))}
+            {settled.length > 50 && <div style={{ fontSize: 10, color: 'var(--text-muted)', textAlign: 'center', padding: 4 }}>+ {settled.length - 50}건 더</div>}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+
 function SportPanel({ bets, sport, onDeleteRequest, leagueOverrides, onAddLeagueOverride, baseballLeagues, onAddBaseballLeague, onRenameBaseballLeague, onDeleteBaseballLeague, soccerOverrides, soccerLeagues, onAddSoccerOverride, onAddSoccerLeague, esportsOverrides, esportsLeagues, onAddEsportsOverride, onAddEsportsLeague, onChangeSport, onRenameSoccerLeague, onDeleteSoccerLeague, onRenameEsportsLeague, onDeleteEsportsLeague, basketballOverrides, basketballLeagues, onAddBasketballOverride, onAddBasketballLeague, onRenameBasketballLeague, onDeleteBasketballLeague, volleyballOverrides, volleyballLeagues, onAddVolleyballOverride, onAddVolleyballLeague, onRenameVolleyballLeague, onDeleteVolleyballLeague }: {
   bets: Bet[]; sport: typeof SPORTS[0]; onDeleteRequest: () => void
   leagueOverrides: LeagueOverride[]; onAddLeagueOverride: (keyword: string, league: string) => Promise<void>
@@ -1229,7 +1313,7 @@ export default function Stats() {
   const [sites, setSites]     = useState<Site[]>([])
   const [rateMap, setRateMap] = useState<Record<string, number>>({})
   const [period, setPeriod]   = useState<'all' | '7d' | '30d' | '90d'>('all')
-  const [activeSport, setActiveSport] = useState<Sport | 'all' | 'parlay'>('all')
+  const [activeSport, setActiveSport] = useState<Sport | 'all' | 'parlay' | 'live'>('all')
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null)
   const [leagueOverrides, setLeagueOverrides] = useState<LeagueOverride[]>([])
   const [baseballLeagues, setBaseballLeagues] = useState<string[]>([])
@@ -1463,7 +1547,9 @@ export default function Stats() {
     return dayjs(b.bet_date).isAfter(dayjs().subtract(days, 'day'))
   })
   // 두폴(합산) 베팅은 개별 다리로 중복 집계되지 않도록 일반/종목별 통계에서는 제외하고, 별도로 집계한다.
-  const periodFiltered = periodAll.filter(b => b.parlay_group === null)
+  // 라이브 체크된 베팅도 각 종목/전체 통계에서 제외하고 "라이브" 탭에서만 별도로 집계한다.
+  const periodFiltered = periodAll.filter(b => b.parlay_group === null && !b.is_live)
+  const liveBets = periodAll.filter(b => b.is_live)
   // 두폴은 leg1에만 실제 stake/profit이 기록되므로 leg1만 뽑아서 "다폴 한 건" 단위로 집계
   const parlayLegs = periodAll.filter(b => b.parlay_group !== null && b.parlay_leg === 1)
   const parlayStats = calcStats(parlayLegs)
@@ -1510,6 +1596,7 @@ export default function Stats() {
           <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
             {([
               { value: 'all' as const, label: '전체', emoji: '📊', cnt: settled.length },
+              { value: 'live' as const, label: '라이브', emoji: '🔴', cnt: liveBets.filter(b => b.result !== 'pending').length },
               { value: 'soccer' as const, label: '축구', emoji: '⚽', cnt: settled.filter(b => b.sport === 'soccer').length },
               { value: 'baseball' as const, label: '야구', emoji: '⚾', cnt: settled.filter(b => b.sport === 'baseball').length },
               { value: 'basketball' as const, label: '농구', emoji: '🏀', cnt: settled.filter(b => b.sport === 'basketball').length },
@@ -1521,7 +1608,7 @@ export default function Stats() {
               <button key={s.value}
                 onClick={() => setActiveSport(s.value)}
                 style={{ padding: '10px 20px', borderRadius: 8, border: activeSport === s.value ? '2px solid var(--gold)' : '1px solid var(--border)', background: activeSport === s.value ? 'var(--gold-bg)' : 'var(--bg-card)', color: activeSport === s.value ? 'var(--gold)' : 'var(--text-secondary)', fontWeight: 700, fontSize: 14, cursor: 'pointer', fontFamily: 'var(--font-body)', transition: 'all 0.15s' }}>
-                {s.value === 'parlay' ? <span style={{ fontSize: 17 }}>{s.emoji}</span> : (sportGlyph(s.value as Sport, '1.3em') ?? <span style={{ fontSize: 17 }}>{s.emoji}</span>)} {s.label} <span style={{ opacity: 0.7, fontSize: 12 }}>({s.cnt})</span>
+                {(s.value === 'parlay' || s.value === 'live') ? <span style={{ fontSize: 17 }}>{s.emoji}</span> : (sportGlyph(s.value as Sport, '1.3em') ?? <span style={{ fontSize: 17 }}>{s.emoji}</span>)} {s.label} <span style={{ opacity: 0.7, fontSize: 12 }}>({s.cnt})</span>
               </button>
             ))}
           </div>
@@ -1687,7 +1774,13 @@ export default function Stats() {
               )}
             </div>
           )}
-          {activeSport !== 'all' && activeSport !== 'parlay' && (
+          {activeSport === 'live' && (
+            <LivePanel
+              bets={liveBets}
+              onDeleteRequest={() => setDeleteTarget({ label: '라이브', emoji: '🔴', matchFn: b => b.is_live === true })}
+            />
+          )}
+          {activeSport !== 'all' && activeSport !== 'parlay' && activeSport !== 'live' && (
             <SportPanel
               bets={periodFiltered}
               sport={SPORTS.find(s => s.value === activeSport)!}
@@ -1724,7 +1817,7 @@ export default function Stats() {
               onDeleteVolleyballLeague={deleteVolleyballLeague}
               onDeleteRequest={() => {
                 const sp = SPORTS.find(s => s.value === activeSport)!
-                setDeleteTarget({ label: sp.label, emoji: sp.emoji, matchFn: b => b.sport === sp.value && b.parlay_group === null })
+                setDeleteTarget({ label: sp.label, emoji: sp.emoji, matchFn: b => b.sport === sp.value && b.parlay_group === null && !b.is_live })
               }}
             />
           )}

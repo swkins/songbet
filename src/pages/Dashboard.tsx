@@ -669,6 +669,13 @@ function InlineBetEditForm({ bet, site, onClose, onSave, baseballOverrides, socc
           onClick={submit} disabled={!content || oddsV <= 0 || stakeN <= 0 || submitting}>
           {submitting ? '저장중...' : '수정 저장'}
         </button>
+        <button type="button" onClick={() => setIsLive(v => !v)} style={{
+          padding: '7px 10px', borderRadius: 'var(--radius-sm)', fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-body)', display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0,
+          border: `1px solid ${isLive ? 'var(--red-border)' : 'var(--border)'}`,
+          background: isLive ? 'var(--red-bg)' : 'var(--bg-elevated)',
+          color: isLive ? 'var(--red)' : 'var(--text-secondary)' }}>
+          🔴 라이브
+        </button>
         <button className="btn btn-ghost" style={{ padding: '7px 10px' }} onClick={onClose}><X size={12} /></button>
       </div>
     </div>
@@ -789,13 +796,11 @@ type EsportsBo = 'bo1' | 'bo3' | 'bo5'
 const ESPORTS_BO3_OPTIONS = [
   { key: 'h15', label: '1.5 플핸' },
   { key: 'hm15', label: '-1.5 핸디캡' },
-  { key: 'so25', label: '2.5 세트오버' },
   { key: 'ml', label: '일반승' },
 ]
 const ESPORTS_BO5_OPTIONS = [
   { key: 'hm15', label: '-1.5 핸디캡' },
   { key: 'h15', label: '1.5 플핸' },
-  { key: 'so25', label: '2.5 세트오버' },
   { key: 'so35', label: '3.5 세트오버' },
   { key: 'ml', label: '일반승' },
 ]
@@ -979,7 +984,6 @@ function SportMatchPicker({ sport, leagues, teams, onAddLeague, onRenameLeague, 
       if (option === 'ml') match = `${team} (${boLabel})`
       else if (option === 'h15') match = `${team} 1.5 (${boLabel})`
       else if (option === 'hm15') match = `${team} -1.5 (${boLabel})`
-      else if (option === 'so25') match = `${team} 2.5세트오버 (${boLabel})`
       else if (option === 'so35') match = `${team} 3.5세트오버 (${boLabel})`
     }
     if (match) onResult(match, league)
@@ -1255,6 +1259,15 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
           onClick={submit} disabled={!content || (mode === 'multi' && !multiFilled) || oddsV <= 0 || stakeN <= 0 || submitting}>
           등록
         </button>
+        {mode === 'single' && (
+          <button type="button" onClick={() => setIsLive(v => !v)} style={{
+            padding: '7px 10px', borderRadius: 'var(--radius-sm)', fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-body)', display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0,
+            border: `1px solid ${isLive ? 'var(--red-border)' : 'var(--border)'}`,
+            background: isLive ? 'var(--red-bg)' : 'var(--bg-elevated)',
+            color: isLive ? 'var(--red)' : 'var(--text-secondary)' }}>
+            🔴 라이브
+          </button>
+        )}
         <button className="btn btn-ghost" style={{ padding: '7px 10px' }} onClick={onClose}><X size={12} /></button>
       </div>
     </div>
