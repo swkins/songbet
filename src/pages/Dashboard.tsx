@@ -2,7 +2,7 @@ import { useEffect, useState, useRef, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
 import { logAction } from '../lib/logger'
 import type { Bet, Site, Sport, Market, BetResult, GameRolling } from '../types'
-import { inferBaseballLeague, inferSoccerLeague, inferLeagueByKeyword, buildLeagueCandidates, suggestLeagueCandidates, type LeagueOverride, type LeagueCandidate } from '../lib/league'
+import { inferBaseballLeague, inferSoccerLeague, inferLeagueByKeyword, buildLeagueCandidates, suggestLeagueCandidates, koCompare, type LeagueOverride, type LeagueCandidate } from '../lib/league'
 import { buildTeamCandidates, suggestTeamCandidates, getTeamInsight, getEsportsLeague, type TeamCandidate, type BetLite } from '../lib/teamInsight'
 import { fetchTodayTomorrowLolMatches, LEAGUES as LOL_LEAGUES, type UpcomingLolMatch } from '../lib/lolSchedule'
 import { sportGlyph } from '../components/SportIcons'
@@ -921,19 +921,23 @@ const LEG_MARKS = ['①', '②', '③', '④']
 type StructuredSport = 'soccer' | 'baseball' | 'basketball'
 const STRUCTURED_SPORTS: StructuredSport[] = ['soccer', 'baseball', 'basketball']
 const SOCCER_BET_OPTIONS = [
-  { key: 'ml', label: '일반승' },
+  { key: 'hm15', label: '-1.5 핸디캡' },
   { key: 'h05', label: '0.5 플핸' },
   { key: 'h15', label: '1.5 플핸' },
 ]
-const BASEBALL_BET_OPTIONS = [
+// 야구는 핸디캡 / 팀오버를 화면에서 좌우로 분리해서 보여준다 (BASEBALL_HCAP_OPTIONS = 좌측, BASEBALL_OVER_OPTIONS = 우측)
+const BASEBALL_HCAP_OPTIONS = [
   { key: 'h15', label: '핸디캡 1.5' },
   { key: 'h25', label: '핸디캡 2.5' },
+]
+const BASEBALL_OVER_OPTIONS = [
   { key: 'o15', label: '팀오버 1.5' },
   { key: 'o25', label: '팀오버 2.5' },
   { key: 'o35', label: '팀오버 3.5' },
   { key: 'o45', label: '팀오버 4.5' },
+  { key: 'o55', label: '팀오버 5.5' },
 ]
-const BASKETBALL_HCAP_LINES = [4.5, 5.5, 6.5, 7.5, 8.5, 9.5, 10.5, 11.5, 12.5, 13.5]
+const BASKETBALL_HCAP_LINES = [4.5, 5.5, 6.5, 7.5, 8.5, 9.5, 10.5, 11.5, 12.5, 13.5, 14.5]
 
 function StructuredPickButton({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
   return (
@@ -946,95 +950,187 @@ function StructuredPickButton({ label, active, onClick }: { label: string; activ
   )
 }
 
+/* ── 드롭다운 선택 컴포넌트 (리그/팀 공용) ──
+   가나다순 정렬 + 열었을 때 맨 위에 "새 항목 추가" 버튼 고정.
+   onRename/onDelete를 넘기면 각 항목에 수정/삭제 아이콘이 추가로 표시된다 (팀 전용, 리그는 추가만 가능). */
+function ManagedSelect({ label, value, onSelect, items, onAdd, onRename, onDelete, addLabel, emptyText }: {
+  label?: string
+  value: string
+  onSelect: (name: string) => void
+  items: string[]
+  onAdd: (name: string) => Promise<void>
+  onRename?: (oldName: string, newName: string) => Promise<void>
+  onDelete?: (name: string) => Promise<void>
+  addLabel: string
+  emptyText?: string
+}) {
+  const [open, setOpen] = useState(false)
+  const [adding, setAdding] = useState(false)
+  const [addValue, setAddValue] = useState('')
+  const [editing, setEditing] = useState<string | null>(null)
+  const [editValue, setEditValue] = useState('')
+  const [busy, setBusy] = useState(false)
+  const boxRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    function onDocClick(e: MouseEvent) {
+      if (boxRef.current && !boxRef.current.contains(e.target as Node)) { setOpen(false); setAdding(false); setEditing(null) }
+    }
+    document.addEventListener('mousedown', onDocClick)
+    return () => document.removeEventListener('mousedown', onDocClick)
+  }, [])
+
+  const sorted = [...items].sort(koCompare)
+
+  async function submitAdd() {
+    const name = addValue.trim(); if (!name || busy) return
+    setBusy(true)
+    await onAdd(name)
+    setBusy(false); setAddValue(''); setAdding(false); setOpen(false)
+    onSelect(name)
+  }
+  async function submitEdit(oldName: string) {
+    const name = editValue.trim(); if (!name || busy || !onRename) return
+    setBusy(true)
+    await onRename(oldName, name)
+    setBusy(false); setEditing(null)
+    if (value === oldName) onSelect(name)
+  }
+  async function submitDelete(name: string) {
+    if (busy || !onDelete) return
+    if (!confirm(`"${name}" 항목을 삭제할까요?\n(기존에 이미 저장된 베팅 기록에는 영향 없음)`)) return
+    setBusy(true)
+    await onDelete(name)
+    setBusy(false)
+    if (value === name) onSelect('')
+  }
+
+  return (
+    <div ref={boxRef} style={{ position: 'relative' }}>
+      {label && <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 3, fontWeight: 700 }}>{label}</div>}
+      <button type="button" onClick={() => setOpen(o => !o)} className="form-input" style={{
+        fontSize: 11, padding: '5px 8px', width: '100%', textAlign: 'left', cursor: 'pointer',
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-elevated)',
+      }}>
+        <span style={{ color: value ? 'var(--text-primary)' : 'var(--text-muted)' }}>{value || '선택'}</span>
+        <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>▾</span>
+      </button>
+      {open && (
+        <div style={{
+          position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 20, marginTop: 2,
+          background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 6,
+          boxShadow: '0 4px 14px rgba(0,0,0,0.3)', maxHeight: 240, overflowY: 'auto',
+        }}>
+          {adding ? (
+            <div style={{ display: 'flex', gap: 4, padding: 6, borderBottom: '1px solid var(--border-light)' }}>
+              <input autoFocus className="form-input" value={addValue} onChange={e => setAddValue(e.target.value)}
+                placeholder={addLabel} onKeyDown={e => e.key === 'Enter' && submitAdd()}
+                style={{ fontSize: 10, padding: '4px 6px', flex: 1 }} />
+              <button type="button" onClick={submitAdd} disabled={!addValue.trim() || busy}
+                style={{ border: '1px solid var(--gold-border)', background: 'var(--gold-bg)', color: 'var(--gold)', borderRadius: 5, cursor: 'pointer', flexShrink: 0, display: 'flex', padding: '4px 6px' }}><Check size={11} /></button>
+              <button type="button" onClick={() => { setAdding(false); setAddValue('') }}
+                style={{ border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-secondary)', borderRadius: 5, cursor: 'pointer', flexShrink: 0, display: 'flex', padding: '4px 6px' }}><X size={11} /></button>
+            </div>
+          ) : (
+            <button type="button" onClick={() => setAdding(true)} style={{
+              width: '100%', textAlign: 'left', padding: '7px 8px', fontSize: 10, fontWeight: 700, color: 'var(--gold)',
+              background: 'none', border: 'none', borderBottom: '1px solid var(--border-light)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4,
+            }}><Plus size={11} /> {addLabel}</button>
+          )}
+
+          {sorted.length === 0 && !adding && (
+            <div style={{ padding: '10px 8px', fontSize: 10, color: 'var(--text-muted)', textAlign: 'center' }}>{emptyText ?? '등록된 항목 없음'}</div>
+          )}
+
+          {sorted.map(name => editing === name ? (
+            <div key={name} style={{ display: 'flex', gap: 4, padding: '5px 6px', alignItems: 'center' }}>
+              <input autoFocus className="form-input" value={editValue} onChange={e => setEditValue(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && submitEdit(name)} style={{ fontSize: 10, padding: '4px 6px', flex: 1 }} />
+              <button type="button" onClick={() => submitEdit(name)} disabled={busy} style={{ border: 'none', background: 'none', color: 'var(--green)', cursor: 'pointer', display: 'flex', padding: 2 }}><Check size={12} /></button>
+              <button type="button" onClick={() => setEditing(null)} style={{ border: 'none', background: 'none', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex', padding: 2 }}><X size={12} /></button>
+            </div>
+          ) : (
+            <div key={name} onClick={() => { onSelect(name); setOpen(false) }} style={{
+              display: 'flex', alignItems: 'center', gap: 4, padding: '6px 8px', cursor: 'pointer', fontSize: 11,
+              background: value === name ? 'var(--gold-bg)' : 'transparent', color: value === name ? 'var(--gold)' : 'var(--text-primary)',
+            }}>
+              <span style={{ flex: 1 }}>{name}</span>
+              {onRename && (
+                <button type="button" onClick={e => { e.stopPropagation(); setEditing(name); setEditValue(name) }}
+                  style={{ border: 'none', background: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', padding: 2 }}><Pencil size={11} /></button>
+              )}
+              {onDelete && (
+                <button type="button" onClick={e => { e.stopPropagation(); submitDelete(name) }}
+                  style={{ border: 'none', background: 'none', color: 'var(--red)', cursor: 'pointer', display: 'flex', padding: 2 }}><Trash2 size={11} /></button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // 리그를 등록 → 그 리그에 팀을 등록 → 팀을 선택해서 그 팀을 대상으로 베팅 (LOL 방식과 동일한 흐름).
 // 경기 내용을 직접 타이핑하지 않고 전부 선택으로만 구성해 market 오분류(예: "원정"/"홈" 접미사로 인한 오분류)를 원천 차단한다.
-function SportMatchPicker({ sport, leagues, teams, onAddLeague, onAddTeam, onResult }: {
+function SportMatchPicker({ sport, leagues, teams, onAddLeague, onAddTeam, onRenameTeam, onDeleteTeam, onResult }: {
   sport: StructuredSport
   leagues: string[]; teams: { league: string; name: string }[]
   onAddLeague: (name: string) => Promise<void>
   onAddTeam: (league: string, name: string) => Promise<void>
+  onRenameTeam: (league: string, oldName: string, newName: string) => Promise<void>
+  onDeleteTeam: (league: string, name: string) => Promise<void>
   onResult: (match: string, league: string) => void
 }) {
   const [league, setLeague] = useState('')
   const [team, setTeam] = useState('')
   const [side, setSide] = useState<'홈' | '원정'>('홈')
   const [option, setOption] = useState('')
-  const [newLeague, setNewLeague] = useState('')
-  const [newTeam, setNewTeam] = useState('')
-  const [savingLeague, setSavingLeague] = useState(false)
-  const [savingTeam, setSavingTeam] = useState(false)
 
   useEffect(() => { setTeam(''); setOption('') }, [league])
 
-  const teamOptions = teams.filter(t => t.league === league)
+  const teamOptions = teams.filter(t => t.league === league).map(t => t.name)
 
   useEffect(() => {
     if (!team || !option) return
     let match = ''
     if (sport === 'soccer') {
-      if (option === 'ml') match = `${team} ${side}`
+      if (option === 'hm15') match = `${team} ${side} -1.5`
       else if (option === 'h05') match = `${team} ${side} 0.5`
       else if (option === 'h15') match = `${team} ${side} 1.5`
     } else if (sport === 'baseball') {
       const hcapLine: Record<string, string> = { h15: '1.5', h25: '2.5' }
-      const overLine: Record<string, string> = { o15: '1.5', o25: '2.5', o35: '3.5', o45: '4.5' }
-      if (hcapLine[option]) match = `${team} ${hcapLine[option]}`
-      else if (overLine[option]) match = `${team} ${overLine[option]}오버`
+      const overLine: Record<string, string> = { o15: '1.5', o25: '2.5', o35: '3.5', o45: '4.5', o55: '5.5' }
+      if (hcapLine[option]) match = `${team} ${side} ${hcapLine[option]}`
+      else if (overLine[option]) match = `${team} ${side} ${overLine[option]}오버`
     } else if (sport === 'basketball') {
       match = `${team} ${option}`
     }
     if (match) onResult(match, league)
   }, [team, option, side, sport, league])
 
-  async function submitAddLeague() {
-    const name = newLeague.trim(); if (!name || savingLeague) return
-    setSavingLeague(true)
-    await onAddLeague(name)
-    setNewLeague(''); setSavingLeague(false); setLeague(name)
-  }
-  async function submitAddTeam() {
-    const name = newTeam.trim(); if (!name || !league || savingTeam) return
-    setSavingTeam(true)
-    await onAddTeam(league, name)
-    setNewTeam(''); setSavingTeam(false); setTeam(name)
-  }
-
   const options = sport === 'soccer' ? SOCCER_BET_OPTIONS
-    : sport === 'baseball' ? BASEBALL_BET_OPTIONS
-    : BASKETBALL_HCAP_LINES.map(l => ({ key: String(l), label: `핸디캡 ${l}` }))
+    : sport === 'basketball' ? BASKETBALL_HCAP_LINES.map(l => ({ key: String(l), label: `핸디캡 ${l}` }))
+    : []
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 6 }}>
-      <div>
-        <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 3, fontWeight: 700 }}>리그</div>
-        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-          {leagues.map(l => <StructuredPickButton key={l} label={l} active={league === l} onClick={() => setLeague(l)} />)}
-        </div>
-        <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
-          <input className="form-input" placeholder="새 리그 추가" value={newLeague} onChange={e => setNewLeague(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && submitAddLeague()} style={{ fontSize: 10, padding: '4px 6px', flex: 1 }} />
-          <button type="button" onClick={submitAddLeague} disabled={!newLeague.trim() || savingLeague}
-            style={{ fontSize: 10, padding: '4px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-secondary)', cursor: 'pointer', flexShrink: 0 }}>+추가</button>
-        </div>
-      </div>
+      <ManagedSelect
+        label="리그" value={league} onSelect={setLeague} items={leagues}
+        onAdd={onAddLeague} addLabel="새 리그 추가" emptyText="등록된 리그 없음"
+      />
 
       {league && (
-        <div>
-          <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 3, fontWeight: 700 }}>팀</div>
-          <select className="form-input" value={team} onChange={e => setTeam(e.target.value)} style={{ fontSize: 11, padding: '5px 8px', width: '100%' }}>
-            <option value="">팀 선택</option>
-            {teamOptions.map(t => <option key={t.name} value={t.name}>{t.name}</option>)}
-          </select>
-          <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
-            <input className="form-input" placeholder="새 팀 추가" value={newTeam} onChange={e => setNewTeam(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && submitAddTeam()} style={{ fontSize: 10, padding: '4px 6px', flex: 1 }} />
-            <button type="button" onClick={submitAddTeam} disabled={!newTeam.trim() || savingTeam}
-              style={{ fontSize: 10, padding: '4px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-secondary)', cursor: 'pointer', flexShrink: 0 }}>+추가</button>
-          </div>
-        </div>
+        <ManagedSelect
+          label="팀" value={team} onSelect={setTeam} items={teamOptions}
+          onAdd={name => onAddTeam(league, name)}
+          onRename={(oldName, newName) => onRenameTeam(league, oldName, newName)}
+          onDelete={name => onDeleteTeam(league, name)}
+          addLabel="새 팀 추가" emptyText="등록된 팀 없음"
+        />
       )}
 
-      {sport === 'soccer' && team && (
+      {(sport === 'soccer' || sport === 'baseball') && team && (
         <div style={{ display: 'flex', gap: 4 }}>
           {(['홈', '원정'] as const).map(s => (
             <button key={s} type="button" onClick={() => setSide(s)} style={{
@@ -1046,7 +1142,24 @@ function SportMatchPicker({ sport, leagues, teams, onAddLeague, onAddTeam, onRes
         </div>
       )}
 
-      {team && (
+      {team && sport === 'baseball' && (
+        <div style={{ display: 'flex', gap: 10 }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 3, fontWeight: 700 }}>핸디캡</div>
+            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+              {BASEBALL_HCAP_OPTIONS.map(o => <StructuredPickButton key={o.key} label={o.label} active={option === o.key} onClick={() => setOption(o.key)} />)}
+            </div>
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 3, fontWeight: 700 }}>팀오버</div>
+            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+              {BASEBALL_OVER_OPTIONS.map(o => <StructuredPickButton key={o.key} label={o.label} active={option === o.key} onClick={() => setOption(o.key)} />)}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {team && sport !== 'baseball' && (
         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
           {options.map(o => <StructuredPickButton key={o.key} label={o.label} active={option === o.key} onClick={() => setOption(o.key)} />)}
         </div>
@@ -1055,7 +1168,7 @@ function SportMatchPicker({ sport, leagues, teams, onAddLeague, onAddTeam, onRes
   )
 }
 
-function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, baseballOverrides, soccerOverrides, basketballOverrides, volleyballOverrides, teamCandidates, allBetsHistory, leagueCandidates, soccerLeagues, baseballLeagues, basketballLeagues, soccerTeams, baseballTeams, basketballTeams, onAddSoccerLeague, onAddBaseballLeague, onAddBasketballLeague, onAddSoccerTeam, onAddBaseballTeam, onAddBasketballTeam }: {
+function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, baseballOverrides, soccerOverrides, basketballOverrides, volleyballOverrides, teamCandidates, allBetsHistory, leagueCandidates, soccerLeagues, baseballLeagues, basketballLeagues, soccerTeams, baseballTeams, basketballTeams, onAddSoccerLeague, onAddBaseballLeague, onAddBasketballLeague, onAddSoccerTeam, onAddBaseballTeam, onAddBasketballTeam, onRenameSoccerTeam, onDeleteSoccerTeam, onRenameBaseballTeam, onDeleteBaseballTeam, onRenameBasketballTeam, onDeleteBasketballTeam }: {
   site: Site; onClose: () => void; defaultSport: string
   onBet: (sport: string, content: string, odds: number, amount: number, isLive: boolean, league: string) => Promise<boolean>
   onMultiBet: (sport: string, contents: string[], odds: number, amount: number, leagues: string[]) => Promise<boolean>
@@ -1066,6 +1179,9 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
   soccerTeams: { league: string; name: string }[]; baseballTeams: { league: string; name: string }[]; basketballTeams: { league: string; name: string }[]
   onAddSoccerLeague: (name: string) => Promise<void>; onAddBaseballLeague: (name: string) => Promise<void>; onAddBasketballLeague: (name: string) => Promise<void>
   onAddSoccerTeam: (league: string, name: string) => Promise<void>; onAddBaseballTeam: (league: string, name: string) => Promise<void>; onAddBasketballTeam: (league: string, name: string) => Promise<void>
+  onRenameSoccerTeam: (league: string, oldName: string, newName: string) => Promise<void>; onDeleteSoccerTeam: (league: string, name: string) => Promise<void>
+  onRenameBaseballTeam: (league: string, oldName: string, newName: string) => Promise<void>; onDeleteBaseballTeam: (league: string, name: string) => Promise<void>
+  onRenameBasketballTeam: (league: string, oldName: string, newName: string) => Promise<void>; onDeleteBasketballTeam: (league: string, name: string) => Promise<void>
 }) {
   const isusd = site.currency === 'usd'; const unit = isusd ? '$' : '원'
   const defaultAmount = site.default_stake > 0 ? String(site.default_stake) : (isusd ? '5' : '10000')
@@ -1187,6 +1303,8 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
           teams={sport === 'soccer' ? soccerTeams : sport === 'baseball' ? baseballTeams : basketballTeams}
           onAddLeague={sport === 'soccer' ? onAddSoccerLeague : sport === 'baseball' ? onAddBaseballLeague : onAddBasketballLeague}
           onAddTeam={sport === 'soccer' ? onAddSoccerTeam : sport === 'baseball' ? onAddBaseballTeam : onAddBasketballTeam}
+          onRenameTeam={sport === 'soccer' ? onRenameSoccerTeam : sport === 'baseball' ? onRenameBaseballTeam : onRenameBasketballTeam}
+          onDeleteTeam={sport === 'soccer' ? onDeleteSoccerTeam : sport === 'baseball' ? onDeleteBaseballTeam : onDeleteBasketballTeam}
           onResult={(m, l) => { setContent(m); setLeague(l); setLeagueTouched(true) }}
         />
       ) : (
@@ -1490,6 +1608,34 @@ export default function Dashboard() {
   async function addBasketballTeam(league: string, name: string) {
     await supabase.from('basketball_teams').upsert({ league, name }, { onConflict: 'league,name', ignoreDuplicates: true })
     setBasketballTeams(p => p.some(t => t.league === league && t.name === name) ? p : [...p, { league, name }])
+  }
+  // 팀 이름 수정/삭제 — 등록 목록(soccer_teams 등)만 갱신. 이미 저장된 베팅의 match 문자열은 자유 입력 텍스트라 소급 반영하지 않음.
+  async function renameSoccerTeam(league: string, oldName: string, newName: string) {
+    const name = newName.trim(); if (!name || name === oldName) return
+    await supabase.from('soccer_teams').update({ name }).eq('league', league).eq('name', oldName)
+    setSoccerTeams(p => p.map(t => (t.league === league && t.name === oldName) ? { league, name } : t))
+  }
+  async function deleteSoccerTeam(league: string, name: string) {
+    await supabase.from('soccer_teams').delete().eq('league', league).eq('name', name)
+    setSoccerTeams(p => p.filter(t => !(t.league === league && t.name === name)))
+  }
+  async function renameBaseballTeam(league: string, oldName: string, newName: string) {
+    const name = newName.trim(); if (!name || name === oldName) return
+    await supabase.from('baseball_teams').update({ name }).eq('league', league).eq('name', oldName)
+    setBaseballTeams(p => p.map(t => (t.league === league && t.name === oldName) ? { league, name } : t))
+  }
+  async function deleteBaseballTeam(league: string, name: string) {
+    await supabase.from('baseball_teams').delete().eq('league', league).eq('name', name)
+    setBaseballTeams(p => p.filter(t => !(t.league === league && t.name === name)))
+  }
+  async function renameBasketballTeam(league: string, oldName: string, newName: string) {
+    const name = newName.trim(); if (!name || name === oldName) return
+    await supabase.from('basketball_teams').update({ name }).eq('league', league).eq('name', oldName)
+    setBasketballTeams(p => p.map(t => (t.league === league && t.name === oldName) ? { league, name } : t))
+  }
+  async function deleteBasketballTeam(league: string, name: string) {
+    await supabase.from('basketball_teams').delete().eq('league', league).eq('name', name)
+    setBasketballTeams(p => p.filter(t => !(t.league === league && t.name === name)))
   }
   const totalRolling     = (s: Site) => (s.last_deposit ?? 0) + (s.point_deposit ?? 0)
   const depositRemaining = (s: Site) => Math.max(0, totalRolling(s) - (s.deposit_bet_done ?? 0))
@@ -2140,7 +2286,7 @@ export default function Dashboard() {
                           ) : openFormType === 'game' ? (
                             <GameRollingForm site={site} onClose={() => setOpenFormSiteId(null)} onSubmit={amt => submitGameRolling(site, amt)} />
                           ) : (
-                            <SingleBetForm site={site} defaultSport={pending.slice(-1)[0]?.sport ?? 'esports'} onClose={() => setOpenFormSiteId(null)} onBet={(sp,ct,od,amt,lv,lg) => submitBet(site,sp,ct,od,amt,lv,lg)} onMultiBet={(sp,cs,od,amt,lgs) => submitMultiBet(site,sp,cs,od,amt,lgs)} baseballOverrides={baseballOverrides} soccerOverrides={soccerOverrides} basketballOverrides={basketballOverrides} volleyballOverrides={volleyballOverrides} teamCandidates={teamCandidates} allBetsHistory={allBetsHistory} leagueCandidates={leagueCandidates} soccerLeagues={soccerLeagues} baseballLeagues={baseballLeagues} basketballLeagues={basketballLeagues} soccerTeams={soccerTeams} baseballTeams={baseballTeams} basketballTeams={basketballTeams} onAddSoccerLeague={addSoccerLeague} onAddBaseballLeague={addBaseballLeague} onAddBasketballLeague={addBasketballLeague} onAddSoccerTeam={addSoccerTeam} onAddBaseballTeam={addBaseballTeam} onAddBasketballTeam={addBasketballTeam} />
+                            <SingleBetForm site={site} defaultSport={pending.slice(-1)[0]?.sport ?? 'esports'} onClose={() => setOpenFormSiteId(null)} onBet={(sp,ct,od,amt,lv,lg) => submitBet(site,sp,ct,od,amt,lv,lg)} onMultiBet={(sp,cs,od,amt,lgs) => submitMultiBet(site,sp,cs,od,amt,lgs)} baseballOverrides={baseballOverrides} soccerOverrides={soccerOverrides} basketballOverrides={basketballOverrides} volleyballOverrides={volleyballOverrides} teamCandidates={teamCandidates} allBetsHistory={allBetsHistory} leagueCandidates={leagueCandidates} soccerLeagues={soccerLeagues} baseballLeagues={baseballLeagues} basketballLeagues={basketballLeagues} soccerTeams={soccerTeams} baseballTeams={baseballTeams} basketballTeams={basketballTeams} onAddSoccerLeague={addSoccerLeague} onAddBaseballLeague={addBaseballLeague} onAddBasketballLeague={addBasketballLeague} onAddSoccerTeam={addSoccerTeam} onAddBaseballTeam={addBaseballTeam} onAddBasketballTeam={addBasketballTeam} onRenameSoccerTeam={renameSoccerTeam} onDeleteSoccerTeam={deleteSoccerTeam} onRenameBaseballTeam={renameBaseballTeam} onDeleteBaseballTeam={deleteBaseballTeam} onRenameBasketballTeam={renameBasketballTeam} onDeleteBasketballTeam={deleteBasketballTeam} />
                           )}
                         </div>
                       )}

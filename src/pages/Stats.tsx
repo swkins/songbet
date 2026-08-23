@@ -21,6 +21,45 @@ const MARKET_LABELS: Record<Market, string> = {
   moneyline:'승패', handicap:'핸디캡', over:'오버', under:'언더', correct_score:'정확한스코어', other:'기타',
 }
 
+// ─── 종목별 룰북 요약 (통계 탭 상단 표시용) ───────────────────────────
+const RULEBOOK_SUMMARY: Partial<Record<Sport, string[]>> = {
+  soccer: [
+    '정배 1.39 이하 → 정배 -1.5 핸디캡 (테스트, 배당 1.40~1.99)',
+    '정배 1.40~1.79 → 반대쪽 +1.5 핸디캡 (배당 1.40~1.99)',
+    '정배 1.80 이상 → 반대쪽 +0.5 핸디캡 (배당 1.70~1.99)',
+  ],
+  baseball: [
+    '언오버 기준점 8.5 (MLB 최빈값, 전 리그 공통 적용)',
+    '8.5 이하(언더 정배·투수전) → 역배팀 런라인: +2.5 우선 → 1.40 미만이면 +1.5로 좁힘 (배당 1.40~1.99)',
+    '8.5 초과(오버 정배·타격전) → 역배팀 팀득점 오버: 최저 라인부터 1.40~1.99 될 때까지 한 단계씩 상향',
+  ],
+  basketball: [
+    'NBA 기준, 정배 방향 확인 후 언더독 핸디캡 +4.5 ~ +14.5 범위 탐색',
+    '배당이 1.90에 가장 가까운 라인 선택 (밴드 1.40~1.99 내)',
+  ],
+  esports: [
+    'BO3, 모든 리그·상시 적용',
+    '언더독 +1.5 배당 1.40~1.99 → 그대로 진입',
+    '언더독 +1.5 배당 2.00 이상 → 정배 -1.5(2:0 스윕), 배당 1.40~1.99 필요',
+    '언더독 +1.5 배당 1.40 미만(박빙) → 총 세트 2.5 오버 (테스트, 배당 1.40~1.99)',
+  ],
+}
+
+function RulebookSummaryCard({ sport }: { sport: Sport }) {
+  const lines = RULEBOOK_SUMMARY[sport]
+  if (!lines) return null
+  return (
+    <div style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 8, padding: '10px 14px', marginBottom: 4 }}>
+      <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 6, letterSpacing: '0.3px' }}>📋 룰북 요약 · 전 종목 공통 배당 1.40~1.99</div>
+      {lines.map((l, i) => (
+        <div key={i} style={{ fontSize: 11, color: 'var(--text-primary)', lineHeight: 1.7, paddingLeft: 12, position: 'relative' }}>
+          <span style={{ position: 'absolute', left: 0, color: 'var(--text-muted)' }}>·</span>{l}
+        </div>
+      ))}
+    </div>
+  )
+}
+
 // ─── 공통 유틸 ─────────────────────────────────────────────────────
 function calcStats(bets: Bet[]) {
   const settled = bets.filter(b => b.result !== 'pending')
@@ -1094,6 +1133,7 @@ function SportPanel({ bets, sport, onDeleteRequest, leagueOverrides, onAddLeague
 
   if (stats.total === 0) return (
     <div>
+      <RulebookSummaryCard sport={sport.value} />
       <div style={{ padding: '24px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>결과 처리된 베팅이 없습니다</div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
         <button onClick={onDeleteRequest} className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--red)', borderColor: 'var(--red-border)', display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -1110,6 +1150,7 @@ function SportPanel({ bets, sport, onDeleteRequest, leagueOverrides, onAddLeague
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <RulebookSummaryCard sport={sport.value} />
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'flex-start' }}>
         {[
           { label: '승률', value: `${stats.winRate.toFixed(1)}%`, sub: `${stats.wins.length}W ${stats.losses.length}L`, cls: stats.winRate >= 50 ? 'profit-pos' : 'profit-neg' },
@@ -1422,9 +1463,20 @@ export default function Stats() {
   })
   // 두폴(합산) 베팅은 개별 다리로 중복 집계되지 않도록 일반/종목별 통계에서는 제외하고, 별도로 집계한다.
   const periodFiltered = periodAll.filter(b => b.parlay_group === null)
-  // 두폴은 leg1에만 실제 stake/profit이 기록되므로 leg1만 뽑아서 "두폴 한 건" 단위로 집계
+  // 두폴은 leg1에만 실제 stake/profit이 기록되므로 leg1만 뽑아서 "다폴 한 건" 단위로 집계
   const parlayLegs = periodAll.filter(b => b.parlay_group !== null && b.parlay_leg === 1)
   const parlayStats = calcStats(parlayLegs)
+  // 그룹별 다리 수 계산 (기간 필터 기준 — 표시용) 및 전체 기준 (삭제 매칭용, 기간 무관)
+  const periodGroupLegCount: Record<string, number> = {}
+  periodAll.forEach(b => { if (b.parlay_group) periodGroupLegCount[b.parlay_group] = (periodGroupLegCount[b.parlay_group] ?? 0) + 1 })
+  const fullGroupLegCount: Record<string, number> = {}
+  bets.forEach(b => { if (b.parlay_group) fullGroupLegCount[b.parlay_group] = (fullGroupLegCount[b.parlay_group] ?? 0) + 1 })
+  const parlay2Legs = parlayLegs.filter(b => periodGroupLegCount[b.parlay_group!] === 2)
+  const parlay3Legs = parlayLegs.filter(b => periodGroupLegCount[b.parlay_group!] === 3)
+  const parlay4pLegs = parlayLegs.filter(b => (periodGroupLegCount[b.parlay_group!] ?? 0) >= 4)
+  const parlay2Stats = calcStats(parlay2Legs)
+  const parlay3Stats = calcStats(parlay3Legs)
+  const parlay4pStats = calcStats(parlay4pLegs)
 
   const stats   = calcStats(periodFiltered)
   const settled = periodFiltered.filter(b => b.result !== 'pending')
@@ -1465,7 +1517,7 @@ export default function Stats() {
               { value: 'basketball' as const, label: '농구', emoji: '🏀', cnt: settled.filter(b => b.sport === 'basketball').length },
               { value: 'volleyball' as const, label: '배구', emoji: '🏐', cnt: settled.filter(b => b.sport === 'volleyball').length },
               { value: 'hockey' as const, label: '하키', emoji: '🏒', cnt: settled.filter(b => b.sport === 'hockey').length },
-              { value: 'parlay' as const, label: '두폴', emoji: '🔗', cnt: parlayStats.total },
+              { value: 'parlay' as const, label: '다폴', emoji: '🔗', cnt: parlayStats.total },
               { value: 'all' as const, label: '전체', emoji: '📊', cnt: settled.length },
             ]).map(s => (
               <button key={s.value}
@@ -1576,44 +1628,63 @@ export default function Stats() {
             </div>
           )}
           {activeSport === 'parlay' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
               {parlayStats.total === 0 ? (
-                <div className="card"><div className="empty"><div className="empty-icon">🔗</div>결과 처리된 두폴 베팅이 없습니다</div></div>
+                <div className="card"><div className="empty"><div className="empty-icon">🔗</div>결과 처리된 다폴 베팅이 없습니다</div></div>
               ) : (
                 <>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                    {[
-                      { label: '승률', value: `${parlayStats.winRate.toFixed(1)}%`, sub: `${parlayStats.wins.length}W ${parlayStats.losses.length}L ${parlayStats.pushes.length}P`, cls: parlayStats.winRate >= 50 ? 'profit-pos' : 'profit-neg' },
-                      { label: '총 손익', value: `${parlayStats.profit >= 0 ? '+' : ''}${parlayStats.profit.toLocaleString()}`, sub: `${parlayStats.total}건`, cls: parlayStats.profit >= 0 ? 'profit-pos' : 'profit-neg' },
-                      { label: 'ROI', value: `${parlayStats.roi >= 0 ? '+' : ''}${parlayStats.roi.toFixed(1)}%`, sub: `${parlayStats.stake.toLocaleString()}`, cls: parlayStats.roi >= 0 ? 'profit-pos' : 'profit-neg' },
-                      { label: '평균 배당', value: parlayStats.avgOdds.toFixed(2), sub: '', cls: '' },
-                    ].map(t => (
-                      <div key={t.label} className="card stat-tile" style={{ flex: '1 0 120px', maxWidth: 180 }}>
-                        <div className={`stat-value ${t.cls}`}>{t.value}</div>
-                        <div className="stat-label">{t.label}</div>
-                        {t.sub && <div style={{ fontSize: 10, color: 'var(--text-secondary)', marginTop: 4 }}>{t.sub}</div>}
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="card">
-                    <div className="card-title" style={{ marginBottom: 8 }}>두폴 베팅 목록</div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                      {parlayLegs.filter(b => b.result !== 'pending').sort((a, b) => b.bet_date.localeCompare(a.bet_date)).map(b => {
-                        const legs = periodAll.filter(x => x.parlay_group === b.parlay_group).sort((x, y) => x.parlay_leg - y.parlay_leg)
-                        return (
-                          <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', background: 'var(--bg-elevated)', borderRadius: 8, fontSize: 12 }}>
-                            <span style={{ color: 'var(--text-muted)', width: 78, flexShrink: 0 }}>{b.bet_date}</span>
-                            <span style={{ flex: 1, color: 'var(--text-primary)' }}>{legs.map(l => l.match).join(' × ')}</span>
-                            <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>{b.odds.toFixed(2)}</span>
-                            <span style={{ fontFamily: 'var(--font-num)', fontWeight: 700, color: b.profit >= 0 ? 'var(--green)' : 'var(--red)' }}>
-                              {b.profit >= 0 ? '+' : ''}{b.profit.toLocaleString()}
-                            </span>
+                  {([
+                    { key: '2' as const, title: '두폴', sub: '2다리', legs: parlay2Legs, s: parlay2Stats, matches: (n: number) => n === 2 },
+                    { key: '3' as const, title: '세폴', sub: '3다리', legs: parlay3Legs, s: parlay3Stats, matches: (n: number) => n === 3 },
+                    { key: '4' as const, title: '포폴+', sub: '4다리 이상', legs: parlay4pLegs, s: parlay4pStats, matches: (n: number) => n >= 4 },
+                  ]).filter(g => g.s.total > 0).map(g => (
+                    <div key={g.key} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'flex-start' }}>
+                        <div style={{ alignSelf: 'center', marginRight: 4 }}>
+                          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>{g.title}</span>
+                          <span style={{ fontSize: 10, color: 'var(--text-secondary)', marginLeft: 5 }}>{g.sub}</span>
+                        </div>
+                        {[
+                          { label: '승률', value: `${g.s.winRate.toFixed(1)}%`, sub: `${g.s.wins.length}W ${g.s.losses.length}L ${g.s.pushes.length}P`, cls: g.s.winRate >= 50 ? 'profit-pos' : 'profit-neg' },
+                          { label: '총 손익', value: `${g.s.profit >= 0 ? '+' : ''}${g.s.profit.toLocaleString()}`, sub: `${g.s.total}건`, cls: g.s.profit >= 0 ? 'profit-pos' : 'profit-neg' },
+                          { label: 'ROI', value: `${g.s.roi >= 0 ? '+' : ''}${g.s.roi.toFixed(1)}%`, sub: `${g.s.stake.toLocaleString()}`, cls: g.s.roi >= 0 ? 'profit-pos' : 'profit-neg' },
+                          { label: '평균 배당', value: g.s.avgOdds.toFixed(2), sub: '', cls: '' },
+                        ].map(t => (
+                          <div key={t.label} className="card stat-tile" style={{ flex: '1 0 110px', maxWidth: 160, padding: '10px 12px' }}>
+                            <div className={`stat-value ${t.cls}`} style={{ fontSize: 16 }}>{t.value}</div>
+                            <div className="stat-label">{t.label}</div>
+                            {t.sub && <div style={{ fontSize: 9, color: 'var(--text-secondary)', marginTop: 2 }}>{t.sub}</div>}
                           </div>
-                        )
-                      })}
+                        ))}
+                        <button
+                          onClick={() => setDeleteTarget({
+                            label: g.title, emoji: '🔗',
+                            matchFn: b => b.parlay_group !== null && g.matches(fullGroupLegCount[b.parlay_group!] ?? 0),
+                          })}
+                          className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--red)', borderColor: 'var(--red-border)', alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: 4, padding: '6px 10px' }}>
+                          <Trash2 size={11} /> 데이터 삭제
+                        </button>
+                      </div>
+
+                      <div className="card">
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          {g.legs.filter(b => b.result !== 'pending').sort((a, b) => b.bet_date.localeCompare(a.bet_date)).map(b => {
+                            const legs = periodAll.filter(x => x.parlay_group === b.parlay_group).sort((x, y) => x.parlay_leg - y.parlay_leg)
+                            return (
+                              <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', background: 'var(--bg-elevated)', borderRadius: 8, fontSize: 12 }}>
+                                <span style={{ color: 'var(--text-muted)', width: 78, flexShrink: 0 }}>{b.bet_date}</span>
+                                <span style={{ flex: 1, color: 'var(--text-primary)' }}>{legs.map(l => l.match).join(' × ')}</span>
+                                <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>{b.odds.toFixed(2)}</span>
+                                <span style={{ fontFamily: 'var(--font-num)', fontWeight: 700, color: b.profit >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                                  {b.profit >= 0 ? '+' : ''}{b.profit.toLocaleString()}
+                                </span>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
                     </div>
-                  </div>
+                  ))}
                 </>
               )}
             </div>
