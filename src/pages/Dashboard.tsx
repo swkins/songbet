@@ -576,13 +576,25 @@ function EditFormAmountRow({ isusd, amount, setAmount }: { isusd: boolean; amoun
 }
 
 /* ── 인라인 단폴 수정폼 ── */
-function InlineBetEditForm({ bet, site, onClose, onSave, baseballOverrides, soccerOverrides, basketballOverrides, volleyballOverrides, teamCandidates, allBetsHistory, leagueCandidates }: {
+function InlineBetEditForm({ bet, site, onClose, onSave, baseballOverrides, soccerOverrides, basketballOverrides, volleyballOverrides, teamCandidates, allBetsHistory, leagueCandidates, soccerLeagues, baseballLeagues, basketballLeagues, esportsLeagues, soccerTeams, baseballTeams, basketballTeams, esportsTeams, onAddSoccerLeague, onAddBaseballLeague, onAddBasketballLeague, onAddEsportsLeague, onRenameSoccerLeague, onDeleteSoccerLeague, onRenameBaseballLeague, onDeleteBaseballLeague, onRenameBasketballLeague, onDeleteBasketballLeague, onRenameEsportsLeague, onDeleteEsportsLeague, onAddSoccerTeam, onAddBaseballTeam, onAddBasketballTeam, onAddEsportsTeam, onRenameSoccerTeam, onDeleteSoccerTeam, onRenameBaseballTeam, onDeleteBaseballTeam, onRenameBasketballTeam, onDeleteBasketballTeam, onRenameEsportsTeam, onDeleteEsportsTeam }: {
   bet: Bet; site: Site
   onClose: () => void
   onSave: (sport: string, content: string, odds: number, stake: number, isLive: boolean, league: string) => Promise<void>
   baseballOverrides: LeagueOverride[]; soccerOverrides: LeagueOverride[]
   basketballOverrides: LeagueOverride[]; volleyballOverrides: LeagueOverride[]
   teamCandidates: TeamCandidate[]; allBetsHistory: BetLite[]; leagueCandidates: LeagueCandidate[]
+  soccerLeagues: string[]; baseballLeagues: string[]; basketballLeagues: string[]; esportsLeagues: string[]
+  soccerTeams: { league: string; name: string }[]; baseballTeams: { league: string; name: string }[]; basketballTeams: { league: string; name: string }[]; esportsTeams: { league: string; name: string }[]
+  onAddSoccerLeague: (name: string) => Promise<void>; onAddBaseballLeague: (name: string) => Promise<void>; onAddBasketballLeague: (name: string) => Promise<void>; onAddEsportsLeague: (name: string) => Promise<void>
+  onRenameSoccerLeague: (oldName: string, newName: string) => Promise<void>; onDeleteSoccerLeague: (name: string) => Promise<void>
+  onRenameBaseballLeague: (oldName: string, newName: string) => Promise<void>; onDeleteBaseballLeague: (name: string) => Promise<void>
+  onRenameBasketballLeague: (oldName: string, newName: string) => Promise<void>; onDeleteBasketballLeague: (name: string) => Promise<void>
+  onRenameEsportsLeague: (oldName: string, newName: string) => Promise<void>; onDeleteEsportsLeague: (name: string) => Promise<void>
+  onAddSoccerTeam: (league: string, name: string) => Promise<void>; onAddBaseballTeam: (league: string, name: string) => Promise<void>; onAddBasketballTeam: (league: string, name: string) => Promise<void>; onAddEsportsTeam: (league: string, name: string) => Promise<void>
+  onRenameSoccerTeam: (league: string, oldName: string, newName: string) => Promise<void>; onDeleteSoccerTeam: (league: string, name: string) => Promise<void>
+  onRenameBaseballTeam: (league: string, oldName: string, newName: string) => Promise<void>; onDeleteBaseballTeam: (league: string, name: string) => Promise<void>
+  onRenameBasketballTeam: (league: string, oldName: string, newName: string) => Promise<void>; onDeleteBasketballTeam: (league: string, name: string) => Promise<void>
+  onRenameEsportsTeam: (league: string, oldName: string, newName: string) => Promise<void>; onDeleteEsportsTeam: (league: string, name: string) => Promise<void>
 }) {
   const isusd = site.currency === 'usd'
   const [sport, setSport]     = useState(bet.sport)
@@ -600,6 +612,7 @@ function InlineBetEditForm({ bet, site, onClose, onSave, baseballOverrides, socc
 
   useEffect(() => {
     if (leagueTouched) return
+    if (STRUCTURED_SPORTS.includes(sport as StructuredSport)) return // 구조화 종목은 드롭다운으로 직접 고르므로 자동 추론 안 함
     const s = suggestLeague(sport, content, baseballOverrides, soccerOverrides, allBetsHistory, basketballOverrides, volleyballOverrides)
     if (s) setLeague(s)
   }, [content, sport, leagueTouched, baseballOverrides, soccerOverrides, allBetsHistory, basketballOverrides, volleyballOverrides])
@@ -616,12 +629,30 @@ function InlineBetEditForm({ bet, site, onClose, onSave, baseballOverrides, socc
   return (
     <div className="inline-bet-form" style={{ borderColor: 'var(--gold-border)', background: 'var(--gold-bg)' }}>
       <SportButtonGroup value={sport} onChange={v => { setSport(v as typeof bet.sport); contentRef.current?.focus() }} />
-      <LeagueInput placeholder="리그 (자동 추론, 직접 입력 가능)" value={league}
-        onChange={v => { setLeague(v); setLeagueTouched(true) }}
-        candidates={leagueCandidates}
-        style={{ fontSize: 11 }} />
-      <TeamContentInput inputRef={contentRef} placeholder="경기 내용" value={content} onChange={setContent}
-        candidates={teamCandidates} allBets={allBetsHistory} autoFocus onEnter={submit} />
+      {STRUCTURED_SPORTS.includes(sport as StructuredSport) ? (
+        <SportMatchPicker
+          key={sport}
+          sport={sport as StructuredSport}
+          leagues={sport === 'soccer' ? soccerLeagues : sport === 'baseball' ? baseballLeagues : sport === 'basketball' ? basketballLeagues : esportsLeagues}
+          teams={sport === 'soccer' ? soccerTeams : sport === 'baseball' ? baseballTeams : sport === 'basketball' ? basketballTeams : esportsTeams}
+          onAddLeague={sport === 'soccer' ? onAddSoccerLeague : sport === 'baseball' ? onAddBaseballLeague : sport === 'basketball' ? onAddBasketballLeague : onAddEsportsLeague}
+          onRenameLeague={sport === 'soccer' ? onRenameSoccerLeague : sport === 'baseball' ? onRenameBaseballLeague : sport === 'basketball' ? onRenameBasketballLeague : onRenameEsportsLeague}
+          onDeleteLeague={sport === 'soccer' ? onDeleteSoccerLeague : sport === 'baseball' ? onDeleteBaseballLeague : sport === 'basketball' ? onDeleteBasketballLeague : onDeleteEsportsLeague}
+          onAddTeam={sport === 'soccer' ? onAddSoccerTeam : sport === 'baseball' ? onAddBaseballTeam : sport === 'basketball' ? onAddBasketballTeam : onAddEsportsTeam}
+          onRenameTeam={sport === 'soccer' ? onRenameSoccerTeam : sport === 'baseball' ? onRenameBaseballTeam : sport === 'basketball' ? onRenameBasketballTeam : onRenameEsportsTeam}
+          onDeleteTeam={sport === 'soccer' ? onDeleteSoccerTeam : sport === 'baseball' ? onDeleteBaseballTeam : sport === 'basketball' ? onDeleteBasketballTeam : onDeleteEsportsTeam}
+          onResult={(m, l) => { setContent(m); setLeague(l); setLeagueTouched(true) }}
+        />
+      ) : (
+        <>
+          <LeagueInput placeholder="리그 (자동 추론, 직접 입력 가능)" value={league}
+            onChange={v => { setLeague(v); setLeagueTouched(true) }}
+            candidates={leagueCandidates}
+            style={{ fontSize: 11 }} />
+          <TeamContentInput inputRef={contentRef} placeholder="경기 내용" value={content} onChange={setContent}
+            candidates={teamCandidates} allBets={allBetsHistory} autoFocus onEnter={submit} />
+        </>
+      )}
       <input className="form-input inline-bet-input" placeholder="배당 (125=1.25)" value={oddsRaw}
         onChange={e => handleOdds(e.target.value)}
         onKeyDown={e => e.key === 'Enter' && submit()}
@@ -2340,6 +2371,18 @@ export default function Dashboard() {
                                   teamCandidates={teamCandidates}
                                   allBetsHistory={allBetsHistory}
                                   leagueCandidates={leagueCandidates}
+                                  soccerLeagues={soccerLeagues} baseballLeagues={baseballLeagues} basketballLeagues={basketballLeagues} esportsLeagues={esportsLeagues}
+                                  soccerTeams={soccerTeams} baseballTeams={baseballTeams} basketballTeams={basketballTeams} esportsTeams={esportsTeams}
+                                  onAddSoccerLeague={addSoccerLeague} onAddBaseballLeague={addBaseballLeague} onAddBasketballLeague={addBasketballLeague} onAddEsportsLeague={addEsportsLeague}
+                                  onRenameSoccerLeague={renameSoccerLeague} onDeleteSoccerLeague={deleteSoccerLeague}
+                                  onRenameBaseballLeague={renameBaseballLeague} onDeleteBaseballLeague={deleteBaseballLeague}
+                                  onRenameBasketballLeague={renameBasketballLeague} onDeleteBasketballLeague={deleteBasketballLeague}
+                                  onRenameEsportsLeague={renameEsportsLeague} onDeleteEsportsLeague={deleteEsportsLeague}
+                                  onAddSoccerTeam={addSoccerTeam} onAddBaseballTeam={addBaseballTeam} onAddBasketballTeam={addBasketballTeam} onAddEsportsTeam={addEsportsTeam}
+                                  onRenameSoccerTeam={renameSoccerTeam} onDeleteSoccerTeam={deleteSoccerTeam}
+                                  onRenameBaseballTeam={renameBaseballTeam} onDeleteBaseballTeam={deleteBaseballTeam}
+                                  onRenameBasketballTeam={renameBasketballTeam} onDeleteBasketballTeam={deleteBasketballTeam}
+                                  onRenameEsportsTeam={renameEsportsTeam} onDeleteEsportsTeam={deleteEsportsTeam}
                                 />
                               ) : (
                                 <div style={{ display: 'flex', gap: 6, alignItems: 'stretch' }}>
