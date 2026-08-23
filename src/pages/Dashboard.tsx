@@ -2535,7 +2535,7 @@ export default function Dashboard() {
                                   {/* 경기 내용 */}
                                   <div style={{ minWidth: 0 }}>
                                     {bet.league && <div style={{ paddingLeft: 24, fontSize: 9, color: 'var(--text-muted)', fontWeight: 700 }}>{bet.league}</div>}
-                                    <div style={{ display: 'flex', gap: 4, alignItems: 'center', paddingRight: hoverBetId === bet.id ? 150 : 0 }}>
+                                    <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
                                       <span style={{ fontSize: 16, lineHeight: 1, flexShrink: 0, width: 20, textAlign: 'center' }}>{sportGlyph(bet.sport) ?? SPORT_SHORT[bet.sport] ?? '📋'}</span>
                                       <BetTeamName sport={bet.sport} match={bet.match} fontSize={12} />
                                       <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 700, color: 'var(--gold)', flexShrink: 0 }}>{bet.odds.toFixed(2)}</span>
@@ -2548,40 +2548,43 @@ export default function Dashboard() {
                                       </span>
                                     </div>
                                   </div>
-                                  {/* 결과 처리 버튼 — hover 시 우측 상단에 한 줄로 표시 (내용 레이아웃엔 영향 없음) */}
+                                  {/* 결과 처리 버튼 — hover 시 우측 상단에 2x3 그리드로 살짝 겹쳐서 표시 (내용 레이아웃엔 영향 없음) */}
                                   {hoverBetId === bet.id && (
-                                    <div style={{ position: 'absolute', top: 4, right: 6, display: 'flex', alignItems: 'center', gap: 2, background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 6, padding: '2px 3px', boxShadow: '0 2px 8px rgba(0,0,0,0.35)' }}>
-                                      <button className="bet-action-btn" title="캐시아웃"
-                                        onClick={() => applyCashout(bet)}
-                                        style={{ color: 'var(--purple)', width: 18, height: 18 }}>
-                                        <DollarSign size={11} />
-                                      </button>
-                                      <button className="bet-action-btn" title="수정"
-                                        onClick={() => { setInlineEditBetId(bet.id); setHoverBetId(null) }}
-                                        style={{ color: 'var(--gold)', width: 18, height: 18 }}>
-                                        <Pencil size={10} />
-                                      </button>
-                                      <button className="bet-action-btn bet-action-cancel" title="베팅취소"
-                                        onClick={() => applyResult(bet, 'cancel')}
-                                        style={{ width: 18, height: 18 }}>
-                                        <Ban size={10} />
-                                      </button>
-                                      <span style={{ width: 1, height: 14, background: 'var(--border)', margin: '0 1px', flexShrink: 0 }} />
-                                      <button className="bet-action-btn bet-action-win" title="적중"
-                                        onClick={() => applyResult(bet, 'win')}
-                                        style={{ width: 22, height: 22 }}>
-                                        <CheckCircle size={15} />
-                                      </button>
-                                      <button className="bet-action-btn bet-action-loss" title="실패"
-                                        onClick={() => applyResult(bet, 'loss')}
-                                        style={{ width: 22, height: 22 }}>
-                                        <XCircle size={15} />
-                                      </button>
-                                      <button className="bet-action-btn" title="적특"
-                                        onClick={() => { if (confirm('적특으로 처리하시겠습니까?')) applyResult(bet, 'push') }}
-                                        style={{ width: 22, height: 22, color: 'var(--blue)', borderColor: 'var(--blue-border)' }}>
-                                        <MinusCircle size={15} />
-                                      </button>
+                                    <div style={{ position: 'absolute', top: 4, right: 6, display: 'flex', flexDirection: 'column', gap: 2, background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 6, padding: 3, boxShadow: '0 2px 8px rgba(0,0,0,0.35)' }}>
+                                      <div style={{ display: 'flex', gap: 2, justifyContent: 'flex-end' }}>
+                                        <button className="bet-action-btn" title="캐시아웃"
+                                          onClick={() => applyCashout(bet)}
+                                          style={{ color: 'var(--purple)', width: 20, height: 20 }}>
+                                          <DollarSign size={13} />
+                                        </button>
+                                        <button className="bet-action-btn" title="수정"
+                                          onClick={() => { setInlineEditBetId(bet.id); setHoverBetId(null) }}
+                                          style={{ color: 'var(--gold)', width: 20, height: 20 }}>
+                                          <Pencil size={13} />
+                                        </button>
+                                        <button className="bet-action-btn bet-action-cancel" title="베팅취소"
+                                          onClick={() => applyResult(bet, 'cancel')}
+                                          style={{ width: 20, height: 20 }}>
+                                          <Ban size={13} />
+                                        </button>
+                                      </div>
+                                      <div style={{ display: 'flex', gap: 2, justifyContent: 'flex-end' }}>
+                                        <button className="bet-action-btn bet-action-win" title="적중"
+                                          onClick={() => applyResult(bet, 'win')}
+                                          style={{ width: 20, height: 20 }}>
+                                          <CheckCircle size={13} />
+                                        </button>
+                                        <button className="bet-action-btn bet-action-loss" title="실패"
+                                          onClick={() => applyResult(bet, 'loss')}
+                                          style={{ width: 20, height: 20 }}>
+                                          <XCircle size={13} />
+                                        </button>
+                                        <button className="bet-action-btn" title="적특"
+                                          onClick={() => { if (confirm('적특으로 처리하시겠습니까?')) applyResult(bet, 'push') }}
+                                          style={{ width: 20, height: 20, color: 'var(--blue)', borderColor: 'var(--blue-border)' }}>
+                                          <MinusCircle size={13} />
+                                        </button>
+                                      </div>
                                     </div>
                                   )}
                                 </>
