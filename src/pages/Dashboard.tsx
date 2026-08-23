@@ -1434,19 +1434,23 @@ export default function Dashboard() {
     if (et) setEsportsTeams(et)
   }
   async function addSoccerLeague(name: string) {
-    await supabase.from('soccer_leagues').upsert({ name }, { onConflict: 'name', ignoreDuplicates: true })
+    const { error } = await supabase.from('soccer_leagues').upsert({ name }, { onConflict: 'name', ignoreDuplicates: true })
+    if (error) { alert('리그 저장 실패: ' + error.message); return }
     setSoccerLeagues(p => p.includes(name) ? p : [...p, name])
   }
   async function addBaseballLeague(name: string) {
-    await supabase.from('baseball_leagues').upsert({ name }, { onConflict: 'name', ignoreDuplicates: true })
+    const { error } = await supabase.from('baseball_leagues').upsert({ name }, { onConflict: 'name', ignoreDuplicates: true })
+    if (error) { alert('리그 저장 실패: ' + error.message); return }
     setBaseballLeagues(p => p.includes(name) ? p : [...p, name])
   }
   async function addBasketballLeague(name: string) {
-    await supabase.from('basketball_leagues').upsert({ name }, { onConflict: 'name', ignoreDuplicates: true })
+    const { error } = await supabase.from('basketball_leagues').upsert({ name }, { onConflict: 'name', ignoreDuplicates: true })
+    if (error) { alert('리그 저장 실패: ' + error.message); return }
     setBasketballLeagues(p => p.includes(name) ? p : [...p, name])
   }
   async function addEsportsLeague(name: string) {
-    await supabase.from('esports_leagues').upsert({ name }, { onConflict: 'name', ignoreDuplicates: true })
+    const { error } = await supabase.from('esports_leagues').upsert({ name }, { onConflict: 'name', ignoreDuplicates: true })
+    if (error) { alert('리그 저장 실패: ' + error.message); return }
     setEsportsLeagues(p => p.includes(name) ? p : [...p, name])
   }
   // 리그 이름 변경 — 리그 테이블 갱신 + 그 리그에 속한 팀들을 새 이름으로 이동 + 이미 저장된 베팅의 league 컬럼도 함께 갱신.
@@ -1512,19 +1516,23 @@ export default function Dashboard() {
     setEsportsTeams(p => p.filter(t => t.league !== name))
   }
   async function addSoccerTeam(league: string, name: string) {
-    await supabase.from('soccer_teams').upsert({ league, name }, { onConflict: 'league,name', ignoreDuplicates: true })
+    const { error } = await supabase.from('soccer_teams').upsert({ league, name }, { onConflict: 'league,name', ignoreDuplicates: true })
+    if (error) { alert('팀 저장 실패: ' + error.message); return }
     setSoccerTeams(p => p.some(t => t.league === league && t.name === name) ? p : [...p, { league, name }])
   }
   async function addBaseballTeam(league: string, name: string) {
-    await supabase.from('baseball_teams').upsert({ league, name }, { onConflict: 'league,name', ignoreDuplicates: true })
+    const { error } = await supabase.from('baseball_teams').upsert({ league, name }, { onConflict: 'league,name', ignoreDuplicates: true })
+    if (error) { alert('팀 저장 실패: ' + error.message); return }
     setBaseballTeams(p => p.some(t => t.league === league && t.name === name) ? p : [...p, { league, name }])
   }
   async function addBasketballTeam(league: string, name: string) {
-    await supabase.from('basketball_teams').upsert({ league, name }, { onConflict: 'league,name', ignoreDuplicates: true })
+    const { error } = await supabase.from('basketball_teams').upsert({ league, name }, { onConflict: 'league,name', ignoreDuplicates: true })
+    if (error) { alert('팀 저장 실패: ' + error.message); return }
     setBasketballTeams(p => p.some(t => t.league === league && t.name === name) ? p : [...p, { league, name }])
   }
   async function addEsportsTeam(league: string, name: string) {
-    await supabase.from('esports_teams').upsert({ league, name }, { onConflict: 'league,name', ignoreDuplicates: true })
+    const { error } = await supabase.from('esports_teams').upsert({ league, name }, { onConflict: 'league,name', ignoreDuplicates: true })
+    if (error) { alert('팀 저장 실패: ' + error.message); return }
     setEsportsTeams(p => p.some(t => t.league === league && t.name === name) ? p : [...p, { league, name }])
   }
   // 팀 이름 수정/삭제 — 등록 목록(soccer_teams 등)만 갱신. 이미 저장된 베팅의 match 문자열은 자유 입력 텍스트라 소급 반영하지 않음.
