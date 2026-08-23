@@ -196,51 +196,62 @@ function isBigStake(stake: number, isusd: boolean): boolean {
 
 // 경기 내용(match)에서 팀 이름 / 홈·원정 / 베팅옵션을 분리해 색으로 구분해 보여주기 위한 파서.
 // 구조화된 형식(축구/야구/농구/LOL)에서만 동작하고, 자유입력(배구/기타 등)이거나 패턴이 안 맞으면 null → 그냥 원문 그대로 표시.
-interface BetMatchParts { team: string; side?: '홈' | '원정'; boTag?: string; optionLabel: string; accent: string }
+type AccentKey = 'red' | 'green' | 'purple' | 'orange' | 'blue' | 'gold'
+interface BetMatchParts { team: string; side?: '홈' | '원정'; boTag?: string; optionLabel: string; accent: AccentKey }
 function parseBetMatch(sport: string, match: string): BetMatchParts | null {
   const s = (match ?? '').trim()
   if (sport === 'soccer') {
     const m = s.match(/^(.+?)\s(홈|원정)\s(-?\d+(?:\.\d+)?)$/)
     if (!m) return null
     const [, team, side, num] = m
-    if (num.startsWith('-')) return { team, side: side as '홈' | '원정', optionLabel: `${num} 핸디캡`, accent: 'var(--red)' }
-    if (num === '0.5') return { team, side: side as '홈' | '원정', optionLabel: `${num} 핸디캡`, accent: 'var(--green)' }
-    return { team, side: side as '홈' | '원정', optionLabel: `${num} 핸디캡`, accent: 'var(--purple)' }
+    if (num.startsWith('-')) return { team, side: side as '홈' | '원정', optionLabel: `${num} 핸디캡`, accent: 'red' }
+    if (num === '0.5') return { team, side: side as '홈' | '원정', optionLabel: `${num} 핸디캡`, accent: 'green' }
+    return { team, side: side as '홈' | '원정', optionLabel: `${num} 핸디캡`, accent: 'purple' }
   }
   if (sport === 'baseball') {
     const m = s.match(/^(.+?)\s(홈|원정)\s(\d+(?:\.\d+)?)(오버)?$/)
     if (!m) return null
     const [, team, side, num, over] = m
-    if (over) return { team, side: side as '홈' | '원정', optionLabel: `${num}오버`, accent: 'var(--orange)' }
-    return { team, side: side as '홈' | '원정', optionLabel: `${num} 핸디캡`, accent: num === '1.5' ? 'var(--green)' : 'var(--purple)' }
+    if (over) return { team, side: side as '홈' | '원정', optionLabel: `${num}오버`, accent: 'orange' }
+    return { team, side: side as '홈' | '원정', optionLabel: `${num} 핸디캡`, accent: num === '1.5' ? 'green' : 'purple' }
   }
   if (sport === 'basketball') {
     const m = s.match(/^(.+?)\s(-?\d+(?:\.\d+)?)$/)
     if (!m) return null
     const [, team, num] = m
-    return { team, optionLabel: `${num} 핸디캡`, accent: 'var(--blue)' }
+    return { team, optionLabel: `${num} 핸디캡`, accent: 'blue' }
   }
   if (sport === 'esports') {
     const m = s.match(/^(.+?)(?:\s(-?\d+(?:\.\d+)?)(세트오버)?)?\s\((BO\d)\)$/)
     if (!m) return null
     const [, team, num, setOver, bo] = m
-    if (!num) return { team, boTag: bo, optionLabel: '일반승', accent: 'var(--gold)' }
-    if (setOver) return { team, boTag: bo, optionLabel: `${num}세트오버`, accent: 'var(--orange)' }
-    return { team, boTag: bo, optionLabel: `${num} 핸디`, accent: num.startsWith('-') ? 'var(--red)' : 'var(--purple)' }
+    if (!num) return { team, boTag: bo, optionLabel: '일반승', accent: 'gold' }
+    if (setOver) return { team, boTag: bo, optionLabel: `${num}세트오버`, accent: 'orange' }
+    return { team, boTag: bo, optionLabel: `${num} 핸디`, accent: num.startsWith('-') ? 'red' : 'purple' }
   }
   return null
 }
 
-// 컴팩트한 베팅 내용 표시 — 파싱 성공 시 팀/홈·원정/옵션을 색으로 구분, 실패 시 원문 그대로.
+// 뱃지(pill) 하나 — 배경/테두리/글자색을 같은 색 계열 3종 세트(--X-bg/--X-border/--X)로 통일
+function MatchBadge({ label, accent }: { label: string; accent: AccentKey | 'neutral' }) {
+  if (accent === 'neutral') {
+    return <span style={{ fontSize: 9, fontWeight: 700, flexShrink: 0, padding: '1px 6px', borderRadius: 999, background: 'var(--bg-elevated)', border: '1px solid var(--border)', color: 'var(--text-muted)' }}>{label}</span>
+  }
+  return (
+    <span style={{ fontSize: 9, fontWeight: 700, flexShrink: 0, padding: '1px 6px', borderRadius: 999, background: `var(--${accent}-bg)`, border: `1px solid var(--${accent}-border)`, color: `var(--${accent})` }}>{label}</span>
+  )
+}
+
+// 컴팩트한 베팅 내용 표시 — 파싱 성공 시 팀/홈·원정/옵션을 뱃지로 구분, 실패 시 원문 그대로.
 function BetMatchDisplay({ sport, match, fontSize = 13, teamColor }: { sport: string; match: string; fontSize?: number; teamColor?: string }) {
   const parts = parseBetMatch(sport, match)
   if (!parts) return <span className="site-bet-match" style={{ flex: 1, marginBottom: 0, fontSize, color: teamColor }}>{match}</span>
   return (
-    <span style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 5, borderLeft: `2px solid ${parts.accent}`, paddingLeft: 6 }}>
+    <span style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
       <span style={{ fontSize, fontWeight: 600, color: teamColor ?? 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{parts.team}</span>
-      {parts.side && <span style={{ fontSize: 9, fontWeight: 700, flexShrink: 0, color: parts.side === '홈' ? 'var(--blue)' : 'var(--orange)' }}>{parts.side}</span>}
-      {parts.boTag && <span style={{ fontSize: 9, fontWeight: 700, flexShrink: 0, color: 'var(--text-muted)' }}>{parts.boTag}</span>}
-      <span style={{ fontSize: 10, fontWeight: 600, flexShrink: 0, color: parts.accent }}>{parts.optionLabel}</span>
+      {parts.side && <MatchBadge label={parts.side} accent={parts.side === '홈' ? 'blue' : 'orange'} />}
+      {parts.boTag && <MatchBadge label={parts.boTag} accent="neutral" />}
+      <MatchBadge label={parts.optionLabel} accent={parts.accent} />
     </span>
   )
 }
