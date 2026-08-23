@@ -201,19 +201,21 @@ interface BetMatchParts { team: string; side?: '홈' | '원정'; boTag?: string;
 function parseBetMatch(sport: string, match: string): BetMatchParts | null {
   const s = (match ?? '').trim()
   if (sport === 'soccer') {
-    const m = s.match(/^(.+?)\s(홈|원정)\s(-?\d+(?:\.\d+)?)$/)
+    const m = s.match(/^(.+?)(?:\s(홈|원정))?\s(-?\d+(?:\.\d+)?)$/)
     if (!m) return null
     const [, team, side, num] = m
-    if (num.startsWith('-')) return { team, side: side as '홈' | '원정', optionLabel: `${num} 핸디캡`, accent: 'red' }
-    if (num === '0.5') return { team, side: side as '홈' | '원정', optionLabel: `${num} 핸디캡`, accent: 'green' }
-    return { team, side: side as '홈' | '원정', optionLabel: `${num} 핸디캡`, accent: 'purple' }
+    const sideV = side as '홈' | '원정' | undefined
+    if (num.startsWith('-')) return { team, side: sideV, optionLabel: `${num} 핸디캡`, accent: 'red' }
+    if (num === '0.5') return { team, side: sideV, optionLabel: `${num} 핸디캡`, accent: 'green' }
+    return { team, side: sideV, optionLabel: `${num} 핸디캡`, accent: 'purple' }
   }
   if (sport === 'baseball') {
-    const m = s.match(/^(.+?)\s(홈|원정)\s(\d+(?:\.\d+)?)(오버)?$/)
+    const m = s.match(/^(.+?)(?:\s(홈|원정))?\s(\d+(?:\.\d+)?)(오버)?$/)
     if (!m) return null
     const [, team, side, num, over] = m
-    if (over) return { team, side: side as '홈' | '원정', optionLabel: `${num}오버`, accent: 'orange' }
-    return { team, side: side as '홈' | '원정', optionLabel: `${num} 핸디캡`, accent: num === '1.5' ? 'green' : 'purple' }
+    const sideV = side as '홈' | '원정' | undefined
+    if (over) return { team, side: sideV, optionLabel: `${num}오버`, accent: 'orange' }
+    return { team, side: sideV, optionLabel: `${num} 핸디캡`, accent: num === '1.5' ? 'green' : 'purple' }
   }
   if (sport === 'basketball') {
     const m = s.match(/^(.+?)\s(-?\d+(?:\.\d+)?)$/)
@@ -242,16 +244,22 @@ function MatchBadge({ label, accent }: { label: string; accent: AccentKey | 'neu
   )
 }
 
-// 컴팩트한 베팅 내용 표시 — 파싱 성공 시 팀/홈·원정/옵션을 뱃지로 구분, 실패 시 원문 그대로.
-function BetMatchDisplay({ sport, match, fontSize = 13, teamColor }: { sport: string; match: string; fontSize?: number; teamColor?: string }) {
+// 팀 이름만 (뱃지 없이) — 배당을 같은 줄 우측에 배치하는 상단 줄에서 사용
+function BetTeamName({ sport, match, fontSize = 12, teamColor }: { sport: string; match: string; fontSize?: number; teamColor?: string }) {
   const parts = parseBetMatch(sport, match)
-  if (!parts) return <span className="site-bet-match" style={{ flex: 1, marginBottom: 0, fontSize, color: teamColor }}>{match}</span>
+  const label = parts ? parts.team : match
+  return <span style={{ flex: 1, fontSize, fontWeight: 600, color: teamColor ?? 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{label}</span>
+}
+
+// 뱃지 줄 (홈/원정, 베팅옵션, BO태그, 라이브) — 팀 이름 아래 별도 줄에서 사용
+function BetBadgeRow({ sport, match, live }: { sport: string; match: string; live?: boolean }) {
+  const parts = parseBetMatch(sport, match)
   return (
-    <span style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
-      <span style={{ fontSize, fontWeight: 600, color: teamColor ?? 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{parts.team}</span>
-      {parts.side && <MatchBadge label={parts.side} accent={parts.side === '홈' ? 'blue' : 'orange'} />}
-      {parts.boTag && <MatchBadge label={parts.boTag} accent="neutral" />}
-      <MatchBadge label={parts.optionLabel} accent={parts.accent} />
+    <span style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap', minWidth: 0 }}>
+      {parts?.side && <MatchBadge label={parts.side} accent={parts.side === '홈' ? 'blue' : 'orange'} />}
+      {parts?.boTag && <MatchBadge label={parts.boTag} accent="neutral" />}
+      {parts && <MatchBadge label={parts.optionLabel} accent={parts.accent} />}
+      {live && <MatchBadge label="LIVE" accent="red" />}
     </span>
   )
 }
@@ -2439,7 +2447,8 @@ export default function Dashboard() {
                                             {gb.league && <div style={{ paddingLeft: 20, fontSize: 9, color: 'var(--text-muted)', fontWeight: 700 }}>{gb.league}</div>}
                                             <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
                                               <span style={{ fontSize: 10, color: 'var(--text-muted)', width: 16, textAlign: 'center', flexShrink: 0 }}>{LEG_MARKS[idx] ?? idx+1}</span>
-                                              <BetMatchDisplay sport={gb.sport} match={gb.match} fontSize={13} teamColor={legChecked ? 'var(--green)' : undefined} />
+                                              <BetTeamName sport={gb.sport} match={gb.match} fontSize={12} teamColor={legChecked ? 'var(--green)' : undefined} />
+                                              <BetBadgeRow sport={gb.sport} match={gb.match} />
                                               {hoverBetId === bet.parlay_group && (
                                                 <div style={{ display: 'flex', gap: 3, flexShrink: 0 }}>
                                                   <button className="bet-action-btn bet-action-win" title="적중" style={{ width: 22, height: 22, opacity: legChecked ? 0.5 : 1 }}
@@ -2522,62 +2531,60 @@ export default function Dashboard() {
                                   onRenameEsportsTeam={renameEsportsTeam} onDeleteEsportsTeam={deleteEsportsTeam}
                                 />
                               ) : (
-                                <div style={{ display: 'flex', gap: 6, alignItems: 'stretch' }}>
-                                  {/* 좌: 경기 내용 */}
-                                  <div style={{ flex: 1, minWidth: 0 }}>
-                                    {bet.league && <div style={{ paddingLeft: 26, fontSize: 9, color: 'var(--text-muted)', fontWeight: 700 }}>{bet.league}</div>}
-                                    <div style={{ display: 'flex', gap: 4, marginBottom: 3, alignItems: 'center' }}>
-                                      <span style={{ fontSize: 18, lineHeight: 1, flexShrink: 0, width: 22, textAlign: 'center' }}>{sportGlyph(bet.sport) ?? SPORT_SHORT[bet.sport] ?? '📋'}</span>
-                                      <BetMatchDisplay sport={bet.sport} match={bet.match} fontSize={13} />
-                                      {bet.is_live && <span style={{ fontSize: 9, fontWeight: 700, color: '#f87171', background: 'rgba(248,113,113,0.12)', border: '1px solid rgba(248,113,113,0.3)', borderRadius: 3, padding: '1px 4px', flexShrink: 0 }}>🔴 LIVE</span>}
+                                <>
+                                  {/* 경기 내용 */}
+                                  <div style={{ minWidth: 0 }}>
+                                    {bet.league && <div style={{ paddingLeft: 24, fontSize: 9, color: 'var(--text-muted)', fontWeight: 700 }}>{bet.league}</div>}
+                                    <div style={{ display: 'flex', gap: 4, alignItems: 'center', paddingRight: hoverBetId === bet.id ? 150 : 0 }}>
+                                      <span style={{ fontSize: 16, lineHeight: 1, flexShrink: 0, width: 20, textAlign: 'center' }}>{sportGlyph(bet.sport) ?? SPORT_SHORT[bet.sport] ?? '📋'}</span>
+                                      <BetTeamName sport={bet.sport} match={bet.match} fontSize={12} />
+                                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 700, color: 'var(--gold)', flexShrink: 0 }}>{bet.odds.toFixed(2)}</span>
                                     </div>
-                                    <div style={{ paddingLeft: 26 }}>
-                                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-secondary)' }}>{bet.odds.toFixed(2)} / {pfx}{bet.stake.toLocaleString()}{sfx}</span>
-                                      {isBigStake(bet.stake, isusd) && <Flame size={13} style={{ marginLeft: 5, color: 'var(--gold)', fill: 'var(--gold)', filter: 'drop-shadow(0 0 3px var(--gold))' }} />}
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, paddingLeft: 24, marginTop: 2 }}>
+                                      <BetBadgeRow sport={bet.sport} match={bet.match} live={bet.is_live} />
+                                      <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0, fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-secondary)' }}>
+                                        {pfx}{bet.stake.toLocaleString()}{sfx}
+                                        {isBigStake(bet.stake, isusd) && <Flame size={12} style={{ color: 'var(--gold)', fill: 'var(--gold)', filter: 'drop-shadow(0 0 3px var(--gold))' }} />}
+                                      </span>
                                     </div>
                                   </div>
-                                  {/* 우: 결과 버튼 (hover 시만) */}
+                                  {/* 결과 처리 버튼 — hover 시 우측 상단에 한 줄로 표시 (내용 레이아웃엔 영향 없음) */}
                                   {hoverBetId === bet.id && (
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flexShrink: 0, alignSelf: 'center' }}>
-                                      {/* 소형: 캐시아웃 / 수정 / 베팅취소 */}
-                                      <div style={{ display: 'flex', gap: 3, justifyContent: 'flex-end' }}>
-                                        <button className="bet-action-btn" title="캐시아웃"
-                                          onClick={() => applyCashout(bet)}
-                                          style={{ color: 'var(--purple)', width: 20, height: 20 }}>
-                                          <DollarSign size={12} />
-                                        </button>
-                                        <button className="bet-action-btn" title="수정"
-                                          onClick={() => { setInlineEditBetId(bet.id); setHoverBetId(null) }}
-                                          style={{ color: 'var(--gold)', width: 20, height: 20 }}>
-                                          <Pencil size={11} />
-                                        </button>
-                                        <button className="bet-action-btn bet-action-cancel" title="베팅취소"
-                                          onClick={() => applyResult(bet, 'cancel')}
-                                          style={{ width: 20, height: 20 }}>
-                                          <Ban size={11} />
-                                        </button>
-                                      </div>
-                                      {/* 대형: 적중 / 실패 / 적특 */}
-                                      <div style={{ display: 'flex', gap: 3 }}>
-                                        <button className="bet-action-btn bet-action-win" title="적중"
-                                          onClick={() => applyResult(bet, 'win')}
-                                          style={{ width: 34, height: 34 }}>
-                                          <CheckCircle size={22} />
-                                        </button>
-                                        <button className="bet-action-btn bet-action-loss" title="실패"
-                                          onClick={() => applyResult(bet, 'loss')}
-                                          style={{ width: 34, height: 34 }}>
-                                          <XCircle size={22} />
-                                        </button>
-                                        <button className="bet-action-btn" title="적특"
-                                          onClick={() => { if (confirm('적특으로 처리하시겠습니까?')) applyResult(bet, 'push') }}
-                                          style={{ width: 34, height: 34, color: 'var(--blue)', borderColor: 'var(--blue-border)' }}>
-                                          <MinusCircle size={22} />
-                                        </button>
-                                      </div>
+                                    <div style={{ position: 'absolute', top: 4, right: 6, display: 'flex', alignItems: 'center', gap: 2, background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 6, padding: '2px 3px', boxShadow: '0 2px 8px rgba(0,0,0,0.35)' }}>
+                                      <button className="bet-action-btn" title="캐시아웃"
+                                        onClick={() => applyCashout(bet)}
+                                        style={{ color: 'var(--purple)', width: 18, height: 18 }}>
+                                        <DollarSign size={11} />
+                                      </button>
+                                      <button className="bet-action-btn" title="수정"
+                                        onClick={() => { setInlineEditBetId(bet.id); setHoverBetId(null) }}
+                                        style={{ color: 'var(--gold)', width: 18, height: 18 }}>
+                                        <Pencil size={10} />
+                                      </button>
+                                      <button className="bet-action-btn bet-action-cancel" title="베팅취소"
+                                        onClick={() => applyResult(bet, 'cancel')}
+                                        style={{ width: 18, height: 18 }}>
+                                        <Ban size={10} />
+                                      </button>
+                                      <span style={{ width: 1, height: 14, background: 'var(--border)', margin: '0 1px', flexShrink: 0 }} />
+                                      <button className="bet-action-btn bet-action-win" title="적중"
+                                        onClick={() => applyResult(bet, 'win')}
+                                        style={{ width: 22, height: 22 }}>
+                                        <CheckCircle size={15} />
+                                      </button>
+                                      <button className="bet-action-btn bet-action-loss" title="실패"
+                                        onClick={() => applyResult(bet, 'loss')}
+                                        style={{ width: 22, height: 22 }}>
+                                        <XCircle size={15} />
+                                      </button>
+                                      <button className="bet-action-btn" title="적특"
+                                        onClick={() => { if (confirm('적특으로 처리하시겠습니까?')) applyResult(bet, 'push') }}
+                                        style={{ width: 22, height: 22, color: 'var(--blue)', borderColor: 'var(--blue-border)' }}>
+                                        <MinusCircle size={15} />
+                                      </button>
                                     </div>
                                   )}
-                                </div>
+                                </>
                               )}
                             </div>
                           )
@@ -2608,9 +2615,10 @@ export default function Dashboard() {
                                     {groupBets.map((gb, idx) => (
                                       <div key={gb.id} style={{ marginBottom: 2 }}>
                                         {gb.league && <div style={{ paddingLeft: 23, fontSize: 9, color: 'var(--text-muted)', fontWeight: 700 }}>{gb.league}</div>}
-                                        <div style={{ display: 'flex', gap: 5 }}>
+                                        <div style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
                                           <span style={{ fontSize: 10, color: 'var(--text-muted)', width: 18, textAlign: 'center', flexShrink: 0 }}>{LEG_MARKS[idx] ?? idx+1}</span>
-                                          <BetMatchDisplay sport={gb.sport} match={gb.match} fontSize={12} teamColor={isWin ? 'var(--green)' : isLoss ? 'var(--red)' : 'var(--text-secondary)'} />
+                                          <BetTeamName sport={gb.sport} match={gb.match} fontSize={12} teamColor={isWin ? 'var(--green)' : isLoss ? 'var(--red)' : 'var(--text-secondary)'} />
+                                          <BetBadgeRow sport={gb.sport} match={gb.match} />
                                         </div>
                                       </div>
                                     ))}
@@ -2630,18 +2638,20 @@ export default function Dashboard() {
                               return (
                                 <div key={bet.id} className={`site-bet-entry${isBigStake(bet.stake, isusd) ? ' big-bet-entry' : ''}`} style={{ marginBottom: 5, opacity: 0.7 }}
                                   onMouseEnter={() => setHoverBetId('s_' + bet.id)} onMouseLeave={() => setHoverBetId(null)}>
-                                  {bet.league && <div style={{ paddingLeft: 29, fontSize: 9, color: 'var(--text-muted)', fontWeight: 700 }}>{bet.league}</div>}
-                                  <div style={{ display: 'flex', gap: 5, marginBottom: 3 }}>
-                                    <span style={{ fontSize: 18, lineHeight: 1, flexShrink: 0, width: 24, textAlign: 'center' }}>{sportGlyph(bet.sport) ?? SPORT_SHORT[bet.sport] ?? '📋'}</span>
-                                    <BetMatchDisplay sport={bet.sport} match={bet.match} fontSize={12} teamColor={bet.result === 'win' ? 'var(--green)' : bet.result === 'loss' ? 'var(--red)' : 'var(--text-secondary)'} />
+                                  {bet.league && <div style={{ paddingLeft: 24, fontSize: 9, color: 'var(--text-muted)', fontWeight: 700 }}>{bet.league}</div>}
+                                  <div style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
+                                    <span style={{ fontSize: 16, lineHeight: 1, flexShrink: 0, width: 20, textAlign: 'center' }}>{sportGlyph(bet.sport) ?? SPORT_SHORT[bet.sport] ?? '📋'}</span>
+                                    <BetTeamName sport={bet.sport} match={bet.match} fontSize={12} teamColor={bet.result === 'win' ? 'var(--green)' : bet.result === 'loss' ? 'var(--red)' : 'var(--text-secondary)'} />
+                                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', flexShrink: 0 }}>{bet.odds.toFixed(2)}</span>
                                   </div>
-                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingLeft: 29 }}>
-                                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-muted)' }}>{bet.odds.toFixed(2)} / {pfx}{bet.stake.toLocaleString()}{sfx}{isBigStake(bet.stake, isusd) && <Flame size={11} style={{ marginLeft: 4, verticalAlign: 'text-bottom', color: 'var(--gold)', fill: 'var(--gold)', filter: 'drop-shadow(0 0 2px var(--gold))' }} />}</span>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingLeft: 24, marginTop: 2 }}>
+                                    <BetBadgeRow sport={bet.sport} match={bet.match} live={bet.is_live} />
                                     {hoverBetId === 's_' + bet.id ? (
                                       <button className="btn btn-ghost btn-xs" style={{ fontSize: 10 }} onClick={() => applyResult(bet, 'revert')}><RotateCcw size={9} /> 되돌리기</button>
                                     ) : (
-                                      <span style={{ fontSize: 10, fontWeight: 700, color: bet.result === 'win' ? 'var(--green)' : bet.result === 'loss' ? 'var(--red)' : 'var(--blue)' }}>
+                                      <span style={{ fontSize: 10, fontWeight: 700, flexShrink: 0, color: bet.result === 'win' ? 'var(--green)' : bet.result === 'loss' ? 'var(--red)' : 'var(--blue)' }}>
                                         {bet.result === 'win' ? `+${pfx}${bet.profit.toLocaleString()}${sfx}` : bet.result === 'loss' ? `-${pfx}${bet.stake.toLocaleString()}${sfx}` : 'PUSH'}
+                                        {isBigStake(bet.stake, isusd) && <Flame size={11} style={{ marginLeft: 4, verticalAlign: 'text-bottom', color: 'var(--gold)', fill: 'var(--gold)', filter: 'drop-shadow(0 0 2px var(--gold))' }} />}
                                       </span>
                                     )}
                                   </div>
