@@ -721,16 +721,16 @@ function InlineBetEditForm({ bet, site, onClose, onSave, baseballOverrides, socc
         </div>
       )}
       <div style={{ display: 'flex', gap: 5 }}>
+        <button type="button" onClick={() => setIsLive(v => !v)} title={isLive ? '라이브 켜짐 (누르면 끄기)' : '라이브 꺼짐 (누르면 켜기)'} style={{
+          width: 30, height: 30, borderRadius: 'var(--radius-sm)', cursor: 'pointer', flexShrink: 0,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          border: `1px solid ${isLive ? 'var(--red)' : 'var(--border)'}`,
+          background: isLive ? 'var(--red)' : 'var(--bg-elevated)' }}>
+          <span style={{ width: 9, height: 9, borderRadius: '50%', flexShrink: 0, background: isLive ? '#fff' : 'var(--text-muted)' }} />
+        </button>
         <button className="btn btn-primary" style={{ flex: 1, fontSize: 12, padding: '7px 0', justifyContent: 'center' }}
           onClick={submit} disabled={!content || oddsV <= 0 || stakeN <= 0 || submitting}>
           {submitting ? '저장중...' : '수정 저장'}
-        </button>
-        <button type="button" onClick={() => setIsLive(v => !v)} style={{
-          padding: '7px 10px', borderRadius: 'var(--radius-sm)', fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-body)', display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0,
-          border: `1px solid ${isLive ? 'var(--red-border)' : 'var(--border)'}`,
-          background: isLive ? 'var(--red-bg)' : 'var(--bg-elevated)',
-          color: isLive ? 'var(--red)' : 'var(--text-secondary)' }}>
-          🔴 라이브
         </button>
         <button className="btn btn-ghost" style={{ padding: '7px 10px' }} onClick={onClose}><X size={12} /></button>
       </div>
@@ -1337,19 +1337,19 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
         </div>
       )}
       <div style={{ display: 'flex', gap: 5 }}>
+        {mode === 'single' && (
+          <button type="button" onClick={() => setIsLive(v => !v)} title={isLive ? '라이브 켜짐 (누르면 끄기)' : '라이브 꺼짐 (누르면 켜기)'} style={{
+            width: 30, height: 30, borderRadius: 'var(--radius-sm)', cursor: 'pointer', flexShrink: 0,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            border: `1px solid ${isLive ? 'var(--red)' : 'var(--border)'}`,
+            background: isLive ? 'var(--red)' : 'var(--bg-elevated)' }}>
+            <span style={{ width: 9, height: 9, borderRadius: '50%', flexShrink: 0, background: isLive ? '#fff' : 'var(--text-muted)' }} />
+          </button>
+        )}
         <button className="btn btn-primary" style={{ flex: 1, fontSize: 12, padding: '7px 0', justifyContent: 'center' }}
           onClick={submit} disabled={!content || (mode === 'multi' && !multiFilled) || oddsV <= 0 || stakeN <= 0 || submitting}>
           등록
         </button>
-        {mode === 'single' && (
-          <button type="button" onClick={() => setIsLive(v => !v)} style={{
-            padding: '7px 10px', borderRadius: 'var(--radius-sm)', fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-body)', display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0,
-            border: `1px solid ${isLive ? 'var(--red-border)' : 'var(--border)'}`,
-            background: isLive ? 'var(--red-bg)' : 'var(--bg-elevated)',
-            color: isLive ? 'var(--red)' : 'var(--text-secondary)' }}>
-            🔴 라이브
-          </button>
-        )}
         <button className="btn btn-ghost" style={{ padding: '7px 10px' }} onClick={onClose}><X size={12} /></button>
       </div>
     </div>
