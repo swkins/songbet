@@ -264,6 +264,37 @@ function BetBadgeRow({ sport, match, live }: { sport: string; match: string; liv
   )
 }
 
+// 진행중 베팅 전용 — 팀 이름 옆에 홈/원정 배지, 그 옆에 베팅옵션은 텍스트로. BO태그/LIVE는 줄 끝에 고정.
+// (배당·금액은 이 줄에 넣지 않고 그 아래 별도 줄에서 표시 — BetOddsStakeLine 참고)
+function BetMatchLine({ sport, match, fontSize = 12, teamColor, live }: { sport: string; match: string; fontSize?: number; teamColor?: string; live?: boolean }) {
+  const parts = parseBetMatch(sport, match)
+  const team = parts ? parts.team : match
+  return (
+    <span style={{ display: 'flex', alignItems: 'center', gap: 5, flex: 1, minWidth: 0 }}>
+      <span style={{ fontSize, fontWeight: 700, color: teamColor ?? 'var(--text-primary)', flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '55%' }}>{team}</span>
+      {parts?.side && <MatchBadge label={parts.side} accent={parts.side === '홈' ? 'blue' : 'orange'} />}
+      {parts && <span style={{ fontSize, color: 'var(--text-secondary)', fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{parts.optionLabel}</span>}
+      <span style={{ flex: 1 }} />
+      {parts?.boTag && <MatchBadge label={parts.boTag} accent="neutral" />}
+      {live && <MatchBadge label="LIVE" accent="red" />}
+    </span>
+  )
+}
+
+// 진행중 베팅 전용 — 배당은 좌측, 금액은 맨 우측 끝
+function BetOddsStakeLine({ odds, stake, prefix, suffix, big }: { odds: number; stake: number; prefix: string; suffix: string; big?: boolean }) {
+  return (
+    <span style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%' }}>
+      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 700, color: 'var(--gold)', flexShrink: 0 }}>{odds.toFixed(2)}</span>
+      <span style={{ flex: 1 }} />
+      <span style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0, fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-secondary)' }}>
+        {prefix}{stake.toLocaleString()}{suffix}
+        {big && <Flame size={12} style={{ color: 'var(--gold)', fill: 'var(--gold)', filter: 'drop-shadow(0 0 3px var(--gold))' }} />}
+      </span>
+    </span>
+  )
+}
+
 function autoMarket(content: string): { market: Market; pick: string } {
   const s = content.trim()
   if (/오버/i.test(s) || /over/i.test(s)) return { market: 'over', pick: s }
@@ -860,13 +891,15 @@ const SOCCER_BET_OPTIONS = [
 const BASEBALL_HCAP_OPTIONS = [
   { key: 'h15', label: '핸디캡 1.5' },
   { key: 'h25', label: '핸디캡 2.5' },
+  { key: 'h35', label: '핸디캡 3.5' },
+  { key: 'h45', label: '핸디캡 4.5' },
+  { key: 'h55', label: '핸디캡 5.5' },
 ]
 const BASEBALL_OVER_OPTIONS = [
   { key: 'o15', label: '팀오버 1.5' },
   { key: 'o25', label: '팀오버 2.5' },
   { key: 'o35', label: '팀오버 3.5' },
   { key: 'o45', label: '팀오버 4.5' },
-  { key: 'o55', label: '팀오버 5.5' },
 ]
 const BASKETBALL_HCAP_LINES = [4.5, 5.5, 6.5, 7.5, 8.5, 9.5, 10.5, 11.5, 12.5, 13.5, 14.5]
 // LOL — BO1은 별도 마켓 없이 팀만 고르면 바로 확정, BO3/BO5는 세트 수에 따라 고를 수 있는 마켓이 다르다
@@ -1089,7 +1122,7 @@ function StructuredTeamPicker({ sport, leagues, favoriteLeagues, teams, onAddLea
 
   const matchedTeam = teams.find(t => t.name === teamText.trim())
   const isRegistered = !!matchedTeam
-  const suggestions = teamText.trim().length >= 2
+  const suggestions = teamText.trim().length >= 1
     ? teams.filter(t => t.name.toLowerCase().includes(teamText.trim().toLowerCase()) && t.name !== teamText.trim()).slice(0, 8)
     : []
 
@@ -1145,8 +1178,8 @@ function StructuredTeamPicker({ sport, leagues, favoriteLeagues, teams, onAddLea
       else if (option === 'h05') match = `${team} ${side} 0.5`
       else if (option === 'h15') match = `${team} ${side} 1.5`
     } else if (sport === 'baseball') {
-      const hcapLine: Record<string, string> = { h15: '1.5', h25: '2.5' }
-      const overLine: Record<string, string> = { o15: '1.5', o25: '2.5', o35: '3.5', o45: '4.5', o55: '5.5' }
+      const hcapLine: Record<string, string> = { h15: '1.5', h25: '2.5', h35: '3.5', h45: '4.5', h55: '5.5' }
+      const overLine: Record<string, string> = { o15: '1.5', o25: '2.5', o35: '3.5', o45: '4.5' }
       if (hcapLine[option]) match = `${team} ${side} ${hcapLine[option]}`
       else if (overLine[option]) match = `${team} ${side} ${overLine[option]}오버`
     } else if (sport === 'basketball') {
@@ -2643,8 +2676,7 @@ export default function Dashboard() {
                                             {gb.league && <div style={{ paddingLeft: 20, fontSize: 9, color: 'var(--text-muted)', fontWeight: 700 }}>{gb.league}</div>}
                                             <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
                                               <span style={{ fontSize: 10, color: 'var(--text-muted)', width: 16, textAlign: 'center', flexShrink: 0 }}>{LEG_MARKS[idx] ?? idx+1}</span>
-                                              <BetTeamName sport={gb.sport} match={gb.match} fontSize={12} teamColor={legChecked ? 'var(--green)' : undefined} />
-                                              <BetBadgeRow sport={gb.sport} match={gb.match} />
+                                              <BetMatchLine sport={gb.sport} match={gb.match} fontSize={12} teamColor={legChecked ? 'var(--green)' : undefined} />
                                               {hoverBetId === bet.parlay_group && (
                                                 <div style={{ display: 'flex', gap: 3, flexShrink: 0 }}>
                                                   <button className="bet-action-btn bet-action-win" title="적중" style={{ width: 22, height: 22, opacity: legChecked ? 0.5 : 1 }}
@@ -2735,15 +2767,10 @@ export default function Dashboard() {
                                     {bet.league && <div style={{ paddingLeft: 24, fontSize: 9, color: 'var(--text-muted)', fontWeight: 700 }}>{bet.league}</div>}
                                     <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
                                       <span style={{ fontSize: 16, lineHeight: 1, flexShrink: 0, width: 20, textAlign: 'center' }}>{sportGlyph(bet.sport) ?? SPORT_SHORT[bet.sport] ?? '📋'}</span>
-                                      <BetTeamName sport={bet.sport} match={bet.match} fontSize={12} />
-                                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 700, color: 'var(--gold)', flexShrink: 0 }}>{bet.odds.toFixed(2)}</span>
+                                      <BetMatchLine sport={bet.sport} match={bet.match} fontSize={12} live={bet.is_live} />
                                     </div>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, paddingLeft: 24, marginTop: 2 }}>
-                                      <BetBadgeRow sport={bet.sport} match={bet.match} live={bet.is_live} />
-                                      <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0, fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-secondary)' }}>
-                                        {pfx}{bet.stake.toLocaleString()}{sfx}
-                                        {isBigStake(bet.stake, isusd) && <Flame size={12} style={{ color: 'var(--gold)', fill: 'var(--gold)', filter: 'drop-shadow(0 0 3px var(--gold))' }} />}
-                                      </span>
+                                    <div style={{ paddingLeft: 24, marginTop: 2 }}>
+                                      <BetOddsStakeLine odds={bet.odds} stake={bet.stake} prefix={pfx} suffix={sfx} big={isBigStake(bet.stake, isusd)} />
                                     </div>
                                   </div>
                                   {/* 결과 처리 버튼 — hover 시 우측 상단에 2x3 그리드로 살짝 겹쳐서 표시 (내용 레이아웃엔 영향 없음) */}
