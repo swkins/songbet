@@ -63,4 +63,4 @@ export interface SoccerOddsLog {
   result_outcome: 'home_win' | 'draw' | 'away_win' | null
   result_updated_at: string | null
 }
-export type Tab = 'dashboard' | 'stats' | 'settlement' | 'mining' | 'analysis' | 'simul' | 'rulebook'
+export type Tab = 'dashboard' | 'stats' | 'settlement' | 'simul' | 'rulebook'
