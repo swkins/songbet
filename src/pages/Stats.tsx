@@ -673,11 +673,11 @@ function LeagueRankColumn({ rows, startRank, columnSize, yesterdayRankMap }: {
   )
 }
 
-type SoccerMarketTab = 'hcap05' | 'hcap15' | 'moneyline'
+type SoccerMarketTab = 'hcap05' | 'hcap15' | 'hcap15minus'
 const SOCCER_MARKET_TABS: { value: SoccerMarketTab; label: string }[] = [
   { value: 'hcap05', label: '0.5 플핸' },
   { value: 'hcap15', label: '1.5 플핸' },
-  { value: 'moneyline', label: '일반승' },
+  { value: 'hcap15minus', label: '-1.5 마핸' },
 ]
 
 // ─── 축구: 리그별 성적 (수익순 랭킹, 어제 대비 순위 변동, 10위 단위로 옆으로 배치) ──
@@ -695,11 +695,13 @@ function SoccerLeagueSection({ bets, overrides, knownLeagues, onAddOverride, onA
   const leagueKeyOf = (b: Bet) => freeLeagueOf(b, overrides)
   const today = dayjs().format('YYYY-MM-DD')
 
-  const filterByMarket = (list: Bet[], tab: SoccerMarketTab) => tab === 'moneyline'
-    ? list.filter(b => b.market === 'moneyline')
-    : list.filter(b => b.market === 'handicap' && extractHandicapLine(b.pick) === (tab === 'hcap05' ? 0.5 : 1.5))
+  const filterByMarket = (list: Bet[], tab: SoccerMarketTab) => {
+    if (tab === 'hcap05') return list.filter(b => b.market === 'handicap' && extractHandicapLine(b.pick) === 0.5)
+    if (tab === 'hcap15') return list.filter(b => b.market === 'handicap' && extractHandicapLine(b.pick) === 1.5 && extractHandicapSign(b.pick) !== '-')
+    return list.filter(b => b.market === 'handicap' && extractHandicapLine(b.pick) === 1.5 && extractHandicapSign(b.pick) === '-')
+  }
 
-  // 마켓(0.5 플핸 / 1.5 플핸 / 일반승)별 리그 랭킹 — 아직 "리그 추가"로 등록되지 않은 리그는 순위에서 제외
+  // 마켓(0.5 플핸 / 1.5 플핸 / -1.5 마핸)별 리그 랭킹 — 아직 "리그 추가"로 등록되지 않은 리그는 순위에서 제외
   function buildMarketRanking(tab: SoccerMarketTab) {
     const marketBets = filterByMarket(allSettled, tab)
     const yesterdayMarketBets = filterByMarket(allSettled.filter(b => b.bet_date < today), tab)
@@ -732,19 +734,21 @@ function SoccerLeagueSection({ bets, overrides, knownLeagues, onAddOverride, onA
     <div style={{ marginBottom: 14 }}>
       <div className="card-title" style={{ marginBottom: 8 }}>⚽ 리그별 성적 (마켓별 · 수익순, 어제 대비 순위변동)</div>
 
-      {SOCCER_MARKET_TABS.map(t => {
-        const { ranking, yesterdayRankMap } = buildMarketRanking(t.value)
-        return (
-          <div key={t.value} style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 6 }}>⚽ {t.label}</div>
-            {ranking.length > 0 ? (
-              <LeagueRankColumn rows={ranking} startRank={1} columnSize={ranking.length} yesterdayRankMap={yesterdayRankMap} />
-            ) : (
-              <div style={{ fontSize: 10, color: 'var(--text-muted)', padding: '8px 0' }}>등록된 리그의 정산 데이터가 없습니다.</div>
-            )}
-          </div>
-        )
-      })}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 12 }}>
+        {SOCCER_MARKET_TABS.map(t => {
+          const { ranking, yesterdayRankMap } = buildMarketRanking(t.value)
+          return (
+            <div key={t.value}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 6 }}>⚽ {t.label}</div>
+              {ranking.length > 0 ? (
+                <LeagueRankColumn rows={ranking} startRank={1} columnSize={ranking.length} yesterdayRankMap={yesterdayRankMap} />
+              ) : (
+                <div style={{ fontSize: 10, color: 'var(--text-muted)', padding: '8px 0' }}>등록된 리그의 정산 데이터가 없습니다.</div>
+              )}
+            </div>
+          )
+        })}
+      </div>
 
       <div style={{ marginTop: 10 }}>
         <AddLeagueInput onAdd={onAddLeague} placeholder="새 리그 이름 (예: 프리미어리그)" />

@@ -1270,8 +1270,11 @@ function StructuredTeamPicker({ sport, leagues, favoriteLeagues, teams, onAddLea
 
       {/* 리그 관리 — 화면 중앙 모달로 열어서 리그/팀 추가·수정·삭제 */}
       <button type="button" onClick={() => setShowManage(true)} style={{
-        background: 'none', border: 'none', cursor: 'pointer', fontSize: 9, color: 'var(--text-muted)', padding: 0, display: 'flex', alignItems: 'center', gap: 3, alignSelf: 'flex-start',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+        fontSize: 11, fontWeight: 700, padding: '7px 10px', borderRadius: 6, cursor: 'pointer', fontFamily: 'var(--font-body)',
+        border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-secondary)', width: '100%',
       }}>
+        <Settings size={12} />
         리그 관리 ({leagues.length}개 리그 · {teams.length}개 팀)
       </button>
 
