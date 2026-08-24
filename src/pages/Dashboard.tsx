@@ -895,7 +895,6 @@ const BASEBALL_HCAP_OPTIONS = [
   { key: 'h25', label: '핸디캡 2.5' },
   { key: 'h35', label: '핸디캡 3.5' },
   { key: 'h45', label: '핸디캡 4.5' },
-  { key: 'h55', label: '핸디캡 5.5' },
 ]
 const BASEBALL_OVER_OPTIONS = [
   { key: 'o15', label: '팀오버 1.5' },
@@ -1180,7 +1179,7 @@ function StructuredTeamPicker({ sport, leagues, favoriteLeagues, teams, onAddLea
       else if (option === 'h05') match = `${team} ${side} 0.5`
       else if (option === 'h15') match = `${team} ${side} 1.5`
     } else if (sport === 'baseball') {
-      const hcapLine: Record<string, string> = { h15: '1.5', h25: '2.5', h35: '3.5', h45: '4.5', h55: '5.5' }
+      const hcapLine: Record<string, string> = { h15: '1.5', h25: '2.5', h35: '3.5', h45: '4.5' }
       const overLine: Record<string, string> = { o15: '1.5', o25: '2.5', o35: '3.5', o45: '4.5' }
       if (hcapLine[option]) match = `${team} ${side} ${hcapLine[option]}`
       else if (overLine[option]) match = `${team} ${side} ${overLine[option]}오버`
