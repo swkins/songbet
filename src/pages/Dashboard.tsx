@@ -198,6 +198,8 @@ function isBigStake(stake: number, isusd: boolean): boolean {
 // 구조화된 형식(축구/야구/농구/LOL)에서만 동작하고, 자유입력(배구/기타 등)이거나 패턴이 안 맞으면 null → 그냥 원문 그대로 표시.
 type AccentKey = 'red' | 'green' | 'purple' | 'orange' | 'blue' | 'gold'
 interface BetMatchParts { team: string; side?: '홈' | '원정'; boTag?: string; optionLabel: string; accent: AccentKey }
+// 배지 표시용 — "원정"은 배지가 커지지 않도록 "원" 한 글자로 줄여서 보여준다 (저장된 데이터/파싱 로직에는 영향 없음)
+const sideBadgeLabel = (side: '홈' | '원정') => side === '원정' ? '원' : side
 function parseBetMatch(sport: string, match: string): BetMatchParts | null {
   const s = (match ?? '').trim()
   if (sport === 'soccer') {
@@ -214,7 +216,7 @@ function parseBetMatch(sport: string, match: string): BetMatchParts | null {
     if (!m) return null
     const [, team, side, num, over] = m
     const sideV = side as '홈' | '원정' | undefined
-    if (over) return { team, side: sideV, optionLabel: `${num}오버`, accent: 'orange' }
+    if (over) return { team, side: sideV, optionLabel: `${num} 오버`, accent: 'orange' }
     return { team, side: sideV, optionLabel: `${num} 핸디캡`, accent: num === '1.5' ? 'green' : 'purple' }
   }
   if (sport === 'basketball') {
@@ -228,7 +230,7 @@ function parseBetMatch(sport: string, match: string): BetMatchParts | null {
     if (!m) return null
     const [, team, num, setOver, bo] = m
     if (!num) return { team, boTag: bo, optionLabel: '일반승', accent: 'gold' }
-    if (setOver) return { team, boTag: bo, optionLabel: `${num}세트오버`, accent: 'orange' }
+    if (setOver) return { team, boTag: bo, optionLabel: `${num} 세트오버`, accent: 'orange' }
     return { team, boTag: bo, optionLabel: `${num} 핸디`, accent: num.startsWith('-') ? 'red' : 'purple' }
   }
   return null
@@ -256,7 +258,7 @@ function BetBadgeRow({ sport, match, live }: { sport: string; match: string; liv
   const parts = parseBetMatch(sport, match)
   return (
     <span style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap', minWidth: 0 }}>
-      {parts?.side && <MatchBadge label={parts.side} accent={parts.side === '홈' ? 'blue' : 'orange'} />}
+      {parts?.side && <MatchBadge label={sideBadgeLabel(parts.side)} accent={parts.side === '홈' ? 'blue' : 'orange'} />}
       {parts?.boTag && <MatchBadge label={parts.boTag} accent="neutral" />}
       {parts && <MatchBadge label={parts.optionLabel} accent={parts.accent} />}
       {live && <MatchBadge label="LIVE" accent="red" />}
@@ -272,7 +274,7 @@ function BetMatchLine({ sport, match, fontSize = 12, teamColor, live }: { sport:
   return (
     <span style={{ display: 'flex', alignItems: 'center', gap: 5, flex: 1, minWidth: 0 }}>
       <span style={{ fontSize, fontWeight: 700, color: teamColor ?? 'var(--text-primary)', flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '55%' }}>{team}</span>
-      {parts?.side && <MatchBadge label={parts.side} accent={parts.side === '홈' ? 'blue' : 'orange'} />}
+      {parts?.side && <MatchBadge label={sideBadgeLabel(parts.side)} accent={parts.side === '홈' ? 'blue' : 'orange'} />}
       {parts && <span style={{ fontSize, color: 'var(--text-secondary)', fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{parts.optionLabel}</span>}
       <span style={{ flex: 1 }} />
       {parts?.boTag && <MatchBadge label={parts.boTag} accent="neutral" />}
