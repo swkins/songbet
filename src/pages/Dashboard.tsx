@@ -682,6 +682,7 @@ function InlineBetEditForm({ bet, site, onClose, onSave, baseballOverrides, socc
   const [isLive, setIsLive]   = useState(!!bet.is_live)
   const [submitting, setSubmitting] = useState(false)
   const contentRef = useRef<HTMLInputElement>(null)
+  const oddsRef = useRef<HTMLInputElement>(null)
   const oddsV = parseOdds(oddsRaw)
   const stakeN = isusd ? (Number(amount) || 0) : (Number(amount.replace(/,/g, '')) || 0)
 
@@ -718,7 +719,7 @@ function InlineBetEditForm({ bet, site, onClose, onSave, baseballOverrides, socc
           onAddTeam={sport === 'soccer' ? onAddSoccerTeam : sport === 'baseball' ? onAddBaseballTeam : sport === 'basketball' ? onAddBasketballTeam : sport === 'volleyball' ? onAddVolleyballTeam : onAddEsportsTeam}
           onRenameTeam={sport === 'soccer' ? onRenameSoccerTeam : sport === 'baseball' ? onRenameBaseballTeam : sport === 'basketball' ? onRenameBasketballTeam : sport === 'volleyball' ? onRenameVolleyballTeam : onRenameEsportsTeam}
           onDeleteTeam={sport === 'soccer' ? onDeleteSoccerTeam : sport === 'baseball' ? onDeleteBaseballTeam : sport === 'basketball' ? onDeleteBasketballTeam : sport === 'volleyball' ? onDeleteVolleyballTeam : onDeleteEsportsTeam}
-          onResult={(m, l) => { setContent(m); setLeague(l); setLeagueTouched(true) }}
+          onResult={(m, l) => { setContent(m); setLeague(l); setLeagueTouched(true); oddsRef.current?.focus() }}
         />
       ) : (
         <>
@@ -730,7 +731,7 @@ function InlineBetEditForm({ bet, site, onClose, onSave, baseballOverrides, socc
             candidates={teamCandidates} allBets={allBetsHistory} autoFocus onEnter={submit} />
         </>
       )}
-      <input className="form-input inline-bet-input" placeholder="배당 (125=1.25)" value={oddsRaw}
+      <input ref={oddsRef} className="form-input inline-bet-input" placeholder="배당 (125=1.25)" value={oddsRaw}
         onChange={e => handleOdds(e.target.value)}
         onKeyDown={e => e.key === 'Enter' && submit()}
         onBlur={e => { const n = parseOdds(e.target.value); if (n > 0) setOddsRaw(n.toFixed(2)) }} />
@@ -1074,12 +1075,13 @@ function StructuredTeamPicker({ sport, leagues, favoriteLeagues, teams, onAddLea
   const [bo, setBo] = useState<EsportsBo | ''>('bo3')
   const [registering, setRegistering] = useState(false)
   const [regLeague, setRegLeague] = useState('')
+  const [showRegLeagueSuggest, setShowRegLeagueSuggest] = useState(false)
   const [showManage, setShowManage] = useState(false)
   const boxRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     function onDocClick(e: MouseEvent) {
-      if (boxRef.current && !boxRef.current.contains(e.target as Node)) setShowSuggest(false)
+      if (boxRef.current && !boxRef.current.contains(e.target as Node)) { setShowSuggest(false); setShowRegLeagueSuggest(false) }
     }
     document.addEventListener('mousedown', onDocClick)
     return () => document.removeEventListener('mousedown', onDocClick)
@@ -1172,6 +1174,7 @@ function StructuredTeamPicker({ sport, leagues, favoriteLeagues, teams, onAddLea
         <div style={{ display: 'flex', gap: 4 }}>
           <input
             className="form-input" value={teamText}
+            autoFocus
             onChange={e => setTeamText(e.target.value)}
             onFocus={() => setShowSuggest(true)}
             onKeyDown={onTeamInputKeyDown}
@@ -1199,18 +1202,29 @@ function StructuredTeamPicker({ sport, leagues, favoriteLeagues, teams, onAddLea
         )}
 
         {registering && (
-          <div style={{ display: 'flex', gap: 4, marginTop: 4, alignItems: 'center' }}>
-            <input className="form-input" value={regLeague} onChange={e => setRegLeague(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && submitRegister()}
-              placeholder="이 팀의 리그 (예: K리그2)" list={`${sport}-league-suggestions`}
-              style={{ flex: 1, fontSize: 10, padding: '4px 6px' }} />
-            <datalist id={`${sport}-league-suggestions`}>
-              {leagues.map(lg => <option key={lg} value={lg} />)}
-            </datalist>
-            <button type="button" onClick={submitRegister} disabled={!regLeague.trim()}
-              style={{ border: '1px solid var(--gold-border)', background: 'var(--gold-bg)', color: 'var(--gold)', borderRadius: 5, cursor: 'pointer', flexShrink: 0, display: 'flex', padding: '4px 6px' }}><Check size={11} /></button>
-            <button type="button" onClick={() => setRegistering(false)}
-              style={{ border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-secondary)', borderRadius: 5, cursor: 'pointer', flexShrink: 0, display: 'flex', padding: '4px 6px' }}><X size={11} /></button>
+          <div style={{ position: 'relative', marginTop: 4 }}>
+            <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+              <input className="form-input" value={regLeague} onChange={e => setRegLeague(e.target.value)}
+                onFocus={() => setShowRegLeagueSuggest(true)}
+                onKeyDown={e => e.key === 'Enter' && submitRegister()}
+                placeholder="이 팀의 리그 (예: K리그2)"
+                style={{ flex: 1, fontSize: 10, padding: '4px 6px' }} />
+              <button type="button" onClick={submitRegister} disabled={!regLeague.trim()}
+                style={{ border: '1px solid var(--gold-border)', background: 'var(--gold-bg)', color: 'var(--gold)', borderRadius: 5, cursor: 'pointer', flexShrink: 0, display: 'flex', padding: '4px 6px' }}><Check size={11} /></button>
+              <button type="button" onClick={() => setRegistering(false)}
+                style={{ border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-secondary)', borderRadius: 5, cursor: 'pointer', flexShrink: 0, display: 'flex', padding: '4px 6px' }}><X size={11} /></button>
+            </div>
+            {showRegLeagueSuggest && leagues.filter(lg => lg.toLowerCase().includes(regLeague.trim().toLowerCase())).length > 0 && (
+              <div style={{ position: 'absolute', top: '100%', left: 0, right: 62, zIndex: 20, marginTop: 2, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 6, boxShadow: '0 4px 14px rgba(0,0,0,0.3)', maxHeight: 160, overflowY: 'auto' }}>
+                {leagues.filter(lg => lg.toLowerCase().includes(regLeague.trim().toLowerCase())).map(lg => (
+                  <div key={lg} onClick={() => { setRegLeague(lg); setShowRegLeagueSuggest(false) }}
+                    style={{ padding: '6px 8px', cursor: 'pointer', fontSize: 11, fontWeight: 600, color: 'var(--text-primary)' }}
+                    onMouseDown={e => e.preventDefault()}>
+                    {lg}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -1412,7 +1426,7 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
           onAddTeam={sport === 'soccer' ? onAddSoccerTeam : sport === 'baseball' ? onAddBaseballTeam : sport === 'basketball' ? onAddBasketballTeam : sport === 'volleyball' ? onAddVolleyballTeam : onAddEsportsTeam}
           onRenameTeam={sport === 'soccer' ? onRenameSoccerTeam : sport === 'baseball' ? onRenameBaseballTeam : sport === 'basketball' ? onRenameBasketballTeam : sport === 'volleyball' ? onRenameVolleyballTeam : onRenameEsportsTeam}
           onDeleteTeam={sport === 'soccer' ? onDeleteSoccerTeam : sport === 'baseball' ? onDeleteBaseballTeam : sport === 'basketball' ? onDeleteBasketballTeam : sport === 'volleyball' ? onDeleteVolleyballTeam : onDeleteEsportsTeam}
-          onResult={(m, l) => { setContent(m); setLeague(l); setLeagueTouched(true) }}
+          onResult={(m, l) => { setContent(m); setLeague(l); setLeagueTouched(true); oddsRef.current?.focus() }}
         />
       ) : (
         <>
