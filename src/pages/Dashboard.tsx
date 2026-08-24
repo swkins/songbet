@@ -702,20 +702,28 @@ function InlineBetEditForm({ bet, site, onClose, onSave, baseballOverrides, socc
   return (
     <div className="inline-bet-form" style={{ borderColor: 'var(--gold-border)', background: 'var(--gold-bg)' }}>
       <SportButtonGroup value={sport} onChange={v => { setSport(v as typeof bet.sport); contentRef.current?.focus() }} />
-      {STRUCTURED_SPORTS.includes(sport as StructuredSport) ? (
+      {sport === 'soccer' ? (
+        <SoccerTeamPicker
+          key={sport}
+          leagues={soccerLeagues} teams={soccerTeams}
+          onAddLeague={onAddSoccerLeague} onAddTeam={onAddSoccerTeam}
+          onDeleteTeam={onDeleteSoccerTeam} onDeleteLeague={onDeleteSoccerLeague}
+          onResult={(m, l) => { setContent(m); setLeague(l); setLeagueTouched(true) }}
+        />
+      ) : STRUCTURED_SPORTS.includes(sport as StructuredSport) ? (
         <SportMatchPicker
           key={sport}
           sport={sport as StructuredSport}
-          leagues={sport === 'soccer' ? soccerLeagues : sport === 'baseball' ? baseballLeagues : sport === 'basketball' ? basketballLeagues : esportsLeagues}
-          favoriteLeagues={sport === 'soccer' ? soccerFavoriteLeagues : sport === 'baseball' ? baseballFavoriteLeagues : sport === 'basketball' ? basketballFavoriteLeagues : esportsFavoriteLeagues}
-          onToggleFavoriteLeague={sport === 'soccer' ? onToggleSoccerLeagueFavorite : sport === 'baseball' ? onToggleBaseballLeagueFavorite : sport === 'basketball' ? onToggleBasketballLeagueFavorite : onToggleEsportsLeagueFavorite}
-          teams={sport === 'soccer' ? soccerTeams : sport === 'baseball' ? baseballTeams : sport === 'basketball' ? basketballTeams : esportsTeams}
-          onAddLeague={sport === 'soccer' ? onAddSoccerLeague : sport === 'baseball' ? onAddBaseballLeague : sport === 'basketball' ? onAddBasketballLeague : onAddEsportsLeague}
-          onRenameLeague={sport === 'soccer' ? onRenameSoccerLeague : sport === 'baseball' ? onRenameBaseballLeague : sport === 'basketball' ? onRenameBasketballLeague : onRenameEsportsLeague}
-          onDeleteLeague={sport === 'soccer' ? onDeleteSoccerLeague : sport === 'baseball' ? onDeleteBaseballLeague : sport === 'basketball' ? onDeleteBasketballLeague : onDeleteEsportsLeague}
-          onAddTeam={sport === 'soccer' ? onAddSoccerTeam : sport === 'baseball' ? onAddBaseballTeam : sport === 'basketball' ? onAddBasketballTeam : onAddEsportsTeam}
-          onRenameTeam={sport === 'soccer' ? onRenameSoccerTeam : sport === 'baseball' ? onRenameBaseballTeam : sport === 'basketball' ? onRenameBasketballTeam : onRenameEsportsTeam}
-          onDeleteTeam={sport === 'soccer' ? onDeleteSoccerTeam : sport === 'baseball' ? onDeleteBaseballTeam : sport === 'basketball' ? onDeleteBasketballTeam : onDeleteEsportsTeam}
+          leagues={sport === 'baseball' ? baseballLeagues : sport === 'basketball' ? basketballLeagues : esportsLeagues}
+          favoriteLeagues={sport === 'baseball' ? baseballFavoriteLeagues : sport === 'basketball' ? basketballFavoriteLeagues : esportsFavoriteLeagues}
+          onToggleFavoriteLeague={sport === 'baseball' ? onToggleBaseballLeagueFavorite : sport === 'basketball' ? onToggleBasketballLeagueFavorite : onToggleEsportsLeagueFavorite}
+          teams={sport === 'baseball' ? baseballTeams : sport === 'basketball' ? basketballTeams : esportsTeams}
+          onAddLeague={sport === 'baseball' ? onAddBaseballLeague : sport === 'basketball' ? onAddBasketballLeague : onAddEsportsLeague}
+          onRenameLeague={sport === 'baseball' ? onRenameBaseballLeague : sport === 'basketball' ? onRenameBasketballLeague : onRenameEsportsLeague}
+          onDeleteLeague={sport === 'baseball' ? onDeleteBaseballLeague : sport === 'basketball' ? onDeleteBasketballLeague : onDeleteEsportsLeague}
+          onAddTeam={sport === 'baseball' ? onAddBaseballTeam : sport === 'basketball' ? onAddBasketballTeam : onAddEsportsTeam}
+          onRenameTeam={sport === 'baseball' ? onRenameBaseballTeam : sport === 'basketball' ? onRenameBasketballTeam : onRenameEsportsTeam}
+          onDeleteTeam={sport === 'baseball' ? onDeleteBaseballTeam : sport === 'basketball' ? onDeleteBasketballTeam : onDeleteEsportsTeam}
           onResult={(m, l) => { setContent(m); setLeague(l); setLeagueTouched(true) }}
         />
       ) : (
@@ -1032,6 +1040,165 @@ function ManagedSelect({ label, value, onSelect, items, onAdd, onRename, onDelet
 
 // 리그를 등록 → 그 리그에 팀을 등록 → 팀을 선택해서 그 팀을 대상으로 베팅.
 // 경기 내용을 직접 타이핑하지 않고 전부 선택으로만 구성해 market 오분류(예: "원정"/"홈" 접미사로 인한 오분류)를 원천 차단한다.
+// ─── 축구 전용: 팀 이름 직접 입력 + 자동완성 + 팀 등록(+) + 소형 리그 관리 ──
+// 리그/팀 드롭다운 대신, 자유 입력하되 등록된 팀은 이름을 다르게(금색) 표시해서 구분한다.
+function SoccerTeamPicker({ leagues, teams, onAddLeague, onAddTeam, onDeleteTeam, onDeleteLeague, onResult }: {
+  leagues: string[]; teams: { league: string; name: string }[]
+  onAddLeague: (name: string) => Promise<void>
+  onAddTeam: (league: string, name: string) => Promise<void>
+  onDeleteTeam: (league: string, name: string) => Promise<void>
+  onDeleteLeague: (name: string) => Promise<void>
+  onResult: (match: string, league: string) => void
+}) {
+  const [teamText, setTeamText] = useState('')
+  const [showSuggest, setShowSuggest] = useState(false)
+  const [side, setSide] = useState<'홈' | '원정'>('홈')
+  const [option, setOption] = useState('')
+  const [registering, setRegistering] = useState(false)
+  const [regLeague, setRegLeague] = useState('')
+  const [showLeagueManage, setShowLeagueManage] = useState(false)
+  const boxRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    function onDocClick(e: MouseEvent) {
+      if (boxRef.current && !boxRef.current.contains(e.target as Node)) setShowSuggest(false)
+    }
+    document.addEventListener('mousedown', onDocClick)
+    return () => document.removeEventListener('mousedown', onDocClick)
+  }, [])
+
+  const matchedTeam = teams.find(t => t.name === teamText.trim())
+  const isRegistered = !!matchedTeam
+  const suggestions = teamText.trim().length >= 2
+    ? teams.filter(t => t.name.toLowerCase().includes(teamText.trim().toLowerCase()) && t.name !== teamText.trim()).slice(0, 8)
+    : []
+
+  useEffect(() => { setOption('') }, [teamText])
+
+  useEffect(() => {
+    const team = teamText.trim()
+    if (!team || !option) return
+    let match = ''
+    if (option === 'hm15') match = `${team} ${side} -1.5`
+    else if (option === 'h05') match = `${team} ${side} 0.5`
+    else if (option === 'h15') match = `${team} ${side} 1.5`
+    if (match) onResult(match, matchedTeam?.league ?? '')
+  }, [teamText, option, side])
+
+  async function submitRegister() {
+    const team = teamText.trim(); const lg = regLeague.trim()
+    if (!team || !lg) return
+    await onAddLeague(lg)
+    await onAddTeam(lg, team)
+    setRegistering(false); setRegLeague('')
+  }
+
+  const byLeague = leagues.map(lg => ({ league: lg, teamNames: teams.filter(t => t.league === lg).map(t => t.name) }))
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 6 }}>
+      <div ref={boxRef} style={{ position: 'relative' }}>
+        <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 3, fontWeight: 700 }}>팀 이름</div>
+        <div style={{ display: 'flex', gap: 4 }}>
+          <input
+            className="form-input" value={teamText}
+            onChange={e => setTeamText(e.target.value)}
+            onFocus={() => setShowSuggest(true)}
+            placeholder="팀 이름 직접 입력"
+            style={{ flex: 1, fontSize: 12, padding: '6px 8px', fontWeight: isRegistered ? 700 : 400, color: isRegistered ? 'var(--gold)' : 'var(--text-primary)' }}
+          />
+          <button type="button" onClick={() => { setRegistering(r => !r); setRegLeague(matchedTeam?.league ?? '') }}
+            disabled={!teamText.trim()}
+            title="팀 등록"
+            style={{ width: 30, flexShrink: 0, borderRadius: 6, border: '1px solid var(--gold-border)', background: 'var(--gold-bg)', color: 'var(--gold)', cursor: teamText.trim() ? 'pointer' : 'default', opacity: teamText.trim() ? 1 : 0.4, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Plus size={14} />
+          </button>
+        </div>
+
+        {showSuggest && suggestions.length > 0 && (
+          <div style={{ position: 'absolute', top: '100%', left: 0, right: 34, zIndex: 20, marginTop: 2, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 6, boxShadow: '0 4px 14px rgba(0,0,0,0.3)', maxHeight: 180, overflowY: 'auto' }}>
+            {suggestions.map(t => (
+              <div key={`${t.league}-${t.name}`} onClick={() => { setTeamText(t.name); setShowSuggest(false) }}
+                style={{ padding: '6px 8px', cursor: 'pointer', fontSize: 11, display: 'flex', justifyContent: 'space-between', gap: 6 }}>
+                <span style={{ fontWeight: 700, color: 'var(--gold)' }}>{t.name}</span>
+                <span style={{ color: 'var(--text-muted)', fontSize: 9, flexShrink: 0 }}>{t.league}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {registering && (
+          <div style={{ display: 'flex', gap: 4, marginTop: 4, alignItems: 'center' }}>
+            <input className="form-input" value={regLeague} onChange={e => setRegLeague(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && submitRegister()}
+              placeholder="이 팀의 리그 (예: K리그2)" list="soccer-league-suggestions"
+              style={{ flex: 1, fontSize: 10, padding: '4px 6px' }} />
+            <datalist id="soccer-league-suggestions">
+              {leagues.map(lg => <option key={lg} value={lg} />)}
+            </datalist>
+            <button type="button" onClick={submitRegister} disabled={!regLeague.trim()}
+              style={{ border: '1px solid var(--gold-border)', background: 'var(--gold-bg)', color: 'var(--gold)', borderRadius: 5, cursor: 'pointer', flexShrink: 0, display: 'flex', padding: '4px 6px' }}><Check size={11} /></button>
+            <button type="button" onClick={() => setRegistering(false)}
+              style={{ border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-secondary)', borderRadius: 5, cursor: 'pointer', flexShrink: 0, display: 'flex', padding: '4px 6px' }}><X size={11} /></button>
+          </div>
+        )}
+      </div>
+
+      {teamText.trim() && (
+        <div style={{ display: 'flex', gap: 4 }}>
+          {(['홈', '원정'] as const).map(s => (
+            <button key={s} type="button" onClick={() => setSide(s)} style={{
+              flex: 1, fontSize: 11, fontWeight: 700, padding: '5px 0', borderRadius: 6, cursor: 'pointer', fontFamily: 'var(--font-body)',
+              border: `1px solid ${side === s ? 'var(--blue-border)' : 'var(--border)'}`,
+              background: side === s ? 'var(--blue-bg)' : 'var(--bg-elevated)',
+              color: side === s ? 'var(--blue)' : 'var(--text-secondary)' }}>{s}</button>
+          ))}
+        </div>
+      )}
+
+      {teamText.trim() && (
+        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+          {SOCCER_BET_OPTIONS.map(o => <StructuredPickButton key={o.key} label={o.label} active={option === o.key} onClick={() => setOption(o.key)} />)}
+        </div>
+      )}
+
+      {/* 소형 리그 관리 — 지금 등록된 리그/팀을 확인만 (아주 작게) */}
+      <div>
+        <button type="button" onClick={() => setShowLeagueManage(v => !v)} style={{
+          background: 'none', border: 'none', cursor: 'pointer', fontSize: 9, color: 'var(--text-muted)', padding: 0, display: 'flex', alignItems: 'center', gap: 3,
+        }}>
+          {showLeagueManage ? <ChevronUp size={10} /> : <ChevronDown size={10} />} 리그 관리 ({leagues.length}개 리그 · {teams.length}개 팀)
+        </button>
+        {showLeagueManage && (
+          <div style={{ marginTop: 4, maxHeight: 130, overflowY: 'auto', background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 6, padding: 6 }}>
+            {byLeague.length === 0 && <div style={{ fontSize: 9, color: 'var(--text-muted)' }}>등록된 리그 없음</div>}
+            {byLeague.map(({ league, teamNames }) => (
+              <div key={league} style={{ marginBottom: 4 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-secondary)' }}>{league}</span>
+                  <button type="button" onClick={() => onDeleteLeague(league)} title="리그 삭제"
+                    style={{ border: 'none', background: 'none', color: 'var(--red)', cursor: 'pointer', display: 'flex', padding: 0 }}><Trash2 size={9} /></button>
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, marginTop: 2 }}>
+                  {teamNames.length === 0 && <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>등록된 팀 없음</span>}
+                  {teamNames.map(name => (
+                    <span key={name} style={{ fontSize: 9, display: 'flex', alignItems: 'center', gap: 2, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 999, padding: '1px 5px', color: 'var(--text-primary)' }}>
+                      {name}
+                      <button type="button" onClick={() => onDeleteTeam(league, name)} title="팀 삭제"
+                        style={{ border: 'none', background: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', padding: 0 }}><X size={8} /></button>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+
 function SportMatchPicker({ sport, leagues, teams, favoriteLeagues, onToggleFavoriteLeague, onAddLeague, onRenameLeague, onDeleteLeague, onAddTeam, onRenameTeam, onDeleteTeam, onResult }: {
   sport: StructuredSport
   leagues: string[]; teams: { league: string; name: string }[]
@@ -1269,20 +1436,28 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
       {mode === 'single' && (
         <SportButtonGroup value={sport} onChange={v => { setSport(v); setSportTouched(true); setLeagueTouched(false); contentRef.current?.focus() }} />
       )}
-      {mode === 'single' && STRUCTURED_SPORTS.includes(sport as StructuredSport) ? (
+      {mode === 'single' && sport === 'soccer' ? (
+        <SoccerTeamPicker
+          key={sport}
+          leagues={soccerLeagues} teams={soccerTeams}
+          onAddLeague={onAddSoccerLeague} onAddTeam={onAddSoccerTeam}
+          onDeleteTeam={onDeleteSoccerTeam} onDeleteLeague={onDeleteSoccerLeague}
+          onResult={(m, l) => { setContent(m); setLeague(l); setLeagueTouched(true) }}
+        />
+      ) : mode === 'single' && STRUCTURED_SPORTS.includes(sport as StructuredSport) ? (
         <SportMatchPicker
           key={sport}
           sport={sport as StructuredSport}
-          leagues={sport === 'soccer' ? soccerLeagues : sport === 'baseball' ? baseballLeagues : sport === 'basketball' ? basketballLeagues : esportsLeagues}
-          favoriteLeagues={sport === 'soccer' ? soccerFavoriteLeagues : sport === 'baseball' ? baseballFavoriteLeagues : sport === 'basketball' ? basketballFavoriteLeagues : esportsFavoriteLeagues}
-          onToggleFavoriteLeague={sport === 'soccer' ? onToggleSoccerLeagueFavorite : sport === 'baseball' ? onToggleBaseballLeagueFavorite : sport === 'basketball' ? onToggleBasketballLeagueFavorite : onToggleEsportsLeagueFavorite}
-          teams={sport === 'soccer' ? soccerTeams : sport === 'baseball' ? baseballTeams : sport === 'basketball' ? basketballTeams : esportsTeams}
-          onAddLeague={sport === 'soccer' ? onAddSoccerLeague : sport === 'baseball' ? onAddBaseballLeague : sport === 'basketball' ? onAddBasketballLeague : onAddEsportsLeague}
-          onRenameLeague={sport === 'soccer' ? onRenameSoccerLeague : sport === 'baseball' ? onRenameBaseballLeague : sport === 'basketball' ? onRenameBasketballLeague : onRenameEsportsLeague}
-          onDeleteLeague={sport === 'soccer' ? onDeleteSoccerLeague : sport === 'baseball' ? onDeleteBaseballLeague : sport === 'basketball' ? onDeleteBasketballLeague : onDeleteEsportsLeague}
-          onAddTeam={sport === 'soccer' ? onAddSoccerTeam : sport === 'baseball' ? onAddBaseballTeam : sport === 'basketball' ? onAddBasketballTeam : onAddEsportsTeam}
-          onRenameTeam={sport === 'soccer' ? onRenameSoccerTeam : sport === 'baseball' ? onRenameBaseballTeam : sport === 'basketball' ? onRenameBasketballTeam : onRenameEsportsTeam}
-          onDeleteTeam={sport === 'soccer' ? onDeleteSoccerTeam : sport === 'baseball' ? onDeleteBaseballTeam : sport === 'basketball' ? onDeleteBasketballTeam : onDeleteEsportsTeam}
+          leagues={sport === 'baseball' ? baseballLeagues : sport === 'basketball' ? basketballLeagues : esportsLeagues}
+          favoriteLeagues={sport === 'baseball' ? baseballFavoriteLeagues : sport === 'basketball' ? basketballFavoriteLeagues : esportsFavoriteLeagues}
+          onToggleFavoriteLeague={sport === 'baseball' ? onToggleBaseballLeagueFavorite : sport === 'basketball' ? onToggleBasketballLeagueFavorite : onToggleEsportsLeagueFavorite}
+          teams={sport === 'baseball' ? baseballTeams : sport === 'basketball' ? basketballTeams : esportsTeams}
+          onAddLeague={sport === 'baseball' ? onAddBaseballLeague : sport === 'basketball' ? onAddBasketballLeague : onAddEsportsLeague}
+          onRenameLeague={sport === 'baseball' ? onRenameBaseballLeague : sport === 'basketball' ? onRenameBasketballLeague : onRenameEsportsLeague}
+          onDeleteLeague={sport === 'baseball' ? onDeleteBaseballLeague : sport === 'basketball' ? onDeleteBasketballLeague : onDeleteEsportsLeague}
+          onAddTeam={sport === 'baseball' ? onAddBaseballTeam : sport === 'basketball' ? onAddBasketballTeam : onAddEsportsTeam}
+          onRenameTeam={sport === 'baseball' ? onRenameBaseballTeam : sport === 'basketball' ? onRenameBasketballTeam : onRenameEsportsTeam}
+          onDeleteTeam={sport === 'baseball' ? onDeleteBaseballTeam : sport === 'basketball' ? onDeleteBasketballTeam : onDeleteEsportsTeam}
           onResult={(m, l) => { setContent(m); setLeague(l); setLeagueTouched(true) }}
         />
       ) : (
