@@ -559,6 +559,8 @@ export default function MiningWidget() {
                 const perfPartialFill = perfFilledCount - perfFullTicks
                 const perfDaysLeft = Math.max(0, periodDays - perfElapsedDays)
                 const perfRequiredPerDay = perfDaysLeft > 0 ? Math.max(0, perfRemaining) / perfDaysLeft : Math.max(0, perfRemaining)
+                // 체크 기준 종료일 — 목표일이 아직 안 지났으면 오늘까지, 지났으면 목표일까지 (효과 계산과 동일한 기준)
+                const perfEnd = dayjs().isBefore(dayjs(c.goal_date!)) ? dayjs() : dayjs(c.goal_date!)
 
                 return (
                   <div style={{ marginTop: 4, paddingTop: 4 }}>
@@ -567,6 +569,10 @@ export default function MiningWidget() {
                       <span style={{ fontSize: 8, color: 'var(--text-muted)' }}>
                         {perfRemaining <= 0 ? '목표 달성' : `하루 ${fmt(perfRequiredPerDay)} 필요 · ${perfDaysLeft}일 남음`}
                       </span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 3, fontSize: 8, color: 'var(--text-muted)' }}>
+                      <span>{perfStart.format('MM.DD')} ~ {perfEnd.format('MM.DD')} 기준</span>
+                      <span><b style={{ color: 'var(--gold)', fontFamily: 'var(--font-num)' }}>{fmt(progress)}</b> / {fmt(c.perf_amount)}</span>
                     </div>
                     <div style={{ position: 'relative' }}>
                       <div style={{ display: 'flex', gap: 2 }}>

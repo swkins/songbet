@@ -275,9 +275,9 @@ function BetMatchLine({ sport, match, fontSize = 12, teamColor, live }: { sport:
     <span style={{ display: 'flex', alignItems: 'center', gap: 5, flex: 1, minWidth: 0 }}>
       <span style={{ fontSize, fontWeight: 700, color: teamColor ?? 'var(--text-primary)', flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '55%' }}>{team}</span>
       {parts?.side && <MatchBadge label={sideBadgeLabel(parts.side)} accent={parts.side === '홈' ? 'blue' : 'orange'} />}
+      {parts?.boTag && <MatchBadge label={parts.boTag} accent="neutral" />}
       {parts && <span style={{ fontSize, color: 'var(--text-secondary)', fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{parts.optionLabel}</span>}
       <span style={{ flex: 1 }} />
-      {parts?.boTag && <MatchBadge label={parts.boTag} accent="neutral" />}
       {live && <MatchBadge label="LIVE" accent="red" />}
     </span>
   )
@@ -1194,6 +1194,8 @@ function StructuredTeamPicker({ sport, leagues, favoriteLeagues, teams, onAddLea
     if (!team || !lg) return
     await onAddLeague(lg)
     await onAddTeam(lg, team)
+    // 강등/승격으로 리그가 바뀌는 경우 기존 리그의 매핑을 남겨두면 같은 팀이 두 리그에 중복 등록되므로 이전 매핑은 지운다
+    if (matchedTeam && matchedTeam.league !== lg) await onDeleteTeam(matchedTeam.league, team)
     setRegistering(false); setRegLeague('')
   }
 
@@ -1217,11 +1219,17 @@ function StructuredTeamPicker({ sport, leagues, favoriteLeagues, teams, onAddLea
           />
           <button type="button" onClick={() => { setRegistering(r => !r); setRegLeague(matchedTeam?.league ?? '') }}
             disabled={!teamText.trim()}
-            title="팀 등록"
+            title={isRegistered ? '리그 수정' : '팀 등록'}
             style={{ width: 30, flexShrink: 0, borderRadius: 6, border: '1px solid var(--gold-border)', background: 'var(--gold-bg)', color: 'var(--gold)', cursor: teamText.trim() ? 'pointer' : 'default', opacity: teamText.trim() ? 1 : 0.4, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <Plus size={14} />
+            {isRegistered ? <Pencil size={13} /> : <Plus size={14} />}
           </button>
         </div>
+
+        {isRegistered && matchedTeam && !registering && (
+          <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 3 }}>
+            현재 리그: <span style={{ color: 'var(--gold)', fontWeight: 700 }}>{matchedTeam.league}</span>
+          </div>
+        )}
 
         {showSuggest && suggestions.length > 0 && (
           <div style={{ position: 'absolute', top: '100%', left: 0, right: 34, zIndex: 20, marginTop: 2, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 6, boxShadow: '0 4px 14px rgba(0,0,0,0.3)', maxHeight: 180, overflowY: 'auto' }}>
@@ -1241,7 +1249,7 @@ function StructuredTeamPicker({ sport, leagues, favoriteLeagues, teams, onAddLea
               <input className="form-input" value={regLeague} onChange={e => setRegLeague(e.target.value)}
                 onFocus={() => setShowRegLeagueSuggest(true)}
                 onKeyDown={e => e.key === 'Enter' && submitRegister()}
-                placeholder="이 팀의 리그 (예: K리그2)"
+                placeholder={isRegistered ? '변경할 리그 (강등/승격 시 수정)' : '이 팀의 리그 (예: K리그2)'}
                 style={{ flex: 1, fontSize: 10, padding: '4px 6px' }} />
               <button type="button" onClick={submitRegister} disabled={!regLeague.trim()}
                 style={{ border: '1px solid var(--gold-border)', background: 'var(--gold-bg)', color: 'var(--gold)', borderRadius: 5, cursor: 'pointer', flexShrink: 0, display: 'flex', padding: '4px 6px' }}><Check size={11} /></button>
