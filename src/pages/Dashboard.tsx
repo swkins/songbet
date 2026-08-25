@@ -1110,12 +1110,13 @@ function StructuredTeamPicker({ sport, leagues, favoriteLeagues, teams, onAddLea
   const [registering, setRegistering] = useState(false)
   const [regLeague, setRegLeague] = useState('')
   const [showRegLeagueSuggest, setShowRegLeagueSuggest] = useState(false)
+  const [regLeagueHighlight, setRegLeagueHighlight] = useState(-1)
   const [showManage, setShowManage] = useState(false)
   const boxRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     function onDocClick(e: MouseEvent) {
-      if (boxRef.current && !boxRef.current.contains(e.target as Node)) { setShowSuggest(false); setShowRegLeagueSuggest(false) }
+      if (boxRef.current && !boxRef.current.contains(e.target as Node)) { setShowSuggest(false); setShowRegLeagueSuggest(false); setRegLeagueHighlight(-1) }
     }
     document.addEventListener('mousedown', onDocClick)
     return () => document.removeEventListener('mousedown', onDocClick)
@@ -1147,6 +1148,30 @@ function StructuredTeamPicker({ sport, leagues, favoriteLeagues, teams, onAddLea
       }
     } else if (e.key === 'Escape') {
       setShowSuggest(false); setHighlightIndex(-1)
+    }
+  }
+
+  const regLeagueSuggestions = leagues.filter(lg => lg.toLowerCase().includes(regLeague.trim().toLowerCase()))
+  function onRegLeagueKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (!showRegLeagueSuggest || regLeagueSuggestions.length === 0) {
+      if (e.key === 'Enter') submitRegister()
+      return
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      setRegLeagueHighlight(i => Math.min(i + 1, regLeagueSuggestions.length - 1))
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      setRegLeagueHighlight(i => Math.max(i - 1, 0))
+    } else if (e.key === 'Enter') {
+      e.preventDefault()
+      if (regLeagueHighlight >= 0 && regLeagueSuggestions[regLeagueHighlight]) {
+        setRegLeague(regLeagueSuggestions[regLeagueHighlight]); setShowRegLeagueSuggest(false); setRegLeagueHighlight(-1)
+      } else {
+        submitRegister()
+      }
+    } else if (e.key === 'Escape') {
+      setShowRegLeagueSuggest(false); setRegLeagueHighlight(-1)
     }
   }
 
@@ -1246,9 +1271,9 @@ function StructuredTeamPicker({ sport, leagues, favoriteLeagues, teams, onAddLea
         {registering && (
           <div style={{ position: 'relative', marginTop: 4 }}>
             <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-              <input className="form-input" value={regLeague} onChange={e => setRegLeague(e.target.value)}
+              <input className="form-input" value={regLeague} onChange={e => { setRegLeague(e.target.value); setRegLeagueHighlight(-1) }}
                 onFocus={() => setShowRegLeagueSuggest(true)}
-                onKeyDown={e => e.key === 'Enter' && submitRegister()}
+                onKeyDown={onRegLeagueKeyDown}
                 placeholder={isRegistered ? '변경할 리그 (강등/승격 시 수정)' : '이 팀의 리그 (예: K리그2)'}
                 style={{ flex: 1, fontSize: 10, padding: '4px 6px' }} />
               <button type="button" onClick={submitRegister} disabled={!regLeague.trim()}
@@ -1256,11 +1281,12 @@ function StructuredTeamPicker({ sport, leagues, favoriteLeagues, teams, onAddLea
               <button type="button" onClick={() => setRegistering(false)}
                 style={{ border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-secondary)', borderRadius: 5, cursor: 'pointer', flexShrink: 0, display: 'flex', padding: '4px 6px' }}><X size={11} /></button>
             </div>
-            {showRegLeagueSuggest && leagues.filter(lg => lg.toLowerCase().includes(regLeague.trim().toLowerCase())).length > 0 && (
+            {showRegLeagueSuggest && regLeagueSuggestions.length > 0 && (
               <div style={{ position: 'absolute', top: '100%', left: 0, right: 62, zIndex: 20, marginTop: 2, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 6, boxShadow: '0 4px 14px rgba(0,0,0,0.3)', maxHeight: 160, overflowY: 'auto' }}>
-                {leagues.filter(lg => lg.toLowerCase().includes(regLeague.trim().toLowerCase())).map(lg => (
-                  <div key={lg} onClick={() => { setRegLeague(lg); setShowRegLeagueSuggest(false) }}
-                    style={{ padding: '6px 8px', cursor: 'pointer', fontSize: 11, fontWeight: 600, color: 'var(--text-primary)' }}
+                {regLeagueSuggestions.map((lg, i) => (
+                  <div key={lg} onClick={() => { setRegLeague(lg); setShowRegLeagueSuggest(false); setRegLeagueHighlight(-1) }}
+                    onMouseEnter={() => setRegLeagueHighlight(i)}
+                    style={{ padding: '6px 8px', cursor: 'pointer', fontSize: 11, fontWeight: 600, color: 'var(--text-primary)', background: regLeagueHighlight === i ? 'var(--gold-bg)' : 'transparent' }}
                     onMouseDown={e => e.preventDefault()}>
                     {lg}
                   </div>
