@@ -68,7 +68,7 @@ function CashoutModal({ entry, cashout, onClose, onSetGoal, onSetAuto, onSetPerf
     })()
   }, [])
 
-  const [amount, setAmount] = useState('')
+  const [amount, setAmount] = useState(entry.target_point > 0 ? String(entry.target_point) : '')
   const [submitting, setSubmitting] = useState(false)
   const autoOn = cashout?.auto_set_2w ?? true
 
@@ -464,13 +464,13 @@ export default function MiningWidget() {
                   </span>
                 )}
                 {isEditingTarget ? (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-                    <input autoFocus style={{ width: 70, background: 'var(--bg-card)', border: '1px solid var(--gold-border)', borderRadius: 5, padding: '3px 5px', fontSize: 11, color: 'var(--text-primary)', fontFamily: 'var(--font-num)', outline: 'none', boxSizing: 'border-box' }}
-                      inputMode="numeric" value={editVal}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <input autoFocus style={{ width: 120, background: 'var(--bg-card)', border: '1px solid var(--gold-border)', borderRadius: 5, padding: '3px 6px', fontSize: 16, fontWeight: 800, color: 'var(--text-primary)', fontFamily: 'var(--font-num)', outline: 'none', boxSizing: 'border-box' }}
+                      inputMode="numeric" value={editVal ? Number(editVal.replace(/,/g, '')).toLocaleString('ko-KR') : ''}
                       onChange={ev => { const raw = ev.target.value.replace(/,/g, ''); if (raw === '' || /^\d+$/.test(raw)) setEditVal(raw) }}
                       onKeyDown={ev => ev.key === 'Enter' && saveEdit(e)} />
-                    <button onClick={() => saveEdit(e)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--green)', display: 'flex' }}><Check size={12} /></button>
-                    <button onClick={cancelEdit} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex' }}><X size={12} /></button>
+                    <button onClick={() => saveEdit(e)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--green)', display: 'flex' }}><Check size={13} /></button>
+                    <button onClick={cancelEdit} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex' }}><X size={13} /></button>
                   </div>
                 ) : (
                   <span onClick={() => startEdit(e, 'target')} style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--font-num)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 2 }}>
