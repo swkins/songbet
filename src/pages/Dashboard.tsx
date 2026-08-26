@@ -1184,18 +1184,39 @@ function StructuredTeamPicker({ sport, leagues, favoriteLeagues, teams, onAddLea
     }
   }
 
+  // 직접입력은 매 글자마다 자동 확정하면 포커스가 배당란으로 튀어 타이핑이 끊긴다 → Enter/포커스 이탈 시에만 확정
+  function commitCustomText() {
+    const team = teamText.trim()
+    const text = customText.trim()
+    if (!team || !text) return
+    const lg = matchedTeam?.league ?? ''
+    let match = ''
+    if (sport === 'esports') {
+      const boLabel = bo === 'bo3' ? 'BO3' : bo === 'bo5' ? 'BO5' : ''
+      if (!boLabel) return
+      match = `${team} ${text} (${boLabel})`
+    } else if (sport === 'basketball') {
+      match = `${team} ${text}`
+    } else {
+      match = `${team} ${side} ${text}`
+    }
+    onResult(match, lg)
+  }
+  function onCustomTextKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === 'Enter') { e.preventDefault(); commitCustomText() }
+  }
+
   useEffect(() => {
     const team = teamText.trim()
     if (!team) return
     const lg = matchedTeam?.league ?? ''
     if (sport === 'esports') {
       if (bo === 'bo1') { onResult(`${team} (BO1)`, lg); return }
-      if (!option) return
+      if (!option || option === CUSTOM_KEY) return
       const boLabel = bo === 'bo3' ? 'BO3' : bo === 'bo5' ? 'BO5' : ''
       if (!boLabel) return
       let match = ''
-      if (option === CUSTOM_KEY) { if (!customText.trim()) return; match = `${team} ${customText.trim()} (${boLabel})` }
-      else if (option === 'ml') match = `${team} (${boLabel})`
+      if (option === 'ml') match = `${team} (${boLabel})`
       else if (option === 'h15') match = `${team} 1.5 (${boLabel})`
       else if (option === 'hm15') match = `${team} -1.5 (${boLabel})`
       else if (option === 'so35') match = `${team} 3.5세트오버 (${boLabel})`
@@ -1207,12 +1228,9 @@ function StructuredTeamPicker({ sport, leagues, favoriteLeagues, teams, onAddLea
       onResult(`${team} ${side}`, lg)
       return
     }
-    if (!option) return
+    if (!option || option === CUSTOM_KEY) return
     let match = ''
-    if (option === CUSTOM_KEY) {
-      if (!customText.trim()) return
-      match = sport === 'basketball' ? `${team} ${customText.trim()}` : `${team} ${side} ${customText.trim()}`
-    } else if (sport === 'soccer') {
+    if (sport === 'soccer') {
       if (option === 'hm15') match = `${team} ${side} -1.5`
       else if (option === 'h05') match = `${team} ${side} 0.5`
       else if (option === 'h15') match = `${team} ${side} 1.5`
@@ -1225,7 +1243,7 @@ function StructuredTeamPicker({ sport, leagues, favoriteLeagues, teams, onAddLea
       match = `${team} ${option}`
     }
     if (match) onResult(match, lg)
-  }, [teamText, option, customText, side, bo, sport])
+  }, [teamText, option, side, bo, sport])
 
   async function submitRegister() {
     const team = teamText.trim(); const lg = regLeague.trim()
@@ -1352,7 +1370,8 @@ function StructuredTeamPicker({ sport, leagues, favoriteLeagues, teams, onAddLea
       )}
       {teamText.trim() && sport === 'baseball' && option === CUSTOM_KEY && (
         <input className="form-input" autoFocus value={customText} onChange={e => setCustomText(e.target.value)}
-          placeholder="예: 5회까지 팀오버 3.5" style={{ fontSize: 11, padding: '6px 8px' }} />
+          onKeyDown={onCustomTextKeyDown} onBlur={commitCustomText}
+          placeholder="예: 5회까지 팀오버 3.5 (Enter로 확정)" style={{ fontSize: 11, padding: '6px 8px' }} />
       )}
 
       {teamText.trim() && sport === 'esports' && (bo === 'bo3' || bo === 'bo5') && (
@@ -1362,7 +1381,8 @@ function StructuredTeamPicker({ sport, leagues, favoriteLeagues, teams, onAddLea
       )}
       {teamText.trim() && sport === 'esports' && (bo === 'bo3' || bo === 'bo5') && option === CUSTOM_KEY && (
         <input className="form-input" autoFocus value={customText} onChange={e => setCustomText(e.target.value)}
-          placeholder="예: 드래곤 17.5 오버" style={{ fontSize: 11, padding: '6px 8px' }} />
+          onKeyDown={onCustomTextKeyDown} onBlur={commitCustomText}
+          placeholder="예: 드래곤 17.5 오버 (Enter로 확정)" style={{ fontSize: 11, padding: '6px 8px' }} />
       )}
 
       {teamText.trim() && (sport === 'soccer' || sport === 'basketball') && (
@@ -1372,7 +1392,8 @@ function StructuredTeamPicker({ sport, leagues, favoriteLeagues, teams, onAddLea
       )}
       {teamText.trim() && (sport === 'soccer' || sport === 'basketball') && option === CUSTOM_KEY && (
         <input className="form-input" autoFocus value={customText} onChange={e => setCustomText(e.target.value)}
-          placeholder={sport === 'soccer' ? '예: 코너킥 9.5 오버' : '예: 3쿼터 팀토탈 22.5 오버'} style={{ fontSize: 11, padding: '6px 8px' }} />
+          onKeyDown={onCustomTextKeyDown} onBlur={commitCustomText}
+          placeholder={(sport === 'soccer' ? '예: 코너킥 9.5 오버' : '예: 3쿼터 팀토탈 22.5 오버') + ' (Enter로 확정)'} style={{ fontSize: 11, padding: '6px 8px' }} />
       )}
 
       {/* 리그 관리 — 화면 중앙 모달로 열어서 리그/팀 추가·수정·삭제 */}
