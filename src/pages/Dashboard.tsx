@@ -884,10 +884,14 @@ const LEG_MARKS = ['①', '②', '③', '④']
 // 축구/야구/농구/LOL — 자유입력 대신 등록된 리그/팀을 선택하는 방식의 마켓 옵션 정의
 type StructuredSport = 'soccer' | 'baseball' | 'basketball' | 'volleyball' | 'esports'
 const STRUCTURED_SPORTS: StructuredSport[] = ['soccer', 'baseball', 'basketball', 'volleyball', 'esports']
+// 직접입력(자유 베팅 옵션) 공용 키 — 프리셋에 없는 마켓(예: "드래곤 17.5 오버")을 직접 타이핑해서 등록할 수 있게 한다
+const CUSTOM_KEY = 'custom'
+const CUSTOM_OPTION = { key: CUSTOM_KEY, label: '직접입력' }
 const SOCCER_BET_OPTIONS = [
   { key: 'hm15', label: '-1.5 핸디캡' },
   { key: 'h05', label: '0.5 플핸' },
   { key: 'h15', label: '1.5 플핸' },
+  CUSTOM_OPTION,
 ]
 // 야구는 핸디캡 / 팀오버를 화면에서 좌우로 분리해서 보여준다 (BASEBALL_HCAP_OPTIONS = 좌측, BASEBALL_OVER_OPTIONS = 우측)
 const BASEBALL_HCAP_OPTIONS = [
@@ -901,6 +905,7 @@ const BASEBALL_OVER_OPTIONS = [
   { key: 'o25', label: '팀오버 2.5' },
   { key: 'o35', label: '팀오버 3.5' },
   { key: 'o45', label: '팀오버 4.5' },
+  CUSTOM_OPTION,
 ]
 const BASKETBALL_HCAP_LINES = [4.5, 5.5, 6.5, 7.5, 8.5, 9.5, 10.5, 11.5, 12.5, 13.5, 14.5]
 // LOL — BO1은 별도 마켓 없이 팀만 고르면 바로 확정, BO3/BO5는 세트 수에 따라 고를 수 있는 마켓이 다르다
@@ -909,22 +914,25 @@ const ESPORTS_BO3_OPTIONS = [
   { key: 'h15', label: '1.5 플핸' },
   { key: 'hm15', label: '-1.5 핸디캡' },
   { key: 'ml', label: '일반승' },
+  CUSTOM_OPTION,
 ]
 const ESPORTS_BO5_OPTIONS = [
   { key: 'hm15', label: '-1.5 핸디캡' },
   { key: 'h15', label: '1.5 플핸' },
   { key: 'so35', label: '3.5 세트오버' },
   { key: 'ml', label: '일반승' },
+  CUSTOM_OPTION,
 ]
 
-function StructuredPickButton({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+function StructuredPickButton({ label, active, onClick, custom }: { label: string; active: boolean; onClick: () => void; custom?: boolean }) {
   return (
     <button type="button" onClick={onClick} style={{
+      display: 'flex', alignItems: 'center', gap: 3,
       fontSize: 10, fontWeight: 700, padding: '5px 9px', borderRadius: 6, cursor: 'pointer', fontFamily: 'var(--font-body)',
-      border: `1px solid ${active ? 'var(--gold-border)' : 'var(--border)'}`,
+      border: `1px ${custom && !active ? 'dashed' : 'solid'} ${active ? 'var(--gold-border)' : 'var(--border)'}`,
       background: active ? 'var(--gold-bg)' : 'var(--bg-elevated)',
       color: active ? 'var(--gold)' : 'var(--text-secondary)',
-    }}>{label}</button>
+    }}>{custom && <Plus size={10} />}{label}</button>
   )
 }
 
@@ -1106,6 +1114,7 @@ function StructuredTeamPicker({ sport, leagues, favoriteLeagues, teams, onAddLea
   const [highlightIndex, setHighlightIndex] = useState(-1)
   const [side, setSide] = useState<'홈' | '원정' | ''>(sport === 'volleyball' ? '' : '홈')
   const [option, setOption] = useState('')
+  const [customText, setCustomText] = useState('')
   const [bo, setBo] = useState<EsportsBo | ''>('bo3')
   const [registering, setRegistering] = useState(false)
   const [regLeague, setRegLeague] = useState('')
@@ -1128,7 +1137,7 @@ function StructuredTeamPicker({ sport, leagues, favoriteLeagues, teams, onAddLea
     ? teams.filter(t => t.name.toLowerCase().includes(teamText.trim().toLowerCase()) && t.name !== teamText.trim()).slice(0, 8)
     : []
 
-  useEffect(() => { setOption(''); setHighlightIndex(-1) }, [teamText])
+  useEffect(() => { setOption(''); setCustomText(''); setHighlightIndex(-1) }, [teamText])
 
   function selectSuggestion(name: string) {
     setTeamText(name); setShowSuggest(false); setHighlightIndex(-1)
@@ -1185,7 +1194,8 @@ function StructuredTeamPicker({ sport, leagues, favoriteLeagues, teams, onAddLea
       const boLabel = bo === 'bo3' ? 'BO3' : bo === 'bo5' ? 'BO5' : ''
       if (!boLabel) return
       let match = ''
-      if (option === 'ml') match = `${team} (${boLabel})`
+      if (option === CUSTOM_KEY) { if (!customText.trim()) return; match = `${team} ${customText.trim()} (${boLabel})` }
+      else if (option === 'ml') match = `${team} (${boLabel})`
       else if (option === 'h15') match = `${team} 1.5 (${boLabel})`
       else if (option === 'hm15') match = `${team} -1.5 (${boLabel})`
       else if (option === 'so35') match = `${team} 3.5세트오버 (${boLabel})`
@@ -1199,7 +1209,10 @@ function StructuredTeamPicker({ sport, leagues, favoriteLeagues, teams, onAddLea
     }
     if (!option) return
     let match = ''
-    if (sport === 'soccer') {
+    if (option === CUSTOM_KEY) {
+      if (!customText.trim()) return
+      match = sport === 'basketball' ? `${team} ${customText.trim()}` : `${team} ${side} ${customText.trim()}`
+    } else if (sport === 'soccer') {
       if (option === 'hm15') match = `${team} ${side} -1.5`
       else if (option === 'h05') match = `${team} ${side} 0.5`
       else if (option === 'h15') match = `${team} ${side} 1.5`
@@ -1212,7 +1225,7 @@ function StructuredTeamPicker({ sport, leagues, favoriteLeagues, teams, onAddLea
       match = `${team} ${option}`
     }
     if (match) onResult(match, lg)
-  }, [teamText, option, side, bo, sport])
+  }, [teamText, option, customText, side, bo, sport])
 
   async function submitRegister() {
     const team = teamText.trim(); const lg = regLeague.trim()
@@ -1225,7 +1238,7 @@ function StructuredTeamPicker({ sport, leagues, favoriteLeagues, teams, onAddLea
   }
 
   const options = sport === 'soccer' ? SOCCER_BET_OPTIONS
-    : sport === 'basketball' ? BASKETBALL_HCAP_LINES.map(l => ({ key: String(l), label: `핸디캡 ${l}` }))
+    : sport === 'basketball' ? [...BASKETBALL_HCAP_LINES.map(l => ({ key: String(l), label: `핸디캡 ${l}` })), CUSTOM_OPTION]
     : []
 
   return (
@@ -1312,7 +1325,7 @@ function StructuredTeamPicker({ sport, leagues, favoriteLeagues, teams, onAddLea
       {teamText.trim() && sport === 'esports' && (
         <div style={{ display: 'flex', gap: 4 }}>
           {(['bo1', 'bo3', 'bo5'] as const).map(b => (
-            <button key={b} type="button" onClick={() => { setBo(b); setOption('') }} style={{
+            <button key={b} type="button" onClick={() => { setBo(b); setOption(''); setCustomText('') }} style={{
               flex: 1, fontSize: 11, fontWeight: 700, padding: '5px 0', borderRadius: 6, cursor: 'pointer', fontFamily: 'var(--font-body)',
               border: `1px solid ${bo === b ? 'var(--blue-border)' : 'var(--border)'}`,
               background: bo === b ? 'var(--blue-bg)' : 'var(--bg-elevated)',
@@ -1332,22 +1345,34 @@ function StructuredTeamPicker({ sport, leagues, favoriteLeagues, teams, onAddLea
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 3, fontWeight: 700 }}>팀오버</div>
             <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-              {BASEBALL_OVER_OPTIONS.map(o => <StructuredPickButton key={o.key} label={o.label} active={option === o.key} onClick={() => setOption(o.key)} />)}
+              {BASEBALL_OVER_OPTIONS.map(o => <StructuredPickButton key={o.key} label={o.label} active={option === o.key} onClick={() => setOption(o.key)} custom={o.key === CUSTOM_KEY} />)}
             </div>
           </div>
         </div>
       )}
+      {teamText.trim() && sport === 'baseball' && option === CUSTOM_KEY && (
+        <input className="form-input" autoFocus value={customText} onChange={e => setCustomText(e.target.value)}
+          placeholder="예: 5회까지 팀오버 3.5" style={{ fontSize: 11, padding: '6px 8px' }} />
+      )}
 
       {teamText.trim() && sport === 'esports' && (bo === 'bo3' || bo === 'bo5') && (
         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-          {(bo === 'bo3' ? ESPORTS_BO3_OPTIONS : ESPORTS_BO5_OPTIONS).map(o => <StructuredPickButton key={o.key} label={o.label} active={option === o.key} onClick={() => setOption(o.key)} />)}
+          {(bo === 'bo3' ? ESPORTS_BO3_OPTIONS : ESPORTS_BO5_OPTIONS).map(o => <StructuredPickButton key={o.key} label={o.label} active={option === o.key} onClick={() => setOption(o.key)} custom={o.key === CUSTOM_KEY} />)}
         </div>
+      )}
+      {teamText.trim() && sport === 'esports' && (bo === 'bo3' || bo === 'bo5') && option === CUSTOM_KEY && (
+        <input className="form-input" autoFocus value={customText} onChange={e => setCustomText(e.target.value)}
+          placeholder="예: 드래곤 17.5 오버" style={{ fontSize: 11, padding: '6px 8px' }} />
       )}
 
       {teamText.trim() && (sport === 'soccer' || sport === 'basketball') && (
         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-          {options.map(o => <StructuredPickButton key={o.key} label={o.label} active={option === o.key} onClick={() => setOption(o.key)} />)}
+          {options.map(o => <StructuredPickButton key={o.key} label={o.label} active={option === o.key} onClick={() => setOption(o.key)} custom={o.key === CUSTOM_KEY} />)}
         </div>
+      )}
+      {teamText.trim() && (sport === 'soccer' || sport === 'basketball') && option === CUSTOM_KEY && (
+        <input className="form-input" autoFocus value={customText} onChange={e => setCustomText(e.target.value)}
+          placeholder={sport === 'soccer' ? '예: 코너킥 9.5 오버' : '예: 3쿼터 팀토탈 22.5 오버'} style={{ fontSize: 11, padding: '6px 8px' }} />
       )}
 
       {/* 리그 관리 — 화면 중앙 모달로 열어서 리그/팀 추가·수정·삭제 */}
