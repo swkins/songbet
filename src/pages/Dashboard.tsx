@@ -220,10 +220,11 @@ function parseBetMatch(sport: string, match: string): BetMatchParts | null {
     return { team, side: sideV, optionLabel: `${num} 핸디캡`, accent: num === '1.5' ? 'green' : 'purple' }
   }
   if (sport === 'basketball') {
-    const m = s.match(/^(.+?)\s(-?\d+(?:\.\d+)?)$/)
+    const m = s.match(/^(.+?)(?:\s(홈|원정))?\s(-?\d+(?:\.\d+)?)$/)
     if (!m) return null
-    const [, team, num] = m
-    return { team, optionLabel: `${num} 핸디캡`, accent: 'blue' }
+    const [, team, side, num] = m
+    const sideV = side as '홈' | '원정' | undefined
+    return { team, side: sideV, optionLabel: `${num} 핸디캡`, accent: 'blue' }
   }
   if (sport === 'esports') {
     const m = s.match(/^(.+?)(?:\s(-?\d+(?:\.\d+)?)(세트오버)?)?\s\((BO\d)\)$/)
@@ -1196,7 +1197,7 @@ function StructuredTeamPicker({ sport, leagues, favoriteLeagues, teams, onAddLea
       if (!boLabel) return
       match = `${team} ${text} (${boLabel})`
     } else if (sport === 'basketball') {
-      match = `${team} ${text}`
+      match = `${team} ${side} ${text}`
     } else {
       match = `${team} ${side} ${text}`
     }
@@ -1240,7 +1241,7 @@ function StructuredTeamPicker({ sport, leagues, favoriteLeagues, teams, onAddLea
       if (hcapLine[option]) match = `${team} ${side} ${hcapLine[option]}`
       else if (overLine[option]) match = `${team} ${side} ${overLine[option]}오버`
     } else if (sport === 'basketball') {
-      match = `${team} ${option}`
+      match = `${team} ${side} ${option}`
     }
     if (match) onResult(match, lg)
   }, [teamText, option, side, bo, sport])
@@ -1328,7 +1329,7 @@ function StructuredTeamPicker({ sport, leagues, favoriteLeagues, teams, onAddLea
         )}
       </div>
 
-      {teamText.trim() && (sport === 'soccer' || sport === 'baseball' || sport === 'volleyball') && (
+      {teamText.trim() && (sport === 'soccer' || sport === 'baseball' || sport === 'basketball' || sport === 'volleyball') && (
         <div style={{ display: 'flex', gap: 4 }}>
           {(['홈', '원정'] as const).map(s => (
             <button key={s} type="button" onClick={() => setSide(s)} style={{
