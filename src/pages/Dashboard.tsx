@@ -1304,7 +1304,7 @@ function StructuredTeamPicker({ sport, leagues, favoriteLeagues, teams, onAddLea
         {registering && (
           <div style={{ position: 'relative', marginTop: 4 }}>
             <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-              <input className="form-input" value={regLeague} onChange={e => { setRegLeague(e.target.value); setRegLeagueHighlight(-1) }}
+              <input className="form-input" value={regLeague} autoFocus onChange={e => { setRegLeague(e.target.value); setRegLeagueHighlight(-1) }}
                 onFocus={() => setShowRegLeagueSuggest(true)}
                 onKeyDown={onRegLeagueKeyDown}
                 placeholder={isRegistered ? '변경할 리그 (강등/승격 시 수정)' : '이 팀의 리그 (예: K리그2)'}
