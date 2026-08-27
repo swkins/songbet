@@ -24,6 +24,7 @@ export interface MiningCashout {
   perf_site_ids: string[]    // 실적현황 대상 베팅사이트 id 목록
   perf_period: '2w' | '1m' | null // 목표 날짜로부터 얼마나 이전 시기까지의 실적을 볼지
   perf_amount: number        // 실적 목표 금액
+  memo: string               // 사이트별 자유 메모
 }
 
 export const MINING_HISTORY_DAYS = 59 // 오늘 포함 60일치 (달력 2개월 안팎 + 그래프 30일 + 일평균 계산용)
@@ -204,5 +205,15 @@ export function useMiningData() {
     })
   }
 
-  return { today, entries, history, loading, knownSites, addEntry, updateField, deleteEntry, cashouts, cashoutFor, setCashGoal, setAutoSet2w, setPerfGoal, doCashout }
+  /** 사이트 메모 저장. */
+  async function setMemo(siteName: string, memo: string) {
+    const existing = cashoutFor(siteName)
+    const payload = { site_name: siteName, memo }
+    const { data } = existing
+      ? await supabase.from('mining_cashouts').update(payload).eq('id', existing.id).select().single()
+      : await supabase.from('mining_cashouts').insert(payload).select().single()
+    if (data) setCashouts(prev => existing ? prev.map(c => c.id === (data as MiningCashout).id ? (data as MiningCashout) : c) : [...prev, data as MiningCashout])
+  }
+
+  return { today, entries, history, loading, knownSites, addEntry, updateField, deleteEntry, cashouts, cashoutFor, setCashGoal, setAutoSet2w, setPerfGoal, setMemo, doCashout }
 }

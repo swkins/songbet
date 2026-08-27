@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import dayjs from 'dayjs'
-import { Plus, Trash2, Pencil, Check, X, ClipboardPaste, DollarSign, Target, TrendingUp } from 'lucide-react'
+import { Plus, Trash2, Pencil, Check, X, ClipboardPaste, DollarSign, Target, TrendingUp, StickyNote } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useMiningData, fmtMining as fmt, minedOf as mined, type MiningEntry, type MiningCashout } from '../lib/useMining'
 
@@ -281,7 +281,7 @@ function CashoutModal({ entry, cashout, onClose, onSetGoal, onSetAuto, onSetPerf
 /** 대시보드 좌측에 얹는 채굴 현황 위젯. 전체 로직(오늘 데이터 로딩/자동 승계/추가/수정/삭제)은
  *  useMiningData 훅을 통해 Mining.tsx(채굴 탭)와 그대로 공유한다 — 달력/그래프는 여기선 생략. */
 export default function MiningWidget() {
-  const { today, entries, loading, knownSites, addEntry: addEntryToDb, updateField, deleteEntry: deleteEntryFromDb, cashouts, cashoutFor, setCashGoal, setAutoSet2w, setPerfGoal, doCashout } = useMiningData()
+  const { today, entries, loading, knownSites, addEntry: addEntryToDb, updateField, deleteEntry: deleteEntryFromDb, cashouts, cashoutFor, setCashGoal, setAutoSet2w, setPerfGoal, setMemo, doCashout } = useMiningData()
 
   const [addModalOpen, setAddModalOpen] = useState(false)
   const [newName, setNewName] = useState('')
@@ -317,6 +317,17 @@ export default function MiningWidget() {
   type EditField = 'target' | 'current'
   const [editing, setEditing] = useState<{ id: string; field: EditField } | null>(null)
   const [editVal, setEditVal] = useState('')
+  const [editingMemoSite, setEditingMemoSite] = useState<string | null>(null)
+  const [memoVal, setMemoVal] = useState('')
+
+  function startMemoEdit(siteName: string) {
+    setEditingMemoSite(siteName)
+    setMemoVal(cashoutFor(siteName)?.memo ?? '')
+  }
+  async function saveMemo(siteName: string) {
+    await setMemo(siteName, memoVal.trim())
+    setEditingMemoSite(null)
+  }
 
   function startEdit(entry: MiningEntry, field: EditField) {
     setEditing({ id: entry.id, field })
@@ -432,6 +443,9 @@ export default function MiningWidget() {
                   <button onClick={() => setCashoutEntry(e)} title="현금교환" style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, cursor: 'pointer', color: 'var(--purple)', display: 'flex', alignItems: 'center', gap: 3, padding: '2px 6px', fontSize: 9, fontWeight: 700, fontFamily: 'var(--font-body)', flexShrink: 0 }}>
                     <DollarSign size={10} /> 현금교환
                   </button>
+                  <button onClick={() => startMemoEdit(e.site_name)} title="메모" style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, cursor: 'pointer', color: 'var(--cyan)', display: 'flex', alignItems: 'center', gap: 3, padding: '2px 6px', fontSize: 9, fontWeight: 700, fontFamily: 'var(--font-body)', flexShrink: 0 }}>
+                    <StickyNote size={10} /> 메모
+                  </button>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
                   {done && <span style={{ fontSize: 8, fontWeight: 700, color: 'var(--green)', background: 'var(--green-bg)', border: '1px solid var(--green-border)', padding: '1px 5px', borderRadius: 4 }}>완료</span>}
@@ -440,6 +454,31 @@ export default function MiningWidget() {
                   </button>
                 </div>
               </div>
+
+              {(() => {
+                const memo = cashoutFor(e.site_name)?.memo ?? ''
+                const isEditingMemo = editingMemoSite === e.site_name
+                if (isEditingMemo) {
+                  return (
+                    <div style={{ marginBottom: 6, display: 'flex', gap: 4, alignItems: 'flex-start' }}>
+                      <textarea autoFocus value={memoVal} onChange={ev => setMemoVal(ev.target.value)}
+                        onKeyDown={ev => { if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); saveMemo(e.site_name) } }}
+                        placeholder="메모 입력 (Enter로 저장)" rows={2}
+                        style={{ flex: 1, resize: 'vertical', background: 'var(--bg-card)', border: '1px solid var(--cyan-border)', borderRadius: 5, padding: '5px 7px', fontSize: 10.5, color: 'var(--text-primary)', fontFamily: 'var(--font-body)', outline: 'none', boxSizing: 'border-box' }} />
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 2, flexShrink: 0 }}>
+                        <button onClick={() => saveMemo(e.site_name)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--green)', display: 'flex' }}><Check size={13} /></button>
+                        <button onClick={() => setEditingMemoSite(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex' }}><X size={13} /></button>
+                      </div>
+                    </div>
+                  )
+                }
+                if (!memo) return null
+                return (
+                  <div onClick={() => startMemoEdit(e.site_name)} style={{ marginBottom: 6, padding: '5px 7px', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 5, fontSize: 10.5, color: 'var(--text-secondary)', cursor: 'pointer', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                    {memo}
+                  </div>
+                )
+              })()}
 
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
                 {isEditingCurrent ? (
