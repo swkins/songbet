@@ -227,9 +227,10 @@ function parseBetMatch(sport: string, match: string): BetMatchParts | null {
     return { team, side: sideV, optionLabel: `${num} 핸디캡`, accent: 'blue' }
   }
   if (sport === 'esports') {
-    const m = s.match(/^(.+?)(?:\s(-?\d+(?:\.\d+)?)(세트오버)?)?\s\((BO\d)\)$/)
+    const m = s.match(/^(.+?)(?:\s\[(.+)\])?(?:\s(-?\d+(?:\.\d+)?)(세트오버)?)?\s\((BO\d)\)$/)
     if (!m) return null
-    const [, team, num, setOver, bo] = m
+    const [, team, custom, num, setOver, bo] = m
+    if (custom) return { team, boTag: bo, optionLabel: custom, accent: 'blue' }
     if (!num) return { team, boTag: bo, optionLabel: '일반승', accent: 'gold' }
     if (setOver) return { team, boTag: bo, optionLabel: `${num} 세트오버`, accent: 'orange' }
     return { team, boTag: bo, optionLabel: `${num} 핸디`, accent: num.startsWith('-') ? 'red' : 'purple' }
@@ -1195,7 +1196,7 @@ function StructuredTeamPicker({ sport, leagues, favoriteLeagues, teams, onAddLea
     if (sport === 'esports') {
       const boLabel = bo === 'bo3' ? 'BO3' : bo === 'bo5' ? 'BO5' : ''
       if (!boLabel) return
-      match = `${team} ${text} (${boLabel})`
+      match = `${team} [${text}] (${boLabel})`
     } else if (sport === 'basketball') {
       match = `${team} ${side} ${text}`
     } else {
