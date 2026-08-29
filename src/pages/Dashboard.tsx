@@ -4,7 +4,7 @@ import { logAction } from '../lib/logger'
 import type { Bet, Site, Sport, Market, BetResult, GameRolling } from '../types'
 import { inferBaseballLeague, inferSoccerLeague, inferLeagueByKeyword, buildLeagueCandidates, suggestLeagueCandidates, koCompare, type LeagueOverride, type LeagueCandidate } from '../lib/league'
 import { buildTeamCandidates, suggestTeamCandidates, getTeamInsight, getEsportsLeague, type TeamCandidate, type BetLite } from '../lib/teamInsight'
-import { fetchTodayTomorrowLolMatches, type UpcomingLolMatch } from '../lib/lolSchedule'
+import { fetchTodayTomorrowLolMatches, LEAGUES as LOL_LEAGUES, type UpcomingLolMatch } from '../lib/lolSchedule'
 import { sportGlyph } from '../components/SportIcons'
 import MiningWidget from '../components/MiningWidget'
 import dayjs from 'dayjs'
@@ -1393,13 +1393,12 @@ function EsportsBetPicker({ onResult }: { onResult: (match: string, league: stri
   const [loaded, setLoaded] = useState(false)
   const [error, setError] = useState('')
   const [selected, setSelected] = useState<UpcomingLolMatch | null>(null)
-  const [team, setTeam] = useState<'A' | 'B' | ''>('')
-  const [option, setOption] = useState('')
-  const [customText, setCustomText] = useState('')
+  const [activeTab, setActiveTab] = useState<'ALL' | number>('ALL')
   const [statKey, setStatKey] = useState('')
   const [statDir, setStatDir] = useState<'오버' | '언더' | ''>('')
   const [statLine, setStatLine] = useState('')
   const [manual, setManual] = useState(false)
+  const [leagueFilter, setLeagueFilter] = useState('ALL')
 
   useEffect(() => { load() }, [])
 
@@ -1416,10 +1415,10 @@ function EsportsBetPicker({ onResult }: { onResult: (match: string, league: stri
   }
 
   function pickMatch(m: UpcomingLolMatch) {
-    setSelected(m); setTeam(''); setOption(''); setCustomText(''); setStatKey(''); setStatDir(''); setStatLine('')
+    setSelected(m); setActiveTab('ALL'); setStatKey(''); setStatDir(''); setStatLine('')
   }
   function backToSchedule() {
-    setSelected(null); setTeam(''); setOption(''); setCustomText(''); setStatKey(''); setStatDir(''); setStatLine('')
+    setSelected(null); setActiveTab('ALL'); setStatKey(''); setStatDir(''); setStatLine('')
   }
   function teamLabel(side: 'A' | 'B'): string {
     if (!selected) return ''
@@ -1430,40 +1429,20 @@ function EsportsBetPicker({ onResult }: { onResult: (match: string, league: stri
     return selected.bestOf === 5 ? 'BO5' : selected.bestOf === 1 ? 'BO1' : 'BO3'
   }
 
-  useEffect(() => {
-    if (!selected || !team) return
-    const tn = teamLabel(team)
-    const bl = boLabel()
-    if (selected.bestOf === 1) { onResult(`${tn} (${bl})`, selected.leagueLabel); return }
-    if (!option || option === CUSTOM_KEY) return
-    let match = ''
-    if (option === 'ml') match = `${tn} (${bl})`
-    else if (option === 'h15') match = `${tn} 1.5 (${bl})`
-    else if (option === 'h25') match = `${tn} 2.5 (${bl})`
-    else if (option === 'hm15') match = `${tn} -1.5 (${bl})`
-    else if (option === 'hm25') match = `${tn} -2.5 (${bl})`
-    else if (option === 'so35') match = `${tn} 3.5세트오버 (${bl})`
-    if (match) onResult(match, selected.leagueLabel)
-  }, [selected, team, option])
-
-  function commitCustomText() {
-    if (!selected || !team) return
-    const text = customText.trim(); if (!text) return
-    onResult(`${teamLabel(team)} [${text}] (${boLabel()})`, selected.leagueLabel)
-  }
-  function onCustomTextKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
-    if (e.key === 'Enter') { e.preventDefault(); commitCustomText() }
-  }
-
   function commitStat() {
-    if (!selected || !team || !statKey || !statDir) return
+    if (!selected || !statKey || !statDir) return
     const line = statLine.trim(); if (!line) return
     const label = ESPORTS_STAT_MARKETS.find(s => s.key === statKey)?.label ?? ''
-    onResult(`${teamLabel(team)} ${label} ${line} ${statDir} (${boLabel()})`, selected.leagueLabel)
+    onResult(`${teamLabel('A')} vs ${teamLabel('B')} ${label} ${line} ${statDir} (${boLabel()})`, selected.leagueLabel)
     setStatKey(''); setStatDir(''); setStatLine('')
   }
   function onStatLineKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key === 'Enter') { e.preventDefault(); commitStat() }
+  }
+
+  function pickSetOver() {
+    if (!selected) return
+    onResult(`${teamLabel('A')} vs ${teamLabel('B')} 3.5세트오버 (${boLabel()})`, selected.leagueLabel)
   }
 
   function pickSetMoneyline(side: 'A' | 'B', setNum: number) {
@@ -1471,7 +1450,7 @@ function EsportsBetPicker({ onResult }: { onResult: (match: string, league: stri
     onResult(`${teamLabel(side)} ${setNum}세트 일반승 (${boLabel()})`, selected.leagueLabel)
   }
 
-  const marketOptions = selected?.bestOf === 5 ? ESPORTS_BO5_OPTIONS : ESPORTS_BO3_OPTIONS
+  const filteredSchedule = leagueFilter === 'ALL' ? schedule : schedule.filter(m => m.league === leagueFilter)
 
   if (manual) {
     return (
@@ -1492,9 +1471,15 @@ function EsportsBetPicker({ onResult }: { onResult: (match: string, league: stri
   if (!selected) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 6 }}>
+        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+          <StructuredPickButton label={`전체 (${schedule.length})`} active={leagueFilter === 'ALL'} onClick={() => setLeagueFilter('ALL')} />
+          {LOL_LEAGUES.map(lg => (
+            <StructuredPickButton key={lg.code} label={`${lg.label} (${schedule.filter(m => m.league === lg.code).length})`} active={leagueFilter === lg.code} onClick={() => setLeagueFilter(lg.code)} />
+          ))}
+        </div>
         <div style={{ border: '1px solid var(--border)', borderRadius: 6, background: 'var(--bg-card)', maxHeight: 280, overflowY: 'auto' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '5px 8px', borderBottom: '1px solid var(--border)' }}>
-            <span style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700 }}>LCK · LCK CL · LPL · LEC · LCS · LCP · CBLOL — 오늘·내일 일정</span>
+            <span style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700 }}>{leagueFilter === 'ALL' ? '전체' : LOL_LEAGUES.find(l => l.code === leagueFilter)?.label} — 오늘·내일 일정</span>
             <button type="button" onClick={() => load(true)} disabled={loading}
               title="새로고침"
               style={{ display: 'flex', alignItems: 'center', border: 'none', background: 'transparent', color: 'var(--text-muted)', cursor: loading ? 'default' : 'pointer', padding: 2 }}>
@@ -1510,7 +1495,10 @@ function EsportsBetPicker({ onResult }: { onResult: (match: string, league: stri
           {!loading && !error && loaded && schedule.length === 0 && (
             <div style={{ padding: '14px 8px', fontSize: 10, color: 'var(--text-muted)', textAlign: 'center' }}>오늘·내일 예정된 경기가 없습니다</div>
           )}
-          {!loading && !error && schedule.map(m => (
+          {!loading && !error && schedule.length > 0 && filteredSchedule.length === 0 && (
+            <div style={{ padding: '14px 8px', fontSize: 10, color: 'var(--text-muted)', textAlign: 'center' }}>이 리그의 예정된 경기가 없습니다</div>
+          )}
+          {!loading && !error && filteredSchedule.map(m => (
             <div key={m.id} onClick={() => pickMatch(m)} style={{ padding: '7px 8px', borderBottom: '1px solid var(--border)', cursor: 'pointer' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 3 }}>
                 <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--gold)' }}>{m.leagueLabel}</span>
@@ -1535,6 +1523,8 @@ function EsportsBetPicker({ onResult }: { onResult: (match: string, league: stri
     )
   }
 
+  const setTabs = selected.bestOf === 1 ? [] : Array.from({ length: selected.bestOf }, (_, i) => i + 1)
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 6 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -1543,76 +1533,134 @@ function EsportsBetPicker({ onResult }: { onResult: (match: string, league: stri
           <ChevronUp size={12} style={{ transform: 'rotate(-90deg)' }} />
         </button>
         <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)' }}>
-          {selected.teamACode || selected.teamA} vs {selected.teamBCode || selected.teamB}
+          {teamLabel('A')} vs {teamLabel('B')}
         </div>
         <div style={{ fontSize: 9, color: 'var(--text-muted)', marginLeft: 'auto' }}>
           {selected.leagueLabel} · {dayjs(selected.startTime).format('MM/DD HH:mm')} · {boLabel()}
         </div>
       </div>
 
-      <div style={{ display: 'flex', gap: 4 }}>
-        {(['A', 'B'] as const).map(s => (
-          <button key={s} type="button" onClick={() => { setTeam(s); setOption(''); setCustomText('') }} style={{
-            flex: 1, fontSize: 12, fontWeight: 700, padding: '6px 0', borderRadius: 6, cursor: 'pointer', fontFamily: 'var(--font-body)',
-            border: `1px solid ${team === s ? 'var(--blue-border)' : 'var(--border)'}`,
-            background: team === s ? 'var(--blue-bg)' : 'var(--bg-elevated)',
-            color: team === s ? 'var(--blue)' : 'var(--text-secondary)' }}>{teamLabel(s)}</button>
-        ))}
-      </div>
-
-      {team && selected.bestOf !== 1 && (
-        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-          {marketOptions.map(o => <StructuredPickButton key={o.key} label={o.label} active={option === o.key} onClick={() => setOption(o.key)} custom={o.key === CUSTOM_KEY} />)}
+      {setTabs.length > 0 && (
+        <div style={{ display: 'flex', gap: 4 }}>
+          <button type="button" onClick={() => setActiveTab('ALL')} style={{
+            flex: 1, fontSize: 11, fontWeight: 700, padding: '5px 0', borderRadius: 6, cursor: 'pointer', fontFamily: 'var(--font-body)',
+            border: `1px solid ${activeTab === 'ALL' ? 'var(--gold-border)' : 'var(--border)'}`,
+            background: activeTab === 'ALL' ? 'var(--gold-bg)' : 'var(--bg-elevated)',
+            color: activeTab === 'ALL' ? 'var(--gold)' : 'var(--text-secondary)' }}>전체</button>
+          {setTabs.map(n => (
+            <button key={n} type="button" onClick={() => setActiveTab(n)} style={{
+              flex: 1, fontSize: 11, fontWeight: 700, padding: '5px 0', borderRadius: 6, cursor: 'pointer', fontFamily: 'var(--font-body)',
+              border: `1px solid ${activeTab === n ? 'var(--gold-border)' : 'var(--border)'}`,
+              background: activeTab === n ? 'var(--gold-bg)' : 'var(--bg-elevated)',
+              color: activeTab === n ? 'var(--gold)' : 'var(--text-secondary)' }}>{n}세트</button>
+          ))}
         </div>
       )}
-      {team && option === CUSTOM_KEY && (
-        <input className="form-input" autoFocus value={customText} onChange={e => setCustomText(e.target.value)}
-          onKeyDown={onCustomTextKeyDown} onBlur={commitCustomText}
-          placeholder="예: 퍼스트블러드 (Enter로 확정)" style={{ fontSize: 11, padding: '6px 8px' }} />
-      )}
 
-      {team && (
-        <div>
-          <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 3, fontWeight: 700 }}>팀 스탯 오버/언더</div>
-          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-            {ESPORTS_STAT_MARKETS.map(s => (
-              <StructuredPickButton key={s.key} label={s.label} active={statKey === s.key} onClick={() => setStatKey(k => k === s.key ? '' : s.key)} />
-            ))}
-          </div>
-          {statKey && (
-            <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
-              {(['오버', '언더'] as const).map(d => (
-                <button key={d} type="button" onClick={() => setStatDir(d)} style={{
-                  flex: 1, fontSize: 10, fontWeight: 700, padding: '5px 0', borderRadius: 6, cursor: 'pointer', fontFamily: 'var(--font-body)',
-                  border: `1px solid ${statDir === d ? 'var(--blue-border)' : 'var(--border)'}`,
-                  background: statDir === d ? 'var(--blue-bg)' : 'var(--bg-elevated)',
-                  color: statDir === d ? 'var(--blue)' : 'var(--text-secondary)' }}>{d}</button>
+      {activeTab === 'ALL' ? (
+        <>
+          {selected.bestOf === 1 ? (
+            <div style={{ display: 'flex', gap: 4 }}>
+              {(['A', 'B'] as const).map(s => (
+                <button key={s} type="button" onClick={() => onResult(`${teamLabel(s)} (${boLabel()})`, selected.leagueLabel)} style={{
+                  flex: 1, fontSize: 12, fontWeight: 700, padding: '6px 0', borderRadius: 6, cursor: 'pointer', fontFamily: 'var(--font-body)',
+                  border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-primary)' }}>{teamLabel(s)} 일반승</button>
               ))}
-              <input className="form-input" autoFocus value={statLine} onChange={e => setStatLine(e.target.value)}
-                onKeyDown={onStatLineKeyDown} onBlur={commitStat}
-                placeholder="라인 (예: 3.5)" style={{ flex: 1.4, fontSize: 11, padding: '5px 8px' }} />
+            </div>
+          ) : (
+            <div style={{ display: 'flex', gap: 8 }}>
+              <EsportsTeamMarketCard team={teamLabel('A')} bestOf={selected.bestOf} boLabel={boLabel()}
+                onCommit={m => onResult(m, selected.leagueLabel)} />
+              <EsportsTeamMarketCard team={teamLabel('B')} bestOf={selected.bestOf} boLabel={boLabel()}
+                onCommit={m => onResult(m, selected.leagueLabel)} />
             </div>
           )}
-        </div>
-      )}
 
-      {selected.bestOf !== 1 && (
-        <div>
-          <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 3, fontWeight: 700 }}>세트별 일반승</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-            {Array.from({ length: selected.bestOf }, (_, i) => i + 1).map(n => (
-              <div key={n} style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-                <span style={{ fontSize: 9, color: 'var(--text-muted)', width: 28, flexShrink: 0 }}>{n}세트</span>
-                <button type="button" onClick={() => pickSetMoneyline('A', n)} style={{
-                  flex: 1, fontSize: 10, fontWeight: 700, padding: '5px 0', borderRadius: 5, cursor: 'pointer', fontFamily: 'var(--font-body)',
-                  border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-primary)' }}>{teamLabel('A')}</button>
-                <button type="button" onClick={() => pickSetMoneyline('B', n)} style={{
-                  flex: 1, fontSize: 10, fontWeight: 700, padding: '5px 0', borderRadius: 5, cursor: 'pointer', fontFamily: 'var(--font-body)',
-                  border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-primary)' }}>{teamLabel('B')}</button>
+          {selected.bestOf === 5 && (
+            <button type="button" onClick={pickSetOver} style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 11, fontWeight: 700, padding: '6px 0', borderRadius: 6, cursor: 'pointer', fontFamily: 'var(--font-body)',
+              border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-primary)',
+            }}>{teamLabel('A')} vs {teamLabel('B')} 3.5 세트오버</button>
+          )}
+
+          <div>
+            <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 3, fontWeight: 700 }}>스탯 오버/언더 ({teamLabel('A')} vs {teamLabel('B')})</div>
+            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+              {ESPORTS_STAT_MARKETS.map(s => (
+                <StructuredPickButton key={s.key} label={s.label} active={statKey === s.key} onClick={() => setStatKey(k => k === s.key ? '' : s.key)} />
+              ))}
+            </div>
+            {statKey && (
+              <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
+                {(['오버', '언더'] as const).map(d => (
+                  <button key={d} type="button" onClick={() => setStatDir(d)} style={{
+                    flex: 1, fontSize: 10, fontWeight: 700, padding: '5px 0', borderRadius: 6, cursor: 'pointer', fontFamily: 'var(--font-body)',
+                    border: `1px solid ${statDir === d ? 'var(--blue-border)' : 'var(--border)'}`,
+                    background: statDir === d ? 'var(--blue-bg)' : 'var(--bg-elevated)',
+                    color: statDir === d ? 'var(--blue)' : 'var(--text-secondary)' }}>{d}</button>
+                ))}
+                <input className="form-input" autoFocus value={statLine} onChange={e => setStatLine(e.target.value)}
+                  onKeyDown={onStatLineKeyDown} onBlur={commitStat}
+                  placeholder="라인 (예: 3.5)" style={{ flex: 1.4, fontSize: 11, padding: '5px 8px' }} />
               </div>
-            ))}
+            )}
+          </div>
+        </>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <div style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700 }}>{activeTab}세트 일반승</div>
+          <div style={{ display: 'flex', gap: 4 }}>
+            <button type="button" onClick={() => pickSetMoneyline('A', activeTab as number)} style={{
+              flex: 1, fontSize: 12, fontWeight: 700, padding: '6px 0', borderRadius: 6, cursor: 'pointer', fontFamily: 'var(--font-body)',
+              border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-primary)' }}>{teamLabel('A')}</button>
+            <button type="button" onClick={() => pickSetMoneyline('B', activeTab as number)} style={{
+              flex: 1, fontSize: 12, fontWeight: 700, padding: '6px 0', borderRadius: 6, cursor: 'pointer', fontFamily: 'var(--font-body)',
+              border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-primary)' }}>{teamLabel('B')}</button>
           </div>
         </div>
+      )}
+    </div>
+  )
+}
+
+/* ── LOL 팀별 마켓 카드(핸디캡/마핸/일반승 + 직접입력) — 전체 탭에서 두 팀을 나란히 보여줄 때 사용. ──
+   팀마다 독립된 옵션 상태를 가져야 하므로 별도 컴포넌트로 분리했다. */
+function EsportsTeamMarketCard({ team, bestOf, boLabel, onCommit }: { team: string; bestOf: number; boLabel: string; onCommit: (match: string) => void }) {
+  const [option, setOption] = useState('')
+  const [customText, setCustomText] = useState('')
+  const marketOptions = (bestOf === 5 ? ESPORTS_BO5_OPTIONS : ESPORTS_BO3_OPTIONS).filter(o => o.key !== 'so35')
+
+  useEffect(() => {
+    if (!option || option === CUSTOM_KEY) return
+    let match = ''
+    if (option === 'ml') match = `${team} (${boLabel})`
+    else if (option === 'h15') match = `${team} 1.5 (${boLabel})`
+    else if (option === 'h25') match = `${team} 2.5 (${boLabel})`
+    else if (option === 'hm15') match = `${team} -1.5 (${boLabel})`
+    else if (option === 'hm25') match = `${team} -2.5 (${boLabel})`
+    if (match) { onCommit(match); setOption('') }
+  }, [option])
+
+  function commitCustom() {
+    const text = customText.trim(); if (!text) return
+    onCommit(`${team} [${text}] (${boLabel})`)
+    setCustomText(''); setOption('')
+  }
+  function onCustomKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === 'Enter') { e.preventDefault(); commitCustom() }
+  }
+
+  return (
+    <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)' }}>{team}</div>
+      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+        {marketOptions.map(o => <StructuredPickButton key={o.key} label={o.label} active={option === o.key} onClick={() => setOption(o.key)} custom={o.key === CUSTOM_KEY} />)}
+      </div>
+      {option === CUSTOM_KEY && (
+        <input className="form-input" autoFocus value={customText} onChange={e => setCustomText(e.target.value)}
+          onKeyDown={onCustomKeyDown} onBlur={commitCustom}
+          placeholder="예: 퍼스트블러드 (Enter로 확정)" style={{ fontSize: 11, padding: '6px 8px' }} />
       )}
     </div>
   )
