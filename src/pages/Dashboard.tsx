@@ -4,6 +4,7 @@ import { logAction } from '../lib/logger'
 import type { Bet, Site, Sport, Market, BetResult, GameRolling } from '../types'
 import { inferBaseballLeague, inferSoccerLeague, inferLeagueByKeyword, buildLeagueCandidates, suggestLeagueCandidates, koCompare, type LeagueOverride, type LeagueCandidate } from '../lib/league'
 import { buildTeamCandidates, suggestTeamCandidates, getTeamInsight, getEsportsLeague, type TeamCandidate, type BetLite } from '../lib/teamInsight'
+import { fetchTodayTomorrowLolMatches, type UpcomingLolMatch } from '../lib/lolSchedule'
 import { sportGlyph } from '../components/SportIcons'
 import MiningWidget from '../components/MiningWidget'
 import dayjs from 'dayjs'
@@ -14,7 +15,7 @@ import {
   RotateCcw, Settings, Flame,
   CheckCircle, XCircle, Ban, MinusCircle, Gift, GripVertical, DollarSign,
   TrendingUp, TrendingDown, ArrowDownToLine, LogOut, Pencil,
-  ClipboardPaste, ChevronUp, ChevronDown, Star,
+  ClipboardPaste, ChevronUp, ChevronDown, Star, Calendar, RefreshCw,
 } from 'lucide-react'
 
 const SPORTS: { value: Sport; label: string }[] = [
@@ -1125,9 +1126,38 @@ function StructuredTeamPicker({ sport, leagues, favoriteLeagues, teams, onAddLea
   const [showManage, setShowManage] = useState(false)
   const boxRef = useRef<HTMLDivElement>(null)
 
+  // LOL 오늘/내일 일정에서 바로 팀을 골라 넣는 패널 (esports 전용)
+  const [showSchedule, setShowSchedule] = useState(false)
+  const [schedule, setSchedule] = useState<UpcomingLolMatch[]>([])
+  const [scheduleLoading, setScheduleLoading] = useState(false)
+  const [scheduleError, setScheduleError] = useState('')
+
+  async function loadSchedule(forceRefresh?: boolean) {
+    setScheduleLoading(true); setScheduleError('')
+    try {
+      const matches = await fetchTodayTomorrowLolMatches({ forceRefresh })
+      setSchedule(matches)
+    } catch (err: any) {
+      setScheduleError(err?.message || '일정을 불러오지 못했습니다')
+    } finally {
+      setScheduleLoading(false)
+    }
+  }
+  function toggleSchedule() {
+    const next = !showSchedule
+    setShowSchedule(next)
+    if (next && schedule.length === 0 && !scheduleLoading) loadSchedule()
+  }
+  // 일정에서 팀을 고르면: 팀 이름 채우고 세트 수(BO)에 맞춰 자동 전환, 리그는 등록된 팀이면 자동으로 붙는다
+  function pickFromSchedule(m: UpcomingLolMatch, teamName: string) {
+    setTeamText(teamName)
+    setBo(m.bestOf === 5 ? 'bo5' : m.bestOf === 1 ? 'bo1' : 'bo3')
+    setShowSchedule(false)
+  }
+
   useEffect(() => {
     function onDocClick(e: MouseEvent) {
-      if (boxRef.current && !boxRef.current.contains(e.target as Node)) { setShowSuggest(false); setShowRegLeagueSuggest(false); setRegLeagueHighlight(-1) }
+      if (boxRef.current && !boxRef.current.contains(e.target as Node)) { setShowSuggest(false); setShowRegLeagueSuggest(false); setRegLeagueHighlight(-1); setShowSchedule(false) }
     }
     document.addEventListener('mousedown', onDocClick)
     return () => document.removeEventListener('mousedown', onDocClick)
@@ -1286,6 +1316,63 @@ function StructuredTeamPicker({ sport, leagues, favoriteLeagues, teams, onAddLea
         {isRegistered && matchedTeam && !registering && (
           <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 3 }}>
             현재 리그: <span style={{ color: 'var(--gold)', fontWeight: 700 }}>{matchedTeam.league}</span>
+          </div>
+        )}
+
+        {sport === 'esports' && (
+          <div style={{ marginTop: 4 }}>
+            <button type="button" onClick={toggleSchedule} style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+              fontSize: 10, fontWeight: 700, padding: '5px 8px', borderRadius: 6, cursor: 'pointer', fontFamily: 'var(--font-body)', width: '100%',
+              border: `1px solid ${showSchedule ? 'var(--blue-border)' : 'var(--border)'}`,
+              background: showSchedule ? 'var(--blue-bg)' : 'var(--bg-elevated)',
+              color: showSchedule ? 'var(--blue)' : 'var(--text-secondary)',
+            }}>
+              <Calendar size={11} />
+              오늘·내일 일정에서 선택
+            </button>
+
+            {showSchedule && (
+              <div style={{ marginTop: 4, border: '1px solid var(--border)', borderRadius: 6, background: 'var(--bg-card)', maxHeight: 220, overflowY: 'auto' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '5px 8px', borderBottom: '1px solid var(--border)' }}>
+                  <span style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700 }}>LCK · LCK CL · LPL · LEC · LCS · LCP · CBLOL</span>
+                  <button type="button" onClick={() => loadSchedule(true)} disabled={scheduleLoading}
+                    title="새로고침"
+                    style={{ display: 'flex', alignItems: 'center', border: 'none', background: 'transparent', color: 'var(--text-muted)', cursor: scheduleLoading ? 'default' : 'pointer', padding: 2 }}>
+                    <RefreshCw size={11} style={scheduleLoading ? { animation: 'spin 1s linear infinite' } : undefined} />
+                  </button>
+                </div>
+                {scheduleLoading && (
+                  <div style={{ padding: '10px 8px', fontSize: 10, color: 'var(--text-muted)', textAlign: 'center' }}>불러오는 중…</div>
+                )}
+                {!scheduleLoading && scheduleError && (
+                  <div style={{ padding: '10px 8px', fontSize: 10, color: 'var(--red, #e05a5a)', textAlign: 'center' }}>{scheduleError}</div>
+                )}
+                {!scheduleLoading && !scheduleError && schedule.length === 0 && (
+                  <div style={{ padding: '10px 8px', fontSize: 10, color: 'var(--text-muted)', textAlign: 'center' }}>오늘·내일 예정된 경기가 없습니다</div>
+                )}
+                {!scheduleLoading && !scheduleError && schedule.map(m => (
+                  <div key={m.id} style={{ padding: '6px 8px', borderBottom: '1px solid var(--border)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 3 }}>
+                      <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--gold)' }}>{m.leagueLabel}</span>
+                      <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>{dayjs(m.startTime).format('MM/DD HH:mm')}</span>
+                      <span style={{ fontSize: 9, color: 'var(--text-muted)', marginLeft: 'auto' }}>BO{m.bestOf}</span>
+                    </div>
+                    <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                      <button type="button" onClick={() => pickFromSchedule(m, m.teamA)} style={{
+                        flex: 1, fontSize: 10, fontWeight: 700, padding: '5px 4px', borderRadius: 5, cursor: 'pointer', fontFamily: 'var(--font-body)',
+                        border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-primary)',
+                      }}>{m.teamA}</button>
+                      <span style={{ fontSize: 9, color: 'var(--text-muted)', flexShrink: 0 }}>vs</span>
+                      <button type="button" onClick={() => pickFromSchedule(m, m.teamB)} style={{
+                        flex: 1, fontSize: 10, fontWeight: 700, padding: '5px 4px', borderRadius: 5, cursor: 'pointer', fontFamily: 'var(--font-body)',
+                        border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-primary)',
+                      }}>{m.teamB}</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
