@@ -931,9 +931,9 @@ const ESPORTS_BO5_OPTIONS = [
 // LOL 팀 스탯 오버/언더 — 라인은 매 경기 다르므로 직접 입력
 const ESPORTS_STAT_MARKETS: { key: string; label: string }[] = [
   { key: 'dragon', label: '드래곤' },
-  { key: 'tower', label: '타워처치' },
+  { key: 'tower', label: '타워 파괴' },
   { key: 'kill', label: '킬수' },
-  { key: 'inhib', label: '억제기 처치' },
+  { key: 'inhib', label: '억제기 파괴' },
 ]
 
 function StructuredPickButton({ label, active, onClick, custom }: { label: string; active: boolean; onClick: () => void; custom?: boolean }) {
@@ -1639,13 +1639,12 @@ function EsportsTeamMarketCard({ team, bestOf, boLabel, onCommit }: { team: stri
     else if (option === 'h25') match = `${team} 2.5 (${boLabel})`
     else if (option === 'hm15') match = `${team} -1.5 (${boLabel})`
     else if (option === 'hm25') match = `${team} -2.5 (${boLabel})`
-    if (match) { onCommit(match); setOption('') }
+    if (match) onCommit(match)
   }, [option])
 
   function commitCustom() {
     const text = customText.trim(); if (!text) return
     onCommit(`${team} [${text}] (${boLabel})`)
-    setCustomText(''); setOption('')
   }
   function onCustomKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key === 'Enter') { e.preventDefault(); commitCustom() }
