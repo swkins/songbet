@@ -239,6 +239,21 @@ function parseBetMatch(sport: string, match: string): BetMatchParts | null {
   return null
 }
 
+// 완료된 베팅 카드 정중앙에 살짝 기울여 찍는 반투명 결과 도장 (적중/실패만, PUSH는 도장 없음)
+function ResultStamp({ result }: { result: 'win' | 'loss' | 'push' | 'pending' }) {
+  if (result !== 'win' && result !== 'loss') return null
+  const isWin = result === 'win'
+  return (
+    <span style={{
+      position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%) rotate(-14deg)',
+      border: `2px solid ${isWin ? 'var(--green)' : 'var(--red)'}`,
+      color: isWin ? 'var(--green)' : 'var(--red)',
+      fontWeight: 800, fontSize: 15, padding: '2px 10px', borderRadius: 6,
+      opacity: 0.22, letterSpacing: 2, pointerEvents: 'none', whiteSpace: 'nowrap', fontFamily: 'var(--font-body)',
+    }}>{isWin ? '적중' : '실패'}</span>
+  )
+}
+
 // 뱃지(pill) 하나 — 배경/테두리/글자색을 같은 색 계열 3종 세트(--X-bg/--X-border/--X)로 통일
 function MatchBadge({ label, accent }: { label: string; accent: AccentKey | 'neutral' }) {
   if (accent === 'neutral') {
@@ -2952,8 +2967,9 @@ export default function Dashboard() {
                                 const isWin = groupBets[0].result === 'win'
                                 const isLoss = groupBets[0].result === 'loss'
                                 return (
-                                  <div key={bet.parlay_group} className={`site-bet-entry parlay-entry${isBigStake(bet.stake, isusd) ? ' big-bet-entry' : ''}`} style={{ marginBottom: 5, opacity: 0.7 }}
+                                  <div key={bet.parlay_group} className={`site-bet-entry parlay-entry${isBigStake(bet.stake, isusd) ? ' big-bet-entry' : ''}`} style={{ marginBottom: 5, opacity: 0.7, position: 'relative' }}
                                     onMouseEnter={() => setHoverBetId('s_' + bet.parlay_group)} onMouseLeave={() => setHoverBetId(null)}>
+                                    <ResultStamp result={groupBets[0].result} />
                                     {groupBets.map((gb, idx) => (
                                       <div key={gb.id} style={{ marginBottom: 2 }}>
                                         {gb.league && <div style={{ paddingLeft: 23, fontSize: 9, color: 'var(--text-muted)', fontWeight: 700 }}>{gb.league}</div>}
@@ -2978,8 +2994,9 @@ export default function Dashboard() {
                                 )
                               }
                               return (
-                                <div key={bet.id} className={`site-bet-entry${isBigStake(bet.stake, isusd) ? ' big-bet-entry' : ''}`} style={{ marginBottom: 5, opacity: 0.7 }}
+                                <div key={bet.id} className={`site-bet-entry${isBigStake(bet.stake, isusd) ? ' big-bet-entry' : ''}`} style={{ marginBottom: 5, opacity: 0.7, position: 'relative' }}
                                   onMouseEnter={() => setHoverBetId('s_' + bet.id)} onMouseLeave={() => setHoverBetId(null)}>
+                                  <ResultStamp result={bet.result} />
                                   {bet.league && <div style={{ paddingLeft: 24, fontSize: 9, color: 'var(--text-muted)', fontWeight: 700 }}>{bet.league}</div>}
                                   <div style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
                                     <span style={{ fontSize: 16, lineHeight: 1, flexShrink: 0, width: 20, textAlign: 'center' }}>{sportGlyph(bet.sport) ?? SPORT_SHORT[bet.sport] ?? '📋'}</span>
