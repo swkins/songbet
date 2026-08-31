@@ -269,19 +269,22 @@ function BetBadgeRow({ sport, match, live }: { sport: string; match: string; liv
   )
 }
 
-// 진행중 베팅 전용 — 팀 이름 옆에 홈/원정 배지, 그 옆에 베팅옵션은 텍스트로. BO태그/LIVE는 줄 끝에 고정.
-// (배당·금액은 이 줄에 넣지 않고 그 아래 별도 줄에서 표시 — BetOddsStakeLine 참고)
+// 진행중 베팅 전용 — 팀 이름은 단독 줄, 홈/원정·베팅옵션·BO태그·LIVE는 그 아래 줄로 분리.
+// 팀 이름이 아무리 길어도 배지가 가려지지 않도록 세로로 나눔 (배당·금액은 이 아래 별도 줄 — BetOddsStakeLine 참고)
 function BetMatchLine({ sport, match, fontSize = 12, teamColor, live }: { sport: string; match: string; fontSize?: number; teamColor?: string; live?: boolean }) {
   const parts = parseBetMatch(sport, match)
   const team = parts ? parts.team : match
   return (
-    <span style={{ display: 'flex', alignItems: 'center', gap: 5, flex: 1, minWidth: 0 }}>
-      <span style={{ fontSize, fontWeight: 700, color: teamColor ?? 'var(--text-primary)', flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '55%' }}>{team}</span>
-      {parts?.side && <MatchBadge label={sideBadgeLabel(parts.side)} accent={parts.side === '홈' ? 'blue' : 'orange'} />}
-      {parts?.boTag && <MatchBadge label={parts.boTag} accent="neutral" />}
-      {parts && <span style={{ fontSize, color: 'var(--text-secondary)', fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{parts.optionLabel}</span>}
-      <span style={{ flex: 1 }} />
-      {live && <MatchBadge label="LIVE" accent="red" />}
+    <span style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1, minWidth: 0 }}>
+      <span style={{ fontSize, fontWeight: 700, color: teamColor ?? 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{team}</span>
+      {(parts?.side || parts?.boTag || parts || live) && (
+        <span style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
+          {parts?.side && <MatchBadge label={sideBadgeLabel(parts.side)} accent={parts.side === '홈' ? 'blue' : 'orange'} />}
+          {parts?.boTag && <MatchBadge label={parts.boTag} accent="neutral" />}
+          {parts && <span style={{ fontSize: fontSize - 1, color: 'var(--text-secondary)', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{parts.optionLabel}</span>}
+          {live && <MatchBadge label="LIVE" accent="red" />}
+        </span>
+      )}
     </span>
   )
 }
@@ -2771,8 +2774,8 @@ export default function Dashboard() {
                                         return (
                                           <div key={gb.id} style={{ marginBottom: 2 }}>
                                             {gb.league && <div style={{ paddingLeft: 20, fontSize: 9, color: 'var(--text-muted)', fontWeight: 700 }}>{gb.league}</div>}
-                                            <div style={{ display: 'flex', gap: 4, alignItems: 'center', position: 'relative' }}>
-                                              <span style={{ fontSize: 10, color: 'var(--text-muted)', width: 16, textAlign: 'center', flexShrink: 0 }}>{LEG_MARKS[idx] ?? idx+1}</span>
+                                            <div style={{ display: 'flex', gap: 4, alignItems: 'flex-start', position: 'relative' }}>
+                                              <span style={{ fontSize: 10, color: 'var(--text-muted)', width: 16, textAlign: 'center', flexShrink: 0, marginTop: 2 }}>{LEG_MARKS[idx] ?? idx+1}</span>
                                               <BetMatchLine sport={gb.sport} match={gb.match} fontSize={12} teamColor={legChecked ? 'var(--green)' : undefined} />
                                               {hoverBetId === bet.parlay_group && (
                                                 <div style={{ display: 'flex', gap: 3, flexShrink: 0, position: 'absolute', right: 0, top: '50%', transform: 'translateY(-50%)', background: 'var(--bg-hover)', paddingLeft: 10, boxShadow: '-10px 0 8px -2px var(--bg-hover)' }}>
@@ -2862,8 +2865,8 @@ export default function Dashboard() {
                                   {/* 경기 내용 */}
                                   <div style={{ minWidth: 0 }}>
                                     {bet.league && <div style={{ paddingLeft: 24, fontSize: 9, color: 'var(--text-muted)', fontWeight: 700 }}>{bet.league}</div>}
-                                    <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-                                      <span style={{ fontSize: 16, lineHeight: 1, flexShrink: 0, width: 20, textAlign: 'center' }}>{sportGlyph(bet.sport) ?? SPORT_SHORT[bet.sport] ?? '📋'}</span>
+                                    <div style={{ display: 'flex', gap: 4, alignItems: 'flex-start' }}>
+                                      <span style={{ fontSize: 16, lineHeight: 1, flexShrink: 0, width: 20, textAlign: 'center', marginTop: 1 }}>{sportGlyph(bet.sport) ?? SPORT_SHORT[bet.sport] ?? '📋'}</span>
                                       <BetMatchLine sport={bet.sport} match={bet.match} fontSize={12} live={bet.is_live} />
                                     </div>
                                     <div style={{ paddingLeft: 24, marginTop: 2 }}>
