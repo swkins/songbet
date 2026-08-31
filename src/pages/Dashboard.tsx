@@ -1797,6 +1797,13 @@ export default function Dashboard() {
 
   const [sites, setSites]     = useState<Site[]>([])
   const [bets, setBets]       = useState<Bet[]>([])
+  // 적중/실패 등 결과 처리 후 1시간 동안은 완료된 목록으로 바로 넘기지 않고 진행중에 유지 — 1분마다 갱신해서 시간이 지나면 자동으로 넘어가게 함
+  const RESULT_HOLD_MS = 60 * 60 * 1000
+  const [nowTick, setNowTick] = useState(() => Date.now())
+  useEffect(() => {
+    const t = setInterval(() => setNowTick(Date.now()), 60000)
+    return () => clearInterval(t)
+  }, [])
   const [gameRollings, setGameRollings] = useState<GameRolling[]>([])
 
   const [showSiteMgr, setShowSiteMgr]   = useState(false)
@@ -2115,6 +2122,11 @@ export default function Dashboard() {
   const betsBySite       = (id: string) => bets.filter(b => b.site_id === id)
   const pendingBySite    = (id: string) => betsBySite(id).filter(b => b.result === 'pending')
   const settledBySite    = (id: string) => betsBySite(id).filter(b => b.result !== 'pending')
+  // 화면 표시 전용 — 결과 처리 후 1시간 동안은 "완료된 목록"으로 바로 넘기지 않고 진행중 쪽에 그대로 보여줌
+  // (잔액/수익 계산 등 실제 데이터 처리는 위 pendingBySite/settledBySite를 그대로 쓰고, 이건 오직 목록 표시 위치만 다르게 함)
+  const isRecentlyResolved = (b: Bet) => b.result !== 'pending' && !!b.result_at && (nowTick - new Date(b.result_at).getTime()) < RESULT_HOLD_MS
+  const displayPendingBySite = (id: string) => betsBySite(id).filter(b => b.result === 'pending' || isRecentlyResolved(b))
+  const displaySettledBySite = (id: string) => betsBySite(id).filter(b => b.result !== 'pending' && !isRecentlyResolved(b))
   const gameRollingsBySite = (id: string) => gameRollings.filter(g => g.site_id === id)
   const colCount = Math.max(1, sites.length)
 
@@ -2357,7 +2369,7 @@ export default function Dashboard() {
     const updatedList: Bet[] = []
     for (let i = 0; i < groupBets.length; i++) {
       const legProfit = i === 0 ? profit : 0  // leg1만 profit, 나머지 0
-      const { data } = await supabase.from('bets').update({ result, profit: legProfit, usd_krw_rate: rateAtSettlement, cashout_amount: null }).eq('id', groupBets[i].id).select().single()
+      const { data } = await supabase.from('bets').update({ result, profit: legProfit, usd_krw_rate: rateAtSettlement, cashout_amount: null, result_at: new Date().toISOString() }).eq('id', groupBets[i].id).select().single()
       if (data) updatedList.push(data)
     }
     if (!updatedList.length) return
@@ -2400,7 +2412,7 @@ export default function Dashboard() {
     const wasCashout = groupBets[0].cashout_amount != null
     const updatedList: Bet[] = []
     for (const gb of groupBets) {
-      const { data } = await supabase.from('bets').update({ result: 'pending', profit: 0, cashout_amount: null }).eq('id', gb.id).select().single()
+      const { data } = await supabase.from('bets').update({ result: 'pending', profit: 0, cashout_amount: null, result_at: null }).eq('id', gb.id).select().single()
       if (data) updatedList.push(data)
     }
     if (!updatedList.length) return
@@ -2432,7 +2444,7 @@ export default function Dashboard() {
       if (!confirm('결과 처리를 취소하고 대기 목록으로 되돌릴까요?')) return
       const wasWin = bet.result === 'win'
       const wasCashout = bet.cashout_amount != null
-      const { data } = await supabase.from('bets').update({ result: 'pending', profit: 0, cashout_amount: null }).eq('id', bet.id).select().single()
+      const { data } = await supabase.from('bets').update({ result: 'pending', profit: 0, cashout_amount: null, result_at: null }).eq('id', bet.id).select().single()
       if (data) {
         setBets(p => p.map(b => b.id === data.id ? data : b))
         if (site && wasWin) {
@@ -2474,7 +2486,7 @@ export default function Dashboard() {
       ? (isusd ? Math.round(rawProfit * 100) / 100 : Math.round(rawProfit))
       : result === 'loss' ? -bet.stake : 0
     const rateAtSettlement = isusd ? await getUsdKrwRate() : null
-    const { data } = await supabase.from('bets').update({ result, profit, usd_krw_rate: rateAtSettlement, cashout_amount: null }).eq('id', bet.id).select().single()
+    const { data } = await supabase.from('bets').update({ result, profit, usd_krw_rate: rateAtSettlement, cashout_amount: null, result_at: new Date().toISOString() }).eq('id', bet.id).select().single()
     if (data) {
       await logAction({ action_type: 'update', table_name: 'bets', record_id: data.id, before_data: bet as never, after_data: data as never, description: `결과: ${bet.match} → ${result}` })
       const updatedBets = bets.map(b => b.id === data.id ? data : b)
@@ -2503,7 +2515,7 @@ export default function Dashboard() {
     const isusd = site.currency === 'usd'
     const rateAtSettlement = isusd ? await getUsdKrwRate() : null
     const memo = bet.memo ? `${bet.memo} · 캐시아웃 ${cashoutAmount.toLocaleString()}` : `캐시아웃 ${cashoutAmount.toLocaleString()}`
-    const { data } = await supabase.from('bets').update({ result: 'loss', profit, usd_krw_rate: rateAtSettlement, memo, cashout_amount: cashoutAmount }).eq('id', bet.id).select().single()
+    const { data } = await supabase.from('bets').update({ result: 'loss', profit, usd_krw_rate: rateAtSettlement, memo, cashout_amount: cashoutAmount, result_at: new Date().toISOString() }).eq('id', bet.id).select().single()
     if (data) {
       await logAction({ action_type: 'update', table_name: 'bets', record_id: data.id, before_data: bet as never, after_data: data as never, description: `캐시아웃: ${bet.match} → ${cashoutAmount.toLocaleString()}` })
       setBets(p => p.map(b => b.id === data.id ? data : b))
@@ -2539,7 +2551,7 @@ export default function Dashboard() {
       const legMemo = i === 0
         ? (groupBets[i].memo ? `${groupBets[i].memo} · 캐시아웃 ${cashoutAmount.toLocaleString()}` : `캐시아웃 ${cashoutAmount.toLocaleString()}`)
         : groupBets[i].memo
-      const { data } = await supabase.from('bets').update({ result: 'loss', profit: legProfit, usd_krw_rate: rateAtSettlement, memo: legMemo, cashout_amount: i === 0 ? cashoutAmount : null }).eq('id', groupBets[i].id).select().single()
+      const { data } = await supabase.from('bets').update({ result: 'loss', profit: legProfit, usd_krw_rate: rateAtSettlement, memo: legMemo, cashout_amount: i === 0 ? cashoutAmount : null, result_at: new Date().toISOString() }).eq('id', groupBets[i].id).select().single()
       if (data) updatedList.push(data)
     }
     if (!updatedList.length) return
@@ -2678,8 +2690,8 @@ export default function Dashboard() {
                 const isusd = site.currency === 'usd'; const pfx = isusd ? '$' : ''; const sfx = isusd ? '' : '원'
                 const pct = depositPct(site); const rem = depositRemaining(site)
                 const pnl = sitePnL(site)
-                const pending = pendingBySite(site.id)
-                const settled = settledBySite(site.id)
+                const pending = displayPendingBySite(site.id)
+                const settled = displaySettledBySite(site.id)
                 return (
                   <div key={site.id} className="card" style={{ padding: 0, overflow: 'hidden', border: site.active ? '1px solid var(--green-border)' : '1px solid var(--border)' }}>
                     {/* 사이트 헤더 */}
@@ -2783,9 +2795,11 @@ export default function Dashboard() {
                             if (renderedGroups.has(bet.parlay_group)) return null
                             renderedGroups.add(bet.parlay_group)
                             const groupBets = pending.filter(b => b.parlay_group === bet.parlay_group).sort((a,b) => a.parlay_leg - b.parlay_leg)
+                            const isHeld = groupBets[0].result !== 'pending'
                             return (
-                              <div key={bet.parlay_group} className={`site-bet-entry parlay-entry${isBigStake(bet.stake, isusd) ? ' big-bet-entry' : ''}`} style={{ marginBottom: 6 }}
+                              <div key={bet.parlay_group} className={`site-bet-entry parlay-entry${isBigStake(bet.stake, isusd) ? ' big-bet-entry' : ''}`} style={{ marginBottom: 6, position: 'relative', opacity: isHeld ? 0.75 : 1 }}
                                 onMouseEnter={() => setHoverBetId(bet.parlay_group)} onMouseLeave={() => setHoverBetId(null)}>
+                                <ResultStamp result={groupBets[0].result} />
                                 {inlineEditBetId === bet.parlay_group ? (
                                   <InlineParlayEditForm
                                     groupBets={groupBets}
@@ -2807,7 +2821,7 @@ export default function Dashboard() {
                                             <div style={{ display: 'flex', gap: 4, alignItems: 'center', position: 'relative' }}>
                                               <span style={{ fontSize: 10, color: 'var(--text-muted)', width: 16, textAlign: 'center', flexShrink: 0 }}>{LEG_MARKS[idx] ?? idx+1}</span>
                                               <BetMatchLine sport={gb.sport} match={gb.match} fontSize={12} teamColor={legChecked ? 'var(--green)' : undefined} stacked={false} />
-                                              {hoverBetId === bet.parlay_group && (
+                                              {hoverBetId === bet.parlay_group && !isHeld && (
                                                 <div style={{ display: 'flex', gap: 3, flexShrink: 0, position: 'absolute', right: 0, top: '50%', transform: 'translateY(-50%)', background: 'var(--bg-hover)', paddingLeft: 10, boxShadow: '-10px 0 8px -2px var(--bg-hover)' }}>
                                                   <button className="bet-action-btn bet-action-win" title="적중" style={{ width: 22, height: 22, opacity: legChecked ? 0.5 : 1 }}
                                                     disabled={legChecked}
@@ -2828,8 +2842,14 @@ export default function Dashboard() {
                                         <BetOddsStakeLine odds={bet.odds} stake={bet.stake} prefix={pfx} suffix={sfx} big={isBigStake(bet.stake, isusd)} />
                                       </div>
                                     </div>
-                                    {/* 우: 결과 버튼 (경기별 적중/실패는 좌측 각 경기 행에 개별 표시) — 오버레이로 띄워서 좌측 폭에 영향 없게 하고, 배당/금액 줄 쪽(하단)에 붙여서 각 경기별 적중/실패 버튼과 안 겹치게 함 */}
+                                    {/* 우: 결과 버튼 (경기별 적중/실패는 좌측 각 경기 행에 개별 표시) — 오버레이로 띄워서 좌측 폭에 영향 없게 하고, 배당/금액 줄 쪽(하단)에 붙여서 각 경기별 적중/실패 버튼과 안 겹치게 함.
+                                        이미 결과 처리되어 1시간 보류 중인 경우엔 재처리 버튼 대신 되돌리기만 제공 */}
                                     {hoverBetId === bet.parlay_group && (
+                                      isHeld ? (
+                                        <div style={{ position: 'absolute', bottom: 16, right: 0, background: 'var(--bg-hover)', paddingLeft: 10, boxShadow: '-10px 0 8px -2px var(--bg-hover)' }}>
+                                          <button className="btn btn-ghost btn-xs" style={{ fontSize: 10 }} onClick={() => applyParlayRevert(groupBets)}><RotateCcw size={9} /> 되돌리기</button>
+                                        </div>
+                                      ) : (
                                       <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flexShrink: 0, position: 'absolute', bottom: 16, right: 0, background: 'var(--bg-hover)', paddingLeft: 10, boxShadow: '-10px 0 8px -2px var(--bg-hover)' }}>
                                         <div style={{ display: 'flex', gap: 3, justifyContent: 'flex-end' }}>
                                           <button className="bet-action-btn" title="캐시아웃" style={{ color: 'var(--purple)', width: 20, height: 20 }}
@@ -2850,6 +2870,7 @@ export default function Dashboard() {
                                           </button>
                                         </div>
                                       </div>
+                                      )
                                     )}
                                   </div>
                                 )}
@@ -2857,8 +2878,9 @@ export default function Dashboard() {
                             )
                           }
                           return (
-                            <div key={bet.id} className={`site-bet-entry${isBigStake(bet.stake, isusd) ? ' big-bet-entry' : ''}`} style={{ marginBottom: 6, position: 'relative' }}
+                            <div key={bet.id} className={`site-bet-entry${isBigStake(bet.stake, isusd) ? ' big-bet-entry' : ''}`} style={{ marginBottom: 6, position: 'relative', opacity: bet.result !== 'pending' ? 0.75 : 1 }}
                               onMouseEnter={() => setHoverBetId(bet.id)} onMouseLeave={() => setHoverBetId(null)}>
+                              <ResultStamp result={bet.result} />
                               {inlineEditBetId === bet.id ? (
                                 <InlineBetEditForm
                                   bet={bet}
@@ -2902,8 +2924,14 @@ export default function Dashboard() {
                                       <BetOddsStakeLine odds={bet.odds} stake={bet.stake} prefix={pfx} suffix={sfx} big={isBigStake(bet.stake, isusd)} />
                                     </div>
                                   </div>
-                                  {/* 결과 처리 버튼 — hover 시 우측 상단에 2x3 그리드로 살짝 겹쳐서 표시 (내용 레이아웃엔 영향 없음) */}
+                                  {/* 결과 처리 버튼 — hover 시 우측 상단에 2x3 그리드로 살짝 겹쳐서 표시 (내용 레이아웃엔 영향 없음).
+                                      이미 결과 처리되어 1시간 보류 중인 경우엔 재처리 버튼 대신 되돌리기만 제공 */}
                                   {hoverBetId === bet.id && (
+                                    bet.result !== 'pending' ? (
+                                      <div style={{ position: 'absolute', top: 4, right: 6, background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 6, padding: '3px 6px', boxShadow: '0 2px 8px rgba(0,0,0,0.35)' }}>
+                                        <button className="btn btn-ghost btn-xs" style={{ fontSize: 10 }} onClick={() => applyResult(bet, 'revert')}><RotateCcw size={9} /> 되돌리기</button>
+                                      </div>
+                                    ) : (
                                     <div style={{ position: 'absolute', top: 4, right: 6, display: 'flex', flexDirection: 'column', gap: 2, background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 6, padding: 3, boxShadow: '0 2px 8px rgba(0,0,0,0.35)' }}>
                                       <div style={{ display: 'flex', gap: 2, justifyContent: 'flex-end' }}>
                                         <button className="bet-action-btn" title="캐시아웃"
@@ -2940,6 +2968,7 @@ export default function Dashboard() {
                                         </button>
                                       </div>
                                     </div>
+                                    )
                                   )}
                                 </>
                               )}
