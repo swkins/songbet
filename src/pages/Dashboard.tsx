@@ -2810,68 +2810,63 @@ export default function Dashboard() {
                                     allBetsHistory={allBetsHistory}
                                   />
                                 ) : (
-                                  <div style={{ display: 'flex', gap: 6, alignItems: 'stretch', position: 'relative' }}>
-                                    {/* 좌: 경기 내용 (호버 시 나오는 버튼이 폭을 줄이지 않도록 항상 flex:1 유지, 버튼은 오버레이로 위에 띄움) */}
-                                    <div style={{ flex: 1, minWidth: 0 }}>
-                                      {groupBets.map((gb, idx) => {
-                                        const legChecked = !!parlayLegWinChecks[gb.id]
-                                        return (
-                                          <div key={gb.id} style={{ marginBottom: 2 }}>
-                                            {gb.league && <div style={{ paddingLeft: 20, fontSize: 9, color: 'var(--text-muted)', fontWeight: 700 }}>{gb.league}</div>}
-                                            <div style={{ display: 'flex', gap: 4, alignItems: 'center', position: 'relative' }}>
-                                              <span style={{ fontSize: 10, color: 'var(--text-muted)', width: 16, textAlign: 'center', flexShrink: 0 }}>{LEG_MARKS[idx] ?? idx+1}</span>
-                                              <BetMatchLine sport={gb.sport} match={gb.match} fontSize={12} teamColor={legChecked ? 'var(--green)' : undefined} stacked={false} />
-                                              {hoverBetId === bet.parlay_group && !isHeld && (
-                                                <div style={{ display: 'flex', gap: 3, flexShrink: 0, position: 'absolute', right: 0, top: '50%', transform: 'translateY(-50%)', background: 'var(--bg-hover)', paddingLeft: 10, boxShadow: '-10px 0 8px -2px var(--bg-hover)' }}>
-                                                  <button className="bet-action-btn bet-action-win" title="적중" style={{ width: 22, height: 22, opacity: legChecked ? 0.5 : 1 }}
-                                                    disabled={legChecked}
-                                                    onClick={() => toggleParlayLegWin(groupBets, gb.id)}>
-                                                    <CheckCircle size={14} />
-                                                  </button>
-                                                  <button className="bet-action-btn bet-action-loss" title="실패" style={{ width: 22, height: 22 }}
-                                                    onClick={() => applyParlayLegLoss(groupBets)}>
-                                                    <XCircle size={14} />
-                                                  </button>
-                                                </div>
-                                              )}
-                                            </div>
+                                  <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                    {groupBets.map((gb, idx) => {
+                                      const legChecked = !!parlayLegWinChecks[gb.id]
+                                      return (
+                                        <div key={gb.id} style={{ marginBottom: 2 }}>
+                                          {gb.league && <div style={{ paddingLeft: 20, fontSize: 9, color: 'var(--text-muted)', fontWeight: 700 }}>{gb.league}</div>}
+                                          <div style={{ display: 'flex', gap: 4, alignItems: 'center', position: 'relative' }}>
+                                            <span style={{ fontSize: 10, color: 'var(--text-muted)', width: 16, textAlign: 'center', flexShrink: 0 }}>{LEG_MARKS[idx] ?? idx+1}</span>
+                                            <BetMatchLine sport={gb.sport} match={gb.match} fontSize={12} teamColor={legChecked ? 'var(--green)' : undefined} stacked={false} />
+                                            {hoverBetId === bet.parlay_group && !isHeld && (
+                                              <div style={{ display: 'flex', gap: 3, flexShrink: 0, position: 'absolute', right: 0, top: '50%', transform: 'translateY(-50%)', background: 'var(--bg-hover)', paddingLeft: 10, boxShadow: '-10px 0 8px -2px var(--bg-hover)' }}>
+                                                <button className="bet-action-btn bet-action-win" title="적중" style={{ width: 22, height: 22, opacity: legChecked ? 0.5 : 1 }}
+                                                  disabled={legChecked}
+                                                  onClick={() => toggleParlayLegWin(groupBets, gb.id)}>
+                                                  <CheckCircle size={14} />
+                                                </button>
+                                                <button className="bet-action-btn bet-action-loss" title="실패" style={{ width: 22, height: 22 }}
+                                                  onClick={() => applyParlayLegLoss(groupBets)}>
+                                                  <XCircle size={14} />
+                                                </button>
+                                              </div>
+                                            )}
                                           </div>
-                                        )
-                                      })}
-                                      <div style={{ paddingLeft: 20, marginTop: 3 }}>
+                                        </div>
+                                      )
+                                    })}
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, paddingLeft: 20, marginTop: 3 }}>
+                                      <div style={{ flex: 1, minWidth: 0 }}>
                                         <BetOddsStakeLine odds={bet.odds} stake={bet.stake} prefix={pfx} suffix={sfx} big={isBigStake(bet.stake, isusd)} />
                                       </div>
+                                      {/* 그룹 전체 버튼(캐시아웃/수정/취소/적특 또는 되돌리기) — 각 경기별 적중/실패 버튼과 겹치지 않도록 오버레이가 아닌 별도 줄로 뺌.
+                                          이미 결과 처리되어 1시간 보류 중인 경우엔 재처리 버튼 대신 되돌리기만 제공 */}
+                                      {hoverBetId === bet.parlay_group && (
+                                        isHeld ? (
+                                          <button className="btn btn-ghost btn-xs" style={{ fontSize: 10, flexShrink: 0 }} onClick={() => applyParlayRevert(groupBets)}><RotateCcw size={9} /> 되돌리기</button>
+                                        ) : (
+                                          <div style={{ display: 'flex', gap: 3, flexShrink: 0 }}>
+                                            <button className="bet-action-btn" title="캐시아웃" style={{ color: 'var(--purple)', width: 20, height: 20 }}
+                                              onClick={() => applyParlayCashout(groupBets)}>
+                                              <DollarSign size={12} />
+                                            </button>
+                                            <button className="bet-action-btn" title="수정" style={{ color: 'var(--gold)', width: 20, height: 20 }}
+                                              onClick={() => { setInlineEditBetId(bet.parlay_group); setHoverBetId(null) }}>
+                                              <Pencil size={11} />
+                                            </button>
+                                            <button className="bet-action-btn bet-action-cancel" title="베팅취소" style={{ width: 20, height: 20 }}
+                                              onClick={() => applyParlayResult(groupBets, 'cancel')}>
+                                              <Ban size={11} />
+                                            </button>
+                                            <button className="bet-action-btn" title="적특" style={{ width: 20, height: 20, color: 'var(--blue)', borderColor: 'var(--blue-border)' }}
+                                              onClick={() => { if (confirm('적특으로 처리하시겠습니까?')) applyParlayResult(groupBets, 'push') }}>
+                                              <MinusCircle size={12} />
+                                            </button>
+                                          </div>
+                                        )
+                                      )}
                                     </div>
-                                    {/* 우: 결과 버튼 (경기별 적중/실패는 좌측 각 경기 행에 개별 표시) — 오버레이로 띄워서 좌측 폭에 영향 없게 하고, 배당/금액 줄 쪽(하단)에 붙여서 각 경기별 적중/실패 버튼과 안 겹치게 함.
-                                        이미 결과 처리되어 1시간 보류 중인 경우엔 재처리 버튼 대신 되돌리기만 제공 */}
-                                    {hoverBetId === bet.parlay_group && (
-                                      isHeld ? (
-                                        <div style={{ position: 'absolute', bottom: 16, right: 0, background: 'var(--bg-hover)', paddingLeft: 10, boxShadow: '-10px 0 8px -2px var(--bg-hover)' }}>
-                                          <button className="btn btn-ghost btn-xs" style={{ fontSize: 10 }} onClick={() => applyParlayRevert(groupBets)}><RotateCcw size={9} /> 되돌리기</button>
-                                        </div>
-                                      ) : (
-                                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flexShrink: 0, position: 'absolute', bottom: 16, right: 0, background: 'var(--bg-hover)', paddingLeft: 10, boxShadow: '-10px 0 8px -2px var(--bg-hover)' }}>
-                                        <div style={{ display: 'flex', gap: 3, justifyContent: 'flex-end' }}>
-                                          <button className="bet-action-btn" title="캐시아웃" style={{ color: 'var(--purple)', width: 20, height: 20 }}
-                                            onClick={() => applyParlayCashout(groupBets)}>
-                                            <DollarSign size={12} />
-                                          </button>
-                                          <button className="bet-action-btn" title="수정" style={{ color: 'var(--gold)', width: 20, height: 20 }}
-                                            onClick={() => { setInlineEditBetId(bet.parlay_group); setHoverBetId(null) }}>
-                                            <Pencil size={11} />
-                                          </button>
-                                          <button className="bet-action-btn bet-action-cancel" title="베팅취소" style={{ width: 20, height: 20 }}
-                                            onClick={() => applyParlayResult(groupBets, 'cancel')}>
-                                            <Ban size={11} />
-                                          </button>
-                                          <button className="bet-action-btn" title="적특" style={{ width: 20, height: 20, color: 'var(--blue)', borderColor: 'var(--blue-border)' }}
-                                            onClick={() => { if (confirm('적특으로 처리하시겠습니까?')) applyParlayResult(groupBets, 'push') }}>
-                                            <MinusCircle size={12} />
-                                          </button>
-                                        </div>
-                                      </div>
-                                      )
-                                    )}
                                   </div>
                                 )}
                               </div>
