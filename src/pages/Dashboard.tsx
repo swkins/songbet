@@ -263,17 +263,32 @@ function BetBadgeRow({ sport, match, live }: { sport: string; match: string; liv
     <span style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap', minWidth: 0 }}>
       {parts?.side && <MatchBadge label={sideBadgeLabel(parts.side)} accent={parts.side === '홈' ? 'blue' : 'orange'} />}
       {parts?.boTag && <MatchBadge label={parts.boTag} accent="neutral" />}
-      {parts && <MatchBadge label={parts.optionLabel} accent={parts.accent} />}
+      {parts && parts.optionLabel !== '승리' && <MatchBadge label={parts.optionLabel} accent={parts.accent} />}
       {live && <MatchBadge label="LIVE" accent="red" />}
     </span>
   )
 }
 
-// 진행중 베팅 전용 — 팀 이름 + 홈/원정 + BO태그는 한 줄, 베팅옵션은 그 아래 줄로 분리.
-// 팀 이름이 아무리 길어도 베팅옵션이 가려지지 않도록 세로로 나눔 (배당·금액은 이 아래 별도 줄 — BetOddsStakeLine 참고)
-function BetMatchLine({ sport, match, fontSize = 12, teamColor, live }: { sport: string; match: string; fontSize?: number; teamColor?: string; live?: boolean }) {
+// 진행중 베팅 전용 — 단폴: 팀 이름 + 홈/원정 + BO태그는 한 줄, 베팅옵션은 그 아래 줄로 분리(stacked=true, 기본값).
+// 두폴(다리별): 한 줄에 다 표시(stacked=false) — 다리 수가 많아 세로로 길어지는 걸 막기 위함.
+// "승리"(일반승/moneyline)는 홈/원정 배지만으로 이미 뜻이 통하므로 별도 표시하지 않음.
+// (배당·금액은 이 아래 별도 줄 — BetOddsStakeLine 참고)
+function BetMatchLine({ sport, match, fontSize = 12, teamColor, live, stacked = true }: { sport: string; match: string; fontSize?: number; teamColor?: string; live?: boolean; stacked?: boolean }) {
   const parts = parseBetMatch(sport, match)
   const team = parts ? parts.team : match
+  const showOption = !!parts && parts.optionLabel !== '승리'
+  if (!stacked) {
+    return (
+      <span style={{ display: 'flex', alignItems: 'center', gap: 5, flex: 1, minWidth: 0 }}>
+        <span style={{ fontSize, fontWeight: 700, color: teamColor ?? 'var(--text-primary)', flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '55%' }}>{team}</span>
+        {parts?.side && <MatchBadge label={sideBadgeLabel(parts.side)} accent={parts.side === '홈' ? 'blue' : 'orange'} />}
+        {parts?.boTag && <MatchBadge label={parts.boTag} accent="neutral" />}
+        {showOption && <span style={{ fontSize, color: 'var(--text-secondary)', fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{parts.optionLabel}</span>}
+        <span style={{ flex: 1 }} />
+        {live && <MatchBadge label="LIVE" accent="red" />}
+      </span>
+    )
+  }
   return (
     <span style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1, minWidth: 0 }}>
       <span style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
@@ -282,7 +297,7 @@ function BetMatchLine({ sport, match, fontSize = 12, teamColor, live }: { sport:
         {parts?.boTag && <MatchBadge label={parts.boTag} accent="neutral" />}
         {live && <MatchBadge label="LIVE" accent="red" />}
       </span>
-      {parts && (
+      {showOption && (
         <span style={{ fontSize: fontSize - 1, color: 'var(--text-secondary)', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{parts.optionLabel}</span>
       )}
     </span>
@@ -661,7 +676,7 @@ function EditFormAmountRow({ isusd, amount, setAmount }: { isusd: boolean; amoun
   return (
     <>
       <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-        <input className="form-input inline-bet-input" type="text" inputMode={isusd ? 'decimal' : 'numeric'} placeholder={`금액 (${unit})`}
+        <input className="form-input inline-bet-input stake-input" type="text" inputMode={isusd ? 'decimal' : 'numeric'} placeholder={`금액 (${unit})`}
           value={isusd ? amount : (stakeN > 0 ? stakeN.toLocaleString() : amount)}
           style={{ flex: 1, MozAppearance: 'textfield' } as React.CSSProperties}
           onChange={e => {
@@ -1597,7 +1612,7 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
         onBlur={e => { const n = parseOdds(e.target.value); if (n > 0) setOddsRaw(n.toFixed(2)) }} />
       {oddsV > 0 && <div style={{ fontSize: 9, color: 'var(--gold)', fontWeight: 700, textAlign: 'right' }}>→ {oddsV.toFixed(2)}</div>}
       <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-        <input className="form-input inline-bet-input" type="text" inputMode={isusd ? 'decimal' : 'numeric'} placeholder={`금액 (${unit})`}
+        <input className="form-input inline-bet-input stake-input" type="text" inputMode={isusd ? 'decimal' : 'numeric'} placeholder={`금액 (${unit})`}
           value={isusd ? amount : (stakeN > 0 ? stakeN.toLocaleString() : amount)}
           style={{ flex: 1, MozAppearance: 'textfield' } as React.CSSProperties}
           onChange={e => {
@@ -2774,9 +2789,9 @@ export default function Dashboard() {
                                         return (
                                           <div key={gb.id} style={{ marginBottom: 2 }}>
                                             {gb.league && <div style={{ paddingLeft: 20, fontSize: 9, color: 'var(--text-muted)', fontWeight: 700 }}>{gb.league}</div>}
-                                            <div style={{ display: 'flex', gap: 4, alignItems: 'flex-start', position: 'relative' }}>
-                                              <span style={{ fontSize: 10, color: 'var(--text-muted)', width: 16, textAlign: 'center', flexShrink: 0, marginTop: 2 }}>{LEG_MARKS[idx] ?? idx+1}</span>
-                                              <BetMatchLine sport={gb.sport} match={gb.match} fontSize={12} teamColor={legChecked ? 'var(--green)' : undefined} />
+                                            <div style={{ display: 'flex', gap: 4, alignItems: 'center', position: 'relative' }}>
+                                              <span style={{ fontSize: 10, color: 'var(--text-muted)', width: 16, textAlign: 'center', flexShrink: 0 }}>{LEG_MARKS[idx] ?? idx+1}</span>
+                                              <BetMatchLine sport={gb.sport} match={gb.match} fontSize={12} teamColor={legChecked ? 'var(--green)' : undefined} stacked={false} />
                                               {hoverBetId === bet.parlay_group && (
                                                 <div style={{ display: 'flex', gap: 3, flexShrink: 0, position: 'absolute', right: 0, top: '50%', transform: 'translateY(-50%)', background: 'var(--bg-hover)', paddingLeft: 10, boxShadow: '-10px 0 8px -2px var(--bg-hover)' }}>
                                                   <button className="bet-action-btn bet-action-win" title="적중" style={{ width: 22, height: 22, opacity: legChecked ? 0.5 : 1 }}
