@@ -2763,19 +2763,19 @@ export default function Dashboard() {
                                     allBetsHistory={allBetsHistory}
                                   />
                                 ) : (
-                                  <div style={{ display: 'flex', gap: 6, alignItems: 'stretch' }}>
-                                    {/* 좌: 경기 내용 */}
+                                  <div style={{ display: 'flex', gap: 6, alignItems: 'stretch', position: 'relative' }}>
+                                    {/* 좌: 경기 내용 (호버 시 나오는 버튼이 폭을 줄이지 않도록 항상 flex:1 유지, 버튼은 오버레이로 위에 띄움) */}
                                     <div style={{ flex: 1, minWidth: 0 }}>
                                       {groupBets.map((gb, idx) => {
                                         const legChecked = !!parlayLegWinChecks[gb.id]
                                         return (
                                           <div key={gb.id} style={{ marginBottom: 2 }}>
                                             {gb.league && <div style={{ paddingLeft: 20, fontSize: 9, color: 'var(--text-muted)', fontWeight: 700 }}>{gb.league}</div>}
-                                            <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                                            <div style={{ display: 'flex', gap: 4, alignItems: 'center', position: 'relative' }}>
                                               <span style={{ fontSize: 10, color: 'var(--text-muted)', width: 16, textAlign: 'center', flexShrink: 0 }}>{LEG_MARKS[idx] ?? idx+1}</span>
                                               <BetMatchLine sport={gb.sport} match={gb.match} fontSize={12} teamColor={legChecked ? 'var(--green)' : undefined} />
                                               {hoverBetId === bet.parlay_group && (
-                                                <div style={{ display: 'flex', gap: 3, flexShrink: 0 }}>
+                                                <div style={{ display: 'flex', gap: 3, flexShrink: 0, position: 'absolute', right: 0, top: '50%', transform: 'translateY(-50%)', background: 'var(--bg-hover)', paddingLeft: 10, boxShadow: '-10px 0 8px -2px var(--bg-hover)' }}>
                                                   <button className="bet-action-btn bet-action-win" title="적중" style={{ width: 22, height: 22, opacity: legChecked ? 0.5 : 1 }}
                                                     disabled={legChecked}
                                                     onClick={() => toggleParlayLegWin(groupBets, gb.id)}>
@@ -2796,9 +2796,9 @@ export default function Dashboard() {
                                       {isBigStake(bet.stake, isusd) && <Flame size={13} style={{ marginLeft: 5, color: 'var(--gold)', fill: 'var(--gold)', filter: 'drop-shadow(0 0 3px var(--gold))' }} />}
                                       </div>
                                     </div>
-                                    {/* 우: 결과 버튼 (경기별 적중/실패는 좌측 각 경기 행에 개별 표시) */}
+                                    {/* 우: 결과 버튼 (경기별 적중/실패는 좌측 각 경기 행에 개별 표시) — 오버레이로 띄워서 좌측 팀 이름 폭에 영향 없게 함 */}
                                     {hoverBetId === bet.parlay_group && (
-                                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flexShrink: 0, alignSelf: 'center' }}>
+                                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flexShrink: 0, position: 'absolute', top: 0, right: 0, background: 'var(--bg-hover)', paddingLeft: 10, boxShadow: '-10px 0 8px -2px var(--bg-hover)' }}>
                                         <div style={{ display: 'flex', gap: 3, justifyContent: 'flex-end' }}>
                                           <button className="bet-action-btn" title="캐시아웃" style={{ color: 'var(--purple)', width: 20, height: 20 }}
                                             onClick={() => applyParlayCashout(groupBets)}>
