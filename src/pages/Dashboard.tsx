@@ -1341,7 +1341,7 @@ function StructuredTeamPicker({ sport, leagues, favoriteLeagues, teams, allTeams
       {teamText.trim() && (sport === 'soccer' || sport === 'baseball' || sport === 'basketball' || sport === 'volleyball') && (
         <div style={{ display: 'flex', gap: 4 }}>
           {(['홈', '원정'] as const).map(s => (
-            <button key={s} type="button" onClick={() => setSide(s)} style={{
+            <button key={s} type="button" onClick={() => { setSide(s); if (sport === 'baseball') setOption('ml') }} style={{
               flex: 1, fontSize: 11, fontWeight: 700, padding: '5px 0', borderRadius: 6, cursor: 'pointer', fontFamily: 'var(--font-body)',
               border: `1px solid ${side === s ? 'var(--blue-border)' : 'var(--border)'}`,
               background: side === s ? 'var(--blue-bg)' : 'var(--bg-elevated)',
