@@ -2810,13 +2810,12 @@ export default function Dashboard() {
                                         )
                                       })}
                                       <div style={{ paddingLeft: 20, marginTop: 3 }}>
-                                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-secondary)' }}>{bet.odds.toFixed(2)} / {pfx}{bet.stake.toLocaleString()}{sfx}</span>
-                                      {isBigStake(bet.stake, isusd) && <Flame size={13} style={{ marginLeft: 5, color: 'var(--gold)', fill: 'var(--gold)', filter: 'drop-shadow(0 0 3px var(--gold))' }} />}
+                                        <BetOddsStakeLine odds={bet.odds} stake={bet.stake} prefix={pfx} suffix={sfx} big={isBigStake(bet.stake, isusd)} />
                                       </div>
                                     </div>
                                     {/* 우: 결과 버튼 (경기별 적중/실패는 좌측 각 경기 행에 개별 표시) — 오버레이로 띄워서 좌측 폭에 영향 없게 하고, 배당/금액 줄 쪽(하단)에 붙여서 각 경기별 적중/실패 버튼과 안 겹치게 함 */}
                                     {hoverBetId === bet.parlay_group && (
-                                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flexShrink: 0, position: 'absolute', bottom: 0, right: 0, background: 'var(--bg-hover)', paddingLeft: 10, boxShadow: '-10px 0 8px -2px var(--bg-hover)' }}>
+                                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flexShrink: 0, position: 'absolute', bottom: 16, right: 0, background: 'var(--bg-hover)', paddingLeft: 10, boxShadow: '-10px 0 8px -2px var(--bg-hover)' }}>
                                         <div style={{ display: 'flex', gap: 3, justifyContent: 'flex-end' }}>
                                           <button className="bet-action-btn" title="캐시아웃" style={{ color: 'var(--purple)', width: 20, height: 20 }}
                                             onClick={() => applyParlayCashout(groupBets)}>
