@@ -216,7 +216,7 @@ function parseBetMatch(sport: string, match: string): BetMatchParts | null {
     if (!m) return null
     const [, team, side, num] = m
     const sideV = side as '홈' | '원정' | undefined
-    if (!num) return { team, side: sideV, optionLabel: '일반승', accent: 'gold' }
+    if (!num) return { team, side: sideV, optionLabel: '승리', accent: 'gold' }
     if (num.startsWith('-')) return { team, side: sideV, optionLabel: `${num} 핸디캡`, accent: 'red' }
     return { team, side: sideV, optionLabel: `${num} 핸디캡`, accent: 'green' }
   }
@@ -232,7 +232,7 @@ function parseBetMatch(sport: string, match: string): BetMatchParts | null {
     if (!m) return null
     const [, team, custom, num, setOver, bo] = m
     if (custom) return { team, boTag: bo, optionLabel: custom, accent: 'blue' }
-    if (!num) return { team, boTag: bo, optionLabel: '일반승', accent: 'gold' }
+    if (!num) return { team, boTag: bo, optionLabel: '승리', accent: 'gold' }
     if (setOver) return { team, boTag: bo, optionLabel: `${num} 세트오버`, accent: 'orange' }
     return { team, boTag: bo, optionLabel: `${num} 핸디`, accent: num.startsWith('-') ? 'red' : 'purple' }
   }
@@ -269,21 +269,21 @@ function BetBadgeRow({ sport, match, live }: { sport: string; match: string; liv
   )
 }
 
-// 진행중 베팅 전용 — 팀 이름은 단독 줄, 홈/원정·베팅옵션·BO태그·LIVE는 그 아래 줄로 분리.
-// 팀 이름이 아무리 길어도 배지가 가려지지 않도록 세로로 나눔 (배당·금액은 이 아래 별도 줄 — BetOddsStakeLine 참고)
+// 진행중 베팅 전용 — 팀 이름 + 홈/원정 + BO태그는 한 줄, 베팅옵션은 그 아래 줄로 분리.
+// 팀 이름이 아무리 길어도 베팅옵션이 가려지지 않도록 세로로 나눔 (배당·금액은 이 아래 별도 줄 — BetOddsStakeLine 참고)
 function BetMatchLine({ sport, match, fontSize = 12, teamColor, live }: { sport: string; match: string; fontSize?: number; teamColor?: string; live?: boolean }) {
   const parts = parseBetMatch(sport, match)
   const team = parts ? parts.team : match
   return (
     <span style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1, minWidth: 0 }}>
-      <span style={{ fontSize, fontWeight: 700, color: teamColor ?? 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{team}</span>
-      {(parts?.side || parts?.boTag || parts || live) && (
-        <span style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
-          {parts?.side && <MatchBadge label={sideBadgeLabel(parts.side)} accent={parts.side === '홈' ? 'blue' : 'orange'} />}
-          {parts?.boTag && <MatchBadge label={parts.boTag} accent="neutral" />}
-          {parts && <span style={{ fontSize: fontSize - 1, color: 'var(--text-secondary)', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{parts.optionLabel}</span>}
-          {live && <MatchBadge label="LIVE" accent="red" />}
-        </span>
+      <span style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
+        <span style={{ fontSize, fontWeight: 700, color: teamColor ?? 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{team}</span>
+        {parts?.side && <MatchBadge label={sideBadgeLabel(parts.side)} accent={parts.side === '홈' ? 'blue' : 'orange'} />}
+        {parts?.boTag && <MatchBadge label={parts.boTag} accent="neutral" />}
+        {live && <MatchBadge label="LIVE" accent="red" />}
+      </span>
+      {parts && (
+        <span style={{ fontSize: fontSize - 1, color: 'var(--text-secondary)', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{parts.optionLabel}</span>
       )}
     </span>
   )
@@ -308,7 +308,7 @@ function autoMarket(content: string): { market: Market; pick: string } {
   if (/오버/i.test(s) || /over/i.test(s)) return { market: 'over', pick: s }
   if (/언더/i.test(s) || /under/i.test(s)) return { market: 'under', pick: s }
   // 팀 이름 등 뒤에 라인 숫자가 붙어 있으면 핸디캡 (부호 +/- 유무는 무관, 예: "수원삼성 1.5", "수원삼성 -1.5")
-  // 팀 이름만 단독으로 있으면(숫자 없음) 일반승(moneyline)
+  // 팀 이름만 단독으로 있으면(숫자 없음) 승리(moneyline)
   if (/[+-]?\d+(\.\d+)?\s*$/.test(s)) return { market: 'handicap', pick: s }
   return { market: 'moneyline', pick: s }
 }
@@ -918,7 +918,7 @@ const SOCCER_BET_OPTIONS = [
 ]
 const BASEBALL_BET_OPTIONS = [
   { key: 'hm15', label: '-1.5 핸디캡' },
-  { key: 'ml', label: '일반승' },
+  { key: 'ml', label: '승리' },
   { key: 'h15', label: '1.5 플핸' },
 ]
 const BASKETBALL_HCAP_LINES = [4.5, 5.5, 6.5, 7.5, 8.5, 9.5, 10.5, 11.5, 12.5, 13.5, 14.5]
@@ -927,14 +927,14 @@ type EsportsBo = 'bo1' | 'bo3' | 'bo5'
 const ESPORTS_BO3_OPTIONS = [
   { key: 'h15', label: '1.5 플핸' },
   { key: 'hm15', label: '-1.5 핸디캡' },
-  { key: 'ml', label: '일반승' },
+  { key: 'ml', label: '승리' },
   CUSTOM_OPTION,
 ]
 const ESPORTS_BO5_OPTIONS = [
   { key: 'hm15', label: '-1.5 핸디캡' },
   { key: 'h15', label: '1.5 플핸' },
   { key: 'so35', label: '3.5 세트오버' },
-  { key: 'ml', label: '일반승' },
+  { key: 'ml', label: '승리' },
   CUSTOM_OPTION,
 ]
 
@@ -2799,9 +2799,9 @@ export default function Dashboard() {
                                       {isBigStake(bet.stake, isusd) && <Flame size={13} style={{ marginLeft: 5, color: 'var(--gold)', fill: 'var(--gold)', filter: 'drop-shadow(0 0 3px var(--gold))' }} />}
                                       </div>
                                     </div>
-                                    {/* 우: 결과 버튼 (경기별 적중/실패는 좌측 각 경기 행에 개별 표시) — 오버레이로 띄워서 좌측 팀 이름 폭에 영향 없게 함 */}
+                                    {/* 우: 결과 버튼 (경기별 적중/실패는 좌측 각 경기 행에 개별 표시) — 오버레이로 띄워서 좌측 폭에 영향 없게 하고, 배당/금액 줄 쪽(하단)에 붙여서 각 경기별 적중/실패 버튼과 안 겹치게 함 */}
                                     {hoverBetId === bet.parlay_group && (
-                                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flexShrink: 0, position: 'absolute', top: 0, right: 0, background: 'var(--bg-hover)', paddingLeft: 10, boxShadow: '-10px 0 8px -2px var(--bg-hover)' }}>
+                                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flexShrink: 0, position: 'absolute', bottom: 0, right: 0, background: 'var(--bg-hover)', paddingLeft: 10, boxShadow: '-10px 0 8px -2px var(--bg-hover)' }}>
                                         <div style={{ display: 'flex', gap: 3, justifyContent: 'flex-end' }}>
                                           <button className="bet-action-btn" title="캐시아웃" style={{ color: 'var(--purple)', width: 20, height: 20 }}
                                             onClick={() => applyParlayCashout(groupBets)}>
