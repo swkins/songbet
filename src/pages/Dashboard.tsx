@@ -582,11 +582,12 @@ function DefaultStakeInput({ site, onCommit }: { site: Site; onCommit: (site: Si
   )
 }
 
-function SiteMgrModal({ sites, onClose, onAdd, onDelete, onToggleCurrency, onReorder, onUpdateDefaultStake }: {
+function SiteMgrModal({ sites, onClose, onAdd, onDelete, onToggleCurrency, onToggleBetType, onReorder, onUpdateDefaultStake }: {
   sites: Site[]; onClose: () => void
   onAdd: (name: string, currency: 'krw' | 'usd') => void
   onDelete: (id: string) => void
   onToggleCurrency: (site: Site) => void
+  onToggleBetType: (site: Site) => void
   onReorder: (from: string, to: string) => void
   onUpdateDefaultStake: (site: Site, val: number) => void
 }) {
@@ -604,6 +605,7 @@ function SiteMgrModal({ sites, onClose, onAdd, onDelete, onToggleCurrency, onReo
         <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginBottom: 16 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '2px 4px', fontSize: 9, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.6px' }}>
             <span style={{ flex: 1 }}>사이트</span>
+            <span title="베팅추가 시 기본으로 열릴 베팅 모드" style={{ width: 40, textAlign: 'center', flexShrink: 0 }}>주력</span>
             <span title="베팅추가 시 초기 베팅 금액 (0 = 기본값)" style={{ width: 70, textAlign: 'right', flexShrink: 0 }}>기본금액</span>
             <span style={{ width: 56, textAlign: 'center', flexShrink: 0 }}>통화</span>
             <span style={{ width: 18, flexShrink: 0 }}></span>
@@ -622,6 +624,9 @@ function SiteMgrModal({ sites, onClose, onAdd, onDelete, onToggleCurrency, onReo
               <GripVertical size={12} color="var(--text-muted)" style={{ flexShrink: 0 }} />
               <span style={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0, background: s.active ? 'var(--green)' : 'var(--border)', boxShadow: s.active ? '0 0 5px var(--green)' : 'none' }} />
               <span className="site-mgr-name">{s.name}</span>
+              <button onClick={() => onToggleBetType(s)} title="베팅추가 시 기본으로 열릴 모드 전환" style={{ width: 40, textAlign: 'center', background: s.bet_type === 'double' ? 'var(--purple-bg)' : 'var(--gold-bg)', border: `1px solid ${s.bet_type === 'double' ? 'var(--purple-border)' : 'var(--gold-border)'}`, borderRadius: 4, color: s.bet_type === 'double' ? 'var(--purple)' : 'var(--gold)', cursor: 'pointer', padding: '2px 0', fontSize: 10, fontWeight: 700, flexShrink: 0 }}>
+                {s.bet_type === 'double' ? '두폴' : '단폴'}
+              </button>
               <DefaultStakeInput site={s} onCommit={onUpdateDefaultStake} />
               <button onClick={() => onToggleCurrency(s)} title="KRW/USD" style={{ background: s.currency === 'usd' ? 'var(--blue-bg)' : 'var(--bg-elevated)', border: `1px solid ${s.currency === 'usd' ? 'var(--blue-border)' : 'var(--border)'}`, borderRadius: 4, color: s.currency === 'usd' ? 'var(--blue)' : 'var(--text-muted)', cursor: 'pointer', padding: '2px 7px', fontSize: 10, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 3, flexShrink: 0 }}>
                 {s.currency === 'usd' ? <><DollarSign size={10} /> USD</> : '₩ KRW'}
@@ -1445,7 +1450,8 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
   const [league, setLeague]     = useState('')
   const [leagueTouched, setLeagueTouched] = useState(false)
   // 베팅 모드: 단폴 / 다폴. 다폴은 리그 없이 경기 내용 여러 개(최대 4개) + 배당/금액 공유.
-  const [mode, setMode] = useState<'single' | 'multi'>('single')
+  // 사이트관리에서 지정한 주력 베팅(bet_type)을 기본값으로 사용
+  const [mode, setMode] = useState<'single' | 'multi'>(site.bet_type === 'double' ? 'multi' : 'single')
   // 경기 내용 ①은 content, 나머지(②③④)는 extraContents에 담는다
   const [extraContents, setExtraContents] = useState<string[]>([''])
   const [oddsRaw, setOddsRaw]   = useState('')
@@ -2108,6 +2114,10 @@ export default function Dashboard() {
   }
   async function toggleCurrency(site: Site) {
     const { data } = await supabase.from('sites').update({ currency: site.currency === 'krw' ? 'usd' : 'krw' }).eq('id', site.id).select().single()
+    if (data) setSites(p => p.map(s => s.id === site.id ? data : s))
+  }
+  async function toggleBetType(site: Site) {
+    const { data } = await supabase.from('sites').update({ bet_type: site.bet_type === 'double' ? 'single' : 'double' }).eq('id', site.id).select().single()
     if (data) setSites(p => p.map(s => s.id === site.id ? data : s))
   }
   async function updateDefaultStake(site: Site, val: number) {
@@ -2989,7 +2999,7 @@ export default function Dashboard() {
 
       {/* 모달 */}
       {showSiteMgr && (
-        <SiteMgrModal sites={sites} onClose={() => setShowSiteMgr(false)} onAdd={addSite} onDelete={deleteSite} onToggleCurrency={toggleCurrency} onReorder={reorderSites} onUpdateDefaultStake={updateDefaultStake} />
+        <SiteMgrModal sites={sites} onClose={() => setShowSiteMgr(false)} onAdd={addSite} onDelete={deleteSite} onToggleCurrency={toggleCurrency} onToggleBetType={toggleBetType} onReorder={reorderSites} onUpdateDefaultStake={updateDefaultStake} />
       )}
       {depositSite && <DepositModal site={depositSite} onClose={() => setDepositSite(null)} onDeposit={doDeposit} onPoint={doPoint} />}
       {withdrawSite && <WithdrawModal site={withdrawSite} onClose={() => setWithdrawSite(null)} onWithdraw={doWithdraw} />}
