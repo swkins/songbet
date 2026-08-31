@@ -280,10 +280,10 @@ function BetMatchLine({ sport, match, fontSize = 12, teamColor, live, stacked = 
   if (!stacked) {
     return (
       <span style={{ display: 'flex', alignItems: 'center', gap: 5, flex: 1, minWidth: 0 }}>
-        <span style={{ fontSize, fontWeight: 700, color: teamColor ?? 'var(--text-primary)', flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '55%' }}>{team}</span>
+        <span style={{ fontSize, fontWeight: 700, color: teamColor ?? 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{team}</span>
         {parts?.side && <MatchBadge label={sideBadgeLabel(parts.side)} accent={parts.side === '홈' ? 'blue' : 'orange'} />}
         {parts?.boTag && <MatchBadge label={parts.boTag} accent="neutral" />}
-        {showOption && <span style={{ fontSize, color: 'var(--text-secondary)', fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{parts.optionLabel}</span>}
+        {showOption && <span style={{ fontSize, color: 'var(--text-secondary)', fontWeight: 600, flexShrink: 0, whiteSpace: 'nowrap' }}>{parts.optionLabel}</span>}
         <span style={{ flex: 1 }} />
         {live && <MatchBadge label="LIVE" accent="red" />}
       </span>
