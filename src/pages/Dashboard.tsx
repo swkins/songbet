@@ -14,7 +14,7 @@ import {
   RotateCcw, Settings, Flame,
   CheckCircle, XCircle, Ban, MinusCircle, Gift, GripVertical, DollarSign,
   TrendingUp, TrendingDown, ArrowDownToLine, LogOut, Pencil,
-  ClipboardPaste, ChevronUp, ChevronDown, Star, ListFilter,
+  ClipboardPaste, ChevronUp, ChevronDown, Star, ListFilter, Pin,
 } from 'lucide-react'
 
 const SPORTS: { value: Sport; label: string }[] = [
@@ -1810,6 +1810,8 @@ function BetListPanel({ bets, sites, onClose }: { bets: Bet[]; sites: Site[]; on
   const [oddsMin, setOddsMin] = useState('')
   const [oddsMax, setOddsMax] = useState('')
   const [pickedSports, setPickedSports] = useState<Sport[]>([])
+  const [pinned, setPinned] = useState(false)
+  const allSportValues = SPORTS.map(s => s.value)
 
   function persist(next: BetListFilter[]) { setFilters(next); persistBetListFilters(next) }
 
@@ -1832,6 +1834,7 @@ function BetListPanel({ bets, sites, onClose }: { bets: Bet[]; sites: Site[]; on
   const siteName = (id: string | null) => sites.find(s => s.id === id)?.name ?? '—'
 
   const filtered = bets.filter(b => {
+    if (b.result !== 'pending') return false
     if (!activeFilter) return true
     const min = parseFloat(activeFilter.oddsMin); const max = parseFloat(activeFilter.oddsMax)
     if (!isNaN(min) && b.odds < min) return false
@@ -1843,7 +1846,7 @@ function BetListPanel({ bets, sites, onClose }: { bets: Bet[]; sites: Site[]; on
 
   return (
     <>
-      <div style={{ position: 'fixed', inset: 0, zIndex: 150 }} onClick={onClose} />
+      {!pinned && <div style={{ position: 'fixed', inset: 0, zIndex: 150 }} onClick={onClose} />}
       <div className="app-side-panel" style={{
         position: 'fixed', top: 56, right: 16, width: 360,
         maxHeight: 'calc(100vh - 72px)',
@@ -1852,8 +1855,22 @@ function BetListPanel({ bets, sites, onClose }: { bets: Bet[]; sites: Site[]; on
         zIndex: 160, display: 'flex', flexDirection: 'column', overflow: 'hidden',
       }} onClick={e => e.stopPropagation()}>
         <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--bg-elevated)', flexShrink: 0 }}>
-          <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '1.2px', textTransform: 'uppercase', color: 'var(--gold)' }}>베팅목록 모아보기</span>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex' }}><X size={12} /></button>
+          <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '1.2px', textTransform: 'uppercase', color: 'var(--gold)' }}>베팅목록 모아보기 (진행중)</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <button
+              onClick={() => setPinned(p => !p)}
+              title={pinned ? '고정 해제' : '항상 위에 고정'}
+              style={{
+                background: pinned ? 'var(--gold-bg)' : 'none',
+                border: `1px solid ${pinned ? 'var(--gold-border)' : 'var(--border)'}`,
+                borderRadius: 4, cursor: 'pointer', color: pinned ? 'var(--gold)' : 'var(--text-muted)',
+                display: 'flex', alignItems: 'center', padding: '2px 5px', gap: 3,
+                fontSize: 9, fontWeight: 700, fontFamily: 'var(--font-body)',
+              }}>
+              <Pin size={10} /> {pinned ? '고정중' : '고정'}
+            </button>
+            <button onClick={() => { onClose(); setPinned(false) }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex' }}><X size={12} /></button>
+          </div>
         </div>
 
         <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column' }}>
@@ -1892,6 +1909,18 @@ function BetListPanel({ bets, sites, onClose }: { bets: Bet[]; sites: Site[]; on
                   <input className="form-input" style={{ fontSize: 11, flex: 1 }} placeholder="배당 최소 (예: 1.3)" value={oddsMin} onChange={e => setOddsMin(e.target.value)} />
                   <input className="form-input" style={{ fontSize: 11, flex: 1 }} placeholder="배당 최대 (예: 1.4)" value={oddsMax} onChange={e => setOddsMax(e.target.value)} />
                 </div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+                  <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.6px' }}>종목</span>
+                  <div style={{ display: 'flex', gap: 4 }}>
+                    <button type="button" onClick={() => setPickedSports(allSportValues)} style={{
+                      background: 'none', border: 'none', color: 'var(--gold)', cursor: 'pointer', fontSize: 9, fontWeight: 700, fontFamily: 'var(--font-body)', padding: 0,
+                    }}>전체 선택</button>
+                    <span style={{ color: 'var(--text-muted)', fontSize: 9 }}>·</span>
+                    <button type="button" onClick={() => setPickedSports([])} style={{
+                      background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: 9, fontWeight: 700, fontFamily: 'var(--font-body)', padding: 0,
+                    }}>전체 해제</button>
+                  </div>
+                </div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
                   {SPORTS.map(s => (
                     <button key={s.value} type="button" onClick={() => toggleSport(s.value)} style={{
@@ -1910,22 +1939,17 @@ function BetListPanel({ bets, sites, onClose }: { bets: Bet[]; sites: Site[]; on
             )}
           </div>
 
-          {/* 결과 목록 — 배당 높은 순 정렬 */}
+          {/* 결과 목록 — 배당 높은 순 정렬 (진행중인 베팅만) */}
           <div style={{ padding: '8px 14px', flex: 1 }}>
             {sorted.length === 0 ? (
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'center', padding: '20px 0' }}>조건에 맞는 베팅이 없습니다</div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'center', padding: '20px 0' }}>조건에 맞는 진행중인 베팅이 없습니다</div>
             ) : sorted.map(b => (
               <div key={b.id} style={{ padding: '7px 0', borderBottom: '1px solid var(--border-light)', display: 'flex', flexDirection: 'column', gap: 2 }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
                   <BetMatchLine sport={b.sport} match={b.match} fontSize={11} stacked={false} />
                   <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--gold)', flexShrink: 0, fontFamily: 'var(--font-num)' }}>{b.odds.toFixed(2)}</span>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 9, color: 'var(--text-muted)' }}>
-                  <span>{siteName(b.site_id)} · {b.bet_date}</span>
-                  <span style={{ fontWeight: 700, color: b.result === 'win' ? 'var(--green)' : b.result === 'loss' ? 'var(--red)' : b.result === 'push' ? 'var(--blue)' : 'var(--text-secondary)' }}>
-                    {b.result === 'win' ? '적중' : b.result === 'loss' ? '실패' : b.result === 'push' ? 'PUSH' : '대기중'}
-                  </span>
-                </div>
+                <div style={{ fontSize: 9, color: 'var(--text-muted)' }}>{siteName(b.site_id)} · {b.bet_date}</div>
               </div>
             ))}
           </div>
