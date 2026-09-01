@@ -856,11 +856,11 @@ function InlineBetEditForm({ bet, site, onClose, onSave, baseballOverrides, socc
 }
 
 /* ── 인라인 다폴 수정폼 (2~4다리) ── */
-function InlineParlayEditForm({ groupBets, site, onClose, onSave, teamCandidates, allBetsHistory }: {
+function InlineParlayEditForm({ groupBets, site, onClose, onSave, teamCandidates: _teamCandidates, allBetsHistory, registeredTeamCandidates }: {
   groupBets: Bet[]; site: Site
   onClose: () => void
   onSave: (contents: string[], odds: number, stake: number, leagues: string[]) => Promise<void>
-  teamCandidates: TeamCandidate[]; allBetsHistory: BetLite[]
+  teamCandidates: TeamCandidate[]; allBetsHistory: BetLite[]; registeredTeamCandidates: TeamCandidate[]
 }) {
   const isusd = site.currency === 'usd'
   const sortedLegs = [...groupBets].sort((a, b) => a.parlay_leg - b.parlay_leg)
@@ -898,7 +898,7 @@ function InlineParlayEditForm({ groupBets, site, onClose, onSave, teamCandidates
             <div style={{ flex: 1, minWidth: 0 }}>
               <TeamContentInput placeholder={`경기 내용 ${LEG_MARKS[i] ?? i + 1}`} value={c}
                 onChange={v => setContents(p => p.map((pc, pi) => pi === i ? v : pc))}
-                candidates={teamCandidates} allBets={allBetsHistory} autoFocus={i === 0} onEnter={submit} />
+                candidates={registeredTeamCandidates} allBets={allBetsHistory} autoFocus={i === 0} onEnter={submit} />
             </div>
             {i === contents.length - 1 && contents.length < MULTI_MAX_LEGS ? (
               <button type="button" onClick={addLeg} title="다리 추가" style={{
@@ -1514,6 +1514,12 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
     ...volleyballTeams.map(t => ({ sport: 'volleyball' as const, ...t })),
     ...esportsTeams.map(t => ({ sport: 'esports' as const, ...t })),
   ]
+  // 다폴(다리별 경기 내용) 자동완성 — 리그관리에 등록된 팀만 사용, 과거 베팅 이력은 섞지 않음
+  const multiTeamCandidates: TeamCandidate[] = (() => {
+    const names = new Set<string>()
+    for (const t of allStructuredTeams) names.add(t.name)
+    return Array.from(names).sort((a, b) => a.localeCompare(b, 'ko')).map(name => ({ name, lastDate: '' }))
+  })()
 
   // 경기 내용(팀 이름)만으로 최근에 이 팀을 어느 종목으로 베팅했는지 찾아 종목을 자동 선택
   // (예: "휴스턴"만 써도 최근 베팅 기록이 야구였다면 야구로 전환. 직접 종목을 고른 뒤에는 덮어쓰지 않음)
@@ -1605,7 +1611,7 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
               style={{ fontSize: 11 }} />
           )}
           <TeamContentInput inputRef={contentRef} placeholder={mode === 'multi' ? `경기 내용 ${LEG_MARKS[0]}` : '경기 내용'} value={content} onChange={setContent}
-            candidates={teamCandidates} allBets={allBetsHistory} autoFocus onEnter={submit} />
+            candidates={mode === 'multi' ? multiTeamCandidates : teamCandidates} allBets={allBetsHistory} autoFocus onEnter={submit} />
         </>
       )}
       {mode === 'multi' && extraContents.map((c, i) => (
@@ -1613,7 +1619,7 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
           <div style={{ flex: 1, minWidth: 0 }}>
             <TeamContentInput placeholder={`경기 내용 ${LEG_MARKS[i + 1] ?? i + 2}`} value={c}
               onChange={v => setExtraContents(p => p.map((pc, pi) => pi === i ? v : pc))}
-              candidates={teamCandidates} allBets={allBetsHistory} onEnter={submit} />
+              candidates={multiTeamCandidates} allBets={allBetsHistory} onEnter={submit} />
           </div>
           {i === extraContents.length - 1 && extraContents.length + 1 < MULTI_MAX_LEGS ? (
             <button type="button" onClick={addLeg} title="다리 추가" style={{
@@ -2016,6 +2022,12 @@ export default function Dashboard() {
   const [basketballTeams, setBasketballTeams] = useState<{ league: string; name: string }[]>([])
   const [volleyballTeams, setVolleyballTeams] = useState<{ league: string; name: string }[]>([])
   const [esportsTeams, setEsportsTeams] = useState<{ league: string; name: string }[]>([])
+  // 다폴(경기 내용) 자동완성용 — 리그관리에 등록된 팀만 사용, 과거 베팅 이력은 섞지 않음
+  const registeredTeamCandidates: TeamCandidate[] = useMemo(() => {
+    const names = new Set<string>()
+    for (const t of [...soccerTeams, ...baseballTeams, ...basketballTeams, ...volleyballTeams, ...esportsTeams]) names.add(t.name)
+    return Array.from(names).sort((a, b) => a.localeCompare(b, 'ko')).map(name => ({ name, lastDate: '' }))
+  }, [soccerTeams, baseballTeams, basketballTeams, volleyballTeams, esportsTeams])
   // 전체 사이트 입금/롤링 합산 요약(원화 환산)용 환율
   const [usdKrwRate, setUsdKrwRate] = useState<number>(1350)
 
@@ -2995,6 +3007,7 @@ export default function Dashboard() {
                                     onSave={(contents, odds, stake, leagues) => saveInlineParlay(groupBets, contents, odds, stake, leagues)}
                                     teamCandidates={teamCandidates}
                                     allBetsHistory={allBetsHistory}
+                                    registeredTeamCandidates={registeredTeamCandidates}
                                   />
                                 ) : (
                                   <div style={{ display: 'flex', flexDirection: 'column' }}>
