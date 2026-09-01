@@ -376,9 +376,9 @@ tr:hover td { background: var(--bg-hover); }
   font-size: 11px !important;
   padding: 5px 7px !important;
 }
-/* 베팅추가 폼의 금액 입력창 */
+/* 베팅추가 폼의 금액 입력창 — 핫키 버튼(+5000 등)과 동일한 크기 */
 .inline-bet-input.stake-input {
-  font-size: 15px !important;
+  font-size: 11px !important;
 }
 
 

@@ -2576,6 +2576,14 @@ export default function Dashboard() {
       setParlayLegWinChecks(next)
     }
   }
+  // 임시 적중 체크 되돌리기 (전체 처리 전 실수로 체크한 경우 취소)
+  function untickParlayLegWin(legId: string) {
+    setParlayLegWinChecks(p => {
+      const next = { ...p }
+      delete next[legId]
+      return next
+    })
+  }
   function applyParlayLegLoss(groupBets: Bet[]) {
     applyParlayResult(groupBets, 'loss')
   }
@@ -3008,11 +3016,17 @@ export default function Dashboard() {
                                             )}
                                             {hoverBetId === bet.parlay_group && !isHeld && (
                                               <div style={{ display: 'flex', gap: 3, flexShrink: 0, position: 'absolute', right: 0, top: '50%', transform: 'translateY(-50%)', background: 'var(--bg-hover)', paddingLeft: 10, boxShadow: '-10px 0 8px -2px var(--bg-hover)' }}>
-                                                <button className="bet-action-btn bet-action-win" title="적중" style={{ width: 22, height: 22, opacity: legChecked ? 0.5 : 1 }}
-                                                  disabled={legChecked}
-                                                  onClick={() => toggleParlayLegWin(groupBets, gb.id)}>
-                                                  <CheckCircle size={14} />
-                                                </button>
+                                                {legChecked ? (
+                                                  <button className="bet-action-btn" title="적중 취소" style={{ width: 22, height: 22, color: 'var(--text-secondary)' }}
+                                                    onClick={() => untickParlayLegWin(gb.id)}>
+                                                    <RotateCcw size={13} />
+                                                  </button>
+                                                ) : (
+                                                  <button className="bet-action-btn bet-action-win" title="적중" style={{ width: 22, height: 22 }}
+                                                    onClick={() => toggleParlayLegWin(groupBets, gb.id)}>
+                                                    <CheckCircle size={14} />
+                                                  </button>
+                                                )}
                                                 <button className="bet-action-btn bet-action-loss" title="실패" style={{ width: 22, height: 22 }}
                                                   onClick={() => applyParlayLegLoss(groupBets)}>
                                                   <XCircle size={14} />
