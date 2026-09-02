@@ -3017,16 +3017,11 @@ export default function Dashboard() {
                                         <div key={gb.id} style={{ marginBottom: 2 }}>
                                           {gb.league && <div style={{ paddingLeft: 20, fontSize: 9, color: 'var(--text-muted)', fontWeight: 700 }}>{gb.league}</div>}
                                           <div style={{ display: 'flex', gap: 4, alignItems: 'center', position: 'relative' }}>
-                                            <span style={{ fontSize: 10, color: 'var(--text-muted)', width: 16, textAlign: 'center', flexShrink: 0 }}>{LEG_MARKS[idx] ?? idx+1}</span>
+                                            <span style={{
+                                              fontSize: legChecked ? 11 : 10, color: legChecked ? 'var(--green)' : 'var(--text-muted)',
+                                              fontWeight: legChecked ? 800 : 400, width: 16, textAlign: 'center', flexShrink: 0,
+                                            }}>{legChecked ? '✓' : (LEG_MARKS[idx] ?? idx+1)}</span>
                                             <BetMatchLine sport={gb.sport} match={gb.match} fontSize={12} stacked={false} />
-                                            {legChecked && (
-                                              <span style={{
-                                                position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%) rotate(-10deg)',
-                                                border: '1.5px solid var(--green)', color: 'var(--green)',
-                                                fontWeight: 800, fontSize: 11, padding: '1px 7px', borderRadius: 5,
-                                                opacity: 0.32, letterSpacing: 1, pointerEvents: 'none', whiteSpace: 'nowrap', fontFamily: 'var(--font-body)',
-                                              }}>적중</span>
-                                            )}
                                             {hoverBetId === bet.parlay_group && !isHeld && (
                                               <div style={{ display: 'flex', gap: 3, flexShrink: 0, position: 'absolute', right: 0, top: '50%', transform: 'translateY(-50%)', background: 'var(--bg-hover)', paddingLeft: 10, boxShadow: '-10px 0 8px -2px var(--bg-hover)' }}>
                                                 {legChecked ? (
