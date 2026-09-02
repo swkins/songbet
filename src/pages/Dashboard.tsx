@@ -974,6 +974,7 @@ const ESPORTS_BO3_OPTIONS = [
 const ESPORTS_BO5_OPTIONS = [
   { key: 'hm15', label: '-1.5 핸디캡' },
   { key: 'h15', label: '1.5 플핸' },
+  { key: 'h25', label: '2.5 핸디캡' },
   { key: 'so35', label: '3.5 세트오버' },
   { key: 'ml', label: '승리' },
   CUSTOM_OPTION,
@@ -1278,6 +1279,7 @@ function StructuredTeamPicker({ sport, leagues, favoriteLeagues, teams, allTeams
       let match = ''
       if (option === 'ml') match = `${team} (${boLabel})`
       else if (option === 'h15') match = `${team} 1.5 (${boLabel})`
+      else if (option === 'h25') match = `${team} 2.5 (${boLabel})`
       else if (option === 'hm15') match = `${team} -1.5 (${boLabel})`
       else if (option === 'so35') match = `${team} 3.5세트오버 (${boLabel})`
       if (match) onResult(match, lg)
