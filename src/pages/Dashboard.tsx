@@ -959,6 +959,8 @@ const BASEBALL_BET_OPTIONS = [
   { key: 'hm15', label: '-1.5 핸디캡' },
   { key: 'ml', label: '승리' },
   { key: 'h15', label: '1.5 플핸' },
+  { key: 'h25', label: '2.5 플핸' },
+  { key: 'h35', label: '3.5 플핸' },
 ]
 const BASKETBALL_HCAP_LINES = [4.5, 5.5, 6.5, 7.5, 8.5, 9.5, 10.5, 11.5, 12.5, 13.5, 14.5]
 // LOL — BO1은 별도 마켓 없이 팀만 고르면 바로 확정, BO3/BO5는 세트 수에 따라 고를 수 있는 마켓이 다르다
@@ -1295,6 +1297,8 @@ function StructuredTeamPicker({ sport, leagues, favoriteLeagues, teams, allTeams
     } else if (sport === 'baseball') {
       if (option === 'hm15') match = `${team} ${side} -1.5`
       else if (option === 'h15') match = `${team} ${side} 1.5`
+      else if (option === 'h25') match = `${team} ${side} 2.5`
+      else if (option === 'h35') match = `${team} ${side} 3.5`
       else if (option === 'ml') match = `${team} ${side}`
     } else if (sport === 'basketball') {
       match = `${team} ${side} ${option}`
