@@ -14,7 +14,7 @@ import {
   RotateCcw, Settings, Flame,
   CheckCircle, XCircle, Ban, MinusCircle, Gift, GripVertical, DollarSign,
   TrendingUp, TrendingDown, ArrowDownToLine, LogOut, Pencil,
-  ClipboardPaste, ChevronUp, ChevronDown, Star, ListFilter, Pin,
+  ClipboardPaste, ChevronUp, ChevronDown, Star,
 } from 'lucide-react'
 
 const SPORTS: { value: Sport; label: string }[] = [
@@ -41,19 +41,6 @@ function loadParlayLegChecks(): Record<string, boolean> {
 }
 function persistParlayLegChecks(v: Record<string, boolean>) {
   try { localStorage.setItem(PARLAY_LEG_CHECK_KEY, JSON.stringify(v)) } catch { /* noop */ }
-}
-
-/* ── 베팅목록 모아보기: 사용자 정의 필터 (배당 범위 + 종목) — 로컬 저장 ── */
-interface BetListFilter { id: string; title: string; oddsMin: string; oddsMax: string; sports: Sport[] }
-const BET_LIST_FILTERS_KEY = 'songbet_bet_list_filters'
-function loadBetListFilters(): BetListFilter[] {
-  try {
-    const raw = localStorage.getItem(BET_LIST_FILTERS_KEY)
-    return raw ? JSON.parse(raw) : []
-  } catch { return [] }
-}
-function persistBetListFilters(v: BetListFilter[]) {
-  try { localStorage.setItem(BET_LIST_FILTERS_KEY, JSON.stringify(v)) } catch { /* noop */ }
 }
 
 /* ── 종목 선택 버튼 그룹 (드롭다운 대신 항상 노출되는 버튼) ── */
@@ -212,10 +199,11 @@ const sideBadgeLabel = (side: '홈' | '원정') => side === '원정' ? '원' : s
 function parseBetMatch(sport: string, match: string): BetMatchParts | null {
   const s = (match ?? '').trim()
   if (sport === 'soccer') {
-    const m = s.match(/^(.+?)(?:\s(홈|원정))?\s(-?\d+(?:\.\d+)?)$/)
+    const m = s.match(/^(.+?)(?:\s(홈|원정))?(?:\s(-?\d+(?:\.\d+)?))?$/)
     if (!m) return null
     const [, team, side, num] = m
     const sideV = side as '홈' | '원정' | undefined
+    if (!num) return { team, side: sideV, optionLabel: '승리', accent: 'gold' }
     if (num.startsWith('-')) return { team, side: sideV, optionLabel: `${num} 핸디캡`, accent: 'red' }
     if (num === '0.5') return { team, side: sideV, optionLabel: `${num} 핸디캡`, accent: 'green' }
     return { team, side: sideV, optionLabel: `${num} 핸디캡`, accent: 'purple' }
@@ -624,12 +612,11 @@ function DefaultStakeInput({ site, onCommit }: { site: Site; onCommit: (site: Si
   )
 }
 
-function SiteMgrModal({ sites, onClose, onAdd, onDelete, onToggleCurrency, onToggleBetType, onReorder, onUpdateDefaultStake }: {
+function SiteMgrModal({ sites, onClose, onAdd, onDelete, onToggleCurrency, onReorder, onUpdateDefaultStake }: {
   sites: Site[]; onClose: () => void
   onAdd: (name: string, currency: 'krw' | 'usd') => void
   onDelete: (id: string) => void
   onToggleCurrency: (site: Site) => void
-  onToggleBetType: (site: Site) => void
   onReorder: (from: string, to: string) => void
   onUpdateDefaultStake: (site: Site, val: number) => void
 }) {
@@ -666,9 +653,6 @@ function SiteMgrModal({ sites, onClose, onAdd, onDelete, onToggleCurrency, onTog
               <GripVertical size={12} color="var(--text-muted)" style={{ flexShrink: 0 }} />
               <span style={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0, background: s.active ? 'var(--green)' : 'var(--border)', boxShadow: s.active ? '0 0 5px var(--green)' : 'none' }} />
               <span className="site-mgr-name">{s.name}</span>
-              <button onClick={() => onToggleBetType(s)} title="베팅추가 시 기본으로 열릴 모드 전환" style={{ width: 40, textAlign: 'center', background: s.bet_type === 'double' ? 'var(--purple-bg)' : 'var(--gold-bg)', border: `1px solid ${s.bet_type === 'double' ? 'var(--purple-border)' : 'var(--gold-border)'}`, borderRadius: 4, color: s.bet_type === 'double' ? 'var(--purple)' : 'var(--gold)', cursor: 'pointer', padding: '2px 0', fontSize: 10, fontWeight: 700, flexShrink: 0 }}>
-                {s.bet_type === 'double' ? '두폴' : '단폴'}
-              </button>
               <DefaultStakeInput site={s} onCommit={onUpdateDefaultStake} />
               <button onClick={() => onToggleCurrency(s)} title="KRW/USD" style={{ background: s.currency === 'usd' ? 'var(--blue-bg)' : 'var(--bg-elevated)', border: `1px solid ${s.currency === 'usd' ? 'var(--blue-border)' : 'var(--border)'}`, borderRadius: 4, color: s.currency === 'usd' ? 'var(--blue)' : 'var(--text-muted)', cursor: 'pointer', padding: '2px 7px', fontSize: 10, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 3, flexShrink: 0 }}>
                 {s.currency === 'usd' ? <><DollarSign size={10} /> USD</> : '₩ KRW'}
@@ -950,6 +934,7 @@ const STRUCTURED_SPORTS: StructuredSport[] = ['soccer', 'baseball', 'basketball'
 const CUSTOM_KEY = 'custom'
 const CUSTOM_OPTION = { key: CUSTOM_KEY, label: '직접입력' }
 const SOCCER_BET_OPTIONS = [
+  { key: 'ml', label: '일반승' },
   { key: 'hm15', label: '-1.5 핸디캡' },
   { key: 'h05', label: '0.5 플핸' },
   { key: 'h15', label: '1.5 플핸' },
@@ -1293,7 +1278,8 @@ function StructuredTeamPicker({ sport, leagues, favoriteLeagues, teams, allTeams
     if (!option || option === CUSTOM_KEY) return
     let match = ''
     if (sport === 'soccer') {
-      if (option === 'hm15') match = `${team} ${side} -1.5`
+      if (option === 'ml') match = `${team} ${side}`
+      else if (option === 'hm15') match = `${team} ${side} -1.5`
       else if (option === 'h05') match = `${team} ${side} 0.5`
       else if (option === 'h15') match = `${team} ${side} 1.5`
     } else if (sport === 'baseball') {
@@ -1498,8 +1484,8 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
   const [league, setLeague]     = useState('')
   const [leagueTouched, setLeagueTouched] = useState(false)
   // 베팅 모드: 단폴 / 다폴. 다폴은 리그 없이 경기 내용 여러 개(최대 4개) + 배당/금액 공유.
-  // 사이트관리에서 지정한 주력 베팅(bet_type)을 기본값으로 사용
-  const [mode, setMode] = useState<'single' | 'multi'>(site.bet_type === 'double' ? 'multi' : 'single')
+  // 항상 단폴 기본 (두폴은 필요할 때만 수동으로 전환)
+  const [mode, setMode] = useState<'single' | 'multi'>('single')
   // 경기 내용 ①은 content, 나머지(②③④)는 extraContents에 담는다
   const [extraContents, setExtraContents] = useState<string[]>([''])
   const [oddsRaw, setOddsRaw]   = useState('')
@@ -1813,164 +1799,6 @@ function WeekMonthDeposit({ sites, cashflows, weekStart, weekEnd }: {
   )
 }
 
-/* ── 베팅목록 모아보기: 사용자 정의 필터로 지금까지의 베팅을 배당/종목별로 찾아보는 패널 (초안) ── */
-function BetListPanel({ bets, sites, onClose }: { bets: Bet[]; sites: Site[]; onClose: () => void }) {
-  const [filters, setFilters] = useState<BetListFilter[]>(() => loadBetListFilters())
-  const [activeFilterId, setActiveFilterId] = useState<string | null>(null)
-  const [creating, setCreating] = useState(false)
-  const [title, setTitle] = useState('')
-  const [oddsMin, setOddsMin] = useState('')
-  const [oddsMax, setOddsMax] = useState('')
-  const [pickedSports, setPickedSports] = useState<Sport[]>([])
-  const [pinned, setPinned] = useState(false)
-  const allSportValues = SPORTS.map(s => s.value)
-
-  function persist(next: BetListFilter[]) { setFilters(next); persistBetListFilters(next) }
-
-  function saveFilter() {
-    if (!title.trim()) return
-    const f: BetListFilter = { id: crypto.randomUUID(), title: title.trim(), oddsMin, oddsMax, sports: pickedSports }
-    persist([...filters, f])
-    setTitle(''); setOddsMin(''); setOddsMax(''); setPickedSports([]); setCreating(false)
-    setActiveFilterId(f.id)
-  }
-  function deleteFilter(id: string) {
-    persist(filters.filter(f => f.id !== id))
-    if (activeFilterId === id) setActiveFilterId(null)
-  }
-  function toggleSport(s: Sport) {
-    setPickedSports(p => p.includes(s) ? p.filter(x => x !== s) : [...p, s])
-  }
-
-  const activeFilter = filters.find(f => f.id === activeFilterId) ?? null
-  const siteName = (id: string | null) => sites.find(s => s.id === id)?.name ?? '—'
-
-  const filtered = bets.filter(b => {
-    if (b.result !== 'pending') return false
-    if (!activeFilter) return true
-    const min = parseFloat(activeFilter.oddsMin); const max = parseFloat(activeFilter.oddsMax)
-    if (!isNaN(min) && b.odds < min) return false
-    if (!isNaN(max) && b.odds > max) return false
-    if (activeFilter.sports.length > 0 && !activeFilter.sports.includes(b.sport)) return false
-    return true
-  })
-  const sorted = [...filtered].sort((a, b) => b.odds - a.odds)
-
-  return (
-    <>
-      {!pinned && <div style={{ position: 'fixed', inset: 0, zIndex: 150 }} onClick={onClose} />}
-      <div className="app-side-panel" style={{
-        position: 'fixed', top: 56, right: 16, width: 360,
-        maxHeight: 'calc(100vh - 72px)',
-        background: 'var(--bg-card)', border: '1px solid var(--gold-border)',
-        borderRadius: 'var(--radius-lg)', boxShadow: '0 16px 48px rgba(0,0,0,0.6)',
-        zIndex: 160, display: 'flex', flexDirection: 'column', overflow: 'hidden',
-      }} onClick={e => e.stopPropagation()}>
-        <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--bg-elevated)', flexShrink: 0 }}>
-          <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '1.2px', textTransform: 'uppercase', color: 'var(--gold)' }}>베팅목록 모아보기 (진행중)</span>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <button
-              onClick={() => setPinned(p => !p)}
-              title={pinned ? '고정 해제' : '항상 위에 고정'}
-              style={{
-                background: pinned ? 'var(--gold-bg)' : 'none',
-                border: `1px solid ${pinned ? 'var(--gold-border)' : 'var(--border)'}`,
-                borderRadius: 4, cursor: 'pointer', color: pinned ? 'var(--gold)' : 'var(--text-muted)',
-                display: 'flex', alignItems: 'center', padding: '2px 5px', gap: 3,
-                fontSize: 9, fontWeight: 700, fontFamily: 'var(--font-body)',
-              }}>
-              <Pin size={10} /> {pinned ? '고정중' : '고정'}
-            </button>
-            <button onClick={() => { onClose(); setPinned(false) }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex' }}><X size={12} /></button>
-          </div>
-        </div>
-
-        <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column' }}>
-          {/* 필터 목록 / 필터 만들기 */}
-          <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
-            <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginBottom: 8 }}>
-              <button onClick={() => setActiveFilterId(null)} style={{
-                padding: '4px 9px', borderRadius: 999, fontSize: 10, fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-body)',
-                border: `1px solid ${!activeFilterId ? 'var(--gold-border)' : 'var(--border)'}`,
-                background: !activeFilterId ? 'var(--gold-bg)' : 'var(--bg-elevated)',
-                color: !activeFilterId ? 'var(--gold)' : 'var(--text-secondary)',
-              }}>전체</button>
-              {filters.map(f => (
-                <button key={f.id} onClick={() => setActiveFilterId(f.id)} style={{
-                  padding: '4px 9px', borderRadius: 999, fontSize: 10, fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-body)',
-                  display: 'flex', alignItems: 'center', gap: 4,
-                  border: `1px solid ${activeFilterId === f.id ? 'var(--purple-border)' : 'var(--border)'}`,
-                  background: activeFilterId === f.id ? 'var(--purple-bg)' : 'var(--bg-elevated)',
-                  color: activeFilterId === f.id ? 'var(--purple)' : 'var(--text-secondary)',
-                }}>
-                  {f.title}
-                  <span onClick={e => { e.stopPropagation(); deleteFilter(f.id) }} style={{ opacity: 0.6, display: 'flex' }}><X size={9} /></span>
-                </button>
-              ))}
-            </div>
-            {!creating ? (
-              <button onClick={() => setCreating(true)} style={{
-                width: '100%', padding: '6px 0', borderRadius: 'var(--radius-sm)', border: '1px dashed var(--border)',
-                background: 'none', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: 11, fontWeight: 700,
-                fontFamily: 'var(--font-body)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
-              }}><Plus size={12} /> 필터 만들기</button>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <input className="form-input" style={{ fontSize: 11 }} placeholder="필터 제목 (예: 두폴짜리 추천)" value={title} onChange={e => setTitle(e.target.value)} autoFocus />
-                <div style={{ display: 'flex', gap: 4 }}>
-                  <input className="form-input" style={{ fontSize: 11, flex: 1 }} placeholder="배당 최소 (예: 1.3)" value={oddsMin} onChange={e => setOddsMin(e.target.value)} />
-                  <input className="form-input" style={{ fontSize: 11, flex: 1 }} placeholder="배당 최대 (예: 1.4)" value={oddsMax} onChange={e => setOddsMax(e.target.value)} />
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
-                  <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.6px' }}>종목</span>
-                  <div style={{ display: 'flex', gap: 4 }}>
-                    <button type="button" onClick={() => setPickedSports(allSportValues)} style={{
-                      background: 'none', border: 'none', color: 'var(--gold)', cursor: 'pointer', fontSize: 9, fontWeight: 700, fontFamily: 'var(--font-body)', padding: 0,
-                    }}>전체 선택</button>
-                    <span style={{ color: 'var(--text-muted)', fontSize: 9 }}>·</span>
-                    <button type="button" onClick={() => setPickedSports([])} style={{
-                      background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: 9, fontWeight: 700, fontFamily: 'var(--font-body)', padding: 0,
-                    }}>전체 해제</button>
-                  </div>
-                </div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                  {SPORTS.map(s => (
-                    <button key={s.value} type="button" onClick={() => toggleSport(s.value)} style={{
-                      padding: '4px 8px', borderRadius: 4, fontSize: 10, fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-body)',
-                      border: `1px solid ${pickedSports.includes(s.value) ? 'var(--gold-border)' : 'var(--border)'}`,
-                      background: pickedSports.includes(s.value) ? 'var(--gold-bg)' : 'var(--bg-elevated)',
-                      color: pickedSports.includes(s.value) ? 'var(--gold)' : 'var(--text-secondary)',
-                    }}>{s.label}</button>
-                  ))}
-                </div>
-                <div style={{ display: 'flex', gap: 5 }}>
-                  <button className="btn btn-primary" style={{ flex: 1, fontSize: 11, padding: '6px 0', justifyContent: 'center' }} onClick={saveFilter} disabled={!title.trim()}>저장</button>
-                  <button className="btn btn-ghost" style={{ fontSize: 11, padding: '6px 10px' }} onClick={() => { setCreating(false); setTitle(''); setOddsMin(''); setOddsMax(''); setPickedSports([]) }}>취소</button>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* 결과 목록 — 배당 높은 순 정렬 (진행중인 베팅만) */}
-          <div style={{ padding: '8px 14px', flex: 1 }}>
-            {sorted.length === 0 ? (
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'center', padding: '20px 0' }}>조건에 맞는 진행중인 베팅이 없습니다</div>
-            ) : sorted.map(b => (
-              <div key={b.id} style={{ padding: '7px 0', borderBottom: '1px solid var(--border-light)', display: 'flex', flexDirection: 'column', gap: 2 }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
-                  <BetMatchLine sport={b.sport} match={b.match} fontSize={11} stacked={false} />
-                  <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--gold)', flexShrink: 0, fontFamily: 'var(--font-num)' }}>{b.odds.toFixed(2)}</span>
-                </div>
-                <div style={{ fontSize: 9, color: 'var(--text-muted)' }}>{siteName(b.site_id)} · {b.bet_date}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    </>
-  )
-}
-
 export default function Dashboard() {
   const today = dayjs().format('YYYY-MM-DD')
 
@@ -2003,7 +1831,6 @@ export default function Dashboard() {
       return next
     })
   }
-  const [showBetList, setShowBetList] = useState(false)
   const [baseballOverrides, setBaseballOverrides] = useState<LeagueOverride[]>([])
   const [soccerOverrides, setSoccerOverrides]     = useState<LeagueOverride[]>([])
   const [basketballOverrides, setBasketballOverrides] = useState<LeagueOverride[]>([])
@@ -2353,10 +2180,6 @@ export default function Dashboard() {
   }
   async function toggleCurrency(site: Site) {
     const { data } = await supabase.from('sites').update({ currency: site.currency === 'krw' ? 'usd' : 'krw' }).eq('id', site.id).select().single()
-    if (data) setSites(p => p.map(s => s.id === site.id ? data : s))
-  }
-  async function toggleBetType(site: Site) {
-    const { data } = await supabase.from('sites').update({ bet_type: site.bet_type === 'double' ? 'single' : 'double' }).eq('id', site.id).select().single()
     if (data) setSites(p => p.map(s => s.id === site.id ? data : s))
   }
   async function updateDefaultStake(site: Site, val: number) {
@@ -2881,9 +2704,6 @@ export default function Dashboard() {
                       <span style={{ fontSize: 11, fontWeight: 700, color: aggPct >= 100 ? 'var(--green)' : 'var(--orange)' }}>{aggPct}%</span>
                     </div>
                   )}
-                  <button onClick={() => setShowBetList(true)} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-secondary)', cursor: 'pointer', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-body)' }}>
-                    <ListFilter size={12} /> 베팅목록
-                  </button>
                   <button onClick={() => setShowSiteMgr(true)} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-secondary)', cursor: 'pointer', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-body)' }}>
                     <Settings size={12} /> 사이트관리
                   </button>
@@ -3272,11 +3092,10 @@ export default function Dashboard() {
 
       {/* 모달 */}
       {showSiteMgr && (
-        <SiteMgrModal sites={sites} onClose={() => setShowSiteMgr(false)} onAdd={addSite} onDelete={deleteSite} onToggleCurrency={toggleCurrency} onToggleBetType={toggleBetType} onReorder={reorderSites} onUpdateDefaultStake={updateDefaultStake} />
+        <SiteMgrModal sites={sites} onClose={() => setShowSiteMgr(false)} onAdd={addSite} onDelete={deleteSite} onToggleCurrency={toggleCurrency} onReorder={reorderSites} onUpdateDefaultStake={updateDefaultStake} />
       )}
       {depositSite && <DepositModal site={depositSite} onClose={() => setDepositSite(null)} onDeposit={doDeposit} onPoint={doPoint} />}
       {withdrawSite && <WithdrawModal site={withdrawSite} onClose={() => setWithdrawSite(null)} onWithdraw={doWithdraw} />}
-      {showBetList && <BetListPanel bets={bets} sites={sites} onClose={() => setShowBetList(false)} />}
 
 
     </div>
