@@ -88,6 +88,21 @@ const TIER_STYLE: Record<RowColor, { color: string; bg: string; border: string; 
 
 interface RuleRow { label: string; bets: Bet[]; tier: RowColor; breakeven?: string }
 
+// ─── 마켓 표별 하단에 붙는 "총 수익률" 요약 줄 ─────────────────────────
+function MarketTotalRow({ bets }: { bets: Bet[] }) {
+  const s = calcStats(bets)
+  if (s.total === 0) return null
+  return (
+    <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-secondary)' }}>총 수익률 ({s.total}건)</span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ fontSize: 10, fontWeight: 700, color: s.winRate >= 50 ? '#4ade80' : '#f87171' }}>{s.winRate.toFixed(0)}%</span>
+        <span style={{ fontSize: 12, fontWeight: 800, color: s.roi >= 0 ? '#4ade80' : '#f87171' }}>{s.roi >= 0 ? '+' : ''}{s.roi.toFixed(1)}%</span>
+      </div>
+    </div>
+  )
+}
+
 function RuleStatsTable({ title, rows, extra }: { title: string; rows: RuleRow[]; extra?: React.ReactNode }) {
   const hasBets = rows.some(r => r.bets.filter(b => b.result !== 'pending').length > 0)
   return (
@@ -787,16 +802,16 @@ function SoccerDetailPanel({ bets, overrides, knownLeagues, onAddOverride, onAdd
   const ml = settled.filter(b => b.market === 'moneyline')
   const hcap = settled.filter(b => b.market === 'handicap')
   const hcap05 = hcap.filter(b => extractHandicapLine(b.pick) === 0.5)
-  const hcap15 = hcap.filter(b => extractHandicapLine(b.pick) === 1.5)
-  const hcap25 = hcap.filter(b => extractHandicapLine(b.pick) === 2.5)
+  const hcap15 = hcap.filter(b => extractHandicapLine(b.pick) === 1.5 && extractHandicapSign(b.pick) !== '-')
+  const hcapm15 = hcap.filter(b => extractHandicapLine(b.pick) === 1.5 && extractHandicapSign(b.pick) === '-')
 
-  // 베팅을 일반승(승무패) / 핸디캡 0.5 플핸 / 핸디캡 1.5 플핸 / 핸디캡 2.5 플핸 네 가지로 구분,
-  // 각각 0.1단위 배당 구간별 적중률·수익률을 표시. 그 외(다른 라인, 오버/언더 등)는 룰북 외로 이동.
+  // 베팅을 일반승(승무패) / 핸디캡 0.5 플핸 / 핸디캡 1.5 플핸 / 핸디캡 -1.5 마핸 네 가지로 구분,
+  // 각각 0.1단위 배당 구간별 적중률·수익률 + 전체 총 수익률을 표시. 그 외(다른 라인, 오버/언더 등)는 룰북 외로 이동.
   const tables = [
-    { title: '⚽ 일반승(승무패) — 0.1단위 배당 구간별', rows: oddsBinRows(ml) },
-    { title: '⚽ 핸디캡 0.5 플핸 — 0.1단위 배당 구간별', rows: oddsBinRows(hcap05) },
-    { title: '⚽ 핸디캡 1.5 플핸 — 0.1단위 배당 구간별', rows: oddsBinRows(hcap15) },
-    { title: '⚽ 핸디캡 2.5 플핸 — 0.1단위 배당 구간별', rows: oddsBinRows(hcap25) },
+    { title: '⚽ 일반승(승무패) — 0.1단위 배당 구간별', rows: oddsBinRows(ml), all: ml },
+    { title: '⚽ 핸디캡 0.5 플핸 — 0.1단위 배당 구간별', rows: oddsBinRows(hcap05), all: hcap05 },
+    { title: '⚽ 핸디캡 1.5 플핸 — 0.1단위 배당 구간별', rows: oddsBinRows(hcap15), all: hcap15 },
+    { title: '⚽ 핸디캡 -1.5 마핸 — 0.1단위 배당 구간별', rows: oddsBinRows(hcapm15), all: hcapm15 },
   ].filter(t => t.rows.length > 0)
 
   const ruleIds = new Set(tables.flatMap(t => t.rows.flatMap(r => r.bets)).map(b => b.id))
@@ -806,7 +821,7 @@ function SoccerDetailPanel({ bets, overrides, knownLeagues, onAddOverride, onAdd
     <div>
       <SoccerLeagueSection bets={bets} overrides={overrides} knownLeagues={knownLeagues} onAddOverride={onAddOverride} onAddLeague={onAddLeague} onChangeSport={onChangeSport} onDeleteGroup={onDeleteGroup} onRenameLeague={onRenameLeague} onDeleteLeague={onDeleteLeague} />
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-        {tables.map(t => <RuleStatsTable key={t.title} title={t.title} rows={t.rows} />)}
+        {tables.map(t => <RuleStatsTable key={t.title} title={t.title} rows={t.rows} extra={<MarketTotalRow bets={t.all} />} />)}
       </div>
       <OtherBetsPanel bets={otherBets} />
     </div>
