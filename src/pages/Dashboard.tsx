@@ -1160,6 +1160,8 @@ function StructuredTeamPicker({ sport, leagues, favoriteLeagues, teams, allTeams
   const [customText, setCustomText] = useState('')
   const [bo, setBo] = useState<EsportsBo | ''>('bo3')
   const [totalLine, setTotalLine] = useState<number | null>(null)
+  // 야구 전용 — 홈/원정/오버/언더 네 개 중 하나만 선택되는 단일 선택 상태
+  const [baseballPick, setBaseballPick] = useState<'홈' | '원정' | 'over' | 'under' | ''>('')
   const [registering, setRegistering] = useState(false)
   const [regLeague, setRegLeague] = useState('')
   const [showRegLeagueSuggest, setShowRegLeagueSuggest] = useState(false)
@@ -1275,6 +1277,12 @@ function StructuredTeamPicker({ sport, leagues, favoriteLeagues, teams, allTeams
       onResult(`${team} ${side}`, lg)
       return
     }
+    if (sport === 'baseball') {
+      if (baseballPick === '홈' || baseballPick === '원정') { onResult(`${team} ${baseballPick}`, lg); return }
+      if (baseballPick === 'over') { if (totalLine == null) return; onResult(`${team} ${totalLine}오버`, lg); return }
+      if (baseballPick === 'under') { if (totalLine == null) return; onResult(`${team} ${totalLine}언더`, lg); return }
+      return
+    }
     if (!option || option === CUSTOM_KEY) return
     let match = ''
     if (sport === 'soccer') {
@@ -1282,19 +1290,11 @@ function StructuredTeamPicker({ sport, leagues, favoriteLeagues, teams, allTeams
       else if (option === 'hm15') match = `${team} ${side} -1.5`
       else if (option === 'h05') match = `${team} ${side} 0.5`
       else if (option === 'h15') match = `${team} ${side} 1.5`
-    } else if (sport === 'baseball') {
-      if (option === 'hm15') match = `${team} ${side} -1.5`
-      else if (option === 'h15') match = `${team} ${side} 1.5`
-      else if (option === 'h25') match = `${team} ${side} 2.5`
-      else if (option === 'h35') match = `${team} ${side} 3.5`
-      else if (option === 'ml') match = `${team} ${side}`
-      else if (option === 'over') { if (totalLine == null) return; match = `${team} ${side} ${totalLine}오버` }
-      else if (option === 'under') { if (totalLine == null) return; match = `${team} ${side} ${totalLine}언더` }
     } else if (sport === 'basketball') {
       match = `${team} ${side} ${option}`
     }
     if (match) onResult(match, lg)
-  }, [teamText, option, side, bo, sport, totalLine])
+  }, [teamText, option, side, bo, sport, totalLine, baseballPick])
 
   async function submitRegister() {
     const team = teamText.trim(); const lg = regLeague.trim()
@@ -1379,10 +1379,10 @@ function StructuredTeamPicker({ sport, leagues, favoriteLeagues, teams, allTeams
         )}
       </div>
 
-      {teamText.trim() && (sport === 'soccer' || sport === 'baseball' || sport === 'basketball' || sport === 'volleyball') && (
+      {teamText.trim() && (sport === 'soccer' || sport === 'basketball' || sport === 'volleyball') && (
         <div style={{ display: 'flex', gap: 4 }}>
           {(['홈', '원정'] as const).map(s => (
-            <button key={s} type="button" onClick={() => { setSide(s); if (sport === 'baseball') { setOption('ml'); setTotalLine(null) } }} style={{
+            <button key={s} type="button" onClick={() => setSide(s)} style={{
               flex: 1, fontSize: 11, fontWeight: 700, padding: '5px 0', borderRadius: 6, cursor: 'pointer', fontFamily: 'var(--font-body)',
               border: `1px solid ${side === s ? 'var(--blue-border)' : 'var(--border)'}`,
               background: side === s ? 'var(--blue-bg)' : 'var(--bg-elevated)',
@@ -1403,12 +1403,19 @@ function StructuredTeamPicker({ sport, leagues, favoriteLeagues, teams, allTeams
         </div>
       )}
 
+      {/* 야구 — 홈/원정/오버/언더 네 개 중 하나만 선택되는 단일 선택 행 */}
       {teamText.trim() && sport === 'baseball' && (
-        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-          {BASEBALL_BET_OPTIONS.map(o => <StructuredPickButton key={o.key} label={o.label} active={option === o.key} onClick={() => { setOption(o.key); setTotalLine(null) }} />)}
+        <div style={{ display: 'flex', gap: 4 }}>
+          {([{ key: '홈', label: '홈' }, { key: '원정', label: '원정' }, { key: 'over', label: '오버' }, { key: 'under', label: '언더' }] as const).map(o => (
+            <button key={o.key} type="button" onClick={() => { setBaseballPick(o.key); setTotalLine(null) }} style={{
+              flex: 1, fontSize: 11, fontWeight: 700, padding: '5px 0', borderRadius: 6, cursor: 'pointer', fontFamily: 'var(--font-body)',
+              border: `1px solid ${baseballPick === o.key ? 'var(--blue-border)' : 'var(--border)'}`,
+              background: baseballPick === o.key ? 'var(--blue-bg)' : 'var(--bg-elevated)',
+              color: baseballPick === o.key ? 'var(--blue)' : 'var(--text-secondary)' }}>{o.label}</button>
+          ))}
         </div>
       )}
-      {teamText.trim() && sport === 'baseball' && (option === 'over' || option === 'under') && (
+      {teamText.trim() && sport === 'baseball' && (baseballPick === 'over' || baseballPick === 'under') && (
         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
           {BASEBALL_TOTAL_LINES.map(l => (
             <StructuredPickButton key={l} label={String(l)} active={totalLine === l} onClick={() => setTotalLine(l)} />
