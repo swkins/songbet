@@ -941,11 +941,6 @@ const SOCCER_BET_OPTIONS = [
   CUSTOM_OPTION,
 ]
 const BASEBALL_BET_OPTIONS = [
-  { key: 'hm15', label: '-1.5 핸디캡' },
-  { key: 'ml', label: '승리' },
-  { key: 'h15', label: '1.5 플핸' },
-  { key: 'h25', label: '2.5 플핸' },
-  { key: 'h35', label: '3.5 플핸' },
   { key: 'over', label: '오버' },
   { key: 'under', label: '언더' },
 ]
