@@ -690,7 +690,7 @@ function LeagueRankColumn({ rows, startRank, columnSize, yesterdayRankMap }: {
 
 type SoccerMarketTab = 'hcap05' | 'hcap15' | 'hcap15minus'
 const SOCCER_MARKET_TABS: { value: SoccerMarketTab; label: string }[] = [
-  { value: 'hcap05', label: '0.5 플핸' },
+  { value: 'hcap05', label: '홈 0.5 플핸' },
   { value: 'hcap15', label: '1.5 플핸' },
   { value: 'hcap15minus', label: '-1.5 마핸' },
 ]
@@ -711,7 +711,8 @@ function SoccerLeagueSection({ bets, overrides, knownLeagues, onAddOverride, onA
   const today = dayjs().format('YYYY-MM-DD')
 
   const filterByMarket = (list: Bet[], tab: SoccerMarketTab) => {
-    if (tab === 'hcap05') return list.filter(b => b.market === 'handicap' && extractHandicapLine(b.pick) === 0.5)
+    // 0.5 플핸은 홈 약팀만 채택(원정 약팀 +0.5는 폐기)했으므로 리그 랭킹도 홈만 집계
+    if (tab === 'hcap05') return list.filter(b => b.market === 'handicap' && extractHandicapLine(b.pick) === 0.5 && extractSide(b.pick) === '홈')
     if (tab === 'hcap15') return list.filter(b => b.market === 'handicap' && extractHandicapLine(b.pick) === 1.5 && extractHandicapSign(b.pick) !== '-')
     return list.filter(b => b.market === 'handicap' && extractHandicapLine(b.pick) === 1.5 && extractHandicapSign(b.pick) === '-')
   }
@@ -801,17 +802,28 @@ function SoccerDetailPanel({ bets, overrides, knownLeagues, onAddOverride, onAdd
   const settled = bets.filter(b => b.result !== 'pending')
   const ml = settled.filter(b => b.market === 'moneyline')
   const hcap = settled.filter(b => b.market === 'handicap')
-  const hcap05 = hcap.filter(b => extractHandicapLine(b.pick) === 0.5)
+  // 0.5 플핸은 홈 약팀만 채택(원정 약팀 +0.5는 폐기) — 홈 쪽만 통계에 반영
+  const hcap05Home = hcap.filter(b => extractHandicapLine(b.pick) === 0.5 && extractSide(b.pick) === '홈')
   const hcap15 = hcap.filter(b => extractHandicapLine(b.pick) === 1.5 && extractHandicapSign(b.pick) !== '-')
   const hcapm15 = hcap.filter(b => extractHandicapLine(b.pick) === 1.5 && extractHandicapSign(b.pick) === '-')
+  const mlHome = ml.filter(b => extractSide(b.pick) === '홈')
+  const mlAway = ml.filter(b => extractSide(b.pick) === '원정')
+  const hcap15Home = hcap15.filter(b => extractSide(b.pick) === '홈')
+  const hcap15Away = hcap15.filter(b => extractSide(b.pick) === '원정')
+  const hcapm15Home = hcapm15.filter(b => extractSide(b.pick) === '홈')
+  const hcapm15Away = hcapm15.filter(b => extractSide(b.pick) === '원정')
 
-  // 베팅을 일반승(승무패) / 핸디캡 0.5 플핸 / 핸디캡 1.5 플핸 / 핸디캡 -1.5 마핸 네 가지로 구분,
+  // 베팅을 일반승(승무패) / 핸디캡 0.5 플핸(홈만) / 핸디캡 1.5 플핸 / 핸디캡 -1.5 마핸 네 가지로 구분하되,
+  // 일반승·1.5 플핸·-1.5 마핸은 홈/원정을 나눠 별도 표로, 0.5 플핸은 홈만 표시(원정 약팀 +0.5는 통계에서 제외).
   // 각각 0.1단위 배당 구간별 적중률·수익률 + 전체 총 수익률을 표시. 그 외(다른 라인, 오버/언더 등)는 룰북 외로 이동.
   const tables = [
-    { title: '⚽ 일반승(승무패) — 0.1단위 배당 구간별', rows: oddsBinRows(ml), all: ml },
-    { title: '⚽ 핸디캡 0.5 플핸 — 0.1단위 배당 구간별', rows: oddsBinRows(hcap05), all: hcap05 },
-    { title: '⚽ 핸디캡 1.5 플핸 — 0.1단위 배당 구간별', rows: oddsBinRows(hcap15), all: hcap15 },
-    { title: '⚽ 핸디캡 -1.5 마핸 — 0.1단위 배당 구간별', rows: oddsBinRows(hcapm15), all: hcapm15 },
+    { title: '⚽ 일반승 홈 — 0.1단위 배당 구간별', rows: oddsBinRows(mlHome), all: mlHome },
+    { title: '⚽ 일반승 원정 — 0.1단위 배당 구간별', rows: oddsBinRows(mlAway), all: mlAway },
+    { title: '⚽ 핸디캡 홈 0.5 플핸 — 0.1단위 배당 구간별', rows: oddsBinRows(hcap05Home), all: hcap05Home },
+    { title: '⚽ 핸디캡 1.5 플핸 홈 — 0.1단위 배당 구간별', rows: oddsBinRows(hcap15Home), all: hcap15Home },
+    { title: '⚽ 핸디캡 1.5 플핸 원정 — 0.1단위 배당 구간별', rows: oddsBinRows(hcap15Away), all: hcap15Away },
+    { title: '⚽ 핸디캡 -1.5 마핸 홈 — 0.1단위 배당 구간별', rows: oddsBinRows(hcapm15Home), all: hcapm15Home },
+    { title: '⚽ 핸디캡 -1.5 마핸 원정 — 0.1단위 배당 구간별', rows: oddsBinRows(hcapm15Away), all: hcapm15Away },
   ].filter(t => t.rows.length > 0)
 
   const ruleIds = new Set(tables.flatMap(t => t.rows.flatMap(r => r.bets)).map(b => b.id))
@@ -971,6 +983,14 @@ function classifyLolOption(content: string): '일반승' | '핸디캡' | '세트
 function extractHandicapSign(pick: string): '+' | '-' | null {
   const m = pick?.match(/([+-])\s*\d+\.?\d*\s*$/)
   return m ? (m[1] as '+' | '-') : null
+}
+
+// 픽 텍스트("팀명 홈 0.5" / "팀명 원정 -1.5" 등)에서 홈/원정 여부 추출
+function extractSide(pick: string): '홈' | '원정' | null {
+  if (!pick) return null
+  if (pick.includes('홈')) return '홈'
+  if (pick.includes('원정')) return '원정'
+  return null
 }
 
 // ─── LOL(e스포츠) 전용: 베팅 옵션별 — 일반승/마핸/플핸/세트승 각각 0.1단위 배당 구간별 성적 ──
