@@ -98,6 +98,7 @@ function MarketTotalRow({ bets }: { bets: Bet[] }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <span style={{ fontSize: 10, fontWeight: 700, color: s.winRate >= 50 ? '#4ade80' : '#f87171' }}>{s.winRate.toFixed(0)}%</span>
         <span style={{ fontSize: 12, fontWeight: 800, color: s.roi >= 0 ? '#4ade80' : '#f87171' }}>{s.roi >= 0 ? '+' : ''}{s.roi.toFixed(1)}%</span>
+        <span style={{ fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap', color: s.profit >= 0 ? '#4ade80' : '#f87171' }}>{s.profit >= 0 ? '+' : ''}{s.profit.toLocaleString()}원</span>
       </div>
     </div>
   )
@@ -688,11 +689,15 @@ function LeagueRankColumn({ rows, startRank, columnSize, yesterdayRankMap }: {
   )
 }
 
-type SoccerMarketTab = 'hcap05' | 'hcap15' | 'hcap15minus'
+type SoccerMarketTab = 'mlHome' | 'mlAway' | 'hcap05Home' | 'hcap15Home' | 'hcap15Away' | 'hcapm15Home' | 'hcapm15Away'
 const SOCCER_MARKET_TABS: { value: SoccerMarketTab; label: string }[] = [
-  { value: 'hcap05', label: '홈 0.5 플핸' },
-  { value: 'hcap15', label: '1.5 플핸' },
-  { value: 'hcap15minus', label: '-1.5 마핸' },
+  { value: 'mlHome', label: '일반승 홈' },
+  { value: 'mlAway', label: '일반승 원정' },
+  { value: 'hcap05Home', label: '0.5 홈 플핸' },
+  { value: 'hcap15Home', label: '1.5 홈 플핸' },
+  { value: 'hcap15Away', label: '1.5 원정 플핸' },
+  { value: 'hcapm15Home', label: '-1.5 홈 마핸' },
+  { value: 'hcapm15Away', label: '-1.5 원정 마핸' },
 ]
 
 // ─── 축구: 리그별 성적 (수익순 랭킹, 어제 대비 순위 변동, 10위 단위로 옆으로 배치) ──
@@ -711,10 +716,16 @@ function SoccerLeagueSection({ bets, overrides, knownLeagues, onAddOverride, onA
   const today = dayjs().format('YYYY-MM-DD')
 
   const filterByMarket = (list: Bet[], tab: SoccerMarketTab) => {
-    // 0.5 플핸은 홈 약팀만 채택(원정 약팀 +0.5는 폐기)했으므로 리그 랭킹도 홈만 집계
-    if (tab === 'hcap05') return list.filter(b => b.market === 'handicap' && extractHandicapLine(b.pick) === 0.5 && extractSide(b.pick) === '홈')
-    if (tab === 'hcap15') return list.filter(b => b.market === 'handicap' && extractHandicapLine(b.pick) === 1.5 && extractHandicapSign(b.pick) !== '-')
-    return list.filter(b => b.market === 'handicap' && extractHandicapLine(b.pick) === 1.5 && extractHandicapSign(b.pick) === '-')
+    switch (tab) {
+      case 'mlHome': return list.filter(b => b.market === 'moneyline' && extractSide(b.pick) === '홈')
+      case 'mlAway': return list.filter(b => b.market === 'moneyline' && extractSide(b.pick) === '원정')
+      // 0.5 플핸은 홈 약팀만 채택(원정 약팀 +0.5는 폐기)
+      case 'hcap05Home': return list.filter(b => b.market === 'handicap' && extractHandicapLine(b.pick) === 0.5 && extractSide(b.pick) === '홈')
+      case 'hcap15Home': return list.filter(b => b.market === 'handicap' && extractHandicapLine(b.pick) === 1.5 && extractHandicapSign(b.pick) !== '-' && extractSide(b.pick) === '홈')
+      case 'hcap15Away': return list.filter(b => b.market === 'handicap' && extractHandicapLine(b.pick) === 1.5 && extractHandicapSign(b.pick) !== '-' && extractSide(b.pick) === '원정')
+      case 'hcapm15Home': return list.filter(b => b.market === 'handicap' && extractHandicapLine(b.pick) === 1.5 && extractHandicapSign(b.pick) === '-' && extractSide(b.pick) === '홈')
+      case 'hcapm15Away': return list.filter(b => b.market === 'handicap' && extractHandicapLine(b.pick) === 1.5 && extractHandicapSign(b.pick) === '-' && extractSide(b.pick) === '원정')
+    }
   }
 
   // 마켓(0.5 플핸 / 1.5 플핸 / -1.5 마핸)별 리그 랭킹 — 아직 "리그 추가"로 등록되지 않은 리그는 순위에서 제외
@@ -824,7 +835,7 @@ function SoccerDetailPanel({ bets, overrides, knownLeagues, onAddOverride, onAdd
     { title: '⚽ 핸디캡 1.5 플핸 원정 — 0.1단위 배당 구간별', rows: oddsBinRows(hcap15Away), all: hcap15Away },
     { title: '⚽ 핸디캡 -1.5 마핸 홈 — 0.1단위 배당 구간별', rows: oddsBinRows(hcapm15Home), all: hcapm15Home },
     { title: '⚽ 핸디캡 -1.5 마핸 원정 — 0.1단위 배당 구간별', rows: oddsBinRows(hcapm15Away), all: hcapm15Away },
-  ].filter(t => t.rows.length > 0)
+  ]
 
   const ruleIds = new Set(tables.flatMap(t => t.rows.flatMap(r => r.bets)).map(b => b.id))
   const otherBets = settled.filter(b => !ruleIds.has(b.id))
