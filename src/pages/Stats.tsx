@@ -691,10 +691,10 @@ function LeagueRankColumn({ rows, startRank, columnSize, yesterdayRankMap }: {
 
 type SoccerMarketTab = 'mlHome' | 'hcap05Home' | 'hcap15Home' | 'hcap15Away' | 'hcapm15Home'
 const SOCCER_MARKET_TABS: { value: SoccerMarketTab; label: string }[] = [
-  { value: 'mlHome', label: '일반승 홈' },
   { value: 'hcap05Home', label: '0.5 홈 플핸' },
   { value: 'hcap15Home', label: '1.5 홈 플핸' },
   { value: 'hcap15Away', label: '1.5 원정 플핸' },
+  { value: 'mlHome', label: '일반승 홈' },
   { value: 'hcapm15Home', label: '-1.5 홈 마핸' },
 ]
 
@@ -757,7 +757,7 @@ function SoccerLeagueSection({ bets, overrides, knownLeagues, onAddOverride, onA
     <div style={{ marginBottom: 14 }}>
       <div className="card-title" style={{ marginBottom: 8 }}>⚽ 리그별 성적 (마켓별 · 수익순, 어제 대비 순위변동)</div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 12 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: 12 }}>
         {SOCCER_MARKET_TABS.map(t => {
           const { ranking, yesterdayRankMap } = buildMarketRanking(t.value)
           return (
@@ -823,10 +823,10 @@ function SoccerDetailPanel({ bets, overrides, knownLeagues, onAddOverride, onAdd
   // 원정 일반승·원정 -1.5 마핸은 더 이상 진행하지 않기로 해서 표에서 제외.
   // 각각 0.1단위 배당 구간별 적중률·수익률 + 전체 총 수익률을 표시. 그 외(다른 라인, 오버/언더 등)는 룰북 외로 이동.
   const tables = [
-    { title: '⚽ 일반승 홈 — 0.1단위 배당 구간별', rows: oddsBinRows(mlHome), all: mlHome },
     { title: '⚽ 핸디캡 홈 0.5 플핸 — 0.1단위 배당 구간별', rows: oddsBinRows(hcap05Home), all: hcap05Home },
     { title: '⚽ 핸디캡 1.5 플핸 홈 — 0.1단위 배당 구간별', rows: oddsBinRows(hcap15Home), all: hcap15Home },
     { title: '⚽ 핸디캡 1.5 플핸 원정 — 0.1단위 배당 구간별', rows: oddsBinRows(hcap15Away), all: hcap15Away },
+    { title: '⚽ 일반승 홈 — 0.1단위 배당 구간별', rows: oddsBinRows(mlHome), all: mlHome },
     { title: '⚽ 핸디캡 -1.5 마핸 홈 — 0.1단위 배당 구간별', rows: oddsBinRows(hcapm15Home), all: hcapm15Home },
   ]
 
