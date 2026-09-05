@@ -698,7 +698,8 @@ const SOCCER_MARKET_TABS: { value: SoccerMarketTab; label: string }[] = [
   { value: 'hcapm15Home', label: '-1.5 홈 마핸' },
 ]
 
-// ─── 축구: 리그별 성적 (수익순 랭킹, 어제 대비 순위 변동, 10위 단위로 옆으로 배치) ──
+// ─── 축구: 리그별 성적 — 좌측 리그명(가나다순) 고정, 우측에 마켓별 성적을 순서대로,
+// 맨 우측에 5개 마켓 합산 총손익/ROI를 붙인 통합 표 (리그명이 잘리는 문제 해결용) ──
 function SoccerLeagueSection({ bets, overrides, knownLeagues, onAddOverride, onAddLeague, onChangeSport, onDeleteGroup, onRenameLeague, onDeleteLeague }: {
   bets: Bet[]
   overrides: LeagueOverride[]; knownLeagues: string[]
@@ -711,7 +712,6 @@ function SoccerLeagueSection({ bets, overrides, knownLeagues, onAddOverride, onA
 }) {
   const allSettled = bets.filter(b => b.result !== 'pending')
   const leagueKeyOf = (b: Bet) => freeLeagueOf(b, overrides)
-  const today = dayjs().format('YYYY-MM-DD')
 
   const filterByMarket = (list: Bet[], tab: SoccerMarketTab) => {
     switch (tab) {
@@ -724,24 +724,12 @@ function SoccerLeagueSection({ bets, overrides, knownLeagues, onAddOverride, onA
     }
   }
 
-  // 마켓(0.5 플핸 / 1.5 플핸 / -1.5 마핸)별 리그 랭킹 — 아직 "리그 추가"로 등록되지 않은 리그는 순위에서 제외
-  function buildMarketRanking(tab: SoccerMarketTab) {
-    const marketBets = filterByMarket(allSettled, tab)
-    const yesterdayMarketBets = filterByMarket(allSettled.filter(b => b.bet_date < today), tab)
+  // 5개 마켓 각각의 필터링된 베팅 목록 (순서 고정: 0.5홈 / 1.5홈 / 1.5원정 / 일반승홈 / -1.5마핸홈)
+  const marketBetLists = SOCCER_MARKET_TABS.map(t => filterByMarket(allSettled, t.value))
 
-    const leagueNames = Array.from(new Set(marketBets.map(leagueKeyOf).filter(l => l !== 'ETC' && knownLeagues.includes(l))))
-    const ranking: LeagueRankRow[] = leagueNames
-      .map(l => { const s = calcStats(marketBets.filter(b => leagueKeyOf(b) === l)); return { league: l, total: s.total, winRate: s.winRate, roi: s.roi, profit: s.profit } })
-      .sort((a, b) => b.profit - a.profit)
-
-    const yesterdayLeagueNames = Array.from(new Set(yesterdayMarketBets.map(leagueKeyOf).filter(l => l !== 'ETC' && knownLeagues.includes(l))))
-    const yesterdayRanking = yesterdayLeagueNames
-      .map(l => ({ league: l, profit: calcStats(yesterdayMarketBets.filter(b => leagueKeyOf(b) === l)).profit }))
-      .sort((a, b) => b.profit - a.profit)
-    const yesterdayRankMap = new Map(yesterdayRanking.map((r, i) => [r.league, i + 1]))
-
-    return { ranking, yesterdayRankMap }
-  }
+  // 좌측 리그 목록 — "리그 추가"로 등록된 리그 중, 5개 마켓 중 하나에라도 정산된 베팅이 있는 리그만, 가나다순
+  const leaguesWithData = new Set(marketBetLists.flat().map(leagueKeyOf))
+  const leagueNames = knownLeagues.filter(l => leaguesWithData.has(l)).sort(koCompare)
 
   // 리그 미확인(ETC)은 마켓과 무관하게 축구 전체 기준으로 모아서 보여줌
   const etcBets = allSettled.filter(b => leagueKeyOf(b) === 'ETC')
@@ -753,25 +741,65 @@ function SoccerLeagueSection({ bets, overrides, knownLeagues, onAddOverride, onA
     }, new Map<string, Bet[]>())
   ).sort((a, b) => b[1].length - a[1].length)
 
+  function cellStats(bets: Bet[]) {
+    if (!bets.length) return null
+    return calcStats(bets)
+  }
+
   return (
     <div style={{ marginBottom: 14 }}>
-      <div className="card-title" style={{ marginBottom: 8 }}>⚽ 리그별 성적 (마켓별 · 수익순, 어제 대비 순위변동)</div>
+      <div className="card-title" style={{ marginBottom: 8 }}>⚽ 리그별 성적 (마켓별 · 리그명 가나다순, 맨 우측 5개 마켓 합산)</div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: 12 }}>
-        {SOCCER_MARKET_TABS.map(t => {
-          const { ranking, yesterdayRankMap } = buildMarketRanking(t.value)
-          return (
-            <div key={t.value}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 6 }}>⚽ {t.label}</div>
-              {ranking.length > 0 ? (
-                <LeagueRankColumn rows={ranking} startRank={1} columnSize={ranking.length} yesterdayRankMap={yesterdayRankMap} />
-              ) : (
-                <div style={{ fontSize: 10, color: 'var(--text-muted)', padding: '8px 0' }}>등록된 리그의 정산 데이터가 없습니다.</div>
-              )}
-            </div>
-          )
-        })}
-      </div>
+      {leagueNames.length > 0 ? (
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+            <thead>
+              <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                <th style={{ textAlign: 'left', padding: '4px 8px', fontSize: 9, color: 'var(--text-secondary)', fontWeight: 700, whiteSpace: 'nowrap' }}>리그</th>
+                {SOCCER_MARKET_TABS.map(t => (
+                  <th key={t.value} style={{ textAlign: 'center', padding: '4px 6px', fontSize: 9, color: 'var(--text-secondary)', fontWeight: 700, whiteSpace: 'nowrap' }}>⚽ {t.label}</th>
+                ))}
+                <th style={{ textAlign: 'center', padding: '4px 8px', fontSize: 9, color: 'var(--text-secondary)', fontWeight: 700, whiteSpace: 'nowrap', borderLeft: '1px solid var(--border)' }}>총손익 · ROI</th>
+              </tr>
+            </thead>
+            <tbody>
+              {leagueNames.map(league => {
+                const perMarketBets = marketBetLists.map(list => list.filter(b => leagueKeyOf(b) === league))
+                const totalBets = perMarketBets.flat()
+                const totalStats = cellStats(totalBets)
+                return (
+                  <tr key={league} style={{ borderBottom: '1px solid var(--border-light)', height: 26 }}>
+                    <td style={{ padding: '4px 8px', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>{league}</td>
+                    {perMarketBets.map((mb, i) => {
+                      const s = cellStats(mb)
+                      return (
+                        <td key={i} style={{ textAlign: 'center', padding: '4px 6px', whiteSpace: 'nowrap' }}>
+                          {s ? (
+                            <>
+                              <span style={{ color: 'var(--text-muted)' }}>{s.total}건 </span>
+                              <span style={{ fontWeight: 700, color: s.roi >= 0 ? '#4ade80' : '#f87171' }}>{s.roi >= 0 ? '+' : ''}{s.roi.toFixed(0)}%</span>
+                            </>
+                          ) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
+                        </td>
+                      )
+                    })}
+                    <td style={{ textAlign: 'center', padding: '4px 8px', whiteSpace: 'nowrap', borderLeft: '1px solid var(--border)' }}>
+                      {totalStats ? (
+                        <>
+                          <span style={{ fontWeight: 700, color: totalStats.profit >= 0 ? '#4ade80' : '#f87171' }}>{totalStats.profit >= 0 ? '+' : ''}{totalStats.profit.toLocaleString()}</span>
+                          <span style={{ marginLeft: 6, fontWeight: 700, color: totalStats.roi >= 0 ? '#4ade80' : '#f87171' }}>{totalStats.roi >= 0 ? '+' : ''}{totalStats.roi.toFixed(1)}%</span>
+                        </>
+                      ) : '—'}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div style={{ fontSize: 10, color: 'var(--text-muted)', padding: '8px 0' }}>등록된 리그의 정산 데이터가 없습니다.</div>
+      )}
 
       <div style={{ marginTop: 10 }}>
         <AddLeagueInput onAdd={onAddLeague} placeholder="새 리그 이름 (예: 프리미어리그)" />
