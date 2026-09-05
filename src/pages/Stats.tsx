@@ -689,15 +689,13 @@ function LeagueRankColumn({ rows, startRank, columnSize, yesterdayRankMap }: {
   )
 }
 
-type SoccerMarketTab = 'mlHome' | 'mlAway' | 'hcap05Home' | 'hcap15Home' | 'hcap15Away' | 'hcapm15Home' | 'hcapm15Away'
+type SoccerMarketTab = 'mlHome' | 'hcap05Home' | 'hcap15Home' | 'hcap15Away' | 'hcapm15Home'
 const SOCCER_MARKET_TABS: { value: SoccerMarketTab; label: string }[] = [
   { value: 'mlHome', label: '일반승 홈' },
-  { value: 'mlAway', label: '일반승 원정' },
   { value: 'hcap05Home', label: '0.5 홈 플핸' },
   { value: 'hcap15Home', label: '1.5 홈 플핸' },
   { value: 'hcap15Away', label: '1.5 원정 플핸' },
   { value: 'hcapm15Home', label: '-1.5 홈 마핸' },
-  { value: 'hcapm15Away', label: '-1.5 원정 마핸' },
 ]
 
 // ─── 축구: 리그별 성적 (수익순 랭킹, 어제 대비 순위 변동, 10위 단위로 옆으로 배치) ──
@@ -718,13 +716,11 @@ function SoccerLeagueSection({ bets, overrides, knownLeagues, onAddOverride, onA
   const filterByMarket = (list: Bet[], tab: SoccerMarketTab) => {
     switch (tab) {
       case 'mlHome': return list.filter(b => b.market === 'moneyline' && extractSide(b.pick) === '홈')
-      case 'mlAway': return list.filter(b => b.market === 'moneyline' && extractSide(b.pick) === '원정')
       // 0.5 플핸은 홈 약팀만 채택(원정 약팀 +0.5는 폐기)
       case 'hcap05Home': return list.filter(b => b.market === 'handicap' && extractHandicapLine(b.pick) === 0.5 && extractSide(b.pick) === '홈')
       case 'hcap15Home': return list.filter(b => b.market === 'handicap' && extractHandicapLine(b.pick) === 1.5 && extractHandicapSign(b.pick) !== '-' && extractSide(b.pick) === '홈')
       case 'hcap15Away': return list.filter(b => b.market === 'handicap' && extractHandicapLine(b.pick) === 1.5 && extractHandicapSign(b.pick) !== '-' && extractSide(b.pick) === '원정')
       case 'hcapm15Home': return list.filter(b => b.market === 'handicap' && extractHandicapLine(b.pick) === 1.5 && extractHandicapSign(b.pick) === '-' && extractSide(b.pick) === '홈')
-      case 'hcapm15Away': return list.filter(b => b.market === 'handicap' && extractHandicapLine(b.pick) === 1.5 && extractHandicapSign(b.pick) === '-' && extractSide(b.pick) === '원정')
     }
   }
 
@@ -817,24 +813,21 @@ function SoccerDetailPanel({ bets, overrides, knownLeagues, onAddOverride, onAdd
   const hcap05Home = hcap.filter(b => extractHandicapLine(b.pick) === 0.5 && extractSide(b.pick) === '홈')
   const hcap15 = hcap.filter(b => extractHandicapLine(b.pick) === 1.5 && extractHandicapSign(b.pick) !== '-')
   const hcapm15 = hcap.filter(b => extractHandicapLine(b.pick) === 1.5 && extractHandicapSign(b.pick) === '-')
+  // 일반승/-1.5 마핸은 원정을 더 이상 안 가기로 해서 홈만 유지
   const mlHome = ml.filter(b => extractSide(b.pick) === '홈')
-  const mlAway = ml.filter(b => extractSide(b.pick) === '원정')
   const hcap15Home = hcap15.filter(b => extractSide(b.pick) === '홈')
   const hcap15Away = hcap15.filter(b => extractSide(b.pick) === '원정')
   const hcapm15Home = hcapm15.filter(b => extractSide(b.pick) === '홈')
-  const hcapm15Away = hcapm15.filter(b => extractSide(b.pick) === '원정')
 
-  // 베팅을 일반승(승무패) / 핸디캡 0.5 플핸(홈만) / 핸디캡 1.5 플핸 / 핸디캡 -1.5 마핸 네 가지로 구분하되,
-  // 일반승·1.5 플핸·-1.5 마핸은 홈/원정을 나눠 별도 표로, 0.5 플핸은 홈만 표시(원정 약팀 +0.5는 통계에서 제외).
+  // 베팅을 일반승 홈 / 0.5 플핸(홈만) / 1.5 플핸(홈·원정) / -1.5 마핸(홈만) 다섯 가지로 구분.
+  // 원정 일반승·원정 -1.5 마핸은 더 이상 진행하지 않기로 해서 표에서 제외.
   // 각각 0.1단위 배당 구간별 적중률·수익률 + 전체 총 수익률을 표시. 그 외(다른 라인, 오버/언더 등)는 룰북 외로 이동.
   const tables = [
     { title: '⚽ 일반승 홈 — 0.1단위 배당 구간별', rows: oddsBinRows(mlHome), all: mlHome },
-    { title: '⚽ 일반승 원정 — 0.1단위 배당 구간별', rows: oddsBinRows(mlAway), all: mlAway },
     { title: '⚽ 핸디캡 홈 0.5 플핸 — 0.1단위 배당 구간별', rows: oddsBinRows(hcap05Home), all: hcap05Home },
     { title: '⚽ 핸디캡 1.5 플핸 홈 — 0.1단위 배당 구간별', rows: oddsBinRows(hcap15Home), all: hcap15Home },
     { title: '⚽ 핸디캡 1.5 플핸 원정 — 0.1단위 배당 구간별', rows: oddsBinRows(hcap15Away), all: hcap15Away },
     { title: '⚽ 핸디캡 -1.5 마핸 홈 — 0.1단위 배당 구간별', rows: oddsBinRows(hcapm15Home), all: hcapm15Home },
-    { title: '⚽ 핸디캡 -1.5 마핸 원정 — 0.1단위 배당 구간별', rows: oddsBinRows(hcapm15Away), all: hcapm15Away },
   ]
 
   const ruleIds = new Set(tables.flatMap(t => t.rows.flatMap(r => r.bets)).map(b => b.id))
