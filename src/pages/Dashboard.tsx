@@ -191,7 +191,7 @@ function isBigStake(stake: number, isusd: boolean): boolean {
 }
 
 // 경기 내용(match)에서 팀 이름 / 홈·원정 / 베팅옵션을 분리해 색으로 구분해 보여주기 위한 파서.
-// 구조화된 형식(축구/야구/농구/LOL)에서만 동작하고, 자유입력(배구/기타 등)이거나 패턴이 안 맞으면 null → 그냥 원문 그대로 표시.
+// 구조화된 형식(축구/농구/LOL)에서만 동작하고, 자유입력(야구/배구/기타 등)이거나 패턴이 안 맞으면 null → 그냥 원문 그대로 표시.
 type AccentKey = 'red' | 'green' | 'purple' | 'orange' | 'blue' | 'gold'
 interface BetMatchParts { team: string; side?: '홈' | '원정'; boTag?: string; optionLabel: string; accent: AccentKey }
 // 배지 표시용 — "원정"은 배지가 커지지 않도록 "원" 한 글자로 줄여서 보여준다 (저장된 데이터/파싱 로직에는 영향 없음)
@@ -207,15 +207,6 @@ function parseBetMatch(sport: string, match: string): BetMatchParts | null {
     if (num.startsWith('-')) return { team, side: sideV, optionLabel: `${num} 핸디캡`, accent: 'red' }
     if (num === '0.5') return { team, side: sideV, optionLabel: `${num} 핸디캡`, accent: 'green' }
     return { team, side: sideV, optionLabel: `${num} 핸디캡`, accent: 'purple' }
-  }
-  if (sport === 'baseball') {
-    const m = s.match(/^(.+?)(?:\s(홈|원정))?(?:\s(-?\d+(?:\.\d+)?))?$/)
-    if (!m) return null
-    const [, team, side, num] = m
-    const sideV = side as '홈' | '원정' | undefined
-    if (!num) return { team, side: sideV, optionLabel: '승리', accent: 'gold' }
-    if (num.startsWith('-')) return { team, side: sideV, optionLabel: `${num} 핸디캡`, accent: 'red' }
-    return { team, side: sideV, optionLabel: `${num} 핸디캡`, accent: 'green' }
   }
   if (sport === 'basketball') {
     const m = s.match(/^(.+?)(?:\s(홈|원정))?\s(-?\d+(?:\.\d+)?)$/)
@@ -929,7 +920,7 @@ const LEG_MARKS = ['①', '②', '③', '④']
 
 // 축구/야구/농구/LOL — 자유입력 대신 등록된 리그/팀을 선택하는 방식의 마켓 옵션 정의
 type StructuredSport = 'soccer' | 'baseball' | 'basketball' | 'volleyball' | 'esports'
-const STRUCTURED_SPORTS: StructuredSport[] = ['soccer', 'baseball', 'basketball', 'volleyball', 'esports']
+const STRUCTURED_SPORTS: StructuredSport[] = ['soccer', 'basketball', 'volleyball', 'esports']
 // 직접입력(자유 베팅 옵션) 공용 키 — 프리셋에 없는 마켓(예: "드래곤 17.5 오버")을 직접 타이핑해서 등록할 수 있게 한다
 const CUSTOM_KEY = 'custom'
 const CUSTOM_OPTION = { key: CUSTOM_KEY, label: '직접입력' }
@@ -940,12 +931,6 @@ const SOCCER_BET_OPTIONS = [
   { key: 'h15', label: '1.5 플핸' },
   CUSTOM_OPTION,
 ]
-const BASEBALL_BET_OPTIONS = [
-  { key: 'over', label: '오버' },
-  { key: 'under', label: '언더' },
-]
-// 야구 오버/언더 기준점 — 4.5부터 12.5까지 1.0 단위
-const BASEBALL_TOTAL_LINES = [4.5, 5.5, 6.5, 7.5, 8.5, 9.5, 10.5, 11.5, 12.5]
 const BASKETBALL_HCAP_LINES = [4.5, 5.5, 6.5, 7.5, 8.5, 9.5, 10.5, 11.5, 12.5, 13.5, 14.5]
 // LOL — BO1은 별도 마켓 없이 팀만 고르면 바로 확정, BO3/BO5는 세트 수에 따라 고를 수 있는 마켓이 다르다
 type EsportsBo = 'bo1' | 'bo3' | 'bo5'
@@ -1159,9 +1144,6 @@ function StructuredTeamPicker({ sport, leagues, favoriteLeagues, teams, allTeams
   const [option, setOption] = useState('')
   const [customText, setCustomText] = useState('')
   const [bo, setBo] = useState<EsportsBo | ''>('bo3')
-  const [totalLine, setTotalLine] = useState<number | null>(null)
-  // 야구 전용 — 홈/원정/오버/언더 네 개 중 하나만 선택되는 단일 선택 상태
-  const [baseballPick, setBaseballPick] = useState<'홈' | '원정' | 'over' | 'under' | ''>('')
   const [registering, setRegistering] = useState(false)
   const [regLeague, setRegLeague] = useState('')
   const [showRegLeagueSuggest, setShowRegLeagueSuggest] = useState(false)
@@ -1277,12 +1259,6 @@ function StructuredTeamPicker({ sport, leagues, favoriteLeagues, teams, allTeams
       onResult(`${team} ${side}`, lg)
       return
     }
-    if (sport === 'baseball') {
-      if (baseballPick === '홈' || baseballPick === '원정') { onResult(`${team} ${baseballPick}`, lg); return }
-      if (baseballPick === 'over') { if (totalLine == null) return; onResult(`${team} ${totalLine}오버`, lg); return }
-      if (baseballPick === 'under') { if (totalLine == null) return; onResult(`${team} ${totalLine}언더`, lg); return }
-      return
-    }
     if (!option || option === CUSTOM_KEY) return
     let match = ''
     if (sport === 'soccer') {
@@ -1294,7 +1270,7 @@ function StructuredTeamPicker({ sport, leagues, favoriteLeagues, teams, allTeams
       match = `${team} ${side} ${option}`
     }
     if (match) onResult(match, lg)
-  }, [teamText, option, side, bo, sport, totalLine, baseballPick])
+  }, [teamText, option, side, bo, sport])
 
   async function submitRegister() {
     const team = teamText.trim(); const lg = regLeague.trim()
@@ -1399,26 +1375,6 @@ function StructuredTeamPicker({ sport, leagues, favoriteLeagues, teams, allTeams
               border: `1px solid ${bo === b ? 'var(--blue-border)' : 'var(--border)'}`,
               background: bo === b ? 'var(--blue-bg)' : 'var(--bg-elevated)',
               color: bo === b ? 'var(--blue)' : 'var(--text-secondary)' }}>{b.toUpperCase()}</button>
-          ))}
-        </div>
-      )}
-
-      {/* 야구 — 홈/원정/오버/언더 네 개 중 하나만 선택되는 단일 선택 행 */}
-      {teamText.trim() && sport === 'baseball' && (
-        <div style={{ display: 'flex', gap: 4 }}>
-          {([{ key: '홈', label: '홈' }, { key: '원정', label: '원정' }, { key: 'over', label: '오버' }, { key: 'under', label: '언더' }] as const).map(o => (
-            <button key={o.key} type="button" onClick={() => { setBaseballPick(o.key); setTotalLine(null) }} style={{
-              flex: 1, fontSize: 11, fontWeight: 700, padding: '5px 0', borderRadius: 6, cursor: 'pointer', fontFamily: 'var(--font-body)',
-              border: `1px solid ${baseballPick === o.key ? 'var(--blue-border)' : 'var(--border)'}`,
-              background: baseballPick === o.key ? 'var(--blue-bg)' : 'var(--bg-elevated)',
-              color: baseballPick === o.key ? 'var(--blue)' : 'var(--text-secondary)' }}>{o.label}</button>
-          ))}
-        </div>
-      )}
-      {teamText.trim() && sport === 'baseball' && (baseballPick === 'over' || baseballPick === 'under') && (
-        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-          {BASEBALL_TOTAL_LINES.map(l => (
-            <StructuredPickButton key={l} label={String(l)} active={totalLine === l} onClick={() => setTotalLine(l)} />
           ))}
         </div>
       )}
