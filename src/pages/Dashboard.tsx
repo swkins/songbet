@@ -632,9 +632,10 @@ function SiteMgrModal({ sites, onClose, onAdd, onDelete, onToggleCurrency, onReo
 }
 
 /* ── 베팅 관리 모달 — 체크한 베팅은 다폴 베팅 내용 빈칸 클릭 시 빠른 선택 목록으로 노출 ── */
-function BetManageModal({ bets, onClose, onToggleQuickPick }: {
+function BetManageModal({ bets, onClose, onToggleQuickPick, onSetQuickPickMany }: {
   bets: Bet[]; onClose: () => void
   onToggleQuickPick: (bet: Bet) => void
+  onSetQuickPickMany: (bets: Bet[], value: boolean) => Promise<void>
 }) {
   const [query, setQuery] = useState('')
   const [sportFilter, setSportFilter] = useState<Set<string>>(new Set())
@@ -691,6 +692,18 @@ function BetManageModal({ bets, onClose, onToggleQuickPick }: {
           <input className="form-input" type="text" inputMode="decimal" placeholder="최대 (예: 1.5)" value={oddsMax}
             onChange={e => { const v = e.target.value; if (v === '' || /^\d*\.?\d*$/.test(v)) setOddsMax(v) }}
             style={{ fontSize: 12, flex: 1 }} />
+        </div>
+        <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+          <button type="button" onClick={() => onSetQuickPickMany(filtered, true)} disabled={filtered.length === 0} style={{
+            flex: 1, fontSize: 10, fontWeight: 700, padding: '6px 0', borderRadius: 'var(--radius-sm)', fontFamily: 'var(--font-body)',
+            border: '1px solid var(--gold-border)', background: 'var(--gold-bg)', color: 'var(--gold)',
+            cursor: filtered.length === 0 ? 'not-allowed' : 'pointer', opacity: filtered.length === 0 ? 0.5 : 1,
+          }}>모두 선택</button>
+          <button type="button" onClick={() => onSetQuickPickMany(filtered, false)} disabled={filtered.length === 0} style={{
+            flex: 1, fontSize: 10, fontWeight: 700, padding: '6px 0', borderRadius: 'var(--radius-sm)', fontFamily: 'var(--font-body)',
+            border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-secondary)',
+            cursor: filtered.length === 0 ? 'not-allowed' : 'pointer', opacity: filtered.length === 0 ? 0.5 : 1,
+          }}>모두 해제</button>
         </div>
         <div style={{ maxHeight: 420, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
           {filtered.length === 0 && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '16px 0', textAlign: 'center' }}>진행중인 베팅이 없습니다</div>}
@@ -1829,6 +1842,16 @@ export default function Dashboard() {
   async function toggleQuickPick(bet: Bet) {
     const { data } = await supabase.from('bets').update({ is_quick_pick: !bet.is_quick_pick }).eq('id', bet.id).select().single()
     if (data) setBets(p => p.map(b => b.id === bet.id ? data : b))
+  }
+  // 베팅관리 "모두 선택/해제" — 현재 필터에 걸린 목록 전체를 한 번에 체크/해제
+  async function setQuickPickMany(betsToSet: Bet[], value: boolean) {
+    const ids = betsToSet.filter(b => b.is_quick_pick !== value).map(b => b.id)
+    if (!ids.length) return
+    const { data } = await supabase.from('bets').update({ is_quick_pick: value }).in('id', ids).select()
+    if (data) {
+      const updated = new Map(data.map(d => [d.id, d]))
+      setBets(p => p.map(b => updated.get(b.id) ?? b))
+    }
   }
   async function loadGameRollings() {
     const { data } = await supabase.from('game_rollings').select('*').order('created_at', { ascending: true })
@@ -3053,7 +3076,7 @@ export default function Dashboard() {
         <SiteMgrModal sites={sites} onClose={() => setShowSiteMgr(false)} onAdd={addSite} onDelete={deleteSite} onToggleCurrency={toggleCurrency} onReorder={reorderSites} onUpdateDefaultStake={updateDefaultStake} onToggleBetType={toggleBetType} />
       )}
       {showBetMgr && (
-        <BetManageModal bets={bets} onClose={() => setShowBetMgr(false)} onToggleQuickPick={toggleQuickPick} />
+        <BetManageModal bets={bets} onClose={() => setShowBetMgr(false)} onToggleQuickPick={toggleQuickPick} onSetQuickPickMany={setQuickPickMany} />
       )}
       {depositSite && <DepositModal site={depositSite} onClose={() => setDepositSite(null)} onDeposit={doDeposit} onPoint={doPoint} />}
       {withdrawSite && <WithdrawModal site={withdrawSite} onClose={() => setWithdrawSite(null)} onWithdraw={doWithdraw} />}
