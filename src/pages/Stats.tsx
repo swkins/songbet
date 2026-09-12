@@ -492,25 +492,20 @@ function SoccerDetailPanel({ bets }: { bets: Bet[] }) {
   const settled = bets.filter(b => b.result !== 'pending')
   const ml = settled.filter(b => b.market === 'moneyline')
   const hcap = settled.filter(b => b.market === 'handicap')
-  // 0.5 플핸은 홈 약팀만 채택(원정 약팀 +0.5는 폐기) — 홈 쪽만 통계에 반영
-  const hcap05Home = hcap.filter(b => extractHandicapLine(b.pick) === 0.5 && extractSide(b.pick) === '홈')
-  const hcap15 = hcap.filter(b => extractHandicapLine(b.pick) === 1.5 && extractHandicapSign(b.pick) !== '-')
-  const hcapm15 = hcap.filter(b => extractHandicapLine(b.pick) === 1.5 && extractHandicapSign(b.pick) === '-')
-  // 일반승/-1.5 마핸은 원정을 더 이상 안 가기로 해서 홈만 유지
-  const mlHome = ml.filter(b => extractSide(b.pick) === '홈')
-  const hcap15Home = hcap15.filter(b => extractSide(b.pick) === '홈')
-  const hcap15Away = hcap15.filter(b => extractSide(b.pick) === '원정')
-  const hcapm15Home = hcapm15.filter(b => extractSide(b.pick) === '홈')
+  // 홈/원정 구분 없이 통합 — 0.5 / 1.5 / 2.5 플핸(언더독 쪽)과 -1.5 마핸(강팀 쪽)
+  const hcap05 = hcap.filter(b => extractHandicapLine(b.pick) === 0.5)
+  const hcap15Plus = hcap.filter(b => extractHandicapLine(b.pick) === 1.5 && extractHandicapSign(b.pick) !== '-')
+  const hcap25Plus = hcap.filter(b => extractHandicapLine(b.pick) === 2.5 && extractHandicapSign(b.pick) !== '-')
+  const hcap15Minus = hcap.filter(b => extractHandicapLine(b.pick) === 1.5 && extractHandicapSign(b.pick) === '-')
 
-  // 베팅을 일반승 홈 / 0.5 플핸(홈만) / 1.5 플핸(홈·원정) / -1.5 마핸(홈만) 다섯 가지로 구분.
-  // 원정 일반승·원정 -1.5 마핸은 더 이상 진행하지 않기로 해서 표에서 제외.
+  // 베팅을 일반승 / 0.5 플핸 / 1.5 플핸 / 2.5 플핸 / -1.5 마핸 다섯 가지로 구분(홈·원정 통합).
   // 각각 0.1단위 배당 구간별 적중률·수익률 + 전체 총 수익률을 표시. 그 외(다른 라인, 오버/언더 등)는 룰북 외로 이동.
   const tables = [
-    { title: '⚽ 핸디캡 홈 0.5 플핸 — 0.1단위 배당 구간별', rows: oddsBinRows(hcap05Home), all: hcap05Home },
-    { title: '⚽ 핸디캡 1.5 플핸 홈 — 0.1단위 배당 구간별', rows: oddsBinRows(hcap15Home), all: hcap15Home },
-    { title: '⚽ 핸디캡 1.5 플핸 원정 — 0.1단위 배당 구간별', rows: oddsBinRows(hcap15Away), all: hcap15Away },
-    { title: '⚽ 일반승 홈 — 0.1단위 배당 구간별', rows: oddsBinRows(mlHome), all: mlHome },
-    { title: '⚽ 핸디캡 -1.5 마핸 홈 — 0.1단위 배당 구간별', rows: oddsBinRows(hcapm15Home), all: hcapm15Home },
+    { title: '⚽ 0.5 플핸 — 0.1단위 배당 구간별', rows: oddsBinRows(hcap05), all: hcap05 },
+    { title: '⚽ 1.5 플핸 — 0.1단위 배당 구간별', rows: oddsBinRows(hcap15Plus), all: hcap15Plus },
+    { title: '⚽ 2.5 플핸 — 0.1단위 배당 구간별', rows: oddsBinRows(hcap25Plus), all: hcap25Plus },
+    { title: '⚽ 일반승 — 0.1단위 배당 구간별', rows: oddsBinRows(ml), all: ml },
+    { title: '⚽ -1.5 마핸 — 0.1단위 배당 구간별', rows: oddsBinRows(hcap15Minus), all: hcap15Minus },
   ]
 
   const ruleIds = new Set(tables.flatMap(t => t.rows.flatMap(r => r.bets)).map(b => b.id))
@@ -637,14 +632,6 @@ function classifyLolOption(content: string): '일반승' | '핸디캡' | '세트
 function extractHandicapSign(pick: string): '+' | '-' | null {
   const m = pick?.match(/([+-])\s*\d+\.?\d*\s*$/)
   return m ? (m[1] as '+' | '-') : null
-}
-
-// 픽 텍스트("팀명 홈 0.5" / "팀명 원정 -1.5" 등)에서 홈/원정 여부 추출
-function extractSide(pick: string): '홈' | '원정' | null {
-  if (!pick) return null
-  if (pick.includes('홈')) return '홈'
-  if (pick.includes('원정')) return '원정'
-  return null
 }
 
 // ─── LOL(e스포츠) 전용: 베팅 옵션별 — 일반승/마핸/플핸/세트승 각각 0.1단위 배당 구간별 성적 ──
