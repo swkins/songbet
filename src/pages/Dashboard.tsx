@@ -637,8 +637,29 @@ function BetManageModal({ bets, onClose, onToggleQuickPick }: {
   onToggleQuickPick: (bet: Bet) => void
 }) {
   const [query, setQuery] = useState('')
-  const sorted = [...bets].sort((a, b) => (b.bet_date + b.created_at).localeCompare(a.bet_date + a.created_at))
-  const filtered = query.trim() ? sorted.filter(b => b.match.includes(query.trim())) : sorted
+  const [sportFilter, setSportFilter] = useState<Set<string>>(new Set())
+  const [oddsMin, setOddsMin] = useState('')
+  const [oddsMax, setOddsMax] = useState('')
+
+  function toggleSportFilter(v: string) {
+    setSportFilter(p => {
+      const next = new Set(p)
+      if (next.has(v)) next.delete(v); else next.add(v)
+      return next
+    })
+  }
+
+  // 결과 처리된 베팅은 더 이상 관리 목록에 두지 않고, 현재 진행중(미정산)인 것만 표시
+  const pending = bets.filter(b => b.result === 'pending')
+  const sorted = [...pending].sort((a, b) => (b.bet_date + b.created_at).localeCompare(a.bet_date + a.created_at))
+  const minV = parseFloat(oddsMin); const maxV = parseFloat(oddsMax)
+  const filtered = sorted.filter(b => {
+    if (query.trim() && !b.match.includes(query.trim())) return false
+    if (sportFilter.size > 0 && !sportFilter.has(b.sport)) return false
+    if (!isNaN(minV) && b.odds < minV) return false
+    if (!isNaN(maxV) && b.odds > maxV) return false
+    return true
+  })
 
   return (
     <div className="modal-overlay">
@@ -648,14 +669,35 @@ function BetManageModal({ bets, onClose, onToggleQuickPick }: {
           <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex' }}><X size={16} /></button>
         </div>
         <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 8 }}>
-          체크한 베팅은 다폴 베팅 내용 빈칸을 클릭했을 때 빠른 선택 목록으로 나타납니다.
+          체크한 베팅은 다폴 베팅 내용 빈칸을 클릭했을 때 빠른 선택 목록으로 나타납니다. (진행중인 베팅만 표시)
         </div>
-        <input className="form-input" placeholder="검색..." value={query} onChange={e => setQuery(e.target.value)} style={{ fontSize: 12, marginBottom: 10 }} />
+        <input className="form-input" placeholder="검색..." value={query} onChange={e => setQuery(e.target.value)} style={{ fontSize: 12, marginBottom: 8 }} />
+        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 8 }}>
+          {SPORTS.map(s => (
+            <button key={s.value} type="button" onClick={() => toggleSportFilter(s.value)} style={{
+              fontSize: 10, fontWeight: 700, padding: '4px 8px', borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontFamily: 'var(--font-body)',
+              border: `1px solid ${sportFilter.has(s.value) ? 'var(--gold-border)' : 'var(--border)'}`,
+              background: sportFilter.has(s.value) ? 'var(--gold-bg)' : 'var(--bg-elevated)',
+              color: sportFilter.has(s.value) ? 'var(--gold)' : 'var(--text-secondary)',
+            }}>{SPORT_SHORT[s.value] ?? ''} {s.label}</button>
+          ))}
+        </div>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 10 }}>
+          <span style={{ fontSize: 10, color: 'var(--text-muted)', flexShrink: 0 }}>배당</span>
+          <input className="form-input" type="text" inputMode="decimal" placeholder="최소 (예: 1.3)" value={oddsMin}
+            onChange={e => { const v = e.target.value; if (v === '' || /^\d*\.?\d*$/.test(v)) setOddsMin(v) }}
+            style={{ fontSize: 12, flex: 1 }} />
+          <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>~</span>
+          <input className="form-input" type="text" inputMode="decimal" placeholder="최대 (예: 1.5)" value={oddsMax}
+            onChange={e => { const v = e.target.value; if (v === '' || /^\d*\.?\d*$/.test(v)) setOddsMax(v) }}
+            style={{ fontSize: 12, flex: 1 }} />
+        </div>
         <div style={{ maxHeight: 420, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
-          {filtered.length === 0 && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '16px 0', textAlign: 'center' }}>베팅 내역이 없습니다</div>}
+          {filtered.length === 0 && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '16px 0', textAlign: 'center' }}>진행중인 베팅이 없습니다</div>}
           {filtered.map(b => (
             <label key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 4px', borderBottom: '1px solid var(--border-light)', cursor: 'pointer' }}>
               <input type="checkbox" checked={b.is_quick_pick} onChange={() => onToggleQuickPick(b)} style={{ flexShrink: 0, cursor: 'pointer' }} />
+              <span style={{ fontSize: 12, flexShrink: 0 }}>{SPORT_SHORT[b.sport] ?? ''}</span>
               <span style={{ fontSize: 9, color: 'var(--text-muted)', flexShrink: 0, width: 60 }}>{dayjs(b.bet_date).format('MM/DD')}</span>
               <span style={{ fontSize: 12, color: 'var(--text-primary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.match}</span>
               <span style={{ fontSize: 10, color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', flexShrink: 0 }}>{b.odds.toFixed(2)}</span>
