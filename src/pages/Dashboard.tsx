@@ -632,15 +632,33 @@ function SiteMgrModal({ sites, onClose, onAdd, onDelete, onToggleCurrency, onReo
 }
 
 /* ── 베팅 관리 모달 — 체크한 베팅은 다폴 베팅 내용 빈칸 클릭 시 빠른 선택 목록으로 노출 ── */
+// 베팅관리 필터(검색어/종목/배당 범위)는 새로고침 후 다시 열어도 유지되도록 로컬에 저장
+const BET_MGR_FILTER_KEY = 'songbet_bet_mgr_filters'
+interface BetMgrFilters { query: string; sports: string[]; oddsMin: string; oddsMax: string }
+function loadBetMgrFilters(): BetMgrFilters {
+  try {
+    const raw = localStorage.getItem(BET_MGR_FILTER_KEY)
+    if (raw) return { query: '', sports: [], oddsMin: '', oddsMax: '', ...JSON.parse(raw) }
+  } catch { /* noop */ }
+  return { query: '', sports: [], oddsMin: '', oddsMax: '' }
+}
+
 function BetManageModal({ bets, onClose, onToggleQuickPick, onSetQuickPickMany }: {
   bets: Bet[]; onClose: () => void
   onToggleQuickPick: (bet: Bet) => void
   onSetQuickPickMany: (bets: Bet[], value: boolean) => Promise<void>
 }) {
-  const [query, setQuery] = useState('')
-  const [sportFilter, setSportFilter] = useState<Set<string>>(new Set())
-  const [oddsMin, setOddsMin] = useState('')
-  const [oddsMax, setOddsMax] = useState('')
+  const initialFilters = useMemo(loadBetMgrFilters, [])
+  const [query, setQuery] = useState(initialFilters.query)
+  const [sportFilter, setSportFilter] = useState<Set<string>>(new Set(initialFilters.sports))
+  const [oddsMin, setOddsMin] = useState(initialFilters.oddsMin)
+  const [oddsMax, setOddsMax] = useState(initialFilters.oddsMax)
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(BET_MGR_FILTER_KEY, JSON.stringify({ query, sports: Array.from(sportFilter), oddsMin, oddsMax }))
+    } catch { /* noop */ }
+  }, [query, sportFilter, oddsMin, oddsMax])
 
   function toggleSportFilter(v: string) {
     setSportFilter(p => {
@@ -650,8 +668,8 @@ function BetManageModal({ bets, onClose, onToggleQuickPick, onSetQuickPickMany }
     })
   }
 
-  // 결과 처리된 베팅은 더 이상 관리 목록에 두지 않고, 현재 진행중(미정산)인 것만 표시
-  const pending = bets.filter(b => b.result === 'pending')
+  // 결과 처리된 베팅은 더 이상 관리 목록에 두지 않고, 현재 진행중(미정산)인 단폴만 표시 — 다폴(패리레이) 다리는 제외
+  const pending = bets.filter(b => b.result === 'pending' && b.parlay_group === null)
   const sorted = [...pending].sort((a, b) => (b.bet_date + b.created_at).localeCompare(a.bet_date + a.created_at))
   const minV = parseFloat(oddsMin); const maxV = parseFloat(oddsMax)
   const filtered = sorted.filter(b => {
@@ -670,7 +688,7 @@ function BetManageModal({ bets, onClose, onToggleQuickPick, onSetQuickPickMany }
           <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex' }}><X size={16} /></button>
         </div>
         <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 8 }}>
-          체크한 베팅은 다폴 베팅 내용 빈칸을 클릭했을 때 빠른 선택 목록으로 나타납니다. (진행중인 베팅만 표시)
+          체크한 베팅은 다폴 베팅 내용 빈칸을 클릭했을 때 빠른 선택 목록으로 나타납니다. (진행중인 단폴 베팅만 표시)
         </div>
         <input className="form-input" placeholder="검색..." value={query} onChange={e => setQuery(e.target.value)} style={{ fontSize: 12, marginBottom: 8 }} />
         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 8 }}>
@@ -706,7 +724,7 @@ function BetManageModal({ bets, onClose, onToggleQuickPick, onSetQuickPickMany }
           }}>모두 해제</button>
         </div>
         <div style={{ maxHeight: 420, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
-          {filtered.length === 0 && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '16px 0', textAlign: 'center' }}>진행중인 베팅이 없습니다</div>}
+          {filtered.length === 0 && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '16px 0', textAlign: 'center' }}>진행중인 단폴 베팅이 없습니다</div>}
           {filtered.map(b => (
             <label key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 4px', borderBottom: '1px solid var(--border-light)', cursor: 'pointer' }}>
               <input type="checkbox" checked={b.is_quick_pick} onChange={() => onToggleQuickPick(b)} style={{ flexShrink: 0, cursor: 'pointer' }} />
