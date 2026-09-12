@@ -578,72 +578,46 @@ function SoccerLeagueSection({ bets, overrides, knownLeagues, onRenameLeague, on
     }
   }
 
-  // 5개 마켓 각각의 필터링된 베팅 목록 (순서 고정: 0.5홈 / 1.5홈 / 1.5원정 / 일반승홈 / -1.5마핸홈)
-  const marketBetLists = SOCCER_MARKET_TABS.map(t => filterByMarket(allSettled, t.value))
+  const today = dayjs().format('YYYY-MM-DD')
 
-  // 좌측 리그 목록 — 등록된 리그 중, 5개 마켓 중 하나에라도 정산된 베팅이 있는 리그만, 가나다순
-  const leaguesWithData = new Set(marketBetLists.flat().map(leagueKeyOf))
-  const leagueNames = knownLeagues.filter(l => leaguesWithData.has(l)).sort(koCompare)
+  // 마켓(0.5 플핸 / 1.5 플핸 / -1.5 마핸 등)별 리그 랭킹 — 등록된 리그만 순위에 포함, 수익순
+  function buildMarketRanking(tab: SoccerMarketTab) {
+    const marketBets = filterByMarket(allSettled, tab)
+    const yesterdayMarketBets = filterByMarket(allSettled.filter(b => b.bet_date < today), tab)
 
-  function cellStats(bets: Bet[]) {
-    if (!bets.length) return null
-    return calcStats(bets)
+    const names = Array.from(new Set(marketBets.map(leagueKeyOf).filter(l => l !== 'ETC' && knownLeagues.includes(l))))
+    const ranking: LeagueRankRow[] = names
+      .map(l => { const s = calcStats(marketBets.filter(b => leagueKeyOf(b) === l)); return { league: l, total: s.total, winRate: s.winRate, roi: s.roi, profit: s.profit } })
+      .sort((a, b) => b.profit - a.profit)
+
+    const yesterdayNames = Array.from(new Set(yesterdayMarketBets.map(leagueKeyOf).filter(l => l !== 'ETC' && knownLeagues.includes(l))))
+    const yesterdayRanking = yesterdayNames
+      .map(l => ({ league: l, profit: calcStats(yesterdayMarketBets.filter(b => leagueKeyOf(b) === l)).profit }))
+      .sort((a, b) => b.profit - a.profit)
+    const yesterdayRankMap = new Map(yesterdayRanking.map((r, i) => [r.league, i + 1]))
+
+    return { ranking, yesterdayRankMap }
   }
 
   return (
     <div style={{ marginBottom: 14 }}>
-      <div className="card-title" style={{ marginBottom: 8 }}>⚽ 리그별 성적 (마켓별 · 리그명 가나다순, 맨 우측 5개 마켓 합산)</div>
+      <div className="card-title" style={{ marginBottom: 8 }}>⚽ 리그별 성적 (마켓별 · 수익순, 어제 대비 순위변동)</div>
 
-      {leagueNames.length > 0 ? (
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
-            <thead>
-              <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                <th style={{ textAlign: 'left', padding: '4px 8px', fontSize: 9, color: 'var(--text-secondary)', fontWeight: 700, whiteSpace: 'nowrap' }}>리그</th>
-                {SOCCER_MARKET_TABS.map(t => (
-                  <th key={t.value} style={{ textAlign: 'center', padding: '4px 6px', fontSize: 9, color: 'var(--text-secondary)', fontWeight: 700, whiteSpace: 'nowrap' }}>⚽ {t.label}</th>
-                ))}
-                <th style={{ textAlign: 'center', padding: '4px 8px', fontSize: 9, color: 'var(--text-secondary)', fontWeight: 700, whiteSpace: 'nowrap', borderLeft: '1px solid var(--border)' }}>총손익 · ROI</th>
-              </tr>
-            </thead>
-            <tbody>
-              {leagueNames.map(league => {
-                const perMarketBets = marketBetLists.map(list => list.filter(b => leagueKeyOf(b) === league))
-                const totalBets = perMarketBets.flat()
-                const totalStats = cellStats(totalBets)
-                return (
-                  <tr key={league} style={{ borderBottom: '1px solid var(--border-light)', height: 26 }}>
-                    <td style={{ padding: '4px 8px', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>{league}</td>
-                    {perMarketBets.map((mb, i) => {
-                      const s = cellStats(mb)
-                      return (
-                        <td key={i} style={{ textAlign: 'center', padding: '4px 6px', whiteSpace: 'nowrap' }}>
-                          {s ? (
-                            <>
-                              <span style={{ color: 'var(--text-muted)' }}>{s.total}건 </span>
-                              <span style={{ fontWeight: 700, color: s.roi >= 0 ? '#4ade80' : '#f87171' }}>{s.roi >= 0 ? '+' : ''}{s.roi.toFixed(0)}%</span>
-                            </>
-                          ) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
-                        </td>
-                      )
-                    })}
-                    <td style={{ textAlign: 'center', padding: '4px 8px', whiteSpace: 'nowrap', borderLeft: '1px solid var(--border)' }}>
-                      {totalStats ? (
-                        <>
-                          <span style={{ fontWeight: 700, color: totalStats.profit >= 0 ? '#4ade80' : '#f87171' }}>{totalStats.profit >= 0 ? '+' : ''}{totalStats.profit.toLocaleString()}</span>
-                          <span style={{ marginLeft: 6, fontWeight: 700, color: totalStats.roi >= 0 ? '#4ade80' : '#f87171' }}>{totalStats.roi >= 0 ? '+' : ''}{totalStats.roi.toFixed(1)}%</span>
-                        </>
-                      ) : '—'}
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
-      ) : (
-        <div style={{ fontSize: 10, color: 'var(--text-muted)', padding: '8px 0' }}>등록된 리그의 정산 데이터가 없습니다.</div>
-      )}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: 12 }}>
+        {SOCCER_MARKET_TABS.map(t => {
+          const { ranking, yesterdayRankMap } = buildMarketRanking(t.value)
+          return (
+            <div key={t.value}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 6 }}>⚽ {t.label}</div>
+              {ranking.length > 0 ? (
+                <LeagueRankColumn rows={ranking} startRank={1} columnSize={ranking.length} yesterdayRankMap={yesterdayRankMap} />
+              ) : (
+                <div style={{ fontSize: 10, color: 'var(--text-muted)', padding: '8px 0' }}>등록된 리그의 정산 데이터가 없습니다.</div>
+              )}
+            </div>
+          )
+        })}
+      </div>
 
       <div style={{ marginTop: 10 }}>
         <LeagueManageList leagues={knownLeagues} onRename={onRenameLeague} onDelete={onDeleteLeague} />
