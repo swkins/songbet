@@ -1374,42 +1374,6 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
   const [sport, setSport]       = useState<string>(defaultSport || 'soccer')
   const [sportTouched, setSportTouched] = useState(false)
   const [content, setContent]   = useState('')
-  // 리그(현재는 축구만) — 드롭다운 선택 + "+"로 새 리그 등록. 팀 이름을 쓰면 과거 베팅 이력에서 리그를 자동으로 찾아 채워준다.
-  const [league, setLeague] = useState('')
-  const [leagueTouched, setLeagueTouched] = useState(false)
-  const [addingLeague, setAddingLeague] = useState(false)
-  const [newLeagueName, setNewLeagueName] = useState('')
-  const soccerLeagueOptions = [...soccerLeagues].sort((a, b) => koCompare(a, b))
-  // 팀 이름 → 가장 최근에 사용한 리그 (축구 베팅 이력에서 추출, 최신순)
-  const soccerTeamLeagueHistory = useMemo(() => {
-    return allBetsHistory
-      .filter(b => b.sport === 'soccer' && (b.league ?? '').trim())
-      .map(b => ({ team: (parseBetMatch('soccer', b.match)?.team ?? b.match).trim(), league: (b.league ?? '').trim(), bet_date: b.bet_date }))
-      .filter(r => r.team)
-      .sort((a, b) => b.bet_date.localeCompare(a.bet_date))
-  }, [allBetsHistory])
-  function findLeagueForTeam(text: string): string | null {
-    const team = (parseBetMatch('soccer', text)?.team ?? text).trim()
-    if (!team) return null
-    const exact = soccerTeamLeagueHistory.find(r => r.team === team)
-    if (exact) return exact.league
-    const partial = soccerTeamLeagueHistory.find(r => team.length >= 2 && (r.team.includes(team) || team.includes(r.team)))
-    return partial ? partial.league : null
-  }
-  // 베팅 내용에 팀 이름을 쓰면(리그를 직접 고르지 않은 동안) 자동으로 리그를 채워준다
-  useEffect(() => {
-    if (sport !== 'soccer' || leagueTouched) return
-    const found = findLeagueForTeam(content)
-    if (found && found !== league) setLeague(found)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [content, sport, leagueTouched])
-  async function confirmAddLeague() {
-    const name = newLeagueName.trim()
-    if (!name) return
-    await onAddSoccerLeague(name)
-    setLeague(name); setLeagueTouched(true)
-    setNewLeagueName(''); setAddingLeague(false)
-  }
   // 베팅옵션(현재는 축구만) — 한 번 추가하면 모든 단폴 베팅에서 재사용, 클릭하면 베팅 내용 뒤에 붙는다
   const [newOption, setNewOption] = useState('')
   function applyBetOption(label: string) {
@@ -1479,13 +1443,9 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
     if (!content || oddsV <= 0 || stakeN <= 0) return
     if (mode === 'multi' && !multiFilled) return
     setSubmitting(true)
-    const leagueTrimmed = league.trim()
-    if (sport === 'soccer' && leagueTrimmed && !soccerLeagues.includes(leagueTrimmed)) {
-      await onAddSoccerLeague(leagueTrimmed)
-    }
     const ok = mode === 'multi'
       ? await onMultiBet(sport, multiContents, oddsV, stakeN, multiContents.map(() => ''))
-      : await onBet(sport, content, oddsV, stakeN, isLive, sport === 'soccer' ? leagueTrimmed : '')
+      : await onBet(sport, content, oddsV, stakeN, isLive, '')
     setSubmitting(false)
     if (ok) onClose()
   }
@@ -1510,36 +1470,6 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
       </div>
       {mode === 'single' && (
         <SportButtonGroup value={sport} onChange={v => { setSport(v); setSportTouched(true); contentRef.current?.focus() }} />
-      )}
-      {mode === 'single' && sport === 'soccer' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <div style={{ display: 'flex', gap: 4 }}>
-            <select className="form-input inline-bet-input" style={{ flex: 1 }}
-              value={league}
-              onChange={e => { setLeague(e.target.value); setLeagueTouched(true) }}>
-              <option value="">리그 선택</option>
-              {league && !soccerLeagueOptions.includes(league) && <option value={league}>{league}</option>}
-              {soccerLeagueOptions.map(l => <option key={l} value={l}>{l}</option>)}
-            </select>
-            <button type="button" onClick={() => setAddingLeague(p => !p)} title="리그 추가" style={{
-              width: 34, height: 34, flexShrink: 0, borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)',
-              background: addingLeague ? 'var(--gold-bg)' : 'var(--bg-elevated)', color: addingLeague ? 'var(--gold)' : 'var(--text-secondary)', cursor: 'pointer',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}><Plus size={14} /></button>
-          </div>
-          {addingLeague && (
-            <div style={{ display: 'flex', gap: 4 }}>
-              <input className="form-input inline-bet-input" placeholder="새 리그 이름" value={newLeagueName}
-                onChange={e => setNewLeagueName(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && confirmAddLeague()}
-                style={{ flex: 1, fontSize: 11 }} autoFocus />
-              <button type="button" onClick={confirmAddLeague} disabled={!newLeagueName.trim()} style={{
-                fontSize: 10, fontWeight: 700, padding: '0 10px', borderRadius: 'var(--radius-sm)', cursor: newLeagueName.trim() ? 'pointer' : 'not-allowed', fontFamily: 'var(--font-body)',
-                border: '1px solid var(--gold-border)', background: 'var(--gold-bg)', color: 'var(--gold)',
-              }}>추가</button>
-            </div>
-          )}
-        </div>
       )}
       <TeamContentInput inputRef={contentRef} placeholder={mode === 'multi' ? `베팅 내용 ${LEG_MARKS[0]}` : '베팅 내용 (팀/옵션 자유 입력)'} value={content} onChange={setContent}
         candidates={[]} allBets={allBetsHistory} autoFocus onEnter={submit} />
