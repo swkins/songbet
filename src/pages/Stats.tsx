@@ -263,13 +263,15 @@ function BaseballDetailPanel({ bets, overrides, knownLeagues, onRenameLeague, on
   const allKnownLeagues = Array.from(new Set([...FIXED, ...knownLeagues]))
 
   const ml = allSettled.filter(b => b.market === 'moneyline')
-  const overBets = allSettled.filter(b => b.market === 'over')
-  const underBets = allSettled.filter(b => b.market === 'under')
+  const hcap = allSettled.filter(b => b.market === 'handicap')
+  // -1.5 마핸(정규 핸디캡, 강팀 쪽)과 5F 0.5 플핸(5회까지 핸디캡)만 추적 — 오버/언더는 제외
+  const hcapMinus15 = hcap.filter(b => !/5F/i.test(b.pick) && extractHandicapLine(b.pick) === 1.5 && extractHandicapSign(b.pick) === '-')
+  const hcap5f05 = hcap.filter(b => /5F/i.test(b.pick) && extractHandicapLine(b.pick) === 0.5)
 
-  const BASEBALL_MARKETS: { key: 'ml' | 'over' | 'under'; label: string; bets: Bet[] }[] = [
+  const BASEBALL_MARKETS: { key: 'ml' | 'hcapMinus15' | 'hcap5f05'; label: string; bets: Bet[] }[] = [
     { key: 'ml', label: '일반승', bets: ml },
-    { key: 'over', label: '오버', bets: overBets },
-    { key: 'under', label: '언더', bets: underBets },
+    { key: 'hcapMinus15', label: '-1.5 마핸', bets: hcapMinus15 },
+    { key: 'hcap5f05', label: '5F 0.5 플핸', bets: hcap5f05 },
   ]
 
   function cellStats(bets: Bet[]) {
@@ -278,18 +280,19 @@ function BaseballDetailPanel({ bets, overrides, knownLeagues, onRenameLeague, on
   }
 
   // 좌측 리그 목록 — 3개 마켓 중 하나에라도 정산된 베팅이 있는 리그만, 가나다순 (KBO/MLB/NPB 등 고정 리그 + 추가 등록 리그 통합)
-  const leaguesWithData = new Set(allSettled.filter(b => b.market === 'moneyline' || b.market === 'over' || b.market === 'under').map(leagueKeyOf))
+  const trackedBets = [...ml, ...hcapMinus15, ...hcap5f05]
+  const leaguesWithData = new Set(trackedBets.map(leagueKeyOf))
   const leagueNames = allKnownLeagues.filter(l => leaguesWithData.has(l)).sort(koCompare)
 
-  // 세 마켓에 안 걸리는 나머지(핸디캡/기타 등)는 룰북 외로 이동
-  const trackedIds = new Set([...ml, ...overBets, ...underBets].map(b => b.id))
+  // 세 마켓에 안 걸리는 나머지(오버/언더/기타 등)는 룰북 외로 이동
+  const trackedIds = new Set(trackedBets.map(b => b.id))
   const otherBets = allSettled.filter(b => !trackedIds.has(b.id))
 
   return (
     <div>
       {/* 리그별 통합 표 */}
       <div style={{ marginBottom: 14 }}>
-        <div className="card-title" style={{ marginBottom: 8 }}>⚾ 리그별 성적 (일반승 · 오버 · 언더, 리그명 가나다순, 맨 우측 3개 마켓 합산)</div>
+        <div className="card-title" style={{ marginBottom: 8 }}>⚾ 리그별 성적 (일반승 · -1.5 마핸 · 5F 0.5 플핸, 리그명 가나다순, 맨 우측 3개 마켓 합산)</div>
         {leagueNames.length > 0 ? (
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
@@ -349,8 +352,8 @@ function BaseballDetailPanel({ bets, overrides, knownLeagues, onRenameLeague, on
       {/* 마켓별 배당 0.1단위 구간 상세 — 적중률 + ROI + 총 수익률(금액 포함) */}
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
         <RuleStatsTable title="⚾ 일반승 — 0.1단위 배당 구간별" rows={oddsBinRows(ml)} extra={<MarketTotalRow bets={ml} />} />
-        <RuleStatsTable title="⚾ 오버 — 0.1단위 배당 구간별" rows={oddsBinRows(overBets)} extra={<MarketTotalRow bets={overBets} />} />
-        <RuleStatsTable title="⚾ 언더 — 0.1단위 배당 구간별" rows={oddsBinRows(underBets)} extra={<MarketTotalRow bets={underBets} />} />
+        <RuleStatsTable title="⚾ -1.5 마핸 — 0.1단위 배당 구간별" rows={oddsBinRows(hcapMinus15)} extra={<MarketTotalRow bets={hcapMinus15} />} />
+        <RuleStatsTable title="⚾ 5F 0.5 플핸 — 0.1단위 배당 구간별" rows={oddsBinRows(hcap5f05)} extra={<MarketTotalRow bets={hcap5f05} />} />
       </div>
 
       <OtherBetsPanel bets={otherBets} />
