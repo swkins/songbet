@@ -239,34 +239,6 @@ function baseballMlRows(ml: Bet[]): RuleRow[] {
   return rows
 }
 
-// ─── 기타(리그 미확인) 항목 표시 UI ──────────────────────────────────
-// ─── 종목을 잘못 고른 미분류 베팅을 다른 종목으로 이동 ───────────────
-function ChangeSportControl({ bets, currentSport, onChangeSport }: {
-  bets: Bet[]; currentSport: Sport
-  onChangeSport: (bets: Bet[], newSport: Sport) => Promise<void>
-}) {
-  const [saving, setSaving] = useState(false)
-  async function change(newSport: Sport) {
-    setSaving(true)
-    await onChangeSport(bets, newSport)
-    setSaving(false)
-  }
-  return (
-    <div style={{ marginTop: 6 }}>
-      <select
-        defaultValue=""
-        disabled={saving}
-        onChange={e => { const v = e.target.value; if (v) { change(v as Sport); e.target.value = '' } }}
-        className="form-input"
-        style={{ fontSize: 11, padding: '5px 8px', width: '100%', cursor: saving ? 'not-allowed' : 'pointer', color: 'var(--text-muted)' }}>
-        <option value="" disabled>{saving ? '이동중...' : '⚠️ 종목을 잘못 골랐다면 → 다른 종목으로 이동'}</option>
-        {SPORTS.filter(s => s.value !== currentSport).map(s => (
-          <option key={s.value} value={s.value}>{s.emoji} {s.label}</option>
-        ))}
-      </select>
-    </div>
-  )
-}
 
 // ─── 야구 리그 판별 (다른 종목과 동일한 로직) ────────────────────────
 // bet.league 값이 최우선(직접 지정/자동완성으로 저장된 값), 없으면 팀 이름 기반 KBO/MLB/NPB 추론(과거 데이터 호환),
@@ -279,12 +251,10 @@ function baseballLeagueKeyOf(b: Bet, overrides: LeagueOverride[]): string {
 
 // ─── 야구: 일반승 / 오버 / 언더 세 마켓만 — 좌측 리그명(가나다순) 고정, 우측에 마켓별 성적,
 // 맨 우측에 3개 마켓 합산 총손익/ROI를 붙인 통합 표 (축구 리그 통합표와 동일한 구조로 갈아엎음) ──
-function BaseballDetailPanel({ bets, overrides, knownLeagues, onAddLeague, onChangeSport, onDeleteGroup, onRenameLeague, onDeleteLeague }: {
+function BaseballDetailPanel({ bets, overrides, knownLeagues, onAddLeague, onRenameLeague, onDeleteLeague }: {
   bets: Bet[]
   overrides: LeagueOverride[]; knownLeagues: string[]
   onAddLeague: (name: string) => Promise<void>
-  onChangeSport: (bets: Bet[], newSport: Sport) => Promise<void>
-  onDeleteGroup: (bets: Bet[]) => void
   onRenameLeague: (oldName: string, newName: string) => Promise<void>
   onDeleteLeague: (name: string) => Promise<void>
 }) {
@@ -311,16 +281,6 @@ function BaseballDetailPanel({ bets, overrides, knownLeagues, onAddLeague, onCha
   // 좌측 리그 목록 — 3개 마켓 중 하나에라도 정산된 베팅이 있는 리그만, 가나다순 (KBO/MLB/NPB 등 고정 리그 + 추가 등록 리그 통합)
   const leaguesWithData = new Set(allSettled.filter(b => b.market === 'moneyline' || b.market === 'over' || b.market === 'under').map(leagueKeyOf))
   const leagueNames = allKnownLeagues.filter(l => leaguesWithData.has(l)).sort(koCompare)
-
-  // 리그 미확인(ETC)
-  const etcBets = allSettled.filter(b => leagueKeyOf(b) === 'ETC' && (b.market === 'moneyline' || b.market === 'over' || b.market === 'under'))
-  const etcGroups = Array.from(
-    etcBets.reduce((map, b) => {
-      if (!map.has(b.match)) map.set(b.match, [])
-      map.get(b.match)!.push(b)
-      return map
-    }, new Map<string, Bet[]>())
-  ).sort((a, b) => b[1].length - a[1].length)
 
   // 세 마켓에 안 걸리는 나머지(핸디캡/기타 등)는 룰북 외로 이동
   const trackedIds = new Set([...ml, ...overBets, ...underBets].map(b => b.id))
@@ -396,18 +356,6 @@ function BaseballDetailPanel({ bets, overrides, knownLeagues, onAddLeague, onCha
       </div>
 
       <OtherBetsPanel bets={otherBets} />
-
-      {/* 기타(리그 미확인) — 원인 확인 */}
-      {etcGroups.length > 0 && (
-        <div style={{ marginTop: 14 }}>
-          <div className="card-title" style={{ marginBottom: 8 }}>❓ 기타(리그 미확인) — {etcBets.length}건</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {etcGroups.map(([matchText, groupBets]) => (
-              <UnmatchedFreeLeagueGroup key={matchText} matchText={matchText} bets={groupBets} currentSport="baseball" onChangeSport={onChangeSport} onDeleteGroup={onDeleteGroup} />
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   )
 }
@@ -564,30 +512,6 @@ function LeagueManageModal({ leagues, onRename, onDelete, onClose }: {
   )
 }
 
-// ─── 리그 미확인 팀 그룹 표시 (축구/LOL 공용) — 종목 이동 / 삭제만 가능 ──
-function UnmatchedFreeLeagueGroup({ matchText, bets, onChangeSport, currentSport, onDeleteGroup }: {
-  matchText: string; bets: Bet[]
-  currentSport: Sport
-  onChangeSport: (bets: Bet[], newSport: Sport) => Promise<void>
-  onDeleteGroup: (bets: Bet[]) => void
-}) {
-  const s = calcStats(bets)
-  return (
-    <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, padding: '10px 12px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>
-        <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}>{matchText}</span>
-        <span style={{ fontSize: 9, color: 'var(--text-muted)', background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 4, padding: '1px 6px' }}>{s.total}건</span>
-        {s.total > 0 && <span style={{ fontSize: 10, fontWeight: 700, color: s.profit >= 0 ? '#4ade80' : '#f87171' }}>{s.profit >= 0 ? '+' : ''}{s.profit.toLocaleString()}원</span>}
-        <button type="button" onClick={() => onDeleteGroup(bets)} title="이 미분류 항목 삭제"
-          style={{ marginLeft: 'auto', border: 'none', background: 'none', color: 'var(--red)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 3, fontSize: 10, padding: 2 }}>
-          <Trash2 size={12} /> 삭제
-        </button>
-      </div>
-      <ChangeSportControl bets={bets} currentSport={currentSport} onChangeSport={onChangeSport} />
-    </div>
-  )
-}
-
 // ─── 순위 변동 배지 (어제 대비, 순위 숫자 옆에 바로 붙여서 표시) ────────
 function RankChangeBadge({ current, previous }: { current: number; previous?: number }) {
   if (previous === undefined) return <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--gold)' }}>NEW</span>
@@ -659,12 +583,10 @@ const SOCCER_MARKET_TABS: { value: SoccerMarketTab; label: string }[] = [
 
 // ─── 축구: 리그별 성적 — 좌측 리그명(가나다순) 고정, 우측에 마켓별 성적을 순서대로,
 // 맨 우측에 5개 마켓 합산 총손익/ROI를 붙인 통합 표 (리그명이 잘리는 문제 해결용) ──
-function SoccerLeagueSection({ bets, overrides, knownLeagues, onAddLeague, onChangeSport, onDeleteGroup, onRenameLeague, onDeleteLeague }: {
+function SoccerLeagueSection({ bets, overrides, knownLeagues, onAddLeague, onRenameLeague, onDeleteLeague }: {
   bets: Bet[]
   overrides: LeagueOverride[]; knownLeagues: string[]
   onAddLeague: (name: string) => Promise<void>
-  onChangeSport: (bets: Bet[], newSport: Sport) => Promise<void>
-  onDeleteGroup: (bets: Bet[]) => void
   onRenameLeague: (oldName: string, newName: string) => Promise<void>
   onDeleteLeague: (name: string) => Promise<void>
 }) {
@@ -688,16 +610,6 @@ function SoccerLeagueSection({ bets, overrides, knownLeagues, onAddLeague, onCha
   // 좌측 리그 목록 — "리그 추가"로 등록된 리그 중, 5개 마켓 중 하나에라도 정산된 베팅이 있는 리그만, 가나다순
   const leaguesWithData = new Set(marketBetLists.flat().map(leagueKeyOf))
   const leagueNames = knownLeagues.filter(l => leaguesWithData.has(l)).sort(koCompare)
-
-  // 리그 미확인(ETC)은 마켓과 무관하게 축구 전체 기준으로 모아서 보여줌
-  const etcBets = allSettled.filter(b => leagueKeyOf(b) === 'ETC')
-  const etcGroups = Array.from(
-    etcBets.reduce((map, b) => {
-      if (!map.has(b.match)) map.set(b.match, [])
-      map.get(b.match)!.push(b)
-      return map
-    }, new Map<string, Bet[]>())
-  ).sort((a, b) => b[1].length - a[1].length)
 
   function cellStats(bets: Bet[]) {
     if (!bets.length) return null
@@ -763,31 +675,15 @@ function SoccerLeagueSection({ bets, overrides, knownLeagues, onAddLeague, onCha
         <AddLeagueInput onAdd={onAddLeague} placeholder="새 리그 이름 (예: 프리미어리그)" />
         <LeagueManageList leagues={knownLeagues} onRename={onRenameLeague} onDelete={onDeleteLeague} />
       </div>
-
-      {etcGroups.length > 0 && (
-        <div style={{ marginTop: 18, padding: '12px 14px', borderRadius: 8, border: '1px solid var(--red-border)', background: 'var(--red-bg)' }}>
-          <div className="card-title" style={{ marginBottom: 4 }}>❓ 미분류 — {etcBets.length}건</div>
-          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 8 }}>
-            리그가 아직 지정되지 않은 팀들입니다. 위 리그 순위에는 포함되지 않아요. 종목을 잘못 골랐다면 아래에서 종목을 바꿔주세요.
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {etcGroups.map(([matchText, groupBets]) => (
-              <UnmatchedFreeLeagueGroup key={matchText} matchText={matchText} bets={groupBets} currentSport="soccer" onChangeSport={onChangeSport} onDeleteGroup={onDeleteGroup} />
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   )
 }
 
 // ─── 축구 상세 통계 (배당 흐름 기반 — 마켓별 0.1단위 구간 통계) ──────
-function SoccerDetailPanel({ bets, overrides, knownLeagues, onAddLeague, onChangeSport, onDeleteGroup, onRenameLeague, onDeleteLeague }: {
+function SoccerDetailPanel({ bets, overrides, knownLeagues, onAddLeague, onRenameLeague, onDeleteLeague }: {
   bets: Bet[]
   overrides: LeagueOverride[]; knownLeagues: string[]
   onAddLeague: (name: string) => Promise<void>
-  onChangeSport: (bets: Bet[], newSport: Sport) => Promise<void>
-  onDeleteGroup: (bets: Bet[]) => void
   onRenameLeague: (oldName: string, newName: string) => Promise<void>
   onDeleteLeague: (name: string) => Promise<void>
 }) {
@@ -820,7 +716,7 @@ function SoccerDetailPanel({ bets, overrides, knownLeagues, onAddLeague, onChang
 
   return (
     <div>
-      <SoccerLeagueSection bets={bets} overrides={overrides} knownLeagues={knownLeagues} onAddLeague={onAddLeague} onChangeSport={onChangeSport} onDeleteGroup={onDeleteGroup} onRenameLeague={onRenameLeague} onDeleteLeague={onDeleteLeague} />
+      <SoccerLeagueSection bets={bets} overrides={overrides} knownLeagues={knownLeagues} onAddLeague={onAddLeague} onRenameLeague={onRenameLeague} onDeleteLeague={onDeleteLeague} />
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
         {tables.map(t => <RuleStatsTable key={t.title} title={t.title} rows={t.rows} extra={<MarketTotalRow bets={t.all} />} />)}
       </div>
@@ -893,13 +789,11 @@ function GenericDetailPanel({ bets }: { bets: Bet[] }) {
 
 
 // ─── LOL(e스포츠): 리그별 성적 (가나다순, 승률·ROI·손익) + 미확인 팀 매핑 ──
-function GenericLeagueSection({ emoji, currentSport, leaguePlaceholder, bets, overrides, knownLeagues, onAddLeague, onChangeSport, onDeleteGroup, onRenameLeague, onDeleteLeague }: {
-  emoji: string; currentSport: Sport; leaguePlaceholder: string
+function GenericLeagueSection({ emoji, leaguePlaceholder, bets, overrides, knownLeagues, onAddLeague, onRenameLeague, onDeleteLeague }: {
+  emoji: string; leaguePlaceholder: string
   bets: Bet[]
   overrides: LeagueOverride[]; knownLeagues: string[]
   onAddLeague: (name: string) => Promise<void>
-  onChangeSport: (bets: Bet[], newSport: Sport) => Promise<void>
-  onDeleteGroup: (bets: Bet[]) => void
   onRenameLeague: (oldName: string, newName: string) => Promise<void>
   onDeleteLeague: (name: string) => Promise<void>
 }) {
@@ -908,15 +802,6 @@ function GenericLeagueSection({ emoji, currentSport, leaguePlaceholder, bets, ov
 
   const leagueNames = Array.from(new Set(allSettled.map(leagueKeyOf).filter(l => l !== 'ETC'))).sort(koCompare)
   const rows: RuleRow[] = leagueNames.map(l => ({ label: l, tier: 'none', bets: allSettled.filter(b => leagueKeyOf(b) === l) }))
-
-  const etcBets = allSettled.filter(b => leagueKeyOf(b) === 'ETC')
-  const etcGroups = Array.from(
-    etcBets.reduce((map, b) => {
-      if (!map.has(b.match)) map.set(b.match, [])
-      map.get(b.match)!.push(b)
-      return map
-    }, new Map<string, Bet[]>())
-  ).sort((a, b) => b[1].length - a[1].length)
 
   return (
     <div style={{ marginBottom: 14 }}>
@@ -929,20 +814,6 @@ function GenericLeagueSection({ emoji, currentSport, leaguePlaceholder, bets, ov
         <AddLeagueInput onAdd={onAddLeague} placeholder={leaguePlaceholder} />
         <LeagueManageList leagues={knownLeagues} onRename={onRenameLeague} onDelete={onDeleteLeague} />
       </div>
-
-      {etcGroups.length > 0 && (
-        <div style={{ marginTop: 18, padding: '12px 14px', borderRadius: 8, border: '1px solid var(--red-border)', background: 'var(--red-bg)' }}>
-          <div className="card-title" style={{ marginBottom: 4 }}>❓ 미분류 — {etcBets.length}건</div>
-          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 8 }}>
-            리그가 아직 지정되지 않은 팀들입니다. 위 리그별 성적에는 포함되지 않아요. 종목을 잘못 골랐다면 아래에서 종목을 바꿔주세요.
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {etcGroups.map(([matchText, groupBets]) => (
-              <UnmatchedFreeLeagueGroup key={matchText} matchText={matchText} bets={groupBets} currentSport={currentSport} onChangeSport={onChangeSport} onDeleteGroup={onDeleteGroup} />
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   )
 }
@@ -951,8 +822,6 @@ interface LeagueSectionProps {
   bets: Bet[]
   overrides: LeagueOverride[]; knownLeagues: string[]
   onAddLeague: (name: string) => Promise<void>
-  onChangeSport: (bets: Bet[], newSport: Sport) => Promise<void>
-  onDeleteGroup: (bets: Bet[]) => void
   onRenameLeague: (oldName: string, newName: string) => Promise<void>
   onDeleteLeague: (name: string) => Promise<void>
 }
@@ -1013,7 +882,7 @@ function EsportsMarketTypeSection({ bets }: { bets: Bet[] }) {
 function EsportsDetailPanel(props: LeagueSectionProps) {
   return (
     <div>
-      <GenericLeagueSection emoji="🎮" currentSport="esports" leaguePlaceholder="새 리그 이름 (예: LCK)" {...props} />
+      <GenericLeagueSection emoji="🎮" leaguePlaceholder="새 리그 이름 (예: LCK)" {...props} />
       <EsportsMarketTypeSection bets={props.bets} />
     </div>
   )
@@ -1022,7 +891,7 @@ function EsportsDetailPanel(props: LeagueSectionProps) {
 function BasketballLeagueDetailPanel(props: LeagueSectionProps) {
   return (
     <div>
-      <GenericLeagueSection emoji="🏀" currentSport="basketball" leaguePlaceholder="새 리그 이름 (예: NBA)" {...props} />
+      <GenericLeagueSection emoji="🏀" leaguePlaceholder="새 리그 이름 (예: NBA)" {...props} />
       <BasketballDetailPanel bets={props.bets} />
     </div>
   )
@@ -1031,7 +900,7 @@ function BasketballLeagueDetailPanel(props: LeagueSectionProps) {
 function VolleyballDetailPanel(props: LeagueSectionProps) {
   return (
     <div>
-      <GenericLeagueSection emoji="🏐" currentSport="volleyball" leaguePlaceholder="새 리그 이름 (예: V리그)" {...props} />
+      <GenericLeagueSection emoji="🏐" leaguePlaceholder="새 리그 이름 (예: V리그)" {...props} />
       <GenericDetailPanel bets={props.bets} />
     </div>
   )
@@ -1206,7 +1075,7 @@ function LivePanel({ bets, onDeleteRequest }: { bets: Bet[]; onDeleteRequest: ()
 }
 
 
-function SportPanel({ bets, sport, onDeleteRequest, leagueOverrides, baseballLeagues, onAddBaseballLeague, onRenameBaseballLeague, onDeleteBaseballLeague, soccerOverrides, soccerLeagues, onAddSoccerLeague, esportsOverrides, esportsLeagues, onAddEsportsLeague, onChangeSport, onDeleteGroup, onRenameSoccerLeague, onDeleteSoccerLeague, onRenameEsportsLeague, onDeleteEsportsLeague, basketballOverrides, basketballLeagues, onAddBasketballLeague, onRenameBasketballLeague, onDeleteBasketballLeague, volleyballOverrides, volleyballLeagues, onAddVolleyballLeague, onRenameVolleyballLeague, onDeleteVolleyballLeague }: {
+function SportPanel({ bets, sport, onDeleteRequest, leagueOverrides, baseballLeagues, onAddBaseballLeague, onRenameBaseballLeague, onDeleteBaseballLeague, soccerOverrides, soccerLeagues, onAddSoccerLeague, esportsOverrides, esportsLeagues, onAddEsportsLeague, onRenameSoccerLeague, onDeleteSoccerLeague, onRenameEsportsLeague, onDeleteEsportsLeague, basketballOverrides, basketballLeagues, onAddBasketballLeague, onRenameBasketballLeague, onDeleteBasketballLeague, volleyballOverrides, volleyballLeagues, onAddVolleyballLeague, onRenameVolleyballLeague, onDeleteVolleyballLeague }: {
   bets: Bet[]; sport: typeof SPORTS[0]; onDeleteRequest: () => void
   leagueOverrides: LeagueOverride[]
   baseballLeagues: string[]
@@ -1217,8 +1086,6 @@ function SportPanel({ bets, sport, onDeleteRequest, leagueOverrides, baseballLea
   onAddSoccerLeague: (name: string) => Promise<void>
   esportsOverrides: LeagueOverride[]; esportsLeagues: string[]
   onAddEsportsLeague: (name: string) => Promise<void>
-  onChangeSport: (bets: Bet[], newSport: Sport) => Promise<void>
-  onDeleteGroup: (bets: Bet[]) => void
   onRenameSoccerLeague: (oldName: string, newName: string) => Promise<void>
   onDeleteSoccerLeague: (name: string) => Promise<void>
   onRenameEsportsLeague: (oldName: string, newName: string) => Promise<void>
@@ -1301,11 +1168,11 @@ function SportPanel({ bets, sport, onDeleteRequest, leagueOverrides, baseballLea
             </table>
           </div>
         )}
-        {sport.value === 'baseball'   && <BaseballDetailPanel bets={periodBets} overrides={leagueOverrides} knownLeagues={baseballLeagues} onAddLeague={onAddBaseballLeague} onChangeSport={onChangeSport} onDeleteGroup={onDeleteGroup} onRenameLeague={onRenameBaseballLeague} onDeleteLeague={onDeleteBaseballLeague} />}
-        {sport.value === 'soccer'     && <SoccerDetailPanel bets={periodBets} overrides={soccerOverrides} knownLeagues={soccerLeagues} onAddLeague={onAddSoccerLeague} onChangeSport={onChangeSport} onDeleteGroup={onDeleteGroup} onRenameLeague={onRenameSoccerLeague} onDeleteLeague={onDeleteSoccerLeague} />}
-        {sport.value === 'basketball' && <BasketballLeagueDetailPanel bets={periodBets} overrides={basketballOverrides} knownLeagues={basketballLeagues} onAddLeague={onAddBasketballLeague} onChangeSport={onChangeSport} onDeleteGroup={onDeleteGroup} onRenameLeague={onRenameBasketballLeague} onDeleteLeague={onDeleteBasketballLeague} />}
-        {sport.value === 'esports'    && <EsportsDetailPanel bets={periodBets} overrides={esportsOverrides} knownLeagues={esportsLeagues} onAddLeague={onAddEsportsLeague} onChangeSport={onChangeSport} onDeleteGroup={onDeleteGroup} onRenameLeague={onRenameEsportsLeague} onDeleteLeague={onDeleteEsportsLeague} />}
-        {sport.value === 'volleyball' && <VolleyballDetailPanel bets={periodBets} overrides={volleyballOverrides} knownLeagues={volleyballLeagues} onAddLeague={onAddVolleyballLeague} onChangeSport={onChangeSport} onDeleteGroup={onDeleteGroup} onRenameLeague={onRenameVolleyballLeague} onDeleteLeague={onDeleteVolleyballLeague} />}
+        {sport.value === 'baseball'   && <BaseballDetailPanel bets={periodBets} overrides={leagueOverrides} knownLeagues={baseballLeagues} onAddLeague={onAddBaseballLeague} onRenameLeague={onRenameBaseballLeague} onDeleteLeague={onDeleteBaseballLeague} />}
+        {sport.value === 'soccer'     && <SoccerDetailPanel bets={periodBets} overrides={soccerOverrides} knownLeagues={soccerLeagues} onAddLeague={onAddSoccerLeague} onRenameLeague={onRenameSoccerLeague} onDeleteLeague={onDeleteSoccerLeague} />}
+        {sport.value === 'basketball' && <BasketballLeagueDetailPanel bets={periodBets} overrides={basketballOverrides} knownLeagues={basketballLeagues} onAddLeague={onAddBasketballLeague} onRenameLeague={onRenameBasketballLeague} onDeleteLeague={onDeleteBasketballLeague} />}
+        {sport.value === 'esports'    && <EsportsDetailPanel bets={periodBets} overrides={esportsOverrides} knownLeagues={esportsLeagues} onAddLeague={onAddEsportsLeague} onRenameLeague={onRenameEsportsLeague} onDeleteLeague={onDeleteEsportsLeague} />}
+        {sport.value === 'volleyball' && <VolleyballDetailPanel bets={periodBets} overrides={volleyballOverrides} knownLeagues={volleyballLeagues} onAddLeague={onAddVolleyballLeague} onRenameLeague={onRenameVolleyballLeague} onDeleteLeague={onDeleteVolleyballLeague} />}
         {!['baseball','soccer','basketball','esports','volleyball'].includes(sport.value) && <GenericDetailPanel bets={periodBets} />}
       </div>
 
@@ -1358,19 +1225,6 @@ export default function Stats() {
   async function loadBets() {
     const { data } = await supabase.from('bets').select('*').order('bet_date').order('created_at')
     if (data) setRawBets(data)
-  }
-  // 종목을 잘못 고른 "리그 미확인" 베팅을 올바른 종목으로 이동 (해당 종목 목록에서 사라지고 대상 종목 목록으로 옮겨짐)
-  async function changeBetsSport(betsToMove: Bet[], newSport: Sport) {
-    const ids = betsToMove.map(b => b.id)
-    if (!ids.length) return
-    await supabase.from('bets').update({ sport: newSport }).in('id', ids)
-    await loadBets()
-  }
-  // 미분류 그룹 삭제 — 그룹에 속한 베팅 id만 정확히 매칭해 기존 삭제 확인 모달(DeleteBetsModal)을 그대로 재사용
-  function onDeleteGroupBets(groupBets: Bet[]) {
-    if (!groupBets.length) return
-    const ids = new Set(groupBets.map(b => b.id))
-    setDeleteTarget({ label: groupBets[0].match, emoji: '❓', matchFn: b => ids.has(b.id) })
   }
   async function loadSites() {
     const { data } = await supabase.from('sites').select('*')
@@ -1795,8 +1649,6 @@ export default function Stats() {
               esportsOverrides={esportsOverrides}
               esportsLeagues={esportsLeagues}
               onAddEsportsLeague={addEsportsLeague}
-              onChangeSport={changeBetsSport}
-              onDeleteGroup={onDeleteGroupBets}
               onRenameSoccerLeague={renameSoccerLeague}
               onDeleteSoccerLeague={deleteSoccerLeague}
               onRenameEsportsLeague={renameEsportsLeague}
