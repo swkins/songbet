@@ -14,7 +14,7 @@ import {
   RotateCcw, Settings, Flame,
   CheckCircle, XCircle, Ban, MinusCircle, Gift, GripVertical, DollarSign,
   TrendingUp, TrendingDown, ArrowDownToLine, LogOut, Pencil,
-  ClipboardPaste, ChevronUp, ChevronDown, Star,
+  ClipboardPaste, ChevronUp, ChevronDown, Star, ListChecks,
 } from 'lucide-react'
 
 const SPORTS: { value: Sport; label: string }[] = [
@@ -88,14 +88,15 @@ function suggestLeague(sport: string, content: string, baseballOverrides: League
   return ''
 }
 
-/* ── 경기 내용 입력창: 팀 이름 자동완성 ── */
-function TeamContentInput({ value, onChange, candidates, allBets: _allBets, placeholder, inputRef, autoFocus, onEnter }: {
+/* ── 경기 내용 입력창: 팀 이름 자동완성(제거됨) + 빈칸 클릭 시 "베팅관리"에서 체크한 빠른 선택 목록 ── */
+function TeamContentInput({ value, onChange, candidates, allBets: _allBets, placeholder, inputRef, autoFocus, onEnter, quickPicks }: {
   value: string; onChange: (v: string) => void
   candidates: TeamCandidate[]; allBets: BetLite[]
   placeholder: string
   inputRef?: React.RefObject<HTMLInputElement>
   autoFocus?: boolean
   onEnter?: () => void
+  quickPicks?: string[]
 }) {
   const [open, setOpen] = useState(false)
   const [hi, setHi] = useState(-1)
@@ -103,7 +104,8 @@ function TeamContentInput({ value, onChange, candidates, allBets: _allBets, plac
   const ref = inputRef ?? localRef
   // 자동완성 제거 (요청에 따라 순수 자유입력만 지원) — candidates는 더 이상 사용하지 않는다
   void candidates
-  const suggestions: string[] = []
+  // 값이 비어있을 때만 "베팅관리"에서 체크한 빠른 선택 목록을 보여준다
+  const suggestions: string[] = !value.trim() && quickPicks?.length ? quickPicks : []
 
   function pick(name: string) {
     onChange(name)
@@ -559,13 +561,14 @@ function DefaultStakeInput({ site, onCommit }: { site: Site; onCommit: (site: Si
   )
 }
 
-function SiteMgrModal({ sites, onClose, onAdd, onDelete, onToggleCurrency, onReorder, onUpdateDefaultStake }: {
+function SiteMgrModal({ sites, onClose, onAdd, onDelete, onToggleCurrency, onReorder, onUpdateDefaultStake, onToggleBetType }: {
   sites: Site[]; onClose: () => void
   onAdd: (name: string, currency: 'krw' | 'usd') => void
   onDelete: (id: string) => void
   onToggleCurrency: (site: Site) => void
   onReorder: (from: string, to: string) => void
   onUpdateDefaultStake: (site: Site, val: number) => void
+  onToggleBetType: (site: Site) => void
 }) {
   const [newName, setNewName] = useState('')
   const [newCurrency, setNewCurrency] = useState<'krw' | 'usd'>('krw')
@@ -600,6 +603,12 @@ function SiteMgrModal({ sites, onClose, onAdd, onDelete, onToggleCurrency, onReo
               <GripVertical size={12} color="var(--text-muted)" style={{ flexShrink: 0 }} />
               <span style={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0, background: s.active ? 'var(--green)' : 'var(--border)', boxShadow: s.active ? '0 0 5px var(--green)' : 'none' }} />
               <span className="site-mgr-name">{s.name}</span>
+              <button onClick={() => onToggleBetType(s)} title="베팅추가 시 기본으로 열릴 베팅 모드 (클릭해서 전환)" style={{
+                width: 40, flexShrink: 0, background: s.bet_type === 'double' ? 'var(--purple-bg)' : 'var(--bg-elevated)',
+                border: `1px solid ${s.bet_type === 'double' ? 'var(--purple-border)' : 'var(--border)'}`, borderRadius: 4,
+                color: s.bet_type === 'double' ? 'var(--purple)' : 'var(--text-muted)', cursor: 'pointer', padding: '2px 0',
+                fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-body)',
+              }}>{s.bet_type === 'double' ? '다폴' : '단폴'}</button>
               <DefaultStakeInput site={s} onCommit={onUpdateDefaultStake} />
               <button onClick={() => onToggleCurrency(s)} title="KRW/USD" style={{ background: s.currency === 'usd' ? 'var(--blue-bg)' : 'var(--bg-elevated)', border: `1px solid ${s.currency === 'usd' ? 'var(--blue-border)' : 'var(--border)'}`, borderRadius: 4, color: s.currency === 'usd' ? 'var(--blue)' : 'var(--text-muted)', cursor: 'pointer', padding: '2px 7px', fontSize: 10, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 3, flexShrink: 0 }}>
                 {s.currency === 'usd' ? <><DollarSign size={10} /> USD</> : '₩ KRW'}
@@ -616,6 +625,42 @@ function SiteMgrModal({ sites, onClose, onAdd, onDelete, onToggleCurrency, onReo
             </button>
             <button className="btn btn-primary" onClick={() => { if (newName.trim()) { onAdd(newName.trim(), newCurrency); setNewName('') }}} style={{ flexShrink: 0 }}><Plus size={12} /> 추가</button>
           </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* ── 베팅 관리 모달 — 체크한 베팅은 다폴 베팅 내용 빈칸 클릭 시 빠른 선택 목록으로 노출 ── */
+function BetManageModal({ bets, onClose, onToggleQuickPick }: {
+  bets: Bet[]; onClose: () => void
+  onToggleQuickPick: (bet: Bet) => void
+}) {
+  const [query, setQuery] = useState('')
+  const sorted = [...bets].sort((a, b) => (b.bet_date + b.created_at).localeCompare(a.bet_date + a.created_at))
+  const filtered = query.trim() ? sorted.filter(b => b.match.includes(query.trim())) : sorted
+
+  return (
+    <div className="modal-overlay">
+      <div className="modal" style={{ maxWidth: 480 }}>
+        <div className="modal-title" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><ListChecks size={16} color="var(--gold)" /> 베팅 관리</div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex' }}><X size={16} /></button>
+        </div>
+        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 8 }}>
+          체크한 베팅은 다폴 베팅 내용 빈칸을 클릭했을 때 빠른 선택 목록으로 나타납니다.
+        </div>
+        <input className="form-input" placeholder="검색..." value={query} onChange={e => setQuery(e.target.value)} style={{ fontSize: 12, marginBottom: 10 }} />
+        <div style={{ maxHeight: 420, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
+          {filtered.length === 0 && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '16px 0', textAlign: 'center' }}>베팅 내역이 없습니다</div>}
+          {filtered.map(b => (
+            <label key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 4px', borderBottom: '1px solid var(--border-light)', cursor: 'pointer' }}>
+              <input type="checkbox" checked={b.is_quick_pick} onChange={() => onToggleQuickPick(b)} style={{ flexShrink: 0, cursor: 'pointer' }} />
+              <span style={{ fontSize: 9, color: 'var(--text-muted)', flexShrink: 0, width: 60 }}>{dayjs(b.bet_date).format('MM/DD')}</span>
+              <span style={{ fontSize: 12, color: 'var(--text-primary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.match}</span>
+              <span style={{ fontSize: 10, color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', flexShrink: 0 }}>{b.odds.toFixed(2)}</span>
+            </label>
+          ))}
         </div>
       </div>
     </div>
@@ -1343,10 +1388,11 @@ function StructuredTeamPicker({ sport, leagues, favoriteLeagues, teams, allTeams
   )
 }
 
-function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, baseballOverrides, soccerOverrides, basketballOverrides, volleyballOverrides, teamCandidates, allBetsHistory, leagueCandidates, soccerLeagues, baseballLeagues, basketballLeagues, volleyballLeagues, esportsLeagues, soccerFavoriteLeagues, baseballFavoriteLeagues, basketballFavoriteLeagues, volleyballFavoriteLeagues, esportsFavoriteLeagues, onToggleSoccerLeagueFavorite, onToggleBaseballLeagueFavorite, onToggleBasketballLeagueFavorite, onToggleVolleyballLeagueFavorite, onToggleEsportsLeagueFavorite, soccerTeams, baseballTeams, basketballTeams, volleyballTeams, esportsTeams, onAddSoccerLeague, onAddBaseballLeague, onAddBasketballLeague, onAddVolleyballLeague, onAddEsportsLeague, onRenameSoccerLeague, onDeleteSoccerLeague, onRenameBaseballLeague, onDeleteBaseballLeague, onRenameBasketballLeague, onDeleteBasketballLeague, onRenameVolleyballLeague, onDeleteVolleyballLeague, onRenameEsportsLeague, onDeleteEsportsLeague, onAddSoccerTeam, onAddBaseballTeam, onAddBasketballTeam, onAddVolleyballTeam, onAddEsportsTeam, onRenameSoccerTeam, onDeleteSoccerTeam, onRenameBaseballTeam, onDeleteBaseballTeam, onRenameBasketballTeam, onDeleteBasketballTeam, onRenameVolleyballTeam, onDeleteVolleyballTeam, onRenameEsportsTeam, onDeleteEsportsTeam }: {
+function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, baseballOverrides, soccerOverrides, basketballOverrides, volleyballOverrides, teamCandidates, allBetsHistory, leagueCandidates, soccerLeagues, baseballLeagues, basketballLeagues, volleyballLeagues, esportsLeagues, soccerFavoriteLeagues, baseballFavoriteLeagues, basketballFavoriteLeagues, volleyballFavoriteLeagues, esportsFavoriteLeagues, onToggleSoccerLeagueFavorite, onToggleBaseballLeagueFavorite, onToggleBasketballLeagueFavorite, onToggleVolleyballLeagueFavorite, onToggleEsportsLeagueFavorite, soccerTeams, baseballTeams, basketballTeams, volleyballTeams, esportsTeams, onAddSoccerLeague, onAddBaseballLeague, onAddBasketballLeague, onAddVolleyballLeague, onAddEsportsLeague, onRenameSoccerLeague, onDeleteSoccerLeague, onRenameBaseballLeague, onDeleteBaseballLeague, onRenameBasketballLeague, onDeleteBasketballLeague, onRenameVolleyballLeague, onDeleteVolleyballLeague, onRenameEsportsLeague, onDeleteEsportsLeague, onAddSoccerTeam, onAddBaseballTeam, onAddBasketballTeam, onAddVolleyballTeam, onAddEsportsTeam, onRenameSoccerTeam, onDeleteSoccerTeam, onRenameBaseballTeam, onDeleteBaseballTeam, onRenameBasketballTeam, onDeleteBasketballTeam, onRenameVolleyballTeam, onDeleteVolleyballTeam, onRenameEsportsTeam, onDeleteEsportsTeam, quickPicks }: {
   site: Site; onClose: () => void; defaultSport: string
   onBet: (sport: string, content: string, odds: number, amount: number, isLive: boolean, league: string) => Promise<boolean>
   onMultiBet: (sport: string, contents: string[], odds: number, amount: number, leagues: string[]) => Promise<boolean>
+  quickPicks: string[]
   baseballOverrides: LeagueOverride[]; soccerOverrides: LeagueOverride[]
   basketballOverrides: LeagueOverride[]; volleyballOverrides: LeagueOverride[]
   teamCandidates: TeamCandidate[]; allBetsHistory: BetLite[]; leagueCandidates: LeagueCandidate[]
@@ -1370,12 +1416,12 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
 }) {
   const isusd = site.currency === 'usd'; const unit = isusd ? '$' : '원'
   const defaultAmount = site.default_stake > 0 ? String(site.default_stake) : (isusd ? '5' : '10000')
-  const [sport, setSport]       = useState<string>(defaultSport || 'soccer')
+  const [sport, setSport]       = useState<string>(site.bet_type === 'double' ? 'other' : (defaultSport || 'soccer'))
   const [sportTouched, setSportTouched] = useState(false)
   const [content, setContent]   = useState('')
   // 베팅 모드: 단폴 / 다폴. 다폴은 리그 없이 경기 내용 여러 개(최대 4개) + 배당/금액 공유.
   // 항상 단폴 기본 (두폴은 필요할 때만 수동으로 전환)
-  const [mode, setMode] = useState<'single' | 'multi'>('single')
+  const [mode, setMode] = useState<'single' | 'multi'>(site.bet_type === 'double' ? 'multi' : 'single')
   // 경기 내용 ①은 content, 나머지(②③④)는 extraContents에 담는다
   const [extraContents, setExtraContents] = useState<string[]>([''])
   const [oddsRaw, setOddsRaw]   = useState('')
@@ -1459,13 +1505,13 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
         <SportButtonGroup value={sport} onChange={v => { setSport(v); setSportTouched(true); contentRef.current?.focus() }} />
       )}
       <TeamContentInput inputRef={contentRef} placeholder={mode === 'multi' ? `베팅 내용 ${LEG_MARKS[0]}` : '베팅 내용 (팀/옵션 자유 입력)'} value={content} onChange={setContent}
-        candidates={[]} allBets={allBetsHistory} autoFocus onEnter={submit} />
+        candidates={[]} allBets={allBetsHistory} autoFocus onEnter={submit} quickPicks={mode === 'multi' ? quickPicks : undefined} />
       {mode === 'multi' && extraContents.map((c, i) => (
         <div key={i} style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <TeamContentInput placeholder={`베팅 내용 ${LEG_MARKS[i + 1] ?? i + 2}`} value={c}
               onChange={v => setExtraContents(p => p.map((pc, pi) => pi === i ? v : pc))}
-              candidates={[]} allBets={allBetsHistory} onEnter={submit} />
+              candidates={[]} allBets={allBetsHistory} onEnter={submit} quickPicks={quickPicks} />
           </div>
           {i === extraContents.length - 1 && extraContents.length + 1 < MULTI_MAX_LEGS ? (
             <button type="button" onClick={addLeg} title="다리 추가" style={{
@@ -1668,6 +1714,7 @@ export default function Dashboard() {
   const [gameRollings, setGameRollings] = useState<GameRolling[]>([])
 
   const [showSiteMgr, setShowSiteMgr]   = useState(false)
+  const [showBetMgr, setShowBetMgr]     = useState(false)
   const [depositSite, setDepositSite]   = useState<Site | null>(null)
   const [withdrawSite, setWithdrawSite] = useState<Site | null>(null)
   const [openFormSiteId, setOpenFormSiteId] = useState<string | null>(null)
@@ -1693,6 +1740,8 @@ export default function Dashboard() {
   const [allBetsHistory, setAllBetsHistory] = useState<BetLite[]>([])
   const teamCandidates = useMemo(() => buildTeamCandidates(allBetsHistory), [allBetsHistory])
   const leagueCandidates = useMemo(() => buildLeagueCandidates(allBetsHistory), [allBetsHistory])
+  // 베팅관리에서 체크한 베팅 내용 — 다폴 베팅 내용 빈칸 클릭 시 빠른 선택 목록으로 노출
+  const quickPickContents = useMemo(() => Array.from(new Set(bets.filter(b => b.is_quick_pick).map(b => b.match))), [bets])
   // 축구/야구/농구/배구/LOL — 리그/팀 직접 등록 후 자동완성으로 선택하는 방식 (자유입력 대신)
   const [soccerLeagues, setSoccerLeagues] = useState<string[]>([])
   const [baseballLeagues, setBaseballLeagues] = useState<string[]>([])
@@ -1733,6 +1782,11 @@ export default function Dashboard() {
   async function loadBets() {
     const { data } = await supabase.from('bets').select('*').eq('is_hidden', false).order('bet_date', { ascending: true }).order('created_at', { ascending: true })
     if (data) setBets(data)
+  }
+  // 베팅관리에서 체크한 베팅 — 다폴 베팅 내용 빈칸 클릭 시 빠른 선택 목록에 노출
+  async function toggleQuickPick(bet: Bet) {
+    const { data } = await supabase.from('bets').update({ is_quick_pick: !bet.is_quick_pick }).eq('id', bet.id).select().single()
+    if (data) setBets(p => p.map(b => b.id === bet.id ? data : b))
   }
   async function loadGameRollings() {
     const { data } = await supabase.from('game_rollings').select('*').order('created_at', { ascending: true })
@@ -2034,6 +2088,11 @@ export default function Dashboard() {
   }
   async function toggleCurrency(site: Site) {
     const { data } = await supabase.from('sites').update({ currency: site.currency === 'krw' ? 'usd' : 'krw' }).eq('id', site.id).select().single()
+    if (data) setSites(p => p.map(s => s.id === site.id ? data : s))
+  }
+  // 주력(기본 베팅 모드) — 단폴/다폴 전환. 다폴 사이트는 베팅추가 시 다폴 모드로 시작함
+  async function toggleBetType(site: Site) {
+    const { data } = await supabase.from('sites').update({ bet_type: site.bet_type === 'double' ? 'single' : 'double' }).eq('id', site.id).select().single()
     if (data) setSites(p => p.map(s => s.id === site.id ? data : s))
   }
   async function updateDefaultStake(site: Site, val: number) {
@@ -2561,6 +2620,9 @@ export default function Dashboard() {
                   <button onClick={() => setShowSiteMgr(true)} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-secondary)', cursor: 'pointer', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-body)' }}>
                     <Settings size={12} /> 사이트관리
                   </button>
+                  <button onClick={() => setShowBetMgr(true)} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-secondary)', cursor: 'pointer', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-body)' }}>
+                    <ListChecks size={12} /> 베팅관리
+                  </button>
                 </div>
               </div>
               <div className="site-cards-wrap" style={{ '--site-cols': colCount } as React.CSSProperties}>
@@ -2645,7 +2707,7 @@ export default function Dashboard() {
                           ) : openFormType === 'game' ? (
                             <GameRollingForm site={site} onClose={() => setOpenFormSiteId(null)} onSubmit={amt => submitGameRolling(site, amt)} />
                           ) : (
-                            <SingleBetForm site={site} defaultSport={betsBySite(site.id).slice(-1)[0]?.sport ?? 'soccer'} onClose={() => setOpenFormSiteId(null)} onBet={(sp,ct,od,amt,lv,lg) => submitBet(site,sp,ct,od,amt,lv,lg)} onMultiBet={(sp,cs,od,amt,lgs) => submitMultiBet(site,sp,cs,od,amt,lgs)} baseballOverrides={baseballOverrides} soccerOverrides={soccerOverrides} basketballOverrides={basketballOverrides} volleyballOverrides={volleyballOverrides} teamCandidates={teamCandidates} allBetsHistory={allBetsHistory} leagueCandidates={leagueCandidates} soccerLeagues={soccerLeagues} baseballLeagues={baseballLeagues} basketballLeagues={basketballLeagues} volleyballLeagues={volleyballLeagues} esportsLeagues={esportsLeagues} soccerFavoriteLeagues={soccerFavoriteLeagues} baseballFavoriteLeagues={baseballFavoriteLeagues} basketballFavoriteLeagues={basketballFavoriteLeagues} volleyballFavoriteLeagues={volleyballFavoriteLeagues} esportsFavoriteLeagues={esportsFavoriteLeagues} onToggleSoccerLeagueFavorite={toggleSoccerLeagueFavorite} onToggleBaseballLeagueFavorite={toggleBaseballLeagueFavorite} onToggleBasketballLeagueFavorite={toggleBasketballLeagueFavorite} onToggleVolleyballLeagueFavorite={toggleVolleyballLeagueFavorite} onToggleEsportsLeagueFavorite={toggleEsportsLeagueFavorite} soccerTeams={soccerTeams} baseballTeams={baseballTeams} basketballTeams={basketballTeams} volleyballTeams={volleyballTeams} esportsTeams={esportsTeams} onAddSoccerLeague={addSoccerLeague} onAddBaseballLeague={addBaseballLeague} onAddBasketballLeague={addBasketballLeague} onAddVolleyballLeague={addVolleyballLeague} onAddEsportsLeague={addEsportsLeague} onRenameSoccerLeague={renameSoccerLeague} onDeleteSoccerLeague={deleteSoccerLeague} onRenameBaseballLeague={renameBaseballLeague} onDeleteBaseballLeague={deleteBaseballLeague} onRenameBasketballLeague={renameBasketballLeague} onDeleteBasketballLeague={deleteBasketballLeague} onRenameVolleyballLeague={renameVolleyballLeague} onDeleteVolleyballLeague={deleteVolleyballLeague} onRenameEsportsLeague={renameEsportsLeague} onDeleteEsportsLeague={deleteEsportsLeague} onAddSoccerTeam={addSoccerTeam} onAddBaseballTeam={addBaseballTeam} onAddBasketballTeam={addBasketballTeam} onAddVolleyballTeam={addVolleyballTeam} onAddEsportsTeam={addEsportsTeam} onRenameSoccerTeam={renameSoccerTeam} onDeleteSoccerTeam={deleteSoccerTeam} onRenameBaseballTeam={renameBaseballTeam} onDeleteBaseballTeam={deleteBaseballTeam} onRenameBasketballTeam={renameBasketballTeam} onDeleteBasketballTeam={deleteBasketballTeam} onRenameVolleyballTeam={renameVolleyballTeam} onDeleteVolleyballTeam={deleteVolleyballTeam} onRenameEsportsTeam={renameEsportsTeam} onDeleteEsportsTeam={deleteEsportsTeam} />
+                            <SingleBetForm site={site} defaultSport={betsBySite(site.id).slice(-1)[0]?.sport ?? 'soccer'} onClose={() => setOpenFormSiteId(null)} onBet={(sp,ct,od,amt,lv,lg) => submitBet(site,sp,ct,od,amt,lv,lg)} onMultiBet={(sp,cs,od,amt,lgs) => submitMultiBet(site,sp,cs,od,amt,lgs)} baseballOverrides={baseballOverrides} soccerOverrides={soccerOverrides} basketballOverrides={basketballOverrides} volleyballOverrides={volleyballOverrides} teamCandidates={teamCandidates} allBetsHistory={allBetsHistory} leagueCandidates={leagueCandidates} soccerLeagues={soccerLeagues} baseballLeagues={baseballLeagues} basketballLeagues={basketballLeagues} volleyballLeagues={volleyballLeagues} esportsLeagues={esportsLeagues} soccerFavoriteLeagues={soccerFavoriteLeagues} baseballFavoriteLeagues={baseballFavoriteLeagues} basketballFavoriteLeagues={basketballFavoriteLeagues} volleyballFavoriteLeagues={volleyballFavoriteLeagues} esportsFavoriteLeagues={esportsFavoriteLeagues} onToggleSoccerLeagueFavorite={toggleSoccerLeagueFavorite} onToggleBaseballLeagueFavorite={toggleBaseballLeagueFavorite} onToggleBasketballLeagueFavorite={toggleBasketballLeagueFavorite} onToggleVolleyballLeagueFavorite={toggleVolleyballLeagueFavorite} onToggleEsportsLeagueFavorite={toggleEsportsLeagueFavorite} soccerTeams={soccerTeams} baseballTeams={baseballTeams} basketballTeams={basketballTeams} volleyballTeams={volleyballTeams} esportsTeams={esportsTeams} onAddSoccerLeague={addSoccerLeague} onAddBaseballLeague={addBaseballLeague} onAddBasketballLeague={addBasketballLeague} onAddVolleyballLeague={addVolleyballLeague} onAddEsportsLeague={addEsportsLeague} onRenameSoccerLeague={renameSoccerLeague} onDeleteSoccerLeague={deleteSoccerLeague} onRenameBaseballLeague={renameBaseballLeague} onDeleteBaseballLeague={deleteBaseballLeague} onRenameBasketballLeague={renameBasketballLeague} onDeleteBasketballLeague={deleteBasketballLeague} onRenameVolleyballLeague={renameVolleyballLeague} onDeleteVolleyballLeague={deleteVolleyballLeague} onRenameEsportsLeague={renameEsportsLeague} onDeleteEsportsLeague={deleteEsportsLeague} onAddSoccerTeam={addSoccerTeam} onAddBaseballTeam={addBaseballTeam} onAddBasketballTeam={addBasketballTeam} onAddVolleyballTeam={addVolleyballTeam} onAddEsportsTeam={addEsportsTeam} onRenameSoccerTeam={renameSoccerTeam} onDeleteSoccerTeam={deleteSoccerTeam} onRenameBaseballTeam={renameBaseballTeam} onDeleteBaseballTeam={deleteBaseballTeam} onRenameBasketballTeam={renameBasketballTeam} onDeleteBasketballTeam={deleteBasketballTeam} onRenameVolleyballTeam={renameVolleyballTeam} onDeleteVolleyballTeam={deleteVolleyballTeam} onRenameEsportsTeam={renameEsportsTeam} onDeleteEsportsTeam={deleteEsportsTeam} quickPicks={quickPickContents} />
                           )}
                         </div>
                       )}
@@ -2946,7 +3008,10 @@ export default function Dashboard() {
 
       {/* 모달 */}
       {showSiteMgr && (
-        <SiteMgrModal sites={sites} onClose={() => setShowSiteMgr(false)} onAdd={addSite} onDelete={deleteSite} onToggleCurrency={toggleCurrency} onReorder={reorderSites} onUpdateDefaultStake={updateDefaultStake} />
+        <SiteMgrModal sites={sites} onClose={() => setShowSiteMgr(false)} onAdd={addSite} onDelete={deleteSite} onToggleCurrency={toggleCurrency} onReorder={reorderSites} onUpdateDefaultStake={updateDefaultStake} onToggleBetType={toggleBetType} />
+      )}
+      {showBetMgr && (
+        <BetManageModal bets={bets} onClose={() => setShowBetMgr(false)} onToggleQuickPick={toggleQuickPick} />
       )}
       {depositSite && <DepositModal site={depositSite} onClose={() => setDepositSite(null)} onDeposit={doDeposit} onPoint={doPoint} />}
       {withdrawSite && <WithdrawModal site={withdrawSite} onClose={() => setWithdrawSite(null)} onWithdraw={doWithdraw} />}
