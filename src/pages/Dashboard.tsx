@@ -1461,36 +1461,19 @@ function StructuredTeamPicker({ sport, leagues, favoriteLeagues, teams, allTeams
   )
 }
 
-/* ── 리그 표시/편집 — 평소엔 추론된 리그를 라벨로 보여주고, 클릭하면 자동완성 입력으로 전환 ── */
-function LeagueClickEdit({ league, editing, onStartEdit, onChange, onDone, candidates }: {
-  league: string
-  editing: boolean
-  onStartEdit: () => void
+/* ── 리그 입력창 — 배당/금액처럼 항상 입력 가능한 칸으로 표시, 탭으로 바로 진입해 수정 ── */
+function LeagueInputField({ value, onChange, candidates }: {
+  value: string
   onChange: (v: string) => void
-  onDone: () => void
   candidates: LeagueCandidate[]
 }) {
   const [open, setOpen] = useState(false)
   const [hi, setHi] = useState(-1)
-  const suggestions = suggestLeagueCandidates(league, candidates)
+  const suggestions = suggestLeagueCandidates(value, candidates)
 
   function pick(name: string) {
     onChange(name)
     setOpen(false); setHi(-1)
-    onDone()
-  }
-
-  if (!editing) {
-    return (
-      <button type="button" onClick={onStartEdit} style={{
-        display: 'flex', alignItems: 'center', gap: 5, alignSelf: 'flex-start',
-        background: 'none', border: 'none', cursor: 'pointer', padding: '2px 0',
-        fontSize: 11, color: league ? 'var(--text-secondary)' : 'var(--text-muted)', fontFamily: 'var(--font-body)',
-      }}>
-        <span>리그: {league || '자동 추론중...'}</span>
-        <Pencil size={10} />
-      </button>
-    )
   }
 
   return (
@@ -1498,20 +1481,18 @@ function LeagueClickEdit({ league, editing, onStartEdit, onChange, onDone, candi
       <input
         className="form-input inline-bet-input"
         placeholder="리그 (예: 프리미어리그)"
-        value={league}
-        autoFocus
+        value={value}
         onChange={e => { onChange(e.target.value); setOpen(true); setHi(-1) }}
         onFocus={() => setOpen(true)}
-        onBlur={() => setTimeout(() => { setOpen(false); onDone() }, 150)}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
         onKeyDown={e => {
           if (open && suggestions.length > 0) {
             if (e.key === 'ArrowDown') { e.preventDefault(); setHi(p => Math.min(p + 1, suggestions.length - 1)); return }
             if (e.key === 'ArrowUp') { e.preventDefault(); setHi(p => Math.max(p - 1, 0)); return }
             if (e.key === 'Enter' && hi >= 0) { e.preventDefault(); pick(suggestions[hi]); return }
+            if (e.key === 'Escape') { setOpen(false); setHi(-1); return }
           }
-          if (e.key === 'Enter' || e.key === 'Escape') onDone()
         }}
-        style={{ fontSize: 11 }}
       />
       {open && suggestions.length > 0 && (
         <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 30, marginTop: 2, background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 6, maxHeight: 170, overflowY: 'auto', boxShadow: '0 4px 12px rgba(0,0,0,0.3)' }}>
@@ -1560,10 +1541,10 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
   const [sportTouched, setSportTouched] = useState(false)
   const [content, setContent]   = useState('')
   // 리그(현재는 축구만) — 베팅 내용에 쓴 팀 이름으로 과거 베팅 이력에서 자동 추론.
-  // 직접 수정하고 싶으면 클릭해서 편집 모드로 전환(그 이후엔 자동 추론이 덮어쓰지 않음).
+  // 배당/금액처럼 항상 입력 가능한 칸으로 표시되며, 직접 수정하면(탭으로 이동해 바로 입력)
+  // 그 이후엔 자동 추론이 덮어쓰지 않음.
   const [league, setLeague] = useState('')
   const [leagueTouched, setLeagueTouched] = useState(false)
-  const [editingLeague, setEditingLeague] = useState(false)
   const soccerLeagueCandidates: LeagueCandidate[] = soccerLeagues.map(name => ({ name, lastDate: '' }))
   const soccerTeamLeagueHistory = useMemo(() => {
     return allBetsHistory
@@ -1678,12 +1659,9 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
       <TeamContentInput inputRef={contentRef} placeholder={mode === 'multi' ? `베팅 내용 ${LEG_MARKS[0]}` : '베팅 내용 (팀/옵션 자유 입력)'} value={content} onChange={setContent}
         candidates={[]} allBets={allBetsHistory} autoFocus onEnter={submit} quickPicks={mode === 'multi' ? quickPicks : undefined} />
       {mode === 'single' && sport === 'soccer' && (
-        <LeagueClickEdit
-          league={league}
-          editing={editingLeague}
-          onStartEdit={() => setEditingLeague(true)}
+        <LeagueInputField
+          value={league}
           onChange={v => { setLeague(v); setLeagueTouched(true) }}
-          onDone={() => setEditingLeague(false)}
           candidates={soccerLeagueCandidates}
         />
       )}
