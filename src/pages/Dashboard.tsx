@@ -2,7 +2,7 @@ import { useEffect, useState, useRef, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
 import { logAction } from '../lib/logger'
 import type { Bet, Site, Sport, Market, BetResult, GameRolling } from '../types'
-import { inferBaseballLeague, inferSoccerLeague, inferLeagueByKeyword, buildLeagueCandidates, koCompare, type LeagueOverride, type LeagueCandidate } from '../lib/league'
+import { inferBaseballLeague, inferSoccerLeague, inferLeagueByKeyword, buildLeagueCandidates, suggestLeagueCandidates, koCompare, type LeagueOverride, type LeagueCandidate } from '../lib/league'
 import { buildTeamCandidates, suggestTeamCandidates, getTeamInsight, getEsportsLeague, type TeamCandidate, type BetLite } from '../lib/teamInsight'
 import { sportGlyph } from '../components/SportIcons'
 import MiningWidget from '../components/MiningWidget'
@@ -1461,6 +1461,73 @@ function StructuredTeamPicker({ sport, leagues, favoriteLeagues, teams, allTeams
   )
 }
 
+/* ── 리그 표시/편집 — 평소엔 추론된 리그를 라벨로 보여주고, 클릭하면 자동완성 입력으로 전환 ── */
+function LeagueClickEdit({ league, editing, onStartEdit, onChange, onDone, candidates }: {
+  league: string
+  editing: boolean
+  onStartEdit: () => void
+  onChange: (v: string) => void
+  onDone: () => void
+  candidates: LeagueCandidate[]
+}) {
+  const [open, setOpen] = useState(false)
+  const [hi, setHi] = useState(-1)
+  const suggestions = suggestLeagueCandidates(league, candidates)
+
+  function pick(name: string) {
+    onChange(name)
+    setOpen(false); setHi(-1)
+    onDone()
+  }
+
+  if (!editing) {
+    return (
+      <button type="button" onClick={onStartEdit} style={{
+        display: 'flex', alignItems: 'center', gap: 5, alignSelf: 'flex-start',
+        background: 'none', border: 'none', cursor: 'pointer', padding: '2px 0',
+        fontSize: 11, color: league ? 'var(--text-secondary)' : 'var(--text-muted)', fontFamily: 'var(--font-body)',
+      }}>
+        <span>리그: {league || '자동 추론중...'}</span>
+        <Pencil size={10} />
+      </button>
+    )
+  }
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <input
+        className="form-input inline-bet-input"
+        placeholder="리그 (예: 프리미어리그)"
+        value={league}
+        autoFocus
+        onChange={e => { onChange(e.target.value); setOpen(true); setHi(-1) }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => { setOpen(false); onDone() }, 150)}
+        onKeyDown={e => {
+          if (open && suggestions.length > 0) {
+            if (e.key === 'ArrowDown') { e.preventDefault(); setHi(p => Math.min(p + 1, suggestions.length - 1)); return }
+            if (e.key === 'ArrowUp') { e.preventDefault(); setHi(p => Math.max(p - 1, 0)); return }
+            if (e.key === 'Enter' && hi >= 0) { e.preventDefault(); pick(suggestions[hi]); return }
+          }
+          if (e.key === 'Enter' || e.key === 'Escape') onDone()
+        }}
+        style={{ fontSize: 11 }}
+      />
+      {open && suggestions.length > 0 && (
+        <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 30, marginTop: 2, background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 6, maxHeight: 170, overflowY: 'auto', boxShadow: '0 4px 12px rgba(0,0,0,0.3)' }}>
+          {suggestions.map((s, i) => (
+            <div key={s} onMouseDown={() => pick(s)}
+              style={{ padding: '6px 9px', fontSize: 11, cursor: 'pointer', fontWeight: i === hi ? 700 : 500,
+                background: i === hi ? 'var(--gold-bg)' : 'transparent', color: i === hi ? 'var(--gold)' : 'var(--text-primary)' }}>
+              {s}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, baseballOverrides, soccerOverrides, basketballOverrides, volleyballOverrides, teamCandidates, allBetsHistory, leagueCandidates, soccerLeagues, baseballLeagues, basketballLeagues, volleyballLeagues, esportsLeagues, soccerFavoriteLeagues, baseballFavoriteLeagues, basketballFavoriteLeagues, volleyballFavoriteLeagues, esportsFavoriteLeagues, onToggleSoccerLeagueFavorite, onToggleBaseballLeagueFavorite, onToggleBasketballLeagueFavorite, onToggleVolleyballLeagueFavorite, onToggleEsportsLeagueFavorite, soccerTeams, baseballTeams, basketballTeams, volleyballTeams, esportsTeams, onAddSoccerLeague, onAddBaseballLeague, onAddBasketballLeague, onAddVolleyballLeague, onAddEsportsLeague, onRenameSoccerLeague, onDeleteSoccerLeague, onRenameBaseballLeague, onDeleteBaseballLeague, onRenameBasketballLeague, onDeleteBasketballLeague, onRenameVolleyballLeague, onDeleteVolleyballLeague, onRenameEsportsLeague, onDeleteEsportsLeague, onAddSoccerTeam, onAddBaseballTeam, onAddBasketballTeam, onAddVolleyballTeam, onAddEsportsTeam, onRenameSoccerTeam, onDeleteSoccerTeam, onRenameBaseballTeam, onDeleteBaseballTeam, onRenameBasketballTeam, onDeleteBasketballTeam, onRenameVolleyballTeam, onDeleteVolleyballTeam, onRenameEsportsTeam, onDeleteEsportsTeam, quickPicks }: {
   site: Site; onClose: () => void; defaultSport: string
   onBet: (sport: string, content: string, odds: number, amount: number, isLive: boolean, league: string) => Promise<boolean>
@@ -1492,6 +1559,33 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
   const [sport, setSport]       = useState<string>(site.bet_type === 'double' ? 'other' : (defaultSport || 'soccer'))
   const [sportTouched, setSportTouched] = useState(false)
   const [content, setContent]   = useState('')
+  // 리그(현재는 축구만) — 베팅 내용에 쓴 팀 이름으로 과거 베팅 이력에서 자동 추론.
+  // 직접 수정하고 싶으면 클릭해서 편집 모드로 전환(그 이후엔 자동 추론이 덮어쓰지 않음).
+  const [league, setLeague] = useState('')
+  const [leagueTouched, setLeagueTouched] = useState(false)
+  const [editingLeague, setEditingLeague] = useState(false)
+  const soccerLeagueCandidates: LeagueCandidate[] = soccerLeagues.map(name => ({ name, lastDate: '' }))
+  const soccerTeamLeagueHistory = useMemo(() => {
+    return allBetsHistory
+      .filter(b => b.sport === 'soccer' && (b.league ?? '').trim())
+      .map(b => ({ team: (parseBetMatch('soccer', b.match)?.team ?? b.match).trim(), league: (b.league ?? '').trim(), bet_date: b.bet_date }))
+      .filter(r => r.team)
+      .sort((a, b) => b.bet_date.localeCompare(a.bet_date))
+  }, [allBetsHistory])
+  function findLeagueForTeam(text: string): string | null {
+    const team = (parseBetMatch('soccer', text)?.team ?? text).trim()
+    if (!team) return null
+    const exact = soccerTeamLeagueHistory.find(r => r.team === team)
+    if (exact) return exact.league
+    const partial = soccerTeamLeagueHistory.find(r => team.length >= 2 && (r.team.includes(team) || team.includes(r.team)))
+    return partial ? partial.league : null
+  }
+  useEffect(() => {
+    if (sport !== 'soccer' || leagueTouched) return
+    const found = findLeagueForTeam(content)
+    if (found && found !== league) setLeague(found)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [content, sport, leagueTouched])
   // 베팅 모드: 단폴 / 다폴. 다폴은 리그 없이 경기 내용 여러 개(최대 4개) + 배당/금액 공유.
   // 항상 단폴 기본 (두폴은 필요할 때만 수동으로 전환)
   const [mode, setMode] = useState<'single' | 'multi'>(site.bet_type === 'double' ? 'multi' : 'single')
@@ -1549,9 +1643,13 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
     if (!content || oddsV <= 0 || stakeN <= 0) return
     if (mode === 'multi' && !multiFilled) return
     setSubmitting(true)
+    const leagueTrimmed = league.trim()
+    if (sport === 'soccer' && leagueTrimmed && !soccerLeagues.includes(leagueTrimmed)) {
+      await onAddSoccerLeague(leagueTrimmed)
+    }
     const ok = mode === 'multi'
       ? await onMultiBet(sport, multiContents, oddsV, stakeN, multiContents.map(() => ''))
-      : await onBet(sport, content, oddsV, stakeN, isLive, '')
+      : await onBet(sport, content, oddsV, stakeN, isLive, sport === 'soccer' ? leagueTrimmed : '')
     setSubmitting(false)
     if (ok) onClose()
   }
@@ -1579,6 +1677,16 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
       )}
       <TeamContentInput inputRef={contentRef} placeholder={mode === 'multi' ? `베팅 내용 ${LEG_MARKS[0]}` : '베팅 내용 (팀/옵션 자유 입력)'} value={content} onChange={setContent}
         candidates={[]} allBets={allBetsHistory} autoFocus onEnter={submit} quickPicks={mode === 'multi' ? quickPicks : undefined} />
+      {mode === 'single' && sport === 'soccer' && (
+        <LeagueClickEdit
+          league={league}
+          editing={editingLeague}
+          onStartEdit={() => setEditingLeague(true)}
+          onChange={v => { setLeague(v); setLeagueTouched(true) }}
+          onDone={() => setEditingLeague(false)}
+          candidates={soccerLeagueCandidates}
+        />
+      )}
       {mode === 'multi' && extraContents.map((c, i) => (
         <div key={i} style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
           <div style={{ flex: 1, minWidth: 0 }}>

@@ -511,7 +511,12 @@ function SoccerDetailPanel({ bets }: { bets: Bet[] }) {
     { title: '⚽ -1.5 마핸 — 0.1단위 배당 구간별', rows: oddsBinRows(hcap15Minus), all: hcap15Minus },
   ]
 
-  const ruleIds = new Set(tables.flatMap(t => t.rows.flatMap(r => r.bets)).map(b => b.id))
+  // 언더(2.5/3.5/4.5) — 배당옵션별 + 리그별 (초안)
+  const under = settled.filter(b => b.market === 'under')
+  const UNDER_LINES = [2.5, 3.5, 4.5]
+  const underByLine = UNDER_LINES.map(line => under.filter(b => extractTotalLine(b.pick) === line))
+
+  const ruleIds = new Set([...tables.flatMap(t => t.rows.flatMap(r => r.bets)), ...underByLine.flat()].map(b => b.id))
   const otherBets = settled.filter(b => !ruleIds.has(b.id))
 
   return (
@@ -519,7 +524,81 @@ function SoccerDetailPanel({ bets }: { bets: Bet[] }) {
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
         {tables.map(t => <RuleStatsTable key={t.title} title={t.title} rows={t.rows} extra={<MarketTotalRow bets={t.all} />} />)}
       </div>
+      <SoccerUnderByLeagueSection lines={UNDER_LINES} lineBets={underByLine} />
       <OtherBetsPanel bets={otherBets} />
+    </div>
+  )
+}
+
+// ─── 축구 언더 — 라인별(2.5/3.5/4.5) × 리그별 (초안) ────────────────
+// 리그 미지정 베팅은 "미분류"로 묶어서 함께 보여줌. league 컬럼값 그대로 사용(과거 팀 키워드 추론은 적용 안 함).
+function SoccerUnderByLeagueSection({ lines, lineBets }: { lines: number[]; lineBets: Bet[][] }) {
+  const leagueKeyOf = (b: Bet) => (b.league && b.league.trim()) ? b.league.trim() : '미분류'
+  const leagueNames = Array.from(new Set(lineBets.flat().map(leagueKeyOf))).sort(koCompare)
+
+  function cellStats(list: Bet[]) {
+    if (!list.length) return null
+    return calcStats(list)
+  }
+
+  return (
+    <div style={{ marginTop: 14 }}>
+      <div className="card-title" style={{ marginBottom: 8 }}>⚽ 언더 — 라인별 · 리그별 (초안)</div>
+      {leagueNames.length > 0 ? (
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+            <thead>
+              <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                <th style={{ textAlign: 'left', padding: '4px 8px', fontSize: 9, color: 'var(--text-secondary)', fontWeight: 700, whiteSpace: 'nowrap' }}>리그</th>
+                {lines.map(l => (
+                  <th key={l} style={{ textAlign: 'center', padding: '4px 6px', fontSize: 9, color: 'var(--text-secondary)', fontWeight: 700, whiteSpace: 'nowrap' }}>{l} 언더</th>
+                ))}
+                <th style={{ textAlign: 'center', padding: '4px 8px', fontSize: 9, color: 'var(--text-secondary)', fontWeight: 700, whiteSpace: 'nowrap', borderLeft: '1px solid var(--border)' }}>총손익 · ROI</th>
+              </tr>
+            </thead>
+            <tbody>
+              {leagueNames.map(league => {
+                const perLine = lineBets.map(list => list.filter(b => leagueKeyOf(b) === league))
+                const totalBets = perLine.flat()
+                const totalStats = cellStats(totalBets)
+                return (
+                  <tr key={league} style={{ borderBottom: '1px solid var(--border-light)', height: 26 }}>
+                    <td style={{ padding: '4px 8px', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>{league}</td>
+                    {perLine.map((lb, i) => {
+                      const s = cellStats(lb)
+                      return (
+                        <td key={i} style={{ textAlign: 'center', padding: '4px 6px', whiteSpace: 'nowrap' }}>
+                          {s ? (
+                            <>
+                              <span style={{ color: 'var(--text-muted)' }}>{s.total}건 </span>
+                              <span style={{ fontWeight: 700, color: s.roi >= 0 ? '#4ade80' : '#f87171' }}>{s.roi >= 0 ? '+' : ''}{s.roi.toFixed(0)}%</span>
+                            </>
+                          ) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
+                        </td>
+                      )
+                    })}
+                    <td style={{ textAlign: 'center', padding: '4px 8px', whiteSpace: 'nowrap', borderLeft: '1px solid var(--border)' }}>
+                      {totalStats ? (
+                        <>
+                          <span style={{ fontWeight: 700, color: totalStats.profit >= 0 ? '#4ade80' : '#f87171' }}>{totalStats.profit >= 0 ? '+' : ''}{totalStats.profit.toLocaleString()}</span>
+                          <span style={{ marginLeft: 6, fontWeight: 700, color: totalStats.roi >= 0 ? '#4ade80' : '#f87171' }}>{totalStats.roi >= 0 ? '+' : ''}{totalStats.roi.toFixed(1)}%</span>
+                        </>
+                      ) : '—'}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div style={{ fontSize: 10, color: 'var(--text-muted)', padding: '8px 0' }}>정산된 언더 베팅이 없습니다.</div>
+      )}
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 10 }}>
+        {lines.map((l, i) => (
+          <RuleStatsTable key={l} title={`⚽ ${l} 언더 — 0.1단위 배당 구간별`} rows={oddsBinRows(lineBets[i])} extra={<MarketTotalRow bets={lineBets[i]} />} />
+        ))}
+      </div>
     </div>
   )
 }
