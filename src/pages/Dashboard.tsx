@@ -1741,6 +1741,18 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
           }}><Settings size={11} /> 옵션 관리</button>
         </div>
       )}
+      {mode === 'single' && content.trim() && (side || selectedOptions.length > 0) && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap', marginTop: 4,
+          padding: '6px 8px', borderRadius: 'var(--radius-sm)',
+          background: 'var(--bg-elevated)', border: '1px dashed var(--border)',
+        }}>
+          <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', flexShrink: 0 }}>미리보기</span>
+          <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}>{content.trim()}</span>
+          {side && <MatchBadge label={sideBadgeLabel(side)} accent={side === '홈' ? 'blue' : 'orange'} />}
+          {selectedOptions.map(opt => <MatchBadge key={opt} label={opt} accent="purple" />)}
+        </div>
+      )}
       {optionsManagerOpen && (
         <BetOptionsManagerModal sportLabel={SPORTS.find(s => s.value === sport)?.label ?? sport} betOptions={betOptions} onClose={() => setOptionsManagerOpen(false)}
           onAddBetOption={label => onAddBetOption(sport, label)}
