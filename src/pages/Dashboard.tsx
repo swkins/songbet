@@ -767,7 +767,7 @@ function BetManageModal({ bets, onClose, onToggleQuickPick, onSetQuickPickMany }
 function EditFormAmountRow({ isusd, amount, setAmount }: { isusd: boolean; amount: string; setAmount: (v: string) => void }) {
   const unit = isusd ? '$' : '원'
   const stakeN = isusd ? (Number(amount) || 0) : (Number(amount.replace(/,/g, '')) || 0)
-  const hotkeys = isusd ? [5, 10] : [1000, 5000, 10000, 20000]
+  const hotkeys = isusd ? [5, 10] : [5000, 10000, 20000]
   // 베팅추가와 동일하게 — 기존 금액이 그대로인 상태에서 처음 누르면 그 금액으로 교체, 그 다음부턴 누적
   const [amountEdited, setAmountEdited] = useState(false)
   return (
