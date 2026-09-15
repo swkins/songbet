@@ -185,6 +185,26 @@ function parseBetMatch(sport: string, match: string): BetMatchParts | null {
   return null
 }
 
+// 종목별 리그 자동 추론 대상 — 야구/배구는 parseBetMatch가 팀 이름을 따로 못 뽑아내
+// 경기 내용 전체를 키워드로 취급(완전히 같은 문구를 다시 쓸 때만 매칭)
+const LEAGUE_SPORTS = ['soccer', 'baseball', 'basketball', 'volleyball', 'esports']
+interface TeamLeagueEntry { team: string; league: string; bet_date: string }
+function buildTeamLeagueHistory(sport: string, history: BetLite[]): TeamLeagueEntry[] {
+  return history
+    .filter(b => b.sport === sport && (b.league ?? '').trim())
+    .map(b => ({ team: (parseBetMatch(sport, b.match)?.team ?? b.match).trim(), league: (b.league ?? '').trim(), bet_date: b.bet_date }))
+    .filter(r => r.team)
+    .sort((a, b) => b.bet_date.localeCompare(a.bet_date))
+}
+function findLeagueForTeam(sport: string, text: string, history: TeamLeagueEntry[]): string | null {
+  const team = (parseBetMatch(sport, text)?.team ?? text).trim()
+  if (!team) return null
+  const exact = history.find(r => r.team === team)
+  if (exact) return exact.league
+  const partial = history.find(r => team.length >= 2 && (r.team.includes(team) || team.includes(r.team)))
+  return partial ? partial.league : null
+}
+
 // 완료된 베팅 카드 정중앙에 살짝 기울여 찍는 반투명 결과 도장 (적중/실패만, PUSH는 도장 없음)
 function ResultStamp({ result }: { result: 'win' | 'loss' | 'push' | 'pending' }) {
   if (result !== 'win' && result !== 'loss') return null
@@ -746,6 +766,8 @@ function EditFormAmountRow({ isusd, amount, setAmount }: { isusd: boolean; amoun
   const unit = isusd ? '$' : '원'
   const stakeN = isusd ? (Number(amount) || 0) : (Number(amount.replace(/,/g, '')) || 0)
   const hotkeys = isusd ? [5, 10] : [1000, 5000, 10000, 20000]
+  // 베팅추가와 동일하게 — 기존 금액이 그대로인 상태에서 처음 누르면 그 금액으로 교체, 그 다음부턴 누적
+  const [amountEdited, setAmountEdited] = useState(false)
   return (
     <>
       <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
@@ -753,6 +775,7 @@ function EditFormAmountRow({ isusd, amount, setAmount }: { isusd: boolean; amoun
           value={isusd ? amount : (stakeN > 0 ? stakeN.toLocaleString() : amount)}
           style={{ flex: 1, MozAppearance: 'textfield' } as React.CSSProperties}
           onChange={e => {
+            setAmountEdited(true)
             if (isusd) {
               const v = e.target.value
               if (v === '' || /^\d*\.?\d{0,2}$/.test(v)) setAmount(v)
@@ -761,11 +784,16 @@ function EditFormAmountRow({ isusd, amount, setAmount }: { isusd: boolean; amoun
               if (r === '' || /^\d+$/.test(r)) setAmount(r)
             }
           }} />
-        <button onClick={() => setAmount('')} style={{ padding: '0 8px', height: 34, borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-body)', whiteSpace: 'nowrap', flexShrink: 0 }}>초기화</button>
+        <button onClick={() => { setAmount(''); setAmountEdited(false) }} style={{ padding: '0 8px', height: 34, borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-body)', whiteSpace: 'nowrap', flexShrink: 0 }}>초기화</button>
       </div>
       <div style={{ display: 'flex', gap: 4 }}>
         {hotkeys.map(hk => (
           <button key={hk} className="hotkey-btn" onClick={() => {
+            if (!amountEdited) {
+              setAmount(String(hk))
+              setAmountEdited(true)
+              return
+            }
             const cur = isusd ? (Number(amount) || 0) : (Number(amount.replace(/,/g,'')) || 0)
             setAmount(String(cur + hk))
           }}>
@@ -824,6 +852,30 @@ function InlineBetEditForm({ bet, site, onClose, onSave, baseballOverrides, socc
   ]
   const stakeN = isusd ? (Number(amount) || 0) : (Number(amount.replace(/,/g, '')) || 0)
 
+  // 리그(축구/야구/농구/배구/LOL) — 베팅추가와 동일한 방식: 팀 이름으로 자동 추론 + 직접 수정 가능.
+  // 이미 저장된 리그가 있으면 그대로 두고(자동 추론이 덮어쓰지 않음), 없으면 베팅 내용으로 추론.
+  const [league, setLeague] = useState(bet.league ?? '')
+  const [leagueTouched, setLeagueTouched] = useState(!!(bet.league && bet.league.trim()))
+  function leagueInfoFor(sp: string): { leagues: string[]; onAdd: (name: string) => Promise<void> } {
+    switch (sp) {
+      case 'soccer': return { leagues: soccerLeagues, onAdd: onAddSoccerLeague }
+      case 'baseball': return { leagues: baseballLeagues, onAdd: onAddBaseballLeague }
+      case 'basketball': return { leagues: basketballLeagues, onAdd: onAddBasketballLeague }
+      case 'volleyball': return { leagues: volleyballLeagues, onAdd: onAddVolleyballLeague }
+      case 'esports': return { leagues: esportsLeagues, onAdd: onAddEsportsLeague }
+      default: return { leagues: [], onAdd: async () => {} }
+    }
+  }
+  const currentLeagueInfo = leagueInfoFor(sport)
+  const leagueCandidatesForSport: LeagueCandidate[] = currentLeagueInfo.leagues.map(name => ({ name, lastDate: '' }))
+  const teamLeagueHistory = useMemo(() => buildTeamLeagueHistory(sport, allBetsHistory), [sport, allBetsHistory])
+  useEffect(() => {
+    if (!LEAGUE_SPORTS.includes(sport) || leagueTouched) return
+    const found = findLeagueForTeam(sport, content, teamLeagueHistory)
+    if (found && found !== league) setLeague(found)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [content, sport, leagueTouched, teamLeagueHistory])
+
   function handleOdds(raw: string) {
     const clean = raw.replace(/[^0-9.]/g, '')
     if (/^\d{3}$/.test(clean)) setOddsRaw((Number(clean) / 100).toFixed(2))
@@ -831,13 +883,26 @@ function InlineBetEditForm({ bet, site, onClose, onSave, baseballOverrides, socc
   }
   async function submit() {
     if (!content || oddsV <= 0 || stakeN <= 0) return
-    setSubmitting(true); await onSave(sport, content, oddsV, stakeN, isLive, ''); setSubmitting(false)
+    setSubmitting(true)
+    const leagueTrimmed = league.trim()
+    if (LEAGUE_SPORTS.includes(sport) && leagueTrimmed && !currentLeagueInfo.leagues.includes(leagueTrimmed)) {
+      await currentLeagueInfo.onAdd(leagueTrimmed)
+    }
+    await onSave(sport, content, oddsV, stakeN, isLive, LEAGUE_SPORTS.includes(sport) ? leagueTrimmed : '')
+    setSubmitting(false)
   }
   return (
     <div className="inline-bet-form" style={{ borderColor: 'var(--gold-border)', background: 'var(--gold-bg)' }}>
       <SportButtonGroup value={sport} onChange={v => { setSport(v as typeof bet.sport); contentRef.current?.focus() }} />
       <TeamContentInput inputRef={contentRef} placeholder="베팅 내용 (팀/옵션 자유 입력)" value={content} onChange={setContent}
         candidates={[]} allBets={allBetsHistory} autoFocus onEnter={submit} />
+      {LEAGUE_SPORTS.includes(sport) && (
+        <LeagueInputField
+          value={league}
+          onChange={v => { setLeague(v); setLeagueTouched(true) }}
+          candidates={leagueCandidatesForSport}
+        />
+      )}
       <input ref={oddsRef} className="form-input inline-bet-input" placeholder="배당 (125=1.25)" value={oddsRaw}
         onChange={e => handleOdds(e.target.value)}
         onKeyDown={e => e.key === 'Enter' && submit()}
@@ -1540,33 +1605,35 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
   const [sport, setSport]       = useState<string>(site.bet_type === 'double' ? 'other' : (defaultSport || 'soccer'))
   const [sportTouched, setSportTouched] = useState(false)
   const [content, setContent]   = useState('')
-  // 리그(현재는 축구만) — 베팅 내용에 쓴 팀 이름으로 과거 베팅 이력에서 자동 추론.
+  // 리그(축구/야구/농구/배구/LOL) — 베팅 내용에 쓴 팀 이름으로 과거 베팅 이력에서 자동 추론.
   // 배당/금액처럼 항상 입력 가능한 칸으로 표시되며, 직접 수정하면(탭으로 이동해 바로 입력)
   // 그 이후엔 자동 추론이 덮어쓰지 않음.
   const [league, setLeague] = useState('')
   const [leagueTouched, setLeagueTouched] = useState(false)
-  const soccerLeagueCandidates: LeagueCandidate[] = soccerLeagues.map(name => ({ name, lastDate: '' }))
-  const soccerTeamLeagueHistory = useMemo(() => {
-    return allBetsHistory
-      .filter(b => b.sport === 'soccer' && (b.league ?? '').trim())
-      .map(b => ({ team: (parseBetMatch('soccer', b.match)?.team ?? b.match).trim(), league: (b.league ?? '').trim(), bet_date: b.bet_date }))
-      .filter(r => r.team)
-      .sort((a, b) => b.bet_date.localeCompare(a.bet_date))
-  }, [allBetsHistory])
-  function findLeagueForTeam(text: string): string | null {
-    const team = (parseBetMatch('soccer', text)?.team ?? text).trim()
-    if (!team) return null
-    const exact = soccerTeamLeagueHistory.find(r => r.team === team)
-    if (exact) return exact.league
-    const partial = soccerTeamLeagueHistory.find(r => team.length >= 2 && (r.team.includes(team) || team.includes(r.team)))
-    return partial ? partial.league : null
+  function leagueInfoFor(sp: string): { leagues: string[]; onAdd: (name: string) => Promise<void> } {
+    switch (sp) {
+      case 'soccer': return { leagues: soccerLeagues, onAdd: onAddSoccerLeague }
+      case 'baseball': return { leagues: baseballLeagues, onAdd: onAddBaseballLeague }
+      case 'basketball': return { leagues: basketballLeagues, onAdd: onAddBasketballLeague }
+      case 'volleyball': return { leagues: volleyballLeagues, onAdd: onAddVolleyballLeague }
+      case 'esports': return { leagues: esportsLeagues, onAdd: onAddEsportsLeague }
+      default: return { leagues: [], onAdd: async () => {} }
+    }
   }
+  const currentLeagueInfo = leagueInfoFor(sport)
+  const leagueCandidatesForSport: LeagueCandidate[] = currentLeagueInfo.leagues.map(name => ({ name, lastDate: '' }))
+  const teamLeagueHistory = useMemo(() => buildTeamLeagueHistory(sport, allBetsHistory), [sport, allBetsHistory])
   useEffect(() => {
-    if (sport !== 'soccer' || leagueTouched) return
-    const found = findLeagueForTeam(content)
+    if (!LEAGUE_SPORTS.includes(sport) || leagueTouched) return
+    const found = findLeagueForTeam(sport, content, teamLeagueHistory)
     if (found && found !== league) setLeague(found)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [content, sport, leagueTouched])
+  }, [content, sport, leagueTouched, teamLeagueHistory])
+  // 종목을 바꾸면 이전 종목 기준으로 추론/입력된 리그는 의미가 없으니 초기화하고 다시 자동 추론되게 함
+  useEffect(() => {
+    setLeague(''); setLeagueTouched(false)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sport])
   // 베팅 모드: 단폴 / 다폴. 다폴은 리그 없이 경기 내용 여러 개(최대 4개) + 배당/금액 공유.
   // 항상 단폴 기본 (두폴은 필요할 때만 수동으로 전환)
   const [mode, setMode] = useState<'single' | 'multi'>(site.bet_type === 'double' ? 'multi' : 'single')
@@ -1628,12 +1695,12 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
     if (mode === 'multi' && !multiFilled) return
     setSubmitting(true)
     const leagueTrimmed = league.trim()
-    if (sport === 'soccer' && leagueTrimmed && !soccerLeagues.includes(leagueTrimmed)) {
-      await onAddSoccerLeague(leagueTrimmed)
+    if (LEAGUE_SPORTS.includes(sport) && leagueTrimmed && !currentLeagueInfo.leagues.includes(leagueTrimmed)) {
+      await currentLeagueInfo.onAdd(leagueTrimmed)
     }
     const ok = mode === 'multi'
       ? await onMultiBet(sport, multiContents, oddsV, stakeN, multiContents.map(() => ''))
-      : await onBet(sport, content, oddsV, stakeN, isLive, sport === 'soccer' ? leagueTrimmed : '')
+      : await onBet(sport, content, oddsV, stakeN, isLive, LEAGUE_SPORTS.includes(sport) ? leagueTrimmed : '')
     setSubmitting(false)
     if (ok) onClose()
   }
@@ -1661,11 +1728,11 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
       )}
       <TeamContentInput inputRef={contentRef} placeholder={mode === 'multi' ? `베팅 내용 ${LEG_MARKS[0]}` : '베팅 내용 (팀/옵션 자유 입력)'} value={content} onChange={setContent}
         candidates={[]} allBets={allBetsHistory} autoFocus onEnter={submit} quickPicks={mode === 'multi' ? quickPicks : undefined} />
-      {mode === 'single' && sport === 'soccer' && (
+      {mode === 'single' && LEAGUE_SPORTS.includes(sport) && (
         <LeagueInputField
           value={league}
           onChange={v => { setLeague(v); setLeagueTouched(true) }}
-          candidates={soccerLeagueCandidates}
+          candidates={leagueCandidatesForSport}
         />
       )}
       {mode === 'multi' && extraContents.map((c, i) => (
