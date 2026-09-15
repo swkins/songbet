@@ -912,12 +912,11 @@ function InlineBetEditForm({ bet, site, onClose, onSave, baseballOverrides, socc
             }}>{opt}</button>
           )
         })}
-        <button type="button" onClick={() => setOptionsManagerOpen(true)} style={{
-          display: 'inline-flex', alignItems: 'center', gap: 3,
-          flexShrink: 0, padding: '5px 8px', borderRadius: 'var(--radius-sm)', cursor: 'pointer',
-          fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-body)',
+        <button type="button" onClick={() => setOptionsManagerOpen(true)} title="옵션 관리" style={{
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          flexShrink: 0, width: 26, height: 26, padding: 0, borderRadius: 'var(--radius-sm)', cursor: 'pointer',
           border: '1px dashed var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-secondary)',
-        }}><Settings size={11} /> 옵션 관리</button>
+        }}><Settings size={13} /></button>
       </div>
       {optionsManagerOpen && (
         <BetOptionsManagerModal sportLabel={SPORTS.find(s => s.value === sport)?.label ?? sport} betOptions={betOptions} onClose={() => setOptionsManagerOpen(false)}
@@ -1795,12 +1794,11 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
               }}>{opt}</button>
             )
           })}
-          <button type="button" onClick={() => setOptionsManagerOpen(true)} style={{
-            display: 'inline-flex', alignItems: 'center', gap: 3,
-            flexShrink: 0, padding: '5px 8px', borderRadius: 'var(--radius-sm)', cursor: 'pointer',
-            fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-body)',
+          <button type="button" onClick={() => setOptionsManagerOpen(true)} title="옵션 관리" style={{
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            flexShrink: 0, width: 26, height: 26, padding: 0, borderRadius: 'var(--radius-sm)', cursor: 'pointer',
             border: '1px dashed var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-secondary)',
-          }}><Settings size={11} /> 옵션 관리</button>
+          }}><Settings size={13} /></button>
         </div>
       )}
       {optionsManagerOpen && (
