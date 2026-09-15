@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase'
 import { logAction } from '../lib/logger'
 import type { Bet, Site, Sport, Market, BetResult, GameRolling } from '../types'
 import { inferBaseballLeague, inferSoccerLeague, inferLeagueByKeyword, buildLeagueCandidates, suggestLeagueCandidates, koCompare, type LeagueOverride, type LeagueCandidate } from '../lib/league'
-import { buildTeamCandidates, suggestTeamCandidates, getTeamInsight, getEsportsLeague, type TeamCandidate, type BetLite } from '../lib/teamInsight'
+import { buildTeamCandidates, suggestTeamCandidates, getEsportsLeague, type TeamCandidate, type BetLite } from '../lib/teamInsight'
 import { sportGlyph } from '../components/SportIcons'
 import MiningWidget from '../components/MiningWidget'
 import dayjs from 'dayjs'
@@ -1605,7 +1605,6 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
   const isusd = site.currency === 'usd'; const unit = isusd ? '$' : '원'
   const defaultAmount = site.default_stake > 0 ? String(site.default_stake) : (isusd ? '5' : '10000')
   const [sport, setSport]       = useState<string>(site.bet_type === 'double' ? 'other' : (defaultSport || 'soccer'))
-  const [sportTouched, setSportTouched] = useState(false)
   const [content, setContent]   = useState('')
   // 홈/원정 — 베팅 내용 우측 토글. 없음 → 홈 → 원정 → 없음 순으로 클릭할 때마다 바뀌고,
   // 베팅 내용 텍스트에는 섞지 않고 버튼 자체에 "홈"/"원정"으로 표시만 한다. 제출할 때만 내용 뒤에 합쳐진다.
@@ -1620,7 +1619,12 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
   const [selectedOptions, setSelectedOptions] = useState<string[]>([])
   const betOptions = betOptionsBySport[sport] ?? []
   function toggleBetOption(label: string) {
-    setSelectedOptions(prev => prev.includes(label) ? prev.filter(o => o !== label) : [...prev, label])
+    setSelectedOptions(prev => {
+      const next = prev.includes(label) ? prev.filter(o => o !== label) : [...prev, label]
+      // 옵션을 새로 선택하면(해제가 아니라 추가하는 경우) 바로 배당을 입력할 수 있도록 커서를 이동
+      if (next.length > prev.length) oddsRef.current?.focus()
+      return next
+    })
   }
   // 베팅 모드: 단폴 / 다폴. 다폴은 리그 없이 경기 내용 여러 개(최대 4개) + 배당/금액 공유.
   // 항상 단폴 기본 (두폴은 필요할 때만 수동으로 전환)
@@ -1655,13 +1659,6 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
     return Array.from(names).sort((a, b) => a.localeCompare(b, 'ko')).map(name => ({ name, lastDate: '' }))
   })()
 
-  // 경기 내용(팀 이름)만으로 최근에 이 팀을 어느 종목으로 베팅했는지 찾아 종목을 자동 선택
-  // (예: "휴스턴"만 써도 최근 베팅 기록이 야구였다면 야구로 전환. 직접 종목을 고른 뒤에는 덮어쓰지 않음)
-  useEffect(() => {
-    if (sportTouched) return
-    const insight = getTeamInsight(content, allBetsHistory, 1)
-    if (insight && insight.sport && insight.sport !== sport) setSport(insight.sport)
-  }, [content, sportTouched, allBetsHistory, sport])
   // 베팅옵션은 종목별로 따로 관리되므로, 종목을 바꾸면 이전 종목에서 선택했던 옵션은 해제
   useEffect(() => { setSelectedOptions([]) }, [sport])
 
@@ -1712,7 +1709,7 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
         }}>다폴</button>
       </div>
       {mode === 'single' && (
-        <SportButtonGroup value={sport} onChange={v => { setSport(v); setSportTouched(true); contentRef.current?.focus() }} />
+        <SportButtonGroup value={sport} onChange={v => { setSport(v); contentRef.current?.focus() }} />
       )}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'stretch' }}>
         <div style={{ flex: '1 1 140px', minWidth: 0 }}>
