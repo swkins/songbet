@@ -269,24 +269,20 @@ function BetMatchLine({ sport, match, fontSize = 12, teamColor, live, stacked = 
       <span style={{ display: 'flex', alignItems: 'center', gap: 5, flex: 1, minWidth: 0 }}>
         <span style={{ fontSize, fontWeight: 700, color: teamColor ?? 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{team}</span>
         {parts?.side && <MatchBadge label={sideBadgeLabel(parts.side)} accent={parts.side === '홈' ? 'blue' : 'orange'} />}
-        {parts?.boTag && <MatchBadge label={parts.boTag} accent="neutral" />}
         {showOption && <MatchBadge label={parts.optionLabel} accent={parts.accent} />}
+        {parts?.boTag && <MatchBadge label={parts.boTag} accent="neutral" />}
         <span style={{ flex: 1 }} />
         {live && <MatchBadge label="LIVE" accent="red" />}
       </span>
     )
   }
   return (
-    <span style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1, minWidth: 0 }}>
-      <span style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
-        <span style={{ fontSize, fontWeight: 700, color: teamColor ?? 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{team}</span>
-        {parts?.side && <MatchBadge label={sideBadgeLabel(parts.side)} accent={parts.side === '홈' ? 'blue' : 'orange'} />}
-        {parts?.boTag && <MatchBadge label={parts.boTag} accent="neutral" />}
-        {live && <MatchBadge label="LIVE" accent="red" />}
-      </span>
-      {showOption && (
-        <span style={{ display: 'flex' }}><MatchBadge label={parts.optionLabel} accent={parts.accent} /></span>
-      )}
+    <span style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap', flex: 1, minWidth: 0 }}>
+      <span style={{ fontSize, fontWeight: 700, color: teamColor ?? 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{team}</span>
+      {parts?.side && <MatchBadge label={sideBadgeLabel(parts.side)} accent={parts.side === '홈' ? 'blue' : 'orange'} />}
+      {showOption && <MatchBadge label={parts.optionLabel} accent={parts.accent} />}
+      {parts?.boTag && <MatchBadge label={parts.boTag} accent="neutral" />}
+      {live && <MatchBadge label="LIVE" accent="red" />}
     </span>
   )
 }
@@ -1725,26 +1721,13 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
         </div>
         {mode === 'single' && (
           <button type="button" onClick={cycleSide} style={{
-            flexShrink: 0, padding: '0 10px', borderRadius: 'var(--radius-sm)', cursor: 'pointer',
-            fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-body)', display: 'flex', alignItems: 'center',
+            flexShrink: 0, width: 46, borderRadius: 'var(--radius-sm)', cursor: 'pointer',
+            fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-body)', display: 'flex', alignItems: 'center', justifyContent: 'center',
             border: `1px solid ${side ? 'var(--gold-border)' : 'var(--border)'}`,
             background: side ? 'var(--gold-bg)' : 'var(--bg-elevated)',
             color: side ? 'var(--gold)' : 'var(--text-secondary)',
           }}>{side || '없음'}</button>
         )}
-        {mode === 'single' && selectedOptions.map(opt => (
-          <span key={opt} style={{
-            display: 'inline-flex', alignItems: 'center', gap: 3, flexShrink: 0,
-            padding: '0 4px 0 8px', borderRadius: 'var(--radius-sm)',
-            border: '1px solid var(--gold-border)', background: 'var(--gold-bg)',
-            color: 'var(--gold)', fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-body)',
-          }}>
-            {opt}
-            <button type="button" onClick={() => toggleBetOption(opt)} title="선택 해제" style={{
-              border: 'none', background: 'none', color: 'var(--gold)', cursor: 'pointer', padding: '0 4px', fontSize: 12, lineHeight: 1,
-            }}>×</button>
-          </span>
-        ))}
       </div>
       {mode === 'single' && (
         <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 4, marginTop: 4 }}>
