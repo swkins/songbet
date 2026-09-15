@@ -185,26 +185,6 @@ function parseBetMatch(sport: string, match: string): BetMatchParts | null {
   return null
 }
 
-// 종목별 리그 자동 추론 대상 — 야구/배구는 parseBetMatch가 팀 이름을 따로 못 뽑아내
-// 경기 내용 전체를 키워드로 취급(완전히 같은 문구를 다시 쓸 때만 매칭)
-const LEAGUE_SPORTS = ['soccer', 'baseball', 'basketball', 'volleyball', 'esports']
-interface TeamLeagueEntry { team: string; league: string; bet_date: string }
-function buildTeamLeagueHistory(sport: string, history: BetLite[]): TeamLeagueEntry[] {
-  return history
-    .filter(b => b.sport === sport && (b.league ?? '').trim())
-    .map(b => ({ team: (parseBetMatch(sport, b.match)?.team ?? b.match).trim(), league: (b.league ?? '').trim(), bet_date: b.bet_date }))
-    .filter(r => r.team)
-    .sort((a, b) => b.bet_date.localeCompare(a.bet_date))
-}
-function findLeagueForTeam(sport: string, text: string, history: TeamLeagueEntry[]): string | null {
-  const team = (parseBetMatch(sport, text)?.team ?? text).trim()
-  if (!team) return null
-  const exact = history.find(r => r.team === team)
-  if (exact) return exact.league
-  const partial = history.find(r => team.length >= 2 && (r.team.includes(team) || team.includes(r.team)))
-  return partial ? partial.league : null
-}
-
 // 완료된 베팅 카드 정중앙에 살짝 기울여 찍는 반투명 결과 도장 (적중/실패만, PUSH는 도장 없음)
 function ResultStamp({ result }: { result: 'win' | 'loss' | 'push' | 'pending' }) {
   if (result !== 'win' && result !== 'loss') return null
@@ -852,30 +832,6 @@ function InlineBetEditForm({ bet, site, onClose, onSave, baseballOverrides, socc
   ]
   const stakeN = isusd ? (Number(amount) || 0) : (Number(amount.replace(/,/g, '')) || 0)
 
-  // 리그(축구/야구/농구/배구/LOL) — 베팅추가와 동일한 방식: 팀 이름으로 자동 추론 + 직접 수정 가능.
-  // 이미 저장된 리그가 있으면 그대로 두고(자동 추론이 덮어쓰지 않음), 없으면 베팅 내용으로 추론.
-  const [league, setLeague] = useState(bet.league ?? '')
-  const [leagueTouched, setLeagueTouched] = useState(!!(bet.league && bet.league.trim()))
-  function leagueInfoFor(sp: string): { leagues: string[]; onAdd: (name: string) => Promise<void> } {
-    switch (sp) {
-      case 'soccer': return { leagues: soccerLeagues, onAdd: onAddSoccerLeague }
-      case 'baseball': return { leagues: baseballLeagues, onAdd: onAddBaseballLeague }
-      case 'basketball': return { leagues: basketballLeagues, onAdd: onAddBasketballLeague }
-      case 'volleyball': return { leagues: volleyballLeagues, onAdd: onAddVolleyballLeague }
-      case 'esports': return { leagues: esportsLeagues, onAdd: onAddEsportsLeague }
-      default: return { leagues: [], onAdd: async () => {} }
-    }
-  }
-  const currentLeagueInfo = leagueInfoFor(sport)
-  const leagueCandidatesForSport: LeagueCandidate[] = currentLeagueInfo.leagues.map(name => ({ name, lastDate: '' }))
-  const teamLeagueHistory = useMemo(() => buildTeamLeagueHistory(sport, allBetsHistory), [sport, allBetsHistory])
-  useEffect(() => {
-    if (!LEAGUE_SPORTS.includes(sport) || leagueTouched) return
-    const found = findLeagueForTeam(sport, content, teamLeagueHistory)
-    if (found && found !== league) setLeague(found)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [content, sport, leagueTouched, teamLeagueHistory])
-
   function handleOdds(raw: string) {
     const clean = raw.replace(/[^0-9.]/g, '')
     if (/^\d{3}$/.test(clean)) setOddsRaw((Number(clean) / 100).toFixed(2))
@@ -884,11 +840,7 @@ function InlineBetEditForm({ bet, site, onClose, onSave, baseballOverrides, socc
   async function submit() {
     if (!content || oddsV <= 0 || stakeN <= 0) return
     setSubmitting(true)
-    const leagueTrimmed = league.trim()
-    if (LEAGUE_SPORTS.includes(sport) && leagueTrimmed && !currentLeagueInfo.leagues.includes(leagueTrimmed)) {
-      await currentLeagueInfo.onAdd(leagueTrimmed)
-    }
-    await onSave(sport, content, oddsV, stakeN, isLive, LEAGUE_SPORTS.includes(sport) ? leagueTrimmed : '')
+    await onSave(sport, content, oddsV, stakeN, isLive, '')
     setSubmitting(false)
   }
   return (
@@ -896,13 +848,6 @@ function InlineBetEditForm({ bet, site, onClose, onSave, baseballOverrides, socc
       <SportButtonGroup value={sport} onChange={v => { setSport(v as typeof bet.sport); contentRef.current?.focus() }} />
       <TeamContentInput inputRef={contentRef} placeholder="베팅 내용 (팀/옵션 자유 입력)" value={content} onChange={setContent}
         candidates={[]} allBets={allBetsHistory} autoFocus onEnter={submit} />
-      {LEAGUE_SPORTS.includes(sport) && (
-        <LeagueInputField
-          value={league}
-          onChange={v => { setLeague(v); setLeagueTouched(true) }}
-          candidates={leagueCandidatesForSport}
-        />
-      )}
       <input ref={oddsRef} className="form-input inline-bet-input" placeholder="배당 (125=1.25)" value={oddsRaw}
         onChange={e => handleOdds(e.target.value)}
         onKeyDown={e => e.key === 'Enter' && submit()}
@@ -1526,59 +1471,12 @@ function StructuredTeamPicker({ sport, leagues, favoriteLeagues, teams, allTeams
   )
 }
 
-/* ── 리그 입력창 — 배당/금액처럼 항상 입력 가능한 칸으로 표시, 탭으로 바로 진입해 수정 ── */
-function LeagueInputField({ value, onChange, candidates }: {
-  value: string
-  onChange: (v: string) => void
-  candidates: LeagueCandidate[]
-}) {
-  const [open, setOpen] = useState(false)
-  const [hi, setHi] = useState(-1)
-  const suggestions = suggestLeagueCandidates(value, candidates)
-
-  function pick(name: string) {
-    onChange(name)
-    setOpen(false); setHi(-1)
-  }
-
-  return (
-    <div style={{ position: 'relative' }}>
-      <input
-        className="form-input inline-bet-input"
-        placeholder="리그 (예: 프리미어리그)"
-        value={value}
-        onChange={e => { onChange(e.target.value); setOpen(true); setHi(-1) }}
-        onFocus={() => setOpen(true)}
-        onBlur={() => setTimeout(() => setOpen(false), 150)}
-        onKeyDown={e => {
-          if (open && suggestions.length > 0) {
-            if (e.key === 'ArrowDown') { e.preventDefault(); setHi(p => Math.min(p + 1, suggestions.length - 1)); return }
-            if (e.key === 'ArrowUp') { e.preventDefault(); setHi(p => Math.max(p - 1, 0)); return }
-            if (e.key === 'Enter' && hi >= 0) { e.preventDefault(); pick(suggestions[hi]); return }
-            if (e.key === 'Escape') { setOpen(false); setHi(-1); return }
-          }
-        }}
-      />
-      {open && suggestions.length > 0 && (
-        <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 30, marginTop: 2, background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 6, maxHeight: 170, overflowY: 'auto', boxShadow: '0 4px 12px rgba(0,0,0,0.3)' }}>
-          {suggestions.map((s, i) => (
-            <div key={s} onMouseDown={() => pick(s)}
-              style={{ padding: '6px 9px', fontSize: 11, cursor: 'pointer', fontWeight: i === hi ? 700 : 500,
-                background: i === hi ? 'var(--gold-bg)' : 'transparent', color: i === hi ? 'var(--gold)' : 'var(--text-primary)' }}>
-              {s}
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
-function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, baseballOverrides, soccerOverrides, basketballOverrides, volleyballOverrides, teamCandidates, allBetsHistory, leagueCandidates, soccerLeagues, baseballLeagues, basketballLeagues, volleyballLeagues, esportsLeagues, soccerFavoriteLeagues, baseballFavoriteLeagues, basketballFavoriteLeagues, volleyballFavoriteLeagues, esportsFavoriteLeagues, onToggleSoccerLeagueFavorite, onToggleBaseballLeagueFavorite, onToggleBasketballLeagueFavorite, onToggleVolleyballLeagueFavorite, onToggleEsportsLeagueFavorite, soccerTeams, baseballTeams, basketballTeams, volleyballTeams, esportsTeams, onAddSoccerLeague, onAddBaseballLeague, onAddBasketballLeague, onAddVolleyballLeague, onAddEsportsLeague, onRenameSoccerLeague, onDeleteSoccerLeague, onRenameBaseballLeague, onDeleteBaseballLeague, onRenameBasketballLeague, onDeleteBasketballLeague, onRenameVolleyballLeague, onDeleteVolleyballLeague, onRenameEsportsLeague, onDeleteEsportsLeague, onAddSoccerTeam, onAddBaseballTeam, onAddBasketballTeam, onAddVolleyballTeam, onAddEsportsTeam, onRenameSoccerTeam, onDeleteSoccerTeam, onRenameBaseballTeam, onDeleteBaseballTeam, onRenameBasketballTeam, onDeleteBasketballTeam, onRenameVolleyballTeam, onDeleteVolleyballTeam, onRenameEsportsTeam, onDeleteEsportsTeam, quickPicks }: {
+function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, baseballOverrides, soccerOverrides, basketballOverrides, volleyballOverrides, teamCandidates, allBetsHistory, leagueCandidates, soccerLeagues, baseballLeagues, basketballLeagues, volleyballLeagues, esportsLeagues, soccerFavoriteLeagues, baseballFavoriteLeagues, basketballFavoriteLeagues, volleyballFavoriteLeagues, esportsFavoriteLeagues, onToggleSoccerLeagueFavorite, onToggleBaseballLeagueFavorite, onToggleBasketballLeagueFavorite, onToggleVolleyballLeagueFavorite, onToggleEsportsLeagueFavorite, soccerTeams, baseballTeams, basketballTeams, volleyballTeams, esportsTeams, onAddSoccerLeague, onAddBaseballLeague, onAddBasketballLeague, onAddVolleyballLeague, onAddEsportsLeague, onRenameSoccerLeague, onDeleteSoccerLeague, onRenameBaseballLeague, onDeleteBaseballLeague, onRenameBasketballLeague, onDeleteBasketballLeague, onRenameVolleyballLeague, onDeleteVolleyballLeague, onRenameEsportsLeague, onDeleteEsportsLeague, onAddSoccerTeam, onAddBaseballTeam, onAddBasketballTeam, onAddVolleyballTeam, onAddEsportsTeam, onRenameSoccerTeam, onDeleteSoccerTeam, onRenameBaseballTeam, onDeleteBaseballTeam, onRenameBasketballTeam, onDeleteBasketballTeam, onRenameVolleyballTeam, onDeleteVolleyballTeam, onRenameEsportsTeam, onDeleteEsportsTeam, quickPicks, betOptions, onAddBetOption, onDeleteBetOption }: {
   site: Site; onClose: () => void; defaultSport: string
   onBet: (sport: string, content: string, odds: number, amount: number, isLive: boolean, league: string) => Promise<boolean>
   onMultiBet: (sport: string, contents: string[], odds: number, amount: number, leagues: string[]) => Promise<boolean>
   quickPicks: string[]
+  betOptions: string[]; onAddBetOption: (label: string) => Promise<void>; onDeleteBetOption: (label: string) => Promise<void>
   baseballOverrides: LeagueOverride[]; soccerOverrides: LeagueOverride[]
   basketballOverrides: LeagueOverride[]; volleyballOverrides: LeagueOverride[]
   teamCandidates: TeamCandidate[]; allBetsHistory: BetLite[]; leagueCandidates: LeagueCandidate[]
@@ -1605,35 +1503,30 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
   const [sport, setSport]       = useState<string>(site.bet_type === 'double' ? 'other' : (defaultSport || 'soccer'))
   const [sportTouched, setSportTouched] = useState(false)
   const [content, setContent]   = useState('')
-  // 리그(축구/야구/농구/배구/LOL) — 베팅 내용에 쓴 팀 이름으로 과거 베팅 이력에서 자동 추론.
-  // 배당/금액처럼 항상 입력 가능한 칸으로 표시되며, 직접 수정하면(탭으로 이동해 바로 입력)
-  // 그 이후엔 자동 추론이 덮어쓰지 않음.
-  const [league, setLeague] = useState('')
-  const [leagueTouched, setLeagueTouched] = useState(false)
-  function leagueInfoFor(sp: string): { leagues: string[]; onAdd: (name: string) => Promise<void> } {
-    switch (sp) {
-      case 'soccer': return { leagues: soccerLeagues, onAdd: onAddSoccerLeague }
-      case 'baseball': return { leagues: baseballLeagues, onAdd: onAddBaseballLeague }
-      case 'basketball': return { leagues: basketballLeagues, onAdd: onAddBasketballLeague }
-      case 'volleyball': return { leagues: volleyballLeagues, onAdd: onAddVolleyballLeague }
-      case 'esports': return { leagues: esportsLeagues, onAdd: onAddEsportsLeague }
-      default: return { leagues: [], onAdd: async () => {} }
-    }
+  // 홈/원정 — 베팅 내용 우측 토글. 없음 → 홈 → 원정 → 없음 순으로 클릭할 때마다 바뀌고,
+  // 베팅 내용 끝에 "홈"/"원정" 텍스트로 반영되어 어느 쪽에 베팅하는지 표시함.
+  const [side, setSide] = useState<'' | '홈' | '원정'>('')
+  function cycleSide() {
+    const next = side === '' ? '홈' : side === '홈' ? '원정' : ''
+    setSide(next)
+    setContent(prev => {
+      const stripped = prev.replace(/\s*(홈|원정)\s*$/, '').trimEnd()
+      return next ? `${stripped} ${next}`.trim() : stripped
+    })
   }
-  const currentLeagueInfo = leagueInfoFor(sport)
-  const leagueCandidatesForSport: LeagueCandidate[] = currentLeagueInfo.leagues.map(name => ({ name, lastDate: '' }))
-  const teamLeagueHistory = useMemo(() => buildTeamLeagueHistory(sport, allBetsHistory), [sport, allBetsHistory])
-  useEffect(() => {
-    if (!LEAGUE_SPORTS.includes(sport) || leagueTouched) return
-    const found = findLeagueForTeam(sport, content, teamLeagueHistory)
-    if (found && found !== league) setLeague(found)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [content, sport, leagueTouched, teamLeagueHistory])
-  // 종목을 바꾸면 이전 종목 기준으로 추론/입력된 리그는 의미가 없으니 초기화하고 다시 자동 추론되게 함
-  useEffect(() => {
-    setLeague(''); setLeagueTouched(false)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sport])
+  // 베팅옵션 — 종목 무관, 모든 단폴 베팅에서 공용으로 쓰이는 자유 등록 옵션 목록(예: "1.5 핸디").
+  // 칩을 클릭하면 베팅 내용 끝에 붙고, 새로 추가하면 다음부터 재사용 가능. 각 칩은 삭제도 가능.
+  const [newOption, setNewOption] = useState('')
+  function applyBetOption(label: string) {
+    setContent(p => (p.trim() ? `${p.trim()} ${label}` : label))
+  }
+  async function addNewOption() {
+    const label = newOption.trim()
+    if (!label) return
+    await onAddBetOption(label)
+    applyBetOption(label)
+    setNewOption('')
+  }
   // 베팅 모드: 단폴 / 다폴. 다폴은 리그 없이 경기 내용 여러 개(최대 4개) + 배당/금액 공유.
   // 항상 단폴 기본 (두폴은 필요할 때만 수동으로 전환)
   const [mode, setMode] = useState<'single' | 'multi'>(site.bet_type === 'double' ? 'multi' : 'single')
@@ -1694,13 +1587,9 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
     if (!content || oddsV <= 0 || stakeN <= 0) return
     if (mode === 'multi' && !multiFilled) return
     setSubmitting(true)
-    const leagueTrimmed = league.trim()
-    if (LEAGUE_SPORTS.includes(sport) && leagueTrimmed && !currentLeagueInfo.leagues.includes(leagueTrimmed)) {
-      await currentLeagueInfo.onAdd(leagueTrimmed)
-    }
     const ok = mode === 'multi'
       ? await onMultiBet(sport, multiContents, oddsV, stakeN, multiContents.map(() => ''))
-      : await onBet(sport, content, oddsV, stakeN, isLive, LEAGUE_SPORTS.includes(sport) ? leagueTrimmed : '')
+      : await onBet(sport, content, oddsV, stakeN, isLive, '')
     setSubmitting(false)
     if (ok) onClose()
   }
@@ -1726,14 +1615,53 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
       {mode === 'single' && (
         <SportButtonGroup value={sport} onChange={v => { setSport(v); setSportTouched(true); contentRef.current?.focus() }} />
       )}
-      <TeamContentInput inputRef={contentRef} placeholder={mode === 'multi' ? `베팅 내용 ${LEG_MARKS[0]}` : '베팅 내용 (팀/옵션 자유 입력)'} value={content} onChange={setContent}
-        candidates={[]} allBets={allBetsHistory} autoFocus onEnter={submit} quickPicks={mode === 'multi' ? quickPicks : undefined} />
-      {mode === 'single' && LEAGUE_SPORTS.includes(sport) && (
-        <LeagueInputField
-          value={league}
-          onChange={v => { setLeague(v); setLeagueTouched(true) }}
-          candidates={leagueCandidatesForSport}
-        />
+      <div style={{ display: 'flex', gap: 4, alignItems: 'flex-start' }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <TeamContentInput inputRef={contentRef} placeholder={mode === 'multi' ? `베팅 내용 ${LEG_MARKS[0]}` : '베팅 내용 (팀/옵션 자유 입력)'} value={content} onChange={setContent}
+            candidates={[]} allBets={allBetsHistory} autoFocus onEnter={submit} quickPicks={mode === 'multi' ? quickPicks : undefined} />
+        </div>
+        {mode === 'single' && (
+          <button type="button" onClick={cycleSide} style={{
+            flexShrink: 0, padding: '0 10px', height: 34, borderRadius: 'var(--radius-sm)', cursor: 'pointer',
+            fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-body)',
+            border: `1px solid ${side ? 'var(--gold-border)' : 'var(--border)'}`,
+            background: side ? 'var(--gold-bg)' : 'var(--bg-elevated)',
+            color: side ? 'var(--gold)' : 'var(--text-secondary)',
+          }}>{side || '없음'}</button>
+        )}
+      </div>
+      {mode === 'single' && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
+          {betOptions.map(opt => (
+            <span key={opt} style={{
+              display: 'inline-flex', alignItems: 'center', gap: 4,
+              border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)',
+              background: 'var(--bg-elevated)', fontSize: 11, fontFamily: 'var(--font-body)',
+            }}>
+              <button type="button" onClick={() => applyBetOption(opt)} style={{
+                padding: '5px 6px', cursor: 'pointer', border: 'none', background: 'transparent',
+                color: 'var(--text-secondary)', fontSize: 11, fontFamily: 'var(--font-body)', fontWeight: 600,
+              }}>{opt}</button>
+              <button type="button" onClick={() => onDeleteBetOption(opt)} style={{
+                padding: '0 6px 0 0', cursor: 'pointer', border: 'none', background: 'transparent',
+                color: 'var(--text-tertiary, #999)', fontSize: 11, lineHeight: 1,
+              }}>×</button>
+            </span>
+          ))}
+          <input
+            className="form-input inline-bet-input"
+            placeholder="옵션 추가 (예: 1.5 핸디)"
+            value={newOption}
+            onChange={e => setNewOption(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addNewOption() } }}
+            style={{ flex: '1 1 100px', minWidth: 90, padding: '5px 8px', fontSize: 11, height: 'auto' }}
+          />
+          <button type="button" onClick={addNewOption} style={{
+            flexShrink: 0, padding: '0 10px', borderRadius: 'var(--radius-sm)', cursor: 'pointer',
+            fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-body)',
+            border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-secondary)',
+          }}>+ 추가</button>
+        </div>
       )}
       {mode === 'multi' && extraContents.map((c, i) => (
         <div key={i} style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
@@ -1977,6 +1905,8 @@ export default function Dashboard() {
   const leagueCandidates = useMemo(() => buildLeagueCandidates(allBetsHistory), [allBetsHistory])
   // 베팅관리에서 체크한 베팅 내용 — 다폴 베팅 내용 빈칸 클릭 시 빠른 선택 목록으로 노출
   const quickPickContents = useMemo(() => Array.from(new Set(bets.filter(b => b.is_quick_pick).map(b => b.match))), [bets])
+  // 베팅옵션 — 단폴 베팅 추가 시 베팅 내용 아래에 버튼으로 노출, 클릭하면 베팅 내용 끝에 붙음
+  const [betOptions, setBetOptions] = useState<string[]>([])
   // 축구/야구/농구/배구/LOL — 리그/팀 직접 등록 후 자동완성으로 선택하는 방식 (자유입력 대신)
   const [soccerLeagues, setSoccerLeagues] = useState<string[]>([])
   const [baseballLeagues, setBaseballLeagues] = useState<string[]>([])
@@ -2002,7 +1932,7 @@ export default function Dashboard() {
   // 전체 사이트 입금/롤링 합산 요약(원화 환산)용 환율
   const [usdKrwRate, setUsdKrwRate] = useState<number>(1350)
 
-  useEffect(() => { loadSites(); loadBets(); loadGameRollings(); loadLeagueOverrides(); loadAllBetsHistory(); loadSportTeamData(); getUsdKrwRate().then(setUsdKrwRate) }, [])
+  useEffect(() => { loadSites(); loadBets(); loadGameRollings(); loadLeagueOverrides(); loadAllBetsHistory(); loadSportTeamData(); loadBetOptions(); getUsdKrwRate().then(setUsdKrwRate) }, [])
   // 리그 관리를 새창(팝업)에서 편집하고 돌아왔을 때, 이 창의 리그/팀 목록도 최신 상태로 갱신
   useEffect(() => {
     function onFocus() { loadSportTeamData() }
@@ -2017,6 +1947,19 @@ export default function Dashboard() {
   async function loadBets() {
     const { data } = await supabase.from('bets').select('*').eq('is_hidden', false).order('bet_date', { ascending: true }).order('created_at', { ascending: true })
     if (data) setBets(data)
+  }
+  async function loadBetOptions() {
+    const { data } = await supabase.from('bet_options').select('*').order('sort_order').order('created_at')
+    if (data) setBetOptions(data.map(d => d.label))
+  }
+  async function addBetOption(label: string) {
+    if (betOptions.includes(label)) return
+    const { error } = await supabase.from('bet_options').upsert({ label }, { onConflict: 'label', ignoreDuplicates: true })
+    if (!error) setBetOptions(p => [...p, label])
+  }
+  async function deleteBetOption(label: string) {
+    const { error } = await supabase.from('bet_options').delete().eq('label', label)
+    if (!error) setBetOptions(p => p.filter(o => o !== label))
   }
   // 베팅관리에서 체크한 베팅 — 다폴 베팅 내용 빈칸 클릭 시 빠른 선택 목록에 노출
   async function toggleQuickPick(bet: Bet) {
@@ -2952,7 +2895,7 @@ export default function Dashboard() {
                           ) : openFormType === 'game' ? (
                             <GameRollingForm site={site} onClose={() => setOpenFormSiteId(null)} onSubmit={amt => submitGameRolling(site, amt)} />
                           ) : (
-                            <SingleBetForm site={site} defaultSport={betsBySite(site.id).slice(-1)[0]?.sport ?? 'soccer'} onClose={() => setOpenFormSiteId(null)} onBet={(sp,ct,od,amt,lv,lg) => submitBet(site,sp,ct,od,amt,lv,lg)} onMultiBet={(sp,cs,od,amt,lgs) => submitMultiBet(site,sp,cs,od,amt,lgs)} baseballOverrides={baseballOverrides} soccerOverrides={soccerOverrides} basketballOverrides={basketballOverrides} volleyballOverrides={volleyballOverrides} teamCandidates={teamCandidates} allBetsHistory={allBetsHistory} leagueCandidates={leagueCandidates} soccerLeagues={soccerLeagues} baseballLeagues={baseballLeagues} basketballLeagues={basketballLeagues} volleyballLeagues={volleyballLeagues} esportsLeagues={esportsLeagues} soccerFavoriteLeagues={soccerFavoriteLeagues} baseballFavoriteLeagues={baseballFavoriteLeagues} basketballFavoriteLeagues={basketballFavoriteLeagues} volleyballFavoriteLeagues={volleyballFavoriteLeagues} esportsFavoriteLeagues={esportsFavoriteLeagues} onToggleSoccerLeagueFavorite={toggleSoccerLeagueFavorite} onToggleBaseballLeagueFavorite={toggleBaseballLeagueFavorite} onToggleBasketballLeagueFavorite={toggleBasketballLeagueFavorite} onToggleVolleyballLeagueFavorite={toggleVolleyballLeagueFavorite} onToggleEsportsLeagueFavorite={toggleEsportsLeagueFavorite} soccerTeams={soccerTeams} baseballTeams={baseballTeams} basketballTeams={basketballTeams} volleyballTeams={volleyballTeams} esportsTeams={esportsTeams} onAddSoccerLeague={addSoccerLeague} onAddBaseballLeague={addBaseballLeague} onAddBasketballLeague={addBasketballLeague} onAddVolleyballLeague={addVolleyballLeague} onAddEsportsLeague={addEsportsLeague} onRenameSoccerLeague={renameSoccerLeague} onDeleteSoccerLeague={deleteSoccerLeague} onRenameBaseballLeague={renameBaseballLeague} onDeleteBaseballLeague={deleteBaseballLeague} onRenameBasketballLeague={renameBasketballLeague} onDeleteBasketballLeague={deleteBasketballLeague} onRenameVolleyballLeague={renameVolleyballLeague} onDeleteVolleyballLeague={deleteVolleyballLeague} onRenameEsportsLeague={renameEsportsLeague} onDeleteEsportsLeague={deleteEsportsLeague} onAddSoccerTeam={addSoccerTeam} onAddBaseballTeam={addBaseballTeam} onAddBasketballTeam={addBasketballTeam} onAddVolleyballTeam={addVolleyballTeam} onAddEsportsTeam={addEsportsTeam} onRenameSoccerTeam={renameSoccerTeam} onDeleteSoccerTeam={deleteSoccerTeam} onRenameBaseballTeam={renameBaseballTeam} onDeleteBaseballTeam={deleteBaseballTeam} onRenameBasketballTeam={renameBasketballTeam} onDeleteBasketballTeam={deleteBasketballTeam} onRenameVolleyballTeam={renameVolleyballTeam} onDeleteVolleyballTeam={deleteVolleyballTeam} onRenameEsportsTeam={renameEsportsTeam} onDeleteEsportsTeam={deleteEsportsTeam} quickPicks={quickPickContents} />
+                            <SingleBetForm site={site} defaultSport={betsBySite(site.id).slice(-1)[0]?.sport ?? 'soccer'} onClose={() => setOpenFormSiteId(null)} onBet={(sp,ct,od,amt,lv,lg) => submitBet(site,sp,ct,od,amt,lv,lg)} onMultiBet={(sp,cs,od,amt,lgs) => submitMultiBet(site,sp,cs,od,amt,lgs)} baseballOverrides={baseballOverrides} soccerOverrides={soccerOverrides} basketballOverrides={basketballOverrides} volleyballOverrides={volleyballOverrides} teamCandidates={teamCandidates} allBetsHistory={allBetsHistory} leagueCandidates={leagueCandidates} soccerLeagues={soccerLeagues} baseballLeagues={baseballLeagues} basketballLeagues={basketballLeagues} volleyballLeagues={volleyballLeagues} esportsLeagues={esportsLeagues} soccerFavoriteLeagues={soccerFavoriteLeagues} baseballFavoriteLeagues={baseballFavoriteLeagues} basketballFavoriteLeagues={basketballFavoriteLeagues} volleyballFavoriteLeagues={volleyballFavoriteLeagues} esportsFavoriteLeagues={esportsFavoriteLeagues} onToggleSoccerLeagueFavorite={toggleSoccerLeagueFavorite} onToggleBaseballLeagueFavorite={toggleBaseballLeagueFavorite} onToggleBasketballLeagueFavorite={toggleBasketballLeagueFavorite} onToggleVolleyballLeagueFavorite={toggleVolleyballLeagueFavorite} onToggleEsportsLeagueFavorite={toggleEsportsLeagueFavorite} soccerTeams={soccerTeams} baseballTeams={baseballTeams} basketballTeams={basketballTeams} volleyballTeams={volleyballTeams} esportsTeams={esportsTeams} onAddSoccerLeague={addSoccerLeague} onAddBaseballLeague={addBaseballLeague} onAddBasketballLeague={addBasketballLeague} onAddVolleyballLeague={addVolleyballLeague} onAddEsportsLeague={addEsportsLeague} onRenameSoccerLeague={renameSoccerLeague} onDeleteSoccerLeague={deleteSoccerLeague} onRenameBaseballLeague={renameBaseballLeague} onDeleteBaseballLeague={deleteBaseballLeague} onRenameBasketballLeague={renameBasketballLeague} onDeleteBasketballLeague={deleteBasketballLeague} onRenameVolleyballLeague={renameVolleyballLeague} onDeleteVolleyballLeague={deleteVolleyballLeague} onRenameEsportsLeague={renameEsportsLeague} onDeleteEsportsLeague={deleteEsportsLeague} onAddSoccerTeam={addSoccerTeam} onAddBaseballTeam={addBaseballTeam} onAddBasketballTeam={addBasketballTeam} onAddVolleyballTeam={addVolleyballTeam} onAddEsportsTeam={addEsportsTeam} onRenameSoccerTeam={renameSoccerTeam} onDeleteSoccerTeam={deleteSoccerTeam} onRenameBaseballTeam={renameBaseballTeam} onDeleteBaseballTeam={deleteBaseballTeam} onRenameBasketballTeam={renameBasketballTeam} onDeleteBasketballTeam={deleteBasketballTeam} onRenameVolleyballTeam={renameVolleyballTeam} onDeleteVolleyballTeam={deleteVolleyballTeam} onRenameEsportsTeam={renameEsportsTeam} onDeleteEsportsTeam={deleteEsportsTeam} quickPicks={quickPickContents} betOptions={betOptions} onAddBetOption={addBetOption} onDeleteBetOption={deleteBetOption} />
                           )}
                         </div>
                       )}
