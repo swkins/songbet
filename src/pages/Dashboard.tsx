@@ -1574,6 +1574,9 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
   const [extraContents, setExtraContents] = useState<string[]>([''])
   const [oddsRaw, setOddsRaw]   = useState('')
   const [amount, setAmount]     = useState(defaultAmount)
+  // 기본금액(defaultAmount)이 아직 그대로인 상태에서 금액 버튼을 처음 누르면 그 금액으로 교체하고,
+  // 그 다음부터 누르면 기존 금액에 더해짐(직접 입력하거나 초기화해도 다시 "교체" 상태로 돌아감)
+  const [amountEdited, setAmountEdited] = useState(false)
   const [isLive, setIsLive]     = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const contentRef = useRef<HTMLInputElement>(null)
@@ -1697,6 +1700,7 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
           value={isusd ? amount : (stakeN > 0 ? stakeN.toLocaleString() : amount)}
           style={{ flex: 1, MozAppearance: 'textfield' } as React.CSSProperties}
           onChange={e => {
+            setAmountEdited(true)
             if (isusd) {
               const v = e.target.value
               if (v === '' || /^\d*\.?\d{0,2}$/.test(v)) setAmount(v)
@@ -1706,11 +1710,16 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
             }
           }}
           onKeyDown={e => e.key === 'Enter' && submit()} />
-        <button onClick={() => setAmount('')} style={{ padding: '0 8px', height: 34, borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-body)', whiteSpace: 'nowrap', flexShrink: 0 }}>초기화</button>
+        <button onClick={() => { setAmount(''); setAmountEdited(false) }} style={{ padding: '0 8px', height: 34, borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-body)', whiteSpace: 'nowrap', flexShrink: 0 }}>초기화</button>
       </div>
       <div style={{ display: 'flex', gap: 4 }}>
         {hotkeys.map(hk => (
           <button key={hk} className="hotkey-btn" onClick={() => {
+            if (!amountEdited) {
+              setAmount(String(hk))
+              setAmountEdited(true)
+              return
+            }
             const cur = isusd ? (Number(amount) || 0) : (Number(amount.replace(/,/g,'')) || 0)
             setAmount(String(cur + hk))
           }}>
