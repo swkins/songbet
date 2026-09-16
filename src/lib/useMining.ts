@@ -126,10 +126,18 @@ export function useMiningData() {
     }
   }
 
+  // 사이트를 삭제하면 오늘 기록뿐 아니라 그 사이트의 과거 기록도 함께 지운다.
+  // 과거 기록(어제 등)만 남아있으면 init()의 "어제 마지막 포인트를 오늘로 승계" 로직이
+  // 그 사이트를 오늘 기록으로 다시 살려내서 새로고침하면 되살아나 보이는 문제가 있었음.
   async function deleteEntry(id: string) {
-    await supabase.from('mining_entries').delete().eq('id', id)
-    setEntries(prev => prev.filter(e => e.id !== id))
-    setHistory(prev => prev.filter(e => e.id !== id))
+    const target = entries.find(e => e.id === id) ?? history.find(e => e.id === id)
+    if (!target) return
+    const siteName = target.site_name
+    await supabase.from('mining_entries').delete().eq('site_name', siteName)
+    await supabase.from('mining_cashouts').delete().eq('site_name', siteName)
+    setEntries(prev => prev.filter(e => e.site_name !== siteName))
+    setHistory(prev => prev.filter(e => e.site_name !== siteName))
+    setCashouts(prev => prev.filter(c => c.site_name !== siteName))
   }
 
   function cashoutFor(siteName: string): MiningCashout | undefined {

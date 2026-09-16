@@ -136,7 +136,7 @@ export default function Mining() {
   }
 
   async function deleteEntry(id: string) {
-    if (!confirm('삭제하시겠습니까?')) return
+    if (!confirm('이 사이트를 삭제할까요? 과거 채굴 기록도 함께 삭제되며 되돌릴 수 없습니다.')) return
     await deleteEntryFromDb(id)
   }
 

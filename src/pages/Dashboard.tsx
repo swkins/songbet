@@ -305,9 +305,10 @@ function autoMarket(content: string): { market: Market; pick: string } {
   const s = content.trim()
   if (/오버/i.test(s) || /over/i.test(s)) return { market: 'over', pick: s }
   if (/언더/i.test(s) || /under/i.test(s)) return { market: 'under', pick: s }
-  // 팀 이름 등 뒤에 라인 숫자가 붙어 있으면 핸디캡 (부호 +/- 유무는 무관, 예: "수원삼성 1.5", "수원삼성 -1.5")
-  // 팀 이름만 단독으로 있으면(숫자 없음) 승리(moneyline)
-  if (/[+-]?\d+(\.\d+)?\s*$/.test(s)) return { market: 'handicap', pick: s }
+  // 팀 이름 등 뒤에 라인 숫자가 붙어 있으면 핸디캡 (부호 +/- 유무는 무관, 예: "수원삼성 1.5", "수원삼성 -1.5").
+  // 베팅옵션 칩으로 고른 "1.5 핸디"/"-1.5 핸디캡" 같은 라벨도 숫자 뒤에 "핸디/핸디캡/플핸/마핸" 접미어가
+  // 붙어 있을 뿐이므로 함께 인식한다. 팀 이름만 단독으로 있으면(숫자 없음) 승리(moneyline)
+  if (/[+-]?\d+(\.\d+)?\s*(핸디캡|핸디|플핸|마핸)?\s*$/.test(s)) return { market: 'handicap', pick: s }
   return { market: 'moneyline', pick: s }
 }
 

@@ -214,18 +214,19 @@ function countBaseballTeamNames(text: string): number {
   return matched.size
 }
 
-// 핸디캡(+N.N / -N.N / 부호없는 N.N) 픽 텍스트에서 라인 숫자 추출 (부호 무관, 절대값)
-// 부호가 없는 경우 문자열 끝의 숫자를 라인으로 간주 (예: "수원삼성 1.5" → 1.5)
+// 핸디캡(+N.N / -N.N / 부호없는 N.N) 픽 텍스트에서 라인 숫자 추출 (부호 무관, 절대값).
+// 베팅옵션 칩으로 고른 "1.5 핸디"/"-1.5 핸디캡"처럼 숫자 뒤에 "핸디/핸디캡/플핸/마핸" 접미어가
+// 붙어 있을 수 있으므로 그 접미어까지 허용하고 문자열 끝 기준으로만 찾는다.
 function extractHandicapLine(pick: string): number | null {
-  const signed = pick?.match(/([+-]\s*\d+\.?\d*)/)
-  if (signed) {
-    const n = parseFloat(signed[1].replace(/\s+/g, ''))
-    if (!isNaN(n)) return Math.abs(n)
-  }
-  const trailing = pick?.match(/(\d+\.?\d*)\s*$/)
-  if (!trailing) return null
-  const n = parseFloat(trailing[1])
+  const m = pick?.match(/([+-]?\s*\d+\.?\d*)\s*(?:핸디캡|핸디|플핸|마핸)?\s*$/)
+  if (!m) return null
+  const n = parseFloat(m[1].replace(/\s+/g, ''))
   return isNaN(n) ? null : Math.abs(n)
+}
+// 저장된 문구("팀이름 홈 1.5 핸디" / "팀이름 원정")에서 홈/원정 표시를 찾는다 (베팅추가에서 붙인 표시).
+function extractSide(match: string): '홈' | '원정' | null {
+  const m = match?.match(/(?:^|\s)(홈|원정)(?:\s|$)/)
+  return m ? (m[1] as '홈' | '원정') : null
 }
 
 // 승패(역배·정배) — 2.1 ~ 2.9 구간을 0.1 단위로 고정 커버 (티어 배지는 더 이상 사용하지 않음) (티어 배지는 더 이상 사용하지 않음)
@@ -362,16 +363,21 @@ function BaseballDetailPanel({ bets, overrides, knownLeagues, onRenameLeague, on
 }
 
 // ─── 배당 0.1단위 구간 집계 (공통) ─────────────────────────────────
+// 배당*10을 정수 구간 인덱스로 변환해서 묶는다 — 최고 배당이 1.90/2.00처럼 정확히 .0으로
+// 떨어지는 경우 그 구간 자체가 통째로 누락되던 부동소수점 버그(loEnd가 한 구간 앞에서
+// 멈춤)를 막기 위함. 아주 작은 epsilon만 더해 부동소수점 오차(1.9000000001 등)도 보정한다.
+function oddsBucketIndex(odds: number): number {
+  return Math.floor(odds * 10 + 1e-6)
+}
 function oddsBinRows(list: Bet[]): RuleRow[] {
   if (!list.length) return []
-  const odds = list.map(b => b.odds)
-  const loStart = Math.floor(Math.min(...odds) * 10) / 10
-  const loEnd = Math.floor((Math.max(...odds) - 0.0001) * 10) / 10
+  const buckets = list.map(b => oddsBucketIndex(b.odds))
+  const minB = Math.min(...buckets)
+  const maxB = Math.max(...buckets)
   const rows: RuleRow[] = []
-  for (let lo = loStart; lo <= loEnd + 1e-9; lo = Math.round((lo + 0.1) * 10) / 10) {
-    const hi = Math.round((lo + 0.1) * 10) / 10
-    const rowBets = list.filter(b => b.odds >= lo && b.odds < hi)
-    if (rowBets.length > 0) rows.push({ label: lo.toFixed(1), tier: 'none', bets: rowBets })
+  for (let idx = minB; idx <= maxB; idx++) {
+    const rowBets = list.filter(b => oddsBucketIndex(b.odds) === idx)
+    if (rowBets.length > 0) rows.push({ label: (idx / 10).toFixed(1), tier: 'none', bets: rowBets })
   }
   return rows
 }
@@ -493,36 +499,33 @@ function LeagueManageModal({ leagues, onRename, onDelete, onClose }: {
 // ─── 축구 상세 통계 (배당 흐름 기반 — 마켓별 0.1단위 구간 통계) ──────
 function SoccerDetailPanel({ bets }: { bets: Bet[] }) {
   const settled = bets.filter(b => b.result !== 'pending')
-  const ml = settled.filter(b => b.market === 'moneyline')
   const hcap = settled.filter(b => b.market === 'handicap')
-  // 홈/원정 구분 없이 통합 — 0.5 / 1.5 / 2.5 플핸(언더독 쪽)과 -1.5 마핸(강팀 쪽)
-  const hcap05 = hcap.filter(b => extractHandicapLine(b.pick) === 0.5)
-  const hcap15Plus = hcap.filter(b => extractHandicapLine(b.pick) === 1.5 && extractHandicapSign(b.pick) !== '-')
-  const hcap25Plus = hcap.filter(b => extractHandicapLine(b.pick) === 2.5 && extractHandicapSign(b.pick) !== '-')
-  const hcap15Minus = hcap.filter(b => extractHandicapLine(b.pick) === 1.5 && extractHandicapSign(b.pick) === '-')
 
-  // 베팅을 일반승 / 0.5 플핸 / 1.5 플핸 / 2.5 플핸 / -1.5 마핸 다섯 가지로 구분(홈·원정 통합).
-  // 각각 0.1단위 배당 구간별 적중률·수익률 + 전체 총 수익률을 표시. 그 외(다른 라인, 오버/언더 등)는 룰북 외로 이동.
-  const tables = [
-    { title: '⚽ 0.5 플핸 — 0.1단위 배당 구간별', rows: oddsBinRows(hcap05), all: hcap05 },
-    { title: '⚽ 1.5 플핸 — 0.1단위 배당 구간별', rows: oddsBinRows(hcap15Plus), all: hcap15Plus },
-    { title: '⚽ 2.5 플핸 — 0.1단위 배당 구간별', rows: oddsBinRows(hcap25Plus), all: hcap25Plus },
-    { title: '⚽ 일반승 — 0.1단위 배당 구간별', rows: oddsBinRows(ml), all: ml },
-    { title: '⚽ -1.5 마핸 — 0.1단위 배당 구간별', rows: oddsBinRows(hcap15Minus), all: hcap15Minus },
-  ]
+  // 홈 0.5/1.5/2.5 플핸, 원정 0.5/1.5/2.5 플핸 — 총 6개 구간으로 나눠서 각각 0.1단위 배당 구간별
+  // 적중률·수익률 + 전체 총 수익률을 표시. 그 외(마핸, 일반승, 다른 라인, 오버/언더 등)는 룰북 외로 이동.
+  const HCAP_LINES = [0.5, 1.5, 2.5] as const
+  const sideTables = HCAP_LINES.flatMap(line => {
+    const lineBets = hcap.filter(b => extractHandicapLine(b.pick) === line && extractHandicapSign(b.pick) !== '-')
+    const home = lineBets.filter(b => extractSide(b.match) === '홈')
+    const away = lineBets.filter(b => extractSide(b.match) === '원정')
+    return [
+      { title: `⚽ 홈 ${line} 플핸 — 0.1단위 배당 구간별`, rows: oddsBinRows(home), all: home },
+      { title: `⚽ 원정 ${line} 플핸 — 0.1단위 배당 구간별`, rows: oddsBinRows(away), all: away },
+    ]
+  })
 
   // 언더(2.5/3.5/4.5) — 배당옵션별 + 리그별 (초안)
   const under = settled.filter(b => b.market === 'under')
   const UNDER_LINES = [2.5, 3.5, 4.5]
   const underByLine = UNDER_LINES.map(line => under.filter(b => extractTotalLine(b.pick) === line))
 
-  const ruleIds = new Set([...tables.flatMap(t => t.rows.flatMap(r => r.bets)), ...underByLine.flat()].map(b => b.id))
+  const ruleIds = new Set([...sideTables.flatMap(t => t.all), ...underByLine.flat()].map(b => b.id))
   const otherBets = settled.filter(b => !ruleIds.has(b.id))
 
   return (
     <div>
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-        {tables.map(t => <RuleStatsTable key={t.title} title={t.title} rows={t.rows} extra={<MarketTotalRow bets={t.all} />} />)}
+        {sideTables.map(t => <RuleStatsTable key={t.title} title={t.title} rows={t.rows} extra={<MarketTotalRow bets={t.all} />} />)}
       </div>
       <SoccerUnderByLeagueSection lines={UNDER_LINES} lineBets={underByLine} />
       <OtherBetsPanel bets={otherBets} />
@@ -712,7 +715,7 @@ function classifyLolOption(content: string): '일반승' | '핸디캡' | '세트
 }
 
 function extractHandicapSign(pick: string): '+' | '-' | null {
-  const m = pick?.match(/([+-])\s*\d+\.?\d*\s*$/)
+  const m = pick?.match(/([+-])\s*\d+\.?\d*\s*(?:핸디캡|핸디|플핸|마핸)?\s*$/)
   return m ? (m[1] as '+' | '-') : null
 }
 
