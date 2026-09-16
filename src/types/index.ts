@@ -11,7 +11,6 @@ export interface Site {
   point_deposit: number
   total_withdrawal: number
   currency: 'krw' | 'usd'
-  bet_type: 'single' | 'double'   // 단폴 or 다폴
   settlement_only: boolean          // 결산 전용 사이트 (대시보드 베팅현황에 미표시)
   default_stake: number             // 기본 베팅 금액 (0이면 통화별 폴백)
   carry_pnl: number                 // 마감 시 진행중 베팅이 남아있으면 이월되는 누적 수익률 (진행중 베팅 없이 마감되면 0으로 초기화)
@@ -25,7 +24,6 @@ export interface Bet {
   parlay_leg: number            // 1 or 2
   is_live: boolean              // 라이브 베팅 여부
   is_pinned: boolean            // 마감 시 고정 유지
-  is_quick_pick: boolean        // 베팅관리에서 체크 — 다폴 베팅 내용 빈칸 클릭 시 빠른 선택 목록에 노출
   usd_krw_rate: number | null   // 달러 사이트 베팅 결과처리 시점의 환율 (통계 원화 환산용)
   cashout_amount: number | null // 캐시아웃한 경우 그 금액 (되돌리기 시 잔액/롤링 복원용)
   result_at: string | null      // 결과(적중/실패/PUSH/캐시아웃) 처리된 시각 — 처리 후 1시간 동안은 완료된 목록으로 넘기지 않고 진행중에 유지

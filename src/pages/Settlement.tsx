@@ -328,7 +328,7 @@ export default function Settlement() {
     const { data } = await supabase.from('sites').insert({
       name: newSiteName.trim(), balance: 0, active: false, sort_order: sites.length,
       rolling_target: 0, rolling_done: 0, last_deposit: 0, deposit_bet_done: 0,
-      point_deposit: 0, total_withdrawal: 0, currency: 'krw', bet_type: 'single', settlement_only: true,
+      point_deposit: 0, total_withdrawal: 0, currency: 'krw', settlement_only: true,
     }).select().single()
     if (data) { setSites(p => [...p, data]); setNewSiteName('') }
   }
@@ -390,11 +390,16 @@ export default function Settlement() {
       if (c.type === 'income') monthMap[c.site_id!].income += toKrw(c)
       else if (c.type === 'expense') monthMap[c.site_id!].expense += toKrw(c)
     })
-    return Object.entries(monthMap)
-      .map(([siteId, v]) => {
-        const t = totalMap[siteId] ?? { income: 0, expense: 0 }
+    // 이번달 입출금이 없어도 과거 입출금 이력이 있으면(전체누적 값이 있으면) 계속 표시한다 —
+    // 비활성화된 사이트도 예전 기록이 있으면 사라지지 않고 흐린 색으로 구분해서 보여줌.
+    return Object.keys(totalMap)
+      .map(siteId => {
+        const v = monthMap[siteId] ?? { income: 0, expense: 0 }
+        const t = totalMap[siteId]
+        const site = sites.find(s => s.id === siteId)
         return {
-          name: sites.find(s => s.id === siteId)?.name ?? siteId,
+          name: site?.name ?? siteId,
+          active: site?.active ?? false,
           income: v.income, expense: v.expense, net: v.income - v.expense,
           totalIncome: t.income, totalExpense: t.expense, totalNet: t.income - t.expense,
         }
@@ -788,7 +793,7 @@ export default function Settlement() {
               <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-secondary)', textAlign: 'right' }}>순수익</span>
             </div>
           )}
-          {monthSiteBreakdown.map(({ name, income, expense, net, totalIncome, totalExpense, totalNet }, i) => {
+          {monthSiteBreakdown.map(({ name, active, income, expense, net, totalIncome, totalExpense, totalNet }, i) => {
             const incPct = Math.round(income / maxSiteBreakdownIncome * 100)
             const expPct = Math.round(expense / maxSiteBreakdownExpense * 100)
             const netPct = Math.round(Math.abs(net) / maxSiteBreakdownNetAbs * 100)
@@ -798,8 +803,11 @@ export default function Settlement() {
             const totNetPct = Math.round(Math.abs(totalNet) / maxSiteTotalNetAbs * 100)
             const totNetColor = totalNet >= 0 ? 'var(--green)' : 'var(--red)'
             return (
-              <div key={name} style={{ marginBottom: 12, paddingBottom: 10, borderBottom: i < monthSiteBreakdown.length - 1 ? '1px solid var(--border)' : 'none' }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</div>
+              <div key={name} style={{ marginBottom: 12, paddingBottom: 10, borderBottom: i < monthSiteBreakdown.length - 1 ? '1px solid var(--border)' : 'none', opacity: active ? 1 : 0.5 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: active ? 'var(--text-primary)' : 'var(--text-muted)', marginBottom: 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  {name}
+                  {!active && <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', border: '1px solid var(--border)', borderRadius: 3, padding: '1px 5px', flexShrink: 0 }}>마감</span>}
+                </div>
 
                 {/* 이번달 */}
                 <div style={{ display: 'grid', gridTemplateColumns: 'minmax(48px, auto) 1fr 1fr 1fr', gap: 4, alignItems: 'center', marginBottom: 5 }}>

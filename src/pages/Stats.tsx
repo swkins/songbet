@@ -76,6 +76,73 @@ function calcStats(bets: Bet[]) {
   return { settled, wins, losses, pushes, total, winRate, stake, profit, roi, avgOdds }
 }
 
+// ─── 전체 탭: 종목 × 베팅옵션(승패/핸디캡/오버/언더)별 적중률·수익률을 한 표로 ──────
+function MarketTypeOverviewSection({ settled }: { settled: Bet[] }) {
+  const MARKET_SPORTS: { value: Sport; label: string; emoji: string }[] = [
+    { value: 'soccer', label: '축구', emoji: '⚽' },
+    { value: 'baseball', label: '야구', emoji: '⚾' },
+    { value: 'basketball', label: '농구', emoji: '🏀' },
+    { value: 'volleyball', label: '배구', emoji: '🏐' },
+    { value: 'esports', label: 'LOL', emoji: '🎮' },
+  ]
+  const MARKETS: { value: Market; label: string }[] = [
+    { value: 'moneyline', label: '승패' },
+    { value: 'handicap', label: '핸디캡' },
+    { value: 'over', label: '오버' },
+    { value: 'under', label: '언더' },
+  ]
+  const rows = MARKET_SPORTS.filter(s => settled.some(b => b.sport === s.value))
+  if (rows.length === 0) return null
+
+  return (
+    <div className="card">
+      <div className="card-title" style={{ marginBottom: 8 }}>종목 × 베팅옵션별 성적</div>
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+          <thead>
+            <tr style={{ borderBottom: '1px solid var(--border)' }}>
+              <th style={{ textAlign: 'left', padding: '4px 8px', fontSize: 9, color: 'var(--text-secondary)', fontWeight: 700, whiteSpace: 'nowrap' }}>종목</th>
+              {MARKETS.map(m => (
+                <th key={m.value} style={{ textAlign: 'center', padding: '4px 6px', fontSize: 9, color: 'var(--text-secondary)', fontWeight: 700, whiteSpace: 'nowrap' }}>{m.label}</th>
+              ))}
+              <th style={{ textAlign: 'center', padding: '4px 8px', fontSize: 9, color: 'var(--text-secondary)', fontWeight: 700, whiteSpace: 'nowrap', borderLeft: '1px solid var(--border)' }}>합계</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(s => {
+              const sportBets = settled.filter(b => b.sport === s.value)
+              const totalStats = calcStats(sportBets)
+              return (
+                <tr key={s.value} style={{ borderBottom: '1px solid var(--border-light)', height: 30 }}>
+                  <td style={{ padding: '4px 8px', fontWeight: 700, color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>{s.emoji} {s.label}</td>
+                  {MARKETS.map(m => {
+                    const mb = sportBets.filter(b => b.market === m.value)
+                    const st = mb.length > 0 ? calcStats(mb) : null
+                    return (
+                      <td key={m.value} style={{ textAlign: 'center', padding: '4px 6px', whiteSpace: 'nowrap' }}>
+                        {st ? (
+                          <>
+                            <div style={{ fontSize: 9, color: 'var(--text-muted)' }}>{st.total}건 · {st.winRate.toFixed(0)}%</div>
+                            <div style={{ fontWeight: 700, color: st.roi >= 0 ? 'var(--green)' : 'var(--red)' }}>{st.roi >= 0 ? '+' : ''}{st.roi.toFixed(1)}%</div>
+                          </>
+                        ) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
+                      </td>
+                    )
+                  })}
+                  <td style={{ textAlign: 'center', padding: '4px 8px', whiteSpace: 'nowrap', borderLeft: '1px solid var(--border)' }}>
+                    <div style={{ fontWeight: 700, color: totalStats.profit >= 0 ? 'var(--green)' : 'var(--red)' }}>{totalStats.profit >= 0 ? '+' : ''}{totalStats.profit.toLocaleString()}</div>
+                    <div style={{ fontSize: 9, color: 'var(--text-muted)' }}>{totalStats.roi >= 0 ? '+' : ''}{totalStats.roi.toFixed(1)}% · {totalStats.total}건</div>
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
 // ─── 룰북 기반 통계 행 ─────────────────────────────────────────────
 type RowColor = 'S' | 'A' | 'B' | 'none'
 
@@ -1241,6 +1308,13 @@ export default function Stats() {
   const settled = periodFiltered.filter(b => b.result !== 'pending')
   const sportCounts = SPORTS.map(s => ({ ...s, count: settled.filter(b => b.sport === s.value).length }))
 
+  // 총 손익 전일 대비 — 기간 필터와 무관하게 항상 오늘 하루치 손익과 어제 하루치 손익을 비교
+  const todayStr = dayjs().format('YYYY-MM-DD')
+  const yesterdayStr = dayjs().subtract(1, 'day').format('YYYY-MM-DD')
+  const todayProfit = bets.filter(b => b.result !== 'pending' && b.bet_date === todayStr).reduce((a, b) => a + b.profit, 0)
+  const yesterdayProfit = bets.filter(b => b.result !== 'pending' && b.bet_date === yesterdayStr).reduce((a, b) => a + b.profit, 0)
+  const dodDelta = todayProfit - yesterdayProfit
+
   const profitCurve = (() => {
     let cum = 0
     return settled.sort((a, b) => a.bet_date.localeCompare(b.bet_date)).map(b => { cum += b.profit; return { date: b.bet_date, profit: cum } })
@@ -1295,12 +1369,21 @@ export default function Stats() {
                   { label: '평균 배당', value: stats.avgOdds.toFixed(2), sub: '', cls: '' },
                 ].map(t => (
                   <div key={t.label} className="card stat-tile" style={{ flex: '1 0 120px', maxWidth: 180 }}>
-                    <div className={`stat-value ${t.cls}`}>{t.value}</div>
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+                      <div className={`stat-value ${t.cls}`}>{t.value}</div>
+                      {t.label === '총 손익' && dodDelta !== 0 && (
+                        <span style={{ fontSize: 10, fontWeight: 700, color: dodDelta >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                          전일대비 {dodDelta >= 0 ? '+' : ''}{dodDelta.toLocaleString()}
+                        </span>
+                      )}
+                    </div>
                     <div className="stat-label">{t.label}</div>
                     {t.sub && <div style={{ fontSize: 10, color: 'var(--text-secondary)', marginTop: 4 }}>{t.sub}</div>}
                   </div>
                 ))}
               </div>
+
+              <MarketTypeOverviewSection settled={settled} />
 
               <div>
                 <div className="card-title" style={{ marginBottom: 8 }}>종목별 수익률</div>
