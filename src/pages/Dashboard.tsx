@@ -2050,8 +2050,14 @@ export default function Dashboard() {
   const [allBetsHistory, setAllBetsHistory] = useState<BetLite[]>([])
   const teamCandidates = useMemo(() => buildTeamCandidates(allBetsHistory), [allBetsHistory])
   const leagueCandidates = useMemo(() => buildLeagueCandidates(allBetsHistory), [allBetsHistory])
-  // 베팅관리에서 체크한 베팅 내용 — 다폴 베팅 내용 빈칸 클릭 시 빠른 선택 목록으로 노출
-  const quickPickContents = useMemo(() => Array.from(new Set(bets.filter(b => b.is_quick_pick).map(b => b.match))), [bets])
+  // 다폴 베팅 내용 빈칸 클릭 시 빠른 선택 목록으로 노출 — 베팅관리에서 직접 체크한 베팅 내용 +
+  // 지금 다폴로 진행중(미정산)인 다리들의 베팅 내용을 자동으로 합쳐서, 한 번 썼던 픽을 다시
+  // 추가할 때 매번 새로 검색/입력하지 않고 바로 골라 쓸 수 있게 한다.
+  const quickPickContents = useMemo(() => {
+    const pendingParlay = bets.filter(b => b.parlay_group !== null && b.result === 'pending').map(b => b.match)
+    const starred = bets.filter(b => b.is_quick_pick).map(b => b.match)
+    return Array.from(new Set([...pendingParlay, ...starred]))
+  }, [bets])
   // 베팅옵션 — 단폴 베팅 추가 시 베팅 내용 아래에 버튼으로 노출, 클릭하면 베팅 내용 끝에 붙음
   const [betOptionsBySport, setBetOptionsBySport] = useState<Record<string, string[]>>({})
   // 축구/야구/농구/배구/LOL — 리그/팀 직접 등록 후 자동완성으로 선택하는 방식 (자유입력 대신)
