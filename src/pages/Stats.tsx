@@ -24,9 +24,9 @@ const MARKET_LABELS: Record<Market, string> = {
 // ─── 종목별 룰북 요약 (통계 탭 상단 표시용) ───────────────────────────
 const RULEBOOK_SUMMARY: Partial<Record<Sport, string[]>> = {
   soccer: [
-    '정배 1.39 이하 → 정배 -1.5 핸디캡 (테스트, 배당 1.40~1.99)',
-    '정배 1.40~1.79 → 반대쪽 +1.5 핸디캡 (배당 1.40~1.99)',
-    '정배 1.80 이상 → 반대쪽 +0.5 핸디캡 (배당 1.70~1.99)',
+    '정배 1.20~1.39 → 반대쪽 +2.5 핸디캡',
+    '정배 1.40~1.79 → 반대쪽 +1.5 핸디캡',
+    '정배 1.80 이상(반대쪽 4.00 미만) → 반대쪽 +0.5 핸디캡',
   ],
   baseball: [
     '언오버 기준점 8.5 (MLB 최빈값, 전 리그 공통 적용)',
@@ -215,10 +215,10 @@ function countBaseballTeamNames(text: string): number {
 }
 
 // 핸디캡(+N.N / -N.N / 부호없는 N.N) 픽 텍스트에서 라인 숫자 추출 (부호 무관, 절대값).
-// 베팅옵션 칩으로 고른 "1.5 핸디"/"-1.5 핸디캡"처럼 숫자 뒤에 "핸디/핸디캡/플핸/마핸" 접미어가
-// 붙어 있을 수 있으므로 그 접미어까지 허용하고 문자열 끝 기준으로만 찾는다.
+// 베팅옵션 칩으로 고른 "1.5 핸디"/"-1.5 핸디캡"/"1.5 H"처럼 숫자 뒤에
+// "핸디/핸디캡/플핸/마핸/H" 접미어가 붙어 있을 수 있으므로 그 접미어까지 허용하고 문자열 끝 기준으로만 찾는다.
 function extractHandicapLine(pick: string): number | null {
-  const m = pick?.match(/([+-]?\s*\d+\.?\d*)\s*(?:핸디캡|핸디|플핸|마핸)?\s*$/)
+  const m = pick?.match(/([+-]?\s*\d+\.?\d*)\s*(?:핸디캡|핸디|플핸|마핸|h)?\s*$/i)
   if (!m) return null
   const n = parseFloat(m[1].replace(/\s+/g, ''))
   return isNaN(n) ? null : Math.abs(n)
@@ -499,7 +499,9 @@ function LeagueManageModal({ leagues, onRename, onDelete, onClose }: {
 // ─── 축구 상세 통계 (배당 흐름 기반 — 마켓별 0.1단위 구간 통계) ──────
 function SoccerDetailPanel({ bets }: { bets: Bet[] }) {
   const settled = bets.filter(b => b.result !== 'pending')
-  const hcap = settled.filter(b => b.market === 'handicap')
+  // market 컬럼이 과거 저장 시점의 분류 버그로 잘못 저장된 경우를 대비해, 문구 자체에서
+  // 라인 숫자를 읽어낼 수 있으면(extractHandicapLine) market 값과 무관하게 핸디캡으로 인정한다.
+  const hcap = settled.filter(b => b.market === 'handicap' || extractHandicapLine(b.pick) !== null)
 
   // 홈 0.5/1.5/2.5 플핸, 원정 0.5/1.5/2.5 플핸 — 총 6개 구간으로 나눠서 각각 0.1단위 배당 구간별
   // 적중률·수익률 + 전체 총 수익률을 표시. 그 외(마핸, 일반승, 다른 라인, 오버/언더 등)는 룰북 외로 이동.
@@ -709,13 +711,13 @@ interface LeagueSectionProps {
 function classifyLolOption(content: string): '일반승' | '핸디캡' | '세트승' | '기타' {
   const s = content.trim()
   if (/\d+세트\s*승\s*$/.test(s)) return '세트승'
-  if (/[+-]?\d+(\.\d+)?\s*$/.test(s)) return '핸디캡'
-  if (/승\s*$/.test(s)) return '일반승'
+  if (/[+-]?\d+(\.\d+)?\s*(?:핸디캡|핸디|플핸|마핸|h)?\s*$/i.test(s)) return '핸디캡'
+  if (/승\s*$/.test(s) || /\bml\s*$/i.test(s)) return '일반승'
   return '기타'
 }
 
 function extractHandicapSign(pick: string): '+' | '-' | null {
-  const m = pick?.match(/([+-])\s*\d+\.?\d*\s*(?:핸디캡|핸디|플핸|마핸)?\s*$/)
+  const m = pick?.match(/([+-])\s*\d+\.?\d*\s*(?:핸디캡|핸디|플핸|마핸|h)?\s*$/i)
   return m ? (m[1] as '+' | '-') : null
 }
 
