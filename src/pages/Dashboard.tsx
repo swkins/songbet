@@ -104,8 +104,11 @@ function TeamContentInput({ value, onChange, candidates, allBets: _allBets, plac
   const ref = inputRef ?? localRef
   // 자동완성 제거 (요청에 따라 순수 자유입력만 지원) — candidates는 더 이상 사용하지 않는다
   void candidates
-  // 값이 비어있을 때만 "베팅관리"에서 체크한 빠른 선택 목록을 보여준다
-  const suggestions: string[] = !value.trim() && quickPicks?.length ? quickPicks : []
+  // 빠른 선택 목록은 포커스만 줘도 뜨지 않고, 더블클릭하거나 글자를 입력했을 때만 보여준다.
+  // 글자를 입력한 상태면 그 글자가 포함된 항목만 걸러서 보여준다.
+  const suggestions: string[] = quickPicks?.length
+    ? (value.trim() ? quickPicks.filter(q => q.includes(value.trim())) : quickPicks)
+    : []
 
   function pick(name: string) {
     onChange(name)
@@ -117,7 +120,7 @@ function TeamContentInput({ value, onChange, candidates, allBets: _allBets, plac
       <input ref={ref} className="form-input inline-bet-input" placeholder={placeholder} value={value}
         autoFocus={autoFocus}
         onChange={e => { onChange(e.target.value); setOpen(true); setHi(-1) }}
-        onFocus={() => setOpen(true)}
+        onDoubleClick={() => setOpen(true)}
         onBlur={() => setTimeout(() => setOpen(false), 150)}
         onKeyDown={e => {
           if (open && suggestions.length > 0) {
