@@ -104,22 +104,22 @@ function classifySportBetsByOption(sportBets: Bet[], options: string[]): OptionC
   return cells
 }
 
-function OptionStatChip({ label, bets }: { label: string; bets: Bet[] }) {
+function OptionStatCell({ bets }: { bets: Bet[] }) {
+  if (!bets || bets.length === 0) return <span style={{ color: 'var(--text-muted)' }}>—</span>
   const st = calcStats(bets)
   return (
-    <div style={{
-      minWidth: 92, flex: '0 0 auto', padding: '6px 9px', borderRadius: 8,
-      background: 'var(--bg-elevated)', border: `1px solid ${st.roi >= 0 ? 'var(--green-border)' : 'var(--red-border)'}`,
-    }}>
-      <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 3, whiteSpace: 'nowrap' }}>{label}</div>
-      <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 1 }}>{st.total}건 · {st.winRate.toFixed(0)}%</div>
+    <>
+      <div style={{ fontSize: 9, color: 'var(--text-muted)' }}>{st.total}건 · {st.winRate.toFixed(0)}%</div>
       <div style={{ fontSize: 12, fontWeight: 800, fontFamily: 'var(--font-num)', color: st.roi >= 0 ? 'var(--green)' : 'var(--red)' }}>
         {st.roi >= 0 ? '+' : ''}{st.roi.toFixed(1)}%
       </div>
-    </div>
+    </>
   )
 }
 
+// 종목을 가로(열)로, 베팅옵션(홈 0.5, 원정 1.5 등)을 세로(행)로 나열한 표.
+// 종목마다 옵션 구성이 다르므로, 실제 등장하는 모든 (종목,옵션) 조합의 라벨을 모아 행으로 쓰고
+// 없는 조합은 빈칸(—)으로 둔다. "기타"(등록된 옵션에 안 걸리는 베팅)는 있으면 맨 아래 행으로.
 function MarketTypeOverviewSection({ settled, betOptionsBySport }: { settled: Bet[]; betOptionsBySport: Record<string, string[]> }) {
   const MARKET_SPORTS: { value: Sport; label: string; emoji: string }[] = [
     { value: 'soccer', label: '축구', emoji: '⚽' },
@@ -128,34 +128,63 @@ function MarketTypeOverviewSection({ settled, betOptionsBySport }: { settled: Be
     { value: 'volleyball', label: '배구', emoji: '🏐' },
     { value: 'esports', label: 'LOL', emoji: '🎮' },
   ]
-  const rows = MARKET_SPORTS
+  const cols = MARKET_SPORTS
     .map(s => ({ ...s, sportBets: settled.filter(b => b.sport === s.value) }))
     .filter(s => s.sportBets.length > 0)
-  if (rows.length === 0) return null
+  if (cols.length === 0) return null
+
+  const cellsBySport = new Map(cols.map(s => [
+    s.value,
+    new Map(classifySportBetsByOption(s.sportBets, betOptionsBySport[s.value] ?? []).map(c => [c.label, c.bets])),
+  ]))
+  const optionLabels: string[] = []
+  cols.forEach(s => {
+    for (const label of cellsBySport.get(s.value)!.keys()) {
+      if (label !== '기타' && !optionLabels.includes(label)) optionLabels.push(label)
+    }
+  })
+  const hasOther = cols.some(s => cellsBySport.get(s.value)!.has('기타'))
+  const rowLabels = hasOther ? [...optionLabels, '기타'] : optionLabels
 
   return (
     <div className="card">
       <div className="card-title" style={{ marginBottom: 2 }}>종목별 · 베팅옵션별 성적</div>
       <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 10 }}>베팅추가에서 등록한 옵션 기준 (예: 홈 0.5, 원정 1.5) — 어디에도 안 걸리는 베팅은 "기타"로 표시</div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {rows.map(s => {
-          const cells = classifySportBetsByOption(s.sportBets, betOptionsBySport[s.value] ?? [])
-          const totalStats = calcStats(s.sportBets)
-          return (
-            <div key={s.value}>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 6 }}>
-                <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}>{s.emoji} {s.label}</span>
-                <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{totalStats.total}건</span>
-                <span style={{ fontSize: 11, fontWeight: 700, color: totalStats.profit >= 0 ? 'var(--green)' : 'var(--red)' }}>
-                  {totalStats.profit >= 0 ? '+' : ''}{totalStats.profit.toLocaleString()}원 ({totalStats.roi >= 0 ? '+' : ''}{totalStats.roi.toFixed(1)}%)
-                </span>
-              </div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                {cells.map(c => <OptionStatChip key={c.label} label={c.label} bets={c.bets} />)}
-              </div>
-            </div>
-          )
-        })}
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+          <thead>
+            <tr style={{ borderBottom: '1px solid var(--border)' }}>
+              <th style={{ textAlign: 'left', padding: '4px 8px', fontSize: 9, color: 'var(--text-secondary)', fontWeight: 700, whiteSpace: 'nowrap' }}>베팅옵션</th>
+              {cols.map(s => (
+                <th key={s.value} style={{ textAlign: 'center', padding: '4px 8px', fontSize: 10, color: 'var(--text-secondary)', fontWeight: 700, whiteSpace: 'nowrap' }}>{s.emoji} {s.label}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            <tr style={{ borderBottom: '1px solid var(--border)', height: 30 }}>
+              <td style={{ padding: '4px 8px', fontWeight: 700, color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>합계</td>
+              {cols.map(s => {
+                const st = calcStats(s.sportBets)
+                return (
+                  <td key={s.value} style={{ textAlign: 'center', padding: '4px 8px', whiteSpace: 'nowrap' }}>
+                    <div style={{ fontWeight: 700, color: st.profit >= 0 ? 'var(--green)' : 'var(--red)' }}>{st.profit >= 0 ? '+' : ''}{st.profit.toLocaleString()}</div>
+                    <div style={{ fontSize: 9, color: 'var(--text-muted)' }}>{st.roi >= 0 ? '+' : ''}{st.roi.toFixed(1)}% · {st.total}건</div>
+                  </td>
+                )
+              })}
+            </tr>
+            {rowLabels.map((label, i) => (
+              <tr key={label} style={{ borderBottom: i < rowLabels.length - 1 ? '1px solid var(--border-light)' : 'none', height: 30 }}>
+                <td style={{ padding: '4px 8px', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>{label}</td>
+                {cols.map(s => (
+                  <td key={s.value} style={{ textAlign: 'center', padding: '4px 8px', whiteSpace: 'nowrap' }}>
+                    <OptionStatCell bets={cellsBySport.get(s.value)!.get(label) ?? []} />
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   )
