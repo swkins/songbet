@@ -76,8 +76,51 @@ function calcStats(bets: Bet[]) {
   return { settled, wins, losses, pushes, total, winRate, stake, profit, roi, avgOdds }
 }
 
-// ─── 전체 탭: 종목 × 베팅옵션(승패/핸디캡/오버/언더)별 적중률·수익률을 한 표로 ──────
-function MarketTypeOverviewSection({ settled }: { settled: Bet[] }) {
+// ─── 전체 탭: 종목별 · 베팅추가에서 등록한 베팅옵션별(홈 0.5, 원정 1.5 등) 세부 성적을 한눈에 ──────
+// 베팅 문구("팀이름 홈 1.5 H")에서 등록된 옵션 라벨을 뒤에서부터 찾아 떼어내고, 남은 문구에서
+// 홈/원정 표시를 찾아 "홈 1.5 H" 처럼 옵션별로 쪼갠다. 어떤 옵션에도 안 걸리는 베팅은 "기타"로 모음.
+function matchesBetOptionLabel(matchText: string, label: string): boolean {
+  const s = (matchText ?? '').trim()
+  return s === label || s.endsWith(' ' + label)
+}
+interface OptionCell { label: string; bets: Bet[] }
+function classifySportBetsByOption(sportBets: Bet[], options: string[]): OptionCell[] {
+  const sortedOptions = [...options].sort((a, b) => b.length - a.length)
+  const claimed = new Set<string>()
+  const cells: OptionCell[] = []
+  for (const opt of sortedOptions) {
+    const matched = sportBets.filter(b => !claimed.has(b.id) && matchesBetOptionLabel(b.match, opt))
+    if (matched.length === 0) continue
+    matched.forEach(b => claimed.add(b.id))
+    const home = matched.filter(b => extractSide(b.match) === '홈')
+    const away = matched.filter(b => extractSide(b.match) === '원정')
+    const none = matched.filter(b => !extractSide(b.match))
+    if (home.length) cells.push({ label: `홈 ${opt}`, bets: home })
+    if (away.length) cells.push({ label: `원정 ${opt}`, bets: away })
+    if (none.length) cells.push({ label: opt, bets: none })
+  }
+  const other = sportBets.filter(b => !claimed.has(b.id))
+  if (other.length) cells.push({ label: '기타', bets: other })
+  return cells
+}
+
+function OptionStatChip({ label, bets }: { label: string; bets: Bet[] }) {
+  const st = calcStats(bets)
+  return (
+    <div style={{
+      minWidth: 92, flex: '0 0 auto', padding: '6px 9px', borderRadius: 8,
+      background: 'var(--bg-elevated)', border: `1px solid ${st.roi >= 0 ? 'var(--green-border)' : 'var(--red-border)'}`,
+    }}>
+      <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 3, whiteSpace: 'nowrap' }}>{label}</div>
+      <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 1 }}>{st.total}건 · {st.winRate.toFixed(0)}%</div>
+      <div style={{ fontSize: 12, fontWeight: 800, fontFamily: 'var(--font-num)', color: st.roi >= 0 ? 'var(--green)' : 'var(--red)' }}>
+        {st.roi >= 0 ? '+' : ''}{st.roi.toFixed(1)}%
+      </div>
+    </div>
+  )
+}
+
+function MarketTypeOverviewSection({ settled, betOptionsBySport }: { settled: Bet[]; betOptionsBySport: Record<string, string[]> }) {
   const MARKET_SPORTS: { value: Sport; label: string; emoji: string }[] = [
     { value: 'soccer', label: '축구', emoji: '⚽' },
     { value: 'baseball', label: '야구', emoji: '⚾' },
@@ -85,59 +128,34 @@ function MarketTypeOverviewSection({ settled }: { settled: Bet[] }) {
     { value: 'volleyball', label: '배구', emoji: '🏐' },
     { value: 'esports', label: 'LOL', emoji: '🎮' },
   ]
-  const MARKETS: { value: Market; label: string }[] = [
-    { value: 'moneyline', label: '승패' },
-    { value: 'handicap', label: '핸디캡' },
-    { value: 'over', label: '오버' },
-    { value: 'under', label: '언더' },
-  ]
-  const rows = MARKET_SPORTS.filter(s => settled.some(b => b.sport === s.value))
+  const rows = MARKET_SPORTS
+    .map(s => ({ ...s, sportBets: settled.filter(b => b.sport === s.value) }))
+    .filter(s => s.sportBets.length > 0)
   if (rows.length === 0) return null
 
   return (
     <div className="card">
-      <div className="card-title" style={{ marginBottom: 8 }}>종목 × 베팅옵션별 성적</div>
-      <div style={{ overflowX: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
-          <thead>
-            <tr style={{ borderBottom: '1px solid var(--border)' }}>
-              <th style={{ textAlign: 'left', padding: '4px 8px', fontSize: 9, color: 'var(--text-secondary)', fontWeight: 700, whiteSpace: 'nowrap' }}>종목</th>
-              {MARKETS.map(m => (
-                <th key={m.value} style={{ textAlign: 'center', padding: '4px 6px', fontSize: 9, color: 'var(--text-secondary)', fontWeight: 700, whiteSpace: 'nowrap' }}>{m.label}</th>
-              ))}
-              <th style={{ textAlign: 'center', padding: '4px 8px', fontSize: 9, color: 'var(--text-secondary)', fontWeight: 700, whiteSpace: 'nowrap', borderLeft: '1px solid var(--border)' }}>합계</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map(s => {
-              const sportBets = settled.filter(b => b.sport === s.value)
-              const totalStats = calcStats(sportBets)
-              return (
-                <tr key={s.value} style={{ borderBottom: '1px solid var(--border-light)', height: 30 }}>
-                  <td style={{ padding: '4px 8px', fontWeight: 700, color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>{s.emoji} {s.label}</td>
-                  {MARKETS.map(m => {
-                    const mb = sportBets.filter(b => b.market === m.value)
-                    const st = mb.length > 0 ? calcStats(mb) : null
-                    return (
-                      <td key={m.value} style={{ textAlign: 'center', padding: '4px 6px', whiteSpace: 'nowrap' }}>
-                        {st ? (
-                          <>
-                            <div style={{ fontSize: 9, color: 'var(--text-muted)' }}>{st.total}건 · {st.winRate.toFixed(0)}%</div>
-                            <div style={{ fontWeight: 700, color: st.roi >= 0 ? 'var(--green)' : 'var(--red)' }}>{st.roi >= 0 ? '+' : ''}{st.roi.toFixed(1)}%</div>
-                          </>
-                        ) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
-                      </td>
-                    )
-                  })}
-                  <td style={{ textAlign: 'center', padding: '4px 8px', whiteSpace: 'nowrap', borderLeft: '1px solid var(--border)' }}>
-                    <div style={{ fontWeight: 700, color: totalStats.profit >= 0 ? 'var(--green)' : 'var(--red)' }}>{totalStats.profit >= 0 ? '+' : ''}{totalStats.profit.toLocaleString()}</div>
-                    <div style={{ fontSize: 9, color: 'var(--text-muted)' }}>{totalStats.roi >= 0 ? '+' : ''}{totalStats.roi.toFixed(1)}% · {totalStats.total}건</div>
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
+      <div className="card-title" style={{ marginBottom: 2 }}>종목별 · 베팅옵션별 성적</div>
+      <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 10 }}>베팅추가에서 등록한 옵션 기준 (예: 홈 0.5, 원정 1.5) — 어디에도 안 걸리는 베팅은 "기타"로 표시</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {rows.map(s => {
+          const cells = classifySportBetsByOption(s.sportBets, betOptionsBySport[s.value] ?? [])
+          const totalStats = calcStats(s.sportBets)
+          return (
+            <div key={s.value}>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 6 }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}>{s.emoji} {s.label}</span>
+                <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{totalStats.total}건</span>
+                <span style={{ fontSize: 11, fontWeight: 700, color: totalStats.profit >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                  {totalStats.profit >= 0 ? '+' : ''}{totalStats.profit.toLocaleString()}원 ({totalStats.roi >= 0 ? '+' : ''}{totalStats.roi.toFixed(1)}%)
+                </span>
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {cells.map(c => <OptionStatChip key={c.label} label={c.label} bets={c.bets} />)}
+              </div>
+            </div>
+          )
+        })}
       </div>
     </div>
   )
@@ -1147,13 +1165,23 @@ export default function Stats() {
   const [basketballLeagues, setBasketballLeagues] = useState<string[]>([])
   const [volleyballOverrides, setVolleyballOverrides] = useState<LeagueOverride[]>([])
   const [volleyballLeagues, setVolleyballLeagues] = useState<string[]>([])
+  // 베팅추가에서 종목별로 등록한 베팅옵션 — 전체 탭에서 종목×옵션별 세부 성적을 보여주기 위해 사용
+  const [betOptionsBySport, setBetOptionsBySport] = useState<Record<string, string[]>>({})
 
   const BASEBALL_FIXED_LEAGUES = ['KBO', 'MLB', 'NPB', 'CPBL', 'LMB']
 
-  useEffect(() => { loadBets(); loadSites(); loadRates(); loadBaseballLeagueData(); loadEsportsLeagueData(); loadBasketballLeagueData(); loadVolleyballLeagueData() }, [])
+  useEffect(() => { loadBets(); loadSites(); loadRates(); loadBaseballLeagueData(); loadEsportsLeagueData(); loadBasketballLeagueData(); loadVolleyballLeagueData(); loadBetOptions() }, [])
   async function loadBets() {
     const { data } = await supabase.from('bets').select('*').order('bet_date').order('created_at')
     if (data) setRawBets(data)
+  }
+  async function loadBetOptions() {
+    const { data } = await supabase.from('bet_options').select('*').order('sport').order('sort_order').order('created_at')
+    if (data) {
+      const grouped: Record<string, string[]> = {}
+      for (const d of data) (grouped[d.sport] ??= []).push(d.label)
+      setBetOptionsBySport(grouped)
+    }
   }
   async function loadSites() {
     const { data } = await supabase.from('sites').select('*')
@@ -1308,12 +1336,14 @@ export default function Stats() {
   const settled = periodFiltered.filter(b => b.result !== 'pending')
   const sportCounts = SPORTS.map(s => ({ ...s, count: settled.filter(b => b.sport === s.value).length }))
 
-  // 총 손익 전일 대비 — 기간 필터와 무관하게 항상 오늘 하루치 손익과 어제 하루치 손익을 비교
+  // 종목별 전일 대비 — 기간 필터와 무관하게 항상 오늘 하루치 손익과 어제 하루치 손익을 종목별로 비교
   const todayStr = dayjs().format('YYYY-MM-DD')
   const yesterdayStr = dayjs().subtract(1, 'day').format('YYYY-MM-DD')
-  const todayProfit = bets.filter(b => b.result !== 'pending' && b.bet_date === todayStr).reduce((a, b) => a + b.profit, 0)
-  const yesterdayProfit = bets.filter(b => b.result !== 'pending' && b.bet_date === yesterdayStr).reduce((a, b) => a + b.profit, 0)
-  const dodDelta = todayProfit - yesterdayProfit
+  function dodDeltaForSport(sport: string): number {
+    const todayP = bets.filter(b => b.result !== 'pending' && b.sport === sport && b.bet_date === todayStr).reduce((a, b) => a + b.profit, 0)
+    const yestP = bets.filter(b => b.result !== 'pending' && b.sport === sport && b.bet_date === yesterdayStr).reduce((a, b) => a + b.profit, 0)
+    return todayP - yestP
+  }
 
   const profitCurve = (() => {
     let cum = 0
@@ -1369,21 +1399,14 @@ export default function Stats() {
                   { label: '평균 배당', value: stats.avgOdds.toFixed(2), sub: '', cls: '' },
                 ].map(t => (
                   <div key={t.label} className="card stat-tile" style={{ flex: '1 0 120px', maxWidth: 180 }}>
-                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-                      <div className={`stat-value ${t.cls}`}>{t.value}</div>
-                      {t.label === '총 손익' && dodDelta !== 0 && (
-                        <span style={{ fontSize: 10, fontWeight: 700, color: dodDelta >= 0 ? 'var(--green)' : 'var(--red)' }}>
-                          전일대비 {dodDelta >= 0 ? '+' : ''}{dodDelta.toLocaleString()}
-                        </span>
-                      )}
-                    </div>
+                    <div className={`stat-value ${t.cls}`}>{t.value}</div>
                     <div className="stat-label">{t.label}</div>
                     {t.sub && <div style={{ fontSize: 10, color: 'var(--text-secondary)', marginTop: 4 }}>{t.sub}</div>}
                   </div>
                 ))}
               </div>
 
-              <MarketTypeOverviewSection settled={settled} />
+              <MarketTypeOverviewSection settled={settled} betOptionsBySport={betOptionsBySport} />
 
               <div>
                 <div className="card-title" style={{ marginBottom: 8 }}>종목별 수익률</div>
@@ -1403,6 +1426,7 @@ export default function Stats() {
                     const stake = sb.reduce((acc, b) => acc + b.stake, 0)
                     const roi = stake > 0 ? profit / stake * 100 : 0
                     const isPos = profit > 0
+                    const dod = dodDeltaForSport(s.value)
                     return (
                       <div key={s.value}
                         onClick={() => setActiveSport(s.value as Sport)}
@@ -1411,6 +1435,11 @@ export default function Stats() {
                         <div style={{ fontSize: 18, fontWeight: 800, fontFamily: 'var(--font-num)', color: isPos ? 'var(--green)' : 'var(--red)', marginBottom: 2 }}>
                           {isPos ? '+' : ''}{profit.toLocaleString()}원
                         </div>
+                        {dod !== 0 && (
+                          <div style={{ fontSize: 10, fontWeight: 700, color: dod >= 0 ? 'var(--green)' : 'var(--red)', marginBottom: 4 }}>
+                            전일대비 {dod >= 0 ? '+' : ''}{dod.toLocaleString()}
+                          </div>
+                        )}
                         <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
                           <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>승률 <span style={{ color: wr >= 50 ? 'var(--green)' : 'var(--red)', fontWeight: 700 }}>{wr}%</span></span>
                           <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>ROI <span style={{ color: isPos ? 'var(--green)' : 'var(--red)', fontWeight: 700 }}>{roi >= 0 ? '+' : ''}{roi.toFixed(1)}%</span></span>
