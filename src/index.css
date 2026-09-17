@@ -533,10 +533,40 @@ tr:hover td { background: var(--bg-hover); }
   }
 }
 
-/* ── 대시보드 메인 레이아웃 (채굴현황 위, 베팅현황 아래로 항상 세로 배치) ── */
+/* ── 대시보드 메인 레이아웃 (모바일: 채굴현황 위 / 베팅현황 아래로 세로 배치) ── */
 .dashboard-main { display: flex; flex-direction: column; gap: 10px; width: 100%; }
 .dashboard-side { display: flex; flex-direction: column; gap: 10px; width: 100%; }
 .dashboard-bets { width: 100%; }
+
+/* ── 데스크탑: 채굴현황을 좌측 고정폭 사이드바로, 사이트 카드는 우측에 세로로 쌓음 (사이트 수가 적을 때 가로로 과하게 늘어지는 것 방지) ── */
+@media (min-width: 901px) {
+  .dashboard-main {
+    display: grid;
+    grid-template-columns: 300px 1fr;
+    align-items: start;
+    gap: 14px;
+  }
+  .dashboard-side {
+    position: sticky;
+    top: 14px;
+  }
+  .site-cards-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    border: none;
+    border-radius: 0;
+    overflow: visible;
+  }
+  .site-cards-wrap .card {
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    border-right: 1px solid var(--border);
+  }
+  .site-cards-wrap .card:last-child {
+    border-right: 1px solid var(--border);
+  }
+}
 
 @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 
