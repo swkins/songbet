@@ -104,19 +104,6 @@ function classifySportBetsByOption(sportBets: Bet[], options: string[]): OptionC
   return cells
 }
 
-function OptionStatCell({ bets }: { bets: Bet[] }) {
-  if (!bets || bets.length === 0) return <span style={{ color: 'var(--text-muted)' }}>—</span>
-  const st = calcStats(bets)
-  return (
-    <>
-      <div style={{ fontSize: 9, color: 'var(--text-muted)' }}>{st.total}건 · {st.winRate.toFixed(0)}%</div>
-      <div style={{ fontSize: 12, fontWeight: 800, fontFamily: 'var(--font-num)', color: st.roi >= 0 ? 'var(--green)' : 'var(--red)' }}>
-        {st.roi >= 0 ? '+' : ''}{st.roi.toFixed(1)}%
-      </div>
-    </>
-  )
-}
-
 // 종목을 가로(열)로, 베팅옵션(홈 0.5, 원정 1.5 등)을 세로(행)로 나열한 표.
 // 종목마다 옵션 구성이 다르므로, 실제 등장하는 모든 (종목,옵션) 조합의 라벨을 모아 행으로 쓰고
 // 없는 조합은 빈칸(—)으로 둔다. "기타"(등록된 옵션에 안 걸리는 베팅)는 있으면 맨 아래 행으로.
@@ -137,35 +124,12 @@ function MarketTypeOverviewSection({ settled, betOptionsBySport }: { settled: Be
     <div className="card">
       <div className="card-title" style={{ marginBottom: 2 }}>종목별 · 베팅옵션별 성적</div>
       <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 10 }}>베팅추가에서 등록한 옵션 기준 (예: 홈 0.5, 원정 1.5) — 어디에도 안 걸리는 베팅은 "기타"로 표시</div>
-      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
         {cols.map(s => {
           const cells = classifySportBetsByOption(s.sportBets, betOptionsBySport[s.value] ?? [])
-          const st = calcStats(s.sportBets)
+          const rows: RuleRow[] = cells.map(c => ({ label: c.label, bets: c.bets, tier: 'none' }))
           return (
-            <table key={s.value} style={{ flex: '0 0 auto', width: 'auto', minWidth: 170, borderCollapse: 'collapse', fontSize: 11 }}>
-              <thead>
-                <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                  <th colSpan={2} style={{ textAlign: 'left', padding: '4px 8px', fontSize: 11, color: 'var(--text-secondary)', fontWeight: 700, whiteSpace: 'nowrap' }}>{s.emoji} {s.label}</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr style={{ borderBottom: '1px solid var(--border)', height: 30 }}>
-                  <td style={{ padding: '4px 8px', fontWeight: 700, color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>합계</td>
-                  <td style={{ textAlign: 'center', padding: '4px 8px', whiteSpace: 'nowrap' }}>
-                    <div style={{ fontWeight: 700, color: st.profit >= 0 ? 'var(--green)' : 'var(--red)' }}>{st.profit >= 0 ? '+' : ''}{st.profit.toLocaleString()}</div>
-                    <div style={{ fontSize: 9, color: 'var(--text-muted)' }}>{st.roi >= 0 ? '+' : ''}{st.roi.toFixed(1)}% · {st.total}건</div>
-                  </td>
-                </tr>
-                {cells.map((c, i) => (
-                  <tr key={c.label} style={{ borderBottom: i < cells.length - 1 ? '1px solid var(--border-light)' : 'none', height: 30 }}>
-                    <td style={{ padding: '4px 8px', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>{c.label}</td>
-                    <td style={{ textAlign: 'center', padding: '4px 8px', whiteSpace: 'nowrap' }}>
-                      <OptionStatCell bets={c.bets} />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <RuleStatsTable key={s.value} title={`${s.emoji} ${s.label}`} rows={rows} extra={<MarketTotalRow bets={s.sportBets} />} />
           )
         })}
       </div>
