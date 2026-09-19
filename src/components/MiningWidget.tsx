@@ -393,7 +393,8 @@ export default function MiningWidget() {
           // 목표량은 "현재 포인트 총량" 기준 — 오늘 오른 양(m)이 아니라 e.current_point를 target_point와 직접 비교한다
           const remaining = e.target_point - e.current_point
           const isExcess = e.target_point > 0 && remaining < 0
-          const pct = e.target_point > 0 ? Math.min(100, Math.max(0, e.current_point / e.target_point * 100)) : 0
+          const pctDisplay = e.target_point > 0 ? Math.max(0, e.current_point / e.target_point * 100) : 0
+          const pct = Math.min(100, pctDisplay)
           const done = e.target_point > 0 && e.current_point >= e.target_point
           const isEditingCurrent = editing?.id === e.id && editing.field === 'current'
           const isEditingTarget = editing?.id === e.id && editing.field === 'target'
@@ -483,7 +484,9 @@ export default function MiningWidget() {
                 <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)' }}>채굴현황</span>
                 {goalDate && (
                   <span style={{ fontSize: 8, color: 'var(--text-muted)' }}>
-                    {remainingAmount <= 0 ? '목표 달성' : `하루 ${fmt(requiredPerDay)} 필요 · ${remainingDays}일 남음`}
+                    {remainingAmount <= 0
+                      ? (isExcess ? `목표 달성 (초과 ${fmt(-remaining)})` : '목표 달성')
+                      : `하루 ${fmt(requiredPerDay)} 필요 · ${remainingDays}일 남음`}
                   </span>
                 )}
               </div>
@@ -532,7 +535,7 @@ export default function MiningWidget() {
                 }}>
                   {isExcess ? `초과 ${fmt(-remaining)}` : `남음 ${fmt(Math.max(0, remaining))}`}
                 </span>
-                <span style={{ fontSize: 11, fontWeight: 800, fontFamily: 'var(--font-num)', color: done ? 'var(--green)' : 'var(--text-secondary)' }}>{pct.toFixed(0)}%</span>
+                <span style={{ fontSize: 11, fontWeight: 800, fontFamily: 'var(--font-num)', color: done ? 'var(--green)' : 'var(--text-secondary)' }}>{pctDisplay.toFixed(0)}%</span>
               </div>
 
               {/* 실적현황: 선택한 베팅사이트들의 (목표 날짜로부터 지정한 기간 이전까지) 입금 실적 진행률
@@ -541,7 +544,8 @@ export default function MiningWidget() {
                 const c = cashoutFor(e.site_name)
                 if (!c?.perf_period || !(c.perf_site_ids?.length > 0) || !c.perf_amount) return null
                 const progress = perfProgress[e.site_name] ?? 0
-                const perfPct = c.perf_amount > 0 ? Math.min(100, Math.max(0, progress / c.perf_amount * 100)) : 0
+                const perfPctDisplay = c.perf_amount > 0 ? Math.max(0, progress / c.perf_amount * 100) : 0
+                const perfPct = Math.min(100, perfPctDisplay)
                 const perfDone = progress >= c.perf_amount
                 const perfExcess = progress > c.perf_amount
                 const perfRemaining = c.perf_amount - progress
@@ -567,7 +571,9 @@ export default function MiningWidget() {
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 2 }}>
                       <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)' }}>실적현황</span>
                       <span style={{ fontSize: 8, color: 'var(--text-muted)' }}>
-                        {perfRemaining <= 0 ? '목표 달성' : `하루 ${fmt(perfRequiredPerDay)} 필요 · ${perfDaysLeft}일 남음`}
+                        {perfRemaining <= 0
+                          ? (perfExcess ? `목표 달성 (초과 ${fmt(-perfRemaining)})` : '목표 달성')
+                          : `하루 ${fmt(perfRequiredPerDay)} 필요 · ${perfDaysLeft}일 남음`}
                       </span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 3, fontSize: 8, color: 'var(--text-muted)' }}>
@@ -608,7 +614,7 @@ export default function MiningWidget() {
                       }}>
                         {perfExcess ? `초과 ${fmt(-perfRemaining)}` : `남음 ${fmt(Math.max(0, perfRemaining))}`}
                       </span>
-                      <span style={{ fontSize: 11, fontWeight: 800, fontFamily: 'var(--font-num)', color: perfDone ? 'var(--green)' : 'var(--text-secondary)' }}>{perfPct.toFixed(0)}%</span>
+                      <span style={{ fontSize: 11, fontWeight: 800, fontFamily: 'var(--font-num)', color: perfDone ? 'var(--green)' : 'var(--text-secondary)' }}>{perfPctDisplay.toFixed(0)}%</span>
                     </div>
                   </div>
                 )

@@ -538,25 +538,6 @@ tr:hover td { background: var(--bg-hover); }
 .dashboard-side { display: flex; flex-direction: column; gap: 10px; width: 100%; }
 .dashboard-bets { width: 100%; }
 
-/* ── 데스크탑: 사이트 카드를 남은 폭만큼 균등하게 늘리지 않고 고정폭으로 두고 나란히 배치
-   (사이트 수가 적을 때 카드 하나하나가 가로로 과하게 늘어지는 것 방지 — 채굴현황 위/사이트현황 아래 순서는 그대로 유지) ── */
-@media (min-width: 641px) {
-  .site-cards-wrap {
-    display: flex;
-    flex-direction: row;
-    flex-wrap: wrap;
-    align-items: flex-start;
-    border: none;
-    border-radius: 0;
-    overflow: visible;
-  }
-  .site-cards-wrap .card {
-    flex: 0 1 300px;
-    border-radius: var(--radius);
-    border: 1px solid var(--border);
-  }
-}
-
 @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 
 /* ── 채굴 페이지 ── */
