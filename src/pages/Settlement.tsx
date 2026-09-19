@@ -437,12 +437,38 @@ export default function Settlement() {
         return {
           name: site?.name ?? orphanNames[key] ?? key,
           active: site?.active ?? false,
+          siteId: site?.id ?? null,
           income: v.income, expense: v.expense, net: v.income - v.expense,
           totalIncome: t.income, totalExpense: t.expense, totalNet: t.income - t.expense,
         }
       })
       .sort((a, b) => b.net - a.net)
   }, [cashflows, sites, thisMonthStart, thisMonthEnd, rateInfo])
+
+  // "사이트별 손익"에서 마감(비활성) 상태인 항목을 다시 활성화 — 실제 사이트 레코드가 있으면
+  // active만 켜고, 삭제되어 이름만 남은 사이트(orphan)면 새 사이트로 되살리고 그 이름으로
+  // 남아있던 과거 cashflows(site_id null)를 전부 새 사이트에 다시 연결해서 더 이상 이름만으로
+  // 묶이는 임시 상태가 아니게 만든다.
+  async function activateSiteBreakdownRow(row: { name: string; siteId: string | null }) {
+    if (row.siteId) {
+      const { data } = await supabase.from('sites').update({ active: true }).eq('id', row.siteId).select().single()
+      if (data) setSites(p => p.map(s => s.id === data.id ? data : s))
+      return
+    }
+    const { data: newSite } = await supabase.from('sites').insert({
+      name: row.name, balance: 0, active: true, sort_order: sites.length,
+      rolling_target: 0, rolling_done: 0, last_deposit: 0, deposit_bet_done: 0,
+      point_deposit: 0, total_withdrawal: 0, currency: 'krw',
+    }).select().single()
+    if (!newSite) return
+    const toRelink = cashflows.filter(c => !c.site_id && orphanSiteName(c) === row.name)
+    if (toRelink.length > 0) {
+      await supabase.from('cashflows').update({ site_id: newSite.id }).in('id', toRelink.map(c => c.id))
+    }
+    setSites(p => [...p, newSite])
+    const relinkIds = new Set(toRelink.map(c => c.id))
+    setCashflows(p => p.map(c => relinkIds.has(c.id) ? { ...c, site_id: newSite.id } : c))
+  }
 
   const monthlySummary = useMemo(() => {
     const months: { label: string; income: number; expense: number }[] = []
@@ -849,7 +875,7 @@ export default function Settlement() {
               <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-secondary)', textAlign: 'right' }}>순수익</span>
             </div>
           )}
-          {visibleSiteBreakdown.map(({ name, active, income, expense, net, totalIncome, totalExpense, totalNet }, i) => {
+          {visibleSiteBreakdown.map(({ name, active, siteId, income, expense, net, totalIncome, totalExpense, totalNet }, i) => {
             const incPct = Math.round(income / maxSiteBreakdownIncome * 100)
             const expPct = Math.round(expense / maxSiteBreakdownExpense * 100)
             const netPct = Math.round(Math.abs(net) / maxSiteBreakdownNetAbs * 100)
@@ -863,6 +889,12 @@ export default function Settlement() {
                 <div style={{ fontSize: 12, fontWeight: 700, color: active ? 'var(--text-primary)' : 'var(--text-muted)', marginBottom: 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 6 }}>
                   {name}
                   {!active && <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', border: '1px solid var(--border)', borderRadius: 3, padding: '1px 5px', flexShrink: 0 }}>마감</span>}
+                  {!active && (
+                    <button onClick={() => activateSiteBreakdownRow({ name, siteId })} title="이 사이트를 다시 활성화"
+                      style={{ fontSize: 9, fontWeight: 700, color: 'var(--green)', background: 'var(--green-bg)', border: '1px solid var(--green-border)', borderRadius: 3, padding: '1px 6px', cursor: 'pointer', fontFamily: 'var(--font-body)', flexShrink: 0 }}>
+                      활성화
+                    </button>
+                  )}
                 </div>
 
                 {/* 이번달 */}
