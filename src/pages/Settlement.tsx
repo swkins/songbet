@@ -479,19 +479,33 @@ export default function Settlement() {
       if (data) setSites(p => p.map(s => s.id === data.id ? data : s))
       return
     }
-    const { data: newSite } = await supabase.from('sites').insert({
-      name: row.name, balance: 0, active: true, sort_order: sites.length,
-      rolling_target: 0, rolling_done: 0, last_deposit: 0, deposit_bet_done: 0,
-      point_deposit: 0, total_withdrawal: 0, currency: 'krw',
-    }).select().single()
-    if (!newSite) return
+    // 같은 이름의 사이트가 이미 있으면(활성/비활성 무관) 새로 만들지 않고 그 사이트를 재사용한다 —
+    // 그렇지 않으면 orphan 이름 매칭과 실제 사이트가 동시에 존재하는 경우, 또는 버튼이 중복
+    // 클릭되는 경우마다 같은 이름의 사이트가 계속 늘어나는 문제가 있었음(고트벳/이지벳 중복 사고).
+    const existing = sites.find(s => s.name === row.name)
+    let targetSite = existing
+    if (existing) {
+      if (!existing.active) {
+        const { data } = await supabase.from('sites').update({ active: true }).eq('id', existing.id).select().single()
+        if (data) { targetSite = data; setSites(p => p.map(s => s.id === data.id ? data : s)) }
+      }
+    } else {
+      const { data: newSite } = await supabase.from('sites').insert({
+        name: row.name, balance: 0, active: true, sort_order: sites.length,
+        rolling_target: 0, rolling_done: 0, last_deposit: 0, deposit_bet_done: 0,
+        point_deposit: 0, total_withdrawal: 0, currency: 'krw',
+      }).select().single()
+      if (!newSite) return
+      targetSite = newSite
+      setSites(p => [...p, newSite])
+    }
+    if (!targetSite) return
     const toRelink = cashflows.filter(c => !c.site_id && orphanSiteName(c) === row.name)
     if (toRelink.length > 0) {
-      await supabase.from('cashflows').update({ site_id: newSite.id }).in('id', toRelink.map(c => c.id))
+      await supabase.from('cashflows').update({ site_id: targetSite.id }).in('id', toRelink.map(c => c.id))
+      const relinkIds = new Set(toRelink.map(c => c.id))
+      setCashflows(p => p.map(c => relinkIds.has(c.id) ? { ...c, site_id: targetSite!.id } : c))
     }
-    setSites(p => [...p, newSite])
-    const relinkIds = new Set(toRelink.map(c => c.id))
-    setCashflows(p => p.map(c => relinkIds.has(c.id) ? { ...c, site_id: newSite.id } : c))
   }
 
   const monthlySummary = useMemo(() => {
