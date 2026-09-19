@@ -380,10 +380,10 @@ export default function Settlement() {
 
   // 사이트를 삭제하면 DB 외래키(ON DELETE SET NULL)가 그 사이트의 과거 cashflows.site_id를
   // 전부 null로 지워버려서, 삭제된 사이트의 입출금 이력이 사이트별 손익에서 통째로 사라지는
-  // 문제가 있었음 — description에 남아있는 사이트명("원펀맨 입금", "이지벳 마감", "고트벳 / 기프티콘")을
-  // 파싱해서 삭제된 사이트도 이름으로 묶어 계속 표시한다. 단, 채굴 현금교환은 베팅사이트가 아니므로 제외.
+  // 문제가 있었음 — description에 남아있는 사이트명("원펀맨 입금", "이지벳 마감", "고트벳 / 기프티콘",
+  // "올인구조대 채굴 현금교환")을 파싱해서 삭제된 사이트도 이름으로 묶어 계속 표시한다.
   function orphanSiteName(c: Cashflow): string | null {
-    if (c.site_id || c.category === '현금교환') return null
+    if (c.site_id) return null
     const desc = (c.description ?? '').trim()
     // "이름 / 카테고리" 형태(결산 화면에서 사이트 선택 후 직접 입력)를 먼저 확인 —
     // "콜벳 / 입금"처럼 카테고리명 자체가 "입금"/"마감"인 경우 아래 접미어 패턴과 겹치기 때문에
@@ -392,6 +392,9 @@ export default function Settlement() {
       const slashMatch = desc.match(/^(.+?)\s*\/\s*.+$/)
       if (slashMatch) return slashMatch[1].trim()
     }
+    // 채굴 현금교환("올인구조대 채굴 현금교환")도 그 사이트의 수익으로 잡는다.
+    const miningMatch = desc.match(/^(.+?)\s+채굴\s*현금교환$/)
+    if (miningMatch) return miningMatch[1].trim()
     const suffixMatch = desc.match(/^(.+?)\s+(마감(?:\s*\(중간정산\))?|입금)$/)
     if (suffixMatch) return suffixMatch[1].trim()
     return null
@@ -407,6 +410,11 @@ export default function Settlement() {
       if (c.site_id) return c.site_id
       const name = orphanSiteName(c)
       if (!name) return null
+      // 이름이 같은 실제 사이트가 이미 있으면(예: 채굴 현금교환 기록이 site_id 없이 저장된 경우)
+      // 별도의 orphan 항목으로 쪼개지 말고 그 사이트로 바로 묶는다 — 같은 이름 행이 두 개
+      // 생기는 걸 방지.
+      const matchedSite = sites.find(s => s.name === name)
+      if (matchedSite) return matchedSite.id
       const key = `orphan:${name}`
       orphanNames[key] = name
       return key
@@ -490,10 +498,13 @@ export default function Settlement() {
         if (data) { targetSite = data; setSites(p => p.map(s => s.id === data.id ? data : s)) }
       }
     } else {
+      // settlement_only: true — 대시보드(베팅현황)는 이 값이 false인 사이트만 불러오므로,
+      // 여기서 되살리는 사이트가 대시보드에 새 카드로 나타나지 않게 한다. "활성화"는 어디까지나
+      // 사이트별 손익에서 계속 보이게 하는 것뿐, 실제 베팅용 사이트로 되살리는 게 아니다.
       const { data: newSite } = await supabase.from('sites').insert({
         name: row.name, balance: 0, active: true, sort_order: sites.length,
         rolling_target: 0, rolling_done: 0, last_deposit: 0, deposit_bet_done: 0,
-        point_deposit: 0, total_withdrawal: 0, currency: 'krw',
+        point_deposit: 0, total_withdrawal: 0, currency: 'krw', settlement_only: true,
       }).select().single()
       if (!newSite) return
       targetSite = newSite
