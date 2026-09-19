@@ -220,7 +220,7 @@ export default function Settlement() {
   }
 
   async function loadCashflows() {
-    const { data } = await supabase.from('cashflows').select('*').order('flow_date', { ascending: false }).order('created_at', { ascending: false }).limit(300)
+    const { data } = await supabase.from('cashflows').select('*').order('flow_date', { ascending: false }).order('created_at', { ascending: false }).limit(5000)
     if (data) setCashflows(data)
   }
   async function loadSites() {
@@ -378,29 +378,64 @@ export default function Settlement() {
   const thisMonthStart = dayjs().startOf('month').format('YYYY-MM-DD')
   const thisMonthEnd   = dayjs().endOf('month').format('YYYY-MM-DD')
 
+  // 사이트를 삭제하면 DB 외래키(ON DELETE SET NULL)가 그 사이트의 과거 cashflows.site_id를
+  // 전부 null로 지워버려서, 삭제된 사이트의 입출금 이력이 사이트별 손익에서 통째로 사라지는
+  // 문제가 있었음 — description에 남아있는 사이트명("원펀맨 입금", "이지벳 마감", "고트벳 / 기프티콘")을
+  // 파싱해서 삭제된 사이트도 이름으로 묶어 계속 표시한다. 단, 채굴 현금교환은 베팅사이트가 아니므로 제외.
+  function orphanSiteName(c: Cashflow): string | null {
+    if (c.site_id || c.category === '현금교환') return null
+    const desc = (c.description ?? '').trim()
+    // "이름 / 카테고리" 형태(결산 화면에서 사이트 선택 후 직접 입력)를 먼저 확인 —
+    // "콜벳 / 입금"처럼 카테고리명 자체가 "입금"/"마감"인 경우 아래 접미어 패턴과 겹치기 때문에
+    // 슬래시가 있으면 그쪽을 우선한다.
+    if (desc.includes(' / ')) {
+      const slashMatch = desc.match(/^(.+?)\s*\/\s*.+$/)
+      if (slashMatch) return slashMatch[1].trim()
+    }
+    const suffixMatch = desc.match(/^(.+?)\s+(마감(?:\s*\(중간정산\))?|입금)$/)
+    if (suffixMatch) return suffixMatch[1].trim()
+    return null
+  }
+
   // 이번달 사이트별 손익 + 전체 누적 사이트별 손익을 함께 계산 (비교용)
   const monthSiteBreakdown = useMemo(() => {
     const monthMap: Record<string, { income: number; expense: number }> = {}
     const totalMap: Record<string, { income: number; expense: number }> = {}
-    cashflows.filter(c => c.site_id).forEach(c => {
-      if (!totalMap[c.site_id!]) totalMap[c.site_id!] = { income: 0, expense: 0 }
-      if (c.type === 'income') totalMap[c.site_id!].income += toKrw(c)
-      else if (c.type === 'expense') totalMap[c.site_id!].expense += toKrw(c)
+    const orphanNames: Record<string, string> = {}
+
+    function keyFor(c: Cashflow): string | null {
+      if (c.site_id) return c.site_id
+      const name = orphanSiteName(c)
+      if (!name) return null
+      const key = `orphan:${name}`
+      orphanNames[key] = name
+      return key
+    }
+
+    cashflows.forEach(c => {
+      const key = keyFor(c)
+      if (!key) return
+      if (!totalMap[key]) totalMap[key] = { income: 0, expense: 0 }
+      if (c.type === 'income') totalMap[key].income += toKrw(c)
+      else if (c.type === 'expense') totalMap[key].expense += toKrw(c)
     })
-    cashflows.filter(c => c.flow_date >= thisMonthStart && c.flow_date <= thisMonthEnd && c.site_id).forEach(c => {
-      if (!monthMap[c.site_id!]) monthMap[c.site_id!] = { income: 0, expense: 0 }
-      if (c.type === 'income') monthMap[c.site_id!].income += toKrw(c)
-      else if (c.type === 'expense') monthMap[c.site_id!].expense += toKrw(c)
+    cashflows.filter(c => c.flow_date >= thisMonthStart && c.flow_date <= thisMonthEnd).forEach(c => {
+      const key = keyFor(c)
+      if (!key) return
+      if (!monthMap[key]) monthMap[key] = { income: 0, expense: 0 }
+      if (c.type === 'income') monthMap[key].income += toKrw(c)
+      else if (c.type === 'expense') monthMap[key].expense += toKrw(c)
     })
     // 이번달 입출금이 없어도 과거 입출금 이력이 있으면(전체누적 값이 있으면) 계속 표시한다 —
-    // 비활성화된 사이트도 예전 기록이 있으면 사라지지 않고 흐린 색으로 구분해서 보여줌.
+    // 비활성화된 사이트도(삭제되어 이름만 남은 사이트 포함) 예전 기록이 있으면 사라지지 않고
+    // 흐린 색으로 구분해서 보여줌.
     return Object.keys(totalMap)
-      .map(siteId => {
-        const v = monthMap[siteId] ?? { income: 0, expense: 0 }
-        const t = totalMap[siteId]
-        const site = sites.find(s => s.id === siteId)
+      .map(key => {
+        const v = monthMap[key] ?? { income: 0, expense: 0 }
+        const t = totalMap[key]
+        const site = key.startsWith('orphan:') ? undefined : sites.find(s => s.id === key)
         return {
-          name: site?.name ?? siteId,
+          name: site?.name ?? orphanNames[key] ?? key,
           active: site?.active ?? false,
           income: v.income, expense: v.expense, net: v.income - v.expense,
           totalIncome: t.income, totalExpense: t.expense, totalNet: t.income - t.expense,
