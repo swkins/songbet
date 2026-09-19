@@ -411,20 +411,44 @@ export default function Settlement() {
       orphanNames[key] = name
       return key
     }
+    function add(map: Record<string, { income: number; expense: number }>, key: string, type: 'income' | 'expense', amt: number) {
+      if (!map[key]) map[key] = { income: 0, expense: 0 }
+      map[key][type] += amt
+    }
 
+    // 사이트별로 시간순 정렬해서 처리 — 베팅입금(지출)은 그 사이트를 마감(베팅수익)할 때까지는
+    // 손익에 반영하지 않는다. 아직 게임 중(출금 전)인데 입금액만큼 바로 손실로 잡히는 문제가
+    // 있었음 — 마감 시점에 그동안 쌓인 입금액과 이번 정산 수익을 함께 반영해야 실제 손익과 맞다.
+    const bySite: Record<string, Cashflow[]> = {}
     cashflows.forEach(c => {
       const key = keyFor(c)
       if (!key) return
-      if (!totalMap[key]) totalMap[key] = { income: 0, expense: 0 }
-      if (c.type === 'income') totalMap[key].income += toKrw(c)
-      else if (c.type === 'expense') totalMap[key].expense += toKrw(c)
+      ;(bySite[key] ??= []).push(c)
     })
-    cashflows.filter(c => c.flow_date >= thisMonthStart && c.flow_date <= thisMonthEnd).forEach(c => {
-      const key = keyFor(c)
-      if (!key) return
-      if (!monthMap[key]) monthMap[key] = { income: 0, expense: 0 }
-      if (c.type === 'income') monthMap[key].income += toKrw(c)
-      else if (c.type === 'expense') monthMap[key].expense += toKrw(c)
+    Object.entries(bySite).forEach(([key, rows]) => {
+      const sorted = [...rows].sort((a, b) => a.created_at.localeCompare(b.created_at))
+      let pendingDeposit = 0
+      for (const c of sorted) {
+        const amt = toKrw(c)
+        const inMonth = c.flow_date >= thisMonthStart && c.flow_date <= thisMonthEnd
+        if (c.type === 'expense' && c.category === '베팅입금') {
+          pendingDeposit += amt
+          continue
+        }
+        if (c.type === 'income' && c.category === '베팅수익') {
+          if (pendingDeposit > 0) {
+            add(totalMap, key, 'expense', pendingDeposit)
+            if (inMonth) add(monthMap, key, 'expense', pendingDeposit)
+            pendingDeposit = 0
+          }
+          add(totalMap, key, 'income', amt)
+          if (inMonth) add(monthMap, key, 'income', amt)
+          continue
+        }
+        // 그 외(기프티콘/현금/출금/포인트 구매·판매 등)는 발생 시점에 바로 반영
+        add(totalMap, key, c.type, amt)
+        if (inMonth) add(monthMap, key, c.type, amt)
+      }
     })
     // 이번달 입출금이 없어도 과거 입출금 이력이 있으면(전체누적 값이 있으면) 계속 표시한다 —
     // 비활성화된 사이트도(삭제되어 이름만 남은 사이트 포함) 예전 기록이 있으면 사라지지 않고
