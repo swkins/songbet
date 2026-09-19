@@ -231,10 +231,10 @@ function ResultStamp({ result }: { result: 'win' | 'loss' | 'push' | 'pending' }
 // 뱃지(pill) 하나 — 배경/테두리/글자색을 같은 색 계열 3종 세트(--X-bg/--X-border/--X)로 통일
 function MatchBadge({ label, accent }: { label: string; accent: AccentKey | 'neutral' }) {
   if (accent === 'neutral') {
-    return <span style={{ fontSize: 9, fontWeight: 700, flexShrink: 0, padding: '1px 6px', borderRadius: 999, background: 'var(--bg-elevated)', border: '1px solid var(--border)', color: 'var(--text-muted)' }}>{label}</span>
+    return <span style={{ fontSize: 11, fontWeight: 700, flexShrink: 0, padding: '2px 7px', borderRadius: 999, background: 'var(--bg-elevated)', border: '1px solid var(--border)', color: 'var(--text-muted)' }}>{label}</span>
   }
   return (
-    <span style={{ fontSize: 9, fontWeight: 700, flexShrink: 0, padding: '1px 6px', borderRadius: 999, background: `var(--${accent}-bg)`, border: `1px solid var(--${accent}-border)`, color: `var(--${accent})` }}>{label}</span>
+    <span style={{ fontSize: 11, fontWeight: 700, flexShrink: 0, padding: '2px 7px', borderRadius: 999, background: `var(--${accent}-bg)`, border: `1px solid var(--${accent}-border)`, color: `var(--${accent})` }}>{label}</span>
   )
 }
 
@@ -263,7 +263,7 @@ function BetBadgeRow({ sport, match, live, knownOptions = [] }: { sport: string;
 // 베팅옵션도 홈/원정과 같은 뱃지(알약) 스타일로 표시 — 평문 글씨 대신 통일된 배지 톤을 유지한다.
 // "승리"(일반승/moneyline)는 홈/원정 배지만으로 이미 뜻이 통하므로 별도 표시하지 않음.
 // (배당·금액은 이 아래 별도 줄 — BetOddsStakeLine 참고)
-function BetMatchLine({ sport, match, fontSize = 12, teamColor, live, stacked = true, knownOptions = [] }: { sport: string; match: string; fontSize?: number; teamColor?: string; live?: boolean; stacked?: boolean; knownOptions?: string[] }) {
+function BetMatchLine({ sport, match, fontSize = 15, teamColor, live, stacked = true, knownOptions = [] }: { sport: string; match: string; fontSize?: number; teamColor?: string; live?: boolean; stacked?: boolean; knownOptions?: string[] }) {
   const parts = parseBetMatch(sport, match, knownOptions)
   const team = parts ? parts.team : match
   const showOption = !!parts && parts.optionLabel !== '승리'
@@ -294,11 +294,11 @@ function BetMatchLine({ sport, match, fontSize = 12, teamColor, live, stacked = 
 function BetOddsStakeLine({ odds, stake, prefix, suffix, big }: { odds: number; stake: number; prefix: string; suffix: string; big?: boolean }) {
   return (
     <span style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%' }}>
-      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 700, color: 'var(--gold)', flexShrink: 0 }}>{odds.toFixed(2)}</span>
+      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 14, fontWeight: 700, color: 'var(--gold)', flexShrink: 0 }}>{odds.toFixed(2)}</span>
       <span style={{ flex: 1 }} />
-      <span style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0, fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-secondary)' }}>
+      <span style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0, fontFamily: 'var(--font-mono)', fontSize: 13, color: 'var(--text-secondary)' }}>
         {prefix}{stake.toLocaleString()}{suffix}
-        {big && <Flame size={12} style={{ color: 'var(--gold)', fill: 'var(--gold)', filter: 'drop-shadow(0 0 3px var(--gold))' }} />}
+        {big && <Flame size={13} style={{ color: 'var(--gold)', fill: 'var(--gold)', filter: 'drop-shadow(0 0 3px var(--gold))' }} />}
       </span>
     </span>
   )
@@ -2977,13 +2977,13 @@ export default function Dashboard() {
                                       const legChecked = !!parlayLegWinChecks[gb.id]
                                       return (
                                         <div key={gb.id} style={{ marginBottom: 2 }}>
-                                          {gb.league && <div style={{ paddingLeft: 20, fontSize: 9, color: 'var(--text-muted)', fontWeight: 700 }}>{gb.league}</div>}
+                                          {gb.league && <div style={{ paddingLeft: 20, fontSize: 10, color: 'var(--text-muted)', fontWeight: 700 }}>{gb.league}</div>}
                                           <div style={{ display: 'flex', gap: 4, alignItems: 'center', position: 'relative' }}>
                                             <span style={{
-                                              fontSize: legChecked ? 11 : 10, color: legChecked ? 'var(--green)' : 'var(--text-muted)',
-                                              fontWeight: legChecked ? 800 : 400, width: 16, textAlign: 'center', flexShrink: 0,
+                                              fontSize: legChecked ? 13 : 12, color: legChecked ? 'var(--green)' : 'var(--text-muted)',
+                                              fontWeight: legChecked ? 800 : 400, width: 18, textAlign: 'center', flexShrink: 0,
                                             }}>{legChecked ? '✓' : (LEG_MARKS[idx] ?? idx+1)}</span>
-                                            <BetMatchLine sport={gb.sport} match={gb.match} fontSize={12} stacked={false} knownOptions={betOptionsBySport[gb.sport] ?? []} />
+                                            <BetMatchLine sport={gb.sport} match={gb.match} stacked={false} knownOptions={betOptionsBySport[gb.sport] ?? []} />
                                             {hoverBetId === bet.parlay_group && !isHeld && (
                                               <div style={{ display: 'flex', gap: 3, flexShrink: 0, position: 'absolute', right: 0, top: '50%', transform: 'translateY(-50%)', background: 'var(--bg-hover)', paddingLeft: 10, boxShadow: '-10px 0 8px -2px var(--bg-hover)' }}>
                                                 {legChecked ? (
@@ -3082,12 +3082,12 @@ export default function Dashboard() {
                                 <>
                                   {/* 경기 내용 */}
                                   <div style={{ minWidth: 0 }}>
-                                    {bet.league && <div style={{ paddingLeft: 24, fontSize: 9, color: 'var(--text-muted)', fontWeight: 700 }}>{bet.league}</div>}
-                                    <div style={{ display: 'flex', gap: 4, alignItems: 'flex-start' }}>
-                                      <span style={{ fontSize: 16, lineHeight: 1, flexShrink: 0, width: 20, textAlign: 'center', marginTop: 1 }}>{sportGlyph(bet.sport) ?? SPORT_SHORT[bet.sport] ?? '📋'}</span>
-                                      <BetMatchLine sport={bet.sport} match={bet.match} fontSize={12} live={bet.is_live} knownOptions={betOptionsBySport[bet.sport] ?? []} />
+                                    {bet.league && <div style={{ paddingLeft: 26, fontSize: 10, color: 'var(--text-muted)', fontWeight: 700 }}>{bet.league}</div>}
+                                    <div style={{ display: 'flex', gap: 5, alignItems: 'flex-start' }}>
+                                      <span style={{ fontSize: 18, lineHeight: 1, flexShrink: 0, width: 22, textAlign: 'center', marginTop: 1 }}>{sportGlyph(bet.sport) ?? SPORT_SHORT[bet.sport] ?? '📋'}</span>
+                                      <BetMatchLine sport={bet.sport} match={bet.match} live={bet.is_live} knownOptions={betOptionsBySport[bet.sport] ?? []} />
                                     </div>
-                                    <div style={{ paddingLeft: 24, marginTop: 2 }}>
+                                    <div style={{ paddingLeft: 26, marginTop: 2 }}>
                                       <BetOddsStakeLine odds={bet.odds} stake={bet.stake} prefix={pfx} suffix={sfx} big={isBigStake(bet.stake, isusd)} />
                                     </div>
                                   </div>
