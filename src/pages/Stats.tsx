@@ -133,58 +133,41 @@ function MarketTypeOverviewSection({ settled, betOptionsBySport }: { settled: Be
     .filter(s => s.sportBets.length > 0)
   if (cols.length === 0) return null
 
-  const cellsBySport = new Map(cols.map(s => [
-    s.value,
-    new Map(classifySportBetsByOption(s.sportBets, betOptionsBySport[s.value] ?? []).map(c => [c.label, c.bets])),
-  ]))
-  const optionLabels: string[] = []
-  cols.forEach(s => {
-    for (const label of cellsBySport.get(s.value)!.keys()) {
-      if (label !== '기타' && !optionLabels.includes(label)) optionLabels.push(label)
-    }
-  })
-  const hasOther = cols.some(s => cellsBySport.get(s.value)!.has('기타'))
-  const rowLabels = hasOther ? [...optionLabels, '기타'] : optionLabels
-
   return (
     <div className="card">
       <div className="card-title" style={{ marginBottom: 2 }}>종목별 · 베팅옵션별 성적</div>
       <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 10 }}>베팅추가에서 등록한 옵션 기준 (예: 홈 0.5, 원정 1.5) — 어디에도 안 걸리는 베팅은 "기타"로 표시</div>
-      <div style={{ overflowX: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
-          <thead>
-            <tr style={{ borderBottom: '1px solid var(--border)' }}>
-              <th style={{ textAlign: 'left', padding: '4px 8px', fontSize: 9, color: 'var(--text-secondary)', fontWeight: 700, whiteSpace: 'nowrap' }}>베팅옵션</th>
-              {cols.map(s => (
-                <th key={s.value} style={{ textAlign: 'center', padding: '4px 8px', fontSize: 10, color: 'var(--text-secondary)', fontWeight: 700, whiteSpace: 'nowrap' }}>{s.emoji} {s.label}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            <tr style={{ borderBottom: '1px solid var(--border)', height: 30 }}>
-              <td style={{ padding: '4px 8px', fontWeight: 700, color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>합계</td>
-              {cols.map(s => {
-                const st = calcStats(s.sportBets)
-                return (
-                  <td key={s.value} style={{ textAlign: 'center', padding: '4px 8px', whiteSpace: 'nowrap' }}>
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+        {cols.map(s => {
+          const cells = classifySportBetsByOption(s.sportBets, betOptionsBySport[s.value] ?? [])
+          const st = calcStats(s.sportBets)
+          return (
+            <table key={s.value} style={{ flex: '0 0 auto', width: 'auto', minWidth: 170, borderCollapse: 'collapse', fontSize: 11 }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                  <th colSpan={2} style={{ textAlign: 'left', padding: '4px 8px', fontSize: 11, color: 'var(--text-secondary)', fontWeight: 700, whiteSpace: 'nowrap' }}>{s.emoji} {s.label}</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr style={{ borderBottom: '1px solid var(--border)', height: 30 }}>
+                  <td style={{ padding: '4px 8px', fontWeight: 700, color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>합계</td>
+                  <td style={{ textAlign: 'center', padding: '4px 8px', whiteSpace: 'nowrap' }}>
                     <div style={{ fontWeight: 700, color: st.profit >= 0 ? 'var(--green)' : 'var(--red)' }}>{st.profit >= 0 ? '+' : ''}{st.profit.toLocaleString()}</div>
                     <div style={{ fontSize: 9, color: 'var(--text-muted)' }}>{st.roi >= 0 ? '+' : ''}{st.roi.toFixed(1)}% · {st.total}건</div>
                   </td>
-                )
-              })}
-            </tr>
-            {rowLabels.map((label, i) => (
-              <tr key={label} style={{ borderBottom: i < rowLabels.length - 1 ? '1px solid var(--border-light)' : 'none', height: 30 }}>
-                <td style={{ padding: '4px 8px', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>{label}</td>
-                {cols.map(s => (
-                  <td key={s.value} style={{ textAlign: 'center', padding: '4px 8px', whiteSpace: 'nowrap' }}>
-                    <OptionStatCell bets={cellsBySport.get(s.value)!.get(label) ?? []} />
-                  </td>
+                </tr>
+                {cells.map((c, i) => (
+                  <tr key={c.label} style={{ borderBottom: i < cells.length - 1 ? '1px solid var(--border-light)' : 'none', height: 30 }}>
+                    <td style={{ padding: '4px 8px', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>{c.label}</td>
+                    <td style={{ textAlign: 'center', padding: '4px 8px', whiteSpace: 'nowrap' }}>
+                      <OptionStatCell bets={c.bets} />
+                    </td>
+                  </tr>
                 ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
+              </tbody>
+            </table>
+          )
+        })}
       </div>
     </div>
   )

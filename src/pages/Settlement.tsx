@@ -201,6 +201,8 @@ export default function Settlement() {
   const [showSavePreset, setShowSavePreset] = useState(false)
   const [presetName, setPresetName]         = useState('')
 
+  const [showInactiveSites, setShowInactiveSites] = useState(false)
+
   useEffect(() => {
     loadCashflows(); loadSites(); loadCategories(); loadPresets()
     // 환율 로드 + 7일 이상 데이터 정리
@@ -454,12 +456,19 @@ export default function Settlement() {
   const thisMonthExpenseTotal = cashflows.filter(c => c.type === 'expense' && c.flow_date >= thisMonthStart && c.flow_date <= thisMonthEnd).reduce((s, c) => s + toKrw(c), 0)
   const thisMonthNetTotal = thisMonthIncomeTotal - thisMonthExpenseTotal
 
-  const maxSiteBreakdownIncome  = Math.max(...monthSiteBreakdown.map(x => x.income), 1)
-  const maxSiteBreakdownExpense = Math.max(...monthSiteBreakdown.map(x => x.expense), 1)
-  const maxSiteBreakdownNetAbs  = Math.max(...monthSiteBreakdown.map(x => Math.abs(x.net)), 1)
-  const maxSiteTotalIncome  = Math.max(...monthSiteBreakdown.map(x => x.totalIncome), 1)
-  const maxSiteTotalExpense = Math.max(...monthSiteBreakdown.map(x => x.totalExpense), 1)
-  const maxSiteTotalNetAbs  = Math.max(...monthSiteBreakdown.map(x => Math.abs(x.totalNet)), 1)
+  // 기본은 비활성(마감) 사이트를 숨기고, 상단 토글을 켜면 입금 이력이 있는 모든 사이트를 보여준다
+  const visibleSiteBreakdown = useMemo(
+    () => monthSiteBreakdown.filter(x => x.active || showInactiveSites),
+    [monthSiteBreakdown, showInactiveSites]
+  )
+  const inactiveSiteCount = monthSiteBreakdown.filter(x => !x.active).length
+
+  const maxSiteBreakdownIncome  = Math.max(...visibleSiteBreakdown.map(x => x.income), 1)
+  const maxSiteBreakdownExpense = Math.max(...visibleSiteBreakdown.map(x => x.expense), 1)
+  const maxSiteBreakdownNetAbs  = Math.max(...visibleSiteBreakdown.map(x => Math.abs(x.net)), 1)
+  const maxSiteTotalIncome  = Math.max(...visibleSiteBreakdown.map(x => x.totalIncome), 1)
+  const maxSiteTotalExpense = Math.max(...visibleSiteBreakdown.map(x => x.totalExpense), 1)
+  const maxSiteTotalNetAbs  = Math.max(...visibleSiteBreakdown.map(x => Math.abs(x.totalNet)), 1)
   const DOW_KO = ['일', '월', '화', '수', '목', '금', '토']
 
   const catNames = categories.map(c => c.name)
@@ -783,9 +792,21 @@ export default function Settlement() {
         </div>
 
         <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10, padding: '12px 14px' }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.7px', marginBottom: 10 }}>사이트별 손익 (이번달 · 전체누적 비교)</div>
-          {monthSiteBreakdown.length === 0 && <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>내역 없음</div>}
-          {monthSiteBreakdown.length > 0 && (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.7px' }}>사이트별 손익 (이번달 · 전체누적 비교)</div>
+            {inactiveSiteCount > 0 && (
+              <button onClick={() => setShowInactiveSites(p => !p)} style={{
+                display: 'flex', alignItems: 'center', gap: 5, background: showInactiveSites ? 'var(--gold-bg)' : 'none',
+                border: `1px solid ${showInactiveSites ? 'var(--gold-border)' : 'var(--border)'}`, borderRadius: 6, cursor: 'pointer',
+                padding: '3px 8px', fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-body)',
+                color: showInactiveSites ? 'var(--gold)' : 'var(--text-muted)',
+              }}>
+                {showInactiveSites ? <Check size={11} /> : null} 마감 사이트 표시 ({inactiveSiteCount})
+              </button>
+            )}
+          </div>
+          {visibleSiteBreakdown.length === 0 && <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>내역 없음</div>}
+          {visibleSiteBreakdown.length > 0 && (
             <div style={{ display: 'grid', gridTemplateColumns: 'minmax(48px, auto) 1fr 1fr 1fr', gap: 4, marginBottom: 8 }}>
               <span />
               <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--green)', textAlign: 'right' }}>수입</span>
@@ -793,7 +814,7 @@ export default function Settlement() {
               <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-secondary)', textAlign: 'right' }}>순수익</span>
             </div>
           )}
-          {monthSiteBreakdown.map(({ name, active, income, expense, net, totalIncome, totalExpense, totalNet }, i) => {
+          {visibleSiteBreakdown.map(({ name, active, income, expense, net, totalIncome, totalExpense, totalNet }, i) => {
             const incPct = Math.round(income / maxSiteBreakdownIncome * 100)
             const expPct = Math.round(expense / maxSiteBreakdownExpense * 100)
             const netPct = Math.round(Math.abs(net) / maxSiteBreakdownNetAbs * 100)
@@ -803,7 +824,7 @@ export default function Settlement() {
             const totNetPct = Math.round(Math.abs(totalNet) / maxSiteTotalNetAbs * 100)
             const totNetColor = totalNet >= 0 ? 'var(--green)' : 'var(--red)'
             return (
-              <div key={name} style={{ marginBottom: 12, paddingBottom: 10, borderBottom: i < monthSiteBreakdown.length - 1 ? '1px solid var(--border)' : 'none', opacity: active ? 1 : 0.5 }}>
+              <div key={name} style={{ marginBottom: 12, paddingBottom: 10, borderBottom: i < visibleSiteBreakdown.length - 1 ? '1px solid var(--border)' : 'none', opacity: active ? 1 : 0.5 }}>
                 <div style={{ fontSize: 12, fontWeight: 700, color: active ? 'var(--text-primary)' : 'var(--text-muted)', marginBottom: 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 6 }}>
                   {name}
                   {!active && <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', border: '1px solid var(--border)', borderRadius: 3, padding: '1px 5px', flexShrink: 0 }}>마감</span>}
