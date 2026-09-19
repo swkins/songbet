@@ -370,24 +370,24 @@ export default function MiningWidget() {
         <span className="card-title" style={{ margin: 0 }}>
           사이트 현황
           {entries.length > 0 && (
-            <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 600, color: 'var(--text-muted)' }}>
+            <span style={{ marginLeft: 8, fontSize: 13, fontWeight: 600, color: 'var(--text-muted)' }}>
               <b style={{ color: 'var(--gold)', fontFamily: 'var(--font-num)' }}>{fmt(totals)}</b> / {fmt(totalsTarget)}
             </span>
           )}
         </span>
-        <button onClick={() => setAddModalOpen(true)} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-secondary)', cursor: 'pointer', padding: '3px 8px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-body)' }}>
-          <Plus size={11} /> 추가
+        <button onClick={() => setAddModalOpen(true)} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-secondary)', cursor: 'pointer', padding: '3px 8px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-body)' }}>
+          <Plus size={12} /> 추가
         </button>
       </div>
 
-      {loading && <div style={{ color: 'var(--text-muted)', fontSize: 12, padding: '4px 0' }}>불러오는 중...</div>}
+      {loading && <div style={{ color: 'var(--text-muted)', fontSize: 13, padding: '4px 0' }}>불러오는 중...</div>}
       {!loading && entries.length === 0 && (
-        <div style={{ color: 'var(--text-muted)', fontSize: 12, textAlign: 'center', padding: '14px 0' }}>
+        <div style={{ color: 'var(--text-muted)', fontSize: 13, textAlign: 'center', padding: '14px 0' }}>
           사이트를 추가하면 오늘의 채굴 현황이 여기 표시됩니다.
         </div>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 8 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 8 }}>
         {entries.map(e => {
           const m = mined(e)
           // 목표량은 "현재 포인트 총량" 기준 — 오늘 오른 양(m)이 아니라 e.current_point를 target_point와 직접 비교한다
@@ -429,15 +429,15 @@ export default function MiningWidget() {
             }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-                  <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}>{e.site_name}</span>
-                  <button onClick={() => setCashoutEntry(e)} title="현금교환" style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, cursor: 'pointer', color: 'var(--purple)', display: 'flex', alignItems: 'center', gap: 3, padding: '2px 6px', fontSize: 9, fontWeight: 700, fontFamily: 'var(--font-body)', flexShrink: 0 }}>
-                    <DollarSign size={10} /> 현금교환
+                  <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>{e.site_name}</span>
+                  <button onClick={() => setCashoutEntry(e)} title="현금교환" style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, cursor: 'pointer', color: 'var(--purple)', display: 'flex', alignItems: 'center', gap: 3, padding: '2px 7px', fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-body)', flexShrink: 0 }}>
+                    <DollarSign size={11} /> 현금교환
                   </button>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-                  {done && <span style={{ fontSize: 8, fontWeight: 700, color: 'var(--green)', background: 'var(--green-bg)', border: '1px solid var(--green-border)', padding: '1px 5px', borderRadius: 4 }}>완료</span>}
+                  {done && <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--green)', background: 'var(--green-bg)', border: '1px solid var(--green-border)', padding: '1px 6px', borderRadius: 4 }}>완료</span>}
                   <button onClick={() => deleteEntry(e.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', padding: 0 }}>
-                    <Trash2 size={11} />
+                    <Trash2 size={12} />
                   </button>
                 </div>
               </div>
@@ -445,7 +445,7 @@ export default function MiningWidget() {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
                 {isEditingCurrent ? (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <input autoFocus style={{ width: 120, background: 'var(--bg-card)', border: '1px solid var(--gold-border)', borderRadius: 5, padding: '3px 6px', fontSize: 16, fontWeight: 800, color: done ? 'var(--green)' : 'var(--gold)', fontFamily: 'var(--font-num)', outline: 'none', boxSizing: 'border-box' }}
+                    <input autoFocus style={{ width: 120, background: 'var(--bg-card)', border: '1px solid var(--gold-border)', borderRadius: 5, padding: '3px 6px', fontSize: 18, fontWeight: 800, color: done ? 'var(--green)' : 'var(--gold)', fontFamily: 'var(--font-num)', outline: 'none', boxSizing: 'border-box' }}
                       inputMode="numeric" placeholder="붙여넣기/입력" value={editVal ? Number(editVal.replace(/,/g, '')).toLocaleString('ko-KR') : ''}
                       onChange={ev => { const raw = ev.target.value.replace(/,/g, ''); if (raw === '' || /^\d+$/.test(raw)) setEditVal(raw) }}
                       onKeyDown={ev => ev.key === 'Enter' && saveEdit(e)} />
@@ -455,18 +455,18 @@ export default function MiningWidget() {
                   </div>
                 ) : (
                   <span onClick={() => startEdit(e, 'current')} style={{ display: 'flex', alignItems: 'baseline', gap: 5, cursor: 'pointer' }}>
-                    <span style={{ fontFamily: 'var(--font-num)', fontSize: 16, fontWeight: 800, color: done ? 'var(--green)' : 'var(--gold)' }}>{fmt(e.current_point)}</span>
+                    <span style={{ fontFamily: 'var(--font-num)', fontSize: 20, fontWeight: 800, color: done ? 'var(--green)' : 'var(--gold)' }}>{fmt(e.current_point)}</span>
                     {m !== 0 && (
-                      <span style={{ fontFamily: 'var(--font-num)', fontSize: 11, fontWeight: 700, color: m > 0 ? 'var(--green)' : 'var(--red)' }}>
+                      <span style={{ fontFamily: 'var(--font-num)', fontSize: 13, fontWeight: 700, color: m > 0 ? 'var(--green)' : 'var(--red)' }}>
                         ({m > 0 ? '+' : ''}{fmt(m)})
                       </span>
                     )}
-                    <Pencil size={9} style={{ color: 'var(--text-muted)' }} />
+                    <Pencil size={10} style={{ color: 'var(--text-muted)' }} />
                   </span>
                 )}
                 {isEditingTarget ? (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <input autoFocus style={{ width: 120, background: 'var(--bg-card)', border: '1px solid var(--gold-border)', borderRadius: 5, padding: '3px 6px', fontSize: 16, fontWeight: 800, color: 'var(--text-primary)', fontFamily: 'var(--font-num)', outline: 'none', boxSizing: 'border-box' }}
+                    <input autoFocus style={{ width: 120, background: 'var(--bg-card)', border: '1px solid var(--gold-border)', borderRadius: 5, padding: '3px 6px', fontSize: 18, fontWeight: 800, color: 'var(--text-primary)', fontFamily: 'var(--font-num)', outline: 'none', boxSizing: 'border-box' }}
                       inputMode="numeric" value={editVal ? Number(editVal.replace(/,/g, '')).toLocaleString('ko-KR') : ''}
                       onChange={ev => { const raw = ev.target.value.replace(/,/g, ''); if (raw === '' || /^\d+$/.test(raw)) setEditVal(raw) }}
                       onKeyDown={ev => ev.key === 'Enter' && saveEdit(e)} />
@@ -474,16 +474,16 @@ export default function MiningWidget() {
                     <button onClick={cancelEdit} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex' }}><X size={13} /></button>
                   </div>
                 ) : (
-                  <span onClick={() => startEdit(e, 'target')} style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--font-num)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 2 }}>
-                    / {fmt(e.target_point)} <Pencil size={9} />
+                  <span onClick={() => startEdit(e, 'target')} style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: 'var(--font-num)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 2 }}>
+                    / {fmt(e.target_point)} <Pencil size={10} />
                   </span>
                 )}
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 2 }}>
-                <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)' }}>채굴현황</span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 3 }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)' }}>채굴현황</span>
                 {goalDate && (
-                  <span style={{ fontSize: 8, color: 'var(--text-muted)' }}>
+                  <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)' }}>
                     {remainingAmount <= 0
                       ? (isExcess ? `목표 달성 (초과 ${fmt(-remaining)})` : '목표 달성')
                       : `하루 ${fmt(requiredPerDay)} 필요 · ${remainingDays}일 남음`}
@@ -526,16 +526,16 @@ export default function MiningWidget() {
                 </div>
               )}
 
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 5 }}>
                 <span style={{
-                  fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-num)', padding: '2px 7px', borderRadius: 999,
+                  fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-num)', padding: '3px 9px', borderRadius: 999,
                   background: isExcess ? 'var(--green-bg)' : 'var(--bg-card)',
                   color: isExcess ? 'var(--green)' : 'var(--text-muted)',
                   border: `1px solid ${isExcess ? 'var(--green-border)' : 'var(--border)'}`,
                 }}>
                   {isExcess ? `초과 ${fmt(-remaining)}` : `남음 ${fmt(Math.max(0, remaining))}`}
                 </span>
-                <span style={{ fontSize: 11, fontWeight: 800, fontFamily: 'var(--font-num)', color: done ? 'var(--green)' : 'var(--text-secondary)' }}>{pctDisplay.toFixed(0)}%</span>
+                <span style={{ fontSize: 14, fontWeight: 800, fontFamily: 'var(--font-num)', color: done ? 'var(--green)' : 'var(--text-secondary)' }}>{pctDisplay.toFixed(0)}%</span>
               </div>
 
               {/* 실적현황: 선택한 베팅사이트들의 (목표 날짜로부터 지정한 기간 이전까지) 입금 실적 진행률
@@ -567,16 +567,16 @@ export default function MiningWidget() {
                 const perfEnd = dayjs().isBefore(dayjs(c.goal_date!)) ? dayjs() : dayjs(c.goal_date!)
 
                 return (
-                  <div style={{ marginTop: 4, paddingTop: 4 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 2 }}>
-                      <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)' }}>실적현황</span>
-                      <span style={{ fontSize: 8, color: 'var(--text-muted)' }}>
+                  <div style={{ marginTop: 5, paddingTop: 5 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 3 }}>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)' }}>실적현황</span>
+                      <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)' }}>
                         {perfRemaining <= 0
                           ? (perfExcess ? `목표 달성 (초과 ${fmt(-perfRemaining)})` : '목표 달성')
                           : `하루 ${fmt(perfRequiredPerDay)} 필요 · ${perfDaysLeft}일 남음`}
                       </span>
                     </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 3, fontSize: 8, color: 'var(--text-muted)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 4, fontSize: 10, color: 'var(--text-muted)' }}>
                       <span>{perfStart.format('MM.DD')} ~ {perfEnd.format('MM.DD')} 기준</span>
                       <span><b style={{ color: 'var(--gold)', fontFamily: 'var(--font-num)' }}>{fmt(progress)}</b> / {fmt(c.perf_amount)}</span>
                     </div>
@@ -605,16 +605,16 @@ export default function MiningWidget() {
                         }} />
                       </div>
                     </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 5 }}>
                       <span style={{
-                        fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-num)', padding: '2px 7px', borderRadius: 999,
+                        fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-num)', padding: '3px 9px', borderRadius: 999,
                         background: perfExcess ? 'var(--green-bg)' : 'var(--bg-card)',
                         color: perfExcess ? 'var(--green)' : 'var(--text-muted)',
                         border: `1px solid ${perfExcess ? 'var(--green-border)' : 'var(--border)'}`,
                       }}>
                         {perfExcess ? `초과 ${fmt(-perfRemaining)}` : `남음 ${fmt(Math.max(0, perfRemaining))}`}
                       </span>
-                      <span style={{ fontSize: 11, fontWeight: 800, fontFamily: 'var(--font-num)', color: perfDone ? 'var(--green)' : 'var(--text-secondary)' }}>{perfPctDisplay.toFixed(0)}%</span>
+                      <span style={{ fontSize: 14, fontWeight: 800, fontFamily: 'var(--font-num)', color: perfDone ? 'var(--green)' : 'var(--text-secondary)' }}>{perfPctDisplay.toFixed(0)}%</span>
                     </div>
                   </div>
                 )
