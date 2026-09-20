@@ -766,12 +766,14 @@ function InlineBetEditForm({ bet, site, onClose, onSave, baseballOverrides, socc
   const sportLeagueNames = LEAGUE_NAMES_BY_SPORT[sport]
   const [leagueInput, setLeagueInput] = useState(bet.league ?? '')
   const [leagueSuggestOpen, setLeagueSuggestOpen] = useState(false)
+  const [leagueShowAll, setLeagueShowAll] = useState(false)
   const [leagueHighlight, setLeagueHighlight] = useState(-1)
   const [leagueOnlyMgmtOpen, setLeagueOnlyMgmtOpen] = useState(false)
   const trimmedLeagueInput = leagueInput.trim()
-  const leagueInputSuggestions = sportLeagueNames && trimmedLeagueInput
+  // 빈칸에서 더블클릭하면 등록된 리그 전체를 드롭다운으로 보여준다 (가나다순)
+  const leagueInputSuggestions = !sportLeagueNames ? [] : trimmedLeagueInput
     ? sportLeagueNames.filter(lg => lg.toLowerCase().includes(trimmedLeagueInput.toLowerCase()) && lg !== trimmedLeagueInput).slice(0, 8)
-    : []
+    : leagueShowAll ? [...sportLeagueNames].sort((a, b) => a.localeCompare(b, 'ko')) : []
   function onLeagueInputKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if (!leagueSuggestOpen || leagueInputSuggestions.length === 0) return
     if (e.key === 'ArrowDown') { e.preventDefault(); setLeagueHighlight(i => Math.min(i + 1, leagueInputSuggestions.length - 1)) }
@@ -824,11 +826,12 @@ function InlineBetEditForm({ bet, site, onClose, onSave, baseballOverrides, socc
         <div style={{ position: 'relative', marginTop: 4 }}>
           <div style={{ display: 'flex', gap: 4 }}>
             <input className="form-input" value={leagueInput}
-              onChange={e => { setLeagueInput(e.target.value); setLeagueSuggestOpen(true); setLeagueHighlight(-1) }}
+              onChange={e => { setLeagueInput(e.target.value); setLeagueSuggestOpen(true); setLeagueHighlight(-1); setLeagueShowAll(false) }}
               onFocus={() => setLeagueSuggestOpen(true)}
-              onBlur={() => setTimeout(() => setLeagueSuggestOpen(false), 150)}
+              onDoubleClick={() => { if (!trimmedLeagueInput) { setLeagueShowAll(true); setLeagueSuggestOpen(true) } }}
+              onBlur={() => setTimeout(() => { setLeagueSuggestOpen(false); setLeagueShowAll(false) }, 150)}
               onKeyDown={onLeagueInputKeyDown}
-              placeholder="리그 (직접 입력, 선택)" style={{ flex: 1, fontSize: 11, padding: '5px 7px' }} />
+              placeholder="리그 (직접 입력, 선택 — 빈칸에서 더블클릭 시 목록)" style={{ flex: 1, fontSize: 11, padding: '5px 7px' }} />
             <button type="button" onClick={() => setLeagueOnlyMgmtOpen(true)} title="리그 관리"
               style={{ width: 30, flexShrink: 0, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <Settings size={13} />
@@ -837,7 +840,7 @@ function InlineBetEditForm({ bet, site, onClose, onSave, baseballOverrides, socc
           {leagueSuggestOpen && leagueInputSuggestions.length > 0 && (
             <div style={{ position: 'absolute', top: '100%', left: 0, right: 34, zIndex: 20, marginTop: 2, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 6, boxShadow: '0 4px 14px rgba(0,0,0,0.3)', maxHeight: 160, overflowY: 'auto' }}>
               {leagueInputSuggestions.map((lg, i) => (
-                <div key={lg} onMouseDown={() => { setLeagueInput(lg); setLeagueSuggestOpen(false); setLeagueHighlight(-1) }}
+                <div key={lg} onMouseDown={() => { setLeagueInput(lg); setLeagueSuggestOpen(false); setLeagueHighlight(-1); setLeagueShowAll(false) }}
                   onMouseEnter={() => setLeagueHighlight(i)}
                   style={{ padding: '6px 8px', cursor: 'pointer', fontSize: 11, fontWeight: i === leagueHighlight ? 700 : 600, color: i === leagueHighlight ? 'var(--gold)' : 'var(--text-primary)', background: i === leagueHighlight ? 'var(--gold-bg)' : 'transparent' }}>
                   {lg}
@@ -1758,13 +1761,15 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
   const sportLeagueNames = LEAGUE_NAMES_BY_SPORT[sport]
   const [leagueInput, setLeagueInput] = useState('')
   const [leagueSuggestOpen, setLeagueSuggestOpen] = useState(false)
+  const [leagueShowAll, setLeagueShowAll] = useState(false)
   const [leagueHighlight, setLeagueHighlight] = useState(-1)
   const [leagueOnlyMgmtOpen, setLeagueOnlyMgmtOpen] = useState(false)
   const trimmedLeagueInput = leagueInput.trim()
-  const leagueInputSuggestions = sportLeagueNames && trimmedLeagueInput
+  // 빈칸에서 더블클릭하면 등록된 리그 전체를 드롭다운으로 보여준다 (가나다순)
+  const leagueInputSuggestions = !sportLeagueNames ? [] : trimmedLeagueInput
     ? sportLeagueNames.filter(lg => lg.toLowerCase().includes(trimmedLeagueInput.toLowerCase()) && lg !== trimmedLeagueInput).slice(0, 8)
-    : []
-  useEffect(() => { setLeagueInput(''); setLeagueSuggestOpen(false); setLeagueHighlight(-1); setLeagueOnlyMgmtOpen(false) }, [sport])
+    : leagueShowAll ? [...sportLeagueNames].sort((a, b) => a.localeCompare(b, 'ko')) : []
+  useEffect(() => { setLeagueInput(''); setLeagueSuggestOpen(false); setLeagueShowAll(false); setLeagueHighlight(-1); setLeagueOnlyMgmtOpen(false) }, [sport])
   function onLeagueInputKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if (!leagueSuggestOpen || leagueInputSuggestions.length === 0) return
     if (e.key === 'ArrowDown') { e.preventDefault(); setLeagueHighlight(i => Math.min(i + 1, leagueInputSuggestions.length - 1)) }
@@ -1846,11 +1851,12 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
         <div style={{ position: 'relative', marginTop: 4 }}>
           <div style={{ display: 'flex', gap: 4 }}>
             <input className="form-input" value={leagueInput}
-              onChange={e => { setLeagueInput(e.target.value); setLeagueSuggestOpen(true); setLeagueHighlight(-1) }}
+              onChange={e => { setLeagueInput(e.target.value); setLeagueSuggestOpen(true); setLeagueHighlight(-1); setLeagueShowAll(false) }}
               onFocus={() => setLeagueSuggestOpen(true)}
-              onBlur={() => setTimeout(() => setLeagueSuggestOpen(false), 150)}
+              onDoubleClick={() => { if (!trimmedLeagueInput) { setLeagueShowAll(true); setLeagueSuggestOpen(true) } }}
+              onBlur={() => setTimeout(() => { setLeagueSuggestOpen(false); setLeagueShowAll(false) }, 150)}
               onKeyDown={onLeagueInputKeyDown}
-              placeholder="리그 (직접 입력, 선택)" style={{ flex: 1, fontSize: 11, padding: '5px 7px' }} />
+              placeholder="리그 (직접 입력, 선택 — 빈칸에서 더블클릭 시 목록)" style={{ flex: 1, fontSize: 11, padding: '5px 7px' }} />
             <button type="button" onClick={() => setLeagueOnlyMgmtOpen(true)} title="리그 관리"
               style={{ width: 30, flexShrink: 0, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <Settings size={13} />
@@ -1859,7 +1865,7 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
           {leagueSuggestOpen && leagueInputSuggestions.length > 0 && (
             <div style={{ position: 'absolute', top: '100%', left: 0, right: 34, zIndex: 20, marginTop: 2, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 6, boxShadow: '0 4px 14px rgba(0,0,0,0.3)', maxHeight: 160, overflowY: 'auto' }}>
               {leagueInputSuggestions.map((lg, i) => (
-                <div key={lg} onMouseDown={() => { setLeagueInput(lg); setLeagueSuggestOpen(false); setLeagueHighlight(-1) }}
+                <div key={lg} onMouseDown={() => { setLeagueInput(lg); setLeagueSuggestOpen(false); setLeagueHighlight(-1); setLeagueShowAll(false) }}
                   onMouseEnter={() => setLeagueHighlight(i)}
                   style={{ padding: '6px 8px', cursor: 'pointer', fontSize: 11, fontWeight: i === leagueHighlight ? 700 : 600, color: i === leagueHighlight ? 'var(--gold)' : 'var(--text-primary)', background: i === leagueHighlight ? 'var(--gold-bg)' : 'transparent' }}>
                   {lg}
