@@ -8,6 +8,9 @@ import { Trash2, X, Check, Pencil } from 'lucide-react'
 import { inferBaseballLeague, inferSoccerLeague, koCompare, KBO_TEAMS, MLB_TEAMS, NPB_TEAMS, type LeagueOverride } from '../lib/league'
 import { sportGlyph } from '../components/SportIcons'
 
+// 리그 관리 시스템(베팅옵션·리그별 순위, 리그 미지정 베팅 지정) — 데이터/로직은 유지하되 화면에는 표출하지 않음
+const SHOW_LEAGUE_UI = false
+
 const SPORTS: { value: Sport; label: string; emoji: string }[] = [
   { value: 'soccer',     label: '축구', emoji: '⚽' },
   { value: 'baseball',   label: '야구', emoji: '⚾' },
@@ -1608,9 +1611,9 @@ export default function Stats() {
 
               <MarketTypeOverviewSection settled={settled} betOptionsBySport={betOptionsBySport} />
 
-              <OptionLeagueRankingSection settled={settled} betOptionsBySport={betOptionsBySport} />
+              {SHOW_LEAGUE_UI && <OptionLeagueRankingSection settled={settled} betOptionsBySport={betOptionsBySport} />}
 
-              <UnassignedLeagueSection bets={bets} leaguesBySport={leaguesBySport} onAssign={assignLeagueToBets} />
+              {SHOW_LEAGUE_UI && <UnassignedLeagueSection bets={bets} leaguesBySport={leaguesBySport} onAssign={assignLeagueToBets} />}
 
               <div>
                 <div className="card-title" style={{ marginBottom: 8 }}>종목별 수익률</div>

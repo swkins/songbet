@@ -17,6 +17,9 @@ import {
   ClipboardPaste, ChevronUp, ChevronDown, Star,
 } from 'lucide-react'
 
+// 리그 관리 시스템(팀 자동완성·리그 자동인식·리그 관리 모달) — 데이터/로직은 유지하되 화면에는 표출하지 않음
+const SHOW_LEAGUE_UI = false
+
 const SPORTS: { value: Sport; label: string }[] = [
   { value: 'soccer',     label: '축구'   },
   { value: 'baseball',   label: '야구'   },
@@ -1654,7 +1657,7 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
     const finalContent = mode === 'single' ? [content.trim(), side, ...selectedOptions].filter(Boolean).join(' ') : content
     const ok = mode === 'multi'
       ? await onMultiBet(sport, multiContents, oddsV, stakeN, multiContents.map(() => ''))
-      : await onBet(sport, finalContent, oddsV, stakeN, isLive, detectedLeague)
+      : await onBet(sport, finalContent, oddsV, stakeN, isLive, SHOW_LEAGUE_UI ? detectedLeague : '')
     setSubmitting(false)
     if (ok) onClose()
   }
@@ -1695,7 +1698,7 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
           }}>{side || '없음'}</button>
         )}
       </div>
-      {mode === 'single' && leagueBundle && (
+      {SHOW_LEAGUE_UI && mode === 'single' && leagueBundle && (
         <div style={{ position: 'relative', marginTop: 4 }}>
           {teamSuggestions.length > 0 && (
             <div style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 6, marginBottom: 4, maxHeight: 130, overflowY: 'auto' }}>
@@ -1755,7 +1758,7 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
           )}
         </div>
       )}
-      {leagueMgmtOpen && leagueBundle && (
+      {SHOW_LEAGUE_UI && leagueMgmtOpen && leagueBundle && (
         <LeagueManageModal
           sport={sport as StructuredSport} leagues={leagueBundle.leagues} favoriteLeagues={leagueBundle.favoriteLeagues} teams={leagueBundle.teams}
           onClose={() => setLeagueMgmtOpen(false)}
