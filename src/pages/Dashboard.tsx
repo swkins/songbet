@@ -753,6 +753,35 @@ function InlineBetEditForm({ bet, site, onClose, onSave, baseballOverrides, socc
     setSelectedOptions([])
   }, [sport])
 
+  // 리그 직접 입력 — 베팅추가 폼과 동일한 방식. 기존 리그값을 기본으로 채워넣어, 아무것도 안 건드리면 그대로 저장된다.
+  const LEAGUE_NAMES_BY_SPORT: Partial<Record<string, string[]>> = {
+    soccer: soccerLeagues, baseball: baseballLeagues, basketball: basketballLeagues, volleyball: volleyballLeagues, esports: esportsLeagues,
+  }
+  const ADD_LEAGUE_NAME_BY_SPORT: Partial<Record<string, (name: string) => Promise<void>>> = {
+    soccer: onAddSoccerLeague, baseball: onAddBaseballLeague, basketball: onAddBasketballLeague, volleyball: onAddVolleyballLeague, esports: onAddEsportsLeague,
+  }
+  const DELETE_LEAGUE_NAME_BY_SPORT: Partial<Record<string, (name: string) => Promise<void>>> = {
+    soccer: onDeleteSoccerLeague, baseball: onDeleteBaseballLeague, basketball: onDeleteBasketballLeague, volleyball: onDeleteVolleyballLeague, esports: onDeleteEsportsLeague,
+  }
+  const sportLeagueNames = LEAGUE_NAMES_BY_SPORT[sport]
+  const [leagueInput, setLeagueInput] = useState(bet.league ?? '')
+  const [leagueSuggestOpen, setLeagueSuggestOpen] = useState(false)
+  const [leagueHighlight, setLeagueHighlight] = useState(-1)
+  const [leagueOnlyMgmtOpen, setLeagueOnlyMgmtOpen] = useState(false)
+  const trimmedLeagueInput = leagueInput.trim()
+  const leagueInputSuggestions = sportLeagueNames && trimmedLeagueInput
+    ? sportLeagueNames.filter(lg => lg.toLowerCase().includes(trimmedLeagueInput.toLowerCase()) && lg !== trimmedLeagueInput).slice(0, 8)
+    : []
+  function onLeagueInputKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (!leagueSuggestOpen || leagueInputSuggestions.length === 0) return
+    if (e.key === 'ArrowDown') { e.preventDefault(); setLeagueHighlight(i => Math.min(i + 1, leagueInputSuggestions.length - 1)) }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setLeagueHighlight(i => Math.max(i - 1, 0)) }
+    else if (e.key === 'Enter' && leagueHighlight >= 0) {
+      e.preventDefault()
+      setLeagueInput(leagueInputSuggestions[leagueHighlight]); setLeagueSuggestOpen(false); setLeagueHighlight(-1)
+    } else if (e.key === 'Escape') { setLeagueSuggestOpen(false); setLeagueHighlight(-1) }
+  }
+
   function cycleSide() {
     setSide(prev => prev === '' ? '홈' : prev === '홈' ? '원정' : '')
   }
@@ -772,7 +801,7 @@ function InlineBetEditForm({ bet, site, onClose, onSave, baseballOverrides, socc
     if (!content.trim() || oddsV <= 0 || stakeN <= 0) return
     setSubmitting(true)
     const finalContent = [content.trim(), side, ...selectedOptions].filter(Boolean).join(' ')
-    await onSave(sport, finalContent, oddsV, stakeN, isLive, '')
+    await onSave(sport, finalContent, oddsV, stakeN, isLive, trimmedLeagueInput)
     setSubmitting(false)
   }
   return (
@@ -791,6 +820,42 @@ function InlineBetEditForm({ bet, site, onClose, onSave, baseballOverrides, socc
           color: side ? 'var(--gold)' : 'var(--text-secondary)',
         }}>{side || '없음'}</button>
       </div>
+      {sportLeagueNames && (
+        <div style={{ position: 'relative', marginTop: 4 }}>
+          <div style={{ display: 'flex', gap: 4 }}>
+            <input className="form-input" value={leagueInput}
+              onChange={e => { setLeagueInput(e.target.value); setLeagueSuggestOpen(true); setLeagueHighlight(-1) }}
+              onFocus={() => setLeagueSuggestOpen(true)}
+              onBlur={() => setTimeout(() => setLeagueSuggestOpen(false), 150)}
+              onKeyDown={onLeagueInputKeyDown}
+              placeholder="리그 (직접 입력, 선택)" style={{ flex: 1, fontSize: 11, padding: '5px 7px' }} />
+            <button type="button" onClick={() => setLeagueOnlyMgmtOpen(true)} title="리그 관리"
+              style={{ width: 30, flexShrink: 0, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Settings size={13} />
+            </button>
+          </div>
+          {leagueSuggestOpen && leagueInputSuggestions.length > 0 && (
+            <div style={{ position: 'absolute', top: '100%', left: 0, right: 34, zIndex: 20, marginTop: 2, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 6, boxShadow: '0 4px 14px rgba(0,0,0,0.3)', maxHeight: 160, overflowY: 'auto' }}>
+              {leagueInputSuggestions.map((lg, i) => (
+                <div key={lg} onMouseDown={() => { setLeagueInput(lg); setLeagueSuggestOpen(false); setLeagueHighlight(-1) }}
+                  onMouseEnter={() => setLeagueHighlight(i)}
+                  style={{ padding: '6px 8px', cursor: 'pointer', fontSize: 11, fontWeight: i === leagueHighlight ? 700 : 600, color: i === leagueHighlight ? 'var(--gold)' : 'var(--text-primary)', background: i === leagueHighlight ? 'var(--gold-bg)' : 'transparent' }}>
+                  {lg}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      {leagueOnlyMgmtOpen && sportLeagueNames && (
+        <LeagueOnlyManageModal
+          sportLabel={SPORTS.find(s => s.value === sport)?.label ?? sport}
+          leagues={sportLeagueNames}
+          onClose={() => setLeagueOnlyMgmtOpen(false)}
+          onAddLeague={ADD_LEAGUE_NAME_BY_SPORT[sport]!}
+          onDeleteLeague={DELETE_LEAGUE_NAME_BY_SPORT[sport]!}
+        />
+      )}
       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 4, marginTop: 4 }}>
         {betOptions.map(opt => {
           const active = selectedOptions.includes(opt)

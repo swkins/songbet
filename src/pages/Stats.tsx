@@ -1617,7 +1617,7 @@ export default function Stats() {
 
               {SHOW_LEAGUE_UI && <OptionLeagueRankingSection settled={settled} betOptionsBySport={betOptionsBySport} />}
 
-              {SHOW_LEAGUE_UI && <UnassignedLeagueSection bets={bets} leaguesBySport={leaguesBySport} onAssign={assignLeagueToBets} />}
+              <UnassignedLeagueSection bets={bets} leaguesBySport={leaguesBySport} onAssign={assignLeagueToBets} />
 
               <div>
                 <div className="card-title" style={{ marginBottom: 8 }}>종목별 수익률</div>
