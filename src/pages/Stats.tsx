@@ -214,9 +214,10 @@ function OptionLeagueRankingSection({ settled, betOptionsBySport }: { settled: B
 }
 
 // ─── 리그 미지정 베팅 — 이미 결과처리된 베팅 중 리그가 비어있는 것을 종목별 등록 리그 중에서 골라 수동 지정 ──
-function UnassignedLeagueSection({ bets, leaguesBySport, onAssign }: {
+function UnassignedLeagueSection({ bets, leaguesBySport, onAssign, onDeleteRequest }: {
   bets: Bet[]; leaguesBySport: Partial<Record<Sport, string[]>>
   onAssign: (ids: string[], league: string) => Promise<void>
+  onDeleteRequest: (target: DeleteTarget) => void
 }) {
   const [choice, setChoice] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState<string | null>(null)
@@ -268,6 +269,11 @@ function UnassignedLeagueSection({ bets, leaguesBySport, onAssign }: {
               <button type="button" onClick={() => save(key, g.ids)} disabled={!choice[key] || saving === key}
                 style={{ fontSize: 10, fontWeight: 700, padding: '4px 10px', borderRadius: 5, border: '1px solid var(--gold-border)', background: 'var(--gold-bg)', color: 'var(--gold)', cursor: choice[key] ? 'pointer' : 'default', opacity: choice[key] ? 1 : 0.5, flexShrink: 0 }}>
                 {saving === key ? '저장중' : '지정'}
+              </button>
+              <button type="button" title="이 베팅 데이터 삭제"
+                onClick={() => onDeleteRequest({ label: g.match, emoji, matchFn: b => g.ids.includes(b.id) })}
+                style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 24, height: 24, flexShrink: 0, borderRadius: 5, border: '1px solid var(--red-border)', background: 'var(--red-bg)', color: 'var(--red)', cursor: 'pointer' }}>
+                <Trash2 size={11} />
               </button>
             </div>
           )
@@ -1617,7 +1623,7 @@ export default function Stats() {
 
               {SHOW_LEAGUE_UI && <OptionLeagueRankingSection settled={settled} betOptionsBySport={betOptionsBySport} />}
 
-              <UnassignedLeagueSection bets={bets} leaguesBySport={leaguesBySport} onAssign={assignLeagueToBets} />
+              <UnassignedLeagueSection bets={bets} leaguesBySport={leaguesBySport} onAssign={assignLeagueToBets} onDeleteRequest={setDeleteTarget} />
 
               <div>
                 <div className="card-title" style={{ marginBottom: 8 }}>종목별 수익률</div>
