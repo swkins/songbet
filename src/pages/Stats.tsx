@@ -745,20 +745,60 @@ function SoccerDetailPanel({ bets }: { bets: Bet[] }) {
 }
 
 // ─── 축구 핸디캡 — 리그별 (홈/원정 0.5·1.5·2.5 여섯 구간을 리그 단위로 한 표에서 비교) ────
-function SoccerLeagueColumnsSection({ title, columns, emptyLabel }: { title: string; columns: { label: string; bets: Bet[] }[]; emptyLabel: string }) {
+// ─── 리그별 순위 공통 계산 — 손익 금액(원) 높은 순으로 순위를 매기고, 자정(00:00) 기준
+// "어제까지의 누적"과 비교해 오늘 하루 동안의 손익 변동·순위 변동을 함께 계산한다. ────
+interface LeagueRankRow {
+  league: string; perGroup: Bet[][]
+  totalStats: ReturnType<typeof calcStats> | null
+  rank: number; rankDelta: number | null; profitDelta: number
+}
+function buildLeagueRankRows(groups: { label: string; bets: Bet[] }[]): LeagueRankRow[] {
   const leagueKeyOf = (b: Bet) => (b.league && b.league.trim()) ? b.league.trim() : '미분류'
-  const leagueNames = Array.from(new Set(columns.flatMap(c => c.bets).map(leagueKeyOf)))
+  const todayStr = dayjs().format('YYYY-MM-DD')
+  const leagueNames = Array.from(new Set(groups.flatMap(g => g.bets).map(leagueKeyOf)))
+  function cellStats(list: Bet[]) { return list.length ? calcStats(list) : null }
 
-  function cellStats(list: Bet[]) {
-    if (!list.length) return null
-    return calcStats(list)
-  }
+  const base = leagueNames.map(league => {
+    const perGroup = groups.map(g => g.bets.filter(b => leagueKeyOf(b) === league))
+    return { league, perGroup, totalStats: cellStats(perGroup.flat()) }
+  }).sort((a, b) => (b.totalStats?.profit ?? -Infinity) - (a.totalStats?.profit ?? -Infinity))
 
-  // 리그별 총 손익률(ROI) 높은 순으로 정렬 — 가장 좋은 성적의 리그가 맨 위
-  const rows = leagueNames.map(league => {
-    const perColumn = columns.map(c => c.bets.filter(b => leagueKeyOf(b) === league))
-    return { league, perColumn, totalStats: cellStats(perColumn.flat()) }
-  }).sort((a, b) => (b.totalStats?.roi ?? -Infinity) - (a.totalStats?.roi ?? -Infinity))
+  // 어제 자정(오늘 이전) 기준 누적으로 다시 순위를 매겨, 오늘자 데이터로 순위가 얼마나 움직였는지 비교
+  const yesterday = leagueNames.map(league => {
+    const bets = groups.flatMap(g => g.bets.filter(b => leagueKeyOf(b) === league && b.bet_date < todayStr))
+    return { league, stats: cellStats(bets) }
+  }).sort((a, b) => (b.stats?.profit ?? -Infinity) - (a.stats?.profit ?? -Infinity))
+  const yestRankMap = new Map<string, number>()
+  const yestProfitMap = new Map<string, number>()
+  yesterday.forEach((r, i) => { if (r.stats) { yestRankMap.set(r.league, i + 1); yestProfitMap.set(r.league, r.stats.profit) } })
+
+  return base.map((row, i) => {
+    const rank = i + 1
+    const yestRank = yestRankMap.get(row.league) ?? null
+    const profitDelta = (row.totalStats?.profit ?? 0) - (yestProfitMap.get(row.league) ?? 0)
+    return { ...row, rank, rankDelta: yestRank ? yestRank - rank : null, profitDelta }
+  })
+}
+
+// 순위 변동 배지 — 상승(▲)은 초록, 하락(▼)은 빨강, 어제 데이터가 없던 신규 리그는 NEW
+function RankDeltaBadge({ delta }: { delta: number | null }) {
+  if (delta === null) return <span style={{ fontSize: 8, fontWeight: 700, color: 'var(--blue)' }}>NEW</span>
+  if (delta === 0) return <span style={{ fontSize: 8, color: 'var(--text-muted)' }}>-</span>
+  return <span style={{ fontSize: 8, fontWeight: 700, color: delta > 0 ? '#4ade80' : '#f87171' }}>{delta > 0 ? `▲${delta}` : `▼${Math.abs(delta)}`}</span>
+}
+// 손익 변동 배지 — 자정 기준 어제까지의 누적 대비 오늘 하루 동안 손익이 얼마나 움직였는지
+function ProfitDeltaBadge({ delta }: { delta: number }) {
+  if (delta === 0) return null
+  return (
+    <span style={{ marginLeft: 6, fontSize: 9, fontWeight: 700, color: delta > 0 ? '#4ade80' : '#f87171' }}>
+      (어제比 {delta > 0 ? '+' : ''}{delta.toLocaleString()})
+    </span>
+  )
+}
+
+function SoccerLeagueColumnsSection({ title, columns, emptyLabel }: { title: string; columns: { label: string; bets: Bet[] }[]; emptyLabel: string }) {
+  const rows = buildLeagueRankRows(columns)
+  function cellStats(list: Bet[]) { return list.length ? calcStats(list) : null }
 
   return (
     <div>
@@ -768,6 +808,7 @@ function SoccerLeagueColumnsSection({ title, columns, emptyLabel }: { title: str
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
             <thead>
               <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                <th style={{ textAlign: 'center', padding: '4px 6px', fontSize: 9, color: 'var(--text-secondary)', fontWeight: 700, whiteSpace: 'nowrap' }}>순위</th>
                 <th style={{ textAlign: 'left', padding: '4px 8px', fontSize: 9, color: 'var(--text-secondary)', fontWeight: 700, whiteSpace: 'nowrap' }}>리그</th>
                 {columns.map(c => (
                   <th key={c.label} style={{ textAlign: 'center', padding: '4px 6px', fontSize: 9, color: 'var(--text-secondary)', fontWeight: 700, whiteSpace: 'nowrap' }}>{c.label}</th>
@@ -776,10 +817,14 @@ function SoccerLeagueColumnsSection({ title, columns, emptyLabel }: { title: str
               </tr>
             </thead>
             <tbody>
-              {rows.map(({ league, perColumn, totalStats }) => (
+              {rows.map(({ league, perGroup, totalStats, rank, rankDelta, profitDelta }) => (
                 <tr key={league} style={{ borderBottom: '1px solid var(--border-light)', height: 26 }}>
+                  <td style={{ textAlign: 'center', padding: '4px 6px', whiteSpace: 'nowrap' }}>
+                    <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{rank}</span>
+                    <div><RankDeltaBadge delta={rankDelta} /></div>
+                  </td>
                   <td style={{ padding: '4px 8px', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>{league}</td>
-                  {perColumn.map((cb, i) => {
+                  {perGroup.map((cb, i) => {
                     const s = cellStats(cb)
                     return (
                       <td key={i} style={{ textAlign: 'center', padding: '4px 6px', whiteSpace: 'nowrap' }}>
@@ -798,6 +843,7 @@ function SoccerLeagueColumnsSection({ title, columns, emptyLabel }: { title: str
                       <>
                         <span style={{ fontWeight: 700, color: totalStats.profit >= 0 ? '#4ade80' : '#f87171' }}>{totalStats.profit >= 0 ? '+' : ''}{totalStats.profit.toLocaleString()}</span>
                         <span style={{ marginLeft: 6, fontWeight: 700, color: totalStats.roi >= 0 ? '#4ade80' : '#f87171' }}>{totalStats.roi >= 0 ? '+' : ''}{totalStats.roi.toFixed(1)}%</span>
+                        <ProfitDeltaBadge delta={profitDelta} />
                       </>
                     ) : '—'}
                   </td>
@@ -816,19 +862,8 @@ function SoccerLeagueColumnsSection({ title, columns, emptyLabel }: { title: str
 // ─── 축구 언더 — 라인별(2.5/3.5/4.5) × 리그별 (초안) ────────────────
 // 리그 미지정 베팅은 "미분류"로 묶어서 함께 보여줌. league 컬럼값 그대로 사용(과거 팀 키워드 추론은 적용 안 함).
 function SoccerUnderByLeagueSection({ lines, lineBets }: { lines: number[]; lineBets: Bet[][] }) {
-  const leagueKeyOf = (b: Bet) => (b.league && b.league.trim()) ? b.league.trim() : '미분류'
-  const leagueNames = Array.from(new Set(lineBets.flat().map(leagueKeyOf)))
-
-  function cellStats(list: Bet[]) {
-    if (!list.length) return null
-    return calcStats(list)
-  }
-
-  // 리그별 총 손익률(ROI) 높은 순으로 정렬
-  const rows = leagueNames.map(league => {
-    const perLine = lineBets.map(list => list.filter(b => leagueKeyOf(b) === league))
-    return { league, perLine, totalStats: cellStats(perLine.flat()) }
-  }).sort((a, b) => (b.totalStats?.roi ?? -Infinity) - (a.totalStats?.roi ?? -Infinity))
+  const rows = buildLeagueRankRows(lines.map((l, i) => ({ label: `${l} 언더`, bets: lineBets[i] })))
+  function cellStats(list: Bet[]) { return list.length ? calcStats(list) : null }
 
   return (
     <div style={{ marginTop: 14 }}>
@@ -838,6 +873,7 @@ function SoccerUnderByLeagueSection({ lines, lineBets }: { lines: number[]; line
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
             <thead>
               <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                <th style={{ textAlign: 'center', padding: '4px 6px', fontSize: 9, color: 'var(--text-secondary)', fontWeight: 700, whiteSpace: 'nowrap' }}>순위</th>
                 <th style={{ textAlign: 'left', padding: '4px 8px', fontSize: 9, color: 'var(--text-secondary)', fontWeight: 700, whiteSpace: 'nowrap' }}>리그</th>
                 {lines.map(l => (
                   <th key={l} style={{ textAlign: 'center', padding: '4px 6px', fontSize: 9, color: 'var(--text-secondary)', fontWeight: 700, whiteSpace: 'nowrap' }}>{l} 언더</th>
@@ -846,10 +882,14 @@ function SoccerUnderByLeagueSection({ lines, lineBets }: { lines: number[]; line
               </tr>
             </thead>
             <tbody>
-              {rows.map(({ league, perLine, totalStats }) => (
+              {rows.map(({ league, perGroup, totalStats, rank, rankDelta, profitDelta }) => (
                 <tr key={league} style={{ borderBottom: '1px solid var(--border-light)', height: 26 }}>
+                  <td style={{ textAlign: 'center', padding: '4px 6px', whiteSpace: 'nowrap' }}>
+                    <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{rank}</span>
+                    <div><RankDeltaBadge delta={rankDelta} /></div>
+                  </td>
                   <td style={{ padding: '4px 8px', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>{league}</td>
-                  {perLine.map((lb, i) => {
+                  {perGroup.map((lb, i) => {
                     const s = cellStats(lb)
                     return (
                       <td key={i} style={{ textAlign: 'center', padding: '4px 6px', whiteSpace: 'nowrap' }}>
@@ -868,6 +908,7 @@ function SoccerUnderByLeagueSection({ lines, lineBets }: { lines: number[]; line
                       <>
                         <span style={{ fontWeight: 700, color: totalStats.profit >= 0 ? '#4ade80' : '#f87171' }}>{totalStats.profit >= 0 ? '+' : ''}{totalStats.profit.toLocaleString()}</span>
                         <span style={{ marginLeft: 6, fontWeight: 700, color: totalStats.roi >= 0 ? '#4ade80' : '#f87171' }}>{totalStats.roi >= 0 ? '+' : ''}{totalStats.roi.toFixed(1)}%</span>
+                        <ProfitDeltaBadge delta={profitDelta} />
                       </>
                     ) : '—'}
                   </td>
