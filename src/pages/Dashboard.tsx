@@ -1586,21 +1586,47 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
   const oddsV = parseOdds(oddsRaw)
   const stakeN = isusd ? (Number(amount) || 0) : (Number(amount.replace(/,/g, "")) || 0)
   const hotkeys = isusd ? [5, 10] : [5000, 10000, 20000]
-  // 다른 종목의 저장된 팀을 자동완성에서 고르면 그 팀 이름을 유지한 채 종목만 전환하기 위한 값
-  const [pendingTeamText, setPendingTeamText] = useState('')
-  const allStructuredTeams: { sport: StructuredSport; league: string; name: string }[] = [
-    ...soccerTeams.map(t => ({ sport: 'soccer' as const, ...t })),
-    ...baseballTeams.map(t => ({ sport: 'baseball' as const, ...t })),
-    ...basketballTeams.map(t => ({ sport: 'basketball' as const, ...t })),
-    ...volleyballTeams.map(t => ({ sport: 'volleyball' as const, ...t })),
-    ...esportsTeams.map(t => ({ sport: 'esports' as const, ...t })),
-  ]
-  // 다폴(다리별 경기 내용) 자동완성 — 리그관리에 등록된 팀만 사용, 과거 베팅 이력은 섞지 않음
-  const multiTeamCandidates: TeamCandidate[] = (() => {
-    const names = new Set<string>()
-    for (const t of allStructuredTeams) names.add(t.name)
-    return Array.from(names).sort((a, b) => a.localeCompare(b, 'ko')).map(name => ({ name, lastDate: '' }))
-  })()
+  // 종목별 리그/팀 등록 데이터 + 관리 함수를 한데 묶어, sport 값 하나로 바로 찾아 쓸 수 있게 함.
+  // 축구/야구/농구/배구/LOL만 리그 관리 대상(하키/기타는 리그 개념이 없어 undefined).
+  type SportLeagueBundle = {
+    teams: { league: string; name: string }[]; leagues: string[]; favoriteLeagues: string[]
+    addLeague: (name: string) => Promise<void>; renameLeague: (oldName: string, newName: string) => Promise<void>; deleteLeague: (name: string) => Promise<void>
+    toggleFavorite: (name: string) => Promise<void>
+    addTeam: (league: string, name: string) => Promise<void>; renameTeam: (league: string, oldName: string, newName: string) => Promise<void>; deleteTeam: (league: string, name: string) => Promise<void>
+  }
+  const LEAGUE_BUNDLES: Partial<Record<string, SportLeagueBundle>> = {
+    soccer: { teams: soccerTeams, leagues: soccerLeagues, favoriteLeagues: soccerFavoriteLeagues, addLeague: onAddSoccerLeague, renameLeague: onRenameSoccerLeague, deleteLeague: onDeleteSoccerLeague, toggleFavorite: onToggleSoccerLeagueFavorite, addTeam: onAddSoccerTeam, renameTeam: onRenameSoccerTeam, deleteTeam: onDeleteSoccerTeam },
+    baseball: { teams: baseballTeams, leagues: baseballLeagues, favoriteLeagues: baseballFavoriteLeagues, addLeague: onAddBaseballLeague, renameLeague: onRenameBaseballLeague, deleteLeague: onDeleteBaseballLeague, toggleFavorite: onToggleBaseballLeagueFavorite, addTeam: onAddBaseballTeam, renameTeam: onRenameBaseballTeam, deleteTeam: onDeleteBaseballTeam },
+    basketball: { teams: basketballTeams, leagues: basketballLeagues, favoriteLeagues: basketballFavoriteLeagues, addLeague: onAddBasketballLeague, renameLeague: onRenameBasketballLeague, deleteLeague: onDeleteBasketballLeague, toggleFavorite: onToggleBasketballLeagueFavorite, addTeam: onAddBasketballTeam, renameTeam: onRenameBasketballTeam, deleteTeam: onDeleteBasketballTeam },
+    volleyball: { teams: volleyballTeams, leagues: volleyballLeagues, favoriteLeagues: volleyballFavoriteLeagues, addLeague: onAddVolleyballLeague, renameLeague: onRenameVolleyballLeague, deleteLeague: onDeleteVolleyballLeague, toggleFavorite: onToggleVolleyballLeagueFavorite, addTeam: onAddVolleyballTeam, renameTeam: onRenameVolleyballTeam, deleteTeam: onDeleteVolleyballTeam },
+    esports: { teams: esportsTeams, leagues: esportsLeagues, favoriteLeagues: esportsFavoriteLeagues, addLeague: onAddEsportsLeague, renameLeague: onRenameEsportsLeague, deleteLeague: onDeleteEsportsLeague, toggleFavorite: onToggleEsportsLeagueFavorite, addTeam: onAddEsportsTeam, renameTeam: onRenameEsportsTeam, deleteTeam: onDeleteEsportsTeam },
+  }
+  const leagueBundle = LEAGUE_BUNDLES[sport]
+  const trimmedContent = content.trim()
+  // "베팅 내용" 필드는 팀 이름만 입력하는 자리이므로, 정확히 일치하는 등록된 팀이 있으면 그 리그를 자동으로 채택한다.
+  const matchedTeam = leagueBundle?.teams.find(t => t.name === trimmedContent)
+  const detectedLeague = matchedTeam?.league ?? ''
+  // 두 글자만 입력해도 등록된 팀 중 포함하는 이름을 추천 — 정확히 일치하면(matchedTeam) 더 이상 추천할 필요 없음
+  const teamSuggestions = leagueBundle && trimmedContent && !matchedTeam
+    ? leagueBundle.teams.filter(t => t.name.toLowerCase().includes(trimmedContent.toLowerCase())).slice(0, 8)
+    : []
+  const [registeringTeam, setRegisteringTeam] = useState(false)
+  const [regLeagueValue, setRegLeagueValue] = useState('')
+  const [leagueMgmtOpen, setLeagueMgmtOpen] = useState(false)
+  const regLeagueSuggestions = leagueBundle && registeringTeam
+    ? leagueBundle.leagues.filter(lg => lg.toLowerCase().includes(regLeagueValue.trim().toLowerCase()) && lg !== regLeagueValue.trim())
+    : []
+  useEffect(() => { setRegisteringTeam(false); setRegLeagueValue(''); setLeagueMgmtOpen(false) }, [sport])
+  async function submitTeamRegister() {
+    if (!leagueBundle) return
+    const team = trimmedContent; const lg = regLeagueValue.trim()
+    if (!team || !lg) return
+    await leagueBundle.addLeague(lg)
+    await leagueBundle.addTeam(lg, team)
+    // 강등/승격으로 리그가 바뀌는 경우 기존 리그의 매핑을 남겨두면 같은 팀이 두 리그에 중복 등록되므로 이전 매핑은 지운다
+    if (matchedTeam && matchedTeam.league !== lg) await leagueBundle.deleteTeam(matchedTeam.league, team)
+    setRegisteringTeam(false); setRegLeagueValue('')
+  }
 
   // 베팅옵션은 종목별로 따로 관리되므로, 종목을 바꾸면 이전 종목에서 선택했던 옵션은 해제
   useEffect(() => { setSelectedOptions([]) }, [sport])
@@ -1628,7 +1654,7 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
     const finalContent = mode === 'single' ? [content.trim(), side, ...selectedOptions].filter(Boolean).join(' ') : content
     const ok = mode === 'multi'
       ? await onMultiBet(sport, multiContents, oddsV, stakeN, multiContents.map(() => ''))
-      : await onBet(sport, finalContent, oddsV, stakeN, isLive, '')
+      : await onBet(sport, finalContent, oddsV, stakeN, isLive, detectedLeague)
     setSubmitting(false)
     if (ok) onClose()
   }
@@ -1669,6 +1695,74 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
           }}>{side || '없음'}</button>
         )}
       </div>
+      {mode === 'single' && leagueBundle && (
+        <div style={{ position: 'relative', marginTop: 4 }}>
+          {teamSuggestions.length > 0 && (
+            <div style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 6, marginBottom: 4, maxHeight: 130, overflowY: 'auto' }}>
+              {teamSuggestions.map(t => (
+                <div key={`${t.league}-${t.name}`} onMouseDown={() => setContent(t.name)}
+                  style={{ padding: '5px 8px', cursor: 'pointer', fontSize: 11, display: 'flex', justifyContent: 'space-between', gap: 6 }}>
+                  <span style={{ fontWeight: 700, color: 'var(--gold)' }}>{t.name}</span>
+                  <span style={{ color: 'var(--text-muted)', fontSize: 9 }}>{t.league}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            {matchedTeam ? (
+              <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>리그: <span style={{ color: 'var(--gold)', fontWeight: 700 }}>{matchedTeam.league}</span></span>
+            ) : trimmedContent ? (
+              <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>미등록 팀</span>
+            ) : (
+              <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>팀 이름 입력 시 리그 자동 표시</span>
+            )}
+            {trimmedContent && (
+              <button type="button" onClick={() => { setRegisteringTeam(r => !r); setRegLeagueValue(matchedTeam?.league ?? '') }}
+                title={matchedTeam ? '리그 수정' : '팀 등록'}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 9, fontWeight: 700, padding: '3px 7px', borderRadius: 5, cursor: 'pointer', fontFamily: 'var(--font-body)',
+                  border: '1px solid var(--gold-border)', background: 'var(--gold-bg)', color: 'var(--gold)' }}>
+                {matchedTeam ? <Pencil size={9} /> : <Plus size={9} />} {matchedTeam ? '리그수정' : '팀등록'}
+              </button>
+            )}
+            <button type="button" onClick={() => setLeagueMgmtOpen(true)}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 9, fontWeight: 700, padding: '3px 7px', borderRadius: 5, cursor: 'pointer', fontFamily: 'var(--font-body)',
+                border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-secondary)', marginLeft: 'auto' }}>
+              <Settings size={9} /> 리그 관리 ({leagueBundle.leagues.length})
+            </button>
+          </div>
+
+          {registeringTeam && (
+            <div style={{ position: 'relative', marginTop: 4 }}>
+              <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                <input className="form-input" value={regLeagueValue} autoFocus onChange={e => setRegLeagueValue(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && submitTeamRegister()}
+                  placeholder={matchedTeam ? '변경할 리그 (강등/승격 시 수정)' : '이 팀의 리그 (예: K리그2)'}
+                  style={{ flex: 1, fontSize: 10, padding: '4px 6px' }} />
+                <button type="button" onClick={submitTeamRegister} disabled={!regLeagueValue.trim()}
+                  style={{ border: '1px solid var(--gold-border)', background: 'var(--gold-bg)', color: 'var(--gold)', borderRadius: 5, cursor: 'pointer', flexShrink: 0, display: 'flex', padding: '4px 6px' }}><Check size={11} /></button>
+                <button type="button" onClick={() => setRegisteringTeam(false)}
+                  style={{ border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-secondary)', borderRadius: 5, cursor: 'pointer', flexShrink: 0, display: 'flex', padding: '4px 6px' }}><X size={11} /></button>
+              </div>
+              {regLeagueSuggestions.length > 0 && (
+                <div style={{ position: 'absolute', top: '100%', left: 0, right: 62, zIndex: 20, marginTop: 2, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 6, boxShadow: '0 4px 14px rgba(0,0,0,0.3)', maxHeight: 140, overflowY: 'auto' }}>
+                  {regLeagueSuggestions.map(lg => (
+                    <div key={lg} onMouseDown={() => setRegLeagueValue(lg)}
+                      style={{ padding: '6px 8px', cursor: 'pointer', fontSize: 11, fontWeight: 600, color: 'var(--text-primary)' }}>{lg}</div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+      {leagueMgmtOpen && leagueBundle && (
+        <LeagueManageModal
+          sport={sport as StructuredSport} leagues={leagueBundle.leagues} favoriteLeagues={leagueBundle.favoriteLeagues} teams={leagueBundle.teams}
+          onClose={() => setLeagueMgmtOpen(false)}
+          onAddLeague={leagueBundle.addLeague} onRenameLeague={leagueBundle.renameLeague} onDeleteLeague={leagueBundle.deleteLeague} onToggleFavoriteLeague={leagueBundle.toggleFavorite}
+          onAddTeam={leagueBundle.addTeam} onRenameTeam={leagueBundle.renameTeam} onDeleteTeam={leagueBundle.deleteTeam}
+        />
+      )}
       {mode === 'single' && (
         <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 4, marginTop: 4 }}>
           {betOptions.map(opt => {
