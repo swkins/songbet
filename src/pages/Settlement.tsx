@@ -201,7 +201,7 @@ export default function Settlement() {
   const [showSavePreset, setShowSavePreset] = useState(false)
   const [presetName, setPresetName]         = useState('')
 
-  const [showInactiveSites, setShowInactiveSites] = useState(false)
+  const [showHiddenSites, setShowHiddenSites] = useState(false)
 
   useEffect(() => {
     loadCashflows(); loadSites(); loadCategories(); loadPresets()
@@ -459,8 +459,9 @@ export default function Settlement() {
       }
     })
     // 이번달 입출금이 없어도 과거 입출금 이력이 있으면(전체누적 값이 있으면) 계속 표시한다 —
-    // 비활성화된 사이트도(삭제되어 이름만 남은 사이트 포함) 예전 기록이 있으면 사라지지 않고
-    // 흐린 색으로 구분해서 보여줌.
+    // 숨긴 사이트도(삭제되어 이름만 남은 사이트 포함) 예전 기록이 있으면 사라지지 않고
+    // 흐린 색으로 구분해서 보여줌. 여기서 쓰는 "숨김"은 대시보드의 active(진행중 베팅 여부)와는
+    // 완전히 별개의 값(settlement_hidden)이다 — 대시보드에서 마감/재개해도 이 화면 표시는 안 바뀐다.
     return Object.keys(totalMap)
       .map(key => {
         const v = monthMap[key] ?? { income: 0, expense: 0 }
@@ -468,7 +469,7 @@ export default function Settlement() {
         const site = key.startsWith('orphan:') ? undefined : sites.find(s => s.id === key)
         return {
           name: site?.name ?? orphanNames[key] ?? key,
-          active: site?.active ?? false,
+          hidden: site?.settlement_hidden ?? true,
           siteId: site?.id ?? null,
           income: v.income, expense: v.expense, net: v.income - v.expense,
           totalIncome: t.income, totalExpense: t.expense, totalNet: t.income - t.expense,
@@ -477,34 +478,36 @@ export default function Settlement() {
       .sort((a, b) => b.net - a.net)
   }, [cashflows, sites, thisMonthStart, thisMonthEnd, rateInfo])
 
-  // "사이트별 손익"에서 마감(비활성) 상태인 항목을 다시 활성화 — 실제 사이트 레코드가 있으면
-  // active만 켜고, 삭제되어 이름만 남은 사이트(orphan)면 새 사이트로 되살리고 그 이름으로
-  // 남아있던 과거 cashflows(site_id null)를 전부 새 사이트에 다시 연결해서 더 이상 이름만으로
-  // 묶이는 임시 상태가 아니게 만든다.
-  async function activateSiteBreakdownRow(row: { name: string; siteId: string | null }) {
+  // "사이트별 손익"의 보기/숨기기 — 대시보드의 활성/비활성(진행중 베팅 여부)과는 완전히 별개로,
+  // 이 화면에서만 계속 보이게 할지를 정하는 독립된 값(settlement_hidden)이다. 실제 사이트 레코드가
+  // 있으면 그 값만 바꾸고, 삭제되어 이름만 남은 사이트(orphan)면 새 사이트로 되살리되
+  // settlement_only:true로 만들어 대시보드 베팅현황에는 나타나지 않게 하고, 그 이름으로 남아있던
+  // 과거 cashflows(site_id null)를 전부 새 사이트에 다시 연결한다.
+  async function setSiteBreakdownHidden(row: { name: string; siteId: string | null }, hidden: boolean) {
     if (row.siteId) {
-      const { data } = await supabase.from('sites').update({ active: true }).eq('id', row.siteId).select().single()
+      const { data } = await supabase.from('sites').update({ settlement_hidden: hidden }).eq('id', row.siteId).select().single()
       if (data) setSites(p => p.map(s => s.id === data.id ? data : s))
       return
     }
-    // 같은 이름의 사이트가 이미 있으면(활성/비활성 무관) 새로 만들지 않고 그 사이트를 재사용한다 —
+    if (hidden) return // orphan은 원래 숨김 상태이므로 할 일 없음
+    // 같은 이름의 사이트가 이미 있으면(설정과 무관) 새로 만들지 않고 그 사이트를 재사용한다 —
     // 그렇지 않으면 orphan 이름 매칭과 실제 사이트가 동시에 존재하는 경우, 또는 버튼이 중복
     // 클릭되는 경우마다 같은 이름의 사이트가 계속 늘어나는 문제가 있었음(고트벳/이지벳 중복 사고).
     const existing = sites.find(s => s.name === row.name)
     let targetSite = existing
     if (existing) {
-      if (!existing.active) {
-        const { data } = await supabase.from('sites').update({ active: true }).eq('id', existing.id).select().single()
+      if (existing.settlement_hidden) {
+        const { data } = await supabase.from('sites').update({ settlement_hidden: false }).eq('id', existing.id).select().single()
         if (data) { targetSite = data; setSites(p => p.map(s => s.id === data.id ? data : s)) }
       }
     } else {
       // settlement_only: true — 대시보드(베팅현황)는 이 값이 false인 사이트만 불러오므로,
-      // 여기서 되살리는 사이트가 대시보드에 새 카드로 나타나지 않게 한다. "활성화"는 어디까지나
+      // 여기서 되살리는 사이트가 대시보드에 새 카드로 나타나지 않게 한다. "보기"는 어디까지나
       // 사이트별 손익에서 계속 보이게 하는 것뿐, 실제 베팅용 사이트로 되살리는 게 아니다.
       const { data: newSite } = await supabase.from('sites').insert({
-        name: row.name, balance: 0, active: true, sort_order: sites.length,
+        name: row.name, balance: 0, active: false, sort_order: sites.length,
         rolling_target: 0, rolling_done: 0, last_deposit: 0, deposit_bet_done: 0,
-        point_deposit: 0, total_withdrawal: 0, currency: 'krw', settlement_only: true,
+        point_deposit: 0, total_withdrawal: 0, currency: 'krw', settlement_only: true, settlement_hidden: false,
       }).select().single()
       if (!newSite) return
       targetSite = newSite
@@ -566,12 +569,13 @@ export default function Settlement() {
   const thisMonthExpenseTotal = cashflows.filter(c => c.type === 'expense' && c.flow_date >= thisMonthStart && c.flow_date <= thisMonthEnd).reduce((s, c) => s + toKrw(c), 0)
   const thisMonthNetTotal = thisMonthIncomeTotal - thisMonthExpenseTotal
 
-  // 기본은 비활성(마감) 사이트를 숨기고, 상단 토글을 켜면 입금 이력이 있는 모든 사이트를 보여준다
+  // 기본은 숨긴 사이트를 안 보여주고, 상단 토글을 켜면 입금 이력이 있는 모든 사이트를 보여준다.
+  // 이 숨김 여부는 대시보드의 활성/비활성과 무관한, 결산 화면 전용 설정이다.
   const visibleSiteBreakdown = useMemo(
-    () => monthSiteBreakdown.filter(x => x.active || showInactiveSites),
-    [monthSiteBreakdown, showInactiveSites]
+    () => monthSiteBreakdown.filter(x => !x.hidden || showHiddenSites),
+    [monthSiteBreakdown, showHiddenSites]
   )
-  const inactiveSiteCount = monthSiteBreakdown.filter(x => !x.active).length
+  const hiddenSiteCount = monthSiteBreakdown.filter(x => x.hidden).length
 
   const maxSiteBreakdownIncome  = Math.max(...visibleSiteBreakdown.map(x => x.income), 1)
   const maxSiteBreakdownExpense = Math.max(...visibleSiteBreakdown.map(x => x.expense), 1)
@@ -904,14 +908,14 @@ export default function Settlement() {
         <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10, padding: '12px 14px' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
             <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.7px' }}>사이트별 손익 (이번달 · 전체누적 비교)</div>
-            {inactiveSiteCount > 0 && (
-              <button onClick={() => setShowInactiveSites(p => !p)} style={{
-                display: 'flex', alignItems: 'center', gap: 5, background: showInactiveSites ? 'var(--gold-bg)' : 'none',
-                border: `1px solid ${showInactiveSites ? 'var(--gold-border)' : 'var(--border)'}`, borderRadius: 6, cursor: 'pointer',
+            {hiddenSiteCount > 0 && (
+              <button onClick={() => setShowHiddenSites(p => !p)} style={{
+                display: 'flex', alignItems: 'center', gap: 5, background: showHiddenSites ? 'var(--gold-bg)' : 'none',
+                border: `1px solid ${showHiddenSites ? 'var(--gold-border)' : 'var(--border)'}`, borderRadius: 6, cursor: 'pointer',
                 padding: '3px 8px', fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-body)',
-                color: showInactiveSites ? 'var(--gold)' : 'var(--text-muted)',
+                color: showHiddenSites ? 'var(--gold)' : 'var(--text-muted)',
               }}>
-                {showInactiveSites ? <Check size={11} /> : null} 마감 사이트 표시 ({inactiveSiteCount})
+                {showHiddenSites ? <Check size={11} /> : null} 숨긴 사이트 보기 ({hiddenSiteCount})
               </button>
             )}
           </div>
@@ -924,7 +928,7 @@ export default function Settlement() {
               <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-secondary)', textAlign: 'right' }}>순수익</span>
             </div>
           )}
-          {visibleSiteBreakdown.map(({ name, active, siteId, income, expense, net, totalIncome, totalExpense, totalNet }, i) => {
+          {visibleSiteBreakdown.map(({ name, hidden, siteId, income, expense, net, totalIncome, totalExpense, totalNet }, i) => {
             const incPct = Math.round(income / maxSiteBreakdownIncome * 100)
             const expPct = Math.round(expense / maxSiteBreakdownExpense * 100)
             const netPct = Math.round(Math.abs(net) / maxSiteBreakdownNetAbs * 100)
@@ -934,14 +938,19 @@ export default function Settlement() {
             const totNetPct = Math.round(Math.abs(totalNet) / maxSiteTotalNetAbs * 100)
             const totNetColor = totalNet >= 0 ? 'var(--green)' : 'var(--red)'
             return (
-              <div key={name} style={{ marginBottom: 12, paddingBottom: 10, borderBottom: i < visibleSiteBreakdown.length - 1 ? '1px solid var(--border)' : 'none', opacity: active ? 1 : 0.5 }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: active ? 'var(--text-primary)' : 'var(--text-muted)', marginBottom: 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <div key={name} style={{ marginBottom: 12, paddingBottom: 10, borderBottom: i < visibleSiteBreakdown.length - 1 ? '1px solid var(--border)' : 'none', opacity: hidden ? 0.5 : 1 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: hidden ? 'var(--text-muted)' : 'var(--text-primary)', marginBottom: 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 6 }}>
                   {name}
-                  {!active && <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', border: '1px solid var(--border)', borderRadius: 3, padding: '1px 5px', flexShrink: 0 }}>마감</span>}
-                  {!active && (
-                    <button onClick={() => activateSiteBreakdownRow({ name, siteId })} title="이 사이트를 다시 활성화"
+                  {hidden && <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', border: '1px solid var(--border)', borderRadius: 3, padding: '1px 5px', flexShrink: 0 }}>숨김</span>}
+                  {hidden ? (
+                    <button onClick={() => setSiteBreakdownHidden({ name, siteId }, false)} title="이 사이트를 사이트별 손익에 계속 보이기"
                       style={{ fontSize: 9, fontWeight: 700, color: 'var(--green)', background: 'var(--green-bg)', border: '1px solid var(--green-border)', borderRadius: 3, padding: '1px 6px', cursor: 'pointer', fontFamily: 'var(--font-body)', flexShrink: 0 }}>
-                      활성화
+                      보기
+                    </button>
+                  ) : (
+                    <button onClick={() => setSiteBreakdownHidden({ name, siteId }, true)} title="이 사이트를 사이트별 손익에서 숨기기"
+                      style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', background: 'none', border: '1px solid var(--border)', borderRadius: 3, padding: '1px 6px', cursor: 'pointer', fontFamily: 'var(--font-body)', flexShrink: 0 }}>
+                      숨기기
                     </button>
                   )}
                 </div>
