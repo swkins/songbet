@@ -137,6 +137,143 @@ function MarketTypeOverviewSection({ settled, betOptionsBySport }: { settled: Be
   )
 }
 
+// ─── 베팅옵션 · 리그별 순위 — 종목×옵션×리그 조합별 성적을 손익률(ROI) 높은 순으로 랭킹 ──────
+interface OptionLeagueRow { sport: Sport; sportLabel: string; sportEmoji: string; optionLabel: string; league: string; bets: Bet[] }
+function buildOptionLeagueRows(settled: Bet[], betOptionsBySport: Record<string, string[]>): OptionLeagueRow[] {
+  const MARKET_SPORTS: { value: Sport; label: string; emoji: string }[] = [
+    { value: 'soccer', label: '축구', emoji: '⚽' },
+    { value: 'baseball', label: '야구', emoji: '⚾' },
+    { value: 'basketball', label: '농구', emoji: '🏀' },
+    { value: 'volleyball', label: '배구', emoji: '🏐' },
+    { value: 'esports', label: 'LOL', emoji: '🎮' },
+  ]
+  const rows: OptionLeagueRow[] = []
+  for (const s of MARKET_SPORTS) {
+    const sportBets = settled.filter(b => b.sport === s.value)
+    if (sportBets.length === 0) continue
+    const cells = classifySportBetsByOption(sportBets, betOptionsBySport[s.value] ?? [])
+    for (const cell of cells) {
+      const byLeague = new Map<string, Bet[]>()
+      for (const b of cell.bets) {
+        const lg = (b.league && b.league.trim()) ? b.league.trim() : '미지정'
+        const arr = byLeague.get(lg) ?? []
+        arr.push(b)
+        byLeague.set(lg, arr)
+      }
+      for (const [league, lbets] of byLeague) rows.push({ sport: s.value, sportLabel: s.label, sportEmoji: s.emoji, optionLabel: cell.label, league, bets: lbets })
+    }
+  }
+  return rows
+}
+
+function OptionLeagueRankingSection({ settled, betOptionsBySport }: { settled: Bet[]; betOptionsBySport: Record<string, string[]> }) {
+  const rows = buildOptionLeagueRows(settled, betOptionsBySport)
+    .map(r => ({ ...r, stats: calcStats(r.bets) }))
+    .filter(r => r.stats.total > 0)
+    .sort((a, b) => b.stats.roi - a.stats.roi)
+  if (rows.length === 0) return null
+  return (
+    <div className="card">
+      <div className="card-title" style={{ marginBottom: 2 }}>베팅옵션 · 리그별 순위</div>
+      <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 10 }}>종목×옵션×리그 조합별 성적을 손익률(ROI) 높은 순으로 정렬</div>
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+          <thead>
+            <tr style={{ borderBottom: '1px solid var(--border)' }}>
+              <th style={{ textAlign: 'center', padding: '4px 6px', fontSize: 9, color: 'var(--text-secondary)', fontWeight: 700, whiteSpace: 'nowrap' }}>순위</th>
+              <th style={{ textAlign: 'left', padding: '4px 8px', fontSize: 9, color: 'var(--text-secondary)', fontWeight: 700, whiteSpace: 'nowrap' }}>종목</th>
+              <th style={{ textAlign: 'left', padding: '4px 8px', fontSize: 9, color: 'var(--text-secondary)', fontWeight: 700, whiteSpace: 'nowrap' }}>옵션</th>
+              <th style={{ textAlign: 'left', padding: '4px 8px', fontSize: 9, color: 'var(--text-secondary)', fontWeight: 700, whiteSpace: 'nowrap' }}>리그</th>
+              <th style={{ textAlign: 'center', padding: '4px 6px', fontSize: 9, color: 'var(--text-secondary)', fontWeight: 700, whiteSpace: 'nowrap' }}>건</th>
+              <th style={{ textAlign: 'center', padding: '4px 6px', fontSize: 9, color: 'var(--text-secondary)', fontWeight: 700, whiteSpace: 'nowrap' }}>승률</th>
+              <th style={{ textAlign: 'center', padding: '4px 6px', fontSize: 9, color: 'var(--text-secondary)', fontWeight: 700, whiteSpace: 'nowrap' }}>ROI</th>
+              <th style={{ textAlign: 'right', padding: '4px 8px', fontSize: 9, color: 'var(--text-secondary)', fontWeight: 700, whiteSpace: 'nowrap' }}>손익</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={`${r.sport}-${r.optionLabel}-${r.league}`} style={{ borderBottom: '1px solid var(--border-light)', height: 26 }}>
+                <td style={{ textAlign: 'center', padding: '4px 6px', color: 'var(--text-muted)', fontWeight: 700 }}>{i + 1}</td>
+                <td style={{ padding: '4px 8px', whiteSpace: 'nowrap' }}>{r.sportEmoji} {r.sportLabel}</td>
+                <td style={{ padding: '4px 8px', whiteSpace: 'nowrap', fontWeight: 600 }}>{r.optionLabel}</td>
+                <td style={{ padding: '4px 8px', whiteSpace: 'nowrap', color: r.league === '미지정' ? 'var(--text-muted)' : 'var(--text-primary)' }}>{r.league}</td>
+                <td style={{ textAlign: 'center', padding: '4px 6px', color: 'var(--text-muted)' }}>{r.stats.total}</td>
+                <td style={{ textAlign: 'center', padding: '4px 6px', fontWeight: 700, color: r.stats.winRate >= 50 ? '#4ade80' : '#f87171' }}>{r.stats.winRate.toFixed(0)}%</td>
+                <td style={{ textAlign: 'center', padding: '4px 6px', fontWeight: 800, color: r.stats.roi >= 0 ? '#4ade80' : '#f87171' }}>{r.stats.roi >= 0 ? '+' : ''}{r.stats.roi.toFixed(1)}%</td>
+                <td style={{ textAlign: 'right', padding: '4px 8px', whiteSpace: 'nowrap', fontWeight: 700, color: r.stats.profit >= 0 ? '#4ade80' : '#f87171' }}>{r.stats.profit >= 0 ? '+' : ''}{r.stats.profit.toLocaleString()}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+// ─── 리그 미지정 베팅 — 이미 결과처리된 베팅 중 리그가 비어있는 것을 종목별 등록 리그 중에서 골라 수동 지정 ──
+function UnassignedLeagueSection({ bets, leaguesBySport, onAssign }: {
+  bets: Bet[]; leaguesBySport: Partial<Record<Sport, string[]>>
+  onAssign: (ids: string[], league: string) => Promise<void>
+}) {
+  const [choice, setChoice] = useState<Record<string, string>>({})
+  const [saving, setSaving] = useState<string | null>(null)
+  const LEAGUE_SPORTS: Sport[] = ['soccer', 'baseball', 'basketball', 'volleyball', 'esports']
+
+  const groups = (() => {
+    const map = new Map<string, { sport: Sport; match: string; ids: string[]; lastDate: string }>()
+    for (const b of bets) {
+      if (b.result === 'pending') continue
+      if (!LEAGUE_SPORTS.includes(b.sport)) continue
+      if (b.league && b.league.trim()) continue
+      const key = `${b.sport}::${b.match}`
+      const g = map.get(key)
+      if (g) { g.ids.push(b.id); if (b.bet_date > g.lastDate) g.lastDate = b.bet_date }
+      else map.set(key, { sport: b.sport, match: b.match, ids: [b.id], lastDate: b.bet_date })
+    }
+    return Array.from(map.values()).sort((a, b) => b.lastDate.localeCompare(a.lastDate))
+  })()
+  if (groups.length === 0) return null
+
+  async function save(key: string, ids: string[]) {
+    const league = choice[key]
+    if (!league) return
+    setSaving(key)
+    await onAssign(ids, league)
+    setSaving(null)
+    setChoice(p => { const n = { ...p }; delete n[key]; return n })
+  }
+
+  return (
+    <div className="card">
+      <div className="card-title" style={{ marginBottom: 2 }}>리그 미지정 베팅 ({groups.length}건)</div>
+      <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 10 }}>결과처리는 됐지만 리그 정보가 없는 베팅 — 등록된 리그 중에서 골라 지정</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {groups.map(g => {
+          const key = `${g.sport}::${g.match}`
+          const opts = leaguesBySport[g.sport] ?? []
+          const emoji = SPORTS.find(s => s.value === g.sport)?.emoji ?? ''
+          return (
+            <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', borderRadius: 6, background: 'var(--bg-elevated)', border: '1px solid var(--border)', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 10, flexShrink: 0 }}>{emoji}</span>
+              <span style={{ fontSize: 11, fontWeight: 600, flex: '1 0 160px' }}>{g.match}</span>
+              <span style={{ fontSize: 9, color: 'var(--text-muted)', flexShrink: 0 }}>{g.ids.length}건</span>
+              <select value={choice[key] ?? ''} onChange={e => setChoice(p => ({ ...p, [key]: e.target.value }))}
+                style={{ fontSize: 11, padding: '4px 6px', borderRadius: 5, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text-primary)' }}>
+                <option value="">리그 선택</option>
+                {opts.map(o => <option key={o} value={o}>{o}</option>)}
+              </select>
+              <button type="button" onClick={() => save(key, g.ids)} disabled={!choice[key] || saving === key}
+                style={{ fontSize: 10, fontWeight: 700, padding: '4px 10px', borderRadius: 5, border: '1px solid var(--gold-border)', background: 'var(--gold-bg)', color: 'var(--gold)', cursor: choice[key] ? 'pointer' : 'default', opacity: choice[key] ? 1 : 0.5, flexShrink: 0 }}>
+                {saving === key ? '저장중' : '지정'}
+              </button>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 // ─── 룰북 기반 통계 행 ─────────────────────────────────────────────
 type RowColor = 'S' | 'A' | 'B' | 'none'
 
@@ -1210,12 +1347,30 @@ export default function Stats() {
   const [basketballLeagues, setBasketballLeagues] = useState<string[]>([])
   const [volleyballOverrides, setVolleyballOverrides] = useState<LeagueOverride[]>([])
   const [volleyballLeagues, setVolleyballLeagues] = useState<string[]>([])
+  const [soccerLeagues, setSoccerLeagues] = useState<string[]>([])
   // 베팅추가에서 종목별로 등록한 베팅옵션 — 전체 탭에서 종목×옵션별 세부 성적을 보여주기 위해 사용
   const [betOptionsBySport, setBetOptionsBySport] = useState<Record<string, string[]>>({})
 
   const BASEBALL_FIXED_LEAGUES = ['KBO', 'MLB', 'NPB', 'CPBL', 'LMB']
 
-  useEffect(() => { loadBets(); loadSites(); loadRates(); loadBaseballLeagueData(); loadEsportsLeagueData(); loadBasketballLeagueData(); loadVolleyballLeagueData(); loadBetOptions() }, [])
+  useEffect(() => { loadBets(); loadSites(); loadRates(); loadSoccerLeagueData(); loadBaseballLeagueData(); loadEsportsLeagueData(); loadBasketballLeagueData(); loadVolleyballLeagueData(); loadBetOptions() }, [])
+  async function loadSoccerLeagueData() {
+    const { data } = await supabase.from('soccer_leagues').select('name').order('sort_order').order('name')
+    if (data) setSoccerLeagues(data.map(r => r.name).sort(koCompare))
+  }
+  // 리그 미지정 베팅에 수동으로 리그를 지정할 때 — 종목별로 등록되어 있는 리그 목록 중에서만 고를 수 있게 한다
+  const leaguesBySport: Partial<Record<Sport, string[]>> = {
+    soccer: soccerLeagues,
+    baseball: [...BASEBALL_FIXED_LEAGUES, ...baseballLeagues],
+    basketball: basketballLeagues,
+    volleyball: volleyballLeagues,
+    esports: esportsLeagues,
+  }
+  async function assignLeagueToBets(ids: string[], league: string) {
+    if (!league || ids.length === 0) return
+    await supabase.from('bets').update({ league }).in('id', ids)
+    await loadBets()
+  }
   async function loadBets() {
     const { data } = await supabase.from('bets').select('*').order('bet_date').order('created_at')
     if (data) setRawBets(data)
@@ -1452,6 +1607,10 @@ export default function Stats() {
               </div>
 
               <MarketTypeOverviewSection settled={settled} betOptionsBySport={betOptionsBySport} />
+
+              <OptionLeagueRankingSection settled={settled} betOptionsBySport={betOptionsBySport} />
+
+              <UnassignedLeagueSection bets={bets} leaguesBySport={leaguesBySport} onAssign={assignLeagueToBets} />
 
               <div>
                 <div className="card-title" style={{ marginBottom: 8 }}>종목별 수익률</div>
