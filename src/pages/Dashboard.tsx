@@ -760,6 +760,9 @@ function InlineBetEditForm({ bet, site, onClose, onSave, baseballOverrides, socc
   const ADD_LEAGUE_NAME_BY_SPORT: Partial<Record<string, (name: string) => Promise<void>>> = {
     soccer: onAddSoccerLeague, baseball: onAddBaseballLeague, basketball: onAddBasketballLeague, volleyball: onAddVolleyballLeague, esports: onAddEsportsLeague,
   }
+  const RENAME_LEAGUE_NAME_BY_SPORT: Partial<Record<string, (oldName: string, newName: string) => Promise<void>>> = {
+    soccer: onRenameSoccerLeague, baseball: onRenameBaseballLeague, basketball: onRenameBasketballLeague, volleyball: onRenameVolleyballLeague, esports: onRenameEsportsLeague,
+  }
   const DELETE_LEAGUE_NAME_BY_SPORT: Partial<Record<string, (name: string) => Promise<void>>> = {
     soccer: onDeleteSoccerLeague, baseball: onDeleteBaseballLeague, basketball: onDeleteBasketballLeague, volleyball: onDeleteVolleyballLeague, esports: onDeleteEsportsLeague,
   }
@@ -856,6 +859,7 @@ function InlineBetEditForm({ bet, site, onClose, onSave, baseballOverrides, socc
           leagues={sportLeagueNames}
           onClose={() => setLeagueOnlyMgmtOpen(false)}
           onAddLeague={ADD_LEAGUE_NAME_BY_SPORT[sport]!}
+          onRenameLeague={RENAME_LEAGUE_NAME_BY_SPORT[sport]!}
           onDeleteLeague={DELETE_LEAGUE_NAME_BY_SPORT[sport]!}
         />
       )}
@@ -1205,18 +1209,27 @@ function LeagueManageModal({ sport, leagues, favoriteLeagues, teams, onClose, on
 
 /* ── 팀 매핑 없이 리그 이름만 등록·삭제하는 단순 관리 모달 — 베팅추가에서 리그를 직접 입력할 때 사용.
    다른 관리 모달들과 동일하게 바깥을 클릭해도 닫히지 않고 X 버튼으로만 닫힌다. */
-function LeagueOnlyManageModal({ sportLabel, leagues, onClose, onAddLeague, onDeleteLeague }: {
+function LeagueOnlyManageModal({ sportLabel, leagues, onClose, onAddLeague, onRenameLeague, onDeleteLeague }: {
   sportLabel: string; leagues: string[]; onClose: () => void
   onAddLeague: (name: string) => Promise<void>
+  onRenameLeague: (oldName: string, newName: string) => Promise<void>
   onDeleteLeague: (name: string) => Promise<void>
 }) {
   const [newLeague, setNewLeague] = useState('')
+  const [editingLeague, setEditingLeague] = useState<string | null>(null)
+  const [editingValue, setEditingValue] = useState('')
   async function addLeague() {
     const name = newLeague.trim(); if (!name) return
     await onAddLeague(name); setNewLeague('')
   }
+  async function submitRename(oldName: string) {
+    const name = editingValue.trim()
+    setEditingLeague(null)
+    if (!name || name === oldName) return
+    await onRenameLeague(oldName, name)
+  }
   async function removeLeague(name: string) {
-    if (!confirm(`"${name}" 리그를 삭제할까요?`)) return
+    if (!confirm(`"${name}" 리그를 삭제할까요? 이 리그로 저장된 베팅의 리그 정보도 함께 지워집니다.`)) return
     await onDeleteLeague(name)
   }
   const sorted = [...leagues].sort((a, b) => a.localeCompare(b, 'ko'))
@@ -1240,7 +1253,16 @@ function LeagueOnlyManageModal({ sportLabel, leagues, onClose, onAddLeague, onDe
           {sorted.length === 0 && <div style={{ fontSize: 10, color: 'var(--text-muted)', padding: '8px 0' }}>등록된 리그 없음</div>}
           {sorted.map(lg => (
             <div key={lg} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 8px', borderRadius: 6, background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}>
-              <span style={{ flex: 1, fontSize: 11, fontWeight: 600 }}>{lg}</span>
+              {editingLeague === lg ? (
+                <input autoFocus className="form-input" value={editingValue} onChange={e => setEditingValue(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && submitRename(lg)}
+                  onBlur={() => submitRename(lg)}
+                  style={{ flex: 1, fontSize: 11, padding: '3px 5px' }} />
+              ) : (
+                <span style={{ flex: 1, fontSize: 11, fontWeight: 600 }}>{lg}</span>
+              )}
+              <button type="button" onClick={() => { setEditingLeague(lg); setEditingValue(lg) }}
+                style={{ border: 'none', background: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', padding: 1, flexShrink: 0 }}><Pencil size={10} /></button>
               <button type="button" onClick={() => removeLeague(lg)}
                 style={{ border: 'none', background: 'none', color: 'var(--red)', cursor: 'pointer', display: 'flex', padding: 1, flexShrink: 0 }}><Trash2 size={10} /></button>
             </div>
@@ -1755,6 +1777,9 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
   const ADD_LEAGUE_NAME_BY_SPORT: Partial<Record<string, (name: string) => Promise<void>>> = {
     soccer: onAddSoccerLeague, baseball: onAddBaseballLeague, basketball: onAddBasketballLeague, volleyball: onAddVolleyballLeague, esports: onAddEsportsLeague,
   }
+  const RENAME_LEAGUE_NAME_BY_SPORT: Partial<Record<string, (oldName: string, newName: string) => Promise<void>>> = {
+    soccer: onRenameSoccerLeague, baseball: onRenameBaseballLeague, basketball: onRenameBasketballLeague, volleyball: onRenameVolleyballLeague, esports: onRenameEsportsLeague,
+  }
   const DELETE_LEAGUE_NAME_BY_SPORT: Partial<Record<string, (name: string) => Promise<void>>> = {
     soccer: onDeleteSoccerLeague, baseball: onDeleteBaseballLeague, basketball: onDeleteBasketballLeague, volleyball: onDeleteVolleyballLeague, esports: onDeleteEsportsLeague,
   }
@@ -1881,6 +1906,7 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
           leagues={sportLeagueNames}
           onClose={() => setLeagueOnlyMgmtOpen(false)}
           onAddLeague={ADD_LEAGUE_NAME_BY_SPORT[sport]!}
+          onRenameLeague={RENAME_LEAGUE_NAME_BY_SPORT[sport]!}
           onDeleteLeague={DELETE_LEAGUE_NAME_BY_SPORT[sport]!}
         />
       )}
