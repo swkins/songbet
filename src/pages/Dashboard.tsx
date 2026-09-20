@@ -1042,8 +1042,8 @@ function LeagueManageModal({ sport, leagues, favoriteLeagues, teams, onClose, on
   const teamsOfSelected = selectedLeague ? teams.filter(t => t.league === selectedLeague) : []
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" style={{ maxWidth: 640 }} onClick={e => e.stopPropagation()}>
+    <div className="modal-overlay">
+      <div className="modal" style={{ maxWidth: 640 }}>
         <div className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
           {SPORT_LABEL[sport]} 리그 관리
           <button onClick={onClose} style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex', padding: 2 }}><X size={15} /></button>
