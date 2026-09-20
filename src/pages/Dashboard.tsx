@@ -1135,6 +1135,54 @@ function LeagueManageModal({ sport, leagues, favoriteLeagues, teams, onClose, on
   )
 }
 
+/* ── 팀 매핑 없이 리그 이름만 등록·삭제하는 단순 관리 모달 — 베팅추가에서 리그를 직접 입력할 때 사용.
+   다른 관리 모달들과 동일하게 바깥을 클릭해도 닫히지 않고 X 버튼으로만 닫힌다. */
+function LeagueOnlyManageModal({ sportLabel, leagues, onClose, onAddLeague, onDeleteLeague }: {
+  sportLabel: string; leagues: string[]; onClose: () => void
+  onAddLeague: (name: string) => Promise<void>
+  onDeleteLeague: (name: string) => Promise<void>
+}) {
+  const [newLeague, setNewLeague] = useState('')
+  async function addLeague() {
+    const name = newLeague.trim(); if (!name) return
+    await onAddLeague(name); setNewLeague('')
+  }
+  async function removeLeague(name: string) {
+    if (!confirm(`"${name}" 리그를 삭제할까요?`)) return
+    await onDeleteLeague(name)
+  }
+  const sorted = [...leagues].sort((a, b) => a.localeCompare(b, 'ko'))
+  return (
+    <div className="modal-overlay">
+      <div className="modal" style={{ maxWidth: 340 }}>
+        <div className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+          {sportLabel} 리그 관리
+          <button onClick={onClose} style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex', padding: 2 }}><X size={15} /></button>
+        </div>
+        <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
+          <input autoFocus className="form-input" value={newLeague} onChange={e => setNewLeague(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && addLeague()}
+            placeholder="새 리그 이름" style={{ flex: 1, fontSize: 11, padding: '5px 7px' }} />
+          <button type="button" onClick={addLeague} disabled={!newLeague.trim()}
+            style={{ border: '1px solid var(--gold-border)', background: 'var(--gold-bg)', color: 'var(--gold)', borderRadius: 5, cursor: 'pointer', display: 'flex', alignItems: 'center', padding: '0 8px', flexShrink: 0 }}>
+            <Plus size={13} />
+          </button>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 3, overflowY: 'auto', maxHeight: 320 }}>
+          {sorted.length === 0 && <div style={{ fontSize: 10, color: 'var(--text-muted)', padding: '8px 0' }}>등록된 리그 없음</div>}
+          {sorted.map(lg => (
+            <div key={lg} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 8px', borderRadius: 6, background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}>
+              <span style={{ flex: 1, fontSize: 11, fontWeight: 600 }}>{lg}</span>
+              <button type="button" onClick={() => removeLeague(lg)}
+                style={{ border: 'none', background: 'none', color: 'var(--red)', cursor: 'pointer', display: 'flex', padding: 1, flexShrink: 0 }}><Trash2 size={10} /></button>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 /* ── 리그를 등록 → 그 리그에 팀을 등록 → 팀을 선택해서 그 팀을 대상으로 베팅. ──
    경기 내용을 직접 타이핑하지 않고 전부 선택으로만 구성해 market 오분류(예: "원정"/"홈" 접미사로 인한 오분류)를 원천 차단한다.
    축구/야구/농구/배구/LOL 공통: 팀 이름 직접 입력 + 자동완성(방향키로 탐색) + 팀 등록(+) + 리그 관리(모달). */
@@ -1631,6 +1679,37 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
     setRegisteringTeam(false); setRegLeagueValue('')
   }
 
+  // 리그 직접 입력 — 팀 매핑 없이 리그 이름만 등록해두고, 베팅추가에서 그 이름을 직접 골라 쓴다.
+  // 한 글자만 입력해도 등록된 리그 중 포함하는 이름을 추천하고, 방향키+엔터로 선택할 수 있다.
+  const LEAGUE_NAMES_BY_SPORT: Partial<Record<string, string[]>> = {
+    soccer: soccerLeagues, baseball: baseballLeagues, basketball: basketballLeagues, volleyball: volleyballLeagues, esports: esportsLeagues,
+  }
+  const ADD_LEAGUE_NAME_BY_SPORT: Partial<Record<string, (name: string) => Promise<void>>> = {
+    soccer: onAddSoccerLeague, baseball: onAddBaseballLeague, basketball: onAddBasketballLeague, volleyball: onAddVolleyballLeague, esports: onAddEsportsLeague,
+  }
+  const DELETE_LEAGUE_NAME_BY_SPORT: Partial<Record<string, (name: string) => Promise<void>>> = {
+    soccer: onDeleteSoccerLeague, baseball: onDeleteBaseballLeague, basketball: onDeleteBasketballLeague, volleyball: onDeleteVolleyballLeague, esports: onDeleteEsportsLeague,
+  }
+  const sportLeagueNames = LEAGUE_NAMES_BY_SPORT[sport]
+  const [leagueInput, setLeagueInput] = useState('')
+  const [leagueSuggestOpen, setLeagueSuggestOpen] = useState(false)
+  const [leagueHighlight, setLeagueHighlight] = useState(-1)
+  const [leagueOnlyMgmtOpen, setLeagueOnlyMgmtOpen] = useState(false)
+  const trimmedLeagueInput = leagueInput.trim()
+  const leagueInputSuggestions = sportLeagueNames && trimmedLeagueInput
+    ? sportLeagueNames.filter(lg => lg.toLowerCase().includes(trimmedLeagueInput.toLowerCase()) && lg !== trimmedLeagueInput).slice(0, 8)
+    : []
+  useEffect(() => { setLeagueInput(''); setLeagueSuggestOpen(false); setLeagueHighlight(-1); setLeagueOnlyMgmtOpen(false) }, [sport])
+  function onLeagueInputKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (!leagueSuggestOpen || leagueInputSuggestions.length === 0) return
+    if (e.key === 'ArrowDown') { e.preventDefault(); setLeagueHighlight(i => Math.min(i + 1, leagueInputSuggestions.length - 1)) }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setLeagueHighlight(i => Math.max(i - 1, 0)) }
+    else if (e.key === 'Enter' && leagueHighlight >= 0) {
+      e.preventDefault()
+      setLeagueInput(leagueInputSuggestions[leagueHighlight]); setLeagueSuggestOpen(false); setLeagueHighlight(-1)
+    } else if (e.key === 'Escape') { setLeagueSuggestOpen(false); setLeagueHighlight(-1) }
+  }
+
   // 베팅옵션은 종목별로 따로 관리되므로, 종목을 바꾸면 이전 종목에서 선택했던 옵션은 해제
   useEffect(() => { setSelectedOptions([]) }, [sport])
 
@@ -1657,7 +1736,7 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
     const finalContent = mode === 'single' ? [content.trim(), side, ...selectedOptions].filter(Boolean).join(' ') : content
     const ok = mode === 'multi'
       ? await onMultiBet(sport, multiContents, oddsV, stakeN, multiContents.map(() => ''))
-      : await onBet(sport, finalContent, oddsV, stakeN, isLive, SHOW_LEAGUE_UI ? detectedLeague : '')
+      : await onBet(sport, finalContent, oddsV, stakeN, isLive, SHOW_LEAGUE_UI ? detectedLeague : trimmedLeagueInput)
     setSubmitting(false)
     if (ok) onClose()
   }
@@ -1698,6 +1777,42 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
           }}>{side || '없음'}</button>
         )}
       </div>
+      {mode === 'single' && sportLeagueNames && (
+        <div style={{ position: 'relative', marginTop: 4 }}>
+          <div style={{ display: 'flex', gap: 4 }}>
+            <input className="form-input" value={leagueInput}
+              onChange={e => { setLeagueInput(e.target.value); setLeagueSuggestOpen(true); setLeagueHighlight(-1) }}
+              onFocus={() => setLeagueSuggestOpen(true)}
+              onBlur={() => setTimeout(() => setLeagueSuggestOpen(false), 150)}
+              onKeyDown={onLeagueInputKeyDown}
+              placeholder="리그 (직접 입력, 선택)" style={{ flex: 1, fontSize: 11, padding: '5px 7px' }} />
+            <button type="button" onClick={() => setLeagueOnlyMgmtOpen(true)} title="리그 관리"
+              style={{ width: 30, flexShrink: 0, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Settings size={13} />
+            </button>
+          </div>
+          {leagueSuggestOpen && leagueInputSuggestions.length > 0 && (
+            <div style={{ position: 'absolute', top: '100%', left: 0, right: 34, zIndex: 20, marginTop: 2, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 6, boxShadow: '0 4px 14px rgba(0,0,0,0.3)', maxHeight: 160, overflowY: 'auto' }}>
+              {leagueInputSuggestions.map((lg, i) => (
+                <div key={lg} onMouseDown={() => { setLeagueInput(lg); setLeagueSuggestOpen(false); setLeagueHighlight(-1) }}
+                  onMouseEnter={() => setLeagueHighlight(i)}
+                  style={{ padding: '6px 8px', cursor: 'pointer', fontSize: 11, fontWeight: i === leagueHighlight ? 700 : 600, color: i === leagueHighlight ? 'var(--gold)' : 'var(--text-primary)', background: i === leagueHighlight ? 'var(--gold-bg)' : 'transparent' }}>
+                  {lg}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      {leagueOnlyMgmtOpen && sportLeagueNames && (
+        <LeagueOnlyManageModal
+          sportLabel={SPORTS.find(s => s.value === sport)?.label ?? sport}
+          leagues={sportLeagueNames}
+          onClose={() => setLeagueOnlyMgmtOpen(false)}
+          onAddLeague={ADD_LEAGUE_NAME_BY_SPORT[sport]!}
+          onDeleteLeague={DELETE_LEAGUE_NAME_BY_SPORT[sport]!}
+        />
+      )}
       {SHOW_LEAGUE_UI && mode === 'single' && leagueBundle && (
         <div style={{ position: 'relative', marginTop: 4 }}>
           {teamSuggestions.length > 0 && (

@@ -741,17 +741,23 @@ function SoccerDetailPanel({ bets }: { bets: Bet[] }) {
 // ─── 축구 핸디캡 — 리그별 (홈/원정 0.5·1.5·2.5 여섯 구간을 리그 단위로 한 표에서 비교) ────
 function SoccerLeagueColumnsSection({ title, columns, emptyLabel }: { title: string; columns: { label: string; bets: Bet[] }[]; emptyLabel: string }) {
   const leagueKeyOf = (b: Bet) => (b.league && b.league.trim()) ? b.league.trim() : '미분류'
-  const leagueNames = Array.from(new Set(columns.flatMap(c => c.bets).map(leagueKeyOf))).sort(koCompare)
+  const leagueNames = Array.from(new Set(columns.flatMap(c => c.bets).map(leagueKeyOf)))
 
   function cellStats(list: Bet[]) {
     if (!list.length) return null
     return calcStats(list)
   }
 
+  // 리그별 총 손익률(ROI) 높은 순으로 정렬 — 가장 좋은 성적의 리그가 맨 위
+  const rows = leagueNames.map(league => {
+    const perColumn = columns.map(c => c.bets.filter(b => leagueKeyOf(b) === league))
+    return { league, perColumn, totalStats: cellStats(perColumn.flat()) }
+  }).sort((a, b) => (b.totalStats?.roi ?? -Infinity) - (a.totalStats?.roi ?? -Infinity))
+
   return (
     <div>
       <div className="card-title" style={{ marginBottom: 8 }}>{title}</div>
-      {leagueNames.length > 0 ? (
+      {rows.length > 0 ? (
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
             <thead>
@@ -764,37 +770,33 @@ function SoccerLeagueColumnsSection({ title, columns, emptyLabel }: { title: str
               </tr>
             </thead>
             <tbody>
-              {leagueNames.map(league => {
-                const perColumn = columns.map(c => c.bets.filter(b => leagueKeyOf(b) === league))
-                const totalBets = perColumn.flat()
-                const totalStats = cellStats(totalBets)
-                return (
-                  <tr key={league} style={{ borderBottom: '1px solid var(--border-light)', height: 26 }}>
-                    <td style={{ padding: '4px 8px', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>{league}</td>
-                    {perColumn.map((cb, i) => {
-                      const s = cellStats(cb)
-                      return (
-                        <td key={i} style={{ textAlign: 'center', padding: '4px 6px', whiteSpace: 'nowrap' }}>
-                          {s ? (
-                            <>
-                              <span style={{ color: 'var(--text-muted)' }}>{s.total}건 </span>
-                              <span style={{ fontWeight: 700, color: s.roi >= 0 ? '#4ade80' : '#f87171' }}>{s.roi >= 0 ? '+' : ''}{s.roi.toFixed(0)}%</span>
-                            </>
-                          ) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
-                        </td>
-                      )
-                    })}
-                    <td style={{ textAlign: 'center', padding: '4px 8px', whiteSpace: 'nowrap', borderLeft: '1px solid var(--border)' }}>
-                      {totalStats ? (
-                        <>
-                          <span style={{ fontWeight: 700, color: totalStats.profit >= 0 ? '#4ade80' : '#f87171' }}>{totalStats.profit >= 0 ? '+' : ''}{totalStats.profit.toLocaleString()}</span>
-                          <span style={{ marginLeft: 6, fontWeight: 700, color: totalStats.roi >= 0 ? '#4ade80' : '#f87171' }}>{totalStats.roi >= 0 ? '+' : ''}{totalStats.roi.toFixed(1)}%</span>
-                        </>
-                      ) : '—'}
-                    </td>
-                  </tr>
-                )
-              })}
+              {rows.map(({ league, perColumn, totalStats }) => (
+                <tr key={league} style={{ borderBottom: '1px solid var(--border-light)', height: 26 }}>
+                  <td style={{ padding: '4px 8px', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>{league}</td>
+                  {perColumn.map((cb, i) => {
+                    const s = cellStats(cb)
+                    return (
+                      <td key={i} style={{ textAlign: 'center', padding: '4px 6px', whiteSpace: 'nowrap' }}>
+                        {s ? (
+                          <>
+                            <span style={{ color: 'var(--text-muted)' }}>{s.total}건 </span>
+                            <span style={{ fontWeight: 600, color: s.winRate >= 50 ? '#4ade80' : '#f87171' }}>{s.winRate.toFixed(0)}% </span>
+                            <span style={{ fontWeight: 700, color: s.roi >= 0 ? '#4ade80' : '#f87171' }}>{s.roi >= 0 ? '+' : ''}{s.roi.toFixed(0)}%</span>
+                          </>
+                        ) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
+                      </td>
+                    )
+                  })}
+                  <td style={{ textAlign: 'center', padding: '4px 8px', whiteSpace: 'nowrap', borderLeft: '1px solid var(--border)' }}>
+                    {totalStats ? (
+                      <>
+                        <span style={{ fontWeight: 700, color: totalStats.profit >= 0 ? '#4ade80' : '#f87171' }}>{totalStats.profit >= 0 ? '+' : ''}{totalStats.profit.toLocaleString()}</span>
+                        <span style={{ marginLeft: 6, fontWeight: 700, color: totalStats.roi >= 0 ? '#4ade80' : '#f87171' }}>{totalStats.roi >= 0 ? '+' : ''}{totalStats.roi.toFixed(1)}%</span>
+                      </>
+                    ) : '—'}
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
@@ -809,17 +811,23 @@ function SoccerLeagueColumnsSection({ title, columns, emptyLabel }: { title: str
 // 리그 미지정 베팅은 "미분류"로 묶어서 함께 보여줌. league 컬럼값 그대로 사용(과거 팀 키워드 추론은 적용 안 함).
 function SoccerUnderByLeagueSection({ lines, lineBets }: { lines: number[]; lineBets: Bet[][] }) {
   const leagueKeyOf = (b: Bet) => (b.league && b.league.trim()) ? b.league.trim() : '미분류'
-  const leagueNames = Array.from(new Set(lineBets.flat().map(leagueKeyOf))).sort(koCompare)
+  const leagueNames = Array.from(new Set(lineBets.flat().map(leagueKeyOf)))
 
   function cellStats(list: Bet[]) {
     if (!list.length) return null
     return calcStats(list)
   }
 
+  // 리그별 총 손익률(ROI) 높은 순으로 정렬
+  const rows = leagueNames.map(league => {
+    const perLine = lineBets.map(list => list.filter(b => leagueKeyOf(b) === league))
+    return { league, perLine, totalStats: cellStats(perLine.flat()) }
+  }).sort((a, b) => (b.totalStats?.roi ?? -Infinity) - (a.totalStats?.roi ?? -Infinity))
+
   return (
     <div style={{ marginTop: 14 }}>
       <div className="card-title" style={{ marginBottom: 8 }}>⚽ 언더 — 라인별 · 리그별 (초안)</div>
-      {leagueNames.length > 0 ? (
+      {rows.length > 0 ? (
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
             <thead>
@@ -832,37 +840,33 @@ function SoccerUnderByLeagueSection({ lines, lineBets }: { lines: number[]; line
               </tr>
             </thead>
             <tbody>
-              {leagueNames.map(league => {
-                const perLine = lineBets.map(list => list.filter(b => leagueKeyOf(b) === league))
-                const totalBets = perLine.flat()
-                const totalStats = cellStats(totalBets)
-                return (
-                  <tr key={league} style={{ borderBottom: '1px solid var(--border-light)', height: 26 }}>
-                    <td style={{ padding: '4px 8px', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>{league}</td>
-                    {perLine.map((lb, i) => {
-                      const s = cellStats(lb)
-                      return (
-                        <td key={i} style={{ textAlign: 'center', padding: '4px 6px', whiteSpace: 'nowrap' }}>
-                          {s ? (
-                            <>
-                              <span style={{ color: 'var(--text-muted)' }}>{s.total}건 </span>
-                              <span style={{ fontWeight: 700, color: s.roi >= 0 ? '#4ade80' : '#f87171' }}>{s.roi >= 0 ? '+' : ''}{s.roi.toFixed(0)}%</span>
-                            </>
-                          ) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
-                        </td>
-                      )
-                    })}
-                    <td style={{ textAlign: 'center', padding: '4px 8px', whiteSpace: 'nowrap', borderLeft: '1px solid var(--border)' }}>
-                      {totalStats ? (
-                        <>
-                          <span style={{ fontWeight: 700, color: totalStats.profit >= 0 ? '#4ade80' : '#f87171' }}>{totalStats.profit >= 0 ? '+' : ''}{totalStats.profit.toLocaleString()}</span>
-                          <span style={{ marginLeft: 6, fontWeight: 700, color: totalStats.roi >= 0 ? '#4ade80' : '#f87171' }}>{totalStats.roi >= 0 ? '+' : ''}{totalStats.roi.toFixed(1)}%</span>
-                        </>
-                      ) : '—'}
-                    </td>
-                  </tr>
-                )
-              })}
+              {rows.map(({ league, perLine, totalStats }) => (
+                <tr key={league} style={{ borderBottom: '1px solid var(--border-light)', height: 26 }}>
+                  <td style={{ padding: '4px 8px', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>{league}</td>
+                  {perLine.map((lb, i) => {
+                    const s = cellStats(lb)
+                    return (
+                      <td key={i} style={{ textAlign: 'center', padding: '4px 6px', whiteSpace: 'nowrap' }}>
+                        {s ? (
+                          <>
+                            <span style={{ color: 'var(--text-muted)' }}>{s.total}건 </span>
+                            <span style={{ fontWeight: 600, color: s.winRate >= 50 ? '#4ade80' : '#f87171' }}>{s.winRate.toFixed(0)}% </span>
+                            <span style={{ fontWeight: 700, color: s.roi >= 0 ? '#4ade80' : '#f87171' }}>{s.roi >= 0 ? '+' : ''}{s.roi.toFixed(0)}%</span>
+                          </>
+                        ) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
+                      </td>
+                    )
+                  })}
+                  <td style={{ textAlign: 'center', padding: '4px 8px', whiteSpace: 'nowrap', borderLeft: '1px solid var(--border)' }}>
+                    {totalStats ? (
+                      <>
+                        <span style={{ fontWeight: 700, color: totalStats.profit >= 0 ? '#4ade80' : '#f87171' }}>{totalStats.profit >= 0 ? '+' : ''}{totalStats.profit.toLocaleString()}</span>
+                        <span style={{ marginLeft: 6, fontWeight: 700, color: totalStats.roi >= 0 ? '#4ade80' : '#f87171' }}>{totalStats.roi >= 0 ? '+' : ''}{totalStats.roi.toFixed(1)}%</span>
+                      </>
+                    ) : '—'}
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
