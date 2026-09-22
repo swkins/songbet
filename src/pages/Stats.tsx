@@ -143,6 +143,71 @@ const OPTION_STATS_SPORTS: { value: Sport; label: string; emoji: string }[] = [
   { value: 'other', label: '기타', emoji: '📋' },
 ]
 
+// ─── 전체 탭: 하루 평균 베팅금액 · 요일별(월~일) 평균 베팅금액 · 10만원 베팅당 손익 ──────────
+const WEEKDAYS: { label: string; idx: number }[] = [
+  { label: '월', idx: 1 }, { label: '화', idx: 2 }, { label: '수', idx: 3 }, { label: '목', idx: 4 },
+  { label: '금', idx: 5 }, { label: '토', idx: 6 }, { label: '일', idx: 0 },
+]
+function BettingVolumeSection({ settled, periodDays }: { settled: Bet[]; periodDays: number }) {
+  if (periodDays <= 0) return null
+  const totalStake = settled.reduce((s, b) => s + b.stake, 0)
+  const totalProfit = settled.reduce((s, b) => s + b.profit, 0)
+  const dailyAvg = totalStake / periodDays
+  const per100k = totalStake > 0 ? (totalProfit / totalStake) * 100000 : 0
+
+  // 요일별 평균 — "그 요일에 베팅한 날"이 아니라 기간 내 그 요일 자체가 며칠 있었는지로 나눠야
+  // 어쩌다 한두 번 베팅한 요일이 과대평가되지 않는다.
+  const today = dayjs()
+  const start = today.subtract(periodDays - 1, 'day')
+  const weekdayDateCount = [0, 0, 0, 0, 0, 0, 0]
+  for (let i = 0; i < periodDays; i++) weekdayDateCount[start.add(i, 'day').day()]++
+  const weekdayStake = [0, 0, 0, 0, 0, 0, 0]
+  settled.forEach(b => { weekdayStake[dayjs(b.bet_date).day()] += b.stake })
+
+  return (
+    <div className="card">
+      <div className="card-title" style={{ marginBottom: 2 }}>베팅 규모</div>
+      <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 10 }}>최근 {periodDays}일 기준</div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 14 }}>
+        <div className="card stat-tile" style={{ flex: '1 0 140px', maxWidth: 200 }}>
+          <div className="stat-value">{Math.round(dailyAvg).toLocaleString()}원</div>
+          <div className="stat-label">하루 평균 베팅금액</div>
+        </div>
+        <div className="card stat-tile" style={{ flex: '1 0 140px', maxWidth: 200 }}>
+          <div className={`stat-value ${per100k >= 0 ? 'profit-pos' : 'profit-neg'}`}>{per100k >= 0 ? '+' : ''}{Math.round(per100k).toLocaleString()}원</div>
+          <div className="stat-label">10만원 베팅당 손익</div>
+        </div>
+      </div>
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+          <thead>
+            <tr style={{ borderBottom: '1px solid var(--border)' }}>
+              <th style={{ textAlign: 'left', padding: '4px 8px', fontSize: 9, color: 'var(--text-secondary)', fontWeight: 700 }}>요일별 평균 베팅금액</th>
+              {WEEKDAYS.map(w => (
+                <th key={w.idx} style={{ textAlign: 'center', padding: '4px 6px', fontSize: 9, color: 'var(--text-secondary)', fontWeight: 700 }}>{w.label}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td style={{ padding: '4px 8px' }} />
+              {WEEKDAYS.map(w => {
+                const cnt = weekdayDateCount[w.idx]
+                const avg = cnt > 0 ? weekdayStake[w.idx] / cnt : 0
+                return (
+                  <td key={w.idx} style={{ textAlign: 'center', padding: '4px 6px', fontSize: 11, fontWeight: 700, color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>
+                    {cnt > 0 ? `${Math.round(avg).toLocaleString()}원` : <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>—</span>}
+                  </td>
+                )
+              })}
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
 function MarketTypeOverviewSection({ settled, betOptionsBySport, numericBetOptionsBySport }: { settled: Bet[]; betOptionsBySport: Record<string, string[]>; numericBetOptionsBySport: Record<string, string[]> }) {
   const cols = OPTION_STATS_SPORTS
     .map(s => ({ ...s, sportBets: settled.filter(b => b.sport === s.value) }))
@@ -1707,6 +1772,10 @@ export default function Stats() {
   const stats   = calcStats(periodFiltered)
   const settled = periodFiltered.filter(b => b.result !== 'pending')
   const sportCounts = SPORTS.map(s => ({ ...s, count: settled.filter(b => b.sport === s.value).length }))
+  // 하루 평균 베팅금액 · 요일별 평균의 분모 — 7일/30일/90일 필터는 고정값, 전체는 첫 베팅일부터 오늘까지 실제 기간
+  const periodDaysCount = period !== 'all'
+    ? (period === '7d' ? 7 : period === '30d' ? 30 : 90)
+    : (settled.length > 0 ? dayjs().diff(dayjs(settled.reduce((min, b) => b.bet_date < min ? b.bet_date : min, settled[0].bet_date)), 'day') + 1 : 0)
 
   // 종목별 전일 대비 — 기간 필터와 무관하게 항상 오늘 하루치 손익과 어제 하루치 손익을 종목별로 비교
   const todayStr = dayjs().format('YYYY-MM-DD')
@@ -1777,6 +1846,8 @@ export default function Stats() {
                   </div>
                 ))}
               </div>
+
+              <BettingVolumeSection settled={settled} periodDays={periodDaysCount} />
 
               <MarketTypeOverviewSection settled={settled} betOptionsBySport={betOptionsBySport} numericBetOptionsBySport={numericBetOptionsBySport} />
 
