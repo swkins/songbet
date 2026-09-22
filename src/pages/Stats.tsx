@@ -110,15 +110,19 @@ function classifySportBetsByOption(sportBets: Bet[], options: string[]): OptionC
 // 종목을 가로(열)로, 베팅옵션(홈 0.5, 원정 1.5 등)을 세로(행)로 나열한 표.
 // 종목마다 옵션 구성이 다르므로, 실제 등장하는 모든 (종목,옵션) 조합의 라벨을 모아 행으로 쓰고
 // 없는 조합은 빈칸(—)으로 둔다. "기타"(등록된 옵션에 안 걸리는 베팅)는 있으면 맨 아래 행으로.
+// 농구를 제외한 모든 종목 — 농구는 핸디캡 라인(4.5~13.5)별 적중률로 따로 보여주고(BasketballDetailPanel),
+// 배당은 항상 1.9대 고정이라 옵션 라벨별 성적표가 필요 없다.
+const OPTION_STATS_SPORTS: { value: Sport; label: string; emoji: string }[] = [
+  { value: 'soccer', label: '축구', emoji: '⚽' },
+  { value: 'baseball', label: '야구', emoji: '⚾' },
+  { value: 'volleyball', label: '배구', emoji: '🏐' },
+  { value: 'esports', label: 'LOL', emoji: '🎮' },
+  { value: 'hockey', label: '하키', emoji: '🏒' },
+  { value: 'other', label: '기타', emoji: '📋' },
+]
+
 function MarketTypeOverviewSection({ settled, betOptionsBySport }: { settled: Bet[]; betOptionsBySport: Record<string, string[]> }) {
-  const MARKET_SPORTS: { value: Sport; label: string; emoji: string }[] = [
-    { value: 'soccer', label: '축구', emoji: '⚽' },
-    { value: 'baseball', label: '야구', emoji: '⚾' },
-    { value: 'basketball', label: '농구', emoji: '🏀' },
-    { value: 'volleyball', label: '배구', emoji: '🏐' },
-    { value: 'esports', label: 'LOL', emoji: '🎮' },
-  ]
-  const cols = MARKET_SPORTS
+  const cols = OPTION_STATS_SPORTS
     .map(s => ({ ...s, sportBets: settled.filter(b => b.sport === s.value) }))
     .filter(s => s.sportBets.length > 0)
   if (cols.length === 0) return null
@@ -140,18 +144,30 @@ function MarketTypeOverviewSection({ settled, betOptionsBySport }: { settled: Be
   )
 }
 
+// ─── 종목 탭 내부: 이 종목에 등록된 베팅옵션별(예: LOL "3.5 오버") 세부 성적 ─────────────
+// 농구는 제외 — 농구는 핸디캡 라인(4.5~13.5)별 적중률만 보면 되고 배당은 항상 1.9대로 고정이라
+// 옵션 라벨 매칭이 필요 없음(BasketballDetailPanel의 hcapLineRows가 이 역할을 대신함).
+function BetOptionStatsSection({ settledBets, options }: { settledBets: Bet[]; options: string[] }) {
+  if (options.length === 0) return null
+  const cells = classifySportBetsByOption(settledBets, options)
+  if (cells.length === 0) return null
+  const rows: RuleRow[] = cells.map(c => ({ label: c.label, bets: c.bets, tier: 'none' }))
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <div className="card-title" style={{ marginBottom: 2 }}>🎯 베팅옵션별 성적</div>
+      <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 10 }}>베팅추가에서 등록한 옵션 기준 — 어디에도 안 걸리는 베팅은 "기타"로 표시</div>
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+        <RuleStatsTable title="옵션별 승률·ROI·손익" rows={rows} extra={<MarketTotalRow bets={settledBets} />} />
+      </div>
+    </div>
+  )
+}
+
 // ─── 베팅옵션 · 리그별 순위 — 종목×옵션×리그 조합별 성적을 손익률(ROI) 높은 순으로 랭킹 ──────
 interface OptionLeagueRow { sport: Sport; sportLabel: string; sportEmoji: string; optionLabel: string; league: string; bets: Bet[] }
 function buildOptionLeagueRows(settled: Bet[], betOptionsBySport: Record<string, string[]>): OptionLeagueRow[] {
-  const MARKET_SPORTS: { value: Sport; label: string; emoji: string }[] = [
-    { value: 'soccer', label: '축구', emoji: '⚽' },
-    { value: 'baseball', label: '야구', emoji: '⚾' },
-    { value: 'basketball', label: '농구', emoji: '🏀' },
-    { value: 'volleyball', label: '배구', emoji: '🏐' },
-    { value: 'esports', label: 'LOL', emoji: '🎮' },
-  ]
   const rows: OptionLeagueRow[] = []
-  for (const s of MARKET_SPORTS) {
+  for (const s of OPTION_STATS_SPORTS) {
     const sportBets = settled.filter(b => b.sport === s.value)
     if (sportBets.length === 0) continue
     const cells = classifySportBetsByOption(sportBets, betOptionsBySport[s.value] ?? [])
@@ -1268,8 +1284,9 @@ function LivePanel({ bets, onDeleteRequest }: { bets: Bet[]; onDeleteRequest: ()
 }
 
 
-function SportPanel({ bets, sport, onDeleteRequest, leagueOverrides, baseballLeagues, onRenameBaseballLeague, onDeleteBaseballLeague, esportsOverrides, esportsLeagues, onRenameEsportsLeague, onDeleteEsportsLeague, basketballOverrides, basketballLeagues, onRenameBasketballLeague, onDeleteBasketballLeague, volleyballOverrides, volleyballLeagues, onRenameVolleyballLeague, onDeleteVolleyballLeague }: {
+function SportPanel({ bets, sport, onDeleteRequest, leagueOverrides, baseballLeagues, onRenameBaseballLeague, onDeleteBaseballLeague, esportsOverrides, esportsLeagues, onRenameEsportsLeague, onDeleteEsportsLeague, basketballOverrides, basketballLeagues, onRenameBasketballLeague, onDeleteBasketballLeague, volleyballOverrides, volleyballLeagues, onRenameVolleyballLeague, onDeleteVolleyballLeague, betOptions }: {
   bets: Bet[]; sport: typeof SPORTS[0]; onDeleteRequest: () => void
+  betOptions: string[]
   leagueOverrides: LeagueOverride[]
   baseballLeagues: string[]
   onRenameBaseballLeague: (oldName: string, newName: string) => Promise<void>
@@ -1332,6 +1349,8 @@ function SportPanel({ bets, sport, onDeleteRequest, leagueOverrides, baseballLea
           <Trash2 size={11} /> 데이터 삭제
         </button>
       </div>
+
+      {sport.value !== 'basketball' && <BetOptionStatsSection settledBets={stats.settled} options={betOptions} />}
 
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-start' }}>
         {byMarket.length > 0 && sport.value !== 'soccer' && (
@@ -1826,6 +1845,7 @@ export default function Stats() {
             <SportPanel
               bets={periodFiltered}
               sport={SPORTS.find(s => s.value === activeSport)!}
+              betOptions={betOptionsBySport[activeSport] ?? []}
               leagueOverrides={leagueOverrides}
               baseballLeagues={baseballLeagues}
               onRenameBaseballLeague={renameBaseballLeague}
