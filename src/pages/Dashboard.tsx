@@ -216,6 +216,64 @@ function parseBetMatch(sport: string, match: string, knownOptions: string[] = []
   return null
 }
 
+// ─── 베팅추가: 리그·홈원정·베팅옵션 조합의 과거 성적 + 추천 베팅금액 ──────────────────
+// 저장 시 "팀이름 [홈/원정] [옵션1] [옵션2]..." 형태로 합쳐지는 것과 똑같은 접미어를 만들어
+// 과거 베팅 중 같은 종목·리그에서 그 접미어로 끝나는 것만 골라 성적을 낸다(팀 이름은 무시).
+interface ComboStats { count: number; wins: number; profit: number; stake: number; winRate: number; roi: number }
+function comboSuffix(side: string, options: string[]): string {
+  return [side, ...options].filter(Boolean).join(' ')
+}
+function computeComboStats(sport: string, league: string, side: string, options: string[], allBets: BetLite[]): ComboStats | null {
+  const suffix = comboSuffix(side, options)
+  if (!suffix) return null
+  const matched = allBets.filter(b => {
+    if (b.sport !== sport || b.result === 'pending') return false
+    if (league && (b.league ?? '').trim() !== league) return false
+    const s = (b.match ?? '').trim()
+    return s === suffix || s.endsWith(' ' + suffix)
+  })
+  if (matched.length === 0) return { count: 0, wins: 0, profit: 0, stake: 0, winRate: 0, roi: 0 }
+  const wins = matched.filter(b => b.result === 'win').length
+  const profit = matched.reduce((s, b) => s + b.profit, 0)
+  const stake = matched.reduce((s, b) => s + b.stake, 0)
+  return { count: matched.length, wins, profit, stake, winRate: wins / matched.length * 100, roi: stake > 0 ? profit / stake * 100 : 0 }
+}
+// 표본(건수)과 수익률(ROI)이 둘 다 충분해야 금액이 올라가는 방식 — 표본이 적거나 수익률이 안 좋으면 최소 5,000원,
+// 표본도 많고(25건 이상) 수익률도 좋으면(25% 이상) 최대 15,000원. 그 사이는 1,000원 단위로 선형 보간.
+function recommendStake(stats: ComboStats | null): number {
+  if (!stats || stats.count === 0) return 5000
+  const sampleScore = Math.max(0, Math.min(1, (stats.count - 5) / 20))
+  const roiScore = Math.max(0, Math.min(1, stats.roi / 25))
+  const steps = Math.round(sampleScore * roiScore * 10)
+  return 5000 + steps * 1000
+}
+function BetOptionHistoryHint({ sport, league, side, options, allBets, onPickStake }: {
+  sport: string; league: string; side: string; options: string[]; allBets: BetLite[]
+  onPickStake: (amount: number) => void
+}) {
+  const stats = computeComboStats(sport, league, side, options, allBets)
+  if (!stats) return null
+  const recommended = recommendStake(stats)
+  const label = [side, ...options].filter(Boolean).join(' · ')
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 6, marginTop: 4, padding: '6px 8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', background: 'var(--bg-elevated)' }}>
+      <span style={{ fontSize: 9, color: 'var(--text-muted)', flexShrink: 0 }}>{league} · {label}</span>
+      {stats.count === 0 ? (
+        <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>과거 데이터 없음</span>
+      ) : (
+        <span style={{ fontSize: 10, color: 'var(--text-secondary)' }}>
+          {stats.count}건 · 승률 <span style={{ fontWeight: 700, color: stats.winRate >= 50 ? 'var(--green)' : 'var(--red)' }}>{stats.winRate.toFixed(0)}%</span> · ROI <span style={{ fontWeight: 700, color: stats.roi >= 0 ? 'var(--green)' : 'var(--red)' }}>{stats.roi >= 0 ? '+' : ''}{stats.roi.toFixed(1)}%</span>
+        </span>
+      )}
+      <button type="button" onClick={() => onPickStake(recommended)} title="추천 금액을 베팅금액에 적용"
+        style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 999, cursor: 'pointer', fontFamily: 'var(--font-body)',
+          border: '1px solid var(--gold-border)', background: 'var(--gold-bg)', color: 'var(--gold)', flexShrink: 0 }}>
+        추천 {recommended.toLocaleString()}원
+      </button>
+    </div>
+  )
+}
+
 // 완료된 베팅 카드 정중앙에 살짝 기울여 찍는 반투명 결과 도장 (적중/실패만, PUSH는 도장 없음)
 function ResultStamp({ result }: { result: 'win' | 'loss' | 'push' | 'pending' }) {
   if (result !== 'win' && result !== 'loss') return null
@@ -2005,6 +2063,12 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
           onEditBetOption={(oldLabel, newLabel) => onEditBetOption(sport, oldLabel, newLabel)}
           onReorderBetOption={(from, to) => onReorderBetOption(sport, from, to)} />
       )}
+      {mode === 'single' && !isusd && trimmedContent && trimmedLeagueInput && (side || selectedOptions.length > 0) && (
+        <BetOptionHistoryHint
+          sport={sport} league={trimmedLeagueInput} side={side} options={selectedOptions} allBets={allBetsHistory}
+          onPickStake={v => { setAmount(String(v)); setAmountEdited(true) }}
+        />
+      )}
       {mode === 'multi' && extraContents.map((c, i) => (
         <div key={i} style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
           <div style={{ flex: 1, minWidth: 0 }}>
@@ -2342,7 +2406,7 @@ export default function Dashboard() {
     if (vb) setVolleyballOverrides(vb as LeagueOverride[])
   }
   async function loadAllBetsHistory() {
-    const { data } = await supabase.from('bets').select('sport, match, result, profit, bet_date, created_at, league').order('bet_date', { ascending: false }).limit(5000)
+    const { data } = await supabase.from('bets').select('sport, match, result, profit, stake, bet_date, created_at, league').order('bet_date', { ascending: false }).limit(5000)
     if (data) setAllBetsHistory(data as BetLite[])
   }
   // 축구/야구/농구/LOL — 등록된 리그/팀 목록 로드 (베팅추가에서 자유입력 대신 드롭다운으로 선택)
@@ -2747,7 +2811,7 @@ export default function Dashboard() {
     if (siteData) {
       await logAction({ action_type: 'insert', table_name: 'bets', record_id: betData.id, after_data: betData as never, description: `[${site.name}] ${content} / ${stake.toLocaleString()}` })
       setBets(p => [...p, betData]); setSites(p => p.map(s => s.id === siteData.id ? siteData : s))
-      setAllBetsHistory(p => [{ sport: betData.sport, match: betData.match, result: betData.result, profit: betData.profit, bet_date: betData.bet_date, created_at: betData.created_at }, ...p])
+      setAllBetsHistory(p => [{ sport: betData.sport, match: betData.match, result: betData.result, profit: betData.profit, stake: betData.stake, bet_date: betData.bet_date, created_at: betData.created_at }, ...p])
       return true
     }
     return false
@@ -2767,7 +2831,7 @@ export default function Dashboard() {
     if (siteData) {
       await logAction({ action_type: 'insert', table_name: 'bets', record_id: betsData[0].id, after_data: betsData[0] as never, description: `[${site.name}] 다폴 ${contents.join('×')} / ${stake.toLocaleString()}` })
       setBets(p => [...p, ...betsData]); setSites(p => p.map(s => s.id === siteData.id ? siteData : s))
-      setAllBetsHistory(p => [...betsData.map(b => ({ sport: b.sport, match: b.match, result: b.result, profit: b.profit, bet_date: b.bet_date, created_at: b.created_at })), ...p])
+      setAllBetsHistory(p => [...betsData.map(b => ({ sport: b.sport, match: b.match, result: b.result, profit: b.profit, stake: b.stake, bet_date: b.bet_date, created_at: b.created_at })), ...p])
       return true
     }
     return false
