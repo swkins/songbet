@@ -89,6 +89,7 @@ function matchesBetOptionLabel(matchText: string, label: string): boolean {
 }
 interface OptionCell { label: string; bets: Bet[] }
 function pushOptionCells(cells: OptionCell[], label: string, matched: Bet[]) {
+  if (matched.length === 0) { cells.push({ label, bets: [] }); return }
   const home = matched.filter(b => extractSide(b.match) === '홈')
   const away = matched.filter(b => extractSide(b.match) === '원정')
   const none = matched.filter(b => !extractSide(b.match))
@@ -96,38 +97,24 @@ function pushOptionCells(cells: OptionCell[], label: string, matched: Bet[]) {
   if (away.length) cells.push({ label: `원정 ${label}`, bets: away })
   if (none.length) cells.push({ label, bets: none })
 }
-// numericOptions에 속한 템플릿(예: "포인트 오버")은 베팅추가에서 매번 다른 숫자가 입력되므로,
-// 문구에서 실제 입력됐던 숫자를 뽑아 "185.5 오버"/"190.5 오버"처럼 값별로 각각 행을 나눈다.
+// numericOptions에 속한 템플릿(예: "포인트 오버")은 베팅추가에서 매번 다른 숫자가 입력되지만
+// 그건 어디까지나 같은 베팅옵션이므로 값에 상관없이 템플릿 이름 하나로 통합해서 집계한다
+// (185.5 오버든 190.5 오버든 전부 "포인트 오버" 한 카드). 등록된 옵션은 순서 그대로 전부 나오고
+// (베팅이 하나도 없어도 빈 카드로), 어디에도 안 걸리거나(또는 옵션이 삭제됐으면) "기타"로 모은다.
 function classifySportBetsByOption(sportBets: Bet[], options: string[], numericOptions: string[] = []): OptionCell[] {
   const numericSet = new Set(numericOptions)
-  const sortedOptions = [...options].sort((a, b) => b.length - a.length)
+  const matchOrder = [...options].sort((a, b) => b.length - a.length)
   const claimed = new Set<string>()
-  const cells: OptionCell[] = []
-  for (const opt of sortedOptions) {
-    if (numericSet.has(opt)) {
-      const byValue = new Map<string, Bet[]>()
-      for (const b of sportBets) {
-        if (claimed.has(b.id)) continue
-        const value = extractNumericTemplateValueFromText(opt, b.match)
-        if (value === null) continue
-        const label = applyNumericTemplate(opt, value)
-        const arr = byValue.get(label) ?? []
-        arr.push(b)
-        byValue.set(label, arr)
-      }
-      const sortedLabels = Array.from(byValue.keys()).sort((a, b) => a.localeCompare(b, 'ko', { numeric: true }))
-      for (const label of sortedLabels) {
-        const matched = byValue.get(label)!
-        matched.forEach(b => claimed.add(b.id))
-        pushOptionCells(cells, label, matched)
-      }
-      continue
-    }
-    const matched = sportBets.filter(b => !claimed.has(b.id) && matchesBetOptionLabel(b.match, opt))
-    if (matched.length === 0) continue
+  const matchedByOption = new Map<string, Bet[]>()
+  for (const opt of matchOrder) {
+    const matched = numericSet.has(opt)
+      ? sportBets.filter(b => !claimed.has(b.id) && extractNumericTemplateValueFromText(opt, b.match) !== null)
+      : sportBets.filter(b => !claimed.has(b.id) && matchesBetOptionLabel(b.match, opt))
     matched.forEach(b => claimed.add(b.id))
-    pushOptionCells(cells, opt, matched)
+    matchedByOption.set(opt, matched)
   }
+  const cells: OptionCell[] = []
+  for (const opt of options) pushOptionCells(cells, opt, matchedByOption.get(opt) ?? [])
   const other = sportBets.filter(b => !claimed.has(b.id))
   if (other.length) cells.push({ label: '기타', bets: other })
   return cells
@@ -170,71 +157,66 @@ function MarketTypeOverviewSection({ settled, betOptionsBySport, numericBetOptio
   )
 }
 
-// 정산된 베팅을 리그별로 묶어 RuleStatsTable 행으로 변환 (리그 미지정은 "미지정"으로 통합)
-function OptionLeagueBreakdownTable({ title, bets }: { title: string; bets: Bet[] }) {
+// 정산된 베팅을 리그별로 묶어 RuleRow로 변환 (리그 미지정은 "미지정"으로 통합)
+function leagueBreakdownRows(bets: Bet[]): RuleRow[] {
   const leagueKeyOf = (b: Bet) => (b.league && b.league.trim()) ? b.league.trim() : '미지정'
   const leagueNames = Array.from(new Set(bets.map(leagueKeyOf))).sort(koCompare)
-  const rows: RuleRow[] = leagueNames.map(l => ({ label: l, tier: 'none', bets: bets.filter(b => leagueKeyOf(b) === l) }))
-  return <RuleStatsTable title={title} rows={rows} extra={<MarketTotalRow bets={bets} />} />
+  return leagueNames.map(l => ({ label: l, tier: 'none', bets: bets.filter(b => leagueKeyOf(b) === l) }))
+}
+
+// 베팅옵션 카드 하나 — 기본은 배당별(0.1단위 구간), 카드별로 개별적으로 리그별 전환 가능.
+function BetOptionCard({ label, bets }: { label: string; bets: Bet[] }) {
+  const [view, setView] = useState<'odds' | 'league'>('odds')
+  const s = calcStats(bets)
+  return (
+    <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, padding: '12px 14px', flex: '1 0 260px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)', flex: 1 }}>{label}</div>
+        <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+          {([['odds', '배당별'], ['league', '리그별']] as const).map(([v, vLabel]) => (
+            <button key={v} type="button" onClick={() => setView(v)} style={{
+              fontSize: 9, fontWeight: 700, padding: '2px 7px', borderRadius: 999, cursor: 'pointer', fontFamily: 'var(--font-body)',
+              border: `1px solid ${view === v ? 'var(--gold-border)' : 'var(--border)'}`,
+              background: view === v ? 'var(--gold-bg)' : 'var(--bg-elevated)',
+              color: view === v ? 'var(--gold)' : 'var(--text-secondary)',
+            }}>{vLabel}</button>
+          ))}
+        </div>
+      </div>
+      {s.total === 0 ? (
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'center', padding: '10px 0' }}>데이터 없음</div>
+      ) : (
+        <>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+            <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{s.total}건</span>
+            <span style={{ fontSize: 11, fontWeight: 700, color: s.winRate >= 50 ? '#4ade80' : '#f87171' }}>{s.winRate.toFixed(0)}%</span>
+            <span style={{ fontSize: 12, fontWeight: 800, color: s.roi >= 0 ? '#4ade80' : '#f87171' }}>{s.roi >= 0 ? '+' : ''}{s.roi.toFixed(1)}%</span>
+            <span style={{ fontSize: 10, fontWeight: 700, color: s.profit >= 0 ? '#4ade80' : '#f87171' }}>{s.profit >= 0 ? '+' : ''}{s.profit.toLocaleString()}원</span>
+          </div>
+          <RuleStatsRows rows={view === 'odds' ? oddsBinRows(bets) : leagueBreakdownRows(bets)} />
+        </>
+      )}
+    </div>
+  )
 }
 
 // ─── 종목 탭 내부: 이 종목에 등록된 베팅옵션별(예: LOL "3.5 오버") 세부 성적 ─────────────
 // 농구는 제외 — 농구는 핸디캡 라인(4.5~13.5)별 적중률만 보면 되고 배당은 항상 1.9대로 고정이라
 // 옵션 라벨 매칭이 필요 없음(BasketballDetailPanel의 hcapLineRows가 이 역할을 대신함).
-// 기본은 옵션별 총계 한 표, "배당별"/"리그별"로 바꾸면 옵션을 하나 골라 그 옵션만 배당 0.1단위 구간
-// 또는 리그별로 더 잘게 쪼개서 본다.
+// 등록된 옵션 하나하나가 각각 카드 하나 — 탭으로 감추지 않고 전부 한 화면에 펼쳐서 보여준다.
+// 삭제된 옵션에 걸려있던(또는 어디에도 안 걸리는) 베팅은 "기타" 카드로.
 function BetOptionStatsSection({ settledBets, options, numericOptions }: { settledBets: Bet[]; options: string[]; numericOptions: string[] }) {
-  const [view, setView] = useState<'total' | 'odds' | 'league'>('total')
-  const [selectedOption, setSelectedOption] = useState('')
   if (options.length === 0) return null
   const cells = classifySportBetsByOption(settledBets, options, numericOptions)
   if (cells.length === 0) return null
-  const rows: RuleRow[] = cells.map(c => ({ label: c.label, bets: c.bets, tier: 'none' }))
-  const activeCell = cells.find(c => c.label === selectedOption) ?? cells[0]
 
   return (
     <div style={{ marginBottom: 14 }}>
-      <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 2 }}>
-        <div className="card-title" style={{ margin: 0 }}>🎯 베팅옵션별 성적</div>
-        <div style={{ display: 'flex', gap: 4, marginLeft: 'auto' }}>
-          {([['total', '총계'], ['odds', '배당별'], ['league', '리그별']] as const).map(([v, label]) => (
-            <button key={v} type="button" onClick={() => setView(v)} style={{
-              fontSize: 10, fontWeight: 700, padding: '3px 9px', borderRadius: 999, cursor: 'pointer', fontFamily: 'var(--font-body)',
-              border: `1px solid ${view === v ? 'var(--gold-border)' : 'var(--border)'}`,
-              background: view === v ? 'var(--gold-bg)' : 'var(--bg-elevated)',
-              color: view === v ? 'var(--gold)' : 'var(--text-secondary)',
-            }}>{label}</button>
-          ))}
-        </div>
+      <div className="card-title" style={{ marginBottom: 2 }}>🎯 베팅옵션별 성적</div>
+      <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 10 }}>베팅추가에 등록된 옵션 전부 · 옵션별로 개별 전환 가능 — 삭제된 옵션에 걸린 베팅이나 어디에도 안 걸리는 베팅은 "기타"로 표시</div>
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+        {cells.map(c => <BetOptionCard key={c.label} label={c.label} bets={c.bets} />)}
       </div>
-      <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 10 }}>베팅추가에서 등록한 옵션 기준 — 어디에도 안 걸리는 베팅은 "기타"로 표시</div>
-
-      {view === 'total' && (
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          <RuleStatsTable title="옵션별 승률·ROI·손익" rows={rows} extra={<MarketTotalRow bets={settledBets} />} />
-        </div>
-      )}
-
-      {view !== 'total' && activeCell && (
-        <>
-          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 8 }}>
-            {cells.map(c => (
-              <button key={c.label} type="button" onClick={() => setSelectedOption(c.label)} style={{
-                fontSize: 10, fontWeight: 600, padding: '4px 8px', borderRadius: 6, cursor: 'pointer', fontFamily: 'var(--font-body)',
-                border: `1px solid ${activeCell.label === c.label ? 'var(--gold-border)' : 'var(--border)'}`,
-                background: activeCell.label === c.label ? 'var(--gold-bg)' : 'var(--bg-elevated)',
-                color: activeCell.label === c.label ? 'var(--gold)' : 'var(--text-secondary)',
-              }}>{c.label}</button>
-            ))}
-          </div>
-          {view === 'odds' && (
-            <RuleStatsTable title={`${activeCell.label} — 0.1단위 배당 구간별`} rows={oddsBinRows(activeCell.bets)} extra={<MarketTotalRow bets={activeCell.bets} />} />
-          )}
-          {view === 'league' && (
-            <OptionLeagueBreakdownTable title={`${activeCell.label} — 리그별`} bets={activeCell.bets} />
-          )}
-        </>
-      )}
     </div>
   )
 }
@@ -403,58 +385,63 @@ function MarketTotalRow({ bets }: { bets: Bet[] }) {
   )
 }
 
-function RuleStatsTable({ title, rows, extra }: { title: string; rows: RuleRow[]; extra?: React.ReactNode }) {
+// 표 몸통(헤더+행)만 — 카드 껍데기 없이. 카드 안에 카드를 중첩시키지 않고 재사용하기 위해 분리.
+function RuleStatsRows({ rows }: { rows: RuleRow[] }) {
   const hasBets = rows.some(r => r.bets.filter(b => b.result !== 'pending').length > 0)
+  if (!hasBets) return <div style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'center', padding: '12px 0' }}>데이터 없음</div>
+  return (
+    <table style={{ width: '100%', fontSize: 11, borderCollapse: 'collapse' }}>
+      <thead>
+        <tr style={{ borderBottom: '1px solid var(--border)' }}>
+          <th style={{ textAlign: 'left', padding: '3px 6px', fontSize: 9, color: 'var(--text-secondary)', fontWeight: 700 }}>구간</th>
+          <th style={{ textAlign: 'center', fontSize: 9, color: 'var(--text-secondary)', fontWeight: 700, padding: '3px 4px' }}>건</th>
+          <th style={{ textAlign: 'center', fontSize: 9, color: 'var(--text-secondary)', fontWeight: 700, padding: '3px 4px' }}>승률</th>
+          <th style={{ textAlign: 'center', fontSize: 9, color: 'var(--text-secondary)', fontWeight: 700, padding: '3px 4px' }}>ROI</th>
+          <th style={{ textAlign: 'center', fontSize: 9, color: 'var(--text-secondary)', fontWeight: 700, padding: '3px 4px' }}>손익</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map(r => {
+          const s = calcStats(r.bets)
+          const ts = TIER_STYLE[r.tier]
+          const isEmpty = s.total === 0
+          return (
+            <tr key={r.label} style={{ borderBottom: '1px solid var(--border-light)', background: isEmpty ? 'transparent' : ts.bg, opacity: isEmpty ? 0.4 : 1 }}>
+              <td style={{ padding: '5px 6px', display: 'flex', alignItems: 'center', gap: 5 }}>
+                {r.tier !== 'none' && (
+                  <span style={{ fontSize: 9, fontWeight: 700, color: ts.color, background: ts.bg, border: `1px solid ${ts.border}`, borderRadius: 3, padding: '0 4px', flexShrink: 0 }}>{ts.label}</span>
+                )}
+                <span style={{ fontSize: 10, color: 'var(--text-primary)', fontWeight: 600 }}>{r.label}</span>
+                {r.breakeven && !isEmpty && (
+                  <span style={{ fontSize: 8, color: 'var(--text-muted)' }}>손분 {r.breakeven}</span>
+                )}
+              </td>
+              <td style={{ textAlign: 'center', padding: '5px 4px', fontSize: 10, color: 'var(--text-secondary)' }}>{isEmpty ? '—' : s.total}</td>
+              <td style={{ textAlign: 'center', padding: '5px 4px' }}>
+                {isEmpty ? <span style={{ color: 'var(--text-muted)', fontSize: 10 }}>—</span>
+                  : <span style={{ fontSize: 11, fontWeight: 700, color: s.winRate >= 50 ? '#4ade80' : '#f87171' }}>{s.winRate.toFixed(0)}%</span>}
+              </td>
+              <td style={{ textAlign: 'center', padding: '5px 4px' }}>
+                {isEmpty ? <span style={{ color: 'var(--text-muted)', fontSize: 10 }}>—</span>
+                  : <span style={{ fontSize: 10, fontWeight: 700, color: s.roi >= 0 ? '#4ade80' : '#f87171' }}>{s.roi >= 0 ? '+' : ''}{s.roi.toFixed(1)}%</span>}
+              </td>
+              <td style={{ textAlign: 'center', padding: '5px 4px', whiteSpace: 'nowrap' }}>
+                {isEmpty ? <span style={{ color: 'var(--text-muted)', fontSize: 10 }}>—</span>
+                  : <span style={{ fontSize: 10, fontWeight: 700, color: s.profit >= 0 ? '#4ade80' : '#f87171' }}>{s.profit >= 0 ? '+' : ''}{s.profit.toLocaleString()}</span>}
+              </td>
+            </tr>
+          )
+        })}
+      </tbody>
+    </table>
+  )
+}
+
+function RuleStatsTable({ title, rows, extra }: { title: string; rows: RuleRow[]; extra?: React.ReactNode }) {
   return (
     <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, padding: '12px 14px', flex: '1 0 250px' }}>
       <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 10 }}>{title}</div>
-      {!hasBets && <div style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'center', padding: '12px 0' }}>데이터 없음</div>}
-      {hasBets && (
-        <table style={{ width: '100%', fontSize: 11, borderCollapse: 'collapse' }}>
-          <thead>
-            <tr style={{ borderBottom: '1px solid var(--border)' }}>
-              <th style={{ textAlign: 'left', padding: '3px 6px', fontSize: 9, color: 'var(--text-secondary)', fontWeight: 700 }}>구간</th>
-              <th style={{ textAlign: 'center', fontSize: 9, color: 'var(--text-secondary)', fontWeight: 700, padding: '3px 4px' }}>건</th>
-              <th style={{ textAlign: 'center', fontSize: 9, color: 'var(--text-secondary)', fontWeight: 700, padding: '3px 4px' }}>승률</th>
-              <th style={{ textAlign: 'center', fontSize: 9, color: 'var(--text-secondary)', fontWeight: 700, padding: '3px 4px' }}>ROI</th>
-              <th style={{ textAlign: 'center', fontSize: 9, color: 'var(--text-secondary)', fontWeight: 700, padding: '3px 4px' }}>손익</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map(r => {
-              const s = calcStats(r.bets)
-              const ts = TIER_STYLE[r.tier]
-              const isEmpty = s.total === 0
-              return (
-                <tr key={r.label} style={{ borderBottom: '1px solid var(--border-light)', background: isEmpty ? 'transparent' : ts.bg, opacity: isEmpty ? 0.4 : 1 }}>
-                  <td style={{ padding: '5px 6px', display: 'flex', alignItems: 'center', gap: 5 }}>
-                    {r.tier !== 'none' && (
-                      <span style={{ fontSize: 9, fontWeight: 700, color: ts.color, background: ts.bg, border: `1px solid ${ts.border}`, borderRadius: 3, padding: '0 4px', flexShrink: 0 }}>{ts.label}</span>
-                    )}
-                    <span style={{ fontSize: 10, color: 'var(--text-primary)', fontWeight: 600 }}>{r.label}</span>
-                    {r.breakeven && !isEmpty && (
-                      <span style={{ fontSize: 8, color: 'var(--text-muted)' }}>손분 {r.breakeven}</span>
-                    )}
-                  </td>
-                  <td style={{ textAlign: 'center', padding: '5px 4px', fontSize: 10, color: 'var(--text-secondary)' }}>{isEmpty ? '—' : s.total}</td>
-                  <td style={{ textAlign: 'center', padding: '5px 4px' }}>
-                    {isEmpty ? <span style={{ color: 'var(--text-muted)', fontSize: 10 }}>—</span>
-                      : <span style={{ fontSize: 11, fontWeight: 700, color: s.winRate >= 50 ? '#4ade80' : '#f87171' }}>{s.winRate.toFixed(0)}%</span>}
-                  </td>
-                  <td style={{ textAlign: 'center', padding: '5px 4px' }}>
-                    {isEmpty ? <span style={{ color: 'var(--text-muted)', fontSize: 10 }}>—</span>
-                      : <span style={{ fontSize: 10, fontWeight: 700, color: s.roi >= 0 ? '#4ade80' : '#f87171' }}>{s.roi >= 0 ? '+' : ''}{s.roi.toFixed(1)}%</span>}
-                  </td>
-                  <td style={{ textAlign: 'center', padding: '5px 4px', whiteSpace: 'nowrap' }}>
-                    {isEmpty ? <span style={{ color: 'var(--text-muted)', fontSize: 10 }}>—</span>
-                      : <span style={{ fontSize: 10, fontWeight: 700, color: s.profit >= 0 ? '#4ade80' : '#f87171' }}>{s.profit >= 0 ? '+' : ''}{s.profit.toLocaleString()}</span>}
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      )}
+      <RuleStatsRows rows={rows} />
       {extra}
     </div>
   )
