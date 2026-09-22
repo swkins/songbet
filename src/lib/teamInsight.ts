@@ -11,6 +11,7 @@ export interface BetLite {
   result: string
   profit: number
   stake: number
+  odds: number
   bet_date: string
   created_at: string
   league?: string | null
