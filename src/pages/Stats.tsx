@@ -7,6 +7,7 @@ import dayjs from 'dayjs'
 import { Trash2, X, Check, Pencil } from 'lucide-react'
 import { inferBaseballLeague, inferSoccerLeague, koCompare, KBO_TEAMS, MLB_TEAMS, NPB_TEAMS, type LeagueOverride } from '../lib/league'
 import { sportGlyph } from '../components/SportIcons'
+import { applyNumericTemplate, extractNumericTemplateValueFromText } from '../lib/betOptions'
 
 // 리그 관리 시스템(베팅옵션·리그별 순위, 리그 미지정 베팅 지정) — 데이터/로직은 유지하되 화면에는 표출하지 않음
 const SHOW_LEAGUE_UI = false
@@ -87,20 +88,45 @@ function matchesBetOptionLabel(matchText: string, label: string): boolean {
   return s === label || s.endsWith(' ' + label)
 }
 interface OptionCell { label: string; bets: Bet[] }
-function classifySportBetsByOption(sportBets: Bet[], options: string[]): OptionCell[] {
+function pushOptionCells(cells: OptionCell[], label: string, matched: Bet[]) {
+  const home = matched.filter(b => extractSide(b.match) === '홈')
+  const away = matched.filter(b => extractSide(b.match) === '원정')
+  const none = matched.filter(b => !extractSide(b.match))
+  if (home.length) cells.push({ label: `홈 ${label}`, bets: home })
+  if (away.length) cells.push({ label: `원정 ${label}`, bets: away })
+  if (none.length) cells.push({ label, bets: none })
+}
+// numericOptions에 속한 템플릿(예: "포인트 오버")은 베팅추가에서 매번 다른 숫자가 입력되므로,
+// 문구에서 실제 입력됐던 숫자를 뽑아 "185.5 오버"/"190.5 오버"처럼 값별로 각각 행을 나눈다.
+function classifySportBetsByOption(sportBets: Bet[], options: string[], numericOptions: string[] = []): OptionCell[] {
+  const numericSet = new Set(numericOptions)
   const sortedOptions = [...options].sort((a, b) => b.length - a.length)
   const claimed = new Set<string>()
   const cells: OptionCell[] = []
   for (const opt of sortedOptions) {
+    if (numericSet.has(opt)) {
+      const byValue = new Map<string, Bet[]>()
+      for (const b of sportBets) {
+        if (claimed.has(b.id)) continue
+        const value = extractNumericTemplateValueFromText(opt, b.match)
+        if (value === null) continue
+        const label = applyNumericTemplate(opt, value)
+        const arr = byValue.get(label) ?? []
+        arr.push(b)
+        byValue.set(label, arr)
+      }
+      const sortedLabels = Array.from(byValue.keys()).sort((a, b) => a.localeCompare(b, 'ko', { numeric: true }))
+      for (const label of sortedLabels) {
+        const matched = byValue.get(label)!
+        matched.forEach(b => claimed.add(b.id))
+        pushOptionCells(cells, label, matched)
+      }
+      continue
+    }
     const matched = sportBets.filter(b => !claimed.has(b.id) && matchesBetOptionLabel(b.match, opt))
     if (matched.length === 0) continue
     matched.forEach(b => claimed.add(b.id))
-    const home = matched.filter(b => extractSide(b.match) === '홈')
-    const away = matched.filter(b => extractSide(b.match) === '원정')
-    const none = matched.filter(b => !extractSide(b.match))
-    if (home.length) cells.push({ label: `홈 ${opt}`, bets: home })
-    if (away.length) cells.push({ label: `원정 ${opt}`, bets: away })
-    if (none.length) cells.push({ label: opt, bets: none })
+    pushOptionCells(cells, opt, matched)
   }
   const other = sportBets.filter(b => !claimed.has(b.id))
   if (other.length) cells.push({ label: '기타', bets: other })
@@ -121,7 +147,7 @@ const OPTION_STATS_SPORTS: { value: Sport; label: string; emoji: string }[] = [
   { value: 'other', label: '기타', emoji: '📋' },
 ]
 
-function MarketTypeOverviewSection({ settled, betOptionsBySport }: { settled: Bet[]; betOptionsBySport: Record<string, string[]> }) {
+function MarketTypeOverviewSection({ settled, betOptionsBySport, numericBetOptionsBySport }: { settled: Bet[]; betOptionsBySport: Record<string, string[]>; numericBetOptionsBySport: Record<string, string[]> }) {
   const cols = OPTION_STATS_SPORTS
     .map(s => ({ ...s, sportBets: settled.filter(b => b.sport === s.value) }))
     .filter(s => s.sportBets.length > 0)
@@ -133,7 +159,7 @@ function MarketTypeOverviewSection({ settled, betOptionsBySport }: { settled: Be
       <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 10 }}>베팅추가에서 등록한 옵션 기준 (예: 홈 0.5, 원정 1.5) — 어디에도 안 걸리는 베팅은 "기타"로 표시</div>
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
         {cols.map(s => {
-          const cells = classifySportBetsByOption(s.sportBets, betOptionsBySport[s.value] ?? [])
+          const cells = classifySportBetsByOption(s.sportBets, betOptionsBySport[s.value] ?? [], numericBetOptionsBySport[s.value] ?? [])
           const rows: RuleRow[] = cells.map(c => ({ label: c.label, bets: c.bets, tier: 'none' }))
           return (
             <RuleStatsTable key={s.value} title={`${s.emoji} ${s.label}`} rows={rows} extra={<MarketTotalRow bets={s.sportBets} />} />
@@ -157,11 +183,11 @@ function OptionLeagueBreakdownTable({ title, bets }: { title: string; bets: Bet[
 // 옵션 라벨 매칭이 필요 없음(BasketballDetailPanel의 hcapLineRows가 이 역할을 대신함).
 // 기본은 옵션별 총계 한 표, "배당별"/"리그별"로 바꾸면 옵션을 하나 골라 그 옵션만 배당 0.1단위 구간
 // 또는 리그별로 더 잘게 쪼개서 본다.
-function BetOptionStatsSection({ settledBets, options }: { settledBets: Bet[]; options: string[] }) {
+function BetOptionStatsSection({ settledBets, options, numericOptions }: { settledBets: Bet[]; options: string[]; numericOptions: string[] }) {
   const [view, setView] = useState<'total' | 'odds' | 'league'>('total')
   const [selectedOption, setSelectedOption] = useState('')
   if (options.length === 0) return null
-  const cells = classifySportBetsByOption(settledBets, options)
+  const cells = classifySportBetsByOption(settledBets, options, numericOptions)
   if (cells.length === 0) return null
   const rows: RuleRow[] = cells.map(c => ({ label: c.label, bets: c.bets, tier: 'none' }))
   const activeCell = cells.find(c => c.label === selectedOption) ?? cells[0]
@@ -1297,9 +1323,10 @@ function LivePanel({ bets, onDeleteRequest }: { bets: Bet[]; onDeleteRequest: ()
 }
 
 
-function SportPanel({ bets, sport, onDeleteRequest, leagueOverrides, baseballLeagues, onRenameBaseballLeague, onDeleteBaseballLeague, esportsOverrides, esportsLeagues, onRenameEsportsLeague, onDeleteEsportsLeague, basketballOverrides, basketballLeagues, onRenameBasketballLeague, onDeleteBasketballLeague, volleyballOverrides, volleyballLeagues, onRenameVolleyballLeague, onDeleteVolleyballLeague, betOptions }: {
+function SportPanel({ bets, sport, onDeleteRequest, leagueOverrides, baseballLeagues, onRenameBaseballLeague, onDeleteBaseballLeague, esportsOverrides, esportsLeagues, onRenameEsportsLeague, onDeleteEsportsLeague, basketballOverrides, basketballLeagues, onRenameBasketballLeague, onDeleteBasketballLeague, volleyballOverrides, volleyballLeagues, onRenameVolleyballLeague, onDeleteVolleyballLeague, betOptions, numericBetOptions }: {
   bets: Bet[]; sport: typeof SPORTS[0]; onDeleteRequest: () => void
   betOptions: string[]
+  numericBetOptions: string[]
   leagueOverrides: LeagueOverride[]
   baseballLeagues: string[]
   onRenameBaseballLeague: (oldName: string, newName: string) => Promise<void>
@@ -1363,7 +1390,7 @@ function SportPanel({ bets, sport, onDeleteRequest, leagueOverrides, baseballLea
         </button>
       </div>
 
-      {sport.value !== 'basketball' && <BetOptionStatsSection key={sport.value} settledBets={stats.settled} options={betOptions} />}
+      {sport.value !== 'basketball' && <BetOptionStatsSection key={sport.value} settledBets={stats.settled} options={betOptions} numericOptions={numericBetOptions} />}
 
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-start' }}>
         {byMarket.length > 0 && sport.value !== 'soccer' && (
@@ -1436,6 +1463,8 @@ export default function Stats() {
   const [soccerLeagues, setSoccerLeagues] = useState<string[]>([])
   // 베팅추가에서 종목별로 등록한 베팅옵션 — 전체 탭에서 종목×옵션별 세부 성적을 보여주기 위해 사용
   const [betOptionsBySport, setBetOptionsBySport] = useState<Record<string, string[]>>({})
+  // "세부 수치 입력" 옵션(예: "포인트 오버") — betOptionsBySport의 부분집합, 문구에서 실제 입력값을 뽑아 값별로 쪼개는 데 사용
+  const [numericBetOptionsBySport, setNumericBetOptionsBySport] = useState<Record<string, string[]>>({})
 
   const BASEBALL_FIXED_LEAGUES = ['KBO', 'MLB', 'NPB', 'CPBL', 'LMB']
 
@@ -1465,8 +1494,13 @@ export default function Stats() {
     const { data } = await supabase.from('bet_options').select('*').order('sport').order('sort_order').order('created_at')
     if (data) {
       const grouped: Record<string, string[]> = {}
-      for (const d of data) (grouped[d.sport] ??= []).push(d.label)
+      const numericGrouped: Record<string, string[]> = {}
+      for (const d of data) {
+        (grouped[d.sport] ??= []).push(d.label)
+        if (d.numeric_input) (numericGrouped[d.sport] ??= []).push(d.label)
+      }
       setBetOptionsBySport(grouped)
+      setNumericBetOptionsBySport(numericGrouped)
     }
   }
   async function loadSites() {
@@ -1692,7 +1726,7 @@ export default function Stats() {
                 ))}
               </div>
 
-              <MarketTypeOverviewSection settled={settled} betOptionsBySport={betOptionsBySport} />
+              <MarketTypeOverviewSection settled={settled} betOptionsBySport={betOptionsBySport} numericBetOptionsBySport={numericBetOptionsBySport} />
 
               {SHOW_LEAGUE_UI && <OptionLeagueRankingSection settled={settled} betOptionsBySport={betOptionsBySport} />}
 
@@ -1859,6 +1893,7 @@ export default function Stats() {
               bets={periodFiltered}
               sport={SPORTS.find(s => s.value === activeSport)!}
               betOptions={betOptionsBySport[activeSport] ?? []}
+              numericBetOptions={numericBetOptionsBySport[activeSport] ?? []}
               leagueOverrides={leagueOverrides}
               baseballLeagues={baseballLeagues}
               onRenameBaseballLeague={renameBaseballLeague}
