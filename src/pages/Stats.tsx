@@ -101,17 +101,27 @@ function pushOptionCells(cells: OptionCell[], label: string, matched: Bet[]) {
 // 그건 어디까지나 같은 베팅옵션이므로 값에 상관없이 템플릿 이름 하나로 통합해서 집계한다
 // (185.5 오버든 190.5 오버든 전부 "포인트 오버" 한 카드). 등록된 옵션은 순서 그대로 전부 나오고
 // (베팅이 하나도 없어도 빈 카드로), 어디에도 안 걸리거나(또는 옵션이 삭제됐으면) "기타"로 모은다.
+// bets.bet_option — "기타"에서 사용자가 수동으로 재지정한 값. 지금도 등록돼있는 옵션이면
+// 문구 패턴매칭보다 우선 적용하고, 그 옵션이 나중에 삭제되면 자동으로 다시 기타로 빠진다.
 function classifySportBetsByOption(sportBets: Bet[], options: string[], numericOptions: string[] = []): OptionCell[] {
   const numericSet = new Set(numericOptions)
-  const matchOrder = [...options].sort((a, b) => b.length - a.length)
+  const optionSet = new Set(options)
   const claimed = new Set<string>()
-  const matchedByOption = new Map<string, Bet[]>()
+  const matchedByOption = new Map<string, Bet[]>(options.map(opt => [opt, []]))
+
+  for (const b of sportBets) {
+    if (b.bet_option && optionSet.has(b.bet_option)) {
+      matchedByOption.get(b.bet_option)!.push(b)
+      claimed.add(b.id)
+    }
+  }
+  const matchOrder = [...options].sort((a, b) => b.length - a.length)
   for (const opt of matchOrder) {
     const matched = numericSet.has(opt)
       ? sportBets.filter(b => !claimed.has(b.id) && extractNumericTemplateValueFromText(opt, b.match) !== null)
       : sportBets.filter(b => !claimed.has(b.id) && matchesBetOptionLabel(b.match, opt))
     matched.forEach(b => claimed.add(b.id))
-    matchedByOption.set(opt, matched)
+    matchedByOption.get(opt)!.push(...matched)
   }
   const cells: OptionCell[] = []
   for (const opt of options) pushOptionCells(cells, opt, matchedByOption.get(opt) ?? [])
@@ -123,11 +133,10 @@ function classifySportBetsByOption(sportBets: Bet[], options: string[], numericO
 // 종목을 가로(열)로, 베팅옵션(홈 0.5, 원정 1.5 등)을 세로(행)로 나열한 표.
 // 종목마다 옵션 구성이 다르므로, 실제 등장하는 모든 (종목,옵션) 조합의 라벨을 모아 행으로 쓰고
 // 없는 조합은 빈칸(—)으로 둔다. "기타"(등록된 옵션에 안 걸리는 베팅)는 있으면 맨 아래 행으로.
-// 농구를 제외한 모든 종목 — 농구는 핸디캡 라인(4.5~13.5)별 적중률로 따로 보여주고(BasketballDetailPanel),
-// 배당은 항상 1.9대 고정이라 옵션 라벨별 성적표가 필요 없다.
 const OPTION_STATS_SPORTS: { value: Sport; label: string; emoji: string }[] = [
   { value: 'soccer', label: '축구', emoji: '⚽' },
   { value: 'baseball', label: '야구', emoji: '⚾' },
+  { value: 'basketball', label: '농구', emoji: '🏀' },
   { value: 'volleyball', label: '배구', emoji: '🏐' },
   { value: 'esports', label: 'LOL', emoji: '🎮' },
   { value: 'hockey', label: '하키', emoji: '🏒' },
@@ -157,32 +166,12 @@ function MarketTypeOverviewSection({ settled, betOptionsBySport, numericBetOptio
   )
 }
 
-// 정산된 베팅을 리그별로 묶어 RuleRow로 변환 (리그 미지정은 "미지정"으로 통합)
-function leagueBreakdownRows(bets: Bet[]): RuleRow[] {
-  const leagueKeyOf = (b: Bet) => (b.league && b.league.trim()) ? b.league.trim() : '미지정'
-  const leagueNames = Array.from(new Set(bets.map(leagueKeyOf))).sort(koCompare)
-  return leagueNames.map(l => ({ label: l, tier: 'none', bets: bets.filter(b => leagueKeyOf(b) === l) }))
-}
-
-// 베팅옵션 카드 하나 — 기본은 배당별(0.1단위 구간), 카드별로 개별적으로 리그별 전환 가능.
-function BetOptionCard({ label, bets }: { label: string; bets: Bet[] }) {
-  const [view, setView] = useState<'odds' | 'league'>('odds')
+// 베팅옵션 카드 하나 — 배당 0.1단위 구간별 고정(리그별 보기는 아래 리그×옵션 매트릭스에서).
+function BetOptionOddsCard({ label, bets }: { label: string; bets: Bet[] }) {
   const s = calcStats(bets)
   return (
     <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, padding: '12px 14px', flex: '1 0 260px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)', flex: 1 }}>{label}</div>
-        <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
-          {([['odds', '배당별'], ['league', '리그별']] as const).map(([v, vLabel]) => (
-            <button key={v} type="button" onClick={() => setView(v)} style={{
-              fontSize: 9, fontWeight: 700, padding: '2px 7px', borderRadius: 999, cursor: 'pointer', fontFamily: 'var(--font-body)',
-              border: `1px solid ${view === v ? 'var(--gold-border)' : 'var(--border)'}`,
-              background: view === v ? 'var(--gold-bg)' : 'var(--bg-elevated)',
-              color: view === v ? 'var(--gold)' : 'var(--text-secondary)',
-            }}>{vLabel}</button>
-          ))}
-        </div>
-      </div>
+      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 8 }}>{label}</div>
       {s.total === 0 ? (
         <div style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'center', padding: '10px 0' }}>데이터 없음</div>
       ) : (
@@ -193,30 +182,98 @@ function BetOptionCard({ label, bets }: { label: string; bets: Bet[] }) {
             <span style={{ fontSize: 12, fontWeight: 800, color: s.roi >= 0 ? '#4ade80' : '#f87171' }}>{s.roi >= 0 ? '+' : ''}{s.roi.toFixed(1)}%</span>
             <span style={{ fontSize: 10, fontWeight: 700, color: s.profit >= 0 ? '#4ade80' : '#f87171' }}>{s.profit >= 0 ? '+' : ''}{s.profit.toLocaleString()}원</span>
           </div>
-          <RuleStatsRows rows={view === 'odds' ? oddsBinRows(bets) : leagueBreakdownRows(bets)} />
+          <RuleStatsRows rows={oddsBinRows(bets)} />
         </>
       )}
     </div>
   )
 }
 
+// "기타" 카드 — 어디에도 안 걸리거나 삭제된 옵션에 걸려있던 베팅을 목록으로 보여주고,
+// 등록된 옵션 중 하나로 직접 재지정할 수 있게 한다(bets.bet_option에 저장).
+function UnclassifiedBetOptionCard({ bets, options, onAssign }: {
+  bets: Bet[]; options: string[]; onAssign: (ids: string[], label: string) => Promise<void>
+}) {
+  const [choice, setChoice] = useState<Record<string, string>>({})
+  const [saving, setSaving] = useState<string | null>(null)
+  const settled = bets.filter(b => b.result !== 'pending')
+  const s = calcStats(settled)
+
+  async function assign(id: string) {
+    const label = choice[id]
+    if (!label) return
+    setSaving(id)
+    await onAssign([id], label)
+    setSaving(null)
+    setChoice(p => { const n = { ...p }; delete n[id]; return n })
+  }
+
+  return (
+    <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, padding: '12px 14px', flex: '1 0 100%' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)' }}>기타 ({settled.length}건)</div>
+        {s.total > 0 && (
+          <>
+            <span style={{ fontSize: 11, fontWeight: 700, color: s.winRate >= 50 ? '#4ade80' : '#f87171' }}>{s.winRate.toFixed(0)}%</span>
+            <span style={{ fontSize: 12, fontWeight: 800, color: s.roi >= 0 ? '#4ade80' : '#f87171' }}>{s.roi >= 0 ? '+' : ''}{s.roi.toFixed(1)}%</span>
+          </>
+        )}
+        <span style={{ fontSize: 9, color: 'var(--text-muted)', marginLeft: 'auto' }}>등록된 옵션 중 하나로 재지정 가능</span>
+      </div>
+      {settled.length === 0 ? (
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'center', padding: '10px 0' }}>데이터 없음</div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 280, overflowY: 'auto' }}>
+          {settled.map(b => (
+            <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, padding: '4px 6px', background: 'var(--bg-elevated)', borderRadius: 5 }}>
+              <span style={{ color: 'var(--text-muted)', flexShrink: 0 }}>{b.bet_date.slice(5)}</span>
+              <span style={{ color: 'var(--text-muted)', flexShrink: 0 }}>{b.league || '리그미지정'}</span>
+              <span style={{ flex: 1, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.pick}</span>
+              <select value={choice[b.id] ?? ''} onChange={e => setChoice(p => ({ ...p, [b.id]: e.target.value }))}
+                style={{ fontSize: 9, padding: '2px 4px', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text-primary)', flexShrink: 0, maxWidth: 110 }}>
+                <option value="">옵션 선택</option>
+                {options.map(o => <option key={o} value={o}>{o}</option>)}
+              </select>
+              <button type="button" onClick={() => assign(b.id)} disabled={!choice[b.id] || saving === b.id}
+                style={{ fontSize: 9, fontWeight: 700, padding: '3px 7px', borderRadius: 4, cursor: choice[b.id] ? 'pointer' : 'default', fontFamily: 'var(--font-body)', flexShrink: 0,
+                  border: '1px solid var(--gold-border)', background: 'var(--gold-bg)', color: 'var(--gold)', opacity: choice[b.id] ? 1 : 0.5 }}>
+                {saving === b.id ? '저장중' : '지정'}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── 종목 탭 내부: 이 종목에 등록된 베팅옵션별(예: LOL "3.5 오버") 세부 성적 ─────────────
-// 농구는 제외 — 농구는 핸디캡 라인(4.5~13.5)별 적중률만 보면 되고 배당은 항상 1.9대로 고정이라
-// 옵션 라벨 매칭이 필요 없음(BasketballDetailPanel의 hcapLineRows가 이 역할을 대신함).
-// 등록된 옵션 하나하나가 각각 카드 하나 — 탭으로 감추지 않고 전부 한 화면에 펼쳐서 보여준다.
-// 삭제된 옵션에 걸려있던(또는 어디에도 안 걸리는) 베팅은 "기타" 카드로.
-function BetOptionStatsSection({ settledBets, options, numericOptions }: { settledBets: Bet[]; options: string[]; numericOptions: string[] }) {
+// 등록된 옵션 하나하나가 각각 카드 하나 — 탭으로 감추지 않고 전부 한 화면에 펼쳐서 보여준다(배당 기준 고정).
+// 삭제된 옵션에 걸려있던(또는 어디에도 안 걸리는) 베팅은 "기타" 카드로, 거기서 직접 재지정 가능.
+// 그 아래엔 축구 리그표처럼 리그를 세로로, 옵션을 가로로 깔아 리그별 성적을 한 표에서 비교하는 매트릭스.
+function BetOptionStatsSection({ settledBets, options, numericOptions, onAssignBetOption }: {
+  settledBets: Bet[]; options: string[]; numericOptions: string[]
+  onAssignBetOption: (ids: string[], label: string) => Promise<void>
+}) {
   if (options.length === 0) return null
   const cells = classifySportBetsByOption(settledBets, options, numericOptions)
   if (cells.length === 0) return null
+  const matrixColumns = cells.filter(c => c.label !== '기타')
 
   return (
     <div style={{ marginBottom: 14 }}>
       <div className="card-title" style={{ marginBottom: 2 }}>🎯 베팅옵션별 성적</div>
-      <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 10 }}>베팅추가에 등록된 옵션 전부 · 옵션별로 개별 전환 가능 — 삭제된 옵션에 걸린 베팅이나 어디에도 안 걸리는 베팅은 "기타"로 표시</div>
+      <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 10 }}>베팅추가에 등록된 옵션 전부, 배당 0.1단위 구간별 — 삭제된 옵션에 걸린 베팅이나 어디에도 안 걸리는 베팅은 "기타"로 표시</div>
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-        {cells.map(c => <BetOptionCard key={c.label} label={c.label} bets={c.bets} />)}
+        {cells.map(c => c.label === '기타'
+          ? <UnclassifiedBetOptionCard key="기타" bets={c.bets} options={options} onAssign={onAssignBetOption} />
+          : <BetOptionOddsCard key={c.label} label={c.label} bets={c.bets} />)}
       </div>
+      {matrixColumns.length > 0 && (
+        <div style={{ marginTop: 14 }}>
+          <SoccerLeagueColumnsSection title="🎯 베팅옵션 · 리그별" columns={matrixColumns} emptyLabel="정산된 베팅이 없습니다." />
+        </div>
+      )}
     </div>
   )
 }
@@ -1310,10 +1367,11 @@ function LivePanel({ bets, onDeleteRequest }: { bets: Bet[]; onDeleteRequest: ()
 }
 
 
-function SportPanel({ bets, sport, onDeleteRequest, leagueOverrides, baseballLeagues, onRenameBaseballLeague, onDeleteBaseballLeague, esportsOverrides, esportsLeagues, onRenameEsportsLeague, onDeleteEsportsLeague, basketballOverrides, basketballLeagues, onRenameBasketballLeague, onDeleteBasketballLeague, volleyballOverrides, volleyballLeagues, onRenameVolleyballLeague, onDeleteVolleyballLeague, betOptions, numericBetOptions }: {
+function SportPanel({ bets, sport, onDeleteRequest, leagueOverrides, baseballLeagues, onRenameBaseballLeague, onDeleteBaseballLeague, esportsOverrides, esportsLeagues, onRenameEsportsLeague, onDeleteEsportsLeague, basketballOverrides, basketballLeagues, onRenameBasketballLeague, onDeleteBasketballLeague, volleyballOverrides, volleyballLeagues, onRenameVolleyballLeague, onDeleteVolleyballLeague, betOptions, numericBetOptions, onAssignBetOption }: {
   bets: Bet[]; sport: typeof SPORTS[0]; onDeleteRequest: () => void
   betOptions: string[]
   numericBetOptions: string[]
+  onAssignBetOption: (ids: string[], label: string) => Promise<void>
   leagueOverrides: LeagueOverride[]
   baseballLeagues: string[]
   onRenameBaseballLeague: (oldName: string, newName: string) => Promise<void>
@@ -1377,7 +1435,7 @@ function SportPanel({ bets, sport, onDeleteRequest, leagueOverrides, baseballLea
         </button>
       </div>
 
-      {sport.value !== 'basketball' && <BetOptionStatsSection key={sport.value} settledBets={stats.settled} options={betOptions} numericOptions={numericBetOptions} />}
+      <BetOptionStatsSection key={sport.value} settledBets={stats.settled} options={betOptions} numericOptions={numericBetOptions} onAssignBetOption={onAssignBetOption} />
 
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-start' }}>
         {byMarket.length > 0 && sport.value !== 'soccer' && (
@@ -1471,6 +1529,13 @@ export default function Stats() {
   async function assignLeagueToBets(ids: string[], league: string) {
     if (!league || ids.length === 0) return
     await supabase.from('bets').update({ league }).in('id', ids)
+    await loadBets()
+  }
+  // "기타"로 빠진 베팅을 등록된 베팅옵션 중 하나로 수동 재지정 — 문구가 제각각이라 패턴매칭이
+  // 안 되는 과거 베팅도 옵션별 통계에 잡히게 해준다. 그 옵션이 나중에 삭제되면 다시 기타로 빠진다.
+  async function assignBetOptionToBets(ids: string[], label: string) {
+    if (!label || ids.length === 0) return
+    await supabase.from('bets').update({ bet_option: label }).in('id', ids)
     await loadBets()
   }
   async function loadBets() {
@@ -1881,6 +1946,7 @@ export default function Stats() {
               sport={SPORTS.find(s => s.value === activeSport)!}
               betOptions={betOptionsBySport[activeSport] ?? []}
               numericBetOptions={numericBetOptionsBySport[activeSport] ?? []}
+              onAssignBetOption={assignBetOptionToBets}
               leagueOverrides={leagueOverrides}
               baseballLeagues={baseballLeagues}
               onRenameBaseballLeague={renameBaseballLeague}
