@@ -144,21 +144,71 @@ function MarketTypeOverviewSection({ settled, betOptionsBySport }: { settled: Be
   )
 }
 
+// 정산된 베팅을 리그별로 묶어 RuleStatsTable 행으로 변환 (리그 미지정은 "미지정"으로 통합)
+function OptionLeagueBreakdownTable({ title, bets }: { title: string; bets: Bet[] }) {
+  const leagueKeyOf = (b: Bet) => (b.league && b.league.trim()) ? b.league.trim() : '미지정'
+  const leagueNames = Array.from(new Set(bets.map(leagueKeyOf))).sort(koCompare)
+  const rows: RuleRow[] = leagueNames.map(l => ({ label: l, tier: 'none', bets: bets.filter(b => leagueKeyOf(b) === l) }))
+  return <RuleStatsTable title={title} rows={rows} extra={<MarketTotalRow bets={bets} />} />
+}
+
 // ─── 종목 탭 내부: 이 종목에 등록된 베팅옵션별(예: LOL "3.5 오버") 세부 성적 ─────────────
 // 농구는 제외 — 농구는 핸디캡 라인(4.5~13.5)별 적중률만 보면 되고 배당은 항상 1.9대로 고정이라
 // 옵션 라벨 매칭이 필요 없음(BasketballDetailPanel의 hcapLineRows가 이 역할을 대신함).
+// 기본은 옵션별 총계 한 표, "배당별"/"리그별"로 바꾸면 옵션을 하나 골라 그 옵션만 배당 0.1단위 구간
+// 또는 리그별로 더 잘게 쪼개서 본다.
 function BetOptionStatsSection({ settledBets, options }: { settledBets: Bet[]; options: string[] }) {
+  const [view, setView] = useState<'total' | 'odds' | 'league'>('total')
+  const [selectedOption, setSelectedOption] = useState('')
   if (options.length === 0) return null
   const cells = classifySportBetsByOption(settledBets, options)
   if (cells.length === 0) return null
   const rows: RuleRow[] = cells.map(c => ({ label: c.label, bets: c.bets, tier: 'none' }))
+  const activeCell = cells.find(c => c.label === selectedOption) ?? cells[0]
+
   return (
     <div style={{ marginBottom: 14 }}>
-      <div className="card-title" style={{ marginBottom: 2 }}>🎯 베팅옵션별 성적</div>
-      <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 10 }}>베팅추가에서 등록한 옵션 기준 — 어디에도 안 걸리는 베팅은 "기타"로 표시</div>
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-        <RuleStatsTable title="옵션별 승률·ROI·손익" rows={rows} extra={<MarketTotalRow bets={settledBets} />} />
+      <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 2 }}>
+        <div className="card-title" style={{ margin: 0 }}>🎯 베팅옵션별 성적</div>
+        <div style={{ display: 'flex', gap: 4, marginLeft: 'auto' }}>
+          {([['total', '총계'], ['odds', '배당별'], ['league', '리그별']] as const).map(([v, label]) => (
+            <button key={v} type="button" onClick={() => setView(v)} style={{
+              fontSize: 10, fontWeight: 700, padding: '3px 9px', borderRadius: 999, cursor: 'pointer', fontFamily: 'var(--font-body)',
+              border: `1px solid ${view === v ? 'var(--gold-border)' : 'var(--border)'}`,
+              background: view === v ? 'var(--gold-bg)' : 'var(--bg-elevated)',
+              color: view === v ? 'var(--gold)' : 'var(--text-secondary)',
+            }}>{label}</button>
+          ))}
+        </div>
       </div>
+      <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 10 }}>베팅추가에서 등록한 옵션 기준 — 어디에도 안 걸리는 베팅은 "기타"로 표시</div>
+
+      {view === 'total' && (
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          <RuleStatsTable title="옵션별 승률·ROI·손익" rows={rows} extra={<MarketTotalRow bets={settledBets} />} />
+        </div>
+      )}
+
+      {view !== 'total' && activeCell && (
+        <>
+          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 8 }}>
+            {cells.map(c => (
+              <button key={c.label} type="button" onClick={() => setSelectedOption(c.label)} style={{
+                fontSize: 10, fontWeight: 600, padding: '4px 8px', borderRadius: 6, cursor: 'pointer', fontFamily: 'var(--font-body)',
+                border: `1px solid ${activeCell.label === c.label ? 'var(--gold-border)' : 'var(--border)'}`,
+                background: activeCell.label === c.label ? 'var(--gold-bg)' : 'var(--bg-elevated)',
+                color: activeCell.label === c.label ? 'var(--gold)' : 'var(--text-secondary)',
+              }}>{c.label}</button>
+            ))}
+          </div>
+          {view === 'odds' && (
+            <RuleStatsTable title={`${activeCell.label} — 0.1단위 배당 구간별`} rows={oddsBinRows(activeCell.bets)} extra={<MarketTotalRow bets={activeCell.bets} />} />
+          )}
+          {view === 'league' && (
+            <OptionLeagueBreakdownTable title={`${activeCell.label} — 리그별`} bets={activeCell.bets} />
+          )}
+        </>
+      )}
     </div>
   )
 }
@@ -1313,7 +1363,7 @@ function SportPanel({ bets, sport, onDeleteRequest, leagueOverrides, baseballLea
         </button>
       </div>
 
-      {sport.value !== 'basketball' && <BetOptionStatsSection settledBets={stats.settled} options={betOptions} />}
+      {sport.value !== 'basketball' && <BetOptionStatsSection key={sport.value} settledBets={stats.settled} options={betOptions} />}
 
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-start' }}>
         {byMarket.length > 0 && sport.value !== 'soccer' && (
