@@ -316,19 +316,40 @@ function computeComboStats(sport: string, league: string, side: string, options:
   const stake = matched.reduce((s, b) => s + b.stake, 0)
   return { count: matched.length, wins, profit, stake, winRate: wins / matched.length * 100, roi: stake > 0 ? profit / stake * 100 : 0 }
 }
-// 손실권(ROI<=0)이면 무조건 최소 5,000원. 수익권(ROI>0)이면 만원까지는 조건을 완화해서
-// 표본이 몇 건만 있어도 금방 채워주고, 만원을 넘어 만오천까지 가려면 표본·ROI를 더 까다롭게 본다.
-function recommendStake(stats: ComboStats | null): number {
-  if (!stats || stats.count === 0 || stats.roi <= 0) return 5000
-  const tier1Score = Math.max(0, Math.min(1, stats.count / 8)) // 8건이면 만점 — 표본 적어도 만원까지는 쉽게
-  let amount = 5000 + Math.round(tier1Score * 5) * 1000 // 5,000 ~ 10,000
-  if (amount >= 10000) {
-    const sampleScore2 = Math.max(0, Math.min(1, (stats.count - 8) / 15)) // 23건 이상이면 만점
-    const roiScore2 = Math.max(0, Math.min(1, (stats.roi - 10) / 20)) // ROI 10%~30%
-    const tier2Steps = Math.round(sampleScore2 * roiScore2 * 5)
-    amount = 10000 + tier2Steps * 1000 // 10,000 ~ 15,000
+// 손실권(ROI<=0)이거나 데이터가 없으면 그 구간의 최소(base)금액. 수익권(ROI>0)이면 표본 8건·
+// ROI 20%면 만점이 되는 완화된 기준으로 base~max 구간 안에서 1,000원 단위로 단계적으로 올라간다.
+function confidenceScore(stats: ComboStats | null): number {
+  if (!stats || stats.count === 0 || stats.roi <= 0) return 0
+  const sampleScore = Math.max(0, Math.min(1, stats.count / 8))
+  const roiScore = Math.max(0, Math.min(1, stats.roi / 20))
+  return sampleScore * roiScore
+}
+interface StakeRange { base: number; max: number }
+function recommendStake(stats: ComboStats | null, range: StakeRange): number {
+  const steps = Math.round((range.max - range.base) / 1000)
+  const amount = range.base + Math.round(confidenceScore(stats) * steps) * 1000
+  return Math.min(range.max, amount)
+}
+// 종목·마켓별로 기본(base)~최대(max) 베팅금액 구간을 다르게 잡는다 — 현재 정해둔 규칙:
+// 농구 핸디캡 1만~1.5만 / 축구 0.5 플핸 5천~1만 / 축구 1.5·2.5 플핸은 배당 1.5 이하면 1만~1.5만,
+// 1.6부터는 5천~1만 / LOL 3.5 오버는 3만~5만. 그 외 조합은 기본값 5천~1.5만.
+function extractOptionLine(label: string): number | null {
+  const m = label.match(/-?\d+(?:\.\d+)?/)
+  return m ? Math.abs(parseFloat(m[0])) : null
+}
+function stakeRangeFor(sport: string, options: string[], odds: number): StakeRange {
+  if (sport === 'basketball' && options.length > 0) return { base: 10000, max: 15000 }
+  if (sport === 'soccer') {
+    const lines = options.map(extractOptionLine).filter((n): n is number => n !== null)
+    if (lines.includes(0.5)) return { base: 5000, max: 10000 }
+    if (lines.includes(1.5) || lines.includes(2.5)) {
+      return odds <= 1.5 ? { base: 10000, max: 15000 } : { base: 5000, max: 10000 }
+    }
   }
-  return Math.min(15000, amount)
+  if (sport === 'esports' && options.some(o => /오버/.test(o) && extractOptionLine(o) === 3.5)) {
+    return { base: 30000, max: 50000 }
+  }
+  return { base: 5000, max: 15000 }
 }
 function BetOptionHistoryHint({ sport, league, side, options, odds, allBets, onPickStake }: {
   sport: string; league: string; side: string; options: string[]; odds: number; allBets: BetLite[]
@@ -336,7 +357,7 @@ function BetOptionHistoryHint({ sport, league, side, options, odds, allBets, onP
 }) {
   const stats = computeComboStats(sport, league, side, options, odds, allBets)
   if (!stats) return null
-  const recommended = recommendStake(stats)
+  const recommended = recommendStake(stats, stakeRangeFor(sport, options, odds))
   const label = [side, ...options].filter(Boolean).join(' · ')
   return (
     <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 6, marginTop: 4, padding: '6px 8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', background: 'var(--bg-elevated)' }}>
