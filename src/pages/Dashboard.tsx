@@ -848,11 +848,12 @@ function InlineBetEditForm({ bet, site, onClose, onSave, baseballOverrides, socc
   function cycleSide() {
     setSide(prev => prev === '' ? '홈' : prev === '홈' ? '원정' : '')
   }
+  // 베팅옵션은 하나만 선택 가능 — 이미 선택된 걸 다시 누르면 해제, 다른 걸 누르면 그걸로 교체.
   function toggleBetOption(label: string) {
     setSelectedOptions(prev => {
-      const next = prev.includes(label) ? prev.filter(o => o !== label) : [...prev, label]
-      if (next.length > prev.length) oddsRef.current?.focus()
-      return next
+      const wasSelected = prev.includes(label)
+      if (!wasSelected) oddsRef.current?.focus()
+      return wasSelected ? [] : [label]
     })
   }
   function handleOdds(raw: string) {
@@ -1760,12 +1761,13 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
   const [optionsManagerOpen, setOptionsManagerOpen] = useState(false)
   const [selectedOptions, setSelectedOptions] = useState<string[]>([])
   const betOptions = betOptionsBySport[sport] ?? []
+  // 베팅옵션은 하나만 선택 가능 — 이미 선택된 걸 다시 누르면 해제, 다른 걸 누르면 그걸로 교체.
   function toggleBetOption(label: string) {
     setSelectedOptions(prev => {
-      const next = prev.includes(label) ? prev.filter(o => o !== label) : [...prev, label]
-      // 옵션을 새로 선택하면(해제가 아니라 추가하는 경우) 바로 배당을 입력할 수 있도록 커서를 이동
-      if (next.length > prev.length) oddsRef.current?.focus()
-      return next
+      const wasSelected = prev.includes(label)
+      // 옵션을 새로 선택하면(해제가 아니라 선택하는 경우) 바로 배당을 입력할 수 있도록 커서를 이동
+      if (!wasSelected) oddsRef.current?.focus()
+      return wasSelected ? [] : [label]
     })
   }
   // 베팅 모드: 단폴 / 다폴. 다폴은 리그 없이 경기 내용 여러 개(최대 4개) + 배당/금액 공유.
