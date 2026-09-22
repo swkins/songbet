@@ -1560,7 +1560,7 @@ export default function Stats() {
   const [sites, setSites]     = useState<Site[]>([])
   const [rateMap, setRateMap] = useState<Record<string, number>>({})
   const [period, setPeriod]   = useState<'all' | '7d' | '30d' | '90d'>('all')
-  const [activeSport, setActiveSport] = useState<Sport | 'all' | 'parlay' | 'live'>('all')
+  const [activeSport, setActiveSport] = useState<Sport | 'all' | 'live'>('all')
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null)
   const [leagueOverrides, setLeagueOverrides] = useState<LeagueOverride[]>([])
   const [baseballLeagues, setBaseballLeagues] = useState<string[]>([])
@@ -1750,24 +1750,10 @@ export default function Stats() {
     const days = period === '7d' ? 7 : period === '30d' ? 30 : 90
     return dayjs(b.bet_date).isAfter(dayjs().subtract(days, 'day'))
   })
-  // 두폴(합산) 베팅은 개별 다리로 중복 집계되지 않도록 일반/종목별 통계에서는 제외하고, 별도로 집계한다.
+  // 두폴(합산) 베팅은 개별 다리로 중복 집계되지 않도록 일반/종목별 통계에서는 제외한다(다폴 통계 자체는 삭제됨).
   // 라이브 체크된 베팅도 각 종목/전체 통계에서 제외하고 "라이브" 탭에서만 별도로 집계한다.
   const periodFiltered = periodAll.filter(b => b.parlay_group === null && !b.is_live)
   const liveBets = periodAll.filter(b => b.is_live)
-  // 두폴은 leg1에만 실제 stake/profit이 기록되므로 leg1만 뽑아서 "다폴 한 건" 단위로 집계
-  const parlayLegs = periodAll.filter(b => b.parlay_group !== null && b.parlay_leg === 1)
-  const parlayStats = calcStats(parlayLegs)
-  // 그룹별 다리 수 계산 (기간 필터 기준 — 표시용) 및 전체 기준 (삭제 매칭용, 기간 무관)
-  const periodGroupLegCount: Record<string, number> = {}
-  periodAll.forEach(b => { if (b.parlay_group) periodGroupLegCount[b.parlay_group] = (periodGroupLegCount[b.parlay_group] ?? 0) + 1 })
-  const fullGroupLegCount: Record<string, number> = {}
-  bets.forEach(b => { if (b.parlay_group) fullGroupLegCount[b.parlay_group] = (fullGroupLegCount[b.parlay_group] ?? 0) + 1 })
-  const parlay2Legs = parlayLegs.filter(b => periodGroupLegCount[b.parlay_group!] === 2)
-  const parlay3Legs = parlayLegs.filter(b => periodGroupLegCount[b.parlay_group!] === 3)
-  const parlay4pLegs = parlayLegs.filter(b => (periodGroupLegCount[b.parlay_group!] ?? 0) >= 4)
-  const parlay2Stats = calcStats(parlay2Legs)
-  const parlay3Stats = calcStats(parlay3Legs)
-  const parlay4pStats = calcStats(parlay4pLegs)
 
   const stats   = calcStats(periodFiltered)
   const settled = periodFiltered.filter(b => b.result !== 'pending')
@@ -1819,13 +1805,12 @@ export default function Stats() {
               { value: 'volleyball' as const, label: '배구', emoji: '🏐', cnt: settled.filter(b => b.sport === 'volleyball').length },
               { value: 'esports' as const, label: 'LOL', emoji: '🎮', cnt: settled.filter(b => b.sport === 'esports').length },
               { value: 'hockey' as const, label: '하키', emoji: '🏒', cnt: settled.filter(b => b.sport === 'hockey').length },
-              { value: 'parlay' as const, label: '다폴', emoji: '🔗', cnt: parlayStats.total },
               { value: 'live' as const, label: '라이브', emoji: '🔴', cnt: liveBets.filter(b => b.result !== 'pending').length },
             ]).map(s => (
               <button key={s.value}
                 onClick={() => setActiveSport(s.value)}
                 style={{ padding: '10px 20px', borderRadius: 8, border: activeSport === s.value ? '2px solid var(--gold)' : '1px solid var(--border)', background: activeSport === s.value ? 'var(--gold-bg)' : 'var(--bg-card)', color: activeSport === s.value ? 'var(--gold)' : 'var(--text-secondary)', fontWeight: 700, fontSize: 14, cursor: 'pointer', fontFamily: 'var(--font-body)', transition: 'all 0.15s' }}>
-                {(s.value === 'parlay' || s.value === 'live') ? <span style={{ fontSize: 17 }}>{s.emoji}</span> : (sportGlyph(s.value as Sport, '1.3em') ?? <span style={{ fontSize: 17 }}>{s.emoji}</span>)} {s.label} <span style={{ opacity: 0.7, fontSize: 12 }}>({s.cnt})</span>
+                {s.value === 'live' ? <span style={{ fontSize: 17 }}>{s.emoji}</span> : (sportGlyph(s.value as Sport, '1.3em') ?? <span style={{ fontSize: 17 }}>{s.emoji}</span>)} {s.label} <span style={{ opacity: 0.7, fontSize: 12 }}>({s.cnt})</span>
               </button>
             ))}
           </div>
@@ -1943,75 +1928,13 @@ export default function Stats() {
               })()}
             </div>
           )}
-          {activeSport === 'parlay' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-              {parlayStats.total === 0 ? (
-                <div className="card"><div className="empty"><div className="empty-icon">🔗</div>결과 처리된 다폴 베팅이 없습니다</div></div>
-              ) : (
-                <>
-                  {([
-                    { key: '2' as const, title: '두폴', sub: '2다리', legs: parlay2Legs, s: parlay2Stats, matches: (n: number) => n === 2 },
-                    { key: '3' as const, title: '세폴', sub: '3다리', legs: parlay3Legs, s: parlay3Stats, matches: (n: number) => n === 3 },
-                    { key: '4' as const, title: '포폴+', sub: '4다리 이상', legs: parlay4pLegs, s: parlay4pStats, matches: (n: number) => n >= 4 },
-                  ]).filter(g => g.s.total > 0).map(g => (
-                    <div key={g.key} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'flex-start' }}>
-                        <div style={{ alignSelf: 'center', marginRight: 4 }}>
-                          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>{g.title}</span>
-                          <span style={{ fontSize: 10, color: 'var(--text-secondary)', marginLeft: 5 }}>{g.sub}</span>
-                        </div>
-                        {[
-                          { label: '승률', value: `${g.s.winRate.toFixed(1)}%`, sub: `${g.s.wins.length}W ${g.s.losses.length}L ${g.s.pushes.length}P`, cls: g.s.winRate >= 50 ? 'profit-pos' : 'profit-neg' },
-                          { label: '총 손익', value: `${g.s.profit >= 0 ? '+' : ''}${g.s.profit.toLocaleString()}`, sub: `${g.s.total}건`, cls: g.s.profit >= 0 ? 'profit-pos' : 'profit-neg' },
-                          { label: 'ROI', value: `${g.s.roi >= 0 ? '+' : ''}${g.s.roi.toFixed(1)}%`, sub: `${g.s.stake.toLocaleString()}`, cls: g.s.roi >= 0 ? 'profit-pos' : 'profit-neg' },
-                          { label: '평균 배당', value: g.s.avgOdds.toFixed(2), sub: '', cls: '' },
-                        ].map(t => (
-                          <div key={t.label} className="card stat-tile" style={{ flex: '1 0 110px', maxWidth: 160, padding: '10px 12px' }}>
-                            <div className={`stat-value ${t.cls}`} style={{ fontSize: 16 }}>{t.value}</div>
-                            <div className="stat-label">{t.label}</div>
-                            {t.sub && <div style={{ fontSize: 9, color: 'var(--text-secondary)', marginTop: 2 }}>{t.sub}</div>}
-                          </div>
-                        ))}
-                        <button
-                          onClick={() => setDeleteTarget({
-                            label: g.title, emoji: '🔗',
-                            matchFn: b => b.parlay_group !== null && g.matches(fullGroupLegCount[b.parlay_group!] ?? 0),
-                          })}
-                          className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--red)', borderColor: 'var(--red-border)', alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: 4, padding: '6px 10px' }}>
-                          <Trash2 size={11} /> 데이터 삭제
-                        </button>
-                      </div>
-
-                      <div className="card">
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                          {g.legs.filter(b => b.result !== 'pending').sort((a, b) => b.bet_date.localeCompare(a.bet_date)).map(b => {
-                            const legs = periodAll.filter(x => x.parlay_group === b.parlay_group).sort((x, y) => x.parlay_leg - y.parlay_leg)
-                            return (
-                              <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', background: 'var(--bg-elevated)', borderRadius: 8, fontSize: 12 }}>
-                                <span style={{ color: 'var(--text-muted)', width: 78, flexShrink: 0 }}>{b.bet_date}</span>
-                                <span style={{ flex: 1, color: 'var(--text-primary)' }}>{legs.map(l => l.match).join(' × ')}</span>
-                                <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>{b.odds.toFixed(2)}</span>
-                                <span style={{ fontFamily: 'var(--font-num)', fontWeight: 700, color: b.profit >= 0 ? 'var(--green)' : 'var(--red)' }}>
-                                  {b.profit >= 0 ? '+' : ''}{b.profit.toLocaleString()}
-                                </span>
-                              </div>
-                            )
-                          })}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </>
-              )}
-            </div>
-          )}
           {activeSport === 'live' && (
             <LivePanel
               bets={liveBets}
               onDeleteRequest={() => setDeleteTarget({ label: '라이브', emoji: '🔴', matchFn: b => b.is_live === true })}
             />
           )}
-          {activeSport !== 'all' && activeSport !== 'parlay' && activeSport !== 'live' && (
+          {activeSport !== 'all' && activeSport !== 'live' && (
             <SportPanel
               bets={periodFiltered}
               sport={SPORTS.find(s => s.value === activeSport)!}

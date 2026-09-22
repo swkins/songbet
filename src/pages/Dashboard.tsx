@@ -179,9 +179,17 @@ function parseBetMatch(sport: string, match: string, knownOptions: string[] = []
   else if (rest.endsWith(' 원정')) { side = '원정'; rest = rest.slice(0, -3).trimEnd() }
   else if (rest === '홈') { side = '홈'; rest = '' }
   else if (rest === '원정') { side = '원정'; rest = '' }
+  // 2b) LOL(esports)은 베팅추가에서 홈/원정 대신 BO3/BO5를 고르므로 그 접미어도 벗겨낸다(괄호 없는 새 포맷).
+  let boSuffix: string | undefined
+  if (sport === 'esports' && !side) {
+    if (rest.endsWith(' BO3')) { boSuffix = 'BO3'; rest = rest.slice(0, -4).trimEnd() }
+    else if (rest.endsWith(' BO5')) { boSuffix = 'BO5'; rest = rest.slice(0, -4).trimEnd() }
+    else if (rest === 'BO3') { boSuffix = 'BO3'; rest = '' }
+    else if (rest === 'BO5') { boSuffix = 'BO5'; rest = '' }
+  }
 
   if (knownOptionLabel) {
-    return { team: (rest || raw).trim(), side, optionLabel: knownOptionLabel, accent: 'purple' }
+    return { team: (rest || raw).trim(), side, boTag: boSuffix, optionLabel: knownOptionLabel, accent: 'purple' }
   }
 
   // 3) 등록된 옵션이 아니면(과거 데이터 등) 기존 종목별 패턴(숫자 핸디캡/BO태그)으로 폴백
@@ -205,12 +213,16 @@ function parseBetMatch(sport: string, match: string, knownOptions: string[] = []
   }
   if (sport === 'esports') {
     const m = s.match(/^(.+?)(?:\s\[(.+)\])?(?:\s(-?\d+(?:\.\d+)?)(세트오버)?)?\s\((BO\d)\)$/)
-    if (!m) return side ? { team: s, side, optionLabel: '승리', accent: 'gold' } : null
-    const [, team, custom, num, setOver, bo] = m
-    if (custom) return { team, side, boTag: bo, optionLabel: custom, accent: 'blue' }
-    if (!num) return { team, side, boTag: bo, optionLabel: '승리', accent: 'gold' }
-    if (setOver) return { team, side, boTag: bo, optionLabel: `${num} 세트오버`, accent: 'orange' }
-    return { team, side, boTag: bo, optionLabel: `${num} 핸디`, accent: num.startsWith('-') ? 'red' : 'purple' }
+    if (m) {
+      const [, team, custom, num, setOver, bo] = m
+      if (custom) return { team, side, boTag: bo, optionLabel: custom, accent: 'blue' }
+      if (!num) return { team, side, boTag: bo, optionLabel: '승리', accent: 'gold' }
+      if (setOver) return { team, side, boTag: bo, optionLabel: `${num} 세트오버`, accent: 'orange' }
+      return { team, side, boTag: bo, optionLabel: `${num} 핸디`, accent: num.startsWith('-') ? 'red' : 'purple' }
+    }
+    // 괄호 없는 새 포맷(BO3/BO5는 위 2b에서 이미 벗겨냄) — 팀 이름만 남았으면 승리, 아니면 원문 그대로
+    if (boSuffix || side) return { team: s, side, boTag: boSuffix, optionLabel: '승리', accent: 'gold' }
+    return null
   }
   // 야구/배구/기타 — 구조화 패턴은 없지만 홈/원정만은 알아볼 수 있게
   if (side) return { team: s, side, optionLabel: '승리', accent: 'gold' }
@@ -853,7 +865,7 @@ function InlineBetEditForm({ bet, site, onClose, onSave, baseballOverrides, socc
   // 저장된 문구("팀이름 홈 1.5 핸디")에서 팀 이름/홈원정/베팅옵션을 다시 분리해서 채워넣는다 — 베팅추가 폼과 동일한 방식.
   const initialParts = parseBetMatch(bet.sport, bet.match, betOptionsBySport[bet.sport] ?? [])
   const [content, setContent] = useState(initialParts ? initialParts.team : bet.match)
-  const [side, setSide] = useState<'' | '홈' | '원정'>(initialParts?.side ?? '')
+  const [side, setSide] = useState<string>(initialParts?.side ?? initialParts?.boTag ?? '')
   const [selectedOptions, setSelectedOptions] = useState<string[]>(initialParts && initialParts.optionLabel !== '승리' ? [initialParts.optionLabel] : [])
   const [optionsManagerOpen, setOptionsManagerOpen] = useState(false)
   const [oddsRaw, setOddsRaw] = useState(bet.odds.toFixed(2))
@@ -866,11 +878,12 @@ function InlineBetEditForm({ bet, site, onClose, onSave, baseballOverrides, socc
   const betOptions = betOptionsBySport[sport] ?? []
   const numericBetOptions = numericBetOptionsBySport[sport] ?? []
   const stakeN = isusd ? (Number(amount) || 0) : (Number(amount.replace(/,/g, '')) || 0)
-  // 종목을 바꾸면(처음 마운트 시 제외) 이전 종목에서 선택했던 옵션은 해제 — 베팅추가 폼과 동일
+  // 종목을 바꾸면(처음 마운트 시 제외) 이전 종목에서 선택했던 옵션/홈원정·BO값은 해제 — 베팅추가 폼과 동일
   const skipFirstSportEffect = useRef(true)
   useEffect(() => {
     if (skipFirstSportEffect.current) { skipFirstSportEffect.current = false; return }
     setSelectedOptions([])
+    setSide('')
   }, [sport])
 
   // 리그 직접 입력 — 베팅추가 폼과 동일한 방식. 기존 리그값을 기본으로 채워넣어, 아무것도 안 건드리면 그대로 저장된다.
@@ -907,8 +920,10 @@ function InlineBetEditForm({ bet, site, onClose, onSave, baseballOverrides, socc
     } else if (e.key === 'Escape') { setLeagueSuggestOpen(false); setLeagueHighlight(-1) }
   }
 
+  // LOL(esports)은 홈/원정 대신 BO3/BO5를 고른다 — 같은 버튼, 종목에 따라 순환 목록만 다름.
   function cycleSide() {
-    setSide(prev => prev === '' ? '홈' : prev === '홈' ? '원정' : '')
+    if (sport === 'esports') setSide(prev => prev === '' ? 'BO3' : prev === 'BO3' ? 'BO5' : '')
+    else setSide(prev => prev === '' ? '홈' : prev === '홈' ? '원정' : '')
   }
   function handleOdds(raw: string) {
     const clean = raw.replace(/[^0-9.]/g, '')
@@ -1803,9 +1818,11 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
   const [content, setContent]   = useState('')
   // 홈/원정 — 베팅 내용 우측 토글. 없음 → 홈 → 원정 → 없음 순으로 클릭할 때마다 바뀌고,
   // 베팅 내용 텍스트에는 섞지 않고 버튼 자체에 "홈"/"원정"으로 표시만 한다. 제출할 때만 내용 뒤에 합쳐진다.
-  const [side, setSide] = useState<'' | '홈' | '원정'>('')
+  // LOL(esports)은 홈/원정 개념이 없으므로 같은 버튼이 BO3/BO5를 순환하도록 바뀐다.
+  const [side, setSide] = useState<string>('')
   function cycleSide() {
-    setSide(prev => prev === '' ? '홈' : prev === '홈' ? '원정' : '')
+    if (sport === 'esports') setSide(prev => prev === '' ? 'BO3' : prev === 'BO3' ? 'BO5' : '')
+    else setSide(prev => prev === '' ? '홈' : prev === '홈' ? '원정' : '')
   }
   // 베팅옵션 — 종목별로 따로 관리되는 자유 등록 옵션 목록(예: "1.5 핸디").
   // 칩을 클릭하면 선택(토글)될 뿐 베팅 내용 텍스트는 건드리지 않고, 베팅 내용 옆에 선택된 옵션이 따로 표시된다.
@@ -1909,8 +1926,8 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
     } else if (e.key === 'Escape') { setLeagueSuggestOpen(false); setLeagueHighlight(-1) }
   }
 
-  // 베팅옵션은 종목별로 따로 관리되므로, 종목을 바꾸면 이전 종목에서 선택했던 옵션은 해제
-  useEffect(() => { setSelectedOptions([]) }, [sport])
+  // 베팅옵션은 종목별로 따로 관리되므로, 종목을 바꾸면 이전 종목에서 선택했던 옵션/홈원정·BO값은 해제
+  useEffect(() => { setSelectedOptions([]); setSide('') }, [sport])
 
   function handleOdds(raw: string) {
     const clean = raw.replace(/[^0-9.]/g, '')
