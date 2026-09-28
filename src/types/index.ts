@@ -28,6 +28,7 @@ export interface Bet {
   usd_krw_rate: number | null   // 달러 사이트 베팅 결과처리 시점의 환율 (통계 원화 환산용)
   cashout_amount: number | null // 캐시아웃한 경우 그 금액 (되돌리기 시 잔액/롤링 복원용)
   result_at: string | null      // 결과(적중/실패/PUSH/캐시아웃) 처리된 시각 — 처리 후 1시간 동안은 완료된 목록으로 넘기지 않고 진행중에 유지
+  stats_excluded: boolean       // 통계에서 제외(통계 페이지 "최근 합류" 목록에서 삭제) — 베팅 자체는 남아 잔액/결산엔 그대로 반영
   bet_option: string | null     // 통계에서 베팅옵션별 성적을 낼 때 문구 패턴매칭 대신 수동으로 지정한 옵션 라벨 ("기타" 재지정용)
 }
 export interface Todo {

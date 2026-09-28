@@ -1264,6 +1264,79 @@ function VolleyballDetailPanel(props: LeagueSectionProps) {
 }
 
 
+/* ── 최근 합류된 결과처리 자료 (종목별 최근 3일) ──
+ * 결과처리 시각(result_at, 없으면 베팅일) 기준으로 오늘 포함 최근 3일치를 보여주고, 삭제하면 stats_excluded로 표시해
+ * 통계 집계에서만 빠지게 한다. 베팅 자체는 지우지 않으므로 사이트 잔액/결산에는 영향 없고, 복구도 가능하다. */
+const RECENT_DAYS = 3
+function recentDayOf(b: Bet): string {
+  return b.result_at ? dayjs(b.result_at).format('YYYY-MM-DD') : b.bet_date
+}
+function RecentSettledSection({ bets, onToggleExclude }: {
+  bets: Bet[]
+  onToggleExclude: (bet: Bet, exclude: boolean) => Promise<void>
+}) {
+  const [busy, setBusy] = useState<string | null>(null)
+  const fromDay = dayjs().subtract(RECENT_DAYS - 1, 'day').format('YYYY-MM-DD')
+  const recent = bets
+    .filter(b => b.result !== 'pending' && recentDayOf(b) >= fromDay)
+    .sort((a, b) => (b.result_at ?? b.bet_date).localeCompare(a.result_at ?? a.bet_date))
+  const days = Array.from(new Set(recent.map(recentDayOf))).sort().reverse()
+  const excludedCnt = recent.filter(b => b.stats_excluded).length
+
+  async function toggle(b: Bet) {
+    if (busy) return
+    const exclude = !b.stats_excluded
+    if (exclude && !confirm(`"${b.match}" (${b.pick}) 을(를) 통계에서 삭제할까요?\n베팅 기록/잔액은 그대로 유지되고 통계 집계에서만 빠집니다.`)) return
+    setBusy(b.id)
+    await onToggleExclude(b, exclude)
+    setBusy(null)
+  }
+
+  return (
+    <div className="card">
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)' }}>최근 합류된 결과처리 (최근 {RECENT_DAYS}일)</div>
+        <span style={{ fontSize: 9, color: 'var(--text-muted)', background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 4, padding: '1px 6px' }}>{recent.length}건</span>
+        {excludedCnt > 0 && <span style={{ fontSize: 9, color: 'var(--red)' }}>통계 제외 {excludedCnt}건</span>}
+      </div>
+      <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 8 }}>삭제하면 통계에서만 제외됩니다 (베팅 기록·잔액은 유지, 복구 가능)</div>
+      {recent.length === 0 ? (
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'center', padding: '8px 0' }}>최근 {RECENT_DAYS}일간 결과처리된 베팅이 없습니다</div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 360, overflowY: 'auto' }}>
+          {days.map(d => (
+            <div key={d}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 4 }}>{dayjs(d).format('MM.DD')}</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {recent.filter(b => recentDayOf(b) === d).map(b => (
+                  <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 10, padding: '4px 6px', background: 'var(--bg-elevated)', borderRadius: 5, opacity: b.stats_excluded ? 0.45 : 1 }}>
+                    <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textDecoration: b.stats_excluded ? 'line-through' : 'none' }}>
+                      <span style={{ color: 'var(--text-secondary)' }}>{b.match}</span>
+                      <span style={{ color: 'var(--text-primary)', marginLeft: 6 }}>{b.pick}</span>
+                    </span>
+                    <span style={{ color: 'var(--text-secondary)', flexShrink: 0 }}>@{b.odds.toFixed(2)}</span>
+                    <span style={{ fontWeight: 700, flexShrink: 0, color: b.result === 'push' ? 'var(--text-muted)' : b.profit >= 0 ? '#4ade80' : '#f87171' }}>
+                      {b.result === 'push' ? 'PUSH' : `${b.profit >= 0 ? '+' : ''}${b.profit.toLocaleString()}`}
+                    </span>
+                    <button onClick={() => toggle(b)} disabled={busy === b.id} title={b.stats_excluded ? '통계에 다시 포함' : '통계에서 삭제'} style={{
+                      flexShrink: 0, display: 'flex', alignItems: 'center', gap: 3, padding: '2px 6px', borderRadius: 4, cursor: 'pointer',
+                      fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-body)', background: 'none',
+                      border: `1px solid ${b.stats_excluded ? 'var(--border)' : 'var(--red-border)'}`,
+                      color: b.stats_excluded ? 'var(--text-secondary)' : 'var(--red)',
+                    }}>
+                      {busy === b.id ? '...' : b.stats_excluded ? '복구' : <><Trash2 size={10} /> 삭제</>}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 /* ── 데이터 삭제 대상 (종목 / 라이브 공용) ── */
 interface DeleteTarget { label: string; emoji: string; matchFn: (b: Bet) => boolean }
 
@@ -1603,6 +1676,17 @@ export default function Stats() {
     await supabase.from('bets').update({ bet_option: label }).in('id', ids)
     await loadBets()
   }
+  // 통계 제외/복구: 베팅 자체는 그대로 두고 stats_excluded 플래그만 바꾼다 (잔액·결산에는 영향 없음).
+  async function setStatsExcluded(bet: Bet, exclude: boolean) {
+    const { error } = await supabase.from('bets').update({ stats_excluded: exclude }).eq('id', bet.id)
+    if (error) { alert('처리 실패: ' + error.message); return }
+    setRawBets(prev => prev.map(b => b.id === bet.id ? { ...b, stats_excluded: exclude } : b))
+    await logAction({
+      action_type: 'update', table_name: 'bets', record_id: bet.id,
+      before_data: { stats_excluded: bet.stats_excluded } as never, after_data: { stats_excluded: exclude } as never,
+      description: `통계 ${exclude ? '제외' : '복구'}: ${bet.match} (${bet.pick})`,
+    })
+  }
   async function loadBets() {
     const { data } = await supabase.from('bets').select('*').order('bet_date').order('created_at')
     if (data) setRawBets(data)
@@ -1739,11 +1823,13 @@ export default function Stats() {
     return rateMap[best] ?? FALLBACK_USD_KRW
   }
   const siteCurrency = new Map(sites.map(s => [s.id, s.currency]))
-  const bets: Bet[] = rawBets.map(b => {
+  const allBets: Bet[] = rawBets.map(b => {
     if (siteCurrency.get(b.site_id ?? '') !== 'usd') return b
     const rate = b.usd_krw_rate ?? nearestRate(b.bet_date)
     return { ...b, stake: Math.round(b.stake * rate), profit: Math.round(b.profit * rate) }
   })
+  // "최근 합류" 목록에서 삭제(통계 제외)한 베팅은 모든 통계 집계에서 뺀다.
+  const bets: Bet[] = allBets.filter(b => !b.stats_excluded)
 
   const periodAll = bets.filter(b => {
     if (period === 'all') return true
@@ -1934,6 +2020,14 @@ export default function Stats() {
               onDeleteRequest={() => setDeleteTarget({ label: '라이브', emoji: '🔴', matchFn: b => b.is_live === true })}
             />
           )}
+          {activeSport !== 'all' && (
+            <div style={{ marginBottom: 14 }}>
+              <RecentSettledSection
+                bets={allBets.filter(b => activeSport === 'live' ? b.is_live : (b.sport === activeSport && b.parlay_group === null && !b.is_live))}
+                onToggleExclude={setStatsExcluded}
+              />
+            </div>
+          )}
           {activeSport !== 'all' && activeSport !== 'live' && (
             <SportPanel
               bets={periodFiltered}
@@ -1969,7 +2063,7 @@ export default function Stats() {
       {deleteTarget && (
         <DeleteBetsModal
           target={deleteTarget}
-          bets={bets}
+          bets={allBets}
           onClose={() => setDeleteTarget(null)}
           onDeleted={() => { loadBets(); setActiveSport('all') }}
         />
