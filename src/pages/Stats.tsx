@@ -1651,6 +1651,7 @@ export default function Stats() {
   const [period, setPeriod]   = useState<'all' | '7d' | '30d' | '90d'>('all')
   const [activeSport, setActiveSport] = useState<Sport | 'all' | 'live'>('all')
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null)
+  const [recentOpen, setRecentOpen] = useState(false)
   const [leagueOverrides, setLeagueOverrides] = useState<LeagueOverride[]>([])
   const [baseballLeagues, setBaseballLeagues] = useState<string[]>([])
   const [esportsOverrides, setEsportsOverrides] = useState<LeagueOverride[]>([])
@@ -1846,6 +1847,8 @@ export default function Stats() {
   })
   // "최근 합류" 목록에서 삭제(통계 제외)한 베팅은 모든 통계 집계에서 뺀다.
   const bets: Bet[] = allBets.filter(b => !b.stats_excluded)
+  // 현재 종목 탭의 "최근 합류" 대상 (라이브 탭은 라이브 베팅, 종목 탭은 그 종목의 단폴·비라이브 베팅)
+  const recentSportBets = activeSport === 'all' ? [] : allBets.filter(b => activeSport === 'live' ? b.is_live : (b.sport === activeSport && b.parlay_group === null && !b.is_live))
 
   const periodAll = bets.filter(b => {
     if (period === 'all') return true
@@ -2037,11 +2040,21 @@ export default function Stats() {
             />
           )}
           {activeSport !== 'all' && (
-            <div style={{ marginBottom: 14 }}>
-              <RecentSettledSection
-                bets={allBets.filter(b => activeSport === 'live' ? b.is_live : (b.sport === activeSport && b.parlay_group === null && !b.is_live))}
-                onToggleExclude={setStatsExcluded}
-              />
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+              <button onClick={() => setRecentOpen(true)} className="btn btn-ghost" style={{ fontSize: 11, padding: '5px 10px', display: 'flex', alignItems: 'center', gap: 4 }}>
+                🕒 최근 합류 ({recentSportBets.filter(b => b.result !== 'pending' && recentDayOf(b) >= dayjs().subtract(RECENT_DAYS - 1, 'day').format('YYYY-MM-DD')).length})
+              </button>
+            </div>
+          )}
+          {recentOpen && activeSport !== 'all' && (
+            <div className="modal-overlay" onClick={() => setRecentOpen(false)}>
+              <div className="modal" style={{ maxWidth: 520, width: '100%' }} onClick={e => e.stopPropagation()}>
+                <div className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                  🕒 {activeSport === 'live' ? '라이브' : SPORTS.find(s => s.value === activeSport)?.label} 최근 합류된 결과처리
+                  <button onClick={() => setRecentOpen(false)} style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex', padding: 2 }}><X size={15} /></button>
+                </div>
+                <RecentSettledSection bets={recentSportBets} onToggleExclude={setStatsExcluded} />
+              </div>
             </div>
           )}
           {activeSport !== 'all' && activeSport !== 'live' && (
