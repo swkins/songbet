@@ -79,7 +79,11 @@ function CashoutModal({ entry, cashout, onClose, onSetGoal, onSetAuto, onSetPerf
   const goalReached = entry.target_point > 0 && entry.current_point >= entry.target_point
 
   const cooldownUntil = cashout?.next_allowed_at ? dayjs(cashout.next_allowed_at) : null
-  const inCooldown = !!cooldownUntil && now.isBefore(cooldownUntil)
+  // 쿨다운은 시간 단위가 아니라 날짜 단위로 판단: 가능일(또는 목표 날짜) 당일이 되면 시각과 상관없이 바로 교환 가능.
+  // (예전엔 next_allowed_at의 시각까지 비교해서, 목표 날짜 당일이어도 지난 교환 시각 전이면 실행이 막혔음)
+  const today = now.startOf('day')
+  const goalDayReached = hasGoal && !today.isBefore(dayjs(cashout!.goal_date!).startOf('day'))
+  const inCooldown = !!cooldownUntil && today.isBefore(cooldownUntil.startOf('day')) && !goalDayReached
   const canExchange = goalReached && !inCooldown
 
   const amountN = Number(amount.replace(/,/g, '')) || 0
