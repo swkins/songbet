@@ -256,8 +256,9 @@ function BetOptionOddsCard({ label, bets }: { label: string; bets: Bet[] }) {
 
 // "기타" 카드 — 어디에도 안 걸리거나 삭제된 옵션에 걸려있던 베팅을 목록으로 보여주고,
 // 등록된 옵션 중 하나로 직접 재지정할 수 있게 한다(bets.bet_option에 저장).
-function UnclassifiedBetOptionCard({ bets, options, onAssign }: {
+function UnclassifiedBetOptionCard({ bets, options, onAssign, onExclude }: {
   bets: Bet[]; options: string[]; onAssign: (ids: string[], label: string) => Promise<void>
+  onExclude: (bet: Bet, exclude: boolean) => Promise<void>
 }) {
   const [choice, setChoice] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState<string | null>(null)
@@ -271,6 +272,14 @@ function UnclassifiedBetOptionCard({ bets, options, onAssign }: {
     await onAssign([id], label)
     setSaving(null)
     setChoice(p => { const n = { ...p }; delete n[id]; return n })
+  }
+
+  // 휴지통: 베팅 자체는 남기고 통계에서만 제외 (최근 합류 목록의 삭제와 동일, 거기서 복구 가능)
+  async function exclude(b: Bet) {
+    if (!confirm(`"${b.match}" (${b.pick}) 을(를) 통계에서 삭제할까요?\n베팅 기록/잔액은 그대로 유지되고 통계 집계에서만 빠집니다.`)) return
+    setSaving(b.id)
+    await onExclude(b, true)
+    setSaving(null)
   }
 
   return (
@@ -304,6 +313,11 @@ function UnclassifiedBetOptionCard({ bets, options, onAssign }: {
                   border: '1px solid var(--gold-border)', background: 'var(--gold-bg)', color: 'var(--gold)', opacity: choice[b.id] ? 1 : 0.5 }}>
                 {saving === b.id ? '저장중' : '지정'}
               </button>
+              <button type="button" onClick={() => exclude(b)} disabled={saving === b.id} title="통계에서 삭제"
+                style={{ display: 'flex', alignItems: 'center', padding: '3px 5px', borderRadius: 4, cursor: 'pointer', flexShrink: 0,
+                  border: '1px solid var(--red-border)', background: 'none', color: 'var(--red)' }}>
+                <Trash2 size={10} />
+              </button>
             </div>
           ))}
         </div>
@@ -316,9 +330,10 @@ function UnclassifiedBetOptionCard({ bets, options, onAssign }: {
 // 등록된 옵션 하나하나가 각각 카드 하나 — 탭으로 감추지 않고 전부 한 화면에 펼쳐서 보여준다(배당 기준 고정).
 // 삭제된 옵션에 걸려있던(또는 어디에도 안 걸리는) 베팅은 "기타" 카드로, 거기서 직접 재지정 가능.
 // 그 아래엔 축구 리그표처럼 리그를 세로로, 옵션을 가로로 깔아 리그별 성적을 한 표에서 비교하는 매트릭스.
-function BetOptionStatsSection({ settledBets, options, numericOptions, onAssignBetOption }: {
+function BetOptionStatsSection({ settledBets, options, numericOptions, onAssignBetOption, onExcludeBet }: {
   settledBets: Bet[]; options: string[]; numericOptions: string[]
   onAssignBetOption: (ids: string[], label: string) => Promise<void>
+  onExcludeBet: (bet: Bet, exclude: boolean) => Promise<void>
 }) {
   if (options.length === 0) return null
   const cells = classifySportBetsByOption(settledBets, options, numericOptions)
@@ -331,7 +346,7 @@ function BetOptionStatsSection({ settledBets, options, numericOptions, onAssignB
       <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 10 }}>베팅추가에 등록된 옵션 전부, 배당 0.1단위 구간별 — 삭제된 옵션에 걸린 베팅이나 어디에도 안 걸리는 베팅은 "기타"로 표시</div>
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
         {cells.map(c => c.label === '기타'
-          ? <UnclassifiedBetOptionCard key="기타" bets={c.bets} options={options} onAssign={onAssignBetOption} />
+          ? <UnclassifiedBetOptionCard key="기타" bets={c.bets} options={options} onAssign={onAssignBetOption} onExclude={onExcludeBet} />
           : <BetOptionOddsCard key={c.label} label={c.label} bets={c.bets} />)}
       </div>
       {matrixColumns.length > 0 && (
@@ -1505,11 +1520,12 @@ function LivePanel({ bets, onDeleteRequest }: { bets: Bet[]; onDeleteRequest: ()
 }
 
 
-function SportPanel({ bets, sport, onDeleteRequest, leagueOverrides, baseballLeagues, onRenameBaseballLeague, onDeleteBaseballLeague, esportsOverrides, esportsLeagues, onRenameEsportsLeague, onDeleteEsportsLeague, basketballOverrides, basketballLeagues, onRenameBasketballLeague, onDeleteBasketballLeague, volleyballOverrides, volleyballLeagues, onRenameVolleyballLeague, onDeleteVolleyballLeague, betOptions, numericBetOptions, onAssignBetOption }: {
+function SportPanel({ bets, sport, onDeleteRequest, leagueOverrides, baseballLeagues, onRenameBaseballLeague, onDeleteBaseballLeague, esportsOverrides, esportsLeagues, onRenameEsportsLeague, onDeleteEsportsLeague, basketballOverrides, basketballLeagues, onRenameBasketballLeague, onDeleteBasketballLeague, volleyballOverrides, volleyballLeagues, onRenameVolleyballLeague, onDeleteVolleyballLeague, betOptions, numericBetOptions, onAssignBetOption, onExcludeBet }: {
   bets: Bet[]; sport: typeof SPORTS[0]; onDeleteRequest: () => void
   betOptions: string[]
   numericBetOptions: string[]
   onAssignBetOption: (ids: string[], label: string) => Promise<void>
+  onExcludeBet: (bet: Bet, exclude: boolean) => Promise<void>
   leagueOverrides: LeagueOverride[]
   baseballLeagues: string[]
   onRenameBaseballLeague: (oldName: string, newName: string) => Promise<void>
@@ -1573,7 +1589,7 @@ function SportPanel({ bets, sport, onDeleteRequest, leagueOverrides, baseballLea
         </button>
       </div>
 
-      <BetOptionStatsSection key={sport.value} settledBets={stats.settled} options={betOptions} numericOptions={numericBetOptions} onAssignBetOption={onAssignBetOption} />
+      <BetOptionStatsSection key={sport.value} settledBets={stats.settled} options={betOptions} numericOptions={numericBetOptions} onAssignBetOption={onAssignBetOption} onExcludeBet={onExcludeBet} />
 
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-start' }}>
         {byMarket.length > 0 && sport.value !== 'soccer' && (
@@ -2035,6 +2051,7 @@ export default function Stats() {
               betOptions={betOptionsBySport[activeSport] ?? []}
               numericBetOptions={numericBetOptionsBySport[activeSport] ?? []}
               onAssignBetOption={assignBetOptionToBets}
+              onExcludeBet={setStatsExcluded}
               leagueOverrides={leagueOverrides}
               baseballLeagues={baseballLeagues}
               onRenameBaseballLeague={renameBaseballLeague}
