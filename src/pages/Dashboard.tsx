@@ -383,19 +383,28 @@ function BetOptionHistoryHint({ sport, league, side, options, odds, allBets, onP
   )
 }
 
-// 완료된 베팅 카드 정중앙에 살짝 기울여 찍는 반투명 결과 도장 (적중/실패만, PUSH는 도장 없음)
+// 결과 처리된 베팅 카드 정중앙에 살짝 기울여 찍는 결과 도장 (적중/실패만, PUSH는 도장 없음)
+// 내용 위에 또렷하게 보이도록 진하게 + 반투명 배경을 깔아서 찍는다.
 function ResultStamp({ result }: { result: 'win' | 'loss' | 'push' | 'pending' }) {
   if (result !== 'win' && result !== 'loss') return null
   const isWin = result === 'win'
+  const c = isWin ? 'var(--green)' : 'var(--red)'
   return (
-    <span style={{
-      position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%) rotate(-14deg)',
-      border: `2.5px solid ${isWin ? 'var(--green)' : 'var(--red)'}`,
-      color: isWin ? 'var(--green)' : 'var(--red)',
-      fontWeight: 800, fontSize: 20, padding: '3px 14px', borderRadius: 7,
-      opacity: 0.22, letterSpacing: 2, pointerEvents: 'none', whiteSpace: 'nowrap', fontFamily: 'var(--font-body)',
+    <span className="result-stamp" style={{
+      position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%) rotate(-12deg)', zIndex: 1,
+      border: `3px double ${c}`, outline: `1.5px solid ${c}`, outlineOffset: 2,
+      color: c, background: isWin ? 'rgba(0,232,122,0.12)' : 'rgba(255,77,109,0.12)',
+      fontWeight: 900, fontSize: 24, padding: '2px 16px', borderRadius: 8,
+      opacity: 0.9, letterSpacing: 4, pointerEvents: 'none', whiteSpace: 'nowrap', fontFamily: 'var(--font-body)',
+      textShadow: `0 0 6px ${isWin ? 'rgba(0,232,122,0.45)' : 'rgba(255,77,109,0.45)'}`,
     }}>{isWin ? '적중' : '실패'}</span>
   )
+}
+
+// 진행중 목록에 1시간 보류 중인 "결과 처리된" 베팅 — 진행중 베팅과 확실히 구분되도록 색 배경 + 내용 흐리게 (CSS: .held-entry)
+function heldEntryClass(result: string): string {
+  if (result === 'pending') return ''
+  return ` held-entry held-${result === 'win' ? 'win' : result === 'loss' ? 'loss' : 'push'}`
 }
 
 // 뱃지(pill) 하나 — 배경/테두리/글자색을 같은 색 계열 3종 세트(--X-bg/--X-border/--X)로 통일
@@ -3445,7 +3454,7 @@ export default function Dashboard() {
                             const groupBets = pending.filter(b => b.parlay_group === bet.parlay_group).sort((a,b) => a.parlay_leg - b.parlay_leg)
                             const isHeld = groupBets[0].result !== 'pending'
                             return (
-                              <div key={bet.parlay_group} className={`site-bet-entry parlay-entry${isBigStake(bet.stake, isusd) ? ' big-bet-entry' : ''}`} style={{ marginBottom: 6, position: 'relative', opacity: isHeld ? 0.75 : 1 }}
+                              <div key={bet.parlay_group} className={`site-bet-entry parlay-entry${isBigStake(bet.stake, isusd) ? ' big-bet-entry' : ''}${isHeld ? heldEntryClass(groupBets[0].result) : ''}`} style={{ marginBottom: 6, position: 'relative' }}
                                 onMouseEnter={() => setHoverBetId(bet.parlay_group)} onMouseLeave={() => setHoverBetId(null)}>
                                 <ResultStamp result={groupBets[0].result} />
                                 {inlineEditBetId === bet.parlay_group ? (
@@ -3531,7 +3540,7 @@ export default function Dashboard() {
                             )
                           }
                           return (
-                            <div key={bet.id} className={`site-bet-entry${isBigStake(bet.stake, isusd) ? ' big-bet-entry' : ''}`} style={{ marginBottom: 6, position: 'relative', opacity: bet.result !== 'pending' ? 0.75 : 1 }}
+                            <div key={bet.id} className={`site-bet-entry${isBigStake(bet.stake, isusd) ? ' big-bet-entry' : ''}${heldEntryClass(bet.result)}`} style={{ marginBottom: 6, position: 'relative' }}
                               onMouseEnter={() => setHoverBetId(bet.id)} onMouseLeave={() => setHoverBetId(null)}>
                               <ResultStamp result={bet.result} />
                               {inlineEditBetId === bet.id ? (
