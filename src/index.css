@@ -542,12 +542,13 @@ tr:hover td { background: var(--bg-hover); }
 .mining-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 8px; }
 
 /* ── 데스크탑: 사이트 현황(좌) / 베팅 현황(우)을 한 줄에 배치.
-   양쪽 폭을 카드 수(--mining-n : --bet-n) 비율로 나누고 각자 카드 수만큼 균등 분할 → 모든 카드가 같은 가로폭 ── */
+   사이트 현황은 카드를 세로로 쌓아 카드 1장 폭(--mining-n = 1)만 차지하고, 베팅 현황은 사이트 수(--bet-n)만큼 —
+   1 : 사이트 수 비율로 나눠서 좌측 카드와 베팅 사이트 카드가 모두 같은 가로폭 ── */
 @media (min-width: 901px) {
   .dashboard-main { flex-direction: row; align-items: flex-start; gap: 10px; }
   .dashboard-side { flex: var(--mining-n, 1) 1 0; min-width: 0; width: auto; }
   .dashboard-bets { flex: var(--bet-n, 1) 1 0; min-width: 0; width: auto; }
-  .mining-cards { grid-template-columns: repeat(var(--mining-cols, 1), minmax(0, 1fr)); }
+  .mining-cards { grid-template-columns: minmax(0, 1fr); }
   .site-cards-wrap { grid-template-columns: repeat(var(--site-cols, 1), minmax(0, 1fr)); }
 }
 

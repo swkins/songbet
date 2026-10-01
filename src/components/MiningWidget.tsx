@@ -284,10 +284,8 @@ function CashoutModal({ entry, cashout, onClose, onSetGoal, onSetAuto, onSetPerf
 
 /** 대시보드 좌측에 얹는 채굴 현황 위젯. 전체 로직(오늘 데이터 로딩/자동 승계/추가/수정/삭제)은
  *  useMiningData 훅을 통해 Mining.tsx(채굴 탭)와 그대로 공유한다 — 달력/그래프는 여기선 생략. */
-export default function MiningWidget({ onCountChange }: { onCountChange?: (count: number) => void } = {}) {
+export default function MiningWidget() {
   const { today, entries, loading, knownSites, addEntry: addEntryToDb, updateField, deleteEntry: deleteEntryFromDb, cashouts, cashoutFor, setCashGoal, setAutoSet2w, setPerfGoal, doCashout } = useMiningData()
-  // 대시보드가 사이트 현황/베팅 현황의 가로 비율을 카드 수에 맞춰 나눌 수 있게 카드 수를 알려준다
-  useEffect(() => { onCountChange?.(entries.length) }, [entries.length, onCountChange])
 
   const [addModalOpen, setAddModalOpen] = useState(false)
   const [newName, setNewName] = useState('')
@@ -393,7 +391,7 @@ export default function MiningWidget({ onCountChange }: { onCountChange?: (count
         </div>
       )}
 
-      <div className="mining-cards" style={{ '--mining-cols': Math.max(1, entries.length) } as React.CSSProperties}>
+      <div className="mining-cards">
         {entries.map(e => {
           const m = mined(e)
           // 목표량은 "현재 포인트 총량" 기준 — 오늘 오른 양(m)이 아니라 e.current_point를 target_point와 직접 비교한다
@@ -486,10 +484,10 @@ export default function MiningWidget({ onCountChange }: { onCountChange?: (count
                 )}
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 3 }}>
-                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)' }}>채굴현황</span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 5 }}>
+                <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-muted)' }}>채굴현황</span>
                 {goalDate && (
-                  <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)' }}>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>
                     {remainingAmount <= 0
                       ? (isExcess ? `목표 달성 (초과 ${fmt(-remaining)})` : '목표 달성')
                       : `하루 ${fmt(requiredPerDay)} 필요 · ${remainingDays}일 남음`}
@@ -503,7 +501,7 @@ export default function MiningWidget({ onCountChange }: { onCountChange?: (count
                       {Array.from({ length: tickCount }, (_, i) => {
                         const fillPct = i < fullTicks ? 100 : i === fullTicks ? partialFill * 100 : 0
                         return (
-                          <div key={i} title={`목표까지 ${remainingDays}일`} style={{ flex: 1, height: 8, background: 'var(--bg-card)', borderRadius: 2, overflow: 'hidden', border: '1px solid var(--border)', position: 'relative' }}>
+                          <div key={i} title={`목표까지 ${remainingDays}일`} style={{ flex: 1, height: 13, background: 'var(--bg-card)', borderRadius: 2, overflow: 'hidden', border: '1px solid var(--border)', position: 'relative' }}>
                             <div style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: `${fillPct}%`, background: paceColor, transition: 'width 0.3s' }} />
                           </div>
                         )
@@ -526,7 +524,7 @@ export default function MiningWidget({ onCountChange }: { onCountChange?: (count
                   </div>
                 </div>
               ) : (
-                <div style={{ height: 8, background: 'var(--bg-card)', borderRadius: 3, overflow: 'hidden' }}>
+                <div style={{ height: 13, background: 'var(--bg-card)', borderRadius: 3, overflow: 'hidden' }}>
                   <div style={{ height: '100%', width: `${pct}%`, borderRadius: 3, transition: 'width 0.4s ease',
                     background: done ? 'var(--green)' : 'linear-gradient(90deg, var(--orange), #FFAD42)' }} />
                 </div>
@@ -534,14 +532,14 @@ export default function MiningWidget({ onCountChange }: { onCountChange?: (count
 
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 5 }}>
                 <span style={{
-                  fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-num)', padding: '3px 9px', borderRadius: 999,
+                  fontSize: 13, fontWeight: 700, fontFamily: 'var(--font-num)', padding: '3px 9px', borderRadius: 999,
                   background: isExcess ? 'var(--green-bg)' : 'var(--bg-card)',
                   color: isExcess ? 'var(--green)' : 'var(--text-muted)',
                   border: `1px solid ${isExcess ? 'var(--green-border)' : 'var(--border)'}`,
                 }}>
                   {isExcess ? `초과 ${fmt(-remaining)}` : `남음 ${fmt(Math.max(0, remaining))}`}
                 </span>
-                <span style={{ fontSize: 14, fontWeight: 800, fontFamily: 'var(--font-num)', color: done ? 'var(--green)' : 'var(--text-secondary)' }}>{pctDisplay.toFixed(0)}%</span>
+                <span style={{ fontSize: 17, fontWeight: 800, fontFamily: 'var(--font-num)', color: done ? 'var(--green)' : 'var(--text-secondary)' }}>{pctDisplay.toFixed(0)}%</span>
               </div>
 
               {/* 실적현황: 선택한 베팅사이트들의 (목표 날짜로부터 지정한 기간 이전까지) 입금 실적 진행률
@@ -574,15 +572,15 @@ export default function MiningWidget({ onCountChange }: { onCountChange?: (count
 
                 return (
                   <div style={{ marginTop: 5, paddingTop: 5 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 3 }}>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)' }}>실적현황</span>
-                      <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 5 }}>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-muted)' }}>실적현황</span>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>
                         {perfRemaining <= 0
                           ? (perfExcess ? `목표 달성 (초과 ${fmt(-perfRemaining)})` : '목표 달성')
                           : `하루 ${fmt(perfRequiredPerDay)} 필요 · ${perfDaysLeft}일 남음`}
                       </span>
                     </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 4, fontSize: 10, color: 'var(--text-muted)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 4, fontSize: 12, color: 'var(--text-muted)' }}>
                       <span>{perfStart.format('MM.DD')} ~ {perfEnd.format('MM.DD')} 기준</span>
                       <span><b style={{ color: 'var(--gold)', fontFamily: 'var(--font-num)' }}>{fmt(progress)}</b> / {fmt(c.perf_amount)}</span>
                     </div>
@@ -591,7 +589,7 @@ export default function MiningWidget({ onCountChange }: { onCountChange?: (count
                         {Array.from({ length: PERF_TICK_COUNT }, (_, i) => {
                           const fillPct = i < perfFullTicks ? 100 : i === perfFullTicks ? perfPartialFill * 100 : 0
                           return (
-                            <div key={i} style={{ flex: 1, height: 8, background: 'var(--bg-card)', borderRadius: 2, overflow: 'hidden', border: '1px solid var(--border)', position: 'relative' }}>
+                            <div key={i} style={{ flex: 1, height: 13, background: 'var(--bg-card)', borderRadius: 2, overflow: 'hidden', border: '1px solid var(--border)', position: 'relative' }}>
                               <div style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: `${fillPct}%`, background: perfPaceColor, transition: 'width 0.3s' }} />
                             </div>
                           )
@@ -613,14 +611,14 @@ export default function MiningWidget({ onCountChange }: { onCountChange?: (count
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 5 }}>
                       <span style={{
-                        fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-num)', padding: '3px 9px', borderRadius: 999,
+                        fontSize: 13, fontWeight: 700, fontFamily: 'var(--font-num)', padding: '3px 9px', borderRadius: 999,
                         background: perfExcess ? 'var(--green-bg)' : 'var(--bg-card)',
                         color: perfExcess ? 'var(--green)' : 'var(--text-muted)',
                         border: `1px solid ${perfExcess ? 'var(--green-border)' : 'var(--border)'}`,
                       }}>
                         {perfExcess ? `초과 ${fmt(-perfRemaining)}` : `남음 ${fmt(Math.max(0, perfRemaining))}`}
                       </span>
-                      <span style={{ fontSize: 14, fontWeight: 800, fontFamily: 'var(--font-num)', color: perfDone ? 'var(--green)' : 'var(--text-secondary)' }}>{perfPctDisplay.toFixed(0)}%</span>
+                      <span style={{ fontSize: 17, fontWeight: 800, fontFamily: 'var(--font-num)', color: perfDone ? 'var(--green)' : 'var(--text-secondary)' }}>{perfPctDisplay.toFixed(0)}%</span>
                     </div>
                   </div>
                 )
