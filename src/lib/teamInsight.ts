@@ -34,6 +34,7 @@ export function extractTeamCandidate(match: string): string {
   return match
     .replace(/\([^)]*\)/g, ' ')
     .replace(/\b(오버|언더|over|under)\b/gi, ' ')
+    .replace(/(^|\s)승리(?=\s|$)/g, ' ')   // 베팅옵션 미선택 시 자동으로 붙는 "승리"
     .replace(/[+-]?\d+(\.\d+)?/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()

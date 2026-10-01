@@ -188,8 +188,13 @@ function parseBetMatch(sport: string, match: string, knownOptions: string[] = []
     else if (rest === 'BO5') { boSuffix = 'BO5'; rest = '' }
   }
 
+  // 베팅옵션을 안 고르면 제출 시 "승리"가 자동으로 붙는다 — 그 종목에 "승리" 옵션이 등록 안 돼 있어도 승리로 알아본다
+  if (!knownOptionLabel && (rest === '승리' || rest.endsWith(' 승리'))) {
+    knownOptionLabel = '승리'; rest = rest === '승리' ? '' : rest.slice(0, -3).trimEnd()
+  }
+
   if (knownOptionLabel) {
-    return { team: (rest || raw).trim(), side, boTag: boSuffix, optionLabel: knownOptionLabel, accent: 'purple' }
+    return { team: (rest || raw).trim(), side, boTag: boSuffix, optionLabel: knownOptionLabel, accent: knownOptionLabel === '승리' ? 'gold' : 'purple' }
   }
 
   // 3) 등록된 옵션이 아니면(과거 데이터 등) 기존 종목별 패턴(숫자 핸디캡/BO태그)으로 폴백
@@ -417,7 +422,7 @@ function BetBadgeRow({ sport, match, live, knownOptions = [] }: { sport: string;
     <span style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap', minWidth: 0 }}>
       {parts?.side && <MatchBadge label={sideBadgeLabel(parts.side)} accent={parts.side === '홈' ? 'blue' : 'orange'} />}
       {parts?.boTag && <MatchBadge label={parts.boTag} accent="neutral" />}
-      {parts && parts.optionLabel !== '승리' && <MatchBadge label={parts.optionLabel} accent={parts.accent} />}
+      {parts && <MatchBadge label={parts.optionLabel} accent={parts.accent} />}
       {live && <MatchBadge label="LIVE" accent="red" />}
     </span>
   )
@@ -426,12 +431,12 @@ function BetBadgeRow({ sport, match, live, knownOptions = [] }: { sport: string;
 // 진행중 베팅 전용 — 단폴: 팀 이름 + 홈/원정 + BO태그는 한 줄, 베팅옵션은 그 아래 줄로 분리(stacked=true, 기본값).
 // 두폴(다리별): 한 줄에 다 표시(stacked=false) — 다리 수가 많아 세로로 길어지는 걸 막기 위함.
 // 베팅옵션도 홈/원정과 같은 뱃지(알약) 스타일로 표시 — 평문 글씨 대신 통일된 배지 톤을 유지한다.
-// "승리"(일반승/moneyline)는 홈/원정 배지만으로 이미 뜻이 통하므로 별도 표시하지 않음.
+// "승리"(일반승/moneyline)도 다른 옵션과 똑같이 배지로 표시한다.
 // (배당·금액은 이 아래 별도 줄 — BetOddsStakeLine 참고)
 function BetMatchLine({ sport, match, fontSize = 15, teamColor, live, stacked = true, knownOptions = [] }: { sport: string; match: string; fontSize?: number; teamColor?: string; live?: boolean; stacked?: boolean; knownOptions?: string[] }) {
   const parts = parseBetMatch(sport, match, knownOptions)
   const team = parts ? parts.team : match
-  const showOption = !!parts && parts.optionLabel !== '승리'
+  const showOption = !!parts
   if (!stacked) {
     return (
       <span style={{ display: 'flex', alignItems: 'center', gap: 5, flex: 1, minWidth: 0 }}>
@@ -899,7 +904,7 @@ function InlineBetEditForm({ bet, site, onClose, onSave, baseballOverrides, socc
   const initialParts = parseBetMatch(bet.sport, bet.match, betOptionsBySport[bet.sport] ?? [])
   const [content, setContent] = useState(initialParts ? initialParts.team : bet.match)
   const [side, setSide] = useState<string>(initialParts?.side ?? initialParts?.boTag ?? '')
-  const [selectedOptions, setSelectedOptions] = useState<string[]>(initialParts && initialParts.optionLabel !== '승리' ? [initialParts.optionLabel] : [])
+  const [selectedOptions, setSelectedOptions] = useState<string[]>(initialParts && (initialParts.optionLabel !== '승리' || (betOptionsBySport[bet.sport] ?? []).includes('승리')) ? [initialParts.optionLabel] : [])
   const [optionsManagerOpen, setOptionsManagerOpen] = useState(false)
   const [oddsRaw, setOddsRaw] = useState(bet.odds.toFixed(2))
   const [amount, setAmount]   = useState(String(bet.stake))
@@ -966,7 +971,8 @@ function InlineBetEditForm({ bet, site, onClose, onSave, baseballOverrides, socc
   async function submit() {
     if (!content.trim() || oddsV <= 0 || stakeN <= 0) return
     setSubmitting(true)
-    const finalContent = [content.trim(), side, ...selectedOptions].filter(Boolean).join(' ')
+    // 베팅옵션을 아무것도 안 골랐으면 "승리"로 처리
+    const finalContent = [content.trim(), side, ...(selectedOptions.length ? selectedOptions : ['승리'])].filter(Boolean).join(' ')
     await onSave(sport, finalContent, oddsV, stakeN, isLive, trimmedLeagueInput)
     setSubmitting(false)
   }
@@ -1982,7 +1988,8 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
     if (mode === 'multi' && !multiFilled) return
     setSubmitting(true)
     // 홈/원정, 베팅옵션은 입력창 텍스트에는 안 보이고 옆에 뱃지로만 표시되다가, 제출할 때 베팅 내용 뒤에 합쳐진다.
-    const finalContent = mode === 'single' ? [content.trim(), side, ...selectedOptions].filter(Boolean).join(' ') : content
+    // 베팅옵션을 아무것도 안 골랐으면 "승리"로 처리
+    const finalContent = mode === 'single' ? [content.trim(), side, ...(selectedOptions.length ? selectedOptions : ['승리'])].filter(Boolean).join(' ') : content
     const ok = mode === 'multi'
       ? await onMultiBet(sport, multiContents, oddsV, stakeN, multiContents.map(() => ''))
       : await onBet(sport, finalContent, oddsV, stakeN, isLive, SHOW_LEAGUE_UI ? detectedLeague : trimmedLeagueInput)
