@@ -88,14 +88,17 @@ function matchesBetOptionLabel(matchText: string, label: string): boolean {
   return s === label || s.endsWith(' ' + label)
 }
 interface OptionCell { label: string; bets: Bet[] }
-function pushOptionCells(cells: OptionCell[], label: string, matched: Bet[]) {
-  if (matched.length === 0) { cells.push({ label, bets: [] }); return }
+// 홈/원정을 고르지 않은 베팅은 옵션 카드에 넣지 않고 반환해서 "기타"로 보낸다 (베팅옵션별 성적엔 홈/원정 지정된 것만).
+// 단 오버/언더처럼 경기 전체에 거는 옵션은 원래 홈/원정이 없으므로 그대로 옵션 카드에 둔다.
+function pushOptionCells(cells: OptionCell[], label: string, matched: Bet[]): Bet[] {
+  if (matched.length === 0) { cells.push({ label, bets: [] }); return [] }
+  if (/오버|언더/.test(label)) { cells.push({ label, bets: matched }); return [] }
   const home = matched.filter(b => extractSide(b.match) === '홈')
   const away = matched.filter(b => extractSide(b.match) === '원정')
-  const none = matched.filter(b => !extractSide(b.match))
   if (home.length) cells.push({ label: `홈 ${label}`, bets: home })
   if (away.length) cells.push({ label: `원정 ${label}`, bets: away })
-  if (none.length) cells.push({ label, bets: none })
+  if (!home.length && !away.length) cells.push({ label, bets: [] })
+  return matched.filter(b => !extractSide(b.match))
 }
 // numericOptions에 속한 템플릿(예: "포인트 오버")은 베팅추가에서 매번 다른 숫자가 입력되지만
 // 그건 어디까지나 같은 베팅옵션이므로 값에 상관없이 템플릿 이름 하나로 통합해서 집계한다
@@ -124,8 +127,9 @@ function classifySportBetsByOption(sportBets: Bet[], options: string[], numericO
     matchedByOption.get(opt)!.push(...matched)
   }
   const cells: OptionCell[] = []
-  for (const opt of options) pushOptionCells(cells, opt, matchedByOption.get(opt) ?? [])
-  const other = sportBets.filter(b => !claimed.has(b.id))
+  const noSide: Bet[] = []
+  for (const opt of options) noSide.push(...pushOptionCells(cells, opt, matchedByOption.get(opt) ?? []))
+  const other = [...sportBets.filter(b => !claimed.has(b.id)), ...noSide]
   if (other.length) cells.push({ label: '기타', bets: other })
   return cells
 }
