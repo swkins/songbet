@@ -538,6 +538,19 @@ tr:hover td { background: var(--bg-hover); }
 .dashboard-side { display: flex; flex-direction: column; gap: 10px; width: 100%; }
 .dashboard-bets { width: 100%; }
 
+/* ── 사이트 현황(채굴) 카드 그리드 ── */
+.mining-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 8px; }
+
+/* ── 데스크탑: 사이트 현황(좌) / 베팅 현황(우)을 한 줄에 배치.
+   양쪽 폭을 카드 수(--mining-n : --bet-n) 비율로 나누고 각자 카드 수만큼 균등 분할 → 모든 카드가 같은 가로폭 ── */
+@media (min-width: 901px) {
+  .dashboard-main { flex-direction: row; align-items: flex-start; gap: 10px; }
+  .dashboard-side { flex: var(--mining-n, 1) 1 0; min-width: 0; width: auto; }
+  .dashboard-bets { flex: var(--bet-n, 1) 1 0; min-width: 0; width: auto; }
+  .mining-cards { grid-template-columns: repeat(var(--mining-cols, 1), minmax(0, 1fr)); }
+  .site-cards-wrap { grid-template-columns: repeat(var(--site-cols, 1), minmax(0, 1fr)); }
+}
+
 @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 
 /* ── 채굴 페이지 ── */

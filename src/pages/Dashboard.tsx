@@ -2764,6 +2764,7 @@ export default function Dashboard() {
   const displaySettledBySite = (id: string) => betsBySite(id).filter(b => b.result !== 'pending' && !isRecentlyResolved(b))
   const gameRollingsBySite = (id: string) => gameRollings.filter(g => g.site_id === id)
   const colCount = Math.max(1, sites.length)
+  const [miningCount, setMiningCount] = useState(1)
 
   function sitePnL(site: Site) {
     // 마감된(비활성) 사이트는 사이트명 옆 진행중 수익/손실 표시를 하지 않음
@@ -3287,11 +3288,13 @@ export default function Dashboard() {
 
   return (
     <div className="page">
-      <div className="dashboard-main">
+      {/* 데스크탑: 사이트 현황(좌) / 베팅 현황(우)을 한 줄에 두고, 양쪽 카드 수 비율로 가로폭을 나눠
+          모든 카드가 같은 폭이 되게 한다 — 어느 쪽에 사이트를 추가해도 전체 카드 폭이 똑같이 줄어든다 */}
+      <div className="dashboard-main" style={{ '--mining-n': Math.max(1, miningCount), '--bet-n': colCount } as React.CSSProperties}>
 
-        {/* ── 채굴 현황 (좌측) */}
+        {/* ── 사이트 현황 (좌측) */}
         <div className="dashboard-side">
-          <MiningWidget />
+          <MiningWidget onCountChange={setMiningCount} />
         </div>
 
         {/* ── 베팅 현황 (전체) */}

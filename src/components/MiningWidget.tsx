@@ -284,8 +284,10 @@ function CashoutModal({ entry, cashout, onClose, onSetGoal, onSetAuto, onSetPerf
 
 /** 대시보드 좌측에 얹는 채굴 현황 위젯. 전체 로직(오늘 데이터 로딩/자동 승계/추가/수정/삭제)은
  *  useMiningData 훅을 통해 Mining.tsx(채굴 탭)와 그대로 공유한다 — 달력/그래프는 여기선 생략. */
-export default function MiningWidget() {
+export default function MiningWidget({ onCountChange }: { onCountChange?: (count: number) => void } = {}) {
   const { today, entries, loading, knownSites, addEntry: addEntryToDb, updateField, deleteEntry: deleteEntryFromDb, cashouts, cashoutFor, setCashGoal, setAutoSet2w, setPerfGoal, doCashout } = useMiningData()
+  // 대시보드가 사이트 현황/베팅 현황의 가로 비율을 카드 수에 맞춰 나눌 수 있게 카드 수를 알려준다
+  useEffect(() => { onCountChange?.(entries.length) }, [entries.length, onCountChange])
 
   const [addModalOpen, setAddModalOpen] = useState(false)
   const [newName, setNewName] = useState('')
@@ -391,7 +393,7 @@ export default function MiningWidget() {
         </div>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 8 }}>
+      <div className="mining-cards" style={{ '--mining-cols': Math.max(1, entries.length) } as React.CSSProperties}>
         {entries.map(e => {
           const m = mined(e)
           // 목표량은 "현재 포인트 총량" 기준 — 오늘 오른 양(m)이 아니라 e.current_point를 target_point와 직접 비교한다
