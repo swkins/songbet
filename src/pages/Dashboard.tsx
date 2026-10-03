@@ -4,7 +4,7 @@ import { logAction } from '../lib/logger'
 import type { Bet, Site, Sport, Market, BetResult, GameRolling } from '../types'
 import { inferBaseballLeague, inferSoccerLeague, inferLeagueByKeyword, buildLeagueCandidates, suggestLeagueCandidates, koCompare, type LeagueOverride, type LeagueCandidate } from '../lib/league'
 import { buildTeamCandidates, suggestTeamCandidates, getEsportsLeague, type TeamCandidate, type BetLite } from '../lib/teamInsight'
-import { applyNumericTemplate, extractNumericTemplateValue } from '../lib/betOptions'
+import { applyNumericTemplate, extractNumericTemplateValue, extractNumericTemplateValueFromText } from '../lib/betOptions'
 import { sportGlyph } from '../components/SportIcons'
 import MiningWidget from '../components/MiningWidget'
 import dayjs from 'dayjs'
@@ -158,12 +158,35 @@ function isBigStake(stake: number, isusd: boolean): boolean {
 // 경기 내용(match)에서 팀 이름 / 홈·원정 / 베팅옵션을 분리해 색으로 구분해 보여주기 위한 파서.
 // 구조화된 형식(축구/농구/LOL)에서만 동작하고, 자유입력(야구/배구/기타 등)이거나 패턴이 안 맞으면 null → 그냥 원문 그대로 표시.
 type AccentKey = 'red' | 'green' | 'purple' | 'orange' | 'blue' | 'gold'
-interface BetMatchParts { team: string; side?: '홈' | '원정'; boTag?: string; optionLabel: string; accent: AccentKey }
+// optionLabel = 배지에 보여줄 글자, optionText = 저장된 원래 옵션 문구(수정 폼에서 칩 선택 복원용, 수치 입력 옵션만 다름)
+interface BetMatchParts { team: string; side?: '홈' | '원정'; boTag?: string; optionLabel: string; optionText?: string; accent: AccentKey }
+// 수치 입력 옵션의 배지 글자 — 입력한 수치까지 한 배지 안에 넣는다 ("180.5 언더", "8.5 킬 핸디").
+// "시간 오버"처럼 시간 옵션은 "28분 오버"로 보여준다. (통계는 템플릿 이름 그대로 "시간 오버"로 묶음)
+function numericOptionDisplay(template: string, value: string): string {
+  if (/^시간(\s|$)/.test(template)) return `${value}분 ${template.replace(/^시간\s*/, '')}`.trim()
+  return applyNumericTemplate(template, value)
+}
 // 배지 표시용 — "원정"은 배지가 커지지 않도록 "원" 한 글자로 줄여서 보여준다 (저장된 데이터/파싱 로직에는 영향 없음)
 const sideBadgeLabel = (side: '홈' | '원정') => side === '원정' ? '원' : side
-function parseBetMatch(sport: string, match: string, knownOptions: string[] = []): BetMatchParts | null {
+function parseBetMatch(sport: string, match: string, knownOptions: string[] = [], numericOptions: string[] = []): BetMatchParts | null {
   const raw = (match ?? '').trim()
   if (!raw) return null
+  // 0) 수치 입력 옵션("29 시간 오버", "180.5 언더" 등)은 수치까지 통째로 떼어내서 한 배지로 보여준다
+  for (const tpl of [...numericOptions].filter(Boolean).sort((a, b) => b.length - a.length)) {
+    const v = extractNumericTemplateValueFromText(tpl, raw)
+    if (v === null) continue
+    const text = applyNumericTemplate(tpl, v)
+    let r = raw.endsWith(' ' + text) ? raw.slice(0, -(text.length + 1)).trimEnd() : raw === text ? '' : raw
+    let side: '홈' | '원정' | undefined
+    if (r.endsWith(' 홈')) { side = '홈'; r = r.slice(0, -2).trimEnd() }
+    else if (r.endsWith(' 원정')) { side = '원정'; r = r.slice(0, -3).trimEnd() }
+    let boTag: string | undefined
+    if (sport === 'esports' && !side) {
+      if (r.endsWith(' BO3')) { boTag = 'BO3'; r = r.slice(0, -4).trimEnd() }
+      else if (r.endsWith(' BO5')) { boTag = 'BO5'; r = r.slice(0, -4).trimEnd() }
+    }
+    return { team: r || raw, side, boTag, optionLabel: numericOptionDisplay(tpl, v), optionText: text, accent: 'purple' }
+  }
   // 1) 등록된 베팅옵션 라벨을 뒤에서부터 벗겨낸다 (여러 개 중 가장 긴 것부터 매치해 오탐 최소화).
   //    베팅추가 화면에서 홈/원정·옵션을 고르면 "팀이름 홈 1.5 핸디"처럼 뒤에 그대로 합쳐져 저장되기 때문에,
   //    구조화되지 않은 종목(야구/배구/기타)이나 옵션에 공백이 섞인 라벨도 정확히 알아보려면 이 방식이 필요하다.
@@ -418,15 +441,15 @@ function MatchBadge({ label, accent }: { label: string; accent: AccentKey | 'neu
 }
 
 // 팀 이름만 (뱃지 없이) — 배당을 같은 줄 우측에 배치하는 상단 줄에서 사용
-function BetTeamName({ sport, match, fontSize = 12, teamColor, knownOptions = [] }: { sport: string; match: string; fontSize?: number; teamColor?: string; knownOptions?: string[] }) {
-  const parts = parseBetMatch(sport, match, knownOptions)
+function BetTeamName({ sport, match, fontSize = 12, teamColor, knownOptions = [], numericOptions = [] }: { sport: string; match: string; fontSize?: number; teamColor?: string; knownOptions?: string[]; numericOptions?: string[] }) {
+  const parts = parseBetMatch(sport, match, knownOptions, numericOptions)
   const label = parts ? parts.team : match
   return <span style={{ flex: 1, fontSize, fontWeight: 600, color: teamColor ?? 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{label}</span>
 }
 
 // 뱃지 줄 (홈/원정, 베팅옵션, BO태그, 라이브) — 팀 이름 아래 별도 줄에서 사용
-function BetBadgeRow({ sport, match, live, knownOptions = [] }: { sport: string; match: string; live?: boolean; knownOptions?: string[] }) {
-  const parts = parseBetMatch(sport, match, knownOptions)
+function BetBadgeRow({ sport, match, live, knownOptions = [], numericOptions = [] }: { sport: string; match: string; live?: boolean; knownOptions?: string[]; numericOptions?: string[] }) {
+  const parts = parseBetMatch(sport, match, knownOptions, numericOptions)
   return (
     <span style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap', minWidth: 0 }}>
       {parts?.side && <MatchBadge label={sideBadgeLabel(parts.side)} accent={parts.side === '홈' ? 'blue' : 'orange'} />}
@@ -442,8 +465,8 @@ function BetBadgeRow({ sport, match, live, knownOptions = [] }: { sport: string;
 // 베팅옵션도 홈/원정과 같은 뱃지(알약) 스타일로 표시 — 평문 글씨 대신 통일된 배지 톤을 유지한다.
 // "승리"(일반승/moneyline)도 다른 옵션과 똑같이 배지로 표시한다.
 // (배당·금액은 이 아래 별도 줄 — BetOddsStakeLine 참고)
-function BetMatchLine({ sport, match, fontSize = 15, teamColor, live, stacked = true, knownOptions = [] }: { sport: string; match: string; fontSize?: number; teamColor?: string; live?: boolean; stacked?: boolean; knownOptions?: string[] }) {
-  const parts = parseBetMatch(sport, match, knownOptions)
+function BetMatchLine({ sport, match, fontSize = 15, teamColor, live, stacked = true, knownOptions = [], numericOptions = [] }: { sport: string; match: string; fontSize?: number; teamColor?: string; live?: boolean; stacked?: boolean; knownOptions?: string[]; numericOptions?: string[] }) {
+  const parts = parseBetMatch(sport, match, knownOptions, numericOptions)
   const team = parts ? parts.team : match
   const showOption = !!parts
   if (!stacked) {
@@ -910,10 +933,10 @@ function InlineBetEditForm({ bet, site, onClose, onSave, baseballOverrides, socc
   const isusd = site.currency === 'usd'
   const [sport, setSport]     = useState(bet.sport)
   // 저장된 문구("팀이름 홈 1.5 핸디")에서 팀 이름/홈원정/베팅옵션을 다시 분리해서 채워넣는다 — 베팅추가 폼과 동일한 방식.
-  const initialParts = parseBetMatch(bet.sport, bet.match, betOptionsBySport[bet.sport] ?? [])
+  const initialParts = parseBetMatch(bet.sport, bet.match, betOptionsBySport[bet.sport] ?? [], numericBetOptionsBySport[bet.sport] ?? [])
   const [content, setContent] = useState(initialParts ? initialParts.team : bet.match)
   const [side, setSide] = useState<string>(initialParts?.side ?? initialParts?.boTag ?? '')
-  const [selectedOptions, setSelectedOptions] = useState<string[]>(initialParts && (initialParts.optionLabel !== '승리' || (betOptionsBySport[bet.sport] ?? []).includes('승리')) ? [initialParts.optionLabel] : [])
+  const [selectedOptions, setSelectedOptions] = useState<string[]>(initialParts && (initialParts.optionLabel !== '승리' || (betOptionsBySport[bet.sport] ?? []).includes('승리')) ? [initialParts.optionText ?? initialParts.optionLabel] : [])
   const [optionsManagerOpen, setOptionsManagerOpen] = useState(false)
   const [oddsRaw, setOddsRaw] = useState(bet.odds.toFixed(2))
   const [amount, setAmount]   = useState(String(bet.stake))
@@ -3479,7 +3502,7 @@ export default function Dashboard() {
                                               fontSize: legChecked ? 13 : 12, color: legChecked ? 'var(--green)' : 'var(--text-muted)',
                                               fontWeight: legChecked ? 800 : 400, width: 18, textAlign: 'center', flexShrink: 0,
                                             }}>{legChecked ? '✓' : (LEG_MARKS[idx] ?? idx+1)}</span>
-                                            <BetMatchLine sport={gb.sport} match={gb.match} stacked={false} knownOptions={betOptionsBySport[gb.sport] ?? []} />
+                                            <BetMatchLine sport={gb.sport} match={gb.match} stacked={false} knownOptions={betOptionsBySport[gb.sport] ?? []} numericOptions={numericBetOptionsBySport[gb.sport] ?? []} />
                                             {hoverBetId === bet.parlay_group && !isHeld && (
                                               <div style={{ display: 'flex', gap: 3, flexShrink: 0, position: 'absolute', right: 0, top: '50%', transform: 'translateY(-50%)', background: 'var(--bg-hover)', paddingLeft: 10, boxShadow: '-10px 0 8px -2px var(--bg-hover)' }}>
                                                 {legChecked ? (
@@ -3581,7 +3604,7 @@ export default function Dashboard() {
                                     {bet.league && <div style={{ paddingLeft: 26, fontSize: 10, color: 'var(--text-muted)', fontWeight: 700 }}>{bet.league}</div>}
                                     <div style={{ display: 'flex', gap: 5, alignItems: 'flex-start' }}>
                                       <span style={{ fontSize: 18, lineHeight: 1, flexShrink: 0, width: 22, textAlign: 'center', marginTop: 1 }}>{sportGlyph(bet.sport) ?? SPORT_SHORT[bet.sport] ?? '📋'}</span>
-                                      <BetMatchLine sport={bet.sport} match={bet.match} live={bet.is_live} knownOptions={betOptionsBySport[bet.sport] ?? []} />
+                                      <BetMatchLine sport={bet.sport} match={bet.match} live={bet.is_live} knownOptions={betOptionsBySport[bet.sport] ?? []} numericOptions={numericBetOptionsBySport[bet.sport] ?? []} />
                                     </div>
                                     <div style={{ paddingLeft: 26, marginTop: 2 }}>
                                       <BetOddsStakeLine odds={bet.odds} stake={bet.stake} prefix={pfx} suffix={sfx} big={isBigStake(bet.stake, isusd)} />
@@ -3667,8 +3690,8 @@ export default function Dashboard() {
                                         {gb.league && <div style={{ paddingLeft: 23, fontSize: 9, color: 'var(--text-muted)', fontWeight: 700 }}>{gb.league}</div>}
                                         <div style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
                                           <span style={{ fontSize: 10, color: 'var(--text-muted)', width: 18, textAlign: 'center', flexShrink: 0 }}>{LEG_MARKS[idx] ?? idx+1}</span>
-                                          <BetTeamName sport={gb.sport} match={gb.match} fontSize={12} teamColor={isWin ? 'var(--green)' : isLoss ? 'var(--red)' : 'var(--text-secondary)'} knownOptions={betOptionsBySport[gb.sport] ?? []} />
-                                          <BetBadgeRow sport={gb.sport} match={gb.match} knownOptions={betOptionsBySport[gb.sport] ?? []} />
+                                          <BetTeamName sport={gb.sport} match={gb.match} fontSize={12} teamColor={isWin ? 'var(--green)' : isLoss ? 'var(--red)' : 'var(--text-secondary)'} knownOptions={betOptionsBySport[gb.sport] ?? []} numericOptions={numericBetOptionsBySport[gb.sport] ?? []} />
+                                          <BetBadgeRow sport={gb.sport} match={gb.match} knownOptions={betOptionsBySport[gb.sport] ?? []} numericOptions={numericBetOptionsBySport[gb.sport] ?? []} />
                                         </div>
                                       </div>
                                     ))}
@@ -3692,11 +3715,11 @@ export default function Dashboard() {
                                   {bet.league && <div style={{ paddingLeft: 24, fontSize: 9, color: 'var(--text-muted)', fontWeight: 700 }}>{bet.league}</div>}
                                   <div style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
                                     <span style={{ fontSize: 16, lineHeight: 1, flexShrink: 0, width: 20, textAlign: 'center' }}>{sportGlyph(bet.sport) ?? SPORT_SHORT[bet.sport] ?? '📋'}</span>
-                                    <BetTeamName sport={bet.sport} match={bet.match} fontSize={12} teamColor={bet.result === 'win' ? 'var(--green)' : bet.result === 'loss' ? 'var(--red)' : 'var(--text-secondary)'} knownOptions={betOptionsBySport[bet.sport] ?? []} />
+                                    <BetTeamName sport={bet.sport} match={bet.match} fontSize={12} teamColor={bet.result === 'win' ? 'var(--green)' : bet.result === 'loss' ? 'var(--red)' : 'var(--text-secondary)'} knownOptions={betOptionsBySport[bet.sport] ?? []} numericOptions={numericBetOptionsBySport[bet.sport] ?? []} />
                                     <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', flexShrink: 0 }}>{bet.odds.toFixed(2)}</span>
                                   </div>
                                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingLeft: 24, marginTop: 2 }}>
-                                    <BetBadgeRow sport={bet.sport} match={bet.match} live={bet.is_live} knownOptions={betOptionsBySport[bet.sport] ?? []} />
+                                    <BetBadgeRow sport={bet.sport} match={bet.match} live={bet.is_live} knownOptions={betOptionsBySport[bet.sport] ?? []} numericOptions={numericBetOptionsBySport[bet.sport] ?? []} />
                                     {hoverBetId === 's_' + bet.id ? (
                                       <button className="btn btn-ghost btn-xs" style={{ fontSize: 10 }} onClick={() => applyResult(bet, 'revert')}><RotateCcw size={9} /> 되돌리기</button>
                                     ) : (
