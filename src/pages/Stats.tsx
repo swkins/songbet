@@ -147,6 +147,107 @@ const OPTION_STATS_SPORTS: { value: Sport; label: string; emoji: string }[] = [
   { value: 'other', label: '기타', emoji: '📋' },
 ]
 
+// ─── 전체 탭: 일별 · 월별 손익 ──────────────────────────────────────────
+// 결과처리된 베팅(적중/실패/PUSH/캐시아웃) 기준, 결과처리 시각(result_at, 없으면 베팅일)의 날짜로 묶는다.
+// 기간 필터와 무관하게 전체 기록 사용 (통계 제외한 건은 빠짐). 두폴은 손익이 첫 경기에만 저장되므로 첫 경기 종목으로 잡힌다.
+interface PnLAgg { count: number; gain: number; loss: number; net: number; bySport: Record<string, { gain: number; loss: number; net: number; count: number }> }
+function settledDayOf(b: Bet): string { return b.result_at ? dayjs(b.result_at).format('YYYY-MM-DD') : b.bet_date }
+function aggregatePnL(list: Bet[]): PnLAgg {
+  const agg: PnLAgg = { count: 0, gain: 0, loss: 0, net: 0, bySport: {} }
+  for (const b of list) {
+    const isExtraLeg = b.parlay_group !== null && b.parlay_leg > 1
+    const sp = (agg.bySport[b.sport] ??= { gain: 0, loss: 0, net: 0, count: 0 })
+    if (!isExtraLeg) { agg.count++; sp.count++ }
+    if (b.profit > 0) { agg.gain += b.profit; sp.gain += b.profit }
+    else if (b.profit < 0) { agg.loss += b.profit; sp.loss += b.profit }
+    agg.net += b.profit; sp.net += b.profit
+  }
+  return agg
+}
+function PnLNum({ v, size = 12, bold = true }: { v: number; size?: number; bold?: boolean }) {
+  if (v === 0) return <span style={{ color: 'var(--text-muted)', fontSize: size }}>0</span>
+  return <span style={{ color: v > 0 ? '#4ade80' : '#f87171', fontSize: size, fontWeight: bold ? 700 : 500, fontFamily: 'var(--font-num)', whiteSpace: 'nowrap' }}>{v > 0 ? '+' : ''}{Math.round(v).toLocaleString()}</span>
+}
+function DailyMonthlyPnLSection({ bets }: { bets: Bet[] }) {
+  const settled = bets.filter(b => b.result !== 'pending')
+  const [mode, setMode] = useState<'day' | 'month'>('day')
+  const months = Array.from(new Set(settled.map(b => settledDayOf(b).slice(0, 7)))).sort().reverse()
+  const [month, setMonth] = useState<string>(months[0] ?? dayjs().format('YYYY-MM'))
+  const sportCols = SPORTS.filter(sp => settled.some(b => b.sport === sp.value))
+
+  const keyOf = (b: Bet) => mode === 'day' ? settledDayOf(b) : settledDayOf(b).slice(0, 7)
+  const scoped = mode === 'day' ? settled.filter(b => settledDayOf(b).startsWith(month)) : settled
+  const groups = new Map<string, Bet[]>()
+  for (const b of scoped) { const k = keyOf(b); (groups.get(k) ?? groups.set(k, []).get(k)!).push(b) }
+  const rows = Array.from(groups.entries()).sort((a, b) => b[0].localeCompare(a[0])).map(([k, list]) => ({ key: k, ...aggregatePnL(list) }))
+  const total = aggregatePnL(scoped)
+  const fmtKey = (k: string) => mode === 'day' ? `${dayjs(k).format('MM.DD')} (${'일월화수목금토'[dayjs(k).day()]})` : dayjs(k + '-01').format('YYYY년 M월')
+
+  const th: React.CSSProperties = { fontSize: 10, color: 'var(--text-muted)', fontWeight: 700, padding: '6px 8px', textAlign: 'right', whiteSpace: 'nowrap', borderBottom: '1px solid var(--border)' }
+  const td: React.CSSProperties = { padding: '6px 8px', textAlign: 'right', borderBottom: '1px solid var(--border-light)' }
+
+  return (
+    <div className="card">
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+        <div className="card-title" style={{ margin: 0 }}>📅 {mode === 'day' ? '일별' : '월별'} 손익</div>
+        <div style={{ display: 'flex', gap: 4 }}>
+          {(['day', 'month'] as const).map(m => (
+            <button key={m} className={`filter-chip ${mode === m ? 'active' : ''}`} onClick={() => setMode(m)}>{m === 'day' ? '일별' : '월별'}</button>
+          ))}
+        </div>
+        {mode === 'day' && months.length > 0 && (
+          <select value={month} onChange={e => setMonth(e.target.value)} style={{ fontSize: 11, padding: '4px 6px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-primary)' }}>
+            {months.map(m => <option key={m} value={m}>{dayjs(m + '-01').format('YYYY년 M월')}</option>)}
+          </select>
+        )}
+        <span style={{ fontSize: 9, color: 'var(--text-muted)', marginLeft: 'auto' }}>결과처리된 날짜 기준</span>
+      </div>
+      {rows.length === 0 ? (
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'center', padding: '12px 0' }}>결과처리된 베팅이 없습니다</div>
+      ) : (
+        <div style={{ overflowX: 'auto', maxHeight: 420, overflowY: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+            <thead style={{ position: 'sticky', top: 0, background: 'var(--bg-card)', zIndex: 1 }}>
+              <tr>
+                <th style={{ ...th, textAlign: 'left' }}>{mode === 'day' ? '날짜' : '월'}</th>
+                <th style={th}>건</th>
+                <th style={th}>수익</th>
+                <th style={th}>손실</th>
+                <th style={th}>순손익</th>
+                {sportCols.map(sp => <th key={sp.value} style={th}>{sp.label}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {[{ key: '__total', ...total }, ...rows].map(r => {
+                const isTotal = r.key === '__total'
+                return (
+                  <tr key={r.key} style={isTotal ? { background: 'var(--bg-elevated)' } : undefined}>
+                    <td style={{ ...td, textAlign: 'left', fontWeight: 700, whiteSpace: 'nowrap', color: 'var(--text-primary)' }}>
+                      {isTotal ? (mode === 'day' ? `${dayjs(month + '-01').format('M월')} 합계` : '전체 합계') : fmtKey(r.key)}
+                    </td>
+                    <td style={{ ...td, color: 'var(--text-secondary)', fontSize: 11 }}>{r.count}</td>
+                    <td style={td}><PnLNum v={r.gain} bold={false} /></td>
+                    <td style={td}><PnLNum v={r.loss} bold={false} /></td>
+                    <td style={td}><PnLNum v={r.net} size={13} /></td>
+                    {sportCols.map(sp => {
+                      const c = r.bySport[sp.value]
+                      return (
+                        <td key={sp.value} style={td} title={c ? `${sp.label} ${c.count}건 · 수익 +${Math.round(c.gain).toLocaleString()} / 손실 ${Math.round(c.loss).toLocaleString()}` : undefined}>
+                          {c ? <PnLNum v={c.net} size={11} /> : <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>–</span>}
+                        </td>
+                      )
+                    })}
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── 전체 탭: 하루 평균 베팅금액 · 요일별(월~일) 평균 베팅금액 · 10만원 베팅당 손익 ──────────
 const WEEKDAYS: { label: string; idx: number }[] = [
   { label: '월', idx: 1 }, { label: '화', idx: 2 }, { label: '수', idx: 3 }, { label: '목', idx: 4 },
@@ -1940,6 +2041,8 @@ export default function Stats() {
                   </div>
                 ))}
               </div>
+
+              <DailyMonthlyPnLSection bets={bets} />
 
               <BettingVolumeSection settled={settled} periodDays={periodDaysCount} />
 
