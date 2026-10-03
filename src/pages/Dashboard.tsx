@@ -7,6 +7,7 @@ import { buildTeamCandidates, suggestTeamCandidates, getEsportsLeague, type Team
 import { applyNumericTemplate, extractNumericTemplateValue, extractNumericTemplateValueFromText } from '../lib/betOptions'
 import { sportGlyph } from '../components/SportIcons'
 import MiningWidget from '../components/MiningWidget'
+import DailyPnLWidget from '../components/DailyPnLWidget'
 import dayjs from 'dayjs'
 import isoWeek from 'dayjs/plugin/isoWeek'
 dayjs.extend(isoWeek)
@@ -3333,6 +3334,7 @@ export default function Dashboard() {
         {/* ── 사이트 현황 (좌측) */}
         <div className="dashboard-side">
           <MiningWidget />
+          <DailyPnLWidget usdKrwRate={usdKrwRate} refreshKey={(() => { const st = bets.filter(b => b.result !== 'pending'); return `${st.length}:${st.reduce((a, b) => a + b.profit, 0)}` })()} />
         </div>
 
         {/* ── 베팅 현황 (전체) */}

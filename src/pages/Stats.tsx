@@ -8,6 +8,7 @@ import { Trash2, X, Check, Pencil } from 'lucide-react'
 import { inferBaseballLeague, inferSoccerLeague, koCompare, KBO_TEAMS, MLB_TEAMS, NPB_TEAMS, type LeagueOverride } from '../lib/league'
 import { sportGlyph } from '../components/SportIcons'
 import { applyNumericTemplate, extractNumericTemplateValueFromText } from '../lib/betOptions'
+import { settledDayOf, aggregatePnL } from '../lib/pnl'
 
 // 리그 관리 시스템(베팅옵션·리그별 순위, 리그 미지정 베팅 지정) — 데이터/로직은 유지하되 화면에는 표출하지 않음
 const SHOW_LEAGUE_UI = false
@@ -150,20 +151,6 @@ const OPTION_STATS_SPORTS: { value: Sport; label: string; emoji: string }[] = [
 // ─── 전체 탭: 일별 · 월별 손익 ──────────────────────────────────────────
 // 결과처리된 베팅(적중/실패/PUSH/캐시아웃) 기준, 결과처리 시각(result_at, 없으면 베팅일)의 날짜로 묶는다.
 // 기간 필터와 무관하게 전체 기록 사용 (통계 제외한 건은 빠짐). 두폴은 손익이 첫 경기에만 저장되므로 첫 경기 종목으로 잡힌다.
-interface PnLAgg { count: number; gain: number; loss: number; net: number; bySport: Record<string, { gain: number; loss: number; net: number; count: number }> }
-function settledDayOf(b: Bet): string { return b.result_at ? dayjs(b.result_at).format('YYYY-MM-DD') : b.bet_date }
-function aggregatePnL(list: Bet[]): PnLAgg {
-  const agg: PnLAgg = { count: 0, gain: 0, loss: 0, net: 0, bySport: {} }
-  for (const b of list) {
-    const isExtraLeg = b.parlay_group !== null && b.parlay_leg > 1
-    const sp = (agg.bySport[b.sport] ??= { gain: 0, loss: 0, net: 0, count: 0 })
-    if (!isExtraLeg) { agg.count++; sp.count++ }
-    if (b.profit > 0) { agg.gain += b.profit; sp.gain += b.profit }
-    else if (b.profit < 0) { agg.loss += b.profit; sp.loss += b.profit }
-    agg.net += b.profit; sp.net += b.profit
-  }
-  return agg
-}
 function PnLNum({ v, size = 12, bold = true }: { v: number; size?: number; bold?: boolean }) {
   if (v === 0) return <span style={{ color: 'var(--text-muted)', fontSize: size }}>0</span>
   return <span style={{ color: v > 0 ? '#4ade80' : '#f87171', fontSize: size, fontWeight: bold ? 700 : 500, fontFamily: 'var(--font-num)', whiteSpace: 'nowrap' }}>{v > 0 ? '+' : ''}{Math.round(v).toLocaleString()}</span>
