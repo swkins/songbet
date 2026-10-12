@@ -1144,9 +1144,9 @@ function SoccerLeagueColumnsSection({ title, columns, emptyLabel }: { title: str
 
 // ─── 축구 언더 — 라인별(2.5/3.5/4.5) × 리그별 (초안) ────────────────
 // 리그 미지정 베팅은 "미분류"로 묶어서 함께 보여줌. league 컬럼값 그대로 사용(과거 팀 키워드 추론은 적용 안 함).
-// ─── 농구 상세 통계 — 리그별 박스, 박스 안에서 베팅옵션(4.5 H ~ 13.5 H, 승리, 오버, 언더)별 적중률·수익률 ──────
-// 리그마다 성향 차이가 커서 옵션 기준이 아니라 리그 기준으로 나눈다. 옵션은 베팅추가에 등록된 순서 그대로,
-// 베팅이 없는 옵션도 빈 줄로 남겨 둔다. 어떤 옵션에도 안 걸리는 베팅은 박스 맨 아래 "기타" 줄로.
+// ─── 농구 상세 통계 — 베팅옵션(4.5 H ~ 13.5 H, 승리, 오버, 언더) × 리그 한 표 ──────
+// 리그마다 성향 차이가 커서 리그별로 나눠 보되, 옵션 구성은 같으니 한 표에 모은다. 옵션은 베팅추가에
+// 등록된 순서 그대로, 베팅이 없는 옵션도 빈 줄로 남긴다. 어떤 옵션에도 안 걸리는 베팅은 "기타" 줄로.
 function betOptionOf(b: Bet, matchOrder: string[], optionSet: Set<string>, numericSet: Set<string>): string | null {
   if (b.bet_option && optionSet.has(b.bet_option)) return b.bet_option
   for (const opt of matchOrder) {
@@ -1157,6 +1157,7 @@ function betOptionOf(b: Bet, matchOrder: string[], optionSet: Set<string>, numer
   }
   return null
 }
+// 행=베팅옵션, 열=리그(+맨 오른쪽 합계)인 한 표 — 옵션 구성이 리그와 무관하게 같으므로 표 하나로 한눈에 비교.
 function BasketballLeagueOptionBoxes({ bets, overrides, options, numericOptions }: {
   bets: Bet[]; overrides: LeagueOverride[]; options: string[]; numericOptions: string[]
 }) {
@@ -1165,30 +1166,62 @@ function BasketballLeagueOptionBoxes({ bets, overrides, options, numericOptions 
   const numericSet = new Set(numericOptions)
   const matchOrder = [...options].sort((a, b) => b.length - a.length)
   const leagueKeyOf = (b: Bet) => { const l = freeLeagueOf(b, overrides); return l === 'ETC' ? '리그 미지정' : l }
+  const optOf = new Map(settled.map(b => [b.id, betOptionOf(b, matchOrder, optionSet, numericSet) ?? '기타']))
 
-  const byLeague = new Map<string, Bet[]>()
-  for (const b of settled) {
-    const k = leagueKeyOf(b)
-    byLeague.set(k, [...(byLeague.get(k) ?? []), b])
-  }
-  const leagues = Array.from(byLeague.keys()).sort((a, b) =>
+  const leagues = Array.from(new Set(settled.map(leagueKeyOf))).sort((a, b) =>
     a === '리그 미지정' ? 1 : b === '리그 미지정' ? -1 : koCompare(a, b))
+  const rowLabels = settled.some(b => optOf.get(b.id) === '기타') ? [...options, '기타'] : options
+  const cell = (opt: string | null, league: string | null) =>
+    settled.filter(b => (opt === null || optOf.get(b.id) === opt) && (league === null || leagueKeyOf(b) === league))
+
+  const th: React.CSSProperties = { textAlign: 'center', padding: '4px 6px', fontSize: 9, color: 'var(--text-secondary)', fontWeight: 700, whiteSpace: 'nowrap' }
+  const sumBorder = { borderLeft: '1px solid var(--border)' }
+  function Cell({ list, bold }: { list: Bet[]; bold?: boolean }) {
+    if (!list.length) return <span style={{ color: 'var(--text-muted)' }}>—</span>
+    const s = calcStats(list)
+    return (
+      <>
+        <span style={{ color: 'var(--text-muted)' }}>{s.total}건 </span>
+        <span style={{ fontWeight: 600, color: s.winRate >= 50 ? '#4ade80' : '#f87171' }}>{s.winRate.toFixed(0)}% </span>
+        <span style={{ fontWeight: bold ? 800 : 700, color: s.roi >= 0 ? '#4ade80' : '#f87171' }}>{s.roi >= 0 ? '+' : ''}{s.roi.toFixed(0)}%</span>
+      </>
+    )
+  }
 
   return (
     <div style={{ marginTop: 14 }}>
-      <div className="card-title" style={{ marginBottom: 8 }}>🏀 리그별 · 베팅옵션별 성적</div>
-      {leagues.length === 0
+      <div className="card-title" style={{ marginBottom: 2 }}>🏀 베팅옵션 × 리그별 성적</div>
+      <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 8 }}>칸마다 건수 · 적중률 · ROI</div>
+      {settled.length === 0
         ? <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '12px 0' }}>정산된 베팅이 없습니다.</div>
         : (
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            {leagues.map(league => {
-              const lb = byLeague.get(league)!
-              const optOf = new Map(lb.map(b => [b.id, betOptionOf(b, matchOrder, optionSet, numericSet)]))
-              const rows: RuleRow[] = options.map(opt => ({ label: opt, tier: 'none', bets: lb.filter(b => optOf.get(b.id) === opt) }))
-              const other = lb.filter(b => optOf.get(b.id) === null)
-              if (other.length) rows.push({ label: '기타', tier: 'none', bets: other })
-              return <RuleStatsTable key={league} title={`🏀 ${league}`} rows={rows} extra={<MarketTotalRow bets={lb} />} />
-            })}
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                  <th style={{ ...th, textAlign: 'left' }}>옵션</th>
+                  {leagues.map(l => <th key={l} style={th}>{l}</th>)}
+                  <th style={{ ...th, ...sumBorder }}>합계</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rowLabels.map(opt => {
+                  const rowAll = cell(opt, null)
+                  return (
+                    <tr key={opt} style={{ borderBottom: '1px solid var(--border-light)', height: 26, opacity: rowAll.length ? 1 : 0.45 }}>
+                      <td style={{ padding: '4px 6px', fontWeight: 700, color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>{opt}</td>
+                      {leagues.map(l => <td key={l} style={{ textAlign: 'center', padding: '4px 6px', whiteSpace: 'nowrap' }}><Cell list={cell(opt, l)} /></td>)}
+                      <td style={{ textAlign: 'center', padding: '4px 6px', whiteSpace: 'nowrap', ...sumBorder }}><Cell list={rowAll} bold /></td>
+                    </tr>
+                  )
+                })}
+                <tr style={{ borderTop: '1px solid var(--border)', height: 28 }}>
+                  <td style={{ padding: '4px 6px', fontWeight: 800, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>합계</td>
+                  {leagues.map(l => <td key={l} style={{ textAlign: 'center', padding: '4px 6px', whiteSpace: 'nowrap' }}><Cell list={cell(null, l)} bold /></td>)}
+                  <td style={{ textAlign: 'center', padding: '4px 6px', whiteSpace: 'nowrap', ...sumBorder }}><Cell list={settled} bold /></td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         )}
     </div>
