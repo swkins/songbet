@@ -1018,6 +1018,9 @@ function InlineBetEditForm({ bet, site, onClose, onSave, baseballOverrides, socc
   const DELETE_TEAM_BY_SPORT: Partial<Record<string, (league: string, name: string) => Promise<void>>> = {
     soccer: onDeleteSoccerTeam, baseball: onDeleteBaseballTeam, basketball: onDeleteBasketballTeam, volleyball: onDeleteVolleyballTeam, esports: onDeleteEsportsTeam,
   }
+  const RENAME_TEAM_BY_SPORT: Partial<Record<string, (league: string, oldName: string, newName: string) => Promise<void>>> = {
+    soccer: onRenameSoccerTeam, baseball: onRenameBaseballTeam, basketball: onRenameBasketballTeam, volleyball: onRenameVolleyballTeam, esports: onRenameEsportsTeam,
+  }
   const sportTeams = TEAMS_BY_SPORT[sport] ?? []
   // 자동으로 채운 리그를 기억 — 사용자가 직접 바꾼 리그는 덮어쓰지 않는다
   const autoLeagueRef = useRef('')
@@ -1113,6 +1116,7 @@ function InlineBetEditForm({ bet, site, onClose, onSave, baseballOverrides, socc
           teams={sportTeams}
           onAddTeam={ADD_TEAM_BY_SPORT[sport]}
           onDeleteTeam={DELETE_TEAM_BY_SPORT[sport]}
+          onRenameTeam={RENAME_TEAM_BY_SPORT[sport]}
         />
       )}
       <BetOptionChips options={betOptions} numericOptions={numericBetOptions} selected={selectedOptions}
@@ -1446,7 +1450,7 @@ function LeagueManageModal({ sport, leagues, favoriteLeagues, teams, onClose, on
 
 /* ── 팀 매핑 없이 리그 이름만 등록·삭제하는 단순 관리 모달 — 베팅추가에서 리그를 직접 입력할 때 사용.
    다른 관리 모달들과 동일하게 바깥을 클릭해도 닫히지 않고 X 버튼으로만 닫힌다. */
-function LeagueOnlyManageModal({ sportLabel, leagues, onClose, onAddLeague, onRenameLeague, onDeleteLeague, teams = [], onAddTeam, onDeleteTeam }: {
+function LeagueOnlyManageModal({ sportLabel, leagues, onClose, onAddLeague, onRenameLeague, onDeleteLeague, teams = [], onAddTeam, onDeleteTeam, onRenameTeam }: {
   sportLabel: string; leagues: string[]; onClose: () => void
   onAddLeague: (name: string) => Promise<void>
   onRenameLeague: (oldName: string, newName: string) => Promise<void>
@@ -1455,8 +1459,17 @@ function LeagueOnlyManageModal({ sportLabel, leagues, onClose, onAddLeague, onRe
   teams?: { league: string; name: string }[]
   onAddTeam?: (league: string, name: string) => Promise<void>
   onDeleteTeam?: (league: string, name: string) => Promise<void>
+  onRenameTeam?: (league: string, oldName: string, newName: string) => Promise<void>
 }) {
   const [openLeague, setOpenLeague] = useState<string | null>(null)
+  const [editingTeam, setEditingTeam] = useState<string | null>(null)
+  const [editingTeamValue, setEditingTeamValue] = useState('')
+  async function submitTeamRename(league: string, oldName: string) {
+    const name = editingTeamValue.trim()
+    setEditingTeam(null)
+    if (!name || name === oldName || !onRenameTeam) return
+    await onRenameTeam(league, oldName, name)
+  }
   const [newTeam, setNewTeam] = useState('')
   async function addTeam(league: string) {
     const name = newTeam.trim(); if (!name || !onAddTeam) return
@@ -1513,7 +1526,7 @@ function LeagueOnlyManageModal({ sportLabel, leagues, onClose, onAddLeague, onRe
                 const isSel = showTeams && selected === lg
                 const cnt = teams.filter(t => t.league === lg).length
                 return (
-                  <div key={lg} onClick={() => { if (showTeams && editingLeague !== lg) { setOpenLeague(lg); setNewTeam('') } }}
+                  <div key={lg} onClick={() => { if (showTeams && editingLeague !== lg) { setOpenLeague(lg); setNewTeam(''); setEditingTeam(null) } }}
                     style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '6px 8px', borderRadius: 6, cursor: showTeams ? 'pointer' : 'default',
                       background: isSel ? 'var(--gold-bg)' : 'var(--bg-elevated)', border: `1px solid ${isSel ? 'var(--gold-border)' : 'var(--border)'}` }}>
                     {editingLeague === lg ? (
@@ -1559,7 +1572,19 @@ function LeagueOnlyManageModal({ sportLabel, leagues, onClose, onAddLeague, onRe
                     {selectedTeams.length === 0 && <div style={{ fontSize: 10, color: 'var(--text-muted)', padding: '8px 0' }}>등록된 팀 없음</div>}
                     {selectedTeams.map(t => (
                       <div key={t.name} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 8px', borderRadius: 6, background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}>
-                        <span style={{ flex: 1, minWidth: 0, fontSize: 11, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.name}</span>
+                        {editingTeam === t.name ? (
+                          <input autoFocus className="form-input" value={editingTeamValue} onChange={e => setEditingTeamValue(e.target.value)}
+                            onKeyDown={e => { if (e.key === 'Enter') submitTeamRename(selected, t.name); else if (e.key === 'Escape') setEditingTeam(null) }}
+                            onBlur={() => submitTeamRename(selected, t.name)}
+                            style={{ flex: 1, minWidth: 0, fontSize: 11, padding: '3px 5px' }} />
+                        ) : (
+                          <span onDoubleClick={() => { if (onRenameTeam) { setEditingTeam(t.name); setEditingTeamValue(t.name) } }}
+                            style={{ flex: 1, minWidth: 0, fontSize: 11, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.name}</span>
+                        )}
+                        {onRenameTeam && (
+                          <button type="button" onClick={() => { setEditingTeam(t.name); setEditingTeamValue(t.name) }} title="팀 이름 수정"
+                            style={{ border: 'none', background: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', padding: 1, flexShrink: 0 }}><Pencil size={10} /></button>
+                        )}
                         <button type="button" onClick={() => removeTeam(selected, t.name)} title="팀 삭제"
                           style={{ border: 'none', background: 'none', color: 'var(--red)', cursor: 'pointer', display: 'flex', padding: 1, flexShrink: 0 }}><Trash2 size={10} /></button>
                       </div>
@@ -2126,6 +2151,9 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
   const DELETE_TEAM_BY_SPORT: Partial<Record<string, (league: string, name: string) => Promise<void>>> = {
     soccer: onDeleteSoccerTeam, baseball: onDeleteBaseballTeam, basketball: onDeleteBasketballTeam, volleyball: onDeleteVolleyballTeam, esports: onDeleteEsportsTeam,
   }
+  const RENAME_TEAM_BY_SPORT: Partial<Record<string, (league: string, oldName: string, newName: string) => Promise<void>>> = {
+    soccer: onRenameSoccerTeam, baseball: onRenameBaseballTeam, basketball: onRenameBasketballTeam, volleyball: onRenameVolleyballTeam, esports: onRenameEsportsTeam,
+  }
   const sportTeams = TEAMS_BY_SPORT[sport] ?? []
   // 자동으로 채운 리그를 기억 — 사용자가 직접 바꾼 리그는 덮어쓰지 않는다
   const autoLeagueRef = useRef('')
@@ -2256,6 +2284,7 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
           teams={sportTeams}
           onAddTeam={ADD_TEAM_BY_SPORT[sport]}
           onDeleteTeam={DELETE_TEAM_BY_SPORT[sport]}
+          onRenameTeam={RENAME_TEAM_BY_SPORT[sport]}
         />
       )}
       {SHOW_LEAGUE_UI && mode === 'single' && leagueBundle && (
