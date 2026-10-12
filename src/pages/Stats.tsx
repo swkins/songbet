@@ -107,7 +107,15 @@ function pushOptionCells(cells: OptionCell[], label: string, matched: Bet[]): Be
 // (베팅이 하나도 없어도 빈 카드로), 어디에도 안 걸리거나(또는 옵션이 삭제됐으면) "기타"로 모은다.
 // bets.bet_option — "기타"에서 사용자가 수동으로 재지정한 값. 지금도 등록돼있는 옵션이면
 // 문구 패턴매칭보다 우선 적용하고, 그 옵션이 나중에 삭제되면 자동으로 다시 기타로 빠진다.
-function classifySportBetsByOption(sportBets: Bet[], options: string[], numericOptions: string[] = []): OptionCell[] {
+// 더 이상 쓰지 않는 베팅법이라 통계에서 박스 자체를 숨기는 (종목별) 옵션 카드 라벨 — 해당 베팅도 기타로 보내지 않고 뺀다.
+const HIDDEN_OPTION_CELLS: Record<string, Set<string>> = {
+  soccer: new Set(['홈 0.5 H', '1.5 H', '홈 1.5 H', '원정 1.5 H', '-1.5 H', '홈 -1.5 H', '원정 -1.5 H', '2.5 언더', '3.5 언더']),
+}
+function classifySportBetsByOption(sportBets: Bet[], options: string[], numericOptions: string[] = [], sport?: string): OptionCell[] {
+  const hidden = HIDDEN_OPTION_CELLS[sport ?? ''] ?? new Set<string>()
+  return classifyAllBetOptionCells(sportBets, options, numericOptions).filter(c => !hidden.has(c.label))
+}
+function classifyAllBetOptionCells(sportBets: Bet[], options: string[], numericOptions: string[]): OptionCell[] {
   const numericSet = new Set(numericOptions)
   const optionSet = new Set(options)
   const claimed = new Set<string>()
@@ -312,7 +320,7 @@ function MarketTypeOverviewSection({ settled, betOptionsBySport, numericBetOptio
       <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 10 }}>베팅추가에서 등록한 옵션 기준 (예: 홈 0.5, 원정 1.5) — 어디에도 안 걸리는 베팅은 "기타"로 표시</div>
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
         {cols.map(s => {
-          const cells = classifySportBetsByOption(s.sportBets, betOptionsBySport[s.value] ?? [], numericBetOptionsBySport[s.value] ?? [])
+          const cells = classifySportBetsByOption(s.sportBets, betOptionsBySport[s.value] ?? [], numericBetOptionsBySport[s.value] ?? [], s.value)
           const rows: RuleRow[] = cells.map(c => ({ label: c.label, bets: c.bets, tier: 'none' }))
           return (
             <RuleStatsTable key={s.value} title={`${s.emoji} ${s.label}`} rows={rows} extra={<MarketTotalRow bets={s.sportBets} />} />
@@ -422,13 +430,13 @@ function UnclassifiedBetOptionCard({ bets, options, onAssign, onExclude }: {
 // 등록된 옵션 하나하나가 각각 카드 하나 — 탭으로 감추지 않고 전부 한 화면에 펼쳐서 보여준다(배당 기준 고정).
 // 삭제된 옵션에 걸려있던(또는 어디에도 안 걸리는) 베팅은 "기타" 카드로, 거기서 직접 재지정 가능.
 // 그 아래엔 축구 리그표처럼 리그를 세로로, 옵션을 가로로 깔아 리그별 성적을 한 표에서 비교하는 매트릭스.
-function BetOptionStatsSection({ settledBets, options, numericOptions, onAssignBetOption, onExcludeBet }: {
-  settledBets: Bet[]; options: string[]; numericOptions: string[]
+function BetOptionStatsSection({ sport, settledBets, options, numericOptions, onAssignBetOption, onExcludeBet }: {
+  sport: string; settledBets: Bet[]; options: string[]; numericOptions: string[]
   onAssignBetOption: (ids: string[], label: string) => Promise<void>
   onExcludeBet: (bet: Bet, exclude: boolean) => Promise<void>
 }) {
   if (options.length === 0) return null
-  const cells = classifySportBetsByOption(settledBets, options, numericOptions)
+  const cells = classifySportBetsByOption(settledBets, options, numericOptions, sport)
   if (cells.length === 0) return null
   const matrixColumns = cells.filter(c => c.label !== '기타')
 
@@ -457,7 +465,7 @@ function buildOptionLeagueRows(settled: Bet[], betOptionsBySport: Record<string,
   for (const s of OPTION_STATS_SPORTS) {
     const sportBets = settled.filter(b => b.sport === s.value)
     if (sportBets.length === 0) continue
-    const cells = classifySportBetsByOption(sportBets, betOptionsBySport[s.value] ?? [])
+    const cells = classifySportBetsByOption(sportBets, betOptionsBySport[s.value] ?? [], [], s.value)
     for (const cell of cells) {
       const byLeague = new Map<string, Bet[]>()
       for (const b of cell.bets) {
@@ -1681,7 +1689,7 @@ function SportPanel({ bets, sport, onDeleteRequest, leagueOverrides, baseballLea
         </button>
       </div>
 
-      <BetOptionStatsSection key={sport.value} settledBets={stats.settled} options={betOptions} numericOptions={numericBetOptions} onAssignBetOption={onAssignBetOption} onExcludeBet={onExcludeBet} />
+      <BetOptionStatsSection key={sport.value} sport={sport.value} settledBets={stats.settled} options={betOptions} numericOptions={numericBetOptions} onAssignBetOption={onAssignBetOption} onExcludeBet={onExcludeBet} />
 
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-start' }}>
         {byMarket.length > 0 && sport.value !== 'soccer' && (
@@ -1938,7 +1946,8 @@ export default function Stats() {
     return { ...b, stake: Math.round(b.stake * rate), profit: Math.round(b.profit * rate) }
   })
   // "최근 합류" 목록에서 삭제(통계 제외)한 베팅은 모든 통계 집계에서 뺀다.
-  const bets: Bet[] = allBets.filter(b => !b.stats_excluded)
+  // 축구 단폴은 홈/원정을 지정한 베팅만 통계에 넣는다 (지정 안 한 건 잔액·결산엔 그대로, 통계에서만 제외).
+  const bets: Bet[] = allBets.filter(b => !b.stats_excluded && !(b.sport === 'soccer' && b.parlay_group === null && !extractSide(b.match)))
   // 현재 종목 탭의 "최근 합류" 대상 (라이브 탭은 라이브 베팅, 종목 탭은 그 종목의 단폴·비라이브 베팅)
   const recentSportBets = activeSport === 'all' ? [] : allBets.filter(b => activeSport === 'live' ? b.is_live : (b.sport === activeSport && b.parlay_group === null && !b.is_live))
 
