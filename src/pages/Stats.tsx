@@ -422,13 +422,18 @@ function UnclassifiedBetOptionCard({ bets, options, onAssign, onExclude }: {
 // 등록된 옵션 하나하나가 각각 카드 하나 — 탭으로 감추지 않고 전부 한 화면에 펼쳐서 보여준다(배당 기준 고정).
 // 삭제된 옵션에 걸려있던(또는 어디에도 안 걸리는) 베팅은 "기타" 카드로, 거기서 직접 재지정 가능.
 // 그 아래엔 축구 리그표처럼 리그를 세로로, 옵션을 가로로 깔아 리그별 성적을 한 표에서 비교하는 매트릭스.
-function BetOptionStatsSection({ settledBets, options, numericOptions, onAssignBetOption, onExcludeBet }: {
+function BetOptionStatsSection({ settledBets, options, numericOptions, onlyLabels, onAssignBetOption, onExcludeBet }: {
   settledBets: Bet[]; options: string[]; numericOptions: string[]
+  // 지정하면 이 라벨(예: "원정 0.5 H")의 카드만 이 순서대로 보여주고 "기타"는 숨긴다.
+  onlyLabels?: readonly string[]
   onAssignBetOption: (ids: string[], label: string) => Promise<void>
   onExcludeBet: (bet: Bet, exclude: boolean) => Promise<void>
 }) {
   if (options.length === 0) return null
-  const cells = classifySportBetsByOption(settledBets, options, numericOptions)
+  const allCells = classifySportBetsByOption(settledBets, options, numericOptions)
+  const cells = onlyLabels
+    ? onlyLabels.map(l => allCells.find(c => c.label === l) ?? { label: l, bets: [] })
+    : allCells
   if (cells.length === 0) return null
   const matrixColumns = cells.filter(c => c.label !== '기타')
 
@@ -1011,40 +1016,15 @@ function LeagueManageModal({ leagues, onRename, onDelete, onClose }: {
   )
 }
 
-// ─── 축구 상세 통계 (배당 흐름 기반 — 마켓별 0.1단위 구간 통계) ──────
-function SoccerDetailPanel({ bets }: { bets: Bet[] }) {
+// ─── 축구 상세 통계 ──────
+// 추적하는 베팅옵션은 위 "베팅옵션별 성적"에서 보여주고, 여기엔 그 외 베팅만 모아 보여준다.
+const SOCCER_TRACKED_OPTIONS = ['원정 0.5 H', '홈 승리', '원정 승리', '홈 2.5 H', '원정 2.5 H'] as const
+function SoccerDetailPanel({ bets, options, numericOptions }: { bets: Bet[]; options: string[]; numericOptions: string[] }) {
   const settled = bets.filter(b => b.result !== 'pending')
-  // market 컬럼이 과거 저장 시점의 분류 버그로 잘못 저장된 경우를 대비해, 문구 자체에서
-  // 라인 숫자를 읽어낼 수 있으면(extractHandicapLine) market 값과 무관하게 핸디캡으로 인정한다.
-  const hcap = settled.filter(b => b.market === 'handicap' || extractHandicapLine(b.pick) !== null)
-
-  // 홈 0.5/1.5/2.5 플핸, 원정 0.5/1.5/2.5 플핸 — 총 6개 구간. 예전엔 구간별로 별도 표를 나눴지만
-  // 이제 리그가 기본 분류축 — 리그별로 한 표에서 6개 구간 성적을 한눈에 비교한다.
-  // 원정 1.5 플핸은 더 이상 추적하지 않는다 (표/박스에서 제외).
-  const HCAP_LINES = [0.5, 1.5, 2.5] as const
-  const hcapColumns = HCAP_LINES.flatMap(line => {
-    const lineBets = hcap.filter(b => extractHandicapLine(b.pick) === line && extractHandicapSign(b.pick) !== '-')
-    const home = lineBets.filter(b => extractSide(b.match) === '홈')
-    const away = lineBets.filter(b => extractSide(b.match) === '원정')
-    return [
-      { label: `홈 ${line}`, bets: home },
-      { label: `원정 ${line}`, bets: away },
-    ]
-  }).filter(c => c.label !== '원정 1.5')
-  const hcapAll = hcapColumns.flatMap(c => c.bets)
-
-  const ruleIds = new Set(hcapAll.map(b => b.id))
-  const otherBets = settled.filter(b => !ruleIds.has(b.id))
-
-  return (
-    <div>
-      <SoccerLeagueColumnsSection title="⚽ 핸디캡 — 리그별" columns={hcapColumns} emptyLabel="정산된 핸디캡 베팅이 없습니다." />
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 10 }}>
-        {hcapColumns.map(c => <RuleStatsTable key={c.label} title={`⚽ ${c.label} 플핸 — 0.1단위 배당 구간별`} rows={oddsBinRows(c.bets)} extra={<MarketTotalRow bets={c.bets} />} />)}
-      </div>
-      <OtherBetsPanel bets={otherBets} />
-    </div>
-  )
+  const tracked = new Set<string>(SOCCER_TRACKED_OPTIONS)
+  const trackedIds = new Set(classifySportBetsByOption(settled, options, numericOptions)
+    .filter(c => tracked.has(c.label)).flatMap(c => c.bets).map(b => b.id))
+  return <OtherBetsPanel bets={settled.filter(b => !trackedIds.has(b.id))} />
 }
 
 // ─── 축구 핸디캡 — 리그별 (홈/원정 0.5·1.5·2.5 여섯 구간을 리그 단위로 한 표에서 비교) ────
@@ -1608,7 +1588,7 @@ function SportPanel({ bets, sport, onDeleteRequest, leagueOverrides, baseballLea
         </button>
       </div>
 
-      <BetOptionStatsSection key={sport.value} settledBets={stats.settled} options={betOptions} numericOptions={numericBetOptions} onAssignBetOption={onAssignBetOption} onExcludeBet={onExcludeBet} />
+      <BetOptionStatsSection key={sport.value} settledBets={stats.settled} options={betOptions} numericOptions={numericBetOptions} onlyLabels={sport.value === 'soccer' ? SOCCER_TRACKED_OPTIONS : undefined} onAssignBetOption={onAssignBetOption} onExcludeBet={onExcludeBet} />
 
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-start' }}>
         {byMarket.length > 0 && sport.value !== 'soccer' && (
@@ -1631,7 +1611,7 @@ function SportPanel({ bets, sport, onDeleteRequest, leagueOverrides, baseballLea
           </div>
         )}
         {sport.value === 'baseball'   && <BaseballDetailPanel bets={periodBets} overrides={leagueOverrides} knownLeagues={baseballLeagues} onRenameLeague={onRenameBaseballLeague} onDeleteLeague={onDeleteBaseballLeague} />}
-        {sport.value === 'soccer'     && <SoccerDetailPanel bets={periodBets} />}
+        {sport.value === 'soccer'     && <SoccerDetailPanel bets={periodBets} options={betOptions} numericOptions={numericBetOptions} />}
         {sport.value === 'basketball' && <BasketballLeagueDetailPanel bets={periodBets} overrides={basketballOverrides} knownLeagues={basketballLeagues} onRenameLeague={onRenameBasketballLeague} onDeleteLeague={onDeleteBasketballLeague} />}
         {sport.value === 'esports'    && <EsportsDetailPanel bets={periodBets} overrides={esportsOverrides} knownLeagues={esportsLeagues} onRenameLeague={onRenameEsportsLeague} onDeleteLeague={onDeleteEsportsLeague} />}
         {sport.value === 'volleyball' && <VolleyballDetailPanel bets={periodBets} overrides={volleyballOverrides} knownLeagues={volleyballLeagues} onRenameLeague={onRenameVolleyballLeague} onDeleteLeague={onDeleteVolleyballLeague} />}
