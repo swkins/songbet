@@ -1144,40 +1144,53 @@ function SoccerLeagueColumnsSection({ title, columns, emptyLabel }: { title: str
 
 // ─── 축구 언더 — 라인별(2.5/3.5/4.5) × 리그별 (초안) ────────────────
 // 리그 미지정 베팅은 "미분류"로 묶어서 함께 보여줌. league 컬럼값 그대로 사용(과거 팀 키워드 추론은 적용 안 함).
-// ─── 농구 상세 통계 (배당 흐름 기반 — 마켓별 0.1단위 구간 통계) ──────
-function BasketballDetailPanel({ bets }: { bets: Bet[] }) {
+// ─── 농구 상세 통계 — 리그별 박스, 박스 안에서 베팅옵션(4.5 H ~ 13.5 H, 승리, 오버, 언더)별 적중률·수익률 ──────
+// 리그마다 성향 차이가 커서 옵션 기준이 아니라 리그 기준으로 나눈다. 옵션은 베팅추가에 등록된 순서 그대로,
+// 베팅이 없는 옵션도 빈 줄로 남겨 둔다. 어떤 옵션에도 안 걸리는 베팅은 박스 맨 아래 "기타" 줄로.
+function betOptionOf(b: Bet, matchOrder: string[], optionSet: Set<string>, numericSet: Set<string>): string | null {
+  if (b.bet_option && optionSet.has(b.bet_option)) return b.bet_option
+  for (const opt of matchOrder) {
+    const hit = numericSet.has(opt)
+      ? extractNumericTemplateValueFromText(opt, b.match) !== null
+      : matchesBetOptionLabel(b.match, opt)
+    if (hit) return opt
+  }
+  return null
+}
+function BasketballLeagueOptionBoxes({ bets, overrides, options, numericOptions }: {
+  bets: Bet[]; overrides: LeagueOverride[]; options: string[]; numericOptions: string[]
+}) {
   const settled = bets.filter(b => b.result !== 'pending')
-  const ml = settled.filter(b => b.market === 'moneyline')
-  const hcap = settled.filter(b => b.market === 'handicap')
-  const overBets = settled.filter(b => b.market === 'over')
-  const underBets = settled.filter(b => b.market === 'under')
+  const optionSet = new Set(options)
+  const numericSet = new Set(numericOptions)
+  const matchOrder = [...options].sort((a, b) => b.length - a.length)
+  const leagueKeyOf = (b: Bet) => { const l = freeLeagueOf(b, overrides); return l === 'ETC' ? '리그 미지정' : l }
 
-  // 핸디캡 — 라인별(4.5 ~ 13.5, 1.0단위) 적중률/수익률
-  const hcapLineRows: RuleRow[] = (() => {
-    const rows: RuleRow[] = []
-    for (let line = 4.5; line <= 13.5 + 1e-9; line = Math.round((line + 1.0) * 10) / 10) {
-      const lineBets = hcap.filter(b => extractHandicapLine(b.pick) === line)
-      rows.push({ label: formatLine(line), tier: 'none', bets: lineBets })
-    }
-    return rows
-  })()
-
-  const tables = [
-    { title: '🏀 승패 — 0.1단위 배당 구간별', rows: oddsBinRows(ml) },
-    { title: '🏀 오버 — 0.1단위 배당 구간별', rows: oddsBinRows(overBets) },
-    { title: '🏀 언더 — 0.1단위 배당 구간별', rows: oddsBinRows(underBets) },
-  ].filter(t => t.rows.length > 0)
-
-  const ruleIds = new Set([...tables.flatMap(t => t.rows.flatMap(r => r.bets)), ...hcapLineRows.flatMap(r => r.bets)].map(b => b.id))
-  const otherBets = settled.filter(b => !ruleIds.has(b.id))
+  const byLeague = new Map<string, Bet[]>()
+  for (const b of settled) {
+    const k = leagueKeyOf(b)
+    byLeague.set(k, [...(byLeague.get(k) ?? []), b])
+  }
+  const leagues = Array.from(byLeague.keys()).sort((a, b) =>
+    a === '리그 미지정' ? 1 : b === '리그 미지정' ? -1 : koCompare(a, b))
 
   return (
-    <div>
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-        <RuleStatsTable title="🏀 핸디캡 — 라인별(4.5~13.5) 적중률" rows={hcapLineRows} />
-        {tables.map(t => <RuleStatsTable key={t.title} title={t.title} rows={t.rows} />)}
-      </div>
-      <OtherBetsPanel bets={otherBets} />
+    <div style={{ marginTop: 14 }}>
+      <div className="card-title" style={{ marginBottom: 8 }}>🏀 리그별 · 베팅옵션별 성적</div>
+      {leagues.length === 0
+        ? <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '12px 0' }}>정산된 베팅이 없습니다.</div>
+        : (
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            {leagues.map(league => {
+              const lb = byLeague.get(league)!
+              const optOf = new Map(lb.map(b => [b.id, betOptionOf(b, matchOrder, optionSet, numericSet)]))
+              const rows: RuleRow[] = options.map(opt => ({ label: opt, tier: 'none', bets: lb.filter(b => optOf.get(b.id) === opt) }))
+              const other = lb.filter(b => optOf.get(b.id) === null)
+              if (other.length) rows.push({ label: '기타', tier: 'none', bets: other })
+              return <RuleStatsTable key={league} title={`🏀 ${league}`} rows={rows} extra={<MarketTotalRow bets={lb} />} />
+            })}
+          </div>
+        )}
     </div>
   )
 }
@@ -1258,11 +1271,11 @@ function EsportsDetailPanel(props: LeagueSectionProps) {
   )
 }
 
-function BasketballLeagueDetailPanel(props: LeagueSectionProps) {
+function BasketballLeagueDetailPanel({ options, numericOptions, ...props }: LeagueSectionProps & { options: string[]; numericOptions: string[] }) {
   return (
     <div>
       <GenericLeagueSection emoji="🏀" {...props} />
-      <BasketballDetailPanel bets={props.bets} />
+      <BasketballLeagueOptionBoxes bets={props.bets} overrides={props.overrides} options={options} numericOptions={numericOptions} />
     </div>
   )
 }
@@ -1588,7 +1601,7 @@ function SportPanel({ bets, sport, onDeleteRequest, leagueOverrides, baseballLea
         </button>
       </div>
 
-      <BetOptionStatsSection key={sport.value} settledBets={stats.settled} options={betOptions} numericOptions={numericBetOptions} onlyLabels={sport.value === 'soccer' ? SOCCER_TRACKED_OPTIONS : undefined} onAssignBetOption={onAssignBetOption} onExcludeBet={onExcludeBet} />
+      {sport.value !== 'basketball' && <BetOptionStatsSection key={sport.value} settledBets={stats.settled} options={betOptions} numericOptions={numericBetOptions} onlyLabels={sport.value === 'soccer' ? SOCCER_TRACKED_OPTIONS : undefined} onAssignBetOption={onAssignBetOption} onExcludeBet={onExcludeBet} />}
 
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-start' }}>
         {byMarket.length > 0 && sport.value !== 'soccer' && (
@@ -1612,7 +1625,7 @@ function SportPanel({ bets, sport, onDeleteRequest, leagueOverrides, baseballLea
         )}
         {sport.value === 'baseball'   && <BaseballDetailPanel bets={periodBets} overrides={leagueOverrides} knownLeagues={baseballLeagues} onRenameLeague={onRenameBaseballLeague} onDeleteLeague={onDeleteBaseballLeague} />}
         {sport.value === 'soccer'     && <SoccerDetailPanel bets={periodBets} options={betOptions} numericOptions={numericBetOptions} />}
-        {sport.value === 'basketball' && <BasketballLeagueDetailPanel bets={periodBets} overrides={basketballOverrides} knownLeagues={basketballLeagues} onRenameLeague={onRenameBasketballLeague} onDeleteLeague={onDeleteBasketballLeague} />}
+        {sport.value === 'basketball' && <BasketballLeagueDetailPanel bets={periodBets} options={betOptions} numericOptions={numericBetOptions} overrides={basketballOverrides} knownLeagues={basketballLeagues} onRenameLeague={onRenameBasketballLeague} onDeleteLeague={onDeleteBasketballLeague} />}
         {sport.value === 'esports'    && <EsportsDetailPanel bets={periodBets} overrides={esportsOverrides} knownLeagues={esportsLeagues} onRenameLeague={onRenameEsportsLeague} onDeleteLeague={onDeleteEsportsLeague} />}
         {sport.value === 'volleyball' && <VolleyballDetailPanel bets={periodBets} overrides={volleyballOverrides} knownLeagues={volleyballLeagues} onRenameLeague={onRenameVolleyballLeague} onDeleteLeague={onDeleteVolleyballLeague} />}
         {!['baseball','soccer','basketball','esports','volleyball'].includes(sport.value) && <GenericDetailPanel bets={periodBets} />}
