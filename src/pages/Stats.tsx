@@ -1020,6 +1020,7 @@ function SoccerDetailPanel({ bets }: { bets: Bet[] }) {
 
   // 홈 0.5/1.5/2.5 플핸, 원정 0.5/1.5/2.5 플핸 — 총 6개 구간. 예전엔 구간별로 별도 표를 나눴지만
   // 이제 리그가 기본 분류축 — 리그별로 한 표에서 6개 구간 성적을 한눈에 비교한다.
+  // 원정 1.5 플핸은 더 이상 추적하지 않는다 (표/박스에서 제외).
   const HCAP_LINES = [0.5, 1.5, 2.5] as const
   const hcapColumns = HCAP_LINES.flatMap(line => {
     const lineBets = hcap.filter(b => extractHandicapLine(b.pick) === line && extractHandicapSign(b.pick) !== '-')
@@ -1029,15 +1030,10 @@ function SoccerDetailPanel({ bets }: { bets: Bet[] }) {
       { label: `홈 ${line}`, bets: home },
       { label: `원정 ${line}`, bets: away },
     ]
-  })
+  }).filter(c => c.label !== '원정 1.5')
   const hcapAll = hcapColumns.flatMap(c => c.bets)
 
-  // 언더(2.5/3.5/4.5) — 배당옵션별 + 리그별 (초안)
-  const under = settled.filter(b => b.market === 'under')
-  const UNDER_LINES = [2.5, 3.5, 4.5]
-  const underByLine = UNDER_LINES.map(line => under.filter(b => extractTotalLine(b.pick) === line))
-
-  const ruleIds = new Set([...hcapAll, ...underByLine.flat()].map(b => b.id))
+  const ruleIds = new Set(hcapAll.map(b => b.id))
   const otherBets = settled.filter(b => !ruleIds.has(b.id))
 
   return (
@@ -1046,7 +1042,6 @@ function SoccerDetailPanel({ bets }: { bets: Bet[] }) {
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 10 }}>
         {hcapColumns.map(c => <RuleStatsTable key={c.label} title={`⚽ ${c.label} 플핸 — 0.1단위 배당 구간별`} rows={oddsBinRows(c.bets)} extra={<MarketTotalRow bets={c.bets} />} />)}
       </div>
-      <SoccerUnderByLeagueSection lines={UNDER_LINES} lineBets={underByLine} />
       <OtherBetsPanel bets={otherBets} />
     </div>
   )
@@ -1169,74 +1164,6 @@ function SoccerLeagueColumnsSection({ title, columns, emptyLabel }: { title: str
 
 // ─── 축구 언더 — 라인별(2.5/3.5/4.5) × 리그별 (초안) ────────────────
 // 리그 미지정 베팅은 "미분류"로 묶어서 함께 보여줌. league 컬럼값 그대로 사용(과거 팀 키워드 추론은 적용 안 함).
-function SoccerUnderByLeagueSection({ lines, lineBets }: { lines: number[]; lineBets: Bet[][] }) {
-  const rows = buildLeagueRankRows(lines.map((l, i) => ({ label: `${l} 언더`, bets: lineBets[i] })))
-  function cellStats(list: Bet[]) { return list.length ? calcStats(list) : null }
-
-  return (
-    <div style={{ marginTop: 14 }}>
-      <div className="card-title" style={{ marginBottom: 8 }}>⚽ 언더 — 라인별 · 리그별 (초안)</div>
-      {rows.length > 0 ? (
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
-            <thead>
-              <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                <th style={{ textAlign: 'center', padding: '4px 6px', fontSize: 9, color: 'var(--text-secondary)', fontWeight: 700, whiteSpace: 'nowrap' }}>순위</th>
-                <th style={{ textAlign: 'left', padding: '4px 8px', fontSize: 9, color: 'var(--text-secondary)', fontWeight: 700, whiteSpace: 'nowrap' }}>리그</th>
-                {lines.map(l => (
-                  <th key={l} style={{ textAlign: 'center', padding: '4px 6px', fontSize: 9, color: 'var(--text-secondary)', fontWeight: 700, whiteSpace: 'nowrap' }}>{l} 언더</th>
-                ))}
-                <th style={{ textAlign: 'center', padding: '4px 8px', fontSize: 9, color: 'var(--text-secondary)', fontWeight: 700, whiteSpace: 'nowrap', borderLeft: '1px solid var(--border)' }}>총손익 · ROI</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map(({ league, perGroup, totalStats, rank, rankDelta, profitDelta }) => (
-                <tr key={league} style={{ borderBottom: '1px solid var(--border-light)', height: 26 }}>
-                  <td style={{ textAlign: 'center', padding: '4px 6px', whiteSpace: 'nowrap' }}>
-                    <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{rank}</span>
-                    <div><RankDeltaBadge delta={rankDelta} /></div>
-                  </td>
-                  <td style={{ padding: '4px 8px', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>{league}</td>
-                  {perGroup.map((lb, i) => {
-                    const s = cellStats(lb)
-                    return (
-                      <td key={i} style={{ textAlign: 'center', padding: '4px 6px', whiteSpace: 'nowrap' }}>
-                        {s ? (
-                          <>
-                            <span style={{ color: 'var(--text-muted)' }}>{s.total}건 </span>
-                            <span style={{ fontWeight: 600, color: s.winRate >= 50 ? '#4ade80' : '#f87171' }}>{s.winRate.toFixed(0)}% </span>
-                            <span style={{ fontWeight: 700, color: s.roi >= 0 ? '#4ade80' : '#f87171' }}>{s.roi >= 0 ? '+' : ''}{s.roi.toFixed(0)}%</span>
-                          </>
-                        ) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
-                      </td>
-                    )
-                  })}
-                  <td style={{ textAlign: 'center', padding: '4px 8px', whiteSpace: 'nowrap', borderLeft: '1px solid var(--border)' }}>
-                    {totalStats ? (
-                      <>
-                        <span style={{ fontWeight: 700, color: totalStats.profit >= 0 ? '#4ade80' : '#f87171' }}>{totalStats.profit >= 0 ? '+' : ''}{totalStats.profit.toLocaleString()}</span>
-                        <span style={{ marginLeft: 6, fontWeight: 700, color: totalStats.roi >= 0 ? '#4ade80' : '#f87171' }}>{totalStats.roi >= 0 ? '+' : ''}{totalStats.roi.toFixed(1)}%</span>
-                        <ProfitDeltaBadge delta={profitDelta} />
-                      </>
-                    ) : '—'}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      ) : (
-        <div style={{ fontSize: 10, color: 'var(--text-muted)', padding: '8px 0' }}>정산된 언더 베팅이 없습니다.</div>
-      )}
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 10 }}>
-        {lines.map((l, i) => (
-          <RuleStatsTable key={l} title={`⚽ ${l} 언더 — 0.1단위 배당 구간별`} rows={oddsBinRows(lineBets[i])} extra={<MarketTotalRow bets={lineBets[i]} />} />
-        ))}
-      </div>
-    </div>
-  )
-}
-
 // ─── 농구 상세 통계 (배당 흐름 기반 — 마켓별 0.1단위 구간 통계) ──────
 function BasketballDetailPanel({ bets }: { bets: Bet[] }) {
   const settled = bets.filter(b => b.result !== 'pending')
