@@ -1220,6 +1220,17 @@ function BasketballLeagueOptionBoxes({ bets, overrides, options, numericOptions 
                   {leagues.map(l => <td key={l} style={{ textAlign: 'center', padding: '4px 6px', whiteSpace: 'nowrap' }}><Cell list={cell(null, l)} bold /></td>)}
                   <td style={{ textAlign: 'center', padding: '4px 6px', whiteSpace: 'nowrap', ...sumBorder }}><Cell list={settled} bold /></td>
                 </tr>
+                <tr style={{ height: 28 }}>
+                  <td style={{ padding: '4px 6px', fontWeight: 800, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>손익</td>
+                  {[...leagues.map(l => cell(null, l)), settled].map((list, i) => {
+                    const p = calcStats(list).profit
+                    return (
+                      <td key={i} style={{ textAlign: 'center', padding: '4px 6px', whiteSpace: 'nowrap', fontWeight: 800, color: p >= 0 ? '#4ade80' : '#f87171', ...(i === leagues.length ? sumBorder : {}) }}>
+                        {list.length ? `${p >= 0 ? '+' : ''}${p.toLocaleString()}원` : '—'}
+                      </td>
+                    )
+                  })}
+                </tr>
               </tbody>
             </table>
           </div>
@@ -1306,8 +1317,7 @@ function EsportsDetailPanel(props: LeagueSectionProps) {
 
 function BasketballLeagueDetailPanel({ options, numericOptions, ...props }: LeagueSectionProps & { options: string[]; numericOptions: string[] }) {
   return (
-    <div>
-      <GenericLeagueSection emoji="🏀" {...props} />
+    <div style={{ flex: 1, minWidth: 0 }}>
       <BasketballLeagueOptionBoxes bets={props.bets} overrides={props.overrides} options={options} numericOptions={numericOptions} />
     </div>
   )
@@ -1637,7 +1647,7 @@ function SportPanel({ bets, sport, onDeleteRequest, leagueOverrides, baseballLea
       {sport.value !== 'basketball' && <BetOptionStatsSection key={sport.value} settledBets={stats.settled} options={betOptions} numericOptions={numericBetOptions} onlyLabels={sport.value === 'soccer' ? SOCCER_TRACKED_OPTIONS : undefined} onAssignBetOption={onAssignBetOption} onExcludeBet={onExcludeBet} />}
 
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-        {byMarket.length > 0 && sport.value !== 'soccer' && (
+        {byMarket.length > 0 && sport.value !== 'soccer' && sport.value !== 'basketball' && (
           <div className="card" style={{ width: 280, flexShrink: 0 }}>
             <div className="card-title">마켓별 성적</div>
             <table style={{ width: '100%' }}>
