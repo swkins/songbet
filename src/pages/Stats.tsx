@@ -1158,8 +1158,8 @@ function betOptionOf(b: Bet, matchOrder: string[], optionSet: Set<string>, numer
   return null
 }
 // 행=리그(+맨 아래 합계), 열=베팅옵션(+합계·손익)인 한 표 — 옵션 구성이 리그와 무관하게 같으므로 표 하나로 한눈에 비교.
-function BasketballLeagueOptionBoxes({ bets, overrides, options, numericOptions }: {
-  bets: Bet[]; overrides: LeagueOverride[]; options: string[]; numericOptions: string[]
+function LeagueOptionMatrix({ emoji, bets, overrides, options, numericOptions }: {
+  emoji: string; bets: Bet[]; overrides: LeagueOverride[]; options: string[]; numericOptions: string[]
 }) {
   const settled = bets.filter(b => b.result !== 'pending')
   const optionSet = new Set(options)
@@ -1190,7 +1190,7 @@ function BasketballLeagueOptionBoxes({ bets, overrides, options, numericOptions 
 
   return (
     <div style={{ marginTop: 14 }}>
-      <div className="card-title" style={{ marginBottom: 2 }}>🏀 베팅옵션 × 리그별 성적</div>
+      <div className="card-title" style={{ marginBottom: 2 }}>{emoji} 베팅옵션 × 리그별 성적</div>
       <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 8 }}>칸마다 건수 · 적중률 · ROI</div>
       {settled.length === 0
         ? <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '12px 0' }}>정산된 베팅이 없습니다.</div>
@@ -1308,17 +1308,16 @@ function EsportsDetailPanel(props: LeagueSectionProps) {
 function BasketballLeagueDetailPanel({ options, numericOptions, ...props }: LeagueSectionProps & { options: string[]; numericOptions: string[] }) {
   return (
     <div style={{ flex: 1, minWidth: 0 }}>
-      <BasketballLeagueOptionBoxes bets={props.bets} overrides={props.overrides} options={options} numericOptions={numericOptions} />
+      <LeagueOptionMatrix emoji="🏀" bets={props.bets} overrides={props.overrides} options={options} numericOptions={numericOptions} />
     </div>
   )
 }
 
-// 배구도 LOL과 마찬가지 — "핸디캡" 하나로 뭉뚱그리지 않고 등록된 옵션 라벨(-2.5, -1.5 등)
-// 하나하나의 적중률은 SportPanel에서 렌더되는 BetOptionStatsSection이 담당한다.
-function VolleyballDetailPanel(props: LeagueSectionProps) {
+// 배구도 농구와 같은 리그(세로) × 베팅옵션(가로) 한 표.
+function VolleyballDetailPanel({ options, numericOptions, ...props }: LeagueSectionProps & { options: string[]; numericOptions: string[] }) {
   return (
-    <div>
-      <GenericLeagueSection emoji="🏐" {...props} />
+    <div style={{ flex: 1, minWidth: 0 }}>
+      <LeagueOptionMatrix emoji="🏐" bets={props.bets} overrides={props.overrides} options={options} numericOptions={numericOptions} />
     </div>
   )
 }
@@ -1634,10 +1633,10 @@ function SportPanel({ bets, sport, onDeleteRequest, leagueOverrides, baseballLea
         </button>
       </div>
 
-      {sport.value !== 'basketball' && <BetOptionStatsSection key={sport.value} settledBets={stats.settled} options={betOptions} numericOptions={numericBetOptions} onlyLabels={sport.value === 'soccer' ? SOCCER_TRACKED_OPTIONS : undefined} onAssignBetOption={onAssignBetOption} onExcludeBet={onExcludeBet} />}
+      {sport.value !== 'basketball' && sport.value !== 'volleyball' && <BetOptionStatsSection key={sport.value} settledBets={stats.settled} options={betOptions} numericOptions={numericBetOptions} onlyLabels={sport.value === 'soccer' ? SOCCER_TRACKED_OPTIONS : undefined} onAssignBetOption={onAssignBetOption} onExcludeBet={onExcludeBet} />}
 
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-        {byMarket.length > 0 && sport.value !== 'soccer' && sport.value !== 'basketball' && (
+        {byMarket.length > 0 && !['soccer', 'basketball', 'volleyball'].includes(sport.value) && (
           <div className="card" style={{ width: 280, flexShrink: 0 }}>
             <div className="card-title">마켓별 성적</div>
             <table style={{ width: '100%' }}>
@@ -1660,7 +1659,7 @@ function SportPanel({ bets, sport, onDeleteRequest, leagueOverrides, baseballLea
         {sport.value === 'soccer'     && <SoccerDetailPanel bets={periodBets} options={betOptions} numericOptions={numericBetOptions} />}
         {sport.value === 'basketball' && <BasketballLeagueDetailPanel bets={periodBets} options={betOptions} numericOptions={numericBetOptions} overrides={basketballOverrides} knownLeagues={basketballLeagues} onRenameLeague={onRenameBasketballLeague} onDeleteLeague={onDeleteBasketballLeague} />}
         {sport.value === 'esports'    && <EsportsDetailPanel bets={periodBets} overrides={esportsOverrides} knownLeagues={esportsLeagues} onRenameLeague={onRenameEsportsLeague} onDeleteLeague={onDeleteEsportsLeague} />}
-        {sport.value === 'volleyball' && <VolleyballDetailPanel bets={periodBets} overrides={volleyballOverrides} knownLeagues={volleyballLeagues} onRenameLeague={onRenameVolleyballLeague} onDeleteLeague={onDeleteVolleyballLeague} />}
+        {sport.value === 'volleyball' && <VolleyballDetailPanel bets={periodBets} options={betOptions} numericOptions={numericBetOptions} overrides={volleyballOverrides} knownLeagues={volleyballLeagues} onRenameLeague={onRenameVolleyballLeague} onDeleteLeague={onDeleteVolleyballLeague} />}
         {!['baseball','soccer','basketball','esports','volleyball'].includes(sport.value) && <GenericDetailPanel bets={periodBets} />}
       </div>
 
