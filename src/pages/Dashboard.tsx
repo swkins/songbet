@@ -1484,77 +1484,91 @@ function LeagueOnlyManageModal({ sportLabel, leagues, onClose, onAddLeague, onRe
     await onDeleteLeague(name)
   }
   const sorted = [...leagues].sort((a, b) => a.localeCompare(b, 'ko'))
+  // 좌측 리그 목록에서 고른 리그 — 우측에 그 리그의 팀을 나열 (선택이 없거나 삭제/이름변경된 경우 첫 리그)
+  const selected = openLeague && sorted.includes(openLeague) ? openLeague : (sorted[0] ?? null)
+  const selectedTeams = selected ? teams.filter(t => t.league === selected).sort((a, b) => a.name.localeCompare(b.name, 'ko')) : []
+  const showTeams = !!onAddTeam
   return (
     <div className="modal-overlay">
-      <div className="modal" style={{ maxWidth: 340 }}>
+      <div className="modal" style={{ maxWidth: showTeams ? 600 : 340, width: '100%' }}>
         <div className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
           {sportLabel} 리그 관리
           <button onClick={onClose} style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex', padding: 2 }}><X size={15} /></button>
         </div>
-        <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
-          <input autoFocus className="form-input" value={newLeague} onChange={e => setNewLeague(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && addLeague()}
-            placeholder="새 리그 이름" style={{ flex: 1, fontSize: 11, padding: '5px 7px' }} />
-          <button type="button" onClick={addLeague} disabled={!newLeague.trim()}
-            style={{ border: '1px solid var(--gold-border)', background: 'var(--gold-bg)', color: 'var(--gold)', borderRadius: 5, cursor: 'pointer', display: 'flex', alignItems: 'center', padding: '0 8px', flexShrink: 0 }}>
-            <Plus size={13} />
-          </button>
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 3, overflowY: 'auto', maxHeight: 320 }}>
-          {sorted.length === 0 && <div style={{ fontSize: 10, color: 'var(--text-muted)', padding: '8px 0' }}>등록된 리그 없음</div>}
-          {sorted.map(lg => {
-            const lgTeams = teams.filter(t => t.league === lg).sort((a, b) => a.name.localeCompare(b.name, 'ko'))
-            const isOpen = openLeague === lg
-            return (
-            <div key={lg} style={{ borderRadius: 6, background: 'var(--bg-elevated)', border: `1px solid ${isOpen ? 'var(--gold-border)' : 'var(--border)'}` }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 8px' }}>
-              {editingLeague === lg ? (
-                <input autoFocus className="form-input" value={editingValue} onChange={e => setEditingValue(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && submitRename(lg)}
-                  onBlur={() => submitRename(lg)}
-                  style={{ flex: 1, fontSize: 11, padding: '3px 5px' }} />
-              ) : (
-                <span onClick={() => { setOpenLeague(isOpen ? null : lg); setNewTeam('') }} title="눌러서 팀 등록/보기"
-                  style={{ flex: 1, fontSize: 11, fontWeight: 600, cursor: onAddTeam ? 'pointer' : 'default', display: 'flex', alignItems: 'center', gap: 5 }}>
-                  {onAddTeam && <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>{isOpen ? '▼' : '▶'}</span>}
-                  {lg}
-                  {onAddTeam && <span style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 500 }}>팀 {lgTeams.length}</span>}
-                </span>
-              )}
-              <button type="button" onClick={() => { setEditingLeague(lg); setEditingValue(lg) }}
-                style={{ border: 'none', background: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', padding: 1, flexShrink: 0 }}><Pencil size={10} /></button>
-              <button type="button" onClick={() => removeLeague(lg)}
-                style={{ border: 'none', background: 'none', color: 'var(--red)', cursor: 'pointer', display: 'flex', padding: 1, flexShrink: 0 }}><Trash2 size={10} /></button>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'stretch' }}>
+          {/* ── 좌측: 리그 목록 ── */}
+          <div style={{ flex: showTeams ? '0 0 44%' : '1 1 auto', minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+            <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
+              <input autoFocus className="form-input" value={newLeague} onChange={e => setNewLeague(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && addLeague()}
+                placeholder="새 리그 이름" style={{ flex: 1, minWidth: 0, fontSize: 11, padding: '5px 7px' }} />
+              <button type="button" onClick={addLeague} disabled={!newLeague.trim()}
+                style={{ border: '1px solid var(--gold-border)', background: 'var(--gold-bg)', color: 'var(--gold)', borderRadius: 5, cursor: 'pointer', display: 'flex', alignItems: 'center', padding: '0 8px', flexShrink: 0 }}>
+                <Plus size={13} />
+              </button>
             </div>
-            {isOpen && onAddTeam && (
-              <div style={{ padding: '0 8px 7px' }}>
-                <div style={{ display: 'flex', gap: 4, marginBottom: 5 }}>
-                  <input autoFocus className="form-input" value={newTeam} onChange={e => setNewTeam(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && addTeam(lg)}
-                    placeholder={`${lg} 팀 이름 추가`} style={{ flex: 1, fontSize: 11, padding: '4px 6px' }} />
-                  <button type="button" onClick={() => addTeam(lg)} disabled={!newTeam.trim()}
-                    style={{ border: '1px solid var(--gold-border)', background: 'var(--gold-bg)', color: 'var(--gold)', borderRadius: 5, cursor: 'pointer', display: 'flex', alignItems: 'center', padding: '0 7px', flexShrink: 0 }}>
-                    <Plus size={12} />
-                  </button>
-                </div>
-                {lgTeams.length === 0 ? (
-                  <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>등록된 팀 없음</div>
-                ) : (
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                    {lgTeams.map(t => (
-                      <span key={t.name} style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 10, fontWeight: 600, padding: '2px 4px 2px 7px', borderRadius: 999, background: 'var(--bg-card)', border: '1px solid var(--border)' }}>
-                        {t.name}
-                        <button type="button" onClick={() => removeTeam(lg, t.name)}
-                          style={{ border: 'none', background: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', padding: 0 }}><X size={10} /></button>
-                      </span>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 3, overflowY: 'auto', maxHeight: 360 }}>
+              {sorted.length === 0 && <div style={{ fontSize: 10, color: 'var(--text-muted)', padding: '8px 0' }}>등록된 리그 없음</div>}
+              {sorted.map(lg => {
+                const isSel = showTeams && selected === lg
+                const cnt = teams.filter(t => t.league === lg).length
+                return (
+                  <div key={lg} onClick={() => { if (showTeams && editingLeague !== lg) { setOpenLeague(lg); setNewTeam('') } }}
+                    style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '6px 8px', borderRadius: 6, cursor: showTeams ? 'pointer' : 'default',
+                      background: isSel ? 'var(--gold-bg)' : 'var(--bg-elevated)', border: `1px solid ${isSel ? 'var(--gold-border)' : 'var(--border)'}` }}>
+                    {editingLeague === lg ? (
+                      <input autoFocus className="form-input" value={editingValue} onChange={e => setEditingValue(e.target.value)}
+                        onClick={e => e.stopPropagation()}
+                        onKeyDown={e => e.key === 'Enter' && submitRename(lg)}
+                        onBlur={() => submitRename(lg)}
+                        style={{ flex: 1, minWidth: 0, fontSize: 11, padding: '3px 5px' }} />
+                    ) : (
+                      <span style={{ flex: 1, minWidth: 0, fontSize: 11, fontWeight: isSel ? 700 : 600, color: isSel ? 'var(--gold)' : 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{lg}</span>
+                    )}
+                    {showTeams && <span style={{ fontSize: 9, color: 'var(--text-muted)', flexShrink: 0 }}>{cnt}</span>}
+                    <button type="button" onClick={e => { e.stopPropagation(); setEditingLeague(lg); setEditingValue(lg) }} title="리그 이름 수정"
+                      style={{ border: 'none', background: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', padding: 1, flexShrink: 0 }}><Pencil size={10} /></button>
+                    <button type="button" onClick={e => { e.stopPropagation(); removeLeague(lg) }} title="리그 삭제"
+                      style={{ border: 'none', background: 'none', color: 'var(--red)', cursor: 'pointer', display: 'flex', padding: 1, flexShrink: 0 }}><Trash2 size={10} /></button>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+
+          {/* ── 우측: 선택한 리그의 팀 목록 ── */}
+          {showTeams && (
+            <div style={{ flex: 1, minWidth: 0, borderLeft: '1px solid var(--border)', paddingLeft: 10, display: 'flex', flexDirection: 'column' }}>
+              {!selected ? (
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0' }}>왼쪽에서 리그를 추가하세요</div>
+              ) : (
+                <>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--gold)', marginBottom: 6 }}>
+                    {selected} <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 500 }}>팀 {selectedTeams.length}</span>
+                  </div>
+                  <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
+                    <input className="form-input" value={newTeam} onChange={e => setNewTeam(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && addTeam(selected)}
+                      placeholder="팀 이름 추가" style={{ flex: 1, minWidth: 0, fontSize: 11, padding: '5px 7px' }} />
+                    <button type="button" onClick={() => addTeam(selected)} disabled={!newTeam.trim()}
+                      style={{ border: '1px solid var(--gold-border)', background: 'var(--gold-bg)', color: 'var(--gold)', borderRadius: 5, cursor: 'pointer', display: 'flex', alignItems: 'center', padding: '0 8px', flexShrink: 0 }}>
+                      <Plus size={13} />
+                    </button>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 3, overflowY: 'auto', maxHeight: 320 }}>
+                    {selectedTeams.length === 0 && <div style={{ fontSize: 10, color: 'var(--text-muted)', padding: '8px 0' }}>등록된 팀 없음</div>}
+                    {selectedTeams.map(t => (
+                      <div key={t.name} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 8px', borderRadius: 6, background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}>
+                        <span style={{ flex: 1, minWidth: 0, fontSize: 11, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.name}</span>
+                        <button type="button" onClick={() => removeTeam(selected, t.name)} title="팀 삭제"
+                          style={{ border: 'none', background: 'none', color: 'var(--red)', cursor: 'pointer', display: 'flex', padding: 1, flexShrink: 0 }}><Trash2 size={10} /></button>
+                      </div>
                     ))}
                   </div>
-                )}
-              </div>
-            )}
+                </>
+              )}
             </div>
-            )
-          })}
+          )}
         </div>
       </div>
     </div>
