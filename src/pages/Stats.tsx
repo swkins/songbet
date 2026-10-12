@@ -1144,7 +1144,7 @@ function SoccerLeagueColumnsSection({ title, columns, emptyLabel }: { title: str
 
 // ─── 축구 언더 — 라인별(2.5/3.5/4.5) × 리그별 (초안) ────────────────
 // 리그 미지정 베팅은 "미분류"로 묶어서 함께 보여줌. league 컬럼값 그대로 사용(과거 팀 키워드 추론은 적용 안 함).
-// ─── 농구 상세 통계 — 베팅옵션(4.5 H ~ 13.5 H, 승리, 오버, 언더) × 리그 한 표 ──────
+// ─── 농구 상세 통계 — 리그(세로) × 베팅옵션(가로: 4.5 H ~ 13.5 H, 승리, 오버, 언더) 한 표 ──────
 // 리그마다 성향 차이가 커서 리그별로 나눠 보되, 옵션 구성은 같으니 한 표에 모은다. 옵션은 베팅추가에
 // 등록된 순서 그대로, 베팅이 없는 옵션도 빈 줄로 남긴다. 어떤 옵션에도 안 걸리는 베팅은 "기타" 줄로.
 function betOptionOf(b: Bet, matchOrder: string[], optionSet: Set<string>, numericSet: Set<string>): string | null {
@@ -1157,7 +1157,7 @@ function betOptionOf(b: Bet, matchOrder: string[], optionSet: Set<string>, numer
   }
   return null
 }
-// 행=베팅옵션, 열=리그(+맨 오른쪽 합계)인 한 표 — 옵션 구성이 리그와 무관하게 같으므로 표 하나로 한눈에 비교.
+// 행=리그(+맨 아래 합계), 열=베팅옵션(+합계·손익)인 한 표 — 옵션 구성이 리그와 무관하게 같으므로 표 하나로 한눈에 비교.
 function BasketballLeagueOptionBoxes({ bets, overrides, options, numericOptions }: {
   bets: Bet[]; overrides: LeagueOverride[]; options: string[]; numericOptions: string[]
 }) {
@@ -1199,38 +1199,28 @@ function BasketballLeagueOptionBoxes({ bets, overrides, options, numericOptions 
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                  <th style={{ ...th, textAlign: 'left' }}>옵션</th>
-                  {leagues.map(l => <th key={l} style={th}>{l}</th>)}
+                  <th style={{ ...th, textAlign: 'left' }}>리그</th>
+                  {rowLabels.map(opt => <th key={opt} style={{ ...th, opacity: cell(opt, null).length ? 1 : 0.45 }}>{opt}</th>)}
                   <th style={{ ...th, ...sumBorder }}>합계</th>
+                  <th style={th}>손익</th>
                 </tr>
               </thead>
               <tbody>
-                {rowLabels.map(opt => {
-                  const rowAll = cell(opt, null)
+                {[...leagues, null].map(league => {
+                  const rowAll = cell(null, league)
+                  const p = calcStats(rowAll).profit
+                  const isTotal = league === null
                   return (
-                    <tr key={opt} style={{ borderBottom: '1px solid var(--border-light)', height: 26, opacity: rowAll.length ? 1 : 0.45 }}>
-                      <td style={{ padding: '4px 6px', fontWeight: 700, color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>{opt}</td>
-                      {leagues.map(l => <td key={l} style={{ textAlign: 'center', padding: '4px 6px', whiteSpace: 'nowrap' }}><Cell list={cell(opt, l)} /></td>)}
+                    <tr key={league ?? '__total'} style={{ borderBottom: '1px solid var(--border-light)', borderTop: isTotal ? '1px solid var(--border)' : undefined, height: 26 }}>
+                      <td style={{ padding: '4px 6px', fontWeight: isTotal ? 800 : 700, color: isTotal ? 'var(--text-secondary)' : 'var(--text-primary)', whiteSpace: 'nowrap' }}>{league ?? '합계'}</td>
+                      {rowLabels.map(opt => <td key={opt} style={{ textAlign: 'center', padding: '4px 6px', whiteSpace: 'nowrap' }}><Cell list={cell(opt, league)} bold={isTotal} /></td>)}
                       <td style={{ textAlign: 'center', padding: '4px 6px', whiteSpace: 'nowrap', ...sumBorder }}><Cell list={rowAll} bold /></td>
+                      <td style={{ textAlign: 'right', padding: '4px 8px', whiteSpace: 'nowrap', fontWeight: 800, color: p >= 0 ? '#4ade80' : '#f87171' }}>
+                        {rowAll.length ? `${p >= 0 ? '+' : ''}${p.toLocaleString()}원` : '—'}
+                      </td>
                     </tr>
                   )
                 })}
-                <tr style={{ borderTop: '1px solid var(--border)', height: 28 }}>
-                  <td style={{ padding: '4px 6px', fontWeight: 800, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>합계</td>
-                  {leagues.map(l => <td key={l} style={{ textAlign: 'center', padding: '4px 6px', whiteSpace: 'nowrap' }}><Cell list={cell(null, l)} bold /></td>)}
-                  <td style={{ textAlign: 'center', padding: '4px 6px', whiteSpace: 'nowrap', ...sumBorder }}><Cell list={settled} bold /></td>
-                </tr>
-                <tr style={{ height: 28 }}>
-                  <td style={{ padding: '4px 6px', fontWeight: 800, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>손익</td>
-                  {[...leagues.map(l => cell(null, l)), settled].map((list, i) => {
-                    const p = calcStats(list).profit
-                    return (
-                      <td key={i} style={{ textAlign: 'center', padding: '4px 6px', whiteSpace: 'nowrap', fontWeight: 800, color: p >= 0 ? '#4ade80' : '#f87171', ...(i === leagues.length ? sumBorder : {}) }}>
-                        {list.length ? `${p >= 0 ? '+' : ''}${p.toLocaleString()}원` : '—'}
-                      </td>
-                    )
-                  })}
-                </tr>
               </tbody>
             </table>
           </div>
