@@ -1308,7 +1308,8 @@ function EsportsDetailPanel(props: LeagueSectionProps) {
 function BasketballLeagueDetailPanel({ options, numericOptions, ...props }: LeagueSectionProps & { options: string[]; numericOptions: string[] }) {
   return (
     <div style={{ flex: 1, minWidth: 0 }}>
-      <LeagueOptionMatrix emoji="🏀" bets={props.bets} overrides={props.overrides} options={options} numericOptions={numericOptions} />
+      {/* 농구 오버/언더는 일단 추적하지 않음 */}
+      <LeagueOptionMatrix emoji="🏀" bets={props.bets} overrides={props.overrides} options={options.filter(o => !/오버|언더/.test(o))} numericOptions={numericOptions} />
     </div>
   )
 }
