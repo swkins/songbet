@@ -1540,7 +1540,8 @@ function MockPanel({ bets, betOptionsBySport, numericBetOptionsBySport, onAssign
   const pendingCount = bets.length - settled.length
   const stats = calcStats(settled)
   const bySport = SPORTS.map(s => ({ ...s, ...calcStats(settled.filter(b => b.sport === s.value)) })).filter(r => r.total > 0)
-  const [selected, setSelected] = useState<Sport | null>(null)
+  // 모의 탭을 열면 축구가 선택된 상태로 시작 (다시 누르면 접힘)
+  const [selected, setSelected] = useState<Sport | null>('soccer')
   const active = bySport.find(r => r.value === selected) ?? null
   const sign = (v: number) => v > 0 ? '+' : ''
 
