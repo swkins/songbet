@@ -28,45 +28,6 @@ const MARKET_LABELS: Record<Market, string> = {
   moneyline:'승패', handicap:'핸디캡', over:'오버', under:'언더', correct_score:'정확한스코어', other:'기타',
 }
 
-// ─── 종목별 룰북 요약 (통계 탭 상단 표시용) ───────────────────────────
-const RULEBOOK_SUMMARY: Partial<Record<Sport, string[]>> = {
-  soccer: [
-    '정배 1.20~1.39 → 반대쪽 +2.5 핸디캡',
-    '정배 1.40~1.79 → 반대쪽 +1.5 핸디캡',
-    '정배 1.80 이상(반대쪽 4.00 미만) → 반대쪽 +0.5 핸디캡',
-  ],
-  baseball: [
-    '언오버 기준점 8.5 (MLB 최빈값, 전 리그 공통 적용)',
-    '8.5 이하(언더 정배·투수전) → 역배팀 런라인: +2.5 우선 → 1.40 미만이면 +1.5로 좁힘 (배당 1.40~1.99)',
-    '8.5 초과(오버 정배·타격전) → 역배팀 팀득점 오버: 최저 라인부터 1.40~1.99 될 때까지 한 단계씩 상향',
-  ],
-  basketball: [
-    'NBA 기준, 정배 방향 확인 후 언더독 핸디캡 +4.5 ~ +14.5 범위 탐색',
-    '배당이 1.90에 가장 가까운 라인 선택 (밴드 1.40~1.99 내)',
-  ],
-  esports: [
-    'BO1 / BO3 / BO5 선택에 따라 베팅 옵션이 달라짐 (기본값 BO3)',
-    'BO1: 별도 마켓 없이 팀 선택만으로 확정',
-    'BO3: 1.5 플핸 / -1.5 핸디캡 / 일반승 중 선택',
-    'BO5: -1.5 핸디캡 / 1.5 플핸 / 3.5 세트오버 / 일반승 중 선택',
-    '모든 리그·상시 적용, 배당은 공통 밴드 1.40~1.99',
-  ],
-}
-
-function RulebookSummaryCard({ sport }: { sport: Sport }) {
-  const lines = RULEBOOK_SUMMARY[sport]
-  if (!lines) return null
-  return (
-    <div style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 8, padding: '10px 14px', marginBottom: 4 }}>
-      <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 6, letterSpacing: '0.3px' }}>📋 룰북 요약 · 전 종목 공통 배당 1.40~1.99</div>
-      {lines.map((l, i) => (
-        <div key={i} style={{ fontSize: 11, color: 'var(--text-primary)', lineHeight: 1.7, paddingLeft: 12, position: 'relative' }}>
-          <span style={{ position: 'absolute', left: 0, color: 'var(--text-muted)' }}>·</span>{l}
-        </div>
-      ))}
-    </div>
-  )
-}
 
 // ─── 공통 유틸 ─────────────────────────────────────────────────────
 function calcStats(bets: Bet[]) {
@@ -1798,7 +1759,6 @@ function SportPanel({ bets, sport, onDeleteRequest, leagueOverrides, baseballLea
 
   if (stats.total === 0) return (
     <div>
-      <RulebookSummaryCard sport={sport.value} />
       <div style={{ padding: '24px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>결과 처리된 베팅이 없습니다</div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
         <button onClick={onDeleteRequest} className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--red)', borderColor: 'var(--red-border)', display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -1815,7 +1775,6 @@ function SportPanel({ bets, sport, onDeleteRequest, leagueOverrides, baseballLea
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <RulebookSummaryCard sport={sport.value} />
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'flex-start' }}>
         {[
           { label: '승률', value: `${stats.winRate.toFixed(1)}%`, sub: `${stats.wins.length}W ${stats.losses.length}L`, cls: stats.winRate >= 50 ? 'profit-pos' : 'profit-neg' },

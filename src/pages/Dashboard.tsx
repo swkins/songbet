@@ -13,7 +13,7 @@ import isoWeek from 'dayjs/plugin/isoWeek'
 dayjs.extend(isoWeek)
 import {
   Plus, Trash2, Check, X,
-  RotateCcw, Settings, Flame,
+  RotateCcw, Settings, Flame, BookOpen,
   CheckCircle, XCircle, Ban, MinusCircle, Gift, GripVertical, DollarSign,
   TrendingUp, TrendingDown, ArrowDownToLine, LogOut, Pencil,
   ClipboardPaste, ChevronUp, ChevronDown, Star,
@@ -3167,6 +3167,12 @@ export default function Dashboard() {
     return total
   }
 
+  // 룰북 메모장 — 새창으로 띄우고, 이미 열려 있으면 그 창을 앞으로
+  function openRulebook() {
+    const w = window.open(`${window.location.pathname}?view=rulebook`, 'songbet_rulebook', 'width=760,height=860')
+    w?.focus()
+  }
+
   /* ── 사이트 관리 ── */
   async function addSite(name: string, currency: 'krw' | 'usd', rollingPct = 100) {
     const { data } = await supabase.from('sites').insert({
@@ -3746,9 +3752,14 @@ export default function Dashboard() {
             <div className="card" style={{ padding: '10px 14px' }}>
               <div className="flex-between mb-10">
                 <span className="card-title" style={{ margin: 0 }}>베팅 현황</span>
+                <div style={{ display: 'flex', gap: 6 }}>
+                <button onClick={openRulebook} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--gold)', cursor: 'pointer', padding: '3px 8px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-body)' }}>
+                  <BookOpen size={11} /> 룰북
+                </button>
                 <button onClick={() => setShowSiteMgr(true)} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-secondary)', cursor: 'pointer', padding: '3px 8px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-body)' }}>
                   <Settings size={11} /> 사이트관리
                 </button>
+                </div>
               </div>
               <div className="empty"><div className="empty-icon">🎯</div>사이트를 추가하세요</div>
             </div>
@@ -3764,6 +3775,9 @@ export default function Dashboard() {
                       <span style={{ fontSize: 11, fontWeight: 700, color: aggPct >= 100 ? 'var(--green)' : 'var(--orange)' }}>{aggPct}%</span>
                     </div>
                   )}
+                  <button onClick={openRulebook} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--gold)', cursor: 'pointer', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-body)' }}>
+                    <BookOpen size={12} /> 룰북
+                  </button>
                   <button onClick={() => setShowSiteMgr(true)} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-secondary)', cursor: 'pointer', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-body)' }}>
                     <Settings size={12} /> 사이트관리
                   </button>
