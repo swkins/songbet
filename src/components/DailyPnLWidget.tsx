@@ -5,7 +5,7 @@ import { settledDayOf, aggregatePnL } from '../lib/pnl'
 import type { Bet } from '../types'
 
 const DAYS = 7
-const SPORT_LABELS: Record<string, string> = { soccer: '축구', baseball: '야구', basketball: '농구', volleyball: '배구', esports: 'LOL', hockey: '하키', other: '기타' }
+const SPORT_LABELS: Record<string, string> = { soccer: '축구', baseball: '야구', basketball: '농구', volleyball: '배구', esports: 'LOL', hockey: '하키', other: '기타', casino: '카지노' }
 
 function Num({ v, size = 12 }: { v: number; size?: number }) {
   if (v === 0) return <span style={{ color: 'var(--text-muted)', fontSize: size, fontFamily: 'var(--font-num)' }}>0</span>

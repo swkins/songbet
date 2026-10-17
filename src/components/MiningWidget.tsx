@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import dayjs from 'dayjs'
-import { Plus, Trash2, Pencil, Check, X, ClipboardPaste, DollarSign, Target, TrendingUp } from 'lucide-react'
+import { Plus, Trash2, Pencil, Check, X, ClipboardPaste, DollarSign, Target, TrendingUp, Gift } from 'lucide-react'
 import { supabase } from '../lib/supabase'
-import { useMiningData, fmtMining as fmt, minedOf as mined, type MiningEntry, type MiningCashout } from '../lib/useMining'
+import { useMiningData, fmtMining as fmt, minedOf as mined, GIFTICON_SITES, GIFTICON_AMOUNT, GIFTICON_CYCLE_DAYS, type MiningEntry, type MiningCashout } from '../lib/useMining'
 
 interface SelectableSite { id: string; name: string }
 
@@ -282,10 +282,146 @@ function CashoutModal({ entry, cashout, onClose, onSetGoal, onSetAuto, onSetPerf
   )
 }
 
+/** 기프티콘교환 모달 (카센터 전용): 현금교환과 같은 구조지만 목표 날짜 자동설정/쿨다운이 2주가 아니라 3일,
+ *  교환 금액은 기프티콘 5만 고정. 실행하면 현재가에서 5만을 빼고 결산에 "카센터 / 기프티콘" 5만이 수입으로 기록된다. */
+function GifticonModal({ entry, cashout, onClose, onSetGoal, onSetAuto, onExchange }: {
+  entry: MiningEntry
+  cashout: MiningCashout | undefined
+  onClose: () => void
+  onSetGoal: (goalDate: string) => Promise<void>
+  onSetAuto: (enabled: boolean) => Promise<void>
+  onExchange: (amount: number) => Promise<void>
+}) {
+  const hasGoal = !!cashout?.gift_goal_date
+  const [editingGoal, setEditingGoal] = useState(!hasGoal)
+  const [goalDate, setGoalDate] = useState(cashout?.gift_goal_date ?? dayjs().add(GIFTICON_CYCLE_DAYS, 'day').format('YYYY-MM-DD'))
+  const [savingGoal, setSavingGoal] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const autoOn = cashout?.gift_auto_set_3d ?? true
+
+  const now = dayjs()
+  const today = now.startOf('day')
+  const remainingDays = hasGoal ? Math.max(0, dayjs(cashout!.gift_goal_date!).startOf('day').diff(today, 'day')) : 0
+  const cooldownUntil = cashout?.gift_next_allowed_at ? dayjs(cashout.gift_next_allowed_at) : null
+  const goalDayReached = hasGoal && !today.isBefore(dayjs(cashout!.gift_goal_date!).startOf('day'))
+  const inCooldown = !!cooldownUntil && today.isBefore(cooldownUntil.startOf('day')) && !goalDayReached
+  const enoughPoint = entry.current_point >= GIFTICON_AMOUNT
+  const canExchange = enoughPoint && !inCooldown
+
+  async function saveGoal() {
+    if (!goalDate || savingGoal) return
+    setSavingGoal(true)
+    await onSetGoal(goalDate)
+    setSavingGoal(false)
+    setEditingGoal(false)
+  }
+
+  async function submit() {
+    if (!canExchange || submitting) return
+    if (!confirm(`기프티콘 ${fmt(GIFTICON_AMOUNT)} 교환하시겠습니까? 현재가에서 차감되어 시작가/현재가가 ${fmt(entry.current_point - GIFTICON_AMOUNT)}(으)로 재설정되고, 결산에 ${entry.site_name} 기프티콘 ${fmt(GIFTICON_AMOUNT)}이 추가됩니다.${autoOn ? ` (목표 날짜는 자동으로 ${now.add(GIFTICON_CYCLE_DAYS, 'day').format('MM.DD')}로 설정됩니다)` : ''}`)) return
+    setSubmitting(true)
+    await onExchange(GIFTICON_AMOUNT)
+    setSubmitting(false)
+    onClose()
+  }
+
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 300, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+      <div onClick={ev => ev.stopPropagation()} style={{ width: '100%', maxWidth: 380, maxHeight: '85vh', overflowY: 'auto', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 20, boxShadow: '0 20px 60px rgba(0,0,0,0.6)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>{entry.site_name} 기프티콘교환</div>
+          <button onClick={onClose} style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 8, width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'var(--text-secondary)' }}><X size={14} /></button>
+        </div>
+
+        <div style={{ marginBottom: 14, padding: 10, background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)' }}>
+              <Target size={12} /> 기프티콘교환 목표 날짜
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <button type="button" onClick={() => onSetAuto(!autoOn)} title="기프티콘교환 실행 시 목표 날짜를 3일 뒤로 자동 설정" style={{
+                display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', cursor: 'pointer',
+                fontSize: 9, fontWeight: 700, fontFamily: 'var(--font-body)', color: autoOn ? 'var(--gold)' : 'var(--text-muted)',
+              }}>
+                <span style={{
+                  width: 26, height: 15, borderRadius: 999, position: 'relative', transition: 'background 0.15s',
+                  background: autoOn ? 'var(--gold)' : 'var(--border)', flexShrink: 0,
+                }}>
+                  <span style={{
+                    position: 'absolute', top: 2, left: autoOn ? 13 : 2, width: 11, height: 11, borderRadius: '50%',
+                    background: '#fff', transition: 'left 0.15s',
+                  }} />
+                </span>
+                3일 자동설정
+              </button>
+              {hasGoal && !editingGoal && (
+                <button onClick={() => setEditingGoal(true)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--gold)', fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-body)', display: 'flex', alignItems: 'center', gap: 2 }}>
+                  <Pencil size={10} /> 재설정
+                </button>
+              )}
+            </div>
+          </div>
+
+          {!editingGoal && hasGoal ? (
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)', fontFamily: 'var(--font-num)' }}>{dayjs(cashout!.gift_goal_date!).format('YYYY.MM.DD')}</span>
+              <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)' }}>{remainingDays}일 남음</span>
+            </div>
+          ) : (
+            <div>
+              <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+                <input type="date" style={{ ...inputSt, fontSize: 12, padding: '7px 9px', flex: 1 }} value={goalDate}
+                  onChange={ev => setGoalDate(ev.target.value)} />
+              </div>
+              <div style={{ display: 'flex', gap: 5 }}>
+                <button onClick={saveGoal} disabled={!goalDate || savingGoal} style={{
+                  flex: 1, padding: '7px 0', borderRadius: 6, border: 'none', cursor: goalDate ? 'pointer' : 'not-allowed',
+                  background: 'var(--gold)', color: '#000', fontWeight: 700, fontSize: 11, fontFamily: 'var(--font-body)',
+                  opacity: goalDate ? 1 : 0.5,
+                }}>{savingGoal ? '저장중...' : '목표 날짜 저장'}</button>
+                {hasGoal && (
+                  <button onClick={() => setEditingGoal(false)} style={{ padding: '7px 12px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-body)' }}>취소</button>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {inCooldown && (
+          <div style={{ fontSize: 11, color: 'var(--red)', marginBottom: 10, padding: '7px 9px', background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 6 }}>
+            다음 기프티콘교환 가능일: {cooldownUntil!.format('YYYY.MM.DD')} ({GIFTICON_CYCLE_DAYS}일 쿨다운)
+          </div>
+        )}
+        {!inCooldown && !enoughPoint && (
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 10, padding: '7px 9px', background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 6 }}>
+            현재가가 {fmt(GIFTICON_AMOUNT)} 이상이어야 기프티콘교환이 가능합니다. (현재 {fmt(entry.current_point)})
+          </div>
+        )}
+
+        <div style={labelSt}>교환할 금액</div>
+        <div style={{ ...inputSt, marginBottom: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ fontWeight: 700 }}>기프티콘</span>
+          <span style={{ fontWeight: 800, fontFamily: 'var(--font-num)', color: 'var(--gold)' }}>{fmt(GIFTICON_AMOUNT)}</span>
+        </div>
+        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 14 }}>현재가 {fmt(entry.current_point)}에서 차감 · 결산에 기프티콘 수입으로 기록</div>
+
+        <button onClick={submit} disabled={!canExchange || submitting} style={{
+          width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+          padding: '11px 0', borderRadius: 8, border: 'none', cursor: canExchange ? 'pointer' : 'not-allowed',
+          background: 'var(--cyan)', color: '#000', fontWeight: 700, fontSize: 13, fontFamily: 'var(--font-body)',
+          opacity: canExchange ? 1 : 0.5,
+        }}>
+          <Gift size={14} /> {submitting ? '처리중...' : '기프티콘 교환 실행'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 /** 대시보드 좌측에 얹는 채굴 현황 위젯. 전체 로직(오늘 데이터 로딩/자동 승계/추가/수정/삭제)은
  *  useMiningData 훅을 통해 Mining.tsx(채굴 탭)와 그대로 공유한다 — 달력/그래프는 여기선 생략. */
 export default function MiningWidget() {
-  const { today, entries, loading, knownSites, addEntry: addEntryToDb, updateField, deleteEntry: deleteEntryFromDb, cashouts, cashoutFor, setCashGoal, setAutoSet2w, setPerfGoal, doCashout } = useMiningData()
+  const { today, entries, loading, knownSites, addEntry: addEntryToDb, updateField, deleteEntry: deleteEntryFromDb, cashouts, cashoutFor, setCashGoal, setAutoSet2w, setPerfGoal, doCashout, setGiftGoal, setGiftAuto3d, doGifticon } = useMiningData()
 
   const [addModalOpen, setAddModalOpen] = useState(false)
   const [newName, setNewName] = useState('')
@@ -293,6 +429,7 @@ export default function MiningWidget() {
   const [newTarget, setNewTarget] = useState('')
   const [saving, setSaving] = useState(false)
   const [cashoutEntry, setCashoutEntry] = useState<MiningEntry | null>(null)
+  const [giftEntry, setGiftEntry] = useState<MiningEntry | null>(null)
   const [perfProgress, setPerfProgress] = useState<Record<string, number>>({})
 
   // 실적현황: 목표(사이트/기간/금액)가 설정된 항목마다, 목표 날짜로부터 기간만큼 이전 ~ 오늘(또는 목표 날짜, 더 이른 쪽)까지의
@@ -437,6 +574,11 @@ export default function MiningWidget() {
                   <button onClick={() => setCashoutEntry(e)} title="현금교환" style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, cursor: 'pointer', color: 'var(--purple)', display: 'flex', alignItems: 'center', gap: 3, padding: '2px 7px', fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-body)', flexShrink: 0 }}>
                     <DollarSign size={11} /> 현금교환
                   </button>
+                  {GIFTICON_SITES.includes(e.site_name) && (
+                    <button onClick={() => setGiftEntry(e)} title="기프티콘교환 (3일 주기 · 5만)" style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, cursor: 'pointer', color: 'var(--cyan)', display: 'flex', alignItems: 'center', gap: 3, padding: '2px 7px', fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-body)', flexShrink: 0 }}>
+                      <Gift size={11} /> 기프티콘교환
+                    </button>
+                  )}
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
                   {done && <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--green)', background: 'var(--green-bg)', border: '1px solid var(--green-border)', padding: '1px 6px', borderRadius: 4 }}>완료</span>}
@@ -698,6 +840,18 @@ export default function MiningWidget() {
           onSetAuto={enabled => setAutoSet2w(cashoutEntry.site_name, enabled)}
           onSetPerfGoal={(siteIds, period, amount) => setPerfGoal(cashoutEntry.site_name, siteIds, period, amount)}
           onCashout={amount => doCashout(cashoutEntry, amount)}
+        />
+      )}
+
+      {/* 기프티콘교환 모달 */}
+      {giftEntry && (
+        <GifticonModal
+          entry={entries.find(x => x.id === giftEntry.id) ?? giftEntry}
+          cashout={cashoutFor(giftEntry.site_name)}
+          onClose={() => setGiftEntry(null)}
+          onSetGoal={goalDate => setGiftGoal(giftEntry.site_name, goalDate)}
+          onSetAuto={enabled => setGiftAuto3d(giftEntry.site_name, enabled)}
+          onExchange={amount => doGifticon(giftEntry, amount)}
         />
       )}
     </div>

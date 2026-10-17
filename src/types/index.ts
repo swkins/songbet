@@ -1,4 +1,4 @@
-export type Sport = 'soccer' | 'baseball' | 'basketball' | 'volleyball' | 'hockey' | 'esports' | 'other'
+export type Sport = 'soccer' | 'baseball' | 'basketball' | 'volleyball' | 'hockey' | 'esports' | 'other' | 'casino'
 export type Market = 'moneyline' | 'handicap' | 'over' | 'under' | 'correct_score' | 'other'
 export type BetResult = 'win' | 'loss' | 'push' | 'pending'
 export type CashflowType = 'income' | 'expense'
@@ -15,6 +15,7 @@ export interface Site {
   default_stake: number             // 기본 베팅 금액 (0이면 통화별 폴백)
   carry_pnl: number                 // 마감 시 진행중 베팅이 남아있으면 이월되는 누적 수익률 (진행중 베팅 없이 마감되면 0으로 초기화)
   settlement_hidden: boolean        // 결산 "사이트별 손익"에서 숨김 여부 — 대시보드의 active(진행중 베팅 여부)와는 완전히 별개
+  rolling_pct: number               // 롤링 목표 % (기본 100) — 입금+포인트의 이 비율만큼 롤링해야 완료 (300이면 30만 입금 시 90만)
 }
 export interface Bet {
   id: string; created_at: string; bet_date: string; sport: Sport
@@ -66,4 +67,8 @@ export interface SoccerOddsLog {
   result_outcome: 'home_win' | 'draw' | 'away_win' | null
   result_updated_at: string | null
 }
+// 카지노 베팅 — bets 테이블에 sport='casino'로 저장 (league/match/pick = 게임명, 총 베팅금액=stake, 손수익=profit, 입력 즉시 결과처리)
+export const CASINO_GAMES = ['바카라', '룰렛', '식보', '판탄'] as const
+export type CasinoGame = typeof CASINO_GAMES[number]
+
 export type Tab = 'dashboard' | 'stats' | 'settlement' | 'simul' | 'rulebook'

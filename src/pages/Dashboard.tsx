@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
 import { logAction } from '../lib/logger'
-import type { Bet, Site, Sport, Market, BetResult, GameRolling } from '../types'
+import { CASINO_GAMES, type Bet, type Site, type Sport, type Market, type BetResult, type GameRolling, type CasinoGame } from '../types'
 import { inferBaseballLeague, inferSoccerLeague, inferLeagueByKeyword, buildLeagueCandidates, suggestLeagueCandidates, koCompare, type LeagueOverride, type LeagueCandidate } from '../lib/league'
 import { buildTeamCandidates, suggestTeamCandidates, getEsportsLeague, type TeamCandidate, type BetLite } from '../lib/teamInsight'
 import { applyNumericTemplate, extractNumericTemplateValue, extractNumericTemplateValueFromText } from '../lib/betOptions'
@@ -33,7 +33,7 @@ const SPORTS: { value: Sport; label: string }[] = [
 
 const SPORT_SHORT: Record<string, string> = {
   soccer: '⚽', baseball: '⚾', basketball: '🏀',
-  volleyball: '🏐', hockey: '🏒', esports: '🎮', other: '📋',
+  volleyball: '🏐', hockey: '🏒', esports: '🎮', other: '📋', casino: '🎰',
 }
 
 /* ── 다폴 진행중 개별 leg "적중" 임시 체크 상태를 새로고침해도 유지하기 위한 로컬 저장 ── */
@@ -567,6 +567,11 @@ async function getUsdKrwRate(): Promise<number> {
 
 
 /* ── 입금 모달 ── */
+/** 사이트의 목표 롤링 금액 — (입금 + 포인트) × 롤링 목표 % (기본 100%, 300%면 30만 입금 시 90만) */
+function rollingTargetOf(site: Site): number {
+  return ((site.last_deposit ?? 0) + (site.point_deposit ?? 0)) * (site.rolling_pct ?? 100) / 100
+}
+
 function DepositModal({ site, onClose, onDeposit, onPoint }: {
   site: Site; onClose: () => void
   onDeposit: (amount: number) => void; onPoint: (amount: number) => void
@@ -578,7 +583,7 @@ function DepositModal({ site, onClose, onDeposit, onPoint }: {
   const num = isusd ? parseFloat(amount) : Number(amount.replace(/,/g, ""))
   const isValid = !isNaN(num) && num > 0
   const dep = site.last_deposit ?? 0; const pt = site.point_deposit ?? 0
-  const tot = dep + pt; const done = site.deposit_bet_done ?? 0
+  const tot = rollingTargetOf(site); const done = site.deposit_bet_done ?? 0
   const rem = Math.max(0, tot - done); const pct = tot > 0 ? Math.round(done / tot * 100) : 0
   const unit = isusd ? '$' : '원'
 
@@ -807,9 +812,32 @@ function DefaultStakeInput({ site, onCommit }: { site: Site; onCommit: (site: Si
   )
 }
 
-function SiteMgrModal({ sites, onClose, onAdd, onDelete, onToggleCurrency, onReorder, onUpdateDefaultStake }: {
+function RollingPctInput({ value, onCommit, title }: { value: number; onCommit: (val: number) => void; title?: string }) {
+  const [val, setVal] = useState(String(value))
+  useEffect(() => { setVal(String(value)) }, [value])
+  function commit() {
+    const n = Number(val) || 0
+    if (n <= 0) { setVal(String(value)); return }
+    if (n !== value) onCommit(n)
+  }
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }} title={title ?? '롤링 목표 % — 입금(+포인트) 대비 롤링해야 하는 비율'}>
+      <input
+        type="text" inputMode="numeric" value={val}
+        onChange={e => { const v = e.target.value; if (v === '' || /^\d+$/.test(v)) setVal(v) }}
+        onBlur={commit}
+        onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+        style={{ width: 40, padding: '2px 5px', fontSize: 10, fontFamily: 'var(--font-mono)', textAlign: 'right', background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 4, color: value !== 100 ? 'var(--gold)' : 'var(--text-primary)' }}
+      />
+      <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>%</span>
+    </div>
+  )
+}
+
+function SiteMgrModal({ sites, onClose, onAdd, onDelete, onToggleCurrency, onReorder, onUpdateDefaultStake, onUpdateRollingPct }: {
   sites: Site[]; onClose: () => void
-  onAdd: (name: string, currency: 'krw' | 'usd') => void
+  onAdd: (name: string, currency: 'krw' | 'usd', rollingPct: number) => void
+  onUpdateRollingPct: (site: Site, val: number) => void
   onDelete: (id: string) => void
   onToggleCurrency: (site: Site) => void
   onReorder: (from: string, to: string) => void
@@ -817,6 +845,14 @@ function SiteMgrModal({ sites, onClose, onAdd, onDelete, onToggleCurrency, onReo
 }) {
   const [newName, setNewName] = useState('')
   const [newCurrency, setNewCurrency] = useState<'krw' | 'usd'>('krw')
+  // 롤링 목표 % — 기본 100%. 300으로 두고 추가하면 30만 입금 시 목표 롤링이 90만이 된다
+  const [newRollingPct, setNewRollingPct] = useState('100')
+  const newRollingPctN = Number(newRollingPct) > 0 ? Number(newRollingPct) : 100
+  function add() {
+    if (!newName.trim()) return
+    onAdd(newName.trim(), newCurrency, newRollingPctN)
+    setNewName(''); setNewRollingPct('100')
+  }
   const dragId = { current: '' }; const overId = { current: '' }
 
   return (
@@ -830,6 +866,7 @@ function SiteMgrModal({ sites, onClose, onAdd, onDelete, onToggleCurrency, onReo
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '2px 4px', fontSize: 9, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.6px' }}>
             <span style={{ flex: 1 }}>사이트</span>
             <span title="베팅추가 시 초기 베팅 금액 (0 = 기본값)" style={{ width: 70, textAlign: 'right', flexShrink: 0 }}>기본금액</span>
+            <span title="롤링 목표 % (입금 대비)" style={{ width: 52, textAlign: 'right', flexShrink: 0 }}>롤링목표</span>
             <span style={{ width: 56, textAlign: 'center', flexShrink: 0 }}>통화</span>
             <span style={{ width: 18, flexShrink: 0 }}></span>
           </div>
@@ -848,6 +885,7 @@ function SiteMgrModal({ sites, onClose, onAdd, onDelete, onToggleCurrency, onReo
               <span style={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0, background: s.active ? 'var(--green)' : 'var(--border)', boxShadow: s.active ? '0 0 5px var(--green)' : 'none' }} />
               <span className="site-mgr-name">{s.name}</span>
               <DefaultStakeInput site={s} onCommit={onUpdateDefaultStake} />
+              <RollingPctInput value={s.rolling_pct ?? 100} onCommit={v => onUpdateRollingPct(s, v)} />
               <button onClick={() => onToggleCurrency(s)} title="KRW/USD" style={{ background: s.currency === 'usd' ? 'var(--blue-bg)' : 'var(--bg-elevated)', border: `1px solid ${s.currency === 'usd' ? 'var(--blue-border)' : 'var(--border)'}`, borderRadius: 4, color: s.currency === 'usd' ? 'var(--blue)' : 'var(--text-muted)', cursor: 'pointer', padding: '2px 7px', fontSize: 10, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 3, flexShrink: 0 }}>
                 {s.currency === 'usd' ? <><DollarSign size={10} /> USD</> : '₩ KRW'}
               </button>
@@ -857,12 +895,24 @@ function SiteMgrModal({ sites, onClose, onAdd, onDelete, onToggleCurrency, onReo
         </div>
         <div style={{ borderTop: '1px solid var(--border)', paddingTop: 14 }}>
           <div style={{ display: 'flex', gap: 6 }}>
-            <input className="form-input" style={{ fontSize: 12 }} placeholder="사이트 이름" value={newName} onChange={e => setNewName(e.target.value)} onKeyDown={e => e.key === 'Enter' && newName.trim() && (onAdd(newName.trim(), newCurrency), setNewName(''))} autoFocus />
+            <input className="form-input" style={{ fontSize: 12 }} placeholder="사이트 이름" value={newName} onChange={e => setNewName(e.target.value)} onKeyDown={e => e.key === 'Enter' && add()} autoFocus />
+            <div title="롤링 목표 % (기본 100%) — 300%면 30만 입금 시 목표 롤링 90만" style={{ display: 'flex', alignItems: 'center', gap: 3, flexShrink: 0 }}>
+              <span style={{ fontSize: 10, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>롤링</span>
+              <input className="form-input" inputMode="numeric" style={{ fontSize: 12, width: 52, textAlign: 'right', padding: '0 6px' }} value={newRollingPct}
+                onChange={e => { const v = e.target.value; if (v === '' || /^\d+$/.test(v)) setNewRollingPct(v) }}
+                onKeyDown={e => e.key === 'Enter' && add()} />
+              <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>%</span>
+            </div>
             <button onClick={() => setNewCurrency(p => p === 'krw' ? 'usd' : 'krw')} style={{ background: newCurrency === 'usd' ? 'var(--blue-bg)' : 'var(--bg-elevated)', border: `1px solid ${newCurrency === 'usd' ? 'var(--blue-border)' : 'var(--border)'}`, borderRadius: 4, color: newCurrency === 'usd' ? 'var(--blue)' : 'var(--text-muted)', cursor: 'pointer', padding: '0 10px', fontSize: 11, fontWeight: 700, flexShrink: 0 }}>
               {newCurrency === 'usd' ? '$' : '₩'}
             </button>
-            <button className="btn btn-primary" onClick={() => { if (newName.trim()) { onAdd(newName.trim(), newCurrency); setNewName('') }}} style={{ flexShrink: 0 }}><Plus size={12} /> 추가</button>
+            <button className="btn btn-primary" onClick={add} style={{ flexShrink: 0 }}><Plus size={12} /> 추가</button>
           </div>
+          {newRollingPctN !== 100 && (
+            <div style={{ fontSize: 10, color: 'var(--gold)', marginTop: 6 }}>
+              롤링 목표 {newRollingPctN}% — 예: 30만 입금 시 목표 롤링 {(300000 * newRollingPctN / 100).toLocaleString()}원
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -1993,10 +2043,11 @@ function BetOptionsManagerModal({ sportLabel, betOptions, numericOptions, onClos
   )
 }
 
-function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, baseballOverrides, soccerOverrides, basketballOverrides, volleyballOverrides, teamCandidates, allBetsHistory, leagueCandidates, soccerLeagues, baseballLeagues, basketballLeagues, volleyballLeagues, esportsLeagues, soccerFavoriteLeagues, baseballFavoriteLeagues, basketballFavoriteLeagues, volleyballFavoriteLeagues, esportsFavoriteLeagues, onToggleSoccerLeagueFavorite, onToggleBaseballLeagueFavorite, onToggleBasketballLeagueFavorite, onToggleVolleyballLeagueFavorite, onToggleEsportsLeagueFavorite, soccerTeams, baseballTeams, basketballTeams, volleyballTeams, esportsTeams, onAddSoccerLeague, onAddBaseballLeague, onAddBasketballLeague, onAddVolleyballLeague, onAddEsportsLeague, onRenameSoccerLeague, onDeleteSoccerLeague, onRenameBaseballLeague, onDeleteBaseballLeague, onRenameBasketballLeague, onDeleteBasketballLeague, onRenameVolleyballLeague, onDeleteVolleyballLeague, onRenameEsportsLeague, onDeleteEsportsLeague, onAddSoccerTeam, onAddBaseballTeam, onAddBasketballTeam, onAddVolleyballTeam, onAddEsportsTeam, onRenameSoccerTeam, onDeleteSoccerTeam, onRenameBaseballTeam, onDeleteBaseballTeam, onRenameBasketballTeam, onDeleteBasketballTeam, onRenameVolleyballTeam, onDeleteVolleyballTeam, onRenameEsportsTeam, onDeleteEsportsTeam, quickPicks, betOptionsBySport, numericBetOptionsBySport, onAddBetOption, onDeleteBetOption, onEditBetOption, onReorderBetOption, onToggleNumericBetOption }: {
+function SingleBetForm({ site, onClose, onBet, onMultiBet, onCasinoBet, defaultSport, baseballOverrides, soccerOverrides, basketballOverrides, volleyballOverrides, teamCandidates, allBetsHistory, leagueCandidates, soccerLeagues, baseballLeagues, basketballLeagues, volleyballLeagues, esportsLeagues, soccerFavoriteLeagues, baseballFavoriteLeagues, basketballFavoriteLeagues, volleyballFavoriteLeagues, esportsFavoriteLeagues, onToggleSoccerLeagueFavorite, onToggleBaseballLeagueFavorite, onToggleBasketballLeagueFavorite, onToggleVolleyballLeagueFavorite, onToggleEsportsLeagueFavorite, soccerTeams, baseballTeams, basketballTeams, volleyballTeams, esportsTeams, onAddSoccerLeague, onAddBaseballLeague, onAddBasketballLeague, onAddVolleyballLeague, onAddEsportsLeague, onRenameSoccerLeague, onDeleteSoccerLeague, onRenameBaseballLeague, onDeleteBaseballLeague, onRenameBasketballLeague, onDeleteBasketballLeague, onRenameVolleyballLeague, onDeleteVolleyballLeague, onRenameEsportsLeague, onDeleteEsportsLeague, onAddSoccerTeam, onAddBaseballTeam, onAddBasketballTeam, onAddVolleyballTeam, onAddEsportsTeam, onRenameSoccerTeam, onDeleteSoccerTeam, onRenameBaseballTeam, onDeleteBaseballTeam, onRenameBasketballTeam, onDeleteBasketballTeam, onRenameVolleyballTeam, onDeleteVolleyballTeam, onRenameEsportsTeam, onDeleteEsportsTeam, quickPicks, betOptionsBySport, numericBetOptionsBySport, onAddBetOption, onDeleteBetOption, onEditBetOption, onReorderBetOption, onToggleNumericBetOption }: {
   site: Site; onClose: () => void; defaultSport: string
   onBet: (sport: string, content: string, odds: number, amount: number, isLive: boolean, league: string) => Promise<boolean>
   onMultiBet: (sport: string, contents: string[], odds: number, amount: number, leagues: string[]) => Promise<boolean>
+  onCasinoBet: (game: CasinoGame, stake: number, profit: number) => Promise<boolean>
   quickPicks: string[]
   betOptionsBySport: Record<string, string[]>
   numericBetOptionsBySport: Record<string, string[]>
@@ -2047,7 +2098,7 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
   const numericBetOptions = numericBetOptionsBySport[sport] ?? []
   // 베팅 모드: 단폴 / 다폴. 다폴은 리그 없이 경기 내용 여러 개(최대 4개) + 배당/금액 공유.
   // 항상 단폴 기본 (다폴은 필요할 때만 수동으로 전환)
-  const [mode, setMode] = useState<'single' | 'multi'>('single')
+  const [mode, setMode] = useState<'single' | 'multi' | 'casino'>('single')
   // 경기 내용 ①은 content, 나머지(②③④)는 extraContents에 담는다
   const [extraContents, setExtraContents] = useState<string[]>([''])
   const [oddsRaw, setOddsRaw]   = useState('')
@@ -2208,8 +2259,7 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
     if (ok) onClose()
   }
 
-  return (
-    <div className="inline-bet-form">
+  const modeTabs = (
       <div style={{ display: 'flex', gap: 4, marginBottom: 4 }}>
         <button type="button" onClick={() => setMode('single')} style={{
           flex: 1, padding: '6px 0', borderRadius: 'var(--radius-sm)', cursor: 'pointer',
@@ -2225,7 +2275,25 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
           background: mode === 'multi' ? 'var(--purple-bg)' : 'var(--bg-elevated)',
           color: mode === 'multi' ? 'var(--purple)' : 'var(--text-secondary)',
         }}>다폴</button>
+        <button type="button" onClick={() => setMode('casino')} style={{
+          flex: 1, padding: '6px 0', borderRadius: 'var(--radius-sm)', cursor: 'pointer',
+          fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-body)',
+          border: `1px solid ${mode === 'casino' ? 'var(--red-border)' : 'var(--border)'}`,
+          background: mode === 'casino' ? 'var(--red-bg)' : 'var(--bg-elevated)',
+          color: mode === 'casino' ? 'var(--red)' : 'var(--text-secondary)',
+        }}>카지노</button>
       </div>
+  )
+  if (mode === 'casino') return (
+    <div className="inline-bet-form">
+      {modeTabs}
+      <CasinoBetForm site={site} onClose={onClose} onSubmit={onCasinoBet} />
+    </div>
+  )
+
+  return (
+    <div className="inline-bet-form">
+      {modeTabs}
       {mode === 'single' && (
         <SportButtonGroup value={sport} onChange={v => { setSport(v); contentRef.current?.focus() }} />
       )}
@@ -2454,6 +2522,83 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
         <button className="btn btn-ghost" style={{ padding: '7px 10px' }} onClick={onClose}><X size={12} /></button>
       </div>
     </div>
+  )
+}
+
+/* ── 인라인 베팅폼 (카지노 — 게임 선택 + 총 베팅금액 + 손수익, 입력 즉시 결과처리) ── */
+function CasinoBetForm({ site, onClose, onSubmit }: {
+  site: Site; onClose: () => void
+  onSubmit: (game: CasinoGame, stake: number, profit: number) => Promise<boolean>
+}) {
+  const isusd = site.currency === 'usd'; const unit = isusd ? '$' : '원'
+  const [game, setGame] = useState<CasinoGame>('바카라')
+  const [stake, setStake] = useState('')
+  const [pnl, setPnl] = useState('')
+  const [sign, setSign] = useState<1 | -1>(1)
+  const [submitting, setSubmitting] = useState(false)
+  const toNum = (v: string) => isusd ? (parseFloat(v) || 0) : (Number(v.replace(/,/g, '')) || 0)
+  const stakeN = toNum(stake)
+  const profitN = sign * toNum(pnl)
+  const isValid = stakeN > 0
+  const fmtInput = (v: string) => isusd ? v : (toNum(v) > 0 ? toNum(v).toLocaleString() : v)
+
+  async function submit() {
+    if (!isValid || submitting) return
+    setSubmitting(true)
+    const ok = await onSubmit(game, stakeN, profitN)
+    setSubmitting(false)
+    if (ok) onClose()
+  }
+
+  return (
+    <>
+      <div style={{ display: 'flex', gap: 4 }}>
+        {CASINO_GAMES.map(g => (
+          <button key={g} type="button" onClick={() => setGame(g)} style={{
+            flex: 1, padding: '6px 0', borderRadius: 'var(--radius-sm)', cursor: 'pointer',
+            fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-body)',
+            border: `1px solid ${game === g ? 'var(--gold-border)' : 'var(--border)'}`,
+            background: game === g ? 'var(--gold-bg)' : 'var(--bg-elevated)',
+            color: game === g ? 'var(--gold)' : 'var(--text-secondary)',
+          }}>{g}</button>
+        ))}
+      </div>
+      <div style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.6px', color: 'var(--text-muted)', marginTop: 2 }}>
+        총 베팅 금액 ({unit}) — 롤링에 포함됩니다
+      </div>
+      <input className="form-input inline-bet-input" type="text" inputMode={isusd ? 'decimal' : 'numeric'} placeholder={`총 베팅 금액 (${unit})`} autoFocus
+        value={fmtInput(stake)} onChange={e => setStake(extractAmount(e.target.value, isusd))} onKeyDown={e => e.key === 'Enter' && submit()} />
+      <div style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.6px', color: 'var(--text-muted)', marginTop: 2 }}>
+        손수익 ({unit})
+      </div>
+      <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+        <button type="button" onClick={() => setSign(1)} style={{
+          flexShrink: 0, padding: '0 10px', height: 34, borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-body)',
+          border: `1px solid ${sign === 1 ? 'var(--green-border)' : 'var(--border)'}`, background: sign === 1 ? 'var(--green-bg)' : 'var(--bg-elevated)', color: sign === 1 ? 'var(--green)' : 'var(--text-secondary)',
+        }}>수익 +</button>
+        <button type="button" onClick={() => setSign(-1)} style={{
+          flexShrink: 0, padding: '0 10px', height: 34, borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-body)',
+          border: `1px solid ${sign === -1 ? 'var(--red-border)' : 'var(--border)'}`, background: sign === -1 ? 'var(--red-bg)' : 'var(--bg-elevated)', color: sign === -1 ? 'var(--red)' : 'var(--text-secondary)',
+        }}>손실 −</button>
+        <input className="form-input inline-bet-input" type="text" inputMode={isusd ? 'decimal' : 'numeric'} placeholder="0" style={{ flex: 1 }}
+          value={fmtInput(pnl)} onChange={e => setPnl(extractAmount(e.target.value, isusd))} onKeyDown={e => e.key === 'Enter' && submit()} />
+      </div>
+      {isValid && (
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'right' }}>
+          {game} · 베팅 {isusd ? '$' : ''}{stakeN.toLocaleString()}{isusd ? '' : '원'} ·{' '}
+          <span style={{ fontWeight: 700, color: profitN > 0 ? 'var(--green)' : profitN < 0 ? 'var(--red)' : 'var(--text-muted)' }}>
+            {profitN > 0 ? '+' : profitN < 0 ? '-' : ''}{isusd ? '$' : ''}{Math.abs(profitN).toLocaleString()}{isusd ? '' : '원'}
+          </span>
+        </div>
+      )}
+      <div style={{ display: 'flex', gap: 5 }}>
+        <button className="btn btn-primary" style={{ flex: 1, fontSize: 12, padding: '7px 0', justifyContent: 'center' }}
+          onClick={submit} disabled={!isValid || submitting}>
+          {submitting ? '저장중...' : '카지노 추가'}
+        </button>
+        <button className="btn btn-ghost" style={{ padding: '7px 10px' }} onClick={onClose}><X size={12} /></button>
+      </div>
+    </>
   )
 }
 
@@ -2734,7 +2879,7 @@ export default function Dashboard() {
     if (vb) setVolleyballOverrides(vb as LeagueOverride[])
   }
   async function loadAllBetsHistory() {
-    const { data } = await supabase.from('bets').select('sport, match, result, profit, stake, odds, bet_date, created_at, league').order('bet_date', { ascending: false }).limit(5000)
+    const { data } = await supabase.from('bets').select('sport, match, result, profit, stake, odds, bet_date, created_at, league').neq('sport', 'casino').order('bet_date', { ascending: false }).limit(5000)
     if (data) setAllBetsHistory(data as BetLite[])
   }
   // 축구/야구/농구/LOL — 등록된 리그/팀 목록 로드 (베팅추가에서 자유입력 대신 드롭다운으로 선택)
@@ -2966,14 +3111,12 @@ export default function Dashboard() {
     await supabase.from('volleyball_teams').delete().eq('league', league).eq('name', name)
     setVolleyballTeams(p => p.filter(t => !(t.league === league && t.name === name)))
   }
-  const totalRolling     = (s: Site) => (s.last_deposit ?? 0) + (s.point_deposit ?? 0)
+  const totalRolling     = (s: Site) => rollingTargetOf(s)
   const depositRemaining = (s: Site) => Math.max(0, totalRolling(s) - (s.deposit_bet_done ?? 0))
   const depositPct       = (s: Site) => totalRolling(s) > 0 ? Math.round((s.deposit_bet_done ?? 0) / totalRolling(s) * 100) : 0
   const toKrw = (amount: number, currency: 'krw' | 'usd') => currency === 'usd' ? amount * usdKrwRate : amount
   // 전체 사이트 합산 (달러는 원화로 환산) — 지금 롤링이 얼마나 필요한지 한눈에 보기 위함 (개별 사이트 카드와 동일한 구성: 입금/포인트/남은롤링/진행률)
-  const aggDep = sites.reduce((sum, s) => sum + toKrw(s.last_deposit ?? 0, s.currency), 0)
-  const aggPt  = sites.reduce((sum, s) => sum + toKrw(s.point_deposit ?? 0, s.currency), 0)
-  const aggRollingTarget = aggDep + aggPt
+  const aggRollingTarget = sites.reduce((sum, s) => sum + toKrw(rollingTargetOf(s), s.currency), 0)
   const aggRollingDone   = sites.reduce((sum, s) => sum + toKrw(s.deposit_bet_done ?? 0, s.currency), 0)
   const aggRem = Math.max(0, aggRollingTarget - aggRollingDone)
   const aggPct = aggRollingTarget > 0 ? Math.round(aggRollingDone / aggRollingTarget * 100) : 0
@@ -2983,8 +3126,10 @@ export default function Dashboard() {
   // 화면 표시 전용 — 결과 처리 후 1시간 동안은 "완료된 목록"으로 바로 넘기지 않고 진행중 쪽에 그대로 보여줌
   // (잔액/수익 계산 등 실제 데이터 처리는 위 pendingBySite/settledBySite를 그대로 쓰고, 이건 오직 목록 표시 위치만 다르게 함)
   const isRecentlyResolved = (b: Bet) => b.result !== 'pending' && !!b.result_at && (nowTick - new Date(b.result_at).getTime()) < RESULT_HOLD_MS
-  const displayPendingBySite = (id: string) => betsBySite(id).filter(b => b.result === 'pending' || isRecentlyResolved(b))
-  const displaySettledBySite = (id: string) => betsBySite(id).filter(b => b.result !== 'pending' && !isRecentlyResolved(b))
+  // 카지노 베팅은 입력 즉시 결과처리되므로 진행중/완료 목록이 아니라 게임 롤링처럼 별도 목록으로 보여준다
+  const displayPendingBySite = (id: string) => betsBySite(id).filter(b => b.sport !== 'casino' && (b.result === 'pending' || isRecentlyResolved(b)))
+  const displaySettledBySite = (id: string) => betsBySite(id).filter(b => b.sport !== 'casino' && b.result !== 'pending' && !isRecentlyResolved(b))
+  const casinoBySite = (id: string) => betsBySite(id).filter(b => b.sport === 'casino')
   const gameRollingsBySite = (id: string) => gameRollings.filter(g => g.site_id === id)
   const colCount = Math.max(1, sites.length)
 
@@ -3001,11 +3146,11 @@ export default function Dashboard() {
   }
 
   /* ── 사이트 관리 ── */
-  async function addSite(name: string, currency: 'krw' | 'usd') {
+  async function addSite(name: string, currency: 'krw' | 'usd', rollingPct = 100) {
     const { data } = await supabase.from('sites').insert({
       name, balance: 0, active: false, sort_order: sites.length,
       rolling_target: 0, rolling_done: 0, last_deposit: 0, deposit_bet_done: 0,
-      point_deposit: 0, total_withdrawal: 0, currency,
+      point_deposit: 0, total_withdrawal: 0, currency, rolling_pct: rollingPct,
     }).select().single()
     if (data) { await logAction({ action_type: 'insert', table_name: 'sites', record_id: data.id, after_data: data, description: `사이트 추가: ${data.name}` }); setSites(p => [...p, data]) }
   }
@@ -3018,6 +3163,13 @@ export default function Dashboard() {
   async function toggleCurrency(site: Site) {
     const { data } = await supabase.from('sites').update({ currency: site.currency === 'krw' ? 'usd' : 'krw' }).eq('id', site.id).select().single()
     if (data) setSites(p => p.map(s => s.id === site.id ? data : s))
+  }
+  async function updateRollingPct(site: Site, val: number) {
+    const { data } = await supabase.from('sites').update({ rolling_pct: val }).eq('id', site.id).select().single()
+    if (data) {
+      await logAction({ action_type: 'update', table_name: 'sites', record_id: site.id, before_data: { rolling_pct: site.rolling_pct } as never, after_data: { rolling_pct: val } as never, description: `${site.name} 롤링 목표 ${site.rolling_pct ?? 100}% → ${val}%` })
+      setSites(p => p.map(s => s.id === site.id ? data : s))
+    }
   }
   async function updateDefaultStake(site: Site, val: number) {
     const { data } = await supabase.from('sites').update({ default_stake: val }).eq('id', site.id).select().single()
@@ -3037,9 +3189,10 @@ export default function Dashboard() {
     if (!depositSite) return
     const before = { ...depositSite }; const isusd = depositSite.currency === 'usd'
     const newTotalDeposit = (depositSite.last_deposit ?? 0) + amount
-    const newTotalRolling = newTotalDeposit + (depositSite.point_deposit ?? 0)
+    // 이전 목표를 넘겨 롤링한 초과분은 이월하지 않음 — 이번 입금분(× 롤링 목표 %)만큼은 새로 롤링 필요
+    const prevTarget = rollingTargetOf(depositSite)
     const currentDone = depositSite.deposit_bet_done ?? 0
-    const newDone = currentDone > (newTotalRolling - amount) ? newTotalRolling - amount : currentDone
+    const newDone = Math.min(currentDone, prevTarget)
     const { data } = await supabase.from('sites').update({
       balance: depositSite.balance + amount, active: true,
       last_deposit: newTotalDeposit,
@@ -3059,9 +3212,9 @@ export default function Dashboard() {
     const before = { ...depositSite }
     // 입금과 동일한 로직: 포인트가 추가되면 그만큼 남은 롤링이 다시 생겨야 함 (롤링완료 상태였어도 추가된 포인트만큼은 롤링 필요)
     const newTotalPoint = (depositSite.point_deposit ?? 0) + amount
-    const newTotalRolling = (depositSite.last_deposit ?? 0) + newTotalPoint
+    const prevTarget = rollingTargetOf(depositSite)
     const currentDone = depositSite.deposit_bet_done ?? 0
-    const newDone = currentDone > (newTotalRolling - amount) ? newTotalRolling - amount : currentDone
+    const newDone = Math.min(currentDone, prevTarget)
     const { data } = await supabase.from('sites').update({
       balance: depositSite.balance + amount, active: true,
       point_deposit: newTotalPoint,
@@ -3163,6 +3316,42 @@ export default function Dashboard() {
       return true
     }
     return false
+  }
+
+  /* ── 카지노 추가: 총 베팅금액은 롤링에, 손수익은 잔액·사이트 손익에 바로 반영 (입력 즉시 결과처리된 베팅으로 저장) ── */
+  async function submitCasinoBet(site: Site, game: CasinoGame, stake: number, profit: number): Promise<boolean> {
+    const result: BetResult = profit > 0 ? 'win' : profit < 0 ? 'loss' : 'push'
+    const rateAtSettlement = site.currency === 'usd' ? await getUsdKrwRate() : null
+    const { data: betData } = await supabase.from('bets').insert({
+      bet_date: today, sport: 'casino' as Sport, league: game, match: game, market: 'other' as Market, pick: game,
+      odds: Math.round((1 + profit / stake) * 100) / 100, stake, result, profit, memo: '', site_id: site.id,
+      parlay_group: null, parlay_leg: 1, is_live: false, usd_krw_rate: rateAtSettlement, result_at: new Date().toISOString(),
+    }).select().single()
+    if (!betData) return false
+    const { data: siteData } = await supabase.from('sites').update({
+      balance: site.balance + profit, rolling_done: site.rolling_done + stake, deposit_bet_done: (site.deposit_bet_done ?? 0) + stake,
+    }).eq('id', site.id).select().single()
+    if (siteData) {
+      await logAction({ action_type: 'insert', table_name: 'bets', record_id: betData.id, after_data: betData as never, description: `[${site.name}] 카지노 ${game} / 베팅 ${stake.toLocaleString()} / 손익 ${profit >= 0 ? '+' : ''}${profit.toLocaleString()}` })
+      setBets(p => [...p, betData]); setSites(p => p.map(s => s.id === siteData.id ? siteData : s))
+      return true
+    }
+    return false
+  }
+  async function deleteCasinoBet(bet: Bet) {
+    const site = sites.find(s => s.id === bet.site_id)
+    if (!confirm(`카지노 ${bet.match} 기록을 삭제하고 잔액/롤링을 되돌릴까요?`)) return
+    await supabase.from('bets').delete().eq('id', bet.id)
+    setBets(p => p.filter(b => b.id !== bet.id))
+    if (site) {
+      const { data } = await supabase.from('sites').update({
+        balance: site.balance - bet.profit,
+        rolling_done: Math.max(0, site.rolling_done - bet.stake),
+        deposit_bet_done: Math.max(0, (site.deposit_bet_done ?? 0) - bet.stake),
+      }).eq('id', site.id).select().single()
+      if (data) setSites(p => p.map(s => s.id === data.id ? data : s))
+    }
+    await logAction({ action_type: 'delete', table_name: 'bets', record_id: bet.id, before_data: bet as never, description: `카지노 ${bet.match} 삭제 (베팅 ${bet.stake.toLocaleString()} / 손익 ${bet.profit.toLocaleString()})` })
   }
 
   /* ── 게임 롤링 추가 (베팅 없이 롤링 금액만 차감 + 목록에 기록) ── */
@@ -3588,7 +3777,7 @@ export default function Dashboard() {
                           <span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-num)', color: pt > 0 ? 'var(--purple)' : 'var(--text-muted)' }}>{pt > 0 ? `+${pt.toLocaleString()}P` : '–'}</span>
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>남은 롤링</span>
+                          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>남은 롤링{(site.rolling_pct ?? 100) !== 100 && <span style={{ marginLeft: 4, fontSize: 9, fontWeight: 700, color: 'var(--gold)' }}>({site.rolling_pct}%)</span>}</span>
                           <span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-num)', color: rem > 0 ? 'var(--gold)' : 'var(--green)' }}>{pfx}{rem.toLocaleString()}{sfx}</span>
                         </div>
                         <div className="deposit-progress-bar"><div className="deposit-progress-fill" style={{ width: `${Math.min(100,pct)}%` }} /></div>
@@ -3631,7 +3820,7 @@ export default function Dashboard() {
                           ) : openFormType === 'game' ? (
                             <GameRollingForm site={site} onClose={() => setOpenFormSiteId(null)} onSubmit={amt => submitGameRolling(site, amt)} />
                           ) : (
-                            <SingleBetForm site={site} defaultSport={betsBySite(site.id).slice(-1)[0]?.sport ?? 'soccer'} onClose={() => setOpenFormSiteId(null)} onBet={(sp,ct,od,amt,lv,lg) => submitBet(site,sp,ct,od,amt,lv,lg)} onMultiBet={(sp,cs,od,amt,lgs) => submitMultiBet(site,sp,cs,od,amt,lgs)} baseballOverrides={baseballOverrides} soccerOverrides={soccerOverrides} basketballOverrides={basketballOverrides} volleyballOverrides={volleyballOverrides} teamCandidates={teamCandidates} allBetsHistory={allBetsHistory} leagueCandidates={leagueCandidates} soccerLeagues={soccerLeagues} baseballLeagues={baseballLeagues} basketballLeagues={basketballLeagues} volleyballLeagues={volleyballLeagues} esportsLeagues={esportsLeagues} soccerFavoriteLeagues={soccerFavoriteLeagues} baseballFavoriteLeagues={baseballFavoriteLeagues} basketballFavoriteLeagues={basketballFavoriteLeagues} volleyballFavoriteLeagues={volleyballFavoriteLeagues} esportsFavoriteLeagues={esportsFavoriteLeagues} onToggleSoccerLeagueFavorite={toggleSoccerLeagueFavorite} onToggleBaseballLeagueFavorite={toggleBaseballLeagueFavorite} onToggleBasketballLeagueFavorite={toggleBasketballLeagueFavorite} onToggleVolleyballLeagueFavorite={toggleVolleyballLeagueFavorite} onToggleEsportsLeagueFavorite={toggleEsportsLeagueFavorite} soccerTeams={soccerTeams} baseballTeams={baseballTeams} basketballTeams={basketballTeams} volleyballTeams={volleyballTeams} esportsTeams={esportsTeams} onAddSoccerLeague={addSoccerLeague} onAddBaseballLeague={addBaseballLeague} onAddBasketballLeague={addBasketballLeague} onAddVolleyballLeague={addVolleyballLeague} onAddEsportsLeague={addEsportsLeague} onRenameSoccerLeague={renameSoccerLeague} onDeleteSoccerLeague={deleteSoccerLeague} onRenameBaseballLeague={renameBaseballLeague} onDeleteBaseballLeague={deleteBaseballLeague} onRenameBasketballLeague={renameBasketballLeague} onDeleteBasketballLeague={deleteBasketballLeague} onRenameVolleyballLeague={renameVolleyballLeague} onDeleteVolleyballLeague={deleteVolleyballLeague} onRenameEsportsLeague={renameEsportsLeague} onDeleteEsportsLeague={deleteEsportsLeague} onAddSoccerTeam={addSoccerTeam} onAddBaseballTeam={addBaseballTeam} onAddBasketballTeam={addBasketballTeam} onAddVolleyballTeam={addVolleyballTeam} onAddEsportsTeam={addEsportsTeam} onRenameSoccerTeam={renameSoccerTeam} onDeleteSoccerTeam={deleteSoccerTeam} onRenameBaseballTeam={renameBaseballTeam} onDeleteBaseballTeam={deleteBaseballTeam} onRenameBasketballTeam={renameBasketballTeam} onDeleteBasketballTeam={deleteBasketballTeam} onRenameVolleyballTeam={renameVolleyballTeam} onDeleteVolleyballTeam={deleteVolleyballTeam} onRenameEsportsTeam={renameEsportsTeam} onDeleteEsportsTeam={deleteEsportsTeam} quickPicks={quickPickContents} betOptionsBySport={betOptionsBySport} numericBetOptionsBySport={numericBetOptionsBySport} onAddBetOption={addBetOption} onDeleteBetOption={deleteBetOption} onEditBetOption={editBetOption} onReorderBetOption={reorderBetOption} onToggleNumericBetOption={toggleNumericBetOption} />
+                            <SingleBetForm site={site} defaultSport={betsBySite(site.id).slice(-1)[0]?.sport ?? 'soccer'} onClose={() => setOpenFormSiteId(null)} onBet={(sp,ct,od,amt,lv,lg) => submitBet(site,sp,ct,od,amt,lv,lg)} onMultiBet={(sp,cs,od,amt,lgs) => submitMultiBet(site,sp,cs,od,amt,lgs)} onCasinoBet={(g,stk,pf) => submitCasinoBet(site,g,stk,pf)} baseballOverrides={baseballOverrides} soccerOverrides={soccerOverrides} basketballOverrides={basketballOverrides} volleyballOverrides={volleyballOverrides} teamCandidates={teamCandidates} allBetsHistory={allBetsHistory} leagueCandidates={leagueCandidates} soccerLeagues={soccerLeagues} baseballLeagues={baseballLeagues} basketballLeagues={basketballLeagues} volleyballLeagues={volleyballLeagues} esportsLeagues={esportsLeagues} soccerFavoriteLeagues={soccerFavoriteLeagues} baseballFavoriteLeagues={baseballFavoriteLeagues} basketballFavoriteLeagues={basketballFavoriteLeagues} volleyballFavoriteLeagues={volleyballFavoriteLeagues} esportsFavoriteLeagues={esportsFavoriteLeagues} onToggleSoccerLeagueFavorite={toggleSoccerLeagueFavorite} onToggleBaseballLeagueFavorite={toggleBaseballLeagueFavorite} onToggleBasketballLeagueFavorite={toggleBasketballLeagueFavorite} onToggleVolleyballLeagueFavorite={toggleVolleyballLeagueFavorite} onToggleEsportsLeagueFavorite={toggleEsportsLeagueFavorite} soccerTeams={soccerTeams} baseballTeams={baseballTeams} basketballTeams={basketballTeams} volleyballTeams={volleyballTeams} esportsTeams={esportsTeams} onAddSoccerLeague={addSoccerLeague} onAddBaseballLeague={addBaseballLeague} onAddBasketballLeague={addBasketballLeague} onAddVolleyballLeague={addVolleyballLeague} onAddEsportsLeague={addEsportsLeague} onRenameSoccerLeague={renameSoccerLeague} onDeleteSoccerLeague={deleteSoccerLeague} onRenameBaseballLeague={renameBaseballLeague} onDeleteBaseballLeague={deleteBaseballLeague} onRenameBasketballLeague={renameBasketballLeague} onDeleteBasketballLeague={deleteBasketballLeague} onRenameVolleyballLeague={renameVolleyballLeague} onDeleteVolleyballLeague={deleteVolleyballLeague} onRenameEsportsLeague={renameEsportsLeague} onDeleteEsportsLeague={deleteEsportsLeague} onAddSoccerTeam={addSoccerTeam} onAddBaseballTeam={addBaseballTeam} onAddBasketballTeam={addBasketballTeam} onAddVolleyballTeam={addVolleyballTeam} onAddEsportsTeam={addEsportsTeam} onRenameSoccerTeam={renameSoccerTeam} onDeleteSoccerTeam={deleteSoccerTeam} onRenameBaseballTeam={renameBaseballTeam} onDeleteBaseballTeam={deleteBaseballTeam} onRenameBasketballTeam={renameBasketballTeam} onDeleteBasketballTeam={deleteBasketballTeam} onRenameVolleyballTeam={renameVolleyballTeam} onDeleteVolleyballTeam={deleteVolleyballTeam} onRenameEsportsTeam={renameEsportsTeam} onDeleteEsportsTeam={deleteEsportsTeam} quickPicks={quickPickContents} betOptionsBySport={betOptionsBySport} numericBetOptionsBySport={numericBetOptionsBySport} onAddBetOption={addBetOption} onDeleteBetOption={deleteBetOption} onEditBetOption={editBetOption} onReorderBetOption={reorderBetOption} onToggleNumericBetOption={toggleNumericBetOption} />
                           )}
                         </div>
                       )}
@@ -3646,6 +3835,25 @@ export default function Dashboard() {
                                   +{isusd ? '$' : ''}{gr.amount.toLocaleString()}{isusd ? '' : '원'}
                                 </span>
                                 <button onClick={() => deleteGameRolling(gr)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', padding: 2 }}><Trash2 size={12} /></button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {/* 카지노 기록 — 게임별 총 베팅금액 / 손수익 */}
+                      {casinoBySite(site.id).length > 0 && (
+                        <div style={{ marginBottom: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                          {[...casinoBySite(site.id)].reverse().map(cb => (
+                            <div key={cb.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, padding: '7px 10px', background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', fontSize: 12 }}>
+                              <span style={{ color: 'var(--text-secondary)', fontWeight: 700, whiteSpace: 'nowrap' }}>🎰 {cb.match}</span>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                                <span style={{ fontFamily: 'var(--font-num)', color: 'var(--text-muted)', fontSize: 11, whiteSpace: 'nowrap' }}>
+                                  {pfx}{cb.stake.toLocaleString()}{sfx}
+                                </span>
+                                <span style={{ fontFamily: 'var(--font-num)', fontWeight: 700, whiteSpace: 'nowrap', color: cb.profit > 0 ? 'var(--green)' : cb.profit < 0 ? 'var(--red)' : 'var(--text-muted)' }}>
+                                  {cb.profit > 0 ? '+' : cb.profit < 0 ? '-' : ''}{pfx}{Math.abs(cb.profit).toLocaleString()}{sfx}
+                                </span>
+                                <button onClick={() => deleteCasinoBet(cb)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', padding: 2 }}><Trash2 size={12} /></button>
                               </div>
                             </div>
                           ))}
@@ -3933,7 +4141,7 @@ export default function Dashboard() {
 
       {/* 모달 */}
       {showSiteMgr && (
-        <SiteMgrModal sites={sites} onClose={() => setShowSiteMgr(false)} onAdd={addSite} onDelete={deleteSite} onToggleCurrency={toggleCurrency} onReorder={reorderSites} onUpdateDefaultStake={updateDefaultStake} />
+        <SiteMgrModal sites={sites} onClose={() => setShowSiteMgr(false)} onAdd={addSite} onDelete={deleteSite} onToggleCurrency={toggleCurrency} onReorder={reorderSites} onUpdateDefaultStake={updateDefaultStake} onUpdateRollingPct={updateRollingPct} />
       )}
       {depositSite && <DepositModal site={depositSite} onClose={() => setDepositSite(null)} onDeposit={doDeposit} onPoint={doPoint} />}
       {withdrawSite && <WithdrawModal site={withdrawSite} onClose={() => setWithdrawSite(null)} onWithdraw={doWithdraw} />}
