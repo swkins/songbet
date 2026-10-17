@@ -1567,6 +1567,104 @@ function LivePanel({ bets, onDeleteRequest }: { bets: Bet[]; onDeleteRequest: ()
 }
 
 
+// ─── 모의베팅 전용 통계 (만원 기준, 종목별 → 종목을 고르면 베팅옵션별 세부) ──
+function MockPanel({ bets, betOptionsBySport, numericBetOptionsBySport, onAssignBetOption, onExcludeBet, onDeleteRequest }: {
+  bets: Bet[]
+  betOptionsBySport: Record<string, string[]>; numericBetOptionsBySport: Record<string, string[]>
+  onAssignBetOption: (ids: string[], label: string) => Promise<void>
+  onExcludeBet: (bet: Bet, exclude: boolean) => Promise<void>
+  onDeleteRequest: () => void
+}) {
+  const settled = bets.filter(b => b.result !== 'pending')
+  const pendingCount = bets.length - settled.length
+  const stats = calcStats(settled)
+  const bySport = SPORTS.map(s => ({ ...s, ...calcStats(settled.filter(b => b.sport === s.value)) })).filter(r => r.total > 0)
+  const [selected, setSelected] = useState<Sport | null>(null)
+  const active = bySport.find(r => r.value === selected) ?? null
+  const sign = (v: number) => v > 0 ? '+' : ''
+
+  if (stats.total === 0) return (
+    <div style={{ padding: '24px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>
+      🧪 결과 처리된 모의베팅이 없습니다{pendingCount > 0 ? ` (진행중 ${pendingCount}건)` : ''}
+    </div>
+  )
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'flex-start' }}>
+        {[
+          { label: '승률', value: `${stats.winRate.toFixed(1)}%`, sub: `${stats.wins.length}W ${stats.losses.length}L ${stats.pushes.length}P`, cls: stats.winRate >= 50 ? 'profit-pos' : 'profit-neg' },
+          { label: '모의 손익', value: `${sign(stats.profit)}${stats.profit.toLocaleString()}`, sub: `${stats.total}건 · 건당 만원`, cls: stats.profit >= 0 ? 'profit-pos' : 'profit-neg' },
+          { label: 'ROI', value: `${sign(stats.roi)}${stats.roi.toFixed(1)}%`, sub: stats.stake.toLocaleString(), cls: stats.roi >= 0 ? 'profit-pos' : 'profit-neg' },
+          { label: '평균 배당', value: stats.avgOdds.toFixed(2), sub: pendingCount > 0 ? `진행중 ${pendingCount}건` : '', cls: '' },
+        ].map(t => (
+          <div key={t.label} className="card stat-tile" style={{ flex: '1 0 110px', maxWidth: 170, padding: '10px 12px' }}>
+            <div className={`stat-value ${t.cls}`} style={{ fontSize: 16 }}>{t.value}</div>
+            <div className="stat-label">{t.label}</div>
+            {t.sub && <div style={{ fontSize: 9, color: 'var(--text-secondary)', marginTop: 2 }}>{t.sub}</div>}
+          </div>
+        ))}
+        <button onClick={onDeleteRequest} className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--red)', borderColor: 'var(--red-border)', alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: 4, padding: '6px 10px' }}>
+          <Trash2 size={11} /> 데이터 삭제
+        </button>
+      </div>
+
+      <div>
+        <div className="card-title" style={{ marginBottom: 8 }}>종목별 모의 성적 <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 400 }}>— 종목을 누르면 베팅옵션별 세부</span></div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          {bySport.map(r => {
+            const isSel = r.value === selected
+            const isPos = r.profit >= 0
+            return (
+              <div key={r.value} onClick={() => setSelected(isSel ? null : r.value)}
+                style={{ flex: '1 0 140px', maxWidth: 220, background: isSel ? 'var(--purple-bg)' : 'var(--bg-card)', border: `1px solid ${isSel ? 'var(--purple)' : isPos ? 'var(--green-border)' : 'var(--red-border)'}`, borderRadius: 10, padding: '12px 14px', cursor: 'pointer' }}>
+                <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6 }}>{sportGlyph(r.value, '1.3em') ?? <span style={{ fontSize: 16 }}>{r.emoji}</span>} {r.label}</div>
+                <div style={{ fontSize: 18, fontWeight: 800, fontFamily: 'var(--font-num)', color: isPos ? 'var(--green)' : 'var(--red)', marginBottom: 2 }}>
+                  {sign(r.profit)}{r.profit.toLocaleString()}원
+                </div>
+                <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
+                  <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>승률 <span style={{ color: r.winRate >= 50 ? 'var(--green)' : 'var(--red)', fontWeight: 700 }}>{r.winRate.toFixed(0)}%</span></span>
+                  <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>ROI <span style={{ color: isPos ? 'var(--green)' : 'var(--red)', fontWeight: 700 }}>{sign(r.roi)}{r.roi.toFixed(1)}%</span></span>
+                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{r.total}건</span>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+
+      {active && (
+        <div className="card">
+          <div className="card-title" style={{ marginBottom: 10 }}>🧪 {active.emoji} {active.label} 모의 · 베팅옵션별</div>
+          {(betOptionsBySport[active.value] ?? []).length > 0 ? (
+            <BetOptionStatsSection
+              settledBets={settled.filter(b => b.sport === active.value)}
+              options={betOptionsBySport[active.value] ?? []}
+              numericOptions={numericBetOptionsBySport[active.value] ?? []}
+              onAssignBetOption={onAssignBetOption}
+              onExcludeBet={onExcludeBet}
+            />
+          ) : (
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0' }}>이 종목에 등록된 베팅옵션이 없습니다.</div>
+          )}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 260, overflowY: 'auto' }}>
+            {settled.filter(b => b.sport === active.value).slice().sort((a, b) => (b.result_at ?? b.bet_date).localeCompare(a.result_at ?? a.bet_date)).slice(0, 50).map(b => (
+              <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 10, padding: '4px 6px', background: 'var(--bg-elevated)', borderRadius: 5 }}>
+                <span style={{ color: 'var(--text-muted)', flexShrink: 0 }}>{b.bet_date.slice(5)}</span>
+                <span style={{ flex: 1, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.match}</span>
+                <span style={{ color: 'var(--text-secondary)', flexShrink: 0 }}>@{b.odds.toFixed(2)}</span>
+                <span style={{ fontWeight: 700, flexShrink: 0, color: b.profit > 0 ? '#4ade80' : b.profit < 0 ? '#f87171' : 'var(--text-muted)' }}>
+                  {b.result === 'push' ? 'PUSH' : `${sign(b.profit)}${b.profit.toLocaleString()}`}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── 카지노 전용 통계 (게임별 총 베팅금액 · 손수익, 스포츠 손수익과 비교) ──
 function CasinoPanel({ bets, sportsProfit, sportsStake, onDeleteRequest }: { bets: Bet[]; sportsProfit: number; sportsStake: number; onDeleteRequest: () => void }) {
   const settled = bets.filter(b => b.result !== 'pending')
@@ -1797,7 +1895,7 @@ export default function Stats() {
   const [sites, setSites]     = useState<Site[]>([])
   const [rateMap, setRateMap] = useState<Record<string, number>>({})
   const [period, setPeriod]   = useState<'all' | '7d' | '30d' | '90d'>('all')
-  const [activeSport, setActiveSport] = useState<Sport | 'all' | 'live'>('all')
+  const [activeSport, setActiveSport] = useState<Sport | 'all' | 'live' | 'mock'>('all')
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null)
   const [recentOpen, setRecentOpen] = useState(false)
   const [leagueOverrides, setLeagueOverrides] = useState<LeagueOverride[]>([])
@@ -1988,15 +2086,18 @@ export default function Stats() {
     return rateMap[best] ?? FALLBACK_USD_KRW
   }
   const siteCurrency = new Map(sites.map(s => [s.id, s.currency]))
+  // 모의베팅은 사이트 통화와 무관하게 항상 원화 만원 기준이라 환산하지 않는다
   const allBets: Bet[] = rawBets.map(b => {
-    if (siteCurrency.get(b.site_id ?? '') !== 'usd') return b
+    if (b.is_mock || siteCurrency.get(b.site_id ?? '') !== 'usd') return b
     const rate = b.usd_krw_rate ?? nearestRate(b.bet_date)
     return { ...b, stake: Math.round(b.stake * rate), profit: Math.round(b.profit * rate) }
   })
   // "최근 합류" 목록에서 삭제(통계 제외)한 베팅은 모든 통계 집계에서 뺀다.
-  const bets: Bet[] = allBets.filter(b => !b.stats_excluded)
+  // 모의베팅도 실제 통계에서는 전부 빼고 "모의" 탭에서만 따로 집계한다.
+  const mockAll: Bet[] = allBets.filter(b => !b.stats_excluded && b.is_mock)
+  const bets: Bet[] = allBets.filter(b => !b.stats_excluded && !b.is_mock)
   // 현재 종목 탭의 "최근 합류" 대상 (라이브 탭은 라이브 베팅, 종목 탭은 그 종목의 단폴·비라이브 베팅)
-  const recentSportBets = activeSport === 'all' ? [] : allBets.filter(b => activeSport === 'live' ? b.is_live : (b.sport === activeSport && b.parlay_group === null && !b.is_live))
+  const recentSportBets = activeSport === 'all' || activeSport === 'mock' ? [] : allBets.filter(b => !b.is_mock).filter(b => activeSport === 'live' ? b.is_live : (b.sport === activeSport && b.parlay_group === null && !b.is_live))
 
   const periodAll = bets.filter(b => {
     if (period === 'all') return true
@@ -2010,6 +2111,11 @@ export default function Stats() {
   const liveBets = periodAll.filter(b => b.is_live)
   const casinoBets = periodAll.filter(b => b.sport === 'casino')
   const casinoSettled = casinoBets.filter(b => b.result !== 'pending')
+  const mockBets = mockAll.filter(b => {
+    if (period === 'all') return true
+    const days = period === '7d' ? 7 : period === '30d' ? 30 : 90
+    return dayjs(b.bet_date).isAfter(dayjs().subtract(days, 'day'))
+  })
 
   const stats   = calcStats(periodFiltered)
   const settled = periodFiltered.filter(b => b.result !== 'pending')
@@ -2062,12 +2168,13 @@ export default function Stats() {
               { value: 'esports' as const, label: 'LOL', emoji: '🎮', cnt: settled.filter(b => b.sport === 'esports').length },
               { value: 'hockey' as const, label: '하키', emoji: '🏒', cnt: settled.filter(b => b.sport === 'hockey').length },
               { value: 'live' as const, label: '라이브', emoji: '🔴', cnt: liveBets.filter(b => b.result !== 'pending').length },
+              { value: 'mock' as const, label: '모의', emoji: '🧪', cnt: mockBets.filter(b => b.result !== 'pending').length },
               { value: 'casino' as const, label: '카지노', emoji: '🎰', cnt: casinoSettled.length },
             ]).map(s => (
               <button key={s.value}
                 onClick={() => setActiveSport(s.value)}
                 style={{ padding: '10px 20px', borderRadius: 8, border: activeSport === s.value ? '2px solid var(--gold)' : '1px solid var(--border)', background: activeSport === s.value ? 'var(--gold-bg)' : 'var(--bg-card)', color: activeSport === s.value ? 'var(--gold)' : 'var(--text-secondary)', fontWeight: 700, fontSize: 14, cursor: 'pointer', fontFamily: 'var(--font-body)', transition: 'all 0.15s' }}>
-                {s.value === 'live' || s.value === 'casino' ? <span style={{ fontSize: 17 }}>{s.emoji}</span> : (sportGlyph(s.value as Sport, '1.3em') ?? <span style={{ fontSize: 17 }}>{s.emoji}</span>)} {s.label} <span style={{ opacity: 0.7, fontSize: 12 }}>({s.cnt})</span>
+                {s.value === 'live' || s.value === 'casino' || s.value === 'mock' ? <span style={{ fontSize: 17 }}>{s.emoji}</span> : (sportGlyph(s.value as Sport, '1.3em') ?? <span style={{ fontSize: 17 }}>{s.emoji}</span>)} {s.label} <span style={{ opacity: 0.7, fontSize: 12 }}>({s.cnt})</span>
               </button>
             ))}
           </div>
@@ -2189,6 +2296,16 @@ export default function Stats() {
               })()}
             </div>
           )}
+          {activeSport === 'mock' && (
+            <MockPanel
+              bets={mockBets}
+              betOptionsBySport={betOptionsBySport}
+              numericBetOptionsBySport={numericBetOptionsBySport}
+              onAssignBetOption={assignBetOptionToBets}
+              onExcludeBet={setStatsExcluded}
+              onDeleteRequest={() => setDeleteTarget({ label: '모의', emoji: '🧪', matchFn: b => b.is_mock === true })}
+            />
+          )}
           {activeSport === 'casino' && (
             <CasinoPanel
               bets={casinoBets}
@@ -2200,17 +2317,17 @@ export default function Stats() {
           {activeSport === 'live' && (
             <LivePanel
               bets={liveBets}
-              onDeleteRequest={() => setDeleteTarget({ label: '라이브', emoji: '🔴', matchFn: b => b.is_live === true })}
+              onDeleteRequest={() => setDeleteTarget({ label: '라이브', emoji: '🔴', matchFn: b => b.is_live === true && !b.is_mock })}
             />
           )}
-          {activeSport !== 'all' && (
+          {activeSport !== 'all' && activeSport !== 'mock' && (
             <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
               <button onClick={() => setRecentOpen(true)} className="btn btn-ghost" style={{ fontSize: 11, padding: '5px 10px', display: 'flex', alignItems: 'center', gap: 4 }}>
                 🕒 최근 합류 ({recentSportBets.filter(b => b.result !== 'pending' && recentDayOf(b) >= dayjs().subtract(RECENT_DAYS - 1, 'day').format('YYYY-MM-DD')).length})
               </button>
             </div>
           )}
-          {recentOpen && activeSport !== 'all' && (
+          {recentOpen && activeSport !== 'all' && activeSport !== 'mock' && (
             <div className="modal-overlay" onClick={() => setRecentOpen(false)}>
               <div className="modal" style={{ maxWidth: 520, width: '100%' }} onClick={e => e.stopPropagation()}>
                 <div className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
@@ -2221,7 +2338,7 @@ export default function Stats() {
               </div>
             </div>
           )}
-          {activeSport !== 'all' && activeSport !== 'live' && activeSport !== 'casino' && (
+          {activeSport !== 'all' && activeSport !== 'live' && activeSport !== 'casino' && activeSport !== 'mock' && (
             <SportPanel
               bets={periodFiltered}
               sport={SPORTS.find(s => s.value === activeSport)!}
@@ -2247,7 +2364,7 @@ export default function Stats() {
               onDeleteVolleyballLeague={deleteVolleyballLeague}
               onDeleteRequest={() => {
                 const sp = SPORTS.find(s => s.value === activeSport)!
-                setDeleteTarget({ label: sp.label, emoji: sp.emoji, matchFn: b => b.sport === sp.value && b.parlay_group === null && !b.is_live })
+                setDeleteTarget({ label: sp.label, emoji: sp.emoji, matchFn: b => b.sport === sp.value && b.parlay_group === null && !b.is_live && !b.is_mock })
               }}
             />
           )}

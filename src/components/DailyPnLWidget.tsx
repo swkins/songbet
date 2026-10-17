@@ -22,7 +22,7 @@ export default function DailyPnLWidget({ refreshKey, usdKrwRate }: { refreshKey:
       const from = dayjs().subtract(DAYS - 1, 'day').format('YYYY-MM-DD')
       // 결과처리 시각 또는 베팅일이 최근 7일 안인 결과처리된 베팅 (시간대 차이 감안해 하루 여유 두고 받은 뒤 아래에서 날짜로 거름)
       const [{ data: b }, { data: sites }] = await Promise.all([
-        supabase.from('bets').select('*').neq('result', 'pending').eq('stats_excluded', false)
+        supabase.from('bets').select('*').neq('result', 'pending').eq('stats_excluded', false).eq('is_mock', false)
           .or(`result_at.gte.${dayjs(from).subtract(1, 'day').format('YYYY-MM-DD')},bet_date.gte.${from}`),
         supabase.from('sites').select('id,currency'),
       ])
