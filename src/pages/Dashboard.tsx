@@ -448,11 +448,6 @@ function heldEntryClass(result: string): string {
 }
 
 // 뱃지(pill) 하나 — 배경/테두리/글자색을 같은 색 계열 3종 세트(--X-bg/--X-border/--X)로 통일
-/** 모의베팅 표시 — 잔액·롤링 미반영, 만원 기준 */
-function MockBadge() {
-  return <span title="모의베팅 — 잔액/롤링 미반영, 만원 기준으로 통계 모의 탭에만 집계" style={{ fontSize: 9, fontWeight: 800, color: 'var(--purple)', background: 'var(--purple-bg)', border: '1px solid var(--purple-border)', borderRadius: 3, padding: '0 5px' }}>모의 {MOCK_STAKE.toLocaleString()}원</span>
-}
-
 function MatchBadge({ label, accent }: { label: string; accent: AccentKey | 'neutral' }) {
   if (accent === 'neutral') {
     return <span style={{ fontSize: 11, fontWeight: 700, flexShrink: 0, padding: '2px 7px', borderRadius: 999, background: 'var(--bg-elevated)', border: '1px solid var(--border)', color: 'var(--text-muted)' }}>{label}</span>
@@ -515,14 +510,15 @@ function BetMatchLine({ sport, match, fontSize = 15, teamColor, live, stacked = 
 }
 
 // 진행중 베팅 전용 — 배당은 좌측, 금액은 맨 우측 끝
-function BetOddsStakeLine({ odds, stake, prefix, suffix, big }: { odds: number; stake: number; prefix: string; suffix: string; big?: boolean }) {
+// mock: 모의베팅은 금액 대신 "모의"만 표시 (만원은 통계에서 손익 낼 때만 쓰는 가정값)
+function BetOddsStakeLine({ odds, stake, prefix, suffix, big, mock }: { odds: number; stake: number; prefix: string; suffix: string; big?: boolean; mock?: boolean }) {
   return (
     <span style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%' }}>
       <span style={{ fontFamily: 'var(--font-mono)', fontSize: 14, fontWeight: 700, color: 'var(--gold)', flexShrink: 0 }}>{odds.toFixed(2)}</span>
       <span style={{ flex: 1 }} />
       <span style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0, fontFamily: 'var(--font-mono)', fontSize: 13, color: 'var(--text-secondary)' }}>
-        {prefix}{stake.toLocaleString()}{suffix}
-        {big && <Flame size={13} style={{ color: 'var(--gold)', fill: 'var(--gold)', filter: 'drop-shadow(0 0 3px var(--gold))' }} />}
+        {mock ? <span style={{ color: 'var(--purple)', fontWeight: 800 }}>모의</span> : <>{prefix}{stake.toLocaleString()}{suffix}</>}
+        {big && !mock && <Flame size={13} style={{ color: 'var(--gold)', fill: 'var(--gold)', filter: 'drop-shadow(0 0 3px var(--gold))' }} />}
       </span>
     </span>
   )
@@ -4029,14 +4025,13 @@ export default function Dashboard() {
                                 <>
                                   {/* 경기 내용 */}
                                   <div style={{ minWidth: 0 }}>
-                                    {bet.is_mock && <div style={{ paddingLeft: 26, marginBottom: 2 }}><MockBadge /></div>}
                                     {bet.league && <div style={{ paddingLeft: 26, fontSize: 10, color: 'var(--text-muted)', fontWeight: 700 }}>{bet.league}</div>}
                                     <div style={{ display: 'flex', gap: 5, alignItems: 'flex-start' }}>
                                       <span style={{ fontSize: 18, lineHeight: 1, flexShrink: 0, width: 22, textAlign: 'center', marginTop: 1 }}>{sportGlyph(bet.sport) ?? SPORT_SHORT[bet.sport] ?? '📋'}</span>
                                       <BetMatchLine sport={bet.sport} match={bet.match} live={bet.is_live} knownOptions={betOptionsBySport[bet.sport] ?? []} numericOptions={numericBetOptionsBySport[bet.sport] ?? []} />
                                     </div>
                                     <div style={{ paddingLeft: 26, marginTop: 2 }}>
-                                      <BetOddsStakeLine odds={bet.odds} stake={bet.stake} prefix={pfx} suffix={sfx} big={isBigStake(bet.stake, isusd)} />
+                                      <BetOddsStakeLine odds={bet.odds} stake={bet.stake} prefix={pfx} suffix={sfx} big={isBigStake(bet.stake, isusd)} mock={bet.is_mock} />
                                     </div>
                                   </div>
                                   {/* 결과 처리 버튼 — hover 시 우측 상단에 2x3 그리드로 살짝 겹쳐서 표시 (내용 레이아웃엔 영향 없음).
@@ -4141,7 +4136,6 @@ export default function Dashboard() {
                                 <div key={bet.id} className={`site-bet-entry${isBigStake(bet.stake, isusd) ? ' big-bet-entry' : ''}`} style={{ marginBottom: 5, opacity: 0.7, position: 'relative' }}
                                   onMouseEnter={() => setHoverBetId('s_' + bet.id)} onMouseLeave={() => setHoverBetId(null)}>
                                   <ResultStamp result={bet.result} />
-                                  {bet.is_mock && <div style={{ paddingLeft: 24, marginBottom: 2 }}><MockBadge /></div>}
                                   {bet.league && <div style={{ paddingLeft: 24, fontSize: 9, color: 'var(--text-muted)', fontWeight: 700 }}>{bet.league}</div>}
                                   <div style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
                                     <span style={{ fontSize: 16, lineHeight: 1, flexShrink: 0, width: 20, textAlign: 'center' }}>{sportGlyph(bet.sport) ?? SPORT_SHORT[bet.sport] ?? '📋'}</span>
@@ -4154,8 +4148,10 @@ export default function Dashboard() {
                                       <button className="btn btn-ghost btn-xs" style={{ fontSize: 10 }} onClick={() => applyResult(bet, 'revert')}><RotateCcw size={9} /> 되돌리기</button>
                                     ) : (
                                       <span style={{ fontSize: 10, fontWeight: 700, flexShrink: 0, color: bet.result === 'win' ? 'var(--green)' : bet.result === 'loss' ? 'var(--red)' : 'var(--blue)' }}>
-                                        {bet.result === 'win' ? `+${pfx}${bet.profit.toLocaleString()}${sfx}` : bet.result === 'loss' ? `-${pfx}${bet.stake.toLocaleString()}${sfx}` : 'PUSH'}
-                                        {isBigStake(bet.stake, isusd) && <Flame size={11} style={{ marginLeft: 4, verticalAlign: 'text-bottom', color: 'var(--gold)', fill: 'var(--gold)', filter: 'drop-shadow(0 0 2px var(--gold))' }} />}
+                                        {bet.is_mock
+                                          ? <span style={{ color: 'var(--purple)' }}>모의 {bet.result === 'win' ? '적중' : bet.result === 'loss' ? '실패' : '적특'}</span>
+                                          : bet.result === 'win' ? `+${pfx}${bet.profit.toLocaleString()}${sfx}` : bet.result === 'loss' ? `-${pfx}${bet.stake.toLocaleString()}${sfx}` : 'PUSH'}
+                                        {!bet.is_mock && isBigStake(bet.stake, isusd) && <Flame size={11} style={{ marginLeft: 4, verticalAlign: 'text-bottom', color: 'var(--gold)', fill: 'var(--gold)', filter: 'drop-shadow(0 0 2px var(--gold))' }} />}
                                       </span>
                                     )}
                                   </div>
