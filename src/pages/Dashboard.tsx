@@ -8,6 +8,7 @@ import { applyNumericTemplate, extractNumericTemplateValue, extractNumericTempla
 import { sportGlyph } from '../components/SportIcons'
 import MiningWidget from '../components/MiningWidget'
 import DailyPnLWidget from '../components/DailyPnLWidget'
+import RulebookNotes from './RulebookNotes'
 import dayjs from 'dayjs'
 import isoWeek from 'dayjs/plugin/isoWeek'
 dayjs.extend(isoWeek)
@@ -2754,6 +2755,7 @@ export default function Dashboard() {
   const [gameRollings, setGameRollings] = useState<GameRolling[]>([])
 
   const [showSiteMgr, setShowSiteMgr]   = useState(false)
+  const [showRulebook, setShowRulebook] = useState(false)
   const [depositSite, setDepositSite]   = useState<Site | null>(null)
   const [withdrawSite, setWithdrawSite] = useState<Site | null>(null)
   const [openFormSiteId, setOpenFormSiteId] = useState<string | null>(null)
@@ -3167,11 +3169,8 @@ export default function Dashboard() {
     return total
   }
 
-  // 룰북 메모장 — 새창으로 띄우고, 이미 열려 있으면 그 창을 앞으로
-  function openRulebook() {
-    const w = window.open(`${window.location.pathname}?view=rulebook`, 'songbet_rulebook', 'width=760,height=860')
-    w?.focus()
-  }
+  // 룰북 메모장 — 사이트관리처럼 모달 창으로
+  function openRulebook() { setShowRulebook(true) }
 
   /* ── 사이트 관리 ── */
   async function addSite(name: string, currency: 'krw' | 'usd', rollingPct = 100) {
@@ -4190,6 +4189,7 @@ export default function Dashboard() {
       {showSiteMgr && (
         <SiteMgrModal sites={sites} onClose={() => setShowSiteMgr(false)} onAdd={addSite} onDelete={deleteSite} onToggleCurrency={toggleCurrency} onReorder={reorderSites} onUpdateDefaultStake={updateDefaultStake} onUpdateRollingPct={updateRollingPct} />
       )}
+      {showRulebook && <RulebookNotes onClose={() => setShowRulebook(false)} />}
       {depositSite && <DepositModal site={depositSite} onClose={() => setDepositSite(null)} onDeposit={doDeposit} onPoint={doPoint} />}
       {withdrawSite && <WithdrawModal site={withdrawSite} onClose={() => setWithdrawSite(null)} onWithdraw={doWithdraw} />}
 

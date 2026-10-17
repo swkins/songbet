@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { Plus, Trash2, BookOpen } from 'lucide-react'
+import { Plus, Trash2, BookOpen, X } from 'lucide-react'
 
-/* ── 룰북 메모장 (대시보드 "룰북" 버튼 → 새창) ──
+/* ── 룰북 메모장 (대시보드 "룰북" 버튼 → 사이트관리처럼 모달 창) ──
    종목별로 자유롭게 쓰는 메모장. 입력하면 잠시 뒤 자동 저장(rulebook_notes 테이블, sport가 키).
    기본 종목 탭 외에 직접 탭을 추가/삭제할 수도 있다. */
 
@@ -19,7 +19,7 @@ const FIXED_TABS: { key: string; label: string }[] = [
 ]
 const FIXED_KEYS = new Set(FIXED_TABS.map(t => t.key))
 
-export default function RulebookNotes() {
+export default function RulebookNotes({ onClose }: { onClose: () => void }) {
   const [notes, setNotes] = useState<Record<string, string>>({})
   const [customTabs, setCustomTabs] = useState<string[]>([])
   const [active, setActive] = useState('common')
@@ -29,7 +29,6 @@ export default function RulebookNotes() {
   const pending = useRef<{ key: string; content: string } | null>(null)
 
   useEffect(() => {
-    document.title = '룰북'
     ;(async () => {
       const { data } = await supabase.from('rulebook_notes').select('sport, content').order('sport')
       if (data) {
@@ -40,10 +39,10 @@ export default function RulebookNotes() {
       }
       setLoading(false)
     })()
-    // 창을 닫기 직전 아직 저장 안 된 내용이 있으면 바로 저장
+    // 페이지를 떠나거나 창을 닫을 때 아직 저장 안 된 내용이 있으면 바로 저장
     const flushOnLeave = () => { if (pending.current) void save(pending.current.key, pending.current.content) }
     window.addEventListener('beforeunload', flushOnLeave)
-    return () => window.removeEventListener('beforeunload', flushOnLeave)
+    return () => { window.removeEventListener('beforeunload', flushOnLeave); if (timer.current) clearTimeout(timer.current); flushOnLeave() }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function save(key: string, content: string) {
@@ -104,13 +103,14 @@ export default function RulebookNotes() {
   })
 
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--bg)', padding: 16, boxSizing: 'border-box', display: 'flex', flexDirection: 'column', gap: 12 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <BookOpen size={18} color="var(--gold)" />
-        <span style={{ fontSize: 17, fontWeight: 800, color: 'var(--text-primary)' }}>룰북</span>
+    <div className="modal-overlay">
+      <div className="modal" style={{ maxWidth: 760, display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 0 }}>
+        <BookOpen size={16} color="var(--gold)" /> 룰북
         <span style={{ marginLeft: 'auto', fontSize: 11, fontWeight: 700, color: status === 'error' ? 'var(--red)' : status === 'saving' ? 'var(--text-muted)' : 'var(--green)' }}>
           {status === 'saving' ? '저장중...' : status === 'saved' ? '저장됨' : status === 'error' ? '저장 실패' : ''}
         </span>
+        <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex' }}><X size={16} /></button>
       </div>
 
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -141,12 +141,13 @@ export default function RulebookNotes() {
             placeholder={`${activeLabel} 룰을 자유롭게 적어두세요. 입력하면 자동 저장됩니다.`}
             spellCheck={false}
             style={{
-              flex: 1, minHeight: 'calc(100vh - 190px)', width: '100%', boxSizing: 'border-box', resize: 'vertical',
+              flex: 1, minHeight: '55vh', width: '100%', boxSizing: 'border-box', resize: 'vertical',
               background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 8, padding: 12,
               color: 'var(--text-primary)', fontSize: 14, lineHeight: 1.7, fontFamily: 'var(--font-body)', outline: 'none',
             }}
           />
         )}
+      </div>
       </div>
     </div>
   )
