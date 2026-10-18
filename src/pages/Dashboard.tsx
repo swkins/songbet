@@ -95,7 +95,7 @@ function suggestLeague(sport: string, content: string, baseballOverrides: League
 }
 
 /* ── 경기 내용 입력창: 팀 이름 자동완성(제거됨) + 빈칸 클릭 시 "베팅관리"에서 체크한 빠른 선택 목록 ── */
-function TeamContentInput({ value, onChange, candidates, allBets: _allBets, placeholder, inputRef, autoFocus, onEnter, quickPicks, teams, onPickTeam }: {
+function TeamContentInput({ value, onChange, candidates, allBets: _allBets, placeholder, inputRef, autoFocus, onEnter, quickPicks, teams, onPickTeam, multiTeam }: {
   value: string; onChange: (v: string) => void
   candidates: TeamCandidate[]; allBets: BetLite[]
   placeholder: string
@@ -106,6 +106,8 @@ function TeamContentInput({ value, onChange, candidates, allBets: _allBets, plac
   // 리그 관리에서 등록한 팀(이 종목 전체 리그) — 한 글자만 입력해도 포함하는 팀을 리그와 함께 추천하고, 고르면 onPickTeam으로 리그까지 넘긴다
   teams?: { league: string; name: string }[]
   onPickTeam?: (name: string, league: string) => void
+  // LOL: 팀 이름을 쓰고 띄어쓴 뒤 한 글자만 더 쓰면 상대팀을 추천, 고르면 "팀A vs 팀B"로 채운다 (경기 자체 옵션 베팅용)
+  multiTeam?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const [hi, setHi] = useState(-1)
@@ -115,7 +117,18 @@ function TeamContentInput({ value, onChange, candidates, allBets: _allBets, plac
   void candidates
   // 빠른 선택 목록은 포커스만 줘도 뜨지 않고, 더블클릭하거나 글자를 입력했을 때만 보여준다.
   // 글자를 입력한 상태면 그 글자가 포함된 항목만 걸러서 보여준다.
-  const q = value.trim().toLowerCase()
+  // multiTeam이면 첫 팀(등록된 팀 이름과 일치) 뒤의 글자만 검색어로 쓰고, 고를 때 "첫팀 vs "를 앞에 붙인다
+  let teamPrefix = ''
+  let q = value.trim().toLowerCase()
+  if (multiTeam && teams?.length) {
+    const vsIdx = value.toLowerCase().lastIndexOf(' vs ')
+    if (vsIdx >= 0) { teamPrefix = value.slice(0, vsIdx + 4); q = value.slice(vsIdx + 4).trim().toLowerCase() }
+    else {
+      const m = value.match(/^(\S+)\s+(.*)$/)
+      const first = m && teams.find(t => t.name.toLowerCase() === m[1].toLowerCase())
+      if (m && first) { teamPrefix = `${first.name} vs `; q = m[2].trim().toLowerCase() }
+    }
+  }
   const teamItems = teams?.length && q
     ? teams.filter(t => t.name.toLowerCase().includes(q))
         .sort((a, b) => Number(!a.name.toLowerCase().startsWith(q)) - Number(!b.name.toLowerCase().startsWith(q)) || a.name.localeCompare(b.name, 'ko'))
@@ -131,8 +144,8 @@ function TeamContentInput({ value, onChange, candidates, allBets: _allBets, plac
   ]
 
   function pick(item: Item) {
-    onChange(item.label)
-    if (item.league !== undefined) onPickTeam?.(item.label, item.league)
+    onChange(teamPrefix && item.league !== undefined ? teamPrefix + item.label : item.label)
+    if (item.league !== undefined && !teamPrefix) onPickTeam?.(item.label, item.league)
     setOpen(false); setHi(-1)
   }
 
@@ -199,11 +212,13 @@ function parseBetMatch(sport: string, match: string, knownOptions: string[] = []
     if (r.endsWith(' 홈')) { side = '홈'; r = r.slice(0, -2).trimEnd() }
     else if (r.endsWith(' 원정')) { side = '원정'; r = r.slice(0, -3).trimEnd() }
     let boTag: string | undefined
+    let setTag = ''
+    if (sport === 'esports') { const sm = r.match(/ (\d+세트)$/); if (sm) { setTag = sm[1] + ' '; r = r.slice(0, -sm[0].length).trimEnd() } }
     if (sport === 'esports' && !side) {
       if (r.endsWith(' BO3')) { boTag = 'BO3'; r = r.slice(0, -4).trimEnd() }
       else if (r.endsWith(' BO5')) { boTag = 'BO5'; r = r.slice(0, -4).trimEnd() }
     }
-    return { team: r || raw, side, boTag, optionLabel: numericOptionDisplay(tpl, v), optionText: text, accent: 'purple' }
+    return { team: r || raw, side, boTag, optionLabel: setTag + numericOptionDisplay(tpl, v), optionText: text, accent: 'purple' }
   }
   // 1) 등록된 베팅옵션 라벨을 뒤에서부터 벗겨낸다 (여러 개 중 가장 긴 것부터 매치해 오탐 최소화).
   //    베팅추가 화면에서 홈/원정·옵션을 고르면 "팀이름 홈 1.5 핸디"처럼 뒤에 그대로 합쳐져 저장되기 때문에,
@@ -213,6 +228,11 @@ function parseBetMatch(sport: string, match: string, knownOptions: string[] = []
   for (const opt of [...knownOptions].filter(Boolean).sort((a, b) => b.length - a.length)) {
     if (rest === opt) { knownOptionLabel = opt; rest = ''; break }
     if (rest.endsWith(' ' + opt)) { knownOptionLabel = opt; rest = rest.slice(0, -(opt.length + 1)); break }
+  }
+  // 1b) LOL 세트 옵션("… BO3 1세트 드래곤 4.5 오버")은 세트 번호까지 옵션 배지에 붙인다
+  if (sport === 'esports' && knownOptionLabel) {
+    const sm = rest.match(/ (\d+세트)$/)
+    if (sm) { knownOptionLabel = `${sm[1]} ${knownOptionLabel}`; rest = rest.slice(0, -sm[0].length).trimEnd() }
   }
   // 2) 홈/원정을 벗겨낸다 (옵션이 없거나 옵션 뒤에 붙었어도 상관없이 남은 문자열 끝에서 찾는다)
   let side: '홈' | '원정' | undefined
@@ -277,6 +297,49 @@ function parseBetMatch(sport: string, match: string, knownOptions: string[] = []
 
 // 베팅옵션 칩 한 줄 — 일반 옵션은 눌러서 단일선택(다시 누르면 해제), 세부 수치 입력 옵션은
 // 누르면 숫자 입력창이 뜨고 확정하면 "{값} {템플릿}" 형태로 합쳐진 라벨이 선택된다.
+// LOL 베팅옵션은 BO3/BO5별 목록(esports_bo3 / esports_bo5)과 세트 세부옵션(esports_set)으로 따로 관리한다.
+// 표시·통계용으로는 예전 'esports' 목록과 합쳐서 하나로 본다 ("1세트" 같은 세트 칩 자체는 옵션이 아니라 세부옵션을 여는 버튼이라 제외).
+const LOL_OPTION_KEYS = ['esports', 'esports_bo3', 'esports_bo5', 'esports_set']
+const isLolSetChip = (label: string) => /^\d+세트$/.test(label)
+function mergeLolOptions(map: Record<string, string[]>): Record<string, string[]> {
+  const merged = Array.from(new Set(LOL_OPTION_KEYS.flatMap(k => map[k] ?? []))).filter(l => !isLolSetChip(l))
+  return { ...map, esports: merged }
+}
+
+/* LOL 베팅옵션 칩 — 위 줄은 BO3/BO5 옵션, "N세트" 칩을 누르면 아래 줄에 세트 세부옵션(드래곤 4.5 오버 등)이 열리고
+   세부옵션을 고르면 "1세트 드래곤 4.5 오버"처럼 세트와 합쳐진 라벨이 선택된다. */
+function LolOptionChips({ options, numericOptions, setOptions, numericSetOptions, selected, onSelect, onManage, onManageSet, oddsRef }: {
+  options: string[]; numericOptions: string[]; setOptions: string[]; numericSetOptions: string[]; selected: string[]
+  onSelect: (labels: string[]) => void
+  onManage: () => void; onManageSet: () => void
+  oddsRef: React.RefObject<HTMLInputElement>
+}) {
+  const selSet = selected[0]?.match(/^(\d+세트) (.+)$/)
+  const [openSet, setOpenSet] = useState<string | null>(selSet?.[1] ?? null)
+  return (
+    <>
+      <BetOptionChips options={options} numericOptions={numericOptions} selected={openSet ? [openSet] : selected}
+        onSelect={labels => {
+          const l = labels[0]
+          if (l && isLolSetChip(l)) { setOpenSet(l); onSelect([]) }
+          else { setOpenSet(null); onSelect(labels) }
+        }}
+        onManage={onManage} oddsRef={oddsRef} />
+      {openSet && (
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6, paddingLeft: 8, borderLeft: '2px solid var(--gold-border)' }}>
+          <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--gold)', whiteSpace: 'nowrap', marginTop: 10 }}>{openSet}</span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <BetOptionChips options={setOptions} numericOptions={numericSetOptions}
+              selected={selSet && selSet[1] === openSet ? [selSet[2]] : []}
+              onSelect={labels => onSelect(labels.length ? [`${openSet} ${labels[0]}`] : [])}
+              onManage={onManageSet} oddsRef={oddsRef} />
+          </div>
+        </div>
+      )}
+    </>
+  )
+}
+
 function BetOptionChips({ options, numericOptions, selected, onSelect, onManage, oddsRef }: {
   options: string[]; numericOptions: string[]; selected: string[]
   onSelect: (labels: string[]) => void
@@ -2124,7 +2187,8 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, onCasinoBet, betOptio
   // LOL(esports)은 홈/원정 개념이 없으므로 같은 버튼이 BO3/BO5를 순환하도록 바뀐다.
   const [side, setSide] = useState<string>('')
   function cycleSide() {
-    if (sport === 'esports') setSide(prev => prev === '' ? 'BO3' : prev === 'BO3' ? 'BO5' : '')
+    // LOL은 BO3/BO5마다 베팅옵션 목록이 달라서, 바꾸면 고른 옵션도 해제
+    if (sport === 'esports') { setSide(prev => prev === '' ? 'BO3' : prev === 'BO3' ? 'BO5' : ''); setSelectedOptions([]) }
     else setSide(prev => prev === '' ? '홈' : prev === '홈' ? '원정' : '')
     // 베팅옵션 칩처럼, 홈/원정(BO3/BO5)을 고르면 바로 배당을 입력할 수 있게 배당칸으로 커서 이동
     oddsRef.current?.focus()
@@ -2134,8 +2198,11 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, onCasinoBet, betOptio
   // 추가/수정/삭제/순서변경은 실수로 지우는 걸 막기 위해 "옵션 관리" 모달에서만 가능.
   const [optionsManagerOpen, setOptionsManagerOpen] = useState(false)
   const [selectedOptions, setSelectedOptions] = useState<string[]>([])
-  const betOptions = betOptionsBySport[sport] ?? []
-  const numericBetOptions = numericBetOptionsBySport[sport] ?? []
+  // 옵션 목록 키 — LOL은 BO3/BO5를 골라야 그에 맞는 목록이 나오고(안 고르면 옵션 없음), 나머지 종목은 종목 그대로
+  const optKey: string | null = sport === 'esports' ? (side === 'BO3' ? 'esports_bo3' : side === 'BO5' ? 'esports_bo5' : null) : sport
+  const betOptions = optKey ? betOptionsBySport[optKey] ?? [] : []
+  const numericBetOptions = optKey ? numericBetOptionsBySport[optKey] ?? [] : []
+  const [lolSetManagerOpen, setLolSetManagerOpen] = useState(false)
   // 베팅 모드: 단폴 / 다폴. 다폴은 리그 없이 경기 내용 여러 개(최대 4개) + 배당/금액 공유.
   // 항상 단폴 기본 (다폴은 필요할 때만 수동으로 전환)
   const [mode, setMode] = useState<'single' | 'multi' | 'casino'>('single')
@@ -2155,7 +2222,15 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, onCasinoBet, betOptio
   // (옵션이 바꿔놓은 금액을 손대지 않은 경우에만) 사이트 기본금액으로 되돌린다. 원화 사이트에만 적용.
   const optionStakeApplied = useRef<string | null>(null)
   function stakeForOption(opt: string): number | undefined {
-    const stakes = betOptionStakesBySport[sport] ?? {}
+    // LOL 세트 세부옵션("1세트 드래곤 4.5 오버")은 세트 세부옵션 목록에 적어둔 금액을 본다
+    const setM = sport === 'esports' ? opt.match(/^\d+세트 (.+)$/) : null
+    if (setM) {
+      const ss = betOptionStakesBySport['esports_set'] ?? {}
+      if (ss[setM[1]]) return ss[setM[1]]
+      const t = (numericBetOptionsBySport['esports_set'] ?? []).find(x => extractNumericTemplateValueFromText(x, setM[1]) !== null)
+      return t ? ss[t] : undefined
+    }
+    const stakes = optKey ? betOptionStakesBySport[optKey] ?? {} : {}
     if (stakes[opt]) return stakes[opt]
     // 수치입력 옵션은 "185.5 오버"처럼 값이 채워진 문구로 선택되므로 원래 템플릿을 찾아서 본다
     const tpl = numericBetOptions.find(t => extractNumericTemplateValueFromText(t, opt) !== null)
@@ -2279,7 +2354,7 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, onCasinoBet, betOptio
   const skipFirstTeamLeagueEffect = useRef(true)
   useEffect(() => {
     if (skipFirstTeamLeagueEffect.current) { skipFirstTeamLeagueEffect.current = false; return }
-    const name = content.trim()
+    const name = sport === 'esports' ? content.trim().split(/\s+/)[0] ?? '' : content.trim()
     const matches = sportTeams.filter(t => t.name === name)
     if (matches.length === 0) return
     setLeagueInput(cur => {
@@ -2316,7 +2391,9 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, onCasinoBet, betOptio
     setSubmitting(true)
     // 홈/원정, 베팅옵션은 입력창 텍스트에는 안 보이고 옆에 뱃지로만 표시되다가, 제출할 때 베팅 내용 뒤에 합쳐진다.
     // 베팅옵션을 아무것도 안 골랐으면 "승리"로 처리
-    const finalContent = mode === 'single' ? [content.trim(), side, ...(selectedOptions.length ? selectedOptions : ['승리'])].filter(Boolean).join(' ') : content
+    // LOL에서 팀 두 개를 띄어쓰기로만 적었으면 사이에 vs를 넣는다 ("T1 GEN" → "T1 vs GEN")
+    const teamText = sport === 'esports' && !/ vs /i.test(content) && content.trim().split(/\s+/).length === 2 ? content.trim().split(/\s+/).join(' vs ') : content.trim()
+    const finalContent = mode === 'single' ? [teamText, side, ...(selectedOptions.length ? selectedOptions : ['승리'])].filter(Boolean).join(' ') : content
     const ok = mode === 'multi'
       ? await onMultiBet(sport, multiContents, oddsV, stakeN, multiContents.map(() => ''))
       : await onBet(sport, finalContent, oddsV, mockOn ? MOCK_STAKE : stakeN, isLive, SHOW_LEAGUE_UI ? detectedLeague : trimmedLeagueInput, mockOn)
@@ -2364,9 +2441,9 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, onCasinoBet, betOptio
       )}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'stretch' }}>
         <div style={{ flex: '1 1 140px', minWidth: 0 }}>
-          <TeamContentInput inputRef={contentRef} placeholder={mode === 'multi' ? `베팅 내용 ${LEG_MARKS[0]}` : '베팅 내용 (팀 이름만 입력, 홈/원정·옵션은 옆에서 선택)'} value={content} onChange={setContent}
+          <TeamContentInput inputRef={contentRef} placeholder={mode === 'multi' ? `베팅 내용 ${LEG_MARKS[0]}` : sport === 'esports' ? '팀 이름 (경기 옵션이면 띄어쓰고 상대팀 → 자동 vs)' : '베팅 내용 (팀 이름만 입력, 홈/원정·옵션은 옆에서 선택)'} value={content} onChange={setContent}
             candidates={[]} allBets={allBetsHistory} autoFocus onEnter={submit} quickPicks={mode === 'multi' ? quickPicks : undefined}
-            teams={mode === 'single' ? sportTeams : undefined} onPickTeam={pickTeamLeague} />
+            teams={mode === 'single' ? sportTeams : undefined} onPickTeam={pickTeamLeague} multiTeam={mode === 'single' && sport === 'esports'} />
         </div>
         {mode === 'single' && (
           <button type="button" onClick={cycleSide} style={{
@@ -2488,18 +2565,36 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, onCasinoBet, betOptio
           onAddTeam={leagueBundle.addTeam} onRenameTeam={leagueBundle.renameTeam} onDeleteTeam={leagueBundle.deleteTeam}
         />
       )}
-      {mode === 'single' && (
+      {mode === 'single' && sport === 'esports' && !optKey && (
+        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4 }}>BO3 / BO5를 먼저 고르면 그에 맞는 베팅옵션이 나옵니다</div>
+      )}
+      {mode === 'single' && sport === 'esports' && optKey && (
+        <LolOptionChips key={optKey} options={betOptions} numericOptions={numericBetOptions}
+          setOptions={betOptionsBySport['esports_set'] ?? []} numericSetOptions={numericBetOptionsBySport['esports_set'] ?? []}
+          selected={selectedOptions} onSelect={selectOptions}
+          onManage={() => setOptionsManagerOpen(true)} onManageSet={() => setLolSetManagerOpen(true)} oddsRef={oddsRef} />
+      )}
+      {mode === 'single' && sport !== 'esports' && (
         <BetOptionChips options={betOptions} numericOptions={numericBetOptions} selected={selectedOptions}
           onSelect={selectOptions} onManage={() => setOptionsManagerOpen(true)} oddsRef={oddsRef} />
       )}
-      {optionsManagerOpen && (
-        <BetOptionsManagerModal sportLabel={SPORTS.find(s => s.value === sport)?.label ?? sport} betOptions={betOptions} numericOptions={numericBetOptions} onClose={() => setOptionsManagerOpen(false)}
-          onAddBetOption={(label, numeric) => onAddBetOption(sport, label, numeric)}
-          onDeleteBetOption={label => onDeleteBetOption(sport, label)}
-          onEditBetOption={(oldLabel, newLabel) => onEditBetOption(sport, oldLabel, newLabel)}
-          onReorderBetOption={(from, to) => onReorderBetOption(sport, from, to)}
-          onToggleNumericBetOption={label => onToggleNumericBetOption(sport, label)}
-          optionStakes={betOptionStakesBySport[sport] ?? {}} onSetOptionStake={(label, stake) => onSetBetOptionStake(sport, label, stake)} />
+      {optionsManagerOpen && optKey && (
+        <BetOptionsManagerModal sportLabel={sport === 'esports' ? `LOL ${side}` : SPORTS.find(s => s.value === sport)?.label ?? sport} betOptions={betOptions} numericOptions={numericBetOptions} onClose={() => setOptionsManagerOpen(false)}
+          onAddBetOption={(label, numeric) => onAddBetOption(optKey, label, numeric)}
+          onDeleteBetOption={label => onDeleteBetOption(optKey, label)}
+          onEditBetOption={(oldLabel, newLabel) => onEditBetOption(optKey, oldLabel, newLabel)}
+          onReorderBetOption={(from, to) => onReorderBetOption(optKey, from, to)}
+          onToggleNumericBetOption={label => onToggleNumericBetOption(optKey, label)}
+          optionStakes={betOptionStakesBySport[optKey] ?? {}} onSetOptionStake={(label, stake) => onSetBetOptionStake(optKey, label, stake)} />
+      )}
+      {lolSetManagerOpen && (
+        <BetOptionsManagerModal sportLabel="LOL 세트 세부" betOptions={betOptionsBySport['esports_set'] ?? []} numericOptions={numericBetOptionsBySport['esports_set'] ?? []} onClose={() => setLolSetManagerOpen(false)}
+          onAddBetOption={(label, numeric) => onAddBetOption('esports_set', label, numeric)}
+          onDeleteBetOption={label => onDeleteBetOption('esports_set', label)}
+          onEditBetOption={(oldLabel, newLabel) => onEditBetOption('esports_set', oldLabel, newLabel)}
+          onReorderBetOption={(from, to) => onReorderBetOption('esports_set', from, to)}
+          onToggleNumericBetOption={label => onToggleNumericBetOption('esports_set', label)}
+          optionStakes={betOptionStakesBySport['esports_set'] ?? {}} onSetOptionStake={(label, stake) => onSetBetOptionStake('esports_set', label, stake)} />
       )}
       {mode === 'single' && !isusd && trimmedContent && trimmedLeagueInput && oddsV > 0 && (side || selectedOptions.length > 0) && (
         <BetOptionHistoryHint
@@ -2860,6 +2955,9 @@ export default function Dashboard() {
   const [numericBetOptionsBySport, setNumericBetOptionsBySport] = useState<Record<string, string[]>>({})
   // 옵션별 기본 베팅금액 (베팅옵션 관리에서 설정) — sport → label → 금액
   const [betOptionStakesBySport, setBetOptionStakesBySport] = useState<Record<string, Record<string, number>>>({})
+  // 표시·수정용: LOL은 BO3/BO5/세트 세부옵션 목록까지 합친 목록으로 배지를 알아본다
+  const displayOptionsBySport = useMemo(() => mergeLolOptions(betOptionsBySport), [betOptionsBySport])
+  const displayNumericBySport = useMemo(() => mergeLolOptions(numericBetOptionsBySport), [numericBetOptionsBySport])
   // 축구/야구/농구/배구/LOL — 리그/팀 직접 등록 후 자동완성으로 선택하는 방식 (자유입력 대신)
   const [soccerLeagues, setSoccerLeagues] = useState<string[]>([])
   const [baseballLeagues, setBaseballLeagues] = useState<string[]>([])
@@ -4034,7 +4132,7 @@ export default function Dashboard() {
                                               fontSize: legChecked ? 13 : 12, color: legChecked ? 'var(--green)' : 'var(--text-muted)',
                                               fontWeight: legChecked ? 800 : 400, width: 18, textAlign: 'center', flexShrink: 0,
                                             }}>{legChecked ? '✓' : (LEG_MARKS[idx] ?? idx+1)}</span>
-                                            <BetMatchLine sport={gb.sport} match={gb.match} stacked={false} knownOptions={betOptionsBySport[gb.sport] ?? []} numericOptions={numericBetOptionsBySport[gb.sport] ?? []} />
+                                            <BetMatchLine sport={gb.sport} match={gb.match} stacked={false} knownOptions={displayOptionsBySport[gb.sport] ?? []} numericOptions={displayNumericBySport[gb.sport] ?? []} />
                                             {hoverBetId === bet.parlay_group && !isHeld && (
                                               <div style={{ display: 'flex', gap: 3, flexShrink: 0, position: 'absolute', right: 0, top: '50%', transform: 'translateY(-50%)', background: 'var(--bg-hover)', paddingLeft: 10, boxShadow: '-10px 0 8px -2px var(--bg-hover)' }}>
                                                 {legChecked ? (
@@ -4127,7 +4225,7 @@ export default function Dashboard() {
                                   onRenameBasketballTeam={renameBasketballTeam} onDeleteBasketballTeam={deleteBasketballTeam}
                                   onRenameVolleyballTeam={renameVolleyballTeam} onDeleteVolleyballTeam={deleteVolleyballTeam}
                                   onRenameEsportsTeam={renameEsportsTeam} onDeleteEsportsTeam={deleteEsportsTeam}
-                                  betOptionsBySport={betOptionsBySport} numericBetOptionsBySport={numericBetOptionsBySport} onAddBetOption={addBetOption} onDeleteBetOption={deleteBetOption} onEditBetOption={editBetOption} onReorderBetOption={reorderBetOption} onToggleNumericBetOption={toggleNumericBetOption}
+                                  betOptionsBySport={displayOptionsBySport} numericBetOptionsBySport={displayNumericBySport} onAddBetOption={addBetOption} onDeleteBetOption={deleteBetOption} onEditBetOption={editBetOption} onReorderBetOption={reorderBetOption} onToggleNumericBetOption={toggleNumericBetOption}
                                 />
                               ) : (
                                 <>
@@ -4136,7 +4234,7 @@ export default function Dashboard() {
                                     {bet.league && <div style={{ paddingLeft: 26, fontSize: 10, color: 'var(--text-muted)', fontWeight: 700 }}>{bet.league}</div>}
                                     <div style={{ display: 'flex', gap: 5, alignItems: 'flex-start' }}>
                                       <span style={{ fontSize: 18, lineHeight: 1, flexShrink: 0, width: 22, textAlign: 'center', marginTop: 1 }}>{sportGlyph(bet.sport) ?? SPORT_SHORT[bet.sport] ?? '📋'}</span>
-                                      <BetMatchLine sport={bet.sport} match={bet.match} live={bet.is_live} knownOptions={betOptionsBySport[bet.sport] ?? []} numericOptions={numericBetOptionsBySport[bet.sport] ?? []} />
+                                      <BetMatchLine sport={bet.sport} match={bet.match} live={bet.is_live} knownOptions={displayOptionsBySport[bet.sport] ?? []} numericOptions={displayNumericBySport[bet.sport] ?? []} />
                                     </div>
                                     <div style={{ paddingLeft: 26, marginTop: 2 }}>
                                       <BetOddsStakeLine odds={bet.odds} stake={bet.stake} prefix={pfx} suffix={sfx} big={isBigStake(bet.stake, isusd)} mock={bet.is_mock} />
@@ -4222,8 +4320,8 @@ export default function Dashboard() {
                                         {gb.league && <div style={{ paddingLeft: 23, fontSize: 9, color: 'var(--text-muted)', fontWeight: 700 }}>{gb.league}</div>}
                                         <div style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
                                           <span style={{ fontSize: 10, color: 'var(--text-muted)', width: 18, textAlign: 'center', flexShrink: 0 }}>{LEG_MARKS[idx] ?? idx+1}</span>
-                                          <BetTeamName sport={gb.sport} match={gb.match} fontSize={12} teamColor={isWin ? 'var(--green)' : isLoss ? 'var(--red)' : 'var(--text-secondary)'} knownOptions={betOptionsBySport[gb.sport] ?? []} numericOptions={numericBetOptionsBySport[gb.sport] ?? []} />
-                                          <BetBadgeRow sport={gb.sport} match={gb.match} knownOptions={betOptionsBySport[gb.sport] ?? []} numericOptions={numericBetOptionsBySport[gb.sport] ?? []} />
+                                          <BetTeamName sport={gb.sport} match={gb.match} fontSize={12} teamColor={isWin ? 'var(--green)' : isLoss ? 'var(--red)' : 'var(--text-secondary)'} knownOptions={displayOptionsBySport[gb.sport] ?? []} numericOptions={displayNumericBySport[gb.sport] ?? []} />
+                                          <BetBadgeRow sport={gb.sport} match={gb.match} knownOptions={displayOptionsBySport[gb.sport] ?? []} numericOptions={displayNumericBySport[gb.sport] ?? []} />
                                         </div>
                                       </div>
                                     ))}
@@ -4247,11 +4345,11 @@ export default function Dashboard() {
                                   {bet.league && <div style={{ paddingLeft: 24, fontSize: 9, color: 'var(--text-muted)', fontWeight: 700 }}>{bet.league}</div>}
                                   <div style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
                                     <span style={{ fontSize: 16, lineHeight: 1, flexShrink: 0, width: 20, textAlign: 'center' }}>{sportGlyph(bet.sport) ?? SPORT_SHORT[bet.sport] ?? '📋'}</span>
-                                    <BetTeamName sport={bet.sport} match={bet.match} fontSize={12} teamColor={bet.result === 'win' ? 'var(--green)' : bet.result === 'loss' ? 'var(--red)' : 'var(--text-secondary)'} knownOptions={betOptionsBySport[bet.sport] ?? []} numericOptions={numericBetOptionsBySport[bet.sport] ?? []} />
+                                    <BetTeamName sport={bet.sport} match={bet.match} fontSize={12} teamColor={bet.result === 'win' ? 'var(--green)' : bet.result === 'loss' ? 'var(--red)' : 'var(--text-secondary)'} knownOptions={displayOptionsBySport[bet.sport] ?? []} numericOptions={displayNumericBySport[bet.sport] ?? []} />
                                     <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', flexShrink: 0 }}>{bet.odds.toFixed(2)}</span>
                                   </div>
                                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingLeft: 24, marginTop: 2 }}>
-                                    <BetBadgeRow sport={bet.sport} match={bet.match} live={bet.is_live} knownOptions={betOptionsBySport[bet.sport] ?? []} numericOptions={numericBetOptionsBySport[bet.sport] ?? []} />
+                                    <BetBadgeRow sport={bet.sport} match={bet.match} live={bet.is_live} knownOptions={displayOptionsBySport[bet.sport] ?? []} numericOptions={displayNumericBySport[bet.sport] ?? []} />
                                     {hoverBetId === 's_' + bet.id ? (
                                       <button className="btn btn-ghost btn-xs" style={{ fontSize: 10 }} onClick={() => applyResult(bet, 'revert')}><RotateCcw size={9} /> 되돌리기</button>
                                     ) : (

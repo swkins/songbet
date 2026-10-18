@@ -1923,6 +1923,10 @@ export default function Stats() {
         (grouped[d.sport] ??= []).push(d.label)
         if (d.numeric_input) (numericGrouped[d.sport] ??= []).push(d.label)
       }
+      // LOL은 BO3/BO5/세트 세부옵션 목록을 따로 관리하므로 통계에선 예전 목록과 합쳐서 하나로 본다 ("1세트" 같은 세트 칩은 제외)
+      const lolKeys = ['esports', 'esports_bo3', 'esports_bo5', 'esports_set']
+      const mergeLol = (m: Record<string, string[]>) => { m.esports = Array.from(new Set(lolKeys.flatMap(k => m[k] ?? []))).filter(l => !/^\d+세트$/.test(l)) }
+      mergeLol(grouped); mergeLol(numericGrouped)
       setBetOptionsBySport(grouped)
       setNumericBetOptionsBySport(numericGrouped)
     }
