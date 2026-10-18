@@ -560,6 +560,16 @@ tr:hover td { background: var(--bg-hover); }
   .site-cards-wrap { grid-template-columns: repeat(var(--site-cols, 1), minmax(0, 1fr)); }
 }
 
+/* ── 대시보드 "상하" 모드: 사이트 현황(채굴·일별손익)을 위 한 줄에, 베팅 현황을 그 아래 전체 폭으로 ── */
+@media (min-width: 901px) {
+  .dashboard-main.stacked { flex-direction: column; align-items: stretch; }
+  .dashboard-main.stacked .dashboard-side { flex: none; width: 100%; flex-direction: row; align-items: flex-start; }
+  .dashboard-main.stacked .dashboard-side > :first-child { flex: 3 1 0; min-width: 0; }
+  .dashboard-main.stacked .dashboard-side > :last-child { flex: 1 1 0; min-width: 260px; }
+  .dashboard-main.stacked .dashboard-bets { flex: none; width: 100%; }
+  .dashboard-main.stacked .mining-cards { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+}
+
 @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 
 /* ── 채굴 페이지 ── */

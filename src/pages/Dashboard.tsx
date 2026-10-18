@@ -14,7 +14,7 @@ import isoWeek from 'dayjs/plugin/isoWeek'
 dayjs.extend(isoWeek)
 import {
   Plus, Trash2, Check, X,
-  RotateCcw, Settings, Flame, BookOpen,
+  RotateCcw, Settings, Flame, BookOpen, Rows3, Columns3,
   CheckCircle, XCircle, Ban, MinusCircle, Gift, GripVertical, DollarSign,
   TrendingUp, TrendingDown, ArrowDownToLine, LogOut, Pencil,
   ClipboardPaste, ChevronUp, ChevronDown, Star,
@@ -2756,6 +2756,15 @@ export default function Dashboard() {
 
   const [showSiteMgr, setShowSiteMgr]   = useState(false)
   const [showRulebook, setShowRulebook] = useState(false)
+  // 대시보드 스타일: 'side'(사이트 현황 좌 / 베팅 현황 우) · 'stacked'(사이트 현황 위 / 베팅 현황 아래) — 이 기기에 기억
+  const [layoutMode, setLayoutMode] = useState<'side' | 'stacked'>(() => {
+    try { return localStorage.getItem('songbet_dashboard_layout') === 'stacked' ? 'stacked' : 'side' } catch { return 'side' }
+  })
+  function toggleLayoutMode() {
+    const next = layoutMode === 'side' ? 'stacked' : 'side'
+    setLayoutMode(next)
+    try { localStorage.setItem('songbet_dashboard_layout', next) } catch { /* 저장 못 해도 이번 화면에선 적용 */ }
+  }
   const [depositSite, setDepositSite]   = useState<Site | null>(null)
   const [withdrawSite, setWithdrawSite] = useState<Site | null>(null)
   const [openFormSiteId, setOpenFormSiteId] = useState<string | null>(null)
@@ -3737,7 +3746,8 @@ export default function Dashboard() {
     <div className="page">
       {/* 데스크탑: 사이트 현황(좌, 카드 세로 쌓기) / 베팅 현황(우)을 한 줄에 두고 1 : 베팅 사이트 수 비율로 가로폭을 나눠
           모든 카드가 같은 폭이 되게 한다 — 베팅 사이트를 추가하면 전체 카드 폭이 똑같이 줄어든다 */}
-      <div className="dashboard-main" style={{ '--mining-n': 1, '--bet-n': colCount } as React.CSSProperties}>
+      {/* 레이아웃 모드 — 좌우(기본): 사이트 현황 좌 / 베팅 현황 우, 상하: 사이트 현황 위 / 베팅 현황 아래 */}
+      <div className={`dashboard-main${layoutMode === 'stacked' ? ' stacked' : ''}`} style={{ '--mining-n': 1, '--bet-n': colCount } as React.CSSProperties}>
 
         {/* ── 사이트 현황 (좌측) */}
         <div className="dashboard-side">
@@ -3752,7 +3762,10 @@ export default function Dashboard() {
               <div className="flex-between mb-10">
                 <span className="card-title" style={{ margin: 0 }}>베팅 현황</span>
                 <div style={{ display: 'flex', gap: 6 }}>
-                <button onClick={openRulebook} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--gold)', cursor: 'pointer', padding: '3px 8px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-body)' }}>
+                <button onClick={toggleLayoutMode} title={layoutMode === 'side' ? '사이트 현황을 위로, 베팅 현황을 아래로' : '사이트 현황 좌측 / 베팅 현황 우측으로'} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-secondary)', cursor: 'pointer', padding: '3px 8px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-body)' }}>
+                    {layoutMode === 'side' ? <Rows3 size={11} /> : <Columns3 size={11} />} {layoutMode === 'side' ? '상하' : '좌우'}
+                  </button>
+                  <button onClick={openRulebook} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--gold)', cursor: 'pointer', padding: '3px 8px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-body)' }}>
                   <BookOpen size={11} /> 룰북
                 </button>
                 <button onClick={() => setShowSiteMgr(true)} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-secondary)', cursor: 'pointer', padding: '3px 8px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-body)' }}>
@@ -3774,6 +3787,9 @@ export default function Dashboard() {
                       <span style={{ fontSize: 11, fontWeight: 700, color: aggPct >= 100 ? 'var(--green)' : 'var(--orange)' }}>{aggPct}%</span>
                     </div>
                   )}
+                  <button onClick={toggleLayoutMode} title={layoutMode === 'side' ? '사이트 현황을 위로, 베팅 현황을 아래로' : '사이트 현황 좌측 / 베팅 현황 우측으로'} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-secondary)', cursor: 'pointer', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-body)' }}>
+                    {layoutMode === 'side' ? <Rows3 size={12} /> : <Columns3 size={12} />} {layoutMode === 'side' ? '상하' : '좌우'}
+                  </button>
                   <button onClick={openRulebook} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--gold)', cursor: 'pointer', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-body)' }}>
                     <BookOpen size={12} /> 룰북
                   </button>
