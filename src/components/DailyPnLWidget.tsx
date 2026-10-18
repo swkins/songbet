@@ -51,20 +51,20 @@ export default function DailyPnLWidget({ refreshKey, usdKrwRate, compact = false
           const sports = Object.entries(r.bySport).filter(([, c]) => c.net !== 0 || c.count > 0)
           return (
             <div key={r.day} style={{ padding: compact ? '1px 8px' : '6px 8px', borderRadius: 6, background: i === 0 ? 'var(--bg-elevated)' : 'transparent', border: i === 0 ? '1px solid var(--border)' : '1px solid transparent' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ fontSize: compact ? 11 : 12, lineHeight: compact ? 1.5 : undefined, fontWeight: 700, color: i === 0 ? 'var(--text-primary)' : 'var(--text-secondary)', width: 72, flexShrink: 0 }}>
-                  {i === 0 ? '오늘' : dayjs(r.day).format('MM.DD')} <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>({'일월화수목금토'[dayjs(r.day).day()]})</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: compact ? 6 : 8 }}>
+                <span style={{ fontSize: compact ? 13 : 12, lineHeight: compact ? 1.45 : undefined, fontWeight: 700, color: i === 0 ? 'var(--text-primary)' : 'var(--text-secondary)', width: compact ? 74 : 72, flexShrink: 0 }}>
+                  {i === 0 ? '오늘' : dayjs(r.day).format('MM.DD')} <span style={{ fontSize: compact ? 11 : 10, color: 'var(--text-muted)' }}>({'일월화수목금토'[dayjs(r.day).day()]})</span>
                 </span>
-                <span style={{ fontSize: 10, color: 'var(--text-muted)', flexShrink: 0 }}>{r.count}건</span>
+                <span style={{ fontSize: compact ? 11 : 10, color: 'var(--text-muted)', flexShrink: 0 }}>{r.count}건</span>
                 {/* compact: 종목별 손익을 같은 줄에 붙여 한 날짜 = 한 줄 */}
                 {compact && sports.length > 0 && (
                   <span style={{ display: 'flex', gap: 8, minWidth: 0, overflow: 'hidden', whiteSpace: 'nowrap' }}>
                     {sports.map(([sp, c]) => (
-                      <span key={sp} style={{ fontSize: 10, color: 'var(--text-muted)' }}>{SPORT_LABELS[sp] ?? sp} <Num v={c.net} size={10} /></span>
+                      <span key={sp} style={{ fontSize: 11, color: 'var(--text-muted)' }}>{SPORT_LABELS[sp] ?? sp} <Num v={c.net} size={11} /></span>
                     ))}
                   </span>
                 )}
-                <span style={{ marginLeft: 'auto', flexShrink: 0 }}><Num v={r.net} size={compact ? (i === 0 ? 13 : 12) : (i === 0 ? 15 : 13)} /></span>
+                <span style={{ marginLeft: 'auto', flexShrink: 0 }}><Num v={r.net} size={compact ? (i === 0 ? 15 : 14) : (i === 0 ? 15 : 13)} /></span>
               </div>
               {!compact && sports.length > 0 && (
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 10px', marginTop: 2 }}>
