@@ -1102,6 +1102,8 @@ function InlineBetEditForm({ bet, site, onClose, onSave, baseballOverrides, socc
   function cycleSide() {
     if (sport === 'esports') setSide(prev => prev === '' ? 'BO3' : prev === 'BO3' ? 'BO5' : '')
     else setSide(prev => prev === '' ? '홈' : prev === '홈' ? '원정' : '')
+    // 베팅옵션 칩처럼, 홈/원정(BO3/BO5)을 고르면 바로 배당을 입력할 수 있게 배당칸으로 커서 이동
+    oddsRef.current?.focus()
   }
   function handleOdds(raw: string) {
     const clean = raw.replace(/[^0-9.]/g, '')
@@ -2093,6 +2095,8 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, onCasinoBet, defaultS
   function cycleSide() {
     if (sport === 'esports') setSide(prev => prev === '' ? 'BO3' : prev === 'BO3' ? 'BO5' : '')
     else setSide(prev => prev === '' ? '홈' : prev === '홈' ? '원정' : '')
+    // 베팅옵션 칩처럼, 홈/원정(BO3/BO5)을 고르면 바로 배당을 입력할 수 있게 배당칸으로 커서 이동
+    oddsRef.current?.focus()
   }
   // 베팅옵션 — 종목별로 따로 관리되는 자유 등록 옵션 목록(예: "1.5 핸디").
   // 칩을 클릭하면 선택(토글)될 뿐 베팅 내용 텍스트는 건드리지 않고, 베팅 내용 옆에 선택된 옵션이 따로 표시된다.
