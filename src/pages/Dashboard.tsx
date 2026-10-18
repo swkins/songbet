@@ -3756,7 +3756,9 @@ export default function Dashboard() {
         {/* ── 사이트 현황 (좌측) */}
         <div className="dashboard-side">
           <MiningWidget />
-          <DailyPnLWidget usdKrwRate={usdKrwRate} refreshKey={(() => { const st = bets.filter(b => b.result !== 'pending'); return `${st.length}:${st.reduce((a, b) => a + b.profit, 0)}` })()} />
+          <div className="dashboard-pnl-slot">
+          <DailyPnLWidget compact={layoutMode === 'stacked'} usdKrwRate={usdKrwRate} refreshKey={(() => { const st = bets.filter(b => b.result !== 'pending'); return `${st.length}:${st.reduce((a, b) => a + b.profit, 0)}` })()} />
+          </div>
         </div>
 
         {/* ── 베팅 현황 (전체) */}

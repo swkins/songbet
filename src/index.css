@@ -563,7 +563,10 @@ tr:hover td { background: var(--bg-hover); }
 /* ── 대시보드 "상하" 모드: 사이트 현황(채굴·일별손익)을 위 한 줄에, 베팅 현황을 그 아래 전체 폭으로 ── */
 @media (min-width: 901px) {
   .dashboard-main.stacked { flex-direction: column; align-items: stretch; }
-  .dashboard-main.stacked .dashboard-side { flex: none; width: 100%; flex-direction: row; align-items: flex-start; }
+  .dashboard-main.stacked .dashboard-side { flex: none; width: 100%; flex-direction: row; align-items: stretch; }
+  /* 일별 손익은 사이트 현황 높이에 맞춘다 — 슬롯은 행 높이만 따라가고(내용이 높이를 늘리지 않게) 카드를 그 안에 꽉 채움 */
+  .dashboard-main.stacked .dashboard-pnl-slot { position: relative; }
+  .dashboard-main.stacked .dashboard-pnl-slot > .card { position: absolute; inset: 0; overflow-y: auto; display: flex; flex-direction: column; }
   .dashboard-main.stacked .dashboard-side > :first-child { flex: 3 1 0; min-width: 0; }
   .dashboard-main.stacked .dashboard-side > :last-child { flex: 1 1 0; min-width: 260px; }
   .dashboard-main.stacked .dashboard-bets { flex: none; width: 100%; }
