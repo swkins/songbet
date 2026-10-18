@@ -577,6 +577,14 @@ function rollingTargetOf(site: Site): number {
   return ((site.last_deposit ?? 0) + (site.point_deposit ?? 0)) * (site.rolling_pct ?? 100) / 100
 }
 
+/** 롤링 진행률(%) — 소수점 한 자리까지 내림. 남은 롤링이 0 이하(롤링한 금액 ≥ 목표)일 때만 100%,
+ *  그 전에는 아무리 가까워도 최대 99.9% (예전엔 반올림이라 783원 남아도 100%·롤링완료로 표시되던 문제) */
+function rollingProgress(done: number, target: number): number {
+  if (target <= 0) return 0
+  if (done >= target) return 100
+  return Math.min(99.9, Math.floor(done / target * 1000) / 10)
+}
+
 function DepositModal({ site, onClose, onDeposit, onPoint }: {
   site: Site; onClose: () => void
   onDeposit: (amount: number) => void; onPoint: (amount: number) => void
@@ -589,7 +597,7 @@ function DepositModal({ site, onClose, onDeposit, onPoint }: {
   const isValid = !isNaN(num) && num > 0
   const dep = site.last_deposit ?? 0; const pt = site.point_deposit ?? 0
   const tot = rollingTargetOf(site); const done = site.deposit_bet_done ?? 0
-  const rem = Math.max(0, tot - done); const pct = tot > 0 ? Math.round(done / tot * 100) : 0
+  const rem = Math.max(0, tot - done); const pct = rollingProgress(done, tot)
   const unit = isusd ? '$' : '원'
 
   // 탭 변경 시 입력 필드에 자동 포커스 + 기존 값 초기화
@@ -655,7 +663,7 @@ function DepositModal({ site, onClose, onDeposit, onPoint }: {
               </div>
             </div>
             <div className="deposit-progress-bar"><div className="deposit-progress-fill" style={{ width: `${Math.min(100,pct)}%` }} /></div>
-            <div style={{ fontSize: 9, textAlign: 'right', marginTop: 2, color: pct >= 100 ? 'var(--green)' : 'var(--orange)', fontWeight: 700 }}>{pct}%</div>
+            <div style={{ fontSize: 9, textAlign: 'right', marginTop: 2, color: pct >= 100 ? 'var(--green)' : 'var(--orange)', fontWeight: 700 }}>{pct.toFixed(1)}%</div>
           </div>
         )}
 
@@ -3215,13 +3223,13 @@ export default function Dashboard() {
   }
   const totalRolling     = (s: Site) => rollingTargetOf(s)
   const depositRemaining = (s: Site) => Math.max(0, totalRolling(s) - (s.deposit_bet_done ?? 0))
-  const depositPct       = (s: Site) => totalRolling(s) > 0 ? Math.round((s.deposit_bet_done ?? 0) / totalRolling(s) * 100) : 0
+  const depositPct       = (s: Site) => rollingProgress(s.deposit_bet_done ?? 0, totalRolling(s))
   const toKrw = (amount: number, currency: 'krw' | 'usd') => currency === 'usd' ? amount * usdKrwRate : amount
   // 전체 사이트 합산 (달러는 원화로 환산) — 지금 롤링이 얼마나 필요한지 한눈에 보기 위함 (개별 사이트 카드와 동일한 구성: 입금/포인트/남은롤링/진행률)
   const aggRollingTarget = sites.reduce((sum, s) => sum + toKrw(rollingTargetOf(s), s.currency), 0)
   const aggRollingDone   = sites.reduce((sum, s) => sum + toKrw(s.deposit_bet_done ?? 0, s.currency), 0)
   const aggRem = Math.max(0, aggRollingTarget - aggRollingDone)
-  const aggPct = aggRollingTarget > 0 ? Math.round(aggRollingDone / aggRollingTarget * 100) : 0
+  const aggPct = rollingProgress(aggRollingDone, aggRollingTarget)
   const betsBySite       = (id: string) => bets.filter(b => b.site_id === id)
   const pendingBySite    = (id: string) => betsBySite(id).filter(b => b.result === 'pending')
   const settledBySite    = (id: string) => betsBySite(id).filter(b => b.result !== 'pending')
@@ -3855,7 +3863,7 @@ export default function Dashboard() {
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       <span style={{ fontSize: 12, fontWeight: 800, fontFamily: 'var(--font-num)', color: aggRem > 0 ? 'var(--gold)' : 'var(--green)' }}>{Math.round(aggRem).toLocaleString()}원</span>
                       <div className="deposit-progress-bar" style={{ width: 150, margin: 0 }}><div className="deposit-progress-fill" style={{ width: `${Math.min(100, aggPct)}%` }} /></div>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: aggPct >= 100 ? 'var(--green)' : 'var(--orange)' }}>{aggPct}%</span>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: aggPct >= 100 ? 'var(--green)' : 'var(--orange)' }}>{aggPct.toFixed(1)}%</span>
                     </div>
                   )}
                   <button onClick={toggleLayoutMode} title={layoutMode === 'side' ? '사이트 현황을 위로, 베팅 현황을 아래로' : '사이트 현황 좌측 / 베팅 현황 우측으로'} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-secondary)', cursor: 'pointer', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-body)' }}>
@@ -3912,7 +3920,7 @@ export default function Dashboard() {
                           <span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-num)', color: rem > 0 ? 'var(--gold)' : 'var(--green)' }}>{pfx}{rem.toLocaleString()}{sfx}</span>
                         </div>
                         <div className="deposit-progress-bar"><div className="deposit-progress-fill" style={{ width: `${Math.min(100,pct)}%` }} /></div>
-                        <div style={{ fontSize: 11, color: pct >= 100 ? 'var(--green)' : 'var(--orange)', fontWeight: 700, textAlign: 'right' }}>{pct}%</div>
+                        <div style={{ fontSize: 11, color: pct >= 100 ? 'var(--green)' : 'var(--orange)', fontWeight: 700, textAlign: 'right' }}>{pct.toFixed(1)}%</div>
                         {/* 롤링 100% 완료 도장 — 입금/포인트/남은롤링 표시 영역 가운데에 반투명 오버레이 */}
                         {pct >= 100 && (
                           <div style={{
