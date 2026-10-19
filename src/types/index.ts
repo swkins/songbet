@@ -68,8 +68,6 @@ export interface SoccerOddsLog {
   result_outcome: 'home_win' | 'draw' | 'away_win' | null
   result_updated_at: string | null
 }
-// 카지노 베팅 — bets 테이블에 sport='casino'로 저장 (league/match/pick = 게임명, 총 베팅금액=stake, 손수익=profit, 입력 즉시 결과처리)
-export const CASINO_GAMES = ['바카라', '룰렛', '식보', '판탄'] as const
-export type CasinoGame = typeof CASINO_GAMES[number]
+// 카지노(sport='casino')는 더 이상 입력하지 않음 — 예전 기록만 대시보드에 남아 삭제 가능, 통계에서는 제외
 
 export type Tab = 'dashboard' | 'stats' | 'settlement' | 'simul' | 'rulebook'
