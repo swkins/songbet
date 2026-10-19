@@ -1323,7 +1323,7 @@ function InlineParlayEditForm({ groupBets, site, onClose, onSave, teamCandidates
   }
   async function submit() {
     if (!allFilled || oddsV <= 0 || stakeN <= 0) return
-    setSubmitting(true); await onSave(contents, oddsV, stakeN, contents.map(() => '')); setSubmitting(false)
+    setSubmitting(true); await onSave(contents.map(joinTeamsVs), oddsV, stakeN, contents.map(() => '')); setSubmitting(false)
   }
   return (
     <div className="inline-bet-form" style={{ borderColor: 'var(--gold-border)', background: 'var(--gold-bg)' }}>
@@ -1332,9 +1332,10 @@ function InlineParlayEditForm({ groupBets, site, onClose, onSave, teamCandidates
           <div style={{ ...labelSt, marginTop: i === 0 ? 0 : 4 }}>{LEG_MARKS[i] ?? i + 1}</div>
           <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <TeamContentInput placeholder={`경기 내용 ${LEG_MARKS[i] ?? i + 1}`} value={c}
+              <TeamContentInput placeholder={`팀 이름 ${LEG_MARKS[i] ?? i + 1} (두 팀이면 쉼표 ,)`} value={c}
                 onChange={v => setContents(p => p.map((pc, pi) => pi === i ? v : pc))}
-                candidates={registeredTeamCandidates} allBets={allBetsHistory} autoFocus={i === 0} onEnter={submit} />
+                candidates={registeredTeamCandidates} allBets={allBetsHistory} autoFocus={i === 0} onEnter={submit}
+                teams={registeredTeamCandidates.map(t => ({ league: '', name: t.name }))} multiTeam />
             </div>
             {i === contents.length - 1 && contents.length < MULTI_MAX_LEGS ? (
               <button type="button" onClick={addLeg} title="다리 추가" style={{
@@ -2351,6 +2352,8 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, onCasinoBet, betOptio
     soccer: onRenameSoccerTeam, baseball: onRenameBaseballTeam, basketball: onRenameBasketballTeam, volleyball: onRenameVolleyballTeam, esports: onRenameEsportsTeam,
   }
   const sportTeams = TEAMS_BY_SPORT[sport] ?? []
+  // 다폴은 종목 구분 없이(기타) 쓰므로 모든 종목에 등록된 팀에서 추천
+  const allSportTeams = useMemo(() => Object.values(TEAMS_BY_SPORT).flatMap(t => t ?? []), [soccerTeams, baseballTeams, basketballTeams, volleyballTeams, esportsTeams]) // eslint-disable-line react-hooks/exhaustive-deps
   // 자동으로 채운 리그를 기억 — 사용자가 직접 바꾼 리그는 덮어쓰지 않는다
   const autoLeagueRef = useRef('')
   function pickTeamLeague(_name: string, league: string) {
@@ -2381,7 +2384,8 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, onCasinoBet, betOptio
     if (/^\d{3}$/.test(clean)) setOddsRaw((Number(clean) / 100).toFixed(2))
     else setOddsRaw(clean)
   }
-  const multiContents = [content, ...extraContents]
+  // 다폴 다리도 "A, B" → "A vs B"
+  const multiContents = [content, ...extraContents].map(joinTeamsVs)
   const multiFilled = multiContents.every(c => !!c)
 
   function addLeg() {
@@ -2447,9 +2451,9 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, onCasinoBet, betOptio
       )}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'stretch' }}>
         <div style={{ flex: '1 1 140px', minWidth: 0 }}>
-          <TeamContentInput inputRef={contentRef} placeholder={mode === 'multi' ? `베팅 내용 ${LEG_MARKS[0]}` : TEAM_INPUT_PLACEHOLDER} value={content} onChange={setContent}
+          <TeamContentInput inputRef={contentRef} placeholder={mode === 'multi' ? `팀 이름 ${LEG_MARKS[0]} (두 팀이면 쉼표 ,)` : TEAM_INPUT_PLACEHOLDER} value={content} onChange={setContent}
             candidates={[]} allBets={allBetsHistory} autoFocus onEnter={submit} quickPicks={mode === 'multi' ? quickPicks : undefined}
-            teams={mode === 'single' ? sportTeams : undefined} onPickTeam={pickTeamLeague} multiTeam={mode === 'single'} />
+            teams={mode === 'single' ? sportTeams : allSportTeams} onPickTeam={mode === 'single' ? pickTeamLeague : undefined} multiTeam />
         </div>
         {mode === 'single' && (
           <button type="button" onClick={cycleSide} style={{
@@ -2611,9 +2615,9 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, onCasinoBet, betOptio
       {mode === 'multi' && extraContents.map((c, i) => (
         <div key={i} style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <TeamContentInput placeholder={`베팅 내용 ${LEG_MARKS[i + 1] ?? i + 2}`} value={c}
+            <TeamContentInput placeholder={`팀 이름 ${LEG_MARKS[i + 1] ?? i + 2} (두 팀이면 쉼표 ,)`} value={c}
               onChange={v => setExtraContents(p => p.map((pc, pi) => pi === i ? v : pc))}
-              candidates={[]} allBets={allBetsHistory} onEnter={submit} quickPicks={quickPicks} />
+              candidates={[]} allBets={allBetsHistory} onEnter={submit} quickPicks={quickPicks} teams={allSportTeams} multiTeam />
           </div>
           {i === extraContents.length - 1 && extraContents.length + 1 < MULTI_MAX_LEGS ? (
             <button type="button" onClick={addLeg} title="다리 추가" style={{
