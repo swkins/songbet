@@ -338,7 +338,7 @@ function UnclassifiedBetOptionCard({ bets, options, onAssign, onExclude }: {
   }
 
   return (
-    <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, padding: '12px 14px', flex: '1 0 100%' }}>
+    <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, padding: '12px 14px', flex: '1 0 100%', gridColumn: '1 / -1' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
         <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)' }}>기타 ({settled.length}건)</div>
         {s.total > 0 && (
@@ -404,7 +404,8 @@ function BetOptionStatsSection({ settledBets, options, numericOptions, onlyLabel
     <div style={{ marginBottom: 14 }}>
       <div className="card-title" style={{ marginBottom: 2 }}>🎯 베팅옵션별 성적</div>
       <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 10 }}>베팅추가에 등록된 옵션 전부, 배당 0.1단위 구간별 — 삭제된 옵션에 걸린 베팅이나 어디에도 안 걸리는 베팅은 "기타"로 표시</div>
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+      {/* 격자로 깔아서 줄 끝에 혼자 남은 카드(예: 2.5 오버)도 위 카드들과 같은 폭 */}
+      <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
         {cells.map(c => c.label === '기타'
           ? <UnclassifiedBetOptionCard key="기타" bets={c.bets} options={options} onAssign={onAssignBetOption} onExclude={onExcludeBet} />
           : <BetOptionOddsCard key={c.label} label={c.label} bets={c.bets} />)}
