@@ -106,7 +106,7 @@ function TeamContentInput({ value, onChange, candidates, allBets: _allBets, plac
   // 리그 관리에서 등록한 팀(이 종목 전체 리그) — 한 글자만 입력해도 포함하는 팀을 리그와 함께 추천하고, 고르면 onPickTeam으로 리그까지 넘긴다
   teams?: { league: string; name: string }[]
   onPickTeam?: (name: string, league: string) => void
-  // LOL: 팀 이름을 쓰고 띄어쓴 뒤 한 글자만 더 쓰면 상대팀을 추천, 고르면 "팀A vs 팀B"로 채운다 (경기 자체 옵션 베팅용)
+  // 팀 이름을 쓰고 쉼표(,) 뒤에 한 글자만 더 쓰면 상대팀을 추천, 고르면 "팀A vs 팀B"로 채운다 (경기 자체 옵션 베팅용)
   multiTeam?: boolean
 }) {
   const [open, setOpen] = useState(false)
@@ -117,17 +117,14 @@ function TeamContentInput({ value, onChange, candidates, allBets: _allBets, plac
   void candidates
   // 빠른 선택 목록은 포커스만 줘도 뜨지 않고, 더블클릭하거나 글자를 입력했을 때만 보여준다.
   // 글자를 입력한 상태면 그 글자가 포함된 항목만 걸러서 보여준다.
-  // multiTeam이면 첫 팀(등록된 팀 이름과 일치) 뒤의 글자만 검색어로 쓰고, 고를 때 "첫팀 vs "를 앞에 붙인다
+  // multiTeam이면 쉼표(또는 이미 들어간 " vs ") 뒤의 글자만 검색어로 쓰고, 고를 때 "첫팀 vs "를 앞에 붙인다
   let teamPrefix = ''
   let q = value.trim().toLowerCase()
-  if (multiTeam && teams?.length) {
+  if (multiTeam) {
     const vsIdx = value.toLowerCase().lastIndexOf(' vs ')
+    const commaIdx = value.indexOf(',')
     if (vsIdx >= 0) { teamPrefix = value.slice(0, vsIdx + 4); q = value.slice(vsIdx + 4).trim().toLowerCase() }
-    else {
-      const m = value.match(/^(\S+)\s+(.*)$/)
-      const first = m && teams.find(t => t.name.toLowerCase() === m[1].toLowerCase())
-      if (m && first) { teamPrefix = `${first.name} vs `; q = m[2].trim().toLowerCase() }
-    }
+    else if (commaIdx >= 0) { teamPrefix = `${value.slice(0, commaIdx).trim()} vs `; q = value.slice(commaIdx + 1).trim().toLowerCase() }
   }
   const teamItems = teams?.length && q
     ? teams.filter(t => t.name.toLowerCase().includes(q))
@@ -180,6 +177,14 @@ function TeamContentInput({ value, onChange, candidates, allBets: _allBets, plac
     </div>
   )
 }
+
+/** 팀 이름 칸: 쉼표로 두 팀을 적으면("A, B") 경기 자체 옵션(2.5 오버 등) 베팅이므로 "A vs B"로 바꿔 저장 */
+function joinTeamsVs(text: string): string {
+  if (!text.includes(',')) return text.trim()
+  const parts = text.split(',').map(t => t.trim()).filter(Boolean)
+  return parts.length >= 2 ? parts.join(' vs ') : (parts[0] ?? '')
+}
+const TEAM_INPUT_PLACEHOLDER = '팀 이름 (두 팀이면 쉼표 , 로 구분 → A vs B)'
 
 // 큰 금액 베팅 기준: 원화 3만원 이상, 달러 20달러 이상
 function isBigStake(stake: number, isusd: boolean): boolean {
@@ -1185,7 +1190,7 @@ function InlineBetEditForm({ bet, site, onClose, onSave, baseballOverrides, socc
     if (!content.trim() || oddsV <= 0 || stakeN <= 0) return
     setSubmitting(true)
     // 베팅옵션을 아무것도 안 골랐으면 "승리"로 처리
-    const finalContent = [content.trim(), side, ...(selectedOptions.length ? selectedOptions : ['승리'])].filter(Boolean).join(' ')
+    const finalContent = [joinTeamsVs(content), side, ...(selectedOptions.length ? selectedOptions : ['승리'])].filter(Boolean).join(' ')
     await onSave(sport, finalContent, oddsV, stakeN, isLive, trimmedLeagueInput)
     setSubmitting(false)
   }
@@ -1194,8 +1199,8 @@ function InlineBetEditForm({ bet, site, onClose, onSave, baseballOverrides, socc
       <SportButtonGroup value={sport} onChange={v => { setSport(v as typeof bet.sport); contentRef.current?.focus() }} />
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'stretch' }}>
         <div style={{ flex: '1 1 140px', minWidth: 0 }}>
-          <TeamContentInput inputRef={contentRef} placeholder="베팅 내용 (팀 이름만 입력, 홈/원정·옵션은 옆에서 선택)" value={content} onChange={setContent}
-            candidates={[]} allBets={allBetsHistory} autoFocus onEnter={submit} teams={sportTeams} onPickTeam={pickTeamLeague} />
+          <TeamContentInput inputRef={contentRef} placeholder={TEAM_INPUT_PLACEHOLDER} value={content} onChange={setContent}
+            candidates={[]} allBets={allBetsHistory} autoFocus onEnter={submit} teams={sportTeams} onPickTeam={pickTeamLeague} multiTeam />
         </div>
         <button type="button" onClick={cycleSide} style={{
           flexShrink: 0, width: 46, borderRadius: 'var(--radius-sm)', cursor: 'pointer',
@@ -2354,7 +2359,8 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, onCasinoBet, betOptio
   const skipFirstTeamLeagueEffect = useRef(true)
   useEffect(() => {
     if (skipFirstTeamLeagueEffect.current) { skipFirstTeamLeagueEffect.current = false; return }
-    const name = sport === 'esports' ? content.trim().split(/\s+/)[0] ?? '' : content.trim()
+    // 두 팀("A, B" / "A vs B")이면 앞 팀 기준으로 리그를 찾는다
+    const name = content.split(/,| vs /)[0].trim()
     const matches = sportTeams.filter(t => t.name === name)
     if (matches.length === 0) return
     setLeagueInput(cur => {
@@ -2391,8 +2397,8 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, onCasinoBet, betOptio
     setSubmitting(true)
     // 홈/원정, 베팅옵션은 입력창 텍스트에는 안 보이고 옆에 뱃지로만 표시되다가, 제출할 때 베팅 내용 뒤에 합쳐진다.
     // 베팅옵션을 아무것도 안 골랐으면 "승리"로 처리
-    // LOL에서 팀 두 개를 띄어쓰기로만 적었으면 사이에 vs를 넣는다 ("T1 GEN" → "T1 vs GEN")
-    const teamText = sport === 'esports' && !/ vs /i.test(content) && content.trim().split(/\s+/).length === 2 ? content.trim().split(/\s+/).join(' vs ') : content.trim()
+    // 쉼표로 두 팀을 적었으면 "A vs B"로 ("T1, GEN" → "T1 vs GEN")
+    const teamText = joinTeamsVs(content)
     const finalContent = mode === 'single' ? [teamText, side, ...(selectedOptions.length ? selectedOptions : ['승리'])].filter(Boolean).join(' ') : content
     const ok = mode === 'multi'
       ? await onMultiBet(sport, multiContents, oddsV, stakeN, multiContents.map(() => ''))
@@ -2441,9 +2447,9 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, onCasinoBet, betOptio
       )}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'stretch' }}>
         <div style={{ flex: '1 1 140px', minWidth: 0 }}>
-          <TeamContentInput inputRef={contentRef} placeholder={mode === 'multi' ? `베팅 내용 ${LEG_MARKS[0]}` : sport === 'esports' ? '팀 이름 (경기 옵션이면 띄어쓰고 상대팀 → 자동 vs)' : '베팅 내용 (팀 이름만 입력, 홈/원정·옵션은 옆에서 선택)'} value={content} onChange={setContent}
+          <TeamContentInput inputRef={contentRef} placeholder={mode === 'multi' ? `베팅 내용 ${LEG_MARKS[0]}` : TEAM_INPUT_PLACEHOLDER} value={content} onChange={setContent}
             candidates={[]} allBets={allBetsHistory} autoFocus onEnter={submit} quickPicks={mode === 'multi' ? quickPicks : undefined}
-            teams={mode === 'single' ? sportTeams : undefined} onPickTeam={pickTeamLeague} multiTeam={mode === 'single' && sport === 'esports'} />
+            teams={mode === 'single' ? sportTeams : undefined} onPickTeam={pickTeamLeague} multiTeam={mode === 'single'} />
         </div>
         {mode === 'single' && (
           <button type="button" onClick={cycleSide} style={{
