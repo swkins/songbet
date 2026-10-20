@@ -52,9 +52,11 @@ interface JudgeBet {
   hit: number; se: number; be: number; ev: number; err: number
   strength: number; strengthLabel: string; n: number; eligible: boolean
   push?: number  // 농구 정수 기준점 적특 비율
+  check?: { n: number; hit: number; roi: number }  // 축구: 같은 배당대 과거 실적
 }
 interface JudgeOut {
   fav: number; favIsHome: boolean; margin: number; marketN: number
+  minusHome?: boolean  // 축구: 사이트가 핸디 마이너스를 준 쪽이 홈인지
   expMargin?: number  // 농구·축구: 표본의 정배 평균 점수차(골차)
   rule?: { text: string; keys: string[]; min?: Record<string, number | undefined> }  // 축구: 내 룰북 기준 이 경기에서 할 베팅 · min = 이 배당 이상일 때만
   bets: JudgeBet[]; recommended: JudgeBet[]; leastLoss: JudgeBet | null
@@ -189,7 +191,7 @@ function soccerProfile(raw: SoccerGame[]) {
 type VolleyJudgeFn = (o: VolleyOdds) => JudgeOut | null
 type BasketJudgeFn = (o: BasketOdds) => JudgeOut | null
 type SoccerJudgeFn = (o: SoccerOdds) => JudgeOut | null
-const SOCCER_REC = '기대수익 플러스 + 배당 1.30 이상 3.00 미만 + 적중률 50% 이상 · 핸디캡은 반 골 기준점이라 적특 없음'
+const SOCCER_REC = '기대수익 플러스 + 배당 1.30 이상 3.00 미만 (홈 승·원정 승·-0.5는 1.90 미만) + 적중률 50% 이상 + 승무패는 같은 배당대 과거 수익률 플러스 · 핸디캡은 반 골 기준점이라 적특 없음'
 const VOLLEY_REC = '기대수익 플러스 + 배당 1.30 이상 3.00 미만 + 적중률 50% 이상 (원정 승은 추천 제외)'
 const BASKET_REC = '기대수익 플러스 + 배당 1.30 이상 3.00 미만 + 적중률 50% 이상 · 기준점이 정수면 적특(환불) 반영'
 function volleyLeague(key: string, label: string, note: string, judge: VolleyJudgeFn, games: VolleyGame[]): LeagueJudge {
@@ -309,7 +311,7 @@ export default function BetAnalysisPanel({ tabs, active = true }: { tabs: ReactN
   const fieldSub = (f: OddsField) => {
     if (f.line != null) {
       if (vals.home == null || vals.away == null) return null
-      return `${(f.side === 'home') === favHome ? '마핸 -' : '플핸 +'}${f.line}`
+      return `${(f.side === 'home') === (out?.minusHome ?? favHome) ? '마핸 -' : '플핸 +'}${f.line}`
     }
     if ((f.key !== 'hh' && f.key !== 'ah') || vals.home == null || vals.away == null) return null
     const isFav = (f.key === 'hh') === favHome
@@ -517,6 +519,7 @@ function JudgeRow({ b, name, recommended, rule = false, ruleMin, recNote, open, 
     `적중률 ${pct(b.hit)} ±${pct(b.se)} (비교 ${b.n}경기)`,
     b.push ? `적특 ${pct(b.push)}` : null,
     `기대수익 ${signedPct(b.ev)} ±${pct(b.err)}`,
+    b.check ? `같은 배당대 과거 실적 ${pct(b.check.hit)} · 수익률 ${signedPct(b.check.roi)} (${b.check.n}경기)` : null,
     short ? `룰 기준 ${ruleMin!.toFixed(2)} 이상 — 미달` : rule && ruleMin != null ? `룰 기준 ${ruleMin.toFixed(2)} 이상 — 충족` : null,
     !b.eligible ? `추천 배당범위 밖 (${recNote.split(' · ')[0]})` : null,
   ].filter(Boolean) as string[]
