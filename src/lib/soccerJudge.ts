@@ -1,4 +1,4 @@
-import { betStrength } from './judgeScore';
+import { betStrength, EV_FLOOR } from './judgeScore';
 import { oddsHistory, shrinkFactor, winGate, type OddsCheck } from './oddsCheck';
 import { recentSeasons, seasonWeigher, weightedMean, weightedStat } from './seasonWeight';
 
@@ -158,9 +158,9 @@ function judgeWith(rows: Row[], sd: number[], oddsCheck: ReturnType<typeof socce
     const check = checkKind ? oddsCheck(checkKind, site) : undefined;
     // 같은 배당대 과거 실적 확인 — 무는 수익률만, 승(홈 승·원정 승·-0.5)은 시즌 일관성까지
     st = winGate(st, check, checkKind === 'draw' ? 0 : opts.winSeasonShare);
-    // 플핸은 무·역배 배당이 비슷했던 과거 경기 적중률로도 손익분기를 넘어야 추천
+    // 플핸은 무·역배 배당이 비슷했던 과거 경기 적중률로도 기대수익이 추천 하한(-3%) 이상이어야 추천
     const plusCheck = plus ? plusHistory(plus.side, plus.L) : undefined;
-    if (opts.plusGate && st.v > 0 && plusCheck && plusCheck.hit * site <= 1) st = { label: '무·역배 비슷한 경기 실적 미달', v: 0 };
+    if (opts.plusGate && st.v > 0 && plusCheck && plusCheck.hit * site - 1 < EV_FLOOR) st = { label: '무·역배 비슷한 경기 실적 미달', v: 0 };
     bets.push({
       key, name, site, hit: s.pw, se: s.se, be: 1 / s.pw, ev, err: site * s.se,
       strengthLabel: st.label, strength: st.v, n: s.n, eligible, check, plusCheck,
@@ -200,7 +200,7 @@ function judgeWith(rows: Row[], sd: number[], oddsCheck: ReturnType<typeof socce
   add('o25', '2.5 오버', odds.o25, (r) => r.t > 2.5);
   add('u25', '2.5 언더', odds.u25, (r) => r.t < 2.5);
 
-  const recommended = bets.filter((b) => b.ev > 0 && b.strength > 0).sort((x, y) => y.strength - x.strength || y.ev - x.ev);
+  const recommended = bets.filter((b) => b.strength > 0).sort((x, y) => y.strength - x.strength || y.ev - x.ev);
   const leastLoss = [...bets].filter((b) => b.eligible).sort((x, y) => y.ev - x.ev)[0] ?? null;
 
   return {

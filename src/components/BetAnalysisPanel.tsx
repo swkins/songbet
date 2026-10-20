@@ -523,7 +523,7 @@ function LeagueInfo({ league }: { league: LeagueJudge }) {
           </div>
           <div style={{ fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.6, borderTop: '1px solid var(--border)', paddingTop: 6 }}>
             추천 조건: {league.recNote} · ±는 95% 오차<br />
-            판정: 손익분기보다 배당이 높으면(기대수익 플러스) 추천 — 기대수익 10% 이상 강 · 5% 이상 중 · 그 밖 약. 패스는 이유를 함께 표시<br />
+            판정: 기대수익 -3% 이상이면 추천 — 3% 초과 ★★★ · 0~3% ★★ · -3~0% ★. 패스는 이유를 함께 표시<br />
             표의 줄에 마우스를 올리거나 누르면 오차·경기 수 등 상세가 나옵니다
           </div>
         </div>
@@ -559,14 +559,14 @@ function DataStatus({ league }: { league: LeagueJudge }) {
   )
 }
 
-// 판정 색: 패스 회색 · 약 주황 · 중 금색 · 강 초록
+// 판정 색: 패스 회색 · ★ 주황 · ★★ 금색 · ★★★ 초록
 function strengthColor(v: number) {
   return v === 0 ? 'var(--text-muted)' : v === 1 ? 'var(--orange)' : v === 2 ? 'var(--gold)' : 'var(--green)'
 }
 
 // 오차·경기 수·적특·배당범위 같은 상세는 평소엔 숨기고, 줄에 마우스를 올리면(툴팁) / 누르면(아래로 펼침) 보여준다
 function JudgeRow({ b, name, recommended, recNote, open, onToggle }: { b: JudgeBet; name: string; recommended: boolean; recNote: string; open: boolean; onToggle: () => void }) {
-  const evColor = b.ev > 0 ? 'var(--green)' : 'var(--red)'
+  const evColor = b.ev > 0 ? 'var(--green)' : b.strength > 0 ? 'var(--orange)' : 'var(--red)'
   const detail = [
     `적중률 ${pct(b.hit)} ±${pct(b.se)} (비교 ${b.n}경기)`,
     b.push ? `적특 ${pct(b.push)}` : null,

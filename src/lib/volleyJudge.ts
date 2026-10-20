@@ -139,7 +139,7 @@ function judgeWith(games: Game[], weight: (g: Game) => number, oddsCheck: Return
 
   // 원정 승은 추천에서 제외 (원하면 아래 필터에서 key !== 'away' 조건 삭제)
   const recommended = bets
-    .filter((b) => b.ev > 0 && b.strength > 0 && b.key !== 'away')
+    .filter((b) => b.strength > 0 && b.key !== 'away')
     .sort((x, y) => y.strength - x.strength || y.ev - x.ev);
   const leastLoss = [...bets].filter((b) => b.eligible).sort((x, y) => y.ev - x.ev)[0] ?? null;
 

@@ -163,7 +163,7 @@ function judgeWith(games: Game[], weight: (g: Game) => number, oddsCheck: Return
     add(pk, po ?? null, stat3((m) => (m < L ? 1 : m === L ? 0 : -1)));
   }
 
-  const recommended = bets.filter((b) => b.ev > 0 && b.strength > 0).sort((x, y) => y.strength - x.strength || y.ev - x.ev);
+  const recommended = bets.filter((b) => b.strength > 0).sort((x, y) => y.strength - x.strength || y.ev - x.ev);
   const leastLoss = [...bets].filter((b) => b.eligible).sort((x, y) => y.ev - x.ev)[0] ?? null;
 
   return {
