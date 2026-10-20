@@ -68,8 +68,7 @@ function stat3<T>(rows: T[], res: (r: T) => 1 | 0 | -1) {
 export interface JudgeOptions {
   minOdds: number; // 추천 하한 사이트 배당
   maxOdds: number; // 추천 상한 사이트 배당 (미만)
-  minMarketN: number; // 핸디캡 표본 최소 경기 수 (정배 배당 + 정배 홈/원정이 같은 경기)
-  minSideN: number; // 홈 승/원정 승 표본 최소 경기 수
+  minMarketN: number; // 표본 최소 경기 수 (정배 배당 + 정배 홈/원정이 같은 경기 — 승패·핸디캡 모두 이 표본)
 }
 
 // 판정에 쓸 수 없는 경기 제외: 동점(0:0 등 취소·미진행), 배당 1.00 이하(빈 값), 두 배당 마진이 마이너스(배당 기록 오류)
@@ -79,7 +78,7 @@ export function cleanGames(games: Game[]): Game[] {
 
 export function createJudge(rawGames: Game[], base: Partial<JudgeOptions> = {}) {
   const games = cleanGames(rawGames);
-  const defaults: JudgeOptions = { minOdds: 1.3, maxOdds: 2.5, minMarketN: 200, minSideN: 150, ...base };
+  const defaults: JudgeOptions = { minOdds: 1.3, maxOdds: 2.5, minMarketN: 200, ...base };
   return (odds: Odds, o: Partial<JudgeOptions> = {}): JudgeOutput | null =>
     judgeWith(games, odds, { ...defaults, ...o });
 }
@@ -111,10 +110,12 @@ function judgeWith(games: Game[], odds: Odds, opts: JudgeOptions): JudgeOutput |
     });
   };
 
-  const sh = pick(games, (g) => g[0], h, opts.minSideN); // 홈 승: 홈 배당이 비슷한 경기
-  const sa = pick(games, (g) => g[1], a, opts.minSideN); // 원정 승: 원정 배당이 비슷한 경기
-  add('home', odds.home, stat3(sh, (g) => (g[2] > g[3] ? 1 : -1)));
-  add('away', odds.away, stat3(sa, (g) => (g[3] > g[2] ? 1 : -1)));
+  // 홈 승/원정 승도 핸디캡과 같은 표본(FM)으로 본다 — 표본이 다르면 역배 +1.5(= 역배 승 + 1점차 패)가
+  // 역배 승보다 몇 %씩 더 잘 맞는 것처럼 나와서, 일반승이 나은 경기에도 플핸을 추천하는 문제가 있었다
+  const favRes = (m: number): 1 | -1 => (m > 0 ? 1 : -1);
+  const dogRes = (m: number): 1 | -1 => (m < 0 ? 1 : -1);
+  add('home', odds.home, stat3(FM, favIsHome ? favRes : dogRes));
+  add('away', odds.away, stat3(FM, favIsHome ? dogRes : favRes));
 
   const L = odds.line;
   if (L != null && L >= 0) {
