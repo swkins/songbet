@@ -21,8 +21,8 @@ interface SportJudges { key: string; label: string; emoji: string; leagues: Leag
 
 const VOLLEY_FIELDS: OddsField[] = [
   { key: 'home', label: '홈 승' }, { key: 'away', label: '원정 승' },
-  { key: 'm15', label: '정배 -1.5 마핸' }, { key: 'o35', label: '3.5 오버' },
-  { key: 'u45', label: '4.5 언더' }, { key: 'p25', label: '역배 +2.5 플핸' },
+  { key: 'm15', label: '정배 -1.5 마핸' }, { key: 'p25', label: '역배 +2.5 플핸' },
+  { key: 'o35', label: '3.5 오버' }, { key: 'u45', label: '4.5 언더' },
 ]
 
 const JUDGES: SportJudges[] = [
@@ -79,8 +79,9 @@ export default function BetAnalysisModal({ onClose }: { onClose: () => void }) {
   })
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" style={{ maxWidth: 720 }} onClick={e => e.stopPropagation()}>
+    // 바깥을 눌러도 닫히지 않음 — 오른쪽 위 X로만 닫는다 (입력하다 실수로 날아가지 않게)
+    <div className="modal-overlay">
+      <div className="modal" style={{ maxWidth: 720 }}>
         <div className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <TrendingUp size={16} color="var(--gold)" /> 베팅분석 · 가치판단기
           <button onClick={() => setRaw({})} title="배당 초기화" style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex' }}><RotateCcw size={14} /></button>
@@ -145,7 +146,7 @@ export default function BetAnalysisModal({ onClose }: { onClose: () => void }) {
                       </tr>
                     </thead>
                     <tbody>
-                      {out.bets.map(b => <JudgeRow key={b.key} b={b} recommended={recommendedKeys.has(b.key)} />)}
+                      {[...out.bets].sort((x, y) => league.fields.findIndex(f => f.key === x.key) - league.fields.findIndex(f => f.key === y.key)).map(b => <JudgeRow key={b.key} b={b} recommended={recommendedKeys.has(b.key)} />)}
                     </tbody>
                   </table>
                 </div>
