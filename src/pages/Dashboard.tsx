@@ -3866,7 +3866,7 @@ export default function Dashboard() {
               {analysisOpened && (
                 <div style={{ display: sidePanel === 'analysis' ? undefined : 'none' }}>
                   <Suspense fallback={analysisFallback(sidePanelTabs)}>
-                    <BetAnalysisPanel tabs={sidePanelTabs} />
+                    <BetAnalysisPanel tabs={sidePanelTabs} active={sidePanel === 'analysis'} />
                   </Suspense>
                 </div>
               )}

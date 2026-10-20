@@ -546,6 +546,8 @@ tr:hover td { background: var(--bg-hover); }
 .dashboard-side { display: flex; flex-direction: column; gap: 10px; width: 100%; }
 .dashboard-bets { width: 100%; }
 .dashboard-analysis { width: 100%; min-width: 0; }
+/* 베팅분석 입력칸 안내 글씨 — 칸이 좁아도 다 보이게 작게 */
+.bet-odds-input::placeholder { font-size: 11px; letter-spacing: -0.3px; }
 
 /* ── 사이트 현황(채굴) 카드 그리드 ── */
 .mining-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 8px; }

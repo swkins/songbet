@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { RotateCcw } from 'lucide-react'
 import type { Odds as VolleyOdds, Game as VolleyGame } from '../lib/volleyJudge'
 import { cleanGames, type Game as BasketGame, type Odds as BasketOdds } from '../lib/basketJudge'
@@ -63,7 +63,7 @@ const VOLLEY_FIELDS: OddsField[] = [
 
 const BASKET_FIELDS: OddsField[] = [
   { key: 'home', label: '홈 승', required: true }, { key: 'away', label: '원정 승', required: true },
-  { key: 'line', label: '기준점 (예: 5.5)', kind: 'line' },
+  { key: 'line', label: '기준점 (5 → 5.5 자동)', kind: 'line' },
   { key: 'hh', label: '홈 핸디캡' }, { key: 'ah', label: '원정 핸디캡' },
 ]
 
@@ -165,18 +165,28 @@ const JUDGES: SportJudges[] = [
 
 const signedPct = (v: number) => `${v > 0 ? '+' : ''}${(v * 100).toFixed(1)}%`
 
-// tabs: 카드 제목 자리에 들어갈 사이트 현황 / 베팅분석 전환 버튼
-export default function BetAnalysisPanel({ tabs }: { tabs: ReactNode }) {
+// tabs: 카드 제목 자리에 들어갈 사이트 현황 / 베팅분석 전환 버튼 · active: 지금 화면에 보이는지 (보일 때 홈 승 칸에 커서)
+export default function BetAnalysisPanel({ tabs, active = true }: { tabs: ReactNode; active?: boolean }) {
   const [sportKey, setSportKey] = useState('volleyball')
   const sport = JUDGES.find(s => s.key === sportKey)!
   const [leagueKey, setLeagueKey] = useState<string | null>(sport.leagues[0]?.key ?? null)
   const league = sport.leagues.find(l => l.key === leagueKey) ?? null
   const [raw, setRaw] = useState<Record<string, string>>({})
   const inputRefs = useRef<(HTMLInputElement | null)[]>([])
+  // 항상 홈 승 칸에 커서 — 처음 보일 때, 종목·리그를 바꿀 때, 초기화할 때 바로 홈 승부터 칠 수 있게
+  const [focusTick, setFocusTick] = useState(0)
+  useEffect(() => {
+    if (active) inputRefs.current[0]?.focus({ preventScroll: true })
+  }, [active, sportKey, leagueKey, focusTick])
+  function reset() { setRaw({}); setFocusTick(t => t + 1) }
+  // 기준점은 정수만 치고 넘어가면 .5를 붙인다 (5 → 5.5, 13 → 13.5). 정수 기준점은 5.0처럼 소수점까지 치면 그대로 둔다
+  function finishLine(key: string) {
+    setRaw(p => /^\d+$/.test(p[key] ?? '') ? { ...p, [key]: `${p[key]}.5` } : p)
+  }
 
   function pickSport(key: string) {
     const s = JUDGES.find(x => x.key === key)!
-    setSportKey(key); setLeagueKey(s.leagues[0]?.key ?? null); setRaw({})
+    setSportKey(key); setLeagueKey(s.leagues[0]?.key ?? null); setRaw({}); setFocusTick(t => t + 1)
   }
   // 숫자 3자리만 치면 배당으로 바꾸고(123 → 1.23) 다음 칸으로 이동
   function change(idx: number, key: string, v: string, kind: 'odds' | 'line' = 'odds') {
@@ -222,7 +232,7 @@ export default function BetAnalysisPanel({ tabs }: { tabs: ReactNode }) {
     <div className="card" style={{ padding: '10px 14px' }}>
         <div className="flex-between mb-10">
           {tabs}
-          <button onClick={() => setRaw({})} title="배당 초기화" style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-secondary)', cursor: 'pointer', padding: '3px 8px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-body)' }}><RotateCcw size={12} /> 초기화</button>
+          <button onClick={reset} title="배당 초기화" style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-secondary)', cursor: 'pointer', padding: '3px 8px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-body)' }}><RotateCcw size={12} /> 초기화</button>
         </div>
 
         {/* 종목 */}
@@ -243,7 +253,7 @@ export default function BetAnalysisPanel({ tabs }: { tabs: ReactNode }) {
           <>
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 4 }}>
               {sport.leagues.map(l => (
-                <button key={l.key} onClick={() => { setLeagueKey(l.key); setRaw({}) }} style={{ ...chip(l.key === leagueKey), fontSize: 11, padding: '4px 10px' }}>{l.label}</button>
+                <button key={l.key} onClick={() => { setLeagueKey(l.key); setRaw({}); setFocusTick(t => t + 1) }} style={{ ...chip(l.key === leagueKey), fontSize: 11, padding: '4px 10px' }}>{l.label}</button>
               ))}
             </div>
             {league && <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 6 }}>기준 데이터: {league.note}</div>}
@@ -268,11 +278,12 @@ export default function BetAnalysisPanel({ tabs }: { tabs: ReactNode }) {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '6px 16px', marginBottom: 12 }}>
               {league.fields.map((f, i) => (
                 <label key={f.key} style={{ display: 'flex', alignItems: 'center', gap: 8, gridColumn: f.kind === 'line' ? '1 / -1' : undefined }}>
-                  <span style={{ flex: '0 0 140px', fontSize: 11, fontWeight: 700, color: f.required ? 'var(--text-primary)' : f.kind === 'line' ? 'var(--gold)' : 'var(--text-muted)' }}>{fieldLabel(f)}{f.required && ' *'}</span>
-                  <input ref={el => { inputRefs.current[i] = el }} className="form-input" inputMode="decimal" placeholder={f.kind === 'line' ? '점수 (예: 5.5)' : '배당 (185=1.85)'}
+                  <span style={{ flex: '0 0 120px', fontSize: 11, fontWeight: 700, color: f.required ? 'var(--text-primary)' : f.kind === 'line' ? 'var(--gold)' : 'var(--text-muted)' }}>{fieldLabel(f)}{f.required && ' *'}</span>
+                  <input ref={el => { inputRefs.current[i] = el }} className="form-input bet-odds-input" inputMode="decimal" placeholder={f.kind === 'line' ? '5 → 5.5' : '배당 (185=1.85)'}
+                    onBlur={f.kind === 'line' ? () => finishLine(f.key) : undefined}
                     value={raw[f.key] ?? ''} onChange={e => change(i, f.key, e.target.value, f.kind)} onFocus={e => e.target.select()}
                     onKeyDown={e => { if (e.key === 'Enter') { const el = inputRefs.current[i + 1]; if (el) { el.focus(); el.select() } } }}
-                    style={{ flex: '0 1 160px', minWidth: 0, fontSize: 13, padding: '6px 8px', fontFamily: 'var(--font-mono)' }} />
+                    style={{ flex: '1 1 0', maxWidth: 170, minWidth: 0, fontSize: 13, padding: '6px 8px', fontFamily: 'var(--font-mono)' }} />
                 </label>
               ))}
             </div>
