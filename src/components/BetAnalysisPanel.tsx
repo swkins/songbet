@@ -370,16 +370,27 @@ export default function BetAnalysisPanel({ tabs, active = true }: { tabs: ReactN
 // 접어 두면 한 줄 요약(시즌 반영 리그 수 / 시즌 정보 없는 리그 수)만 보인다
 function DataStatus({ leagues }: { leagues: LeagueJudge[] }) {
   const [open, setOpen] = useState(false)
-  const rows = leagues.map(l => ({ l, d: l.data() }))
-  const seasons = [...new Set(rows.flatMap(r => r.d.seasons.map(s => s.season)))].sort((a, b) => a - b)
-  const withSeason = rows.filter(r => r.d.seasons.length > 0).length
-  const label = (y: number) => `${String(y - 1).slice(2)}-${String(y).slice(2)}`
+  // 리그마다 있어야 할 시즌 = 기준 데이터 설명의 "2021-22 ~ 2025-26" 범위 (+ 실제로 들어 있는 시즌)
+  const expectedOf = (note: string) => {
+    const m = note.match(/(\d{4})-\d{2}\s*~\s*(\d{4})-\d{2}/)
+    if (!m) return []
+    const out: number[] = []
+    for (let y = +m[1] + 1; y <= +m[2] + 1; y++) out.push(y)
+    return out
+  }
+  const rows = leagues.map(l => {
+    const d = l.data()
+    const have = new Map(d.seasons.map(x => [x.season, x]))
+    return { l, d, have, expected: [...new Set([...expectedOf(l.note), ...d.seasons.map(x => x.season)])] }
+  })
+  const seasons = [...new Set(rows.flatMap(r => r.expected))].sort((a, b) => a - b)
+  const missing = rows.reduce((k, r) => k + r.expected.filter(y => !r.have.has(y)).length, 0)
+  const label = (y: number) => `${String(y - 1).slice(2)}/${String(y).slice(2)}`
   const cell: React.CSSProperties = { padding: '3px 6px', fontSize: 10, whiteSpace: 'nowrap', borderBottom: '1px solid var(--border-light)' }
   return (
     <div style={{ marginBottom: 6 }}>
       <button onClick={() => setOpen(o => !o)} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: 10, fontFamily: 'var(--font-body)', color: 'var(--text-muted)' }}>
-        {open ? '▾' : '▸'} 데이터 현황 — 시즌 반영 <b style={{ color: 'var(--green)' }}>{withSeason}</b>개 리그
-        {rows.length - withSeason > 0 && <> · 시즌 정보 없음(가중 미적용) <b style={{ color: 'var(--orange)' }}>{rows.length - withSeason}</b>개</>}
+        {open ? '▾' : '▸'} 데이터 현황 — 시즌 파일 {missing === 0 ? <b style={{ color: 'var(--green)' }}>모두 있음</b> : <>없는 시즌 <b style={{ color: 'var(--orange)' }}>{missing}</b>개</>}
       </button>
       {open && (
         <div style={{ overflowX: 'auto', marginTop: 4, border: '1px solid var(--border)', borderRadius: 6 }}>
@@ -388,29 +399,34 @@ function DataStatus({ leagues }: { leagues: LeagueJudge[] }) {
               <tr>
                 <th style={{ ...cell, textAlign: 'left' }}>리그</th>
                 {seasons.map(y => <th key={y} style={{ ...cell, textAlign: 'center' }}>{label(y)}</th>)}
-                <th style={{ ...cell, textAlign: 'right' }}>합계</th>
+                <th style={{ ...cell, textAlign: 'right' }}>판정에 쓰는 경기</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map(({ l, d }) => (
+              {rows.map(({ l, d, have, expected }) => (
                 <tr key={l.key}>
                   <td style={{ ...cell, fontWeight: 700 }}>{l.label}</td>
-                  {d.seasons.length === 0 ? (
-                    <td colSpan={seasons.length || 1} style={{ ...cell, textAlign: 'center', color: 'var(--orange)' }}>시즌 정보 없음 — 파일 다시 필요 (모든 시즌 같은 비중)</td>
-                  ) : seasons.map(y => {
-                    const s = d.seasons.find(x => x.season === y)
+                  {seasons.map(y => {
+                    const s = have.get(y)
+                    if (s) return (
+                      <td key={y} style={{ ...cell, textAlign: 'center', color: 'var(--green)' }}>
+                        ✓ <span style={{ color: 'var(--text-primary)' }}>{s.n}</span><span style={{ color: 'var(--text-muted)' }}> · {Math.round(s.w * 100)}%</span>
+                      </td>
+                    )
                     return (
-                      <td key={y} style={{ ...cell, textAlign: 'center', color: s ? 'var(--text-primary)' : 'var(--text-muted)' }}>
-                        {s ? <>{s.n}<span style={{ color: s.w >= 0.99 ? 'var(--green)' : 'var(--text-muted)' }}> · {Math.round(s.w * 100)}%</span></> : '없음'}
+                      <td key={y} style={{ ...cell, textAlign: 'center', color: expected.includes(y) ? 'var(--orange)' : 'var(--text-muted)' }}>
+                        {expected.includes(y) ? '✗ 없음' : '–'}
                       </td>
                     )
                   })}
-                  <td style={{ ...cell, textAlign: 'right' }}>{d.total}경기</td>
+                  <td style={{ ...cell, textAlign: 'right', color: d.seasons.length ? 'var(--text-primary)' : 'var(--orange)' }}>
+                    {d.seasons.length ? `${d.total}경기` : `옛 데이터 ${d.total}경기 (시즌 구분 없음)`}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
-          <div style={{ fontSize: 9, color: 'var(--text-muted)', padding: '3px 6px' }}>칸 = 경기 수 · 반영도(가장 최근 시즌 100%, 한 시즌 오래될수록 ×0.8, 최소 30%)</div>
+          <div style={{ fontSize: 9, color: 'var(--text-muted)', padding: '3px 6px' }}>✓ 경기 수 · 반영도(가장 최근 시즌 100%, 한 시즌 오래될수록 ×0.8, 최소 30%) · ✗ 없음 = 그 시즌 파일 필요 · 시즌 구분 없는 옛 데이터는 모든 시즌 같은 비중</div>
         </div>
       )}
     </div>
