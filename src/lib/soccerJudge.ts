@@ -62,11 +62,17 @@ const std = (xs: number[]) => {
 const isOverRule = (fav: number, draw: number) => Math.round(fav * 100) >= 101 && Math.round(fav * 100) <= 139 && draw >= 5.5;
 
 // 2.5 오버 룰 기준 배당 = 그 리그 과거 같은 조건 경기의 손익분기 × 1.05 (5% 여유). 시즌 가중 적중률로 계산해서 새 시즌을 넣으면 같이 바뀐다
-export function overRuleMin(rawGames: Game[]): number | undefined {
+// 홈정배 / 원정정배 따로 계산한다 (예: EPL 홈정배 70% → 1.51, 원정정배 53% → 2.00). 같은 조건 경기가 10경기 미만이면 기준 없음
+export type OverMin = { home?: number; away?: number };
+export function overRuleMin(rawGames: Game[]): OverMin {
   const games = recentSeasons(cleanGames(rawGames));
   const weight = seasonWeigher(games);
-  const s = weightedStat(games.filter((g) => isOverRule(Math.min(g[0], g[1]), g[5])), weight, (g) => (g[2] + g[3] > 2.5 ? 1 : -1));
-  return s.pw ? Math.ceil((1.05 / s.pw) * 100) / 100 : undefined;
+  const min = (favHome: boolean) => {
+    const rows = games.filter((g) => (g[0] <= g[1]) === favHome && isOverRule(Math.min(g[0], g[1]), g[5]));
+    const s = weightedStat(rows, weight, (g) => (g[2] + g[3] > 2.5 ? 1 : -1));
+    return rows.length >= 10 && s.pw ? Math.ceil((1.05 / s.pw) * 100) / 100 : undefined;
+  };
+  return { home: min(true), away: min(false) };
 }
 
 // 내 룰북 (정배 배당 기준). 1.60~1.68 · 2.20 이상 · 1.10 미만은 룰 없음
@@ -92,7 +98,7 @@ export interface JudgeOptions {
   minOdds: number; // 추천 하한 사이트 배당
   maxOdds: number; // 추천 상한 사이트 배당 (미만)
   sampleN: number; // 비교 경기 수 (세 배당이 가장 비슷한 경기)
-  overMin?: number; // 2.5 오버 룰 기준 배당 (리그별, overRuleMin)
+  overMin?: OverMin; // 2.5 오버 룰 기준 배당 (리그별 · 홈정배/원정정배 따로, overRuleMin)
 }
 
 // 판정에 쓸 수 없는 경기 제외: 배당 1.00 이하(빈 값)
@@ -183,6 +189,6 @@ function judgeWith(rows: Row[], sd: number[], odds: Odds, opts: JudgeOptions): J
 
   return {
     fav, favIsHome, margin: 1 / h + 1 / d + 1 / a - 1, marketN: mk.length, expMargin,
-    bets, recommended, leastLoss, rule: ruleFor(fav, favIsHome, d, opts.overMin),
+    bets, recommended, leastLoss, rule: ruleFor(fav, favIsHome, d, favIsHome ? opts.overMin?.home : opts.overMin?.away),
   };
 }
