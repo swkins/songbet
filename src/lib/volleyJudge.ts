@@ -1,4 +1,4 @@
-import { EU_VOLLEY_GAMES, type Game } from '../data/euVolleyGames';
+export type Game = [number, number, number, number];
 
 export type BetKey = 'home' | 'away' | 'm15' | 'o35' | 'u45' | 'p25';
 
@@ -41,11 +41,11 @@ const NAMES: Record<BetKey, string> = {
 };
 
 // 기준 배당 x 주변 로그 창을 넓혀가며 최소 n 경기 확보
-function pick(getX: (g: Game) => number, x: number, minN: number): { rows: Game[]; w: number } {
+function pick(games: Game[], getX: (g: Game) => number, x: number, minN: number): { rows: Game[]; w: number } {
   let w = 0.03;
   let rows: Game[] = [];
   while (w <= 0.3) {
-    rows = EU_VOLLEY_GAMES.filter((g) => Math.abs(Math.log(getX(g) / x)) <= w);
+    rows = games.filter((g) => Math.abs(Math.log(getX(g) / x)) <= w);
     if (rows.length >= minN) break;
     w += 0.01;
   }
@@ -69,14 +69,27 @@ function strengthOf(site: number, be: number, ev: number): { label: string; v: 0
   return { label: '강 1단위', v: 1 };
 }
 
-export function judge(odds: Odds, opts = { minOdds: 1.3, maxOdds: 2.0 }): JudgeOutput | null {
+export interface JudgeOptions {
+  minOdds: number; // 추천 하한 사이트 배당
+  maxOdds: number; // 추천 상한 사이트 배당 (미만)
+  minMarketN: number; // 마켓(-1.5/오버/언더/플핸) 표본 최소 경기 수
+  minSideN: number; // 홈 승/원정 승 표본 최소 경기 수
+}
+
+export function createJudge(games: Game[], base: Partial<JudgeOptions> = {}) {
+  const defaults: JudgeOptions = { minOdds: 1.3, maxOdds: 2.0, minMarketN: 150, minSideN: 120, ...base };
+  return (odds: Odds, o: Partial<JudgeOptions> = {}): JudgeOutput | null =>
+    judgeWith(games, odds, { ...defaults, ...o });
+}
+
+function judgeWith(games: Game[], odds: Odds, opts: JudgeOptions): JudgeOutput | null {
   const { home: h, away: a } = odds;
   if (!h || !a) return null;
   const fav = Math.min(h, a);
   const favIsHome = h <= a;
 
   // 정배 쪽(fs)과 역배 쪽(us)의 세트 수로 환산
-  const mk = pick((g) => Math.min(g[0], g[1]), fav, 250);
+  const mk = pick(games, (g) => Math.min(g[0], g[1]), fav, opts.minMarketN);
   const F = mk.rows.map((g) => {
     const f = g[0] <= g[1];
     return { fs: f ? g[2] : g[3], us: f ? g[3] : g[2] };
@@ -96,8 +109,8 @@ export function judge(odds: Odds, opts = { minOdds: 1.3, maxOdds: 2.0 }): JudgeO
     });
   };
 
-  const sh = pick((g) => g[0], h, 200); // 홈 승: 홈 배당이 비슷한 경기
-  const sa = pick((g) => g[1], a, 200); // 원정 승: 원정 배당이 비슷한 경기
+  const sh = pick(games, (g) => g[0], h, opts.minSideN); // 홈 승: 홈 배당이 비슷한 경기
+  const sa = pick(games, (g) => g[1], a, opts.minSideN); // 원정 승: 원정 배당이 비슷한 경기
   add('home', odds.home, stat(sh.rows, (g) => g[2] > g[3]));
   add('away', odds.away, stat(sa.rows, (g) => g[3] > g[2]));
   add('m15', odds.m15, stat(F, (x) => x.fs === 3 && x.us <= 1));

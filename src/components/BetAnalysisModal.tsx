@@ -1,16 +1,21 @@
 import { useRef, useState } from 'react'
 import { X, TrendingUp, RotateCcw } from 'lucide-react'
-import { judge, type Odds, type BetKey, type BetResult } from '../lib/volleyJudge'
+import type { Odds, BetKey, BetResult, JudgeOutput } from '../lib/volleyJudge'
+import { judgeKrWomen } from '../leagues/krWomen'
+import { judgeItMen } from '../leagues/itMen'
+import { judgeItWomen } from '../leagues/itWomen'
+import { judgeTrMen } from '../leagues/trMen'
+import { judgeTrWomen } from '../leagues/trWomen'
 
 /* ── 베팅분석 — 종목 → 리그를 고르고 배당을 넣으면 과거 경기 데이터로 각 베팅의 가치(기대수익)를 판정 ──
-   판정기는 종목·리그별로 등록한다. 지금은 배구(유럽: 이탈리아·터키 남녀) 하나뿐이고,
-   다른 종목/리그는 과거 데이터가 생기면 JUDGES에 추가하면 된다. */
+   판정기는 종목·리그별로 등록한다(리그마다 과거 경기 데이터 + 최소 표본 수가 다름 — src/leagues).
+   지금은 배구 5개 리그이고, 다른 종목/리그는 과거 데이터가 생기면 JUDGES에 추가하면 된다. */
 
 interface OddsField { key: BetKey; label: string }
 interface LeagueJudge {
   key: string; label: string; note: string
   fields: OddsField[]
-  run: (odds: Odds) => ReturnType<typeof judge>
+  run: (odds: Odds) => JudgeOutput | null
 }
 interface SportJudges { key: string; label: string; emoji: string; leagues: LeagueJudge[] }
 
@@ -26,7 +31,11 @@ const JUDGES: SportJudges[] = [
   { key: 'basketball', label: '농구', emoji: '🏀', leagues: [] },
   {
     key: 'volleyball', label: '배구', emoji: '🏐', leagues: [
-      { key: 'eu', label: '유럽 (이탈리아·터키 남녀)', note: '2021-22 ~ 2025-26 정규시즌 3,364경기 (BetExplorer)', fields: VOLLEY_FIELDS, run: judge },
+      { key: 'krWomen', label: '한국 여자', note: '2021-22 ~ 2025-26 정규시즌 615경기 (BetExplorer)', fields: VOLLEY_FIELDS, run: judgeKrWomen },
+      { key: 'itMen', label: '이탈리아 남자', note: '2021-22 ~ 2025-26 정규시즌 683경기 (BetExplorer)', fields: VOLLEY_FIELDS, run: judgeItMen },
+      { key: 'itWomen', label: '이탈리아 여자', note: '2021-22 ~ 2025-26 정규시즌 910경기 (BetExplorer)', fields: VOLLEY_FIELDS, run: judgeItWomen },
+      { key: 'trMen', label: '터키 남자', note: '2021-22 ~ 2025-26 정규시즌 861경기 (BetExplorer)', fields: VOLLEY_FIELDS, run: judgeTrMen },
+      { key: 'trWomen', label: '터키 여자', note: '2021-22 ~ 2025-26 정규시즌 910경기 (BetExplorer)', fields: VOLLEY_FIELDS, run: judgeTrWomen },
     ],
   },
   { key: 'esports', label: 'LOL', emoji: '🎮', leagues: [] },
@@ -47,9 +56,11 @@ export default function BetAnalysisModal({ onClose }: { onClose: () => void }) {
     const s = JUDGES.find(x => x.key === key)!
     setSportKey(key); setLeagueKey(s.leagues[0]?.key ?? null); setRaw({})
   }
-  // 마진율 계산기처럼 숫자 3자리면 배당으로 바꾸고(185 → 1.85) 다음 칸으로 이동
+  // 숫자 3자리만 치면 배당으로 바꾸고(123 → 1.23) 다음 칸으로 이동
   function change(idx: number, key: string, v: string) {
-    const clean = v.replace(/[^0-9.]/g, '')
+    let clean = v.replace(/[^0-9.]/g, '')
+    // 이미 배당(1.85)이 들어있는 칸에 숫자를 더 치면 덧붙이지 않고 새로 친 숫자부터 다시 받는다
+    if (/^\d\.\d{2}$/.test(raw[key] ?? '') && /^\d\.\d{3,}$/.test(clean)) clean = clean.slice(4)
     const isTriple = /^\d{3}$/.test(clean)
     setRaw(p => ({ ...p, [key]: isTriple ? (Number(clean) / 100).toFixed(2) : clean }))
     // 바로 다음 칸으로 포커스 — 빠르게 이어 치거나 붙여넣어도 다음 숫자가 이 칸에 덧붙지 않게 즉시 옮긴다
@@ -109,7 +120,7 @@ export default function BetAnalysisModal({ onClose }: { onClose: () => void }) {
                 <label key={f.key} style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                   <span style={{ fontSize: 10, fontWeight: 700, color: i < 2 ? 'var(--text-primary)' : 'var(--text-muted)' }}>{f.label}{i < 2 && ' *'}</span>
                   <input ref={el => { inputRefs.current[i] = el }} className="form-input" inputMode="decimal" placeholder="배당 (185=1.85)"
-                    value={raw[f.key] ?? ''} onChange={e => change(i, f.key, e.target.value)}
+                    value={raw[f.key] ?? ''} onChange={e => change(i, f.key, e.target.value)} onFocus={e => e.target.select()}
                     style={{ fontSize: 13, padding: '6px 8px', fontFamily: 'var(--font-mono)' }} />
                 </label>
               ))}
