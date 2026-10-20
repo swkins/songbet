@@ -260,6 +260,7 @@ export default function BetAnalysisPanel({ tabs, active = true }: { tabs: ReactN
   const [leagueKey, setLeagueKey] = useState<string | null>(sport.leagues[0]?.key ?? null)
   const league = sport.leagues.find(l => l.key === leagueKey) ?? null
   const [raw, setRaw] = useState<Record<string, string>>({})
+  const [openRow, setOpenRow] = useState<string | null>(null)  // 판정 표에서 눌러서 상세를 펼친 줄
   const inputRefs = useRef<(HTMLInputElement | null)[]>([])
   // 항상 홈 승 칸에 커서 — 처음 보일 때, 종목·리그를 바꿀 때, 초기화할 때 바로 홈 승부터 칠 수 있게
   const [focusTick, setFocusTick] = useState(0)
@@ -338,7 +339,6 @@ export default function BetAnalysisPanel({ tabs, active = true }: { tabs: ReactN
     <div className="card" style={{ padding: '10px 14px' }}>
         <div className="flex-between mb-10">
           {tabs}
-          <button onClick={reset} title="배당 초기화" style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-secondary)', cursor: 'pointer', padding: '3px 8px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-body)' }}><RotateCcw size={12} /> 초기화</button>
         </div>
 
         {/* 종목 */}
@@ -357,25 +357,13 @@ export default function BetAnalysisPanel({ tabs, active = true }: { tabs: ReactN
           </div>
         ) : (
           <>
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 4 }}>
+            {/* 리그 칩 + 리그 정보(ⓘ) — 데이터 현황·기준 데이터·리그 특성·판정 기준은 ⓘ에 마우스를 올리거나 눌렀을 때만 */}
+            <div style={{ position: 'relative', display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
               {sport.leagues.map(l => (
                 <button key={l.key} onClick={() => { setLeagueKey(l.key); setRaw({}); setFocusTick(t => t + 1) }} style={{ ...chip(l.key === leagueKey), fontSize: 11, padding: '4px 10px' }}>{l.label}</button>
               ))}
+              {league && <LeagueInfo league={league} />}
             </div>
-            {league && <DataStatus league={league} />}
-            {league && <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 6 }}>기준 데이터: {league.note}</div>}
-            {league && (() => {
-              const pr = league.profile()
-              const items = pr.items
-              return (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 12px', padding: '7px 10px', marginBottom: 12, borderRadius: 8, background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}>
-                  <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--gold)' }}>{league.label} 특성 ({pr.n}경기 · {pr.weighted ? '최근 시즌 가중' : '시즌 정보 없음, 가중 미적용'})</span>
-                  {items.map(([k, v]) => (
-                    <span key={k} style={{ fontSize: 10, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{k} <b style={{ color: 'var(--text-primary)' }}>{v}</b></span>
-                  ))}
-                </div>
-              )
-            })()}
           </>
         )}
 
@@ -400,27 +388,26 @@ export default function BetAnalysisPanel({ tabs, active = true }: { tabs: ReactN
             <button onClick={reset} title="입력한 배당 모두 지우기 (Esc)" style={{ marginTop: -4, marginBottom: 10, background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-secondary)', cursor: 'pointer', padding: '4px 10px', display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-body)' }}><RotateCcw size={12} /> 입력 지우기</button>
 
             {!out ? (
-              <div style={{ padding: '14px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>{requiredLabels} 배당을 넣으면 판정합니다 (나머지는 있는 것만 넣어도 됨{league.fields.some(f => f.kind === 'line') ? ' · 마핸/플핸은 기준점도 넣어야 판정' : ''})</div>
+              <div style={{ padding: '14px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>{requiredLabels} 배당을 넣으면 판정</div>
             ) : (
               <>
-                <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', fontSize: 11, color: 'var(--text-secondary)', marginBottom: 8 }}>
+                <div title={`비교 경기 ${out.marketN}경기${out.expMargin != null ? ` · 비교 경기 정배 평균 점수차 ${out.expMargin >= 0 ? '+' : ''}${out.expMargin.toFixed(1)}` : ''}`}
+                  style={{ display: 'flex', gap: 14, flexWrap: 'wrap', fontSize: 11, color: 'var(--text-secondary)', marginBottom: 8 }}>
                   <span>정배 <b style={{ color: 'var(--text-primary)' }}>{out.favIsHome ? '홈' : '원정'} {out.fav.toFixed(2)}</b></span>
                   <span>마진 <b style={{ color: out.margin <= 0.05 ? 'var(--green)' : 'var(--orange)' }}>{pct(out.margin)}</b></span>
-                  <span>비교 경기 <b style={{ color: 'var(--text-primary)' }}>{out.marketN}</b></span>
                   {out.rule && <span>내 룰 <b style={{ color: out.rule.keys.length ? 'var(--gold)' : 'var(--text-muted)' }}>{out.rule.text}</b></span>}
-                  {out.expMargin != null && <span>비교 경기 정배 평균 점수차 <b style={{ color: 'var(--text-primary)' }}>{out.expMargin >= 0 ? '+' : ''}{out.expMargin.toFixed(1)}</b></span>}
                 </div>
 
                 <div className="table-wrap">
                   <table className="bet-judge-table" style={{ width: '100%' }}>
                     <thead>
                       <tr>
-                        <th>베팅</th><th className="td-right">배당</th><th className="td-right">과거 적중률</th>
+                        <th>베팅</th><th className="td-right">배당</th><th className="td-right">적중률</th>
                         <th className="td-right">손익분기</th><th className="td-right">기대수익</th><th>베팅 강도</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {[...out.bets].sort((x, y) => league.fields.findIndex(f => f.key === fieldKeyOf(x.key)) - league.fields.findIndex(f => f.key === fieldKeyOf(y.key))).map(b => <JudgeRow key={b.key} b={b} name={betName(b)} recommended={recommendedKeys.has(b.key)} rule={ruleKeys.has(b.key)} ruleMin={out.rule?.min?.[b.key]} />)}
+                      {[...out.bets].sort((x, y) => league.fields.findIndex(f => f.key === fieldKeyOf(x.key)) - league.fields.findIndex(f => f.key === fieldKeyOf(y.key))).map(b => <JudgeRow key={b.key} b={b} name={betName(b)} recommended={recommendedKeys.has(b.key)} rule={ruleKeys.has(b.key)} ruleMin={out.rule?.min?.[b.key]} recNote={league.recNote} open={openRow === b.key} onToggle={() => setOpenRow(k => k === b.key ? null : b.key)} />)}
                     </tbody>
                   </table>
                 </div>
@@ -439,15 +426,50 @@ export default function BetAnalysisPanel({ tabs, active = true }: { tabs: ReactN
                       {out.leastLoss && <span style={{ color: 'var(--text-secondary)' }}> — 그나마 손해가 적은 건 <b>{betName(out.leastLoss)}</b> {out.leastLoss.site.toFixed(2)} ({signedPct(out.leastLoss.ev)})</span>}
                     </>
                   )}
-                  <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4 }}>
-                    추천 조건: {league.recNote} · ±는 95% 오차<br />
-                    베팅 강도: 0 패스(기대수익 마이너스) · 1~10 플러스(기대수익 크고 확실할수록 높음 — 1~3 약은 오차에 묻히는 작은 플러스)
-                  </div>
                 </div>
               </>
             )}
           </>
         )}
+    </div>
+  )
+}
+
+// 리그 정보 ⓘ — 마우스를 올리면 보이고, 누르면 고정(다시 누르거나 바깥을 누르면 닫힘).
+// 데이터 현황 · 기준 데이터 · 리그 특성 · 판정 기준(추천 조건·베팅 강도)을 한곳에 모아 평소 화면을 간단하게
+function LeagueInfo({ league }: { league: LeagueJudge }) {
+  const [hover, setHover] = useState(false)
+  const [pinned, setPinned] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!pinned) return
+    const close = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setPinned(false) }
+    document.addEventListener('mousedown', close)
+    return () => document.removeEventListener('mousedown', close)
+  }, [pinned])
+  const pr = league.profile()
+  const open = hover || pinned
+  return (
+    // 정보 창은 리그 줄(부모, position: relative) 기준으로 왼쪽에 맞춰 띄운다 — 버튼 위치와 상관없이 카드 안에 들어오게
+    <div ref={ref} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
+      <button onClick={() => setPinned(p => !p)} title="리그 정보" style={{ width: 24, height: 24, borderRadius: 12, cursor: 'pointer', fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-body)', border: `1px solid ${open ? 'var(--gold-border)' : 'var(--border)'}`, background: open ? 'var(--gold-bg)' : 'var(--bg-elevated)', color: open ? 'var(--gold)' : 'var(--text-muted)' }}>i</button>
+      {open && (
+        <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: 4, zIndex: 30, width: 'min(440px, 100%)', boxSizing: 'border-box', padding: '10px 12px', borderRadius: 8, background: 'var(--bg-card)', border: '1px solid var(--border)', boxShadow: '0 8px 24px rgba(0,0,0,0.45)' }}>
+          <DataStatus league={league} />
+          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 8 }}>기준 데이터: {league.note}</div>
+          <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--gold)', marginBottom: 4 }}>{league.label} 특성 ({pr.n}경기 · {pr.weighted ? '최근 시즌 가중' : '시즌 정보 없음, 가중 미적용'})</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px 12px', marginBottom: 8 }}>
+            {pr.items.map(([k, v]) => (
+              <span key={k} style={{ fontSize: 10, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{k} <b style={{ color: 'var(--text-primary)' }}>{v}</b></span>
+            ))}
+          </div>
+          <div style={{ fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.6, borderTop: '1px solid var(--border)', paddingTop: 6 }}>
+            추천 조건: {league.recNote} · ±는 95% 오차<br />
+            베팅 강도: 0 패스(기대수익 마이너스) · 1~10 플러스(기대수익 크고 확실할수록 높음 — 1~3 약은 오차에 묻히는 작은 플러스)<br />
+            표의 줄에 마우스를 올리거나 누르면 오차·경기 수 등 상세가 나옵니다
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -485,17 +507,25 @@ function strengthColor(v: number) {
 }
 
 // rule: 축구 내 룰북이 이 경기에서 고르는 베팅 (이름 옆에 '룰' 표시) · ruleMin: 룰 기준 배당 — 사이트 배당이 못 미치면 '미달'
-function JudgeRow({ b, name, recommended, rule = false, ruleMin }: { b: JudgeBet; name: string; recommended: boolean; rule?: boolean; ruleMin?: number }) {
+// 오차·경기 수·적특·배당범위 같은 상세는 평소엔 숨기고, 줄에 마우스를 올리면(툴팁) / 누르면(아래로 펼침) 보여준다
+function JudgeRow({ b, name, recommended, rule = false, ruleMin, recNote, open, onToggle }: { b: JudgeBet; name: string; recommended: boolean; rule?: boolean; ruleMin?: number; recNote: string; open: boolean; onToggle: () => void }) {
   const short = rule && ruleMin != null && b.site < ruleMin
   const evColor = b.ev > 0 ? 'var(--green)' : 'var(--red)'
+  const detail = [
+    `적중률 ${pct(b.hit)} ±${pct(b.se)} (비교 ${b.n}경기)`,
+    b.push ? `적특 ${pct(b.push)}` : null,
+    `기대수익 ${signedPct(b.ev)} ±${pct(b.err)}`,
+    short ? `룰 기준 ${ruleMin!.toFixed(2)} 이상 — 미달` : rule && ruleMin != null ? `룰 기준 ${ruleMin.toFixed(2)} 이상 — 충족` : null,
+    !b.eligible ? `추천 배당범위 밖 (${recNote.split(' · ')[0]})` : null,
+  ].filter(Boolean) as string[]
   return (
-    <tr style={recommended ? { background: 'var(--green-bg)' } : !b.eligible ? { opacity: 0.55 } : undefined}>
-      <td style={{ fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap' }}>{name}{rule && <span style={{ marginLeft: 4, padding: '0 4px', borderRadius: 3, fontSize: 9, color: short ? 'var(--text-muted)' : 'var(--gold)', border: `1px solid ${short ? 'var(--border)' : 'var(--gold-border)'}` }}>{short ? `룰 ${ruleMin!.toFixed(2)}↑ 미달` : '룰'}</span>}</td>
+    <>
+    <tr onClick={onToggle} title={detail.join('\n')} style={{ cursor: 'pointer', ...(recommended ? { background: 'var(--green-bg)' } : !b.eligible ? { opacity: 0.55 } : {}) }}>
+      <td style={{ fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap' }}>{name}{rule && <span style={{ marginLeft: 4, padding: '0 4px', borderRadius: 3, fontSize: 9, color: short ? 'var(--text-muted)' : 'var(--gold)', border: `1px solid ${short ? 'var(--border)' : 'var(--gold-border)'}` }}>{short ? '룰 미달' : '룰'}</span>}</td>
       <td className="td-right" style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{b.site.toFixed(2)}</td>
-      {/* 오차·경기 수 같은 보조 정보는 아랫줄에 작게 — 가로 스크롤 없이 표가 한 번에 보이게 */}
-      <td className="td-right" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>{pct(b.hit)}<div style={{ fontSize: 9, color: 'var(--text-muted)' }}>±{pct(b.se)}{b.push ? ` · 적특 ${pct(b.push)}` : ''} · {b.n}경기</div></td>
+      <td className="td-right" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>{pct(b.hit)}</td>
       <td className="td-right" style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{b.be.toFixed(2)}</td>
-      <td className="td-right" style={{ fontSize: 12, fontWeight: 700, color: evColor, whiteSpace: 'nowrap' }}>{signedPct(b.ev)}<div style={{ fontWeight: 400, fontSize: 9, color: 'var(--text-muted)' }}>±{pct(b.err)}</div></td>
+      <td className="td-right" style={{ fontSize: 12, fontWeight: 700, color: evColor, whiteSpace: 'nowrap' }}>{signedPct(b.ev)}</td>
       <td style={{ fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap', color: strengthColor(b.strength) }}>
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
           <span style={{ fontFamily: 'var(--font-num)', fontSize: 13 }}>{b.strength}<span style={{ fontSize: 9, opacity: 0.7 }}>/10</span></span>
@@ -504,8 +534,13 @@ function JudgeRow({ b, name, recommended, rule = false, ruleMin }: { b: JudgeBet
           </span>
           {b.strengthLabel}
         </span>
-        {!b.eligible && <div style={{ fontWeight: 400, fontSize: 9, color: 'var(--text-muted)' }}>배당범위 밖</div>}
       </td>
     </tr>
+    {open && (
+      <tr style={{ background: 'var(--bg-elevated)' }}>
+        <td colSpan={6} style={{ fontSize: 10, color: 'var(--text-secondary)', paddingTop: 4, paddingBottom: 6 }}>{detail.join(' · ')}</td>
+      </tr>
+    )}
+    </>
   )
 }
