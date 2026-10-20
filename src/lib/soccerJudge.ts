@@ -67,7 +67,9 @@ export interface JudgeOptions {
   winSeasonShare: number; // 승 베팅: 같은 배당대 과거 실적이 플러스였던 시즌 비율이 이 이상이어야 추천 (0.6)
   // 홈 승·원정 승(·같은 결과인 -0.5) 추천 상한 배당 (미만, 1.75) — 정배 승 1.90부터는 4개 리그 거의 모두 적중률 50% 밑이고,
   // 3시즌 백테스트(이전 시즌으로만 판정)에서 상한 1.90은 152건 +2.3%(EPL 77건 -10.9%), 1.75는 83건 +12.8%(EPL 26건 +3.6%)였다.
-  // 시즌 일관성 0.6을 더하면 67건 +8.0% — 둘 다 오차 ±15~17%라 확정은 아니지만 엉뚱한 추천이 크게 줄어 보수적으로 1.75 + 0.6
+  // 시즌 일관성 0.6을 더하면 67건 +8.0% — 둘 다 오차 ±15~17%라 확정은 아니지만 엉뚱한 추천이 크게 줄어 보수적으로 1.75 + 0.6.
+  // 이후 6개 리그 3시즌 재검토(추천 -3%까지 포함): 1.75 426건 적중 68.3% +2.5% → 1.55 257건 적중 73.9% +4.2%, 세 시즌 모두 플러스
+  // (+3.6% / +5.1% / +3.2%)라 1.55로 낮췄다. 시즌 일관성 0.75는 따로는 +3.7%였지만 상한과 같이 쓰면 +2.1%로 나빠져서 0.6 유지
   winMaxOdds: number;
   // 플핸 추가 확인(무·역배 배당이 비슷했던 경기 적중률)으로 패스시킬지 — 3시즌 검증(공정+5% 배당 가정)에서 걸러진 플핸이
   // 라리가 -0.7%·분데스 -9.8%·챔스 -13.1%로 도움이 됐지만 EPL은 +13.7%(좋은 걸 걸러냄)라 EPL은 참고만 (leagues/epl.ts)
@@ -94,7 +96,7 @@ export function createJudge(rawGames: Game[], base: Partial<JudgeOptions> = {}) 
   const P = games.map((g) => probs(g[0], g[5], g[1]));
   const sd = [0, 1, 2].map((i) => std(P.map((p) => p[i]))); // 세 확률을 같은 눈금으로 맞춰 거리 계산
   const rows = games.map((g, i) => ({ g, p: P[i], w: weight(g), favHome: g[0] <= g[1] }));
-  const defaults: JudgeOptions = { minOdds: 1.3, maxOdds: 3.0, winMaxOdds: 1.75, winSeasonShare: 0.6, plusGate: true, sampleN: 200, ...base };
+  const defaults: JudgeOptions = { minOdds: 1.3, maxOdds: 3.0, winMaxOdds: 1.55, winSeasonShare: 0.6, plusGate: true, sampleN: 200, ...base };
   const check = soccerOddsHistory(games, weight);
   return (odds: Odds, o: Partial<JudgeOptions> = {}): JudgeOutput | null =>
     judgeWith(rows, sd, check, odds, { ...defaults, ...o });
@@ -151,7 +153,7 @@ function judgeWith(rows: Row[], sd: number[], oddsCheck: ReturnType<typeof socce
     // 표본이 없거나 한 번도 안 맞았으면 손익분기(1/적중률)가 무한대가 되므로 판정하지 않는다
     if (!s.n || !s.pw) return;
     const ev = site * s.pw - 1;
-    // 승 베팅(홈 승·원정 승·-0.5)은 winMaxOdds(1.75) 미만까지만 추천 범위
+    // 승 베팅(홈 승·원정 승·-0.5)은 winMaxOdds(1.55) 미만까지만 추천 범위
     const eligible = site >= opts.minOdds && site < (checkKind && checkKind !== 'draw' ? opts.winMaxOdds : opts.maxOdds);
     // 추천 배당범위 밖(고배당·초저배당은 과거 데이터가 적어 숫자를 못 믿음)이거나 적중률 50% 미만이면 강도 0
     let st = betStrength(ev, s.pw, eligible);

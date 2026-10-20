@@ -221,7 +221,7 @@ function soccerProfile(raw: SoccerGame[]) {
 type VolleyJudgeFn = (o: VolleyOdds) => JudgeOut | null
 type BasketJudgeFn = (o: BasketOdds) => JudgeOut | null
 type SoccerJudgeFn = (o: SoccerOdds) => JudgeOut | null
-const SOCCER_REC = '기대수익 플러스 + 배당 1.30 이상 3.00 미만 (홈 승·원정 승·-0.5는 1.75 미만 + 같은 배당대 과거 실적이 시즌 60% 이상 플러스) + 적중률 50% 이상 + 승무패는 같은 배당대 과거 수익률 플러스 · 핸디캡은 반 골 기준점이라 적특 없음'
+const SOCCER_REC = '기대수익 플러스 + 배당 1.30 이상 3.00 미만 (홈·원정·-0.5는 1.55 미만 + 같은 배당대 과거 실적이 시즌 60% 이상 플러스) + 적중률 50% 이상 + 승무패는 같은 배당대 과거 수익률 플러스 · 핸디캡은 반 골 기준점이라 적특 없음'
 const VOLLEY_REC = '기대수익 플러스 + 배당 1.30 이상 3.00 미만 + 적중률 50% 이상 · 홈 승·원정 승은 추천 안 함 (3시즌 백테스트에서 모든 리그 마이너스) · 세트 판정은 홈정배/원정정배 따로'
 const BASKET_REC = '기대수익 플러스 + 배당 1.30 이상 3.00 미만 + 적중률 50% 이상 · 홈 승·원정 승은 1.75 미만 + 같은 배당대 과거 실적 시즌 60% 이상 플러스 (NBA·KBL·유로리그는 승 추천 안 함) · 리그별로 정배 배당 구역에 따라 마핸·플핸 중 한쪽만 추천 · 기준점이 정수면 적특(환불) 반영'
 function volleyLeague(key: string, label: string, note: string, judge: VolleyJudgeFn, games: VolleyGame[]): LeagueJudge {
