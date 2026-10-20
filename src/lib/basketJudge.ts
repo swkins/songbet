@@ -74,6 +74,8 @@ export interface JudgeOptions {
   winAnchor: boolean; // 승 적중률을 시장 확률 기준으로 잡을지 (false면 비교 경기 비율 그대로)
   winOff: boolean; // 이 리그는 승 추천 안 함 (적중률·손익분기는 보여주고 강도 0)
   mhOff: 'home' | 'away' | 'both' | null; // 이 쪽 정배 경기는 마핸 추천 안 함 (KBL 홈정배 — 2시즌 검증에서 마핸 가이드 적중 51.3%로 손익분기 밑)
+  // 정배 배당 갈림길: 정배가 이 배당 미만이면 플핸 추천 안 함, 이상이면 마핸 추천 안 함 (호주 NBL 1.45 — 강정배는 크게 이기고 약한 정배는 못 이긴다)
+  hcapSplit: number | null;
 }
 // 농구 승 추천 기준 — 리그별 3시즌 백테스트(각 시즌을 이전 시즌으로만 판정, 평균배당)로 정함:
 //  예전(비교 경기 비율, 1.30~3.00) 1701건 -1.4% · 시장 기준 보정 140건 -7.0% · 비교 경기 비율 + 상한 1.75 + 시즌 일관성 0.6 376건 -2.5%
@@ -88,7 +90,7 @@ export function cleanGames(games: Game[]): Game[] {
 export function createJudge(rawGames: Game[], base: Partial<JudgeOptions> = {}) {
   const games = recentSeasons(cleanGames(rawGames)); // 최근 5시즌만
   const weight = seasonWeigher(games);
-  const defaults: JudgeOptions = { minOdds: 1.3, maxOdds: 3.0, minMarketN: 200, winMaxOdds: 1.75, winSeasonShare: 0.6, winAnchor: false, winOff: false, mhOff: null, ...base };
+  const defaults: JudgeOptions = { minOdds: 1.3, maxOdds: 3.0, minMarketN: 200, winMaxOdds: 1.75, winSeasonShare: 0.6, winAnchor: false, winOff: false, mhOff: null, hcapSplit: null, ...base };
   const check = oddsHistory<'home' | 'away'>(games.map((g) => ({ odds: { home: g[0], away: g[1] }, won: { home: g[2] > g[3], away: g[3] > g[2] }, w: weight(g), season: g[4] })));
   return (odds: Odds, o: Partial<JudgeOptions> = {}): JudgeOutput | null =>
     judgeWith(games, weight, check, odds, { ...defaults, ...o });
@@ -112,7 +114,8 @@ function judgeWith(games: Game[], weight: (g: Game) => number, oddsCheck: Return
   const stat3 = (res: (m: number) => 1 | 0 | -1) => weightedStat(FM, W, (r) => res(r.m));
   const expMargin = weightedMean(FM, W, (r) => r.m);
 
-  const mhOff = opts.mhOff === 'both' || opts.mhOff === (favIsHome ? 'home' : 'away');
+  const mhOff = opts.mhOff === 'both' || opts.mhOff === (favIsHome ? 'home' : 'away') || (opts.hcapSplit != null && fav >= opts.hcapSplit);
+  const phOff = opts.hcapSplit != null && fav < opts.hcapSplit;
   const bets: BetResult[] = [];
   const add = (key: BetKey, site: number | null, s: { n: number; pw: number; pp: number; se: number }) => {
     // 표본이 없거나 한 번도 안 맞았으면 손익분기가 무한대가 되므로 판정하지 않는다
@@ -127,6 +130,7 @@ function judgeWith(games: Game[], weight: (g: Game) => number, oddsCheck: Return
     const check = isWin ? oddsCheck(key, site) : undefined;
     const st = isWin && opts.winOff ? { label: '승 추천 안 함', v: 0 }
       : (key === 'mh' || key === 'mh2') && mhOff ? { label: '마핸 추천 안 함', v: 0 }
+      : (key === 'ph' || key === 'ph2') && phOff ? { label: '플핸 추천 안 함', v: 0 }
       : winGate(betStrength(ev, site * s.se, s.pw, eligible), check, opts.winSeasonShare);
     bets.push({
       key, name: NAMES[key], site, hit: s.pw, push: s.pp, se: s.se, be, ev, err: site * s.se,
@@ -167,7 +171,7 @@ function judgeWith(games: Game[], weight: (g: Game) => number, oddsCheck: Return
   const cand = Array.from({ length: 41 }, (_, i) => i + 0.5);
   const over = (L: number) => weightedMean(FM, W, (r) => (r.m > L ? 1 : 0));
   const mhOk = cand.filter((L) => over(L) >= BE190), phOk = cand.filter((L) => 1 - over(L) >= BE190);
-  const lines = { mhMax: mhOk.length && !mhOff ? Math.max(...mhOk) : null, phMin: phOk.length ? Math.min(...phOk) : null };
+  const lines = { mhMax: mhOk.length && !mhOff ? Math.max(...mhOk) : null, phMin: phOk.length && !phOff ? Math.min(...phOk) : null };
 
   return {
     fav, favIsHome, margin: 1 / h + 1 / a - 1, marketN: mk.length, expMargin, lines,
