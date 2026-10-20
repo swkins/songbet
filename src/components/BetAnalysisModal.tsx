@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import { X, TrendingUp, RotateCcw } from 'lucide-react'
 import type { Odds, BetKey, BetResult, JudgeOutput } from '../lib/volleyJudge'
+import { judgeKrMen } from '../leagues/krMen'
 import { judgeKrWomen } from '../leagues/krWomen'
 import { judgeItMen } from '../leagues/itMen'
 import { judgeItWomen } from '../leagues/itWomen'
@@ -9,7 +10,7 @@ import { judgeTrWomen } from '../leagues/trWomen'
 
 /* ── 베팅분석 — 종목 → 리그를 고르고 배당을 넣으면 과거 경기 데이터로 각 베팅의 가치(기대수익)를 판정 ──
    판정기는 종목·리그별로 등록한다(리그마다 과거 경기 데이터 + 최소 표본 수가 다름 — src/leagues).
-   지금은 배구 5개 리그이고, 다른 종목/리그는 과거 데이터가 생기면 JUDGES에 추가하면 된다. */
+   지금은 배구 6개 리그이고, 다른 종목/리그는 과거 데이터가 생기면 JUDGES에 추가하면 된다. */
 
 interface OddsField { key: BetKey; label: string }
 interface LeagueJudge {
@@ -31,6 +32,7 @@ const JUDGES: SportJudges[] = [
   { key: 'basketball', label: '농구', emoji: '🏀', leagues: [] },
   {
     key: 'volleyball', label: '배구', emoji: '🏐', leagues: [
+      { key: 'krMen', label: '한국 남자', note: '2021-22 ~ 2025-26 정규시즌 630경기 (BetExplorer)', fields: VOLLEY_FIELDS, run: judgeKrMen },
       { key: 'krWomen', label: '한국 여자', note: '2021-22 ~ 2025-26 정규시즌 615경기 (BetExplorer)', fields: VOLLEY_FIELDS, run: judgeKrWomen },
       { key: 'itMen', label: '이탈리아 남자', note: '2021-22 ~ 2025-26 정규시즌 683경기 (BetExplorer)', fields: VOLLEY_FIELDS, run: judgeItMen },
       { key: 'itWomen', label: '이탈리아 여자', note: '2021-22 ~ 2025-26 정규시즌 910경기 (BetExplorer)', fields: VOLLEY_FIELDS, run: judgeItWomen },
