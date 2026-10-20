@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { RotateCcw } from 'lucide-react'
 import type { Odds as VolleyOdds, Game as VolleyGame } from '../lib/volleyJudge'
 import { cleanGames, type Game as BasketGame, type Odds as BasketOdds } from '../lib/basketJudge'
+import { latestSeason, seasonWeigher } from '../lib/seasonWeight'
 import { NBA_GAMES } from '../data/nbaGames'
 import { KBL_GAMES } from '../data/kblGames'
 import { CBA_GAMES } from '../data/cbaGames'
@@ -50,7 +51,7 @@ interface LeagueJudge {
   key: string; label: string; note: string
   fields: OddsField[]
   run: (v: Record<string, number | null>) => JudgeOut | null
-  profile: () => { n: number; items: [string, string][] }  // 리그 특성 요약 (판정기가 쓰는 과거 경기 기준)
+  profile: () => { n: number; weighted: boolean; items: [string, string][] }  // 리그 특성 요약 (판정기가 쓰는 과거 경기 기준, weighted = 최근 시즌 가중 적용)
   recNote: string
 }
 interface SportJudges { key: string; label: string; emoji: string; leagues: LeagueJudge[] }
@@ -72,46 +73,55 @@ const pct = (v: number, d = 1) => `${(v * 100).toFixed(d)}%`
 /* 리그 특성 요약 — 판정기가 맞게 만들어졌는지 눈으로 확인하는 용도. 과거 경기 전체 기준 비율 */
 function volleyProfile(games: VolleyGame[]) {
   const n = games.length
-  let favWin = 0, homeWin = 0, m15 = 0, p25 = 0, o35 = 0, u45 = 0, margin = 0, favOdds = 0
-  for (const [h, a, hs, as] of games) {
+  const weight = seasonWeigher(games)
+  // 최근 시즌 가중 비율 (판정기와 같은 가중치)
+  let sw = 0, favWin = 0, homeWin = 0, m15 = 0, p25 = 0, o35 = 0, u45 = 0, margin = 0, favOdds = 0
+  for (const g of games) {
+    const [h, a, hs, as] = g
+    const w = weight(g)
+    sw += w
     const favHome = h <= a
     const fs = favHome ? hs : as, us = favHome ? as : hs
-    if (fs > us) favWin++
-    if (hs > as) homeWin++
-    if (fs === 3 && us <= 1) m15++
-    if (!(fs === 3 && us === 0)) p25++
-    if (hs + as >= 4) o35++
-    if (hs + as <= 4) u45++
-    margin += 1 / h + 1 / a - 1
-    favOdds += Math.min(h, a)
+    if (fs > us) favWin += w
+    if (hs > as) homeWin += w
+    if (fs === 3 && us <= 1) m15 += w
+    if (!(fs === 3 && us === 0)) p25 += w
+    if (hs + as >= 4) o35 += w
+    if (hs + as <= 4) u45 += w
+    margin += w * (1 / h + 1 / a - 1)
+    favOdds += w * Math.min(h, a)
   }
-  const r = (k: number) => k / n
+  const r = (k: number) => k / sw
   return {
-    n, items: [
+    n, weighted: latestSeason(games) != null, items: [
       ['정배 승률', pct(r(favWin))], ['홈 승률', pct(r(homeWin))], ['정배 -1.5 (3-0·3-1)', pct(r(m15))],
       ['역배 +2.5 (1세트↑)', pct(r(p25))], ['3.5 오버 (4세트↑)', pct(r(o35))], ['4.5 언더', pct(r(u45))],
-      ['풀세트(3-2)', pct(1 - r(u45))], ['정배 평균배당', (favOdds / n).toFixed(2)], ['평균 마진', pct(margin / n)],
+      ['풀세트(3-2)', pct(1 - r(u45))], ['정배 평균배당', r(favOdds).toFixed(2)], ['평균 마진', pct(r(margin))],
     ] as [string, string][],
   }
 }
 function basketProfile(raw: BasketGame[]) {
   const games = cleanGames(raw)
   const n = games.length
-  let favWin = 0, homeWin = 0, favMargin = 0, total = 0, margin = 0, favOdds = 0, big = 0
-  for (const [h, a, hs, as] of games) {
+  const weight = seasonWeigher(games)
+  let sw = 0, favWin = 0, homeWin = 0, favMargin = 0, total = 0, margin = 0, favOdds = 0, big = 0
+  for (const g of games) {
+    const [h, a, hs, as] = g
+    const w = weight(g)
+    sw += w
     const m = h <= a ? hs - as : as - hs
-    if (m > 0) favWin++
-    if (hs > as) homeWin++
-    if (m >= 10) big++
-    favMargin += m; total += hs + as
-    margin += 1 / h + 1 / a - 1
-    favOdds += Math.min(h, a)
+    if (m > 0) favWin += w
+    if (hs > as) homeWin += w
+    if (m >= 10) big += w
+    favMargin += w * m; total += w * (hs + as)
+    margin += w * (1 / h + 1 / a - 1)
+    favOdds += w * Math.min(h, a)
   }
-  const r = (k: number) => k / n
+  const r = (k: number) => k / sw
   return {
-    n, items: [
-      ['정배 승률', pct(r(favWin))], ['홈 승률', pct(r(homeWin))], ['정배 평균 점수차', `${favMargin / n >= 0 ? '+' : ''}${(favMargin / n).toFixed(1)}`],
-      ['정배 10점차↑ 승', pct(r(big))], ['총점 평균', (total / n).toFixed(1)], ['정배 평균배당', (favOdds / n).toFixed(2)], ['평균 마진', pct(margin / n)],
+    n, weighted: latestSeason(games) != null, items: [
+      ['정배 승률', pct(r(favWin))], ['홈 승률', pct(r(homeWin))], ['정배 평균 점수차', `${r(favMargin) >= 0 ? '+' : ''}${r(favMargin).toFixed(1)}`],
+      ['정배 10점차↑ 승', pct(r(big))], ['총점 평균', r(total).toFixed(1)], ['정배 평균배당', r(favOdds).toFixed(2)], ['평균 마진', pct(r(margin))],
     ] as [string, string][],
   }
 }
@@ -268,7 +278,7 @@ export default function BetAnalysisPanel({ tabs, active = true }: { tabs: ReactN
               const items = pr.items
               return (
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 12px', padding: '7px 10px', marginBottom: 12, borderRadius: 8, background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}>
-                  <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--gold)' }}>{league.label} 특성 ({pr.n}경기)</span>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--gold)' }}>{league.label} 특성 ({pr.n}경기 · {pr.weighted ? '최근 시즌 가중' : '시즌 정보 없음, 가중 미적용'})</span>
                   {items.map(([k, v]) => (
                     <span key={k} style={{ fontSize: 10, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{k} <b style={{ color: 'var(--text-primary)' }}>{v}</b></span>
                   ))}

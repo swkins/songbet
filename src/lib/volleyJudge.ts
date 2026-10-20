@@ -1,6 +1,8 @@
 import { strengthOf } from './judgeScore';
+import { seasonWeigher, weightedStat } from './seasonWeight';
 
-export type Game = [number, number, number, number];
+// [홈배당, 원정배당, 홈세트, 원정세트, 시즌(끝나는 해, 선택)] — 시즌이 있으면 최근 시즌일수록 가중치를 크게 (seasonWeight.ts)
+export type Game = [number, number, number, number, number?];
 
 export type BetKey = 'home' | 'away' | 'm15' | 'o35' | 'u45' | 'p25';
 
@@ -54,12 +56,10 @@ function pick(games: Game[], getX: (g: Game) => number, x: number, minN: number)
   return { rows, w };
 }
 
-function stat<T>(rows: T[], test: (r: T) => boolean) {
-  let k = 0;
-  for (const r of rows) if (test(r)) k++;
-  const n = rows.length;
-  const p = k / n;
-  return { n, p, se: 1.96 * Math.sqrt((p * (1 - p)) / n) };
+// 가중 적중률 (최근 시즌 경기일수록 크게 반영)
+function stat<T>(rows: T[], weight: (r: T) => number, test: (r: T) => boolean) {
+  const s = weightedStat(rows, weight, (r) => (test(r) ? 1 : -1));
+  return { n: s.n, p: s.pw, se: s.se };
 }
 
 
@@ -72,11 +72,12 @@ export interface JudgeOptions {
 
 export function createJudge(games: Game[], base: Partial<JudgeOptions> = {}) {
   const defaults: JudgeOptions = { minOdds: 1.3, maxOdds: 2.0, minMarketN: 150, minSideN: 120, ...base };
+  const weight = seasonWeigher(games);
   return (odds: Odds, o: Partial<JudgeOptions> = {}): JudgeOutput | null =>
-    judgeWith(games, odds, { ...defaults, ...o });
+    judgeWith(games, weight, odds, { ...defaults, ...o });
 }
 
-function judgeWith(games: Game[], odds: Odds, opts: JudgeOptions): JudgeOutput | null {
+function judgeWith(games: Game[], weight: (g: Game) => number, odds: Odds, opts: JudgeOptions): JudgeOutput | null {
   const { home: h, away: a } = odds;
   if (!h || !a) return null;
   const fav = Math.min(h, a);
@@ -86,7 +87,7 @@ function judgeWith(games: Game[], odds: Odds, opts: JudgeOptions): JudgeOutput |
   const mk = pick(games, (g) => Math.min(g[0], g[1]), fav, opts.minMarketN);
   const F = mk.rows.map((g) => {
     const f = g[0] <= g[1];
-    return { fs: f ? g[2] : g[3], us: f ? g[3] : g[2] };
+    return { fs: f ? g[2] : g[3], us: f ? g[3] : g[2], w: weight(g) };
   });
 
   const bets: BetResult[] = [];
@@ -105,12 +106,13 @@ function judgeWith(games: Game[], odds: Odds, opts: JudgeOptions): JudgeOutput |
 
   const sh = pick(games, (g) => g[0], h, opts.minSideN); // 홈 승: 홈 배당이 비슷한 경기
   const sa = pick(games, (g) => g[1], a, opts.minSideN); // 원정 승: 원정 배당이 비슷한 경기
-  add('home', odds.home, stat(sh.rows, (g) => g[2] > g[3]));
-  add('away', odds.away, stat(sa.rows, (g) => g[3] > g[2]));
-  add('m15', odds.m15, stat(F, (x) => x.fs === 3 && x.us <= 1));
-  add('o35', odds.o35, stat(F, (x) => x.fs + x.us >= 4));
-  add('u45', odds.u45, stat(F, (x) => x.fs + x.us <= 4));
-  add('p25', odds.p25, stat(F, (x) => !(x.fs === 3 && x.us === 0)));
+  const W = (x: { w: number }) => x.w;
+  add('home', odds.home, stat(sh.rows, weight, (g) => g[2] > g[3]));
+  add('away', odds.away, stat(sa.rows, weight, (g) => g[3] > g[2]));
+  add('m15', odds.m15, stat(F, W, (x) => x.fs === 3 && x.us <= 1));
+  add('o35', odds.o35, stat(F, W, (x) => x.fs + x.us >= 4));
+  add('u45', odds.u45, stat(F, W, (x) => x.fs + x.us <= 4));
+  add('p25', odds.p25, stat(F, W, (x) => !(x.fs === 3 && x.us === 0)));
 
   // 원정 승은 추천에서 제외 (원하면 아래 필터에서 key !== 'away' 조건 삭제)
   const recommended = bets
