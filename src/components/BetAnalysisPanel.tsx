@@ -31,10 +31,17 @@ import { judgeTrMen } from '../leagues/trMen'
 import { judgeTrWomen } from '../leagues/trWomen'
 import { judgePlMen } from '../leagues/plMen'
 import { judgePlWomen } from '../leagues/plWomen'
+import { cleanGames as cleanSoccer, type Game as SoccerGame, type Odds as SoccerOdds } from '../lib/soccerJudge'
+import { EPL_GAMES } from '../data/eplGames'
+import { LALIGA_GAMES } from '../data/laligaGames'
+import { BUNDESLIGA_GAMES } from '../data/bundesligaGames'
+import { judgeEpl } from '../leagues/epl'
+import { judgeLaliga } from '../leagues/laliga'
+import { judgeBundesliga } from '../leagues/bundesliga'
 
 /* ── 베팅분석 — 대시보드 사이트 현황 자리에서 탭으로 바꿔 보는 패널. 종목 → 리그를 고르고 배당을 넣으면 과거 경기 데이터로 각 베팅의 가치(기대수익)를 판정 ──
    판정기는 종목·리그별로 등록한다(리그마다 과거 경기 데이터 + 최소 표본 수가 다름 — src/leagues).
-   지금은 배구 8개·농구 6개 리그이고, 다른 종목/리그는 과거 데이터가 생기면 JUDGES에 추가하면 된다.
+   지금은 축구 3개·배구 8개·농구 6개 리그이고, 다른 종목/리그는 과거 데이터가 생기면 JUDGES에 추가하면 된다.
    종목마다 판정기 입력·출력 모양이 조금 달라서(농구는 기준점 + 적특) 아래 공통 모양으로 맞춰서 쓴다. */
 
 // 판정 결과 공통 모양 — 배구/농구 판정기 결과가 모두 이 모양을 만족한다
@@ -46,11 +53,13 @@ interface JudgeBet {
 }
 interface JudgeOut {
   fav: number; favIsHome: boolean; margin: number; marketN: number
-  expMargin?: number  // 농구: 표본의 정배 평균 점수차
+  expMargin?: number  // 농구·축구: 표본의 정배 평균 점수차(골차)
+  rule?: { text: string; keys: string[] }  // 축구: 내 룰북 기준 이 경기에서 할 베팅
   bets: JudgeBet[]; recommended: JudgeBet[]; leastLoss: JudgeBet | null
 }
 // kind: 'odds' = 배당(3자리 → 1.23, 다음 칸 이동) / 'line' = 농구 기준점(그대로 입력, 예: 5.5)
-interface OddsField { key: string; label: string; kind?: 'odds' | 'line'; required?: boolean }
+// line·side: 축구 핸디캡 칸 (기준점과 홈/원정 — 정배 쪽이면 마핸 -line, 역배 쪽이면 플핸 +line) · solo: 이 칸 뒤에서 줄을 바꾼다
+interface OddsField { key: string; label: string; kind?: 'odds' | 'line'; required?: boolean; line?: number; side?: 'home' | 'away'; solo?: boolean }
 interface LeagueJudge {
   key: string; label: string; note: string
   fields: OddsField[]
@@ -71,6 +80,16 @@ const BASKET_FIELDS: OddsField[] = [
   { key: 'home', label: '홈 승', required: true }, { key: 'away', label: '원정 승', required: true },
   { key: 'line', label: '기준점', kind: 'line' },
   { key: 'hh', label: '홈 핸디캡' }, { key: 'ah', label: '원정 핸디캡' },
+]
+
+// 승무패는 사이트 순서대로 홈 승 → 무 → 원정 승, 그다음 홈/원정 핸디캡을 기준점마다 짝으로
+const SOCCER_FIELDS: OddsField[] = [
+  { key: 'home', label: '홈 승', required: true }, { key: 'draw', label: '무', required: true },
+  { key: 'away', label: '원정 승', required: true, solo: true },
+  ...[0.5, 1.5, 2.5].flatMap(L => (['home', 'away'] as const).map(side => ({
+    key: `${side[0]}${String(L).replace('.', '')}`, label: `${side === 'home' ? '홈' : '원정'} 핸디 ${L}`, line: L, side,
+  }))),
+  { key: 'o25', label: '2.5 오버' },
 ]
 
 const pct = (v: number, d = 1) => `${(v * 100).toFixed(d)}%`
@@ -132,8 +151,39 @@ function basketProfile(raw: BasketGame[]) {
   }
 }
 
+function soccerProfile(raw: SoccerGame[]) {
+  const games = recentSeasons(cleanSoccer(raw)) // 판정기와 같이 최근 5시즌만
+  const n = games.length
+  const weight = seasonWeigher(games)
+  let sw = 0, favWin = 0, homeWin = 0, draw = 0, big = 0, total = 0, o25 = 0, btts = 0, margin = 0, favOdds = 0
+  for (const g of games) {
+    const [h, a, hs, as, , d] = g
+    const w = weight(g)
+    sw += w
+    const m = h <= a ? hs - as : as - hs
+    if (m > 0) favWin += w
+    if (hs > as) homeWin += w
+    if (m === 0) draw += w
+    if (m >= 2) big += w
+    if (hs + as > 2.5) o25 += w
+    if (hs > 0 && as > 0) btts += w
+    total += w * (hs + as)
+    margin += w * (1 / h + 1 / d + 1 / a - 1)
+    favOdds += w * Math.min(h, a)
+  }
+  const r = (k: number) => k / sw
+  return {
+    n, weighted: latestSeason(games) != null, items: [
+      ['정배 승률', pct(r(favWin))], ['홈 승률', pct(r(homeWin))], ['무승부', pct(r(draw))], ['정배 2골차↑ 승', pct(r(big))],
+      ['평균 골', r(total).toFixed(2)], ['2.5 오버', pct(r(o25))], ['양팀 득점', pct(r(btts))], ['정배 평균배당', r(favOdds).toFixed(2)], ['평균 마진', pct(r(margin))],
+    ] as [string, string][],
+  }
+}
+
 type VolleyJudgeFn = (o: VolleyOdds) => JudgeOut | null
 type BasketJudgeFn = (o: BasketOdds) => JudgeOut | null
+type SoccerJudgeFn = (o: SoccerOdds) => JudgeOut | null
+const SOCCER_REC = '기대수익 플러스 + 배당 1.10 이상 3.00 미만 · 핸디캡은 반 골 기준점이라 적특 없음'
 const VOLLEY_REC = '기대수익 플러스 + 배당 1.30 이상 2.00 미만 (원정 승은 추천 제외)'
 const BASKET_REC = '기대수익 플러스 + 배당 1.30 이상 2.50 미만 · 기준점이 정수면 적특(환불) 반영'
 function volleyLeague(key: string, label: string, note: string, judge: VolleyJudgeFn, games: VolleyGame[]): LeagueJudge {
@@ -153,8 +203,23 @@ function basketLeague(key: string, label: string, note: string, judge: BasketJud
   }
 }
 
+function soccerLeague(key: string, label: string, note: string, judge: SoccerJudgeFn, games: SoccerGame[]): LeagueJudge {
+  return {
+    key, label, note, fields: SOCCER_FIELDS, recNote: SOCCER_REC, profile: () => soccerProfile(games), data: () => seasonSummary(cleanSoccer(games)),
+    run: v => judge({
+      home: v.home, draw: v.draw, away: v.away, h05: v.h05, a05: v.a05, h15: v.h15, a15: v.a15, h25: v.h25, a25: v.a25, o25: v.o25,
+    }),
+  }
+}
+
 const JUDGES: SportJudges[] = [
-  { key: 'soccer', label: '축구', emoji: '⚽', leagues: [] },
+  {
+    key: 'soccer', label: '축구', emoji: '⚽', leagues: [
+      soccerLeague('epl', 'EPL', '2021-22 ~ 2025-26 정규리그 (BetExplorer 평균 배당)', judgeEpl, EPL_GAMES),
+      soccerLeague('laliga', '라리가', '2021-22 ~ 2025-26 정규리그 (BetExplorer 평균 배당)', judgeLaliga, LALIGA_GAMES),
+      soccerLeague('bundesliga', '분데스리가', '2021-22 ~ 2025-26 정규리그 (BetExplorer 평균 배당)', judgeBundesliga, BUNDESLIGA_GAMES),
+    ],
+  },
   { key: 'baseball', label: '야구', emoji: '⚾', leagues: [] },
   {
     key: 'basketball', label: '농구', emoji: '🏀', leagues: [
@@ -235,15 +300,22 @@ export default function BetAnalysisPanel({ tabs, active = true }: { tabs: ReactN
   // 칸 이름 아래 작은 글씨 — 기준점은 자동 .5 안내, 핸디캡은 지금 배당 기준 마핸/플핸 (이름 폭을 줄여 칸이 좁아도 한 줄에 두 칸)
   const fieldSub = (f: OddsField) => {
     if (f.kind === 'line') return '5 → 5.5 자동'
+    if (f.line != null) {
+      if (vals.home == null || vals.away == null) return null
+      return `${(f.side === 'home') === favHome ? '마핸 -' : '플핸 +'}${f.line}`
+    }
     if ((f.key !== 'hh' && f.key !== 'ah') || vals.home == null || vals.away == null) return null
     const isFav = (f.key === 'hh') === favHome
     return `${isFav ? '마핸 -' : '플핸 +'}${lineV ?? '기준점'}`
   }
-  // 입력칸이 한 줄의 첫째(0)/둘째(1) 자리 중 어디에 놓이는지 — 둘째 자리 이름 앞에만 간격 (기준점은 혼자 한 줄)
+  // 입력칸이 한 줄의 첫째(0)/둘째(1) 자리 중 어디에 놓이는지 — 둘째 자리 이름 앞에만 간격 (기준점·solo 칸 뒤에서 줄 바꿈)
+  const endsRow = (f: OddsField) => f.kind === 'line' || !!f.solo
   const inputCol: number[] = []
   let col = 0
-  for (const f of league?.fields ?? []) { inputCol.push(col); col = f.kind === 'line' ? 0 : (col + 1) % 2 }
+  for (const f of league?.fields ?? []) { inputCol.push(col); col = endsRow(f) ? 0 : (col + 1) % 2 }
   const recommendedKeys = new Set(out?.recommended.map(b => b.key) ?? [])
+  const ruleKeys = new Set(out?.rule?.keys ?? [])
+  const requiredLabels = (league?.fields ?? []).filter(f => f.required).map(f => f.label).join(' / ')
 
   const chip = (active: boolean): React.CSSProperties => ({
     padding: '6px 12px', borderRadius: 8, cursor: 'pointer', fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-body)', whiteSpace: 'nowrap',
@@ -310,19 +382,20 @@ export default function BetAnalysisPanel({ tabs, active = true }: { tabs: ReactN
                     value={raw[f.key] ?? ''} onChange={e => change(i, f.key, e.target.value, f.kind)} onFocus={e => e.target.select()}
                     onKeyDown={e => { if (e.key === 'Enter') { const el = inputRefs.current[i + 1]; if (el) { el.focus(); el.select() } } }}
                     style={{ fontSize: 13, fontFamily: 'var(--font-mono)' }} />
-                  {f.kind === 'line' && <span className="bet-inputs__rest" />}
+                  {endsRow(f) && inputCol[i] === 0 && <span className="bet-inputs__rest" />}
                 </label>
               ))}
             </div>
 
             {!out ? (
-              <div style={{ padding: '14px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>홈 승 / 원정 승 배당을 넣으면 판정합니다 (나머지는 있는 것만 넣어도 됨{league.fields.some(f => f.kind === 'line') ? ' · 마핸/플핸은 기준점도 넣어야 판정' : ''})</div>
+              <div style={{ padding: '14px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>{requiredLabels} 배당을 넣으면 판정합니다 (나머지는 있는 것만 넣어도 됨{league.fields.some(f => f.kind === 'line') ? ' · 마핸/플핸은 기준점도 넣어야 판정' : ''})</div>
             ) : (
               <>
                 <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', fontSize: 11, color: 'var(--text-secondary)', marginBottom: 8 }}>
                   <span>정배 <b style={{ color: 'var(--text-primary)' }}>{out.favIsHome ? '홈' : '원정'} {out.fav.toFixed(2)}</b></span>
                   <span>마진 <b style={{ color: out.margin <= 0.05 ? 'var(--green)' : 'var(--orange)' }}>{pct(out.margin)}</b></span>
                   <span>비교 경기 <b style={{ color: 'var(--text-primary)' }}>{out.marketN}</b></span>
+                  {out.rule && <span>내 룰 <b style={{ color: out.rule.keys.length ? 'var(--gold)' : 'var(--text-muted)' }}>{out.rule.text}</b></span>}
                   {out.expMargin != null && <span>비교 경기 정배 평균 점수차 <b style={{ color: 'var(--text-primary)' }}>{out.expMargin >= 0 ? '+' : ''}{out.expMargin.toFixed(1)}</b></span>}
                 </div>
 
@@ -335,7 +408,7 @@ export default function BetAnalysisPanel({ tabs, active = true }: { tabs: ReactN
                       </tr>
                     </thead>
                     <tbody>
-                      {[...out.bets].sort((x, y) => league.fields.findIndex(f => f.key === fieldKeyOf(x.key)) - league.fields.findIndex(f => f.key === fieldKeyOf(y.key))).map(b => <JudgeRow key={b.key} b={b} name={betName(b)} recommended={recommendedKeys.has(b.key)} />)}
+                      {[...out.bets].sort((x, y) => league.fields.findIndex(f => f.key === fieldKeyOf(x.key)) - league.fields.findIndex(f => f.key === fieldKeyOf(y.key))).map(b => <JudgeRow key={b.key} b={b} name={betName(b)} recommended={recommendedKeys.has(b.key)} rule={ruleKeys.has(b.key)} />)}
                     </tbody>
                   </table>
                 </div>
@@ -399,11 +472,12 @@ function strengthColor(v: number) {
   return v === 0 ? 'var(--text-muted)' : v <= 3 ? 'var(--orange)' : v <= 6 ? 'var(--gold)' : 'var(--green)'
 }
 
-function JudgeRow({ b, name, recommended }: { b: JudgeBet; name: string; recommended: boolean }) {
+// rule: 축구 내 룰북이 이 경기에서 고르는 베팅 (이름 옆에 '룰' 표시)
+function JudgeRow({ b, name, recommended, rule = false }: { b: JudgeBet; name: string; recommended: boolean; rule?: boolean }) {
   const evColor = b.ev > 0 ? 'var(--green)' : 'var(--red)'
   return (
     <tr style={recommended ? { background: 'var(--green-bg)' } : !b.eligible ? { opacity: 0.55 } : undefined}>
-      <td style={{ fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap' }}>{name}</td>
+      <td style={{ fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap' }}>{name}{rule && <span style={{ marginLeft: 4, padding: '0 4px', borderRadius: 3, fontSize: 9, color: 'var(--gold)', border: '1px solid var(--gold-border)' }}>룰</span>}</td>
       <td className="td-right" style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{b.site.toFixed(2)}</td>
       {/* 오차·경기 수 같은 보조 정보는 아랫줄에 작게 — 가로 스크롤 없이 표가 한 번에 보이게 */}
       <td className="td-right" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>{pct(b.hit)}<div style={{ fontSize: 9, color: 'var(--text-muted)' }}>±{pct(b.se)}{b.push ? ` · 적특 ${pct(b.push)}` : ''} · {b.n}경기</div></td>

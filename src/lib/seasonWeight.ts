@@ -7,7 +7,8 @@ export const SEASON_MIN_WEIGHT = 0.3;
 // 모든 리그 공통으로 최근 5시즌만 쓴다 — 새 시즌을 넣으면 가장 오래된 시즌은 자동으로 빠진다
 export const MAX_SEASONS = 5;
 
-type WithSeason = readonly [number, number, number, number, number?];
+// 축구는 6번째 칸(무배당)이 더 있다
+type WithSeason = readonly [number, number, number, number, number?, ...number[]];
 
 export function latestSeason(games: readonly WithSeason[]): number | null {
   let latest: number | null = null;
