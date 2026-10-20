@@ -101,7 +101,7 @@ const SOCCER_LINE_SHOW: Record<number, (fav: number) => boolean> = {
 }
 const soccerOuZone = (v: Record<string, number | null>) => {
   const fav = soccerFav(v)
-  return fav != null && v.draw != null && ((fav < 1.4 && v.draw >= 5.5) || (fav >= 2.5 && v.draw <= 3.25))
+  return fav != null && v.draw != null && fav < 1.4 && v.draw >= 5.5
 }
 const SOCCER_FIELDS: OddsField[] = [
   { key: 'home', label: '홈 승', required: true }, { key: 'draw', label: '무', required: true },
@@ -111,7 +111,7 @@ const SOCCER_FIELDS: OddsField[] = [
     showIf: (v: Record<string, number | null>) => { const fav = soccerFav(v); return fav != null && SOCCER_LINE_SHOW[L](fav) },
   }))),
   // 2.5 오버·언더 칸은 과거 데이터로 해볼 만했던 조건일 때만 (사용자 요청, 3.5 오버·언더는 뺐다)
-  //  오버: 정배 1.39 이하 & 무 5.5 이상 (3개 리그 69%, 5시즌 모두 66% 이상) / 언더: 정배 2.50 이상 & 무 3.25 이하 (검증 시즌 68%)
+  //  정배 1.39 이하 & 무 5.5 이상 (2.5 오버가 3개 리그 69%, 5시즌 모두 66% 이상) — 언더 배당은 마진 확인용으로 같이 넣는다
   { key: 'o25', label: '2.5 오버', showIf: soccerOuZone }, { key: 'u25', label: '2.5 언더', solo: true, showIf: soccerOuZone },
 ]
 
@@ -431,6 +431,7 @@ export default function BetAnalysisPanel({ tabs, active = true }: { tabs: ReactN
                   style={{ display: 'flex', gap: 14, flexWrap: 'wrap', fontSize: 11, color: 'var(--text-secondary)', marginBottom: 8 }}>
                   <span>정배 <b style={{ color: 'var(--text-primary)' }}>{out.favIsHome ? '홈' : '원정'} {out.fav.toFixed(2)}</b></span>
                   <span>마진 <b style={{ color: out.margin <= 0.05 ? 'var(--green)' : 'var(--orange)' }}>{pct(out.margin)}</b></span>
+                  {vals.o25 != null && vals.u25 != null && <span>2.5 오버/언더 마진 <b style={{ color: 1 / vals.o25 + 1 / vals.u25 - 1 <= 0.05 ? 'var(--green)' : 'var(--orange)' }}>{pct(1 / vals.o25 + 1 / vals.u25 - 1)}</b></span>}
                 </div>
 
                 <div className="table-wrap">
