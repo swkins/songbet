@@ -219,6 +219,10 @@ export default function BetAnalysisPanel({ tabs, active = true }: { tabs: ReactN
     const isFav = (f.key === 'hh') === favHome
     return `${f.label} (${isFav ? '마핸 -' : '플핸 +'}${lineV ?? '기준점'})`
   }
+  // 입력칸이 한 줄의 첫째(0)/둘째(1) 자리 중 어디에 놓이는지 — 둘째 자리 이름 앞에만 간격 (기준점은 혼자 한 줄)
+  const inputCol: number[] = []
+  let col = 0
+  for (const f of league?.fields ?? []) { inputCol.push(col); col = f.kind === 'line' ? 0 : (col + 1) % 2 }
   const recommendedKeys = new Set(out?.recommended.map(b => b.key) ?? [])
 
   const chip = (active: boolean): React.CSSProperties => ({
@@ -274,16 +278,18 @@ export default function BetAnalysisPanel({ tabs, active = true }: { tabs: ReactN
 
         {league && (
           <>
-            {/* 배당 입력 — 한 줄에 두 칸씩 (홈/원정 짝). 농구 기준점은 혼자 한 줄 → 홈 핸디캡/원정 핸디캡이 아래 줄에 짝으로 */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '6px 16px', marginBottom: 12 }}>
+            {/* 배당 입력 — 좌측 정렬, 한 줄에 두 칸씩 (이름 바로 옆에 입력칸, 그 옆에 다음 이름·입력칸). 입력칸은 모두 같은 크기.
+                농구 기준점은 혼자 한 줄 → 홈 핸디캡/원정 핸디캡이 아래 줄에 짝으로 */}
+            <div className="bet-inputs">
               {league.fields.map((f, i) => (
-                <label key={f.key} style={{ display: 'flex', alignItems: 'center', gap: 8, gridColumn: f.kind === 'line' ? '1 / -1' : undefined }}>
-                  <span style={{ flex: '0 0 120px', fontSize: 11, fontWeight: 700, color: f.required ? 'var(--text-primary)' : f.kind === 'line' ? 'var(--gold)' : 'var(--text-muted)' }}>{fieldLabel(f)}{f.required && ' *'}</span>
+                <label key={f.key} style={{ display: 'contents' }}>
+                  <span className="bet-inputs__label" style={{ paddingLeft: inputCol[i] === 1 ? 14 : 0, fontSize: 11, fontWeight: 700, color: f.required ? 'var(--text-primary)' : f.kind === 'line' ? 'var(--gold)' : 'var(--text-muted)' }}>{fieldLabel(f)}{f.required && ' *'}</span>
                   <input ref={el => { inputRefs.current[i] = el }} className="form-input bet-odds-input" inputMode="decimal" placeholder={f.kind === 'line' ? '5 → 5.5' : '배당 (185=1.85)'}
                     onBlur={f.kind === 'line' ? () => finishLine(f.key) : undefined}
                     value={raw[f.key] ?? ''} onChange={e => change(i, f.key, e.target.value, f.kind)} onFocus={e => e.target.select()}
                     onKeyDown={e => { if (e.key === 'Enter') { const el = inputRefs.current[i + 1]; if (el) { el.focus(); el.select() } } }}
-                    style={{ flex: '1 1 0', maxWidth: 170, minWidth: 0, fontSize: 13, padding: '6px 8px', fontFamily: 'var(--font-mono)' }} />
+                    style={{ fontSize: 13, fontFamily: 'var(--font-mono)' }} />
+                  {f.kind === 'line' && <span className="bet-inputs__rest" />}
                 </label>
               ))}
             </div>

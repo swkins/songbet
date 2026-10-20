@@ -546,6 +546,16 @@ tr:hover td { background: var(--bg-hover); }
 .dashboard-side { display: flex; flex-direction: column; gap: 10px; width: 100%; }
 .dashboard-bets { width: 100%; }
 .dashboard-analysis { width: 100%; min-width: 0; }
+/* 베팅분석 입력칸 — 좌측 정렬 [이름][칸] [이름][칸], 입력칸은 모두 같은 가로·세로. 기준점 줄은 나머지 칸을 비워서 다음 줄로 */
+.bet-inputs { display: grid; grid-template-columns: max-content 130px max-content 130px; justify-content: start; align-items: center; gap: 6px 8px; margin-bottom: 12px; }
+.bet-inputs__label { white-space: nowrap; }
+.bet-inputs > label > input.bet-odds-input, .bet-inputs input.bet-odds-input { width: 130px; height: 32px; box-sizing: border-box; padding: 0 8px; }
+.bet-inputs__rest { grid-column: span 2; }
+@media (max-width: 600px) {
+  .bet-inputs { grid-template-columns: max-content 130px; }
+  .bet-inputs__rest { display: none; }
+  .bet-inputs .bet-inputs__label { padding-left: 0 !important; }
+}
 /* 베팅분석 입력칸 안내 글씨 — 칸이 좁아도 다 보이게 작게 */
 .bet-odds-input::placeholder { font-size: 11px; letter-spacing: -0.3px; }
 
