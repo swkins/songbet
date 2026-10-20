@@ -59,8 +59,8 @@ const VOLLEY_FIELDS: OddsField[] = [
 
 const BASKET_FIELDS: OddsField[] = [
   { key: 'home', label: '홈 승', required: true }, { key: 'away', label: '원정 승', required: true },
-  { key: 'line', label: '기준점 (정배 기준, 예: 5.5)', kind: 'line' },
-  { key: 'mh', label: '정배 -기준점 마핸' }, { key: 'ph', label: '역배 +기준점 플핸' },
+  { key: 'line', label: '기준점 (예: 5.5)', kind: 'line' },
+  { key: 'hh', label: '홈 핸디캡' }, { key: 'ah', label: '원정 핸디캡' },
 ]
 
 const pct = (v: number, d = 1) => `${(v * 100).toFixed(d)}%`
@@ -125,7 +125,11 @@ function volleyLeague(key: string, label: string, note: string, judge: VolleyJud
 function basketLeague(key: string, label: string, note: string, judge: BasketJudgeFn, games: BasketGame[]): LeagueJudge {
   return {
     key, label, note, fields: BASKET_FIELDS, recNote: BASKET_REC, profile: () => basketProfile(games),
-    run: v => judge({ home: v.home, away: v.away, line: v.line, mh: v.mh, ph: v.ph }),
+    // 홈/원정 핸디캡 배당으로 받고, 승패 배당이 낮은 쪽(정배)이 자동으로 -기준점 마핸이 된다
+    run: v => {
+      const favHome = v.home != null && v.away != null && v.home <= v.away
+      return judge({ home: v.home, away: v.away, line: v.line, mh: favHome ? v.hh : v.ah, ph: favHome ? v.ah : v.hh })
+    },
   }
 }
 
@@ -185,9 +189,19 @@ export default function BetAnalysisModal({ onClose }: { onClose: () => void }) {
     vals[f.key] = f.kind === 'line' ? (Number.isFinite(n) && n >= 0 ? n : null) : (n > 1 ? n : null)
   }
   const out = league ? league.run(vals) : null
-  // 농구 마핸/플핸 줄 이름에 실제 기준점을 붙여서 보여준다 (마핸 -5.5 / 플핸 +5.5)
+  // 농구 마핸/플핸 줄 이름에 홈/원정과 실제 기준점을 붙여서 보여준다 (홈 마핸 -5.5 / 원정 플핸 +5.5)
   const lineV = vals.line
-  const betName = (b: JudgeBet) => lineV != null && (b.key === 'mh' || b.key === 'ph') ? `${b.key === 'mh' ? '마핸 정배' : '플핸 역배'} ${b.key === 'mh' ? '-' : '+'}${lineV}` : b.name
+  const favHome = vals.home != null && vals.away != null && vals.home <= vals.away
+  const sideOf = (key: string) => (key === 'mh') === favHome ? '홈' : '원정'
+  const betName = (b: JudgeBet) => lineV != null && (b.key === 'mh' || b.key === 'ph') ? `${sideOf(b.key)} ${b.key === 'mh' ? '마핸 -' : '플핸 +'}${lineV}` : b.name
+  // 판정 결과의 마핸/플핸을 입력 칸(홈 핸디캡/원정 핸디캡) 순서로 맞춘다
+  const fieldKeyOf = (key: string) => key === 'mh' || key === 'ph' ? (sideOf(key) === '홈' ? 'hh' : 'ah') : key
+  // 홈/원정 핸디캡 칸 이름 옆에 지금 배당 기준으로 마핸/플핸 어느 쪽인지 붙여준다
+  const fieldLabel = (f: OddsField) => {
+    if ((f.key !== 'hh' && f.key !== 'ah') || vals.home == null || vals.away == null) return f.label
+    const isFav = (f.key === 'hh') === favHome
+    return `${f.label} (${isFav ? '마핸 -' : '플핸 +'}${lineV ?? '기준점'})`
+  }
   const recommendedKeys = new Set(out?.recommended.map(b => b.key) ?? [])
 
   const chip = (active: boolean): React.CSSProperties => ({
@@ -250,7 +264,7 @@ export default function BetAnalysisModal({ onClose }: { onClose: () => void }) {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 8, marginBottom: 12 }}>
               {league.fields.map((f, i) => (
                 <label key={f.key} style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                  <span style={{ fontSize: 10, fontWeight: 700, color: f.required ? 'var(--text-primary)' : f.kind === 'line' ? 'var(--gold)' : 'var(--text-muted)' }}>{f.label}{f.required && ' *'}</span>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: f.required ? 'var(--text-primary)' : f.kind === 'line' ? 'var(--gold)' : 'var(--text-muted)' }}>{fieldLabel(f)}{f.required && ' *'}</span>
                   <input ref={el => { inputRefs.current[i] = el }} className="form-input" inputMode="decimal" placeholder={f.kind === 'line' ? '점수 (예: 5.5)' : '배당 (185=1.85)'}
                     value={raw[f.key] ?? ''} onChange={e => change(i, f.key, e.target.value, f.kind)} onFocus={e => e.target.select()}
                     onKeyDown={e => { if (e.key === 'Enter') { const el = inputRefs.current[i + 1]; if (el) { el.focus(); el.select() } } }}
@@ -279,7 +293,7 @@ export default function BetAnalysisModal({ onClose }: { onClose: () => void }) {
                       </tr>
                     </thead>
                     <tbody>
-                      {[...out.bets].sort((x, y) => league.fields.findIndex(f => f.key === x.key) - league.fields.findIndex(f => f.key === y.key)).map(b => <JudgeRow key={b.key} b={b} name={betName(b)} recommended={recommendedKeys.has(b.key)} />)}
+                      {[...out.bets].sort((x, y) => league.fields.findIndex(f => f.key === fieldKeyOf(x.key)) - league.fields.findIndex(f => f.key === fieldKeyOf(y.key))).map(b => <JudgeRow key={b.key} b={b} name={betName(b)} recommended={recommendedKeys.has(b.key)} />)}
                     </tbody>
                   </table>
                 </div>
