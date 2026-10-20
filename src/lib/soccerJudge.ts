@@ -104,18 +104,24 @@ export function cleanGames(games: Game[]): Game[] {
 // 정배 배당만 보면 같은 정배 1.75라도 저득점·무승부 경기(무배당 낮음)와 다득점 경기(무배당 높음)가 섞여서
 // 핸디·언더오버 판정이 크게 틀렸다 — 지난 시즌 백테스트로 비교해 세 배당 · 3개 리그 합침 · 300경기가 가장 잘 맞았다.
 // (리그별로 나누거나 홈/원정 정배를 나눠도 더 나아지지 않아서 섞어서 본다. 리그 차이는 무배당에 대부분 담겨 있다)
-export function createJudge(rawGames: Game[], base: Partial<JudgeOptions> = {}) {
+// preferred: 비교 경기에 섞되 더 가깝게 쳐줄 경기 (챔스 판정기에서 챔스 경기 — 거리를 PREFER_FACTOR로 나눈다)
+// 챔스는 국내 리그보다 무승부가 적고(17% vs 시장 22%) 대승이 많아서, 국내 경기만 쓰면 무승부를 과하게 보고 마핸을 약하게 봤다.
+// 시즌 하나씩 빼고 검증해 보니 국내+챔스를 섞고 챔스 경기를 2배 가깝게 치는 게 챔스만 쓰거나 국내만 쓰는 것보다 잘 맞았다
+const PREFER_FACTOR = 2;
+
+export function createJudge(rawGames: Game[], base: Partial<JudgeOptions> = {}, preferred: Game[] = []) {
   const games = recentSeasons(cleanGames(rawGames)); // 최근 5시즌만
   const weight = seasonWeigher(games);
   const P = games.map((g) => probs(g[0], g[5], g[1]));
   const sd = [0, 1, 2].map((i) => std(P.map((p) => p[i]))); // 세 확률을 같은 눈금으로 맞춰 거리 계산
-  const rows = games.map((g, i) => ({ g, p: P[i], w: weight(g) }));
+  const pref = new Set(preferred);
+  const rows = games.map((g, i) => ({ g, p: P[i], w: weight(g), near: pref.has(g) ? PREFER_FACTOR : 1 }));
   const defaults: JudgeOptions = { minOdds: 1.1, maxOdds: 3.0, sampleN: 300, ...base };
   return (odds: Odds, o: Partial<JudgeOptions> = {}): JudgeOutput | null =>
     judgeWith(rows, sd, odds, { ...defaults, ...o });
 }
 
-type Row = { g: Game; p: [number, number, number]; w: number };
+type Row = { g: Game; p: [number, number, number]; w: number; near: number };
 
 function judgeWith(rows: Row[], sd: number[], odds: Odds, opts: JudgeOptions): JudgeOutput | null {
   const { home: h, draw: d, away: a } = odds;
@@ -126,7 +132,7 @@ function judgeWith(rows: Row[], sd: number[], odds: Odds, opts: JudgeOptions): J
   // 비교 경기: 세 배당이 가장 비슷한 경기 → 정배 기준 골차(m)와 총골(t)
   const q = probs(h, d, a);
   const dist = (p: number[]) => Math.hypot((p[0] - q[0]) / sd[0], (p[1] - q[1]) / sd[1], (p[2] - q[2]) / sd[2]);
-  const mk = rows.map((r) => ({ r, k: dist(r.p) })).sort((x, y) => x.k - y.k).slice(0, opts.sampleN).map((x) => x.r);
+  const mk = rows.map((r) => ({ r, k: dist(r.p) / r.near })).sort((x, y) => x.k - y.k).slice(0, opts.sampleN).map((x) => x.r);
   const F = mk.map(({ g, w }) => ({ m: g[0] <= g[1] ? g[2] - g[3] : g[3] - g[2], t: g[2] + g[3], w }));
   const W = (r: { w: number }) => r.w;
   type R = (typeof F)[number];

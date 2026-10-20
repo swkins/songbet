@@ -38,10 +38,12 @@ import { BUNDESLIGA_GAMES } from '../data/bundesligaGames'
 import { judgeEpl } from '../leagues/epl'
 import { judgeLaliga } from '../leagues/laliga'
 import { judgeBundesliga } from '../leagues/bundesliga'
+import { UCL_GAMES } from '../data/uclGames'
+import { judgeUcl } from '../leagues/soccer'
 
 /* ── 베팅분석 — 대시보드 사이트 현황 자리에서 탭으로 바꿔 보는 패널. 종목 → 리그를 고르고 배당을 넣으면 과거 경기 데이터로 각 베팅의 가치(기대수익)를 판정 ──
    판정기는 종목·리그별로 등록한다(리그마다 과거 경기 데이터 + 최소 표본 수가 다름 — src/leagues).
-   지금은 축구 3개·배구 8개·농구 6개 리그이고, 다른 종목/리그는 과거 데이터가 생기면 JUDGES에 추가하면 된다.
+   지금은 축구 4개·배구 8개·농구 6개 리그이고, 다른 종목/리그는 과거 데이터가 생기면 JUDGES에 추가하면 된다.
    종목마다 판정기 입력·출력 모양이 조금 달라서(농구는 기준점 + 적특) 아래 공통 모양으로 맞춰서 쓴다. */
 
 // 판정 결과 공통 모양 — 배구/농구 판정기 결과가 모두 이 모양을 만족한다
@@ -220,6 +222,7 @@ const JUDGES: SportJudges[] = [
       soccerLeague('epl', 'EPL', '2021-22 ~ 2025-26 정규리그 (BetExplorer 평균 배당) · 비교 경기는 3개 리그에서 승무패 세 배당이 비슷한 300경기', judgeEpl, EPL_GAMES),
       soccerLeague('laliga', '라리가', '2021-22 ~ 2025-26 정규리그 (BetExplorer 평균 배당) · 비교 경기는 3개 리그에서 승무패 세 배당이 비슷한 300경기', judgeLaliga, LALIGA_GAMES),
       soccerLeague('bundesliga', '분데스리가', '2021-22 ~ 2025-26 정규리그 (BetExplorer 평균 배당) · 비교 경기는 3개 리그에서 승무패 세 배당이 비슷한 300경기', judgeBundesliga, BUNDESLIGA_GAMES),
+      soccerLeague('ucl', '챔피언스리그', '2021-22 ~ 2025-26 조별리그·리그 페이즈, 토너먼트 제외 (BetExplorer 평균 배당) · 비교 경기는 3개 리그+챔스에서 세 배당이 비슷한 300경기 (챔스 경기 우대)', judgeUcl, UCL_GAMES),
     ],
   },
   { key: 'baseball', label: '야구', emoji: '⚾', leagues: [] },
