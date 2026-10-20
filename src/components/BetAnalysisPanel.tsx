@@ -196,7 +196,7 @@ type BasketJudgeFn = (o: BasketOdds) => JudgeOut | null
 type SoccerJudgeFn = (o: SoccerOdds) => JudgeOut | null
 const SOCCER_REC = '기대수익 플러스 + 배당 1.30 이상 3.00 미만 (홈 승·원정 승·-0.5는 1.75 미만 + 같은 배당대 과거 실적이 시즌 60% 이상 플러스) + 적중률 50% 이상 + 승무패는 같은 배당대 과거 수익률 플러스 · 핸디캡은 반 골 기준점이라 적특 없음'
 const VOLLEY_REC = '기대수익 플러스 + 배당 1.30 이상 3.00 미만 + 적중률 50% 이상 · 홈 승·원정 승은 추천 안 함 (3시즌 백테스트에서 모든 리그 마이너스) · 세트 판정은 홈정배/원정정배 따로'
-const BASKET_REC = '기대수익 플러스 + 배당 1.30 이상 3.00 미만 + 적중률 50% 이상 · 홈 승·원정 승은 1.75 미만 + 같은 배당대 과거 실적 시즌 60% 이상 플러스 (NBA·KBL·유로리그는 승 추천 안 함) · KBL 홈정배 경기는 마핸 추천 안 함 · 핸디 가이드(마핸 -X 이하 / 플핸 +Y 이상)는 비교 경기에서 배당 1.90 손익분기 52.6%를 넘는 기준점 · 기준점이 정수면 적특(환불) 반영'
+const BASKET_REC = '기대수익 플러스 + 배당 1.30 이상 3.00 미만 + 적중률 50% 이상 · 홈 승·원정 승은 1.75 미만 + 같은 배당대 과거 실적 시즌 60% 이상 플러스 (NBA·KBL·유로리그는 승 추천 안 함) · 핸디 가이드(마핸 -X 이하 / 플핸 +Y 이상)는 비교 경기에서 적중률 52.6%(NBA·KBL 58%)를 넘는 기준점, 리그별로 정배 배당 구역에 따라 마핸·플핸 중 한쪽만 추천 · 기준점이 정수면 적특(환불) 반영'
 function volleyLeague(key: string, label: string, note: string, judge: VolleyJudgeFn, games: VolleyGame[]): LeagueJudge {
   return {
     key, label, note, fields: VOLLEY_FIELDS, recNote: VOLLEY_REC, profile: () => volleyProfile(games), data: () => seasonSummary(games),
