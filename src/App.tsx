@@ -3,10 +3,11 @@ import type { Tab, ActionLog, Todo } from './types'
 import Dashboard from './pages/Dashboard'
 import Settlement from './pages/Settlement'
 import Stats from './pages/Stats'
+import BetAnalysisModal from './components/BetAnalysisModal'
 import { supabase } from './lib/supabase'
 import { purgeOldLogs } from './lib/logger'
 import dayjs from 'dayjs'
-import { RotateCcw, ClipboardList, X, LayoutTemplate, Code2, Check, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Save, CheckSquare, Plus, Trash2, Settings, Pin, GripVertical, Percent } from 'lucide-react'
+import { RotateCcw, ClipboardList, X, LayoutTemplate, Code2, Check, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Save, CheckSquare, Plus, Trash2, Settings, Pin, GripVertical, Percent, TrendingUp } from 'lucide-react'
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'dashboard', label: '대시보드' },
@@ -222,6 +223,7 @@ export default function App() {
   const [showLog, setShowLog] = useState(false)
   const [showTodo, setShowTodo] = useState(false)
   const [showMargin, setShowMargin] = useState(false)
+  const [showAnalysis, setShowAnalysis] = useState(false)
   const [marginCount, setMarginCount] = useState<2 | 3>(2)
   const [marginOdds, setMarginOdds] = useState<string[]>(['', '', ''])
   const marginInputRefs = useRef<(HTMLInputElement | null)[]>([])
@@ -526,6 +528,17 @@ export default function App() {
           </div>
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
 
+            {/* 베팅분석(가치판단기) 버튼 — 종목·리그별 과거 데이터로 배당의 기대수익 판정 */}
+            <button onClick={() => setShowAnalysis(true)} style={{
+              background: showAnalysis ? 'var(--gold-bg)' : 'transparent',
+              border: `1px solid ${showAnalysis ? 'var(--gold-border)' : 'var(--border)'}`,
+              borderRadius: 'var(--radius-sm)', color: showAnalysis ? 'var(--gold)' : 'var(--text-secondary)',
+              cursor: 'pointer', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 5,
+              fontSize: 11, fontWeight: 600, fontFamily: 'var(--font-body)', transition: 'all 0.15s',
+            }}>
+              <TrendingUp size={13} /><span className="nav-btn-label">베팅분석</span>
+            </button>
+
             {/* 마진율 계산기 버튼 */}
             <button onClick={() => { if (!showMargin) setMarginOdds(['', '', '']); setShowMargin(p => !p) }} style={{
               background: showMargin ? 'var(--gold-bg)' : 'transparent',
@@ -771,6 +784,8 @@ export default function App() {
           </div>
         </>
       )}
+
+      {showAnalysis && <BetAnalysisModal onClose={() => setShowAnalysis(false)} />}
 
       {/* 마진율 계산기 패널 — 우측 패널들(메모장/코드수정/할일/LOG)과 독립적으로 열리며, 항상 그 왼쪽에 위치 */}
       {showMargin && (
