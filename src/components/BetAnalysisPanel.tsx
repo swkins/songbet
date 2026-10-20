@@ -62,8 +62,8 @@ interface JudgeOut {
 }
 // kind: 'odds' = 배당(3자리 → 1.23, 다음 칸 이동) / 'line' = 농구 기준점(그대로 입력, 예: 5.5)
 // line·side: 축구 핸디캡 칸 (기준점과 홈/원정 — 정배 쪽이면 마핸 -line, 역배 쪽이면 플핸 +line) · solo: 이 칸 뒤에서 줄을 바꾼다
-// showIf: 이 조건일 때만 칸을 보여준다 (안 보이는 칸의 배당은 판정에 쓰지 않는다)
-interface OddsField { key: string; label: string; kind?: 'odds' | 'line'; required?: boolean; line?: number; side?: 'home' | 'away'; solo?: boolean; showIf?: (v: Record<string, number | null>) => boolean }
+// showIf: 이 조건일 때만 칸을 보여준다 (안 보이는 칸의 배당은 판정에 쓰지 않는다) · lineGroup: 농구 기준점 몇 번째 묶음인지 ('+ 기준점 추가'로 늘린 만큼만 보임)
+interface OddsField { key: string; label: string; kind?: 'odds' | 'line'; required?: boolean; line?: number; side?: 'home' | 'away'; solo?: boolean; showIf?: (v: Record<string, number | null>) => boolean; lineGroup?: number }
 interface LeagueJudge {
   key: string; label: string; note: string
   fields: OddsField[]
@@ -76,18 +76,20 @@ interface LeagueJudge {
 interface SportJudges { key: string; label: string; emoji: string; leagues: LeagueJudge[] }
 
 const VOLLEY_FIELDS: OddsField[] = [
-  { key: 'home', label: '홈 승', required: true }, { key: 'away', label: '원정 승', required: true },
+  { key: 'home', label: '홈', required: true }, { key: 'away', label: '원정', required: true },
   { key: 'm15', label: '-1.5 H' }, { key: 'p25', label: '+2.5 H' },  // -1.5는 정배, +2.5는 역배
   { key: 'o35', label: '3.5 오버' }, { key: 'u45', label: '4.5 언더' },
 ]
 
 const BASKET_FIELDS: OddsField[] = [
-  { key: 'home', label: '홈 승', required: true }, { key: 'away', label: '원정 승', required: true },
+  { key: 'home', label: '홈', required: true }, { key: 'away', label: '원정', required: true },
   { key: 'line', label: '기준점', kind: 'line' },
   { key: 'hh', label: '홈 H' }, { key: 'ah', label: '원정 H' },
-  // 두 번째 기준점 — 같은 경기의 다른 기준점·배당을 나란히 비교 (예: +2.5 1.97 vs +3.5 1.82)
-  { key: 'line2', label: '기준점 2', kind: 'line' },
-  { key: 'hh2', label: '홈 H' }, { key: 'ah2', label: '원정 H' },
+  // 기준점 추가 (최대 3개) — 같은 경기의 다른 기준점·배당을 나란히 비교 (예: +2.5 1.97 vs +3.5 1.82)
+  ...[2, 3].flatMap(n => [
+    { key: `line${n}`, label: `기준점 ${n}`, kind: 'line' as const, lineGroup: n },
+    { key: `hh${n}`, label: '홈 H', lineGroup: n }, { key: `ah${n}`, label: '원정 H', lineGroup: n },
+  ]),
 ]
 
 // 승무패는 사이트 순서대로 홈 승 → 무 → 원정 승, 그다음 홈/원정 핸디캡을 기준점마다 짝으로
@@ -114,8 +116,8 @@ const soccerFields = (zone?: OuZone): OddsField[] => [
   { key: 'o25', label: '2.5 오버', showIf: v => inOuZone(zone, v) }, { key: 'u25', label: '2.5 언더', solo: true, showIf: v => inOuZone(zone, v) },
 ]
 const SOCCER_FIELDS: OddsField[] = [
-  { key: 'home', label: '홈 승', required: true }, { key: 'draw', label: '무', required: true },
-  { key: 'away', label: '원정 승', required: true, solo: true },
+  { key: 'home', label: '홈', required: true }, { key: 'draw', label: '무', required: true },
+  { key: 'away', label: '원정', required: true, solo: true },
   ...[0.5, 1.5, 2.5].flatMap(L => (['home', 'away'] as const).map(side => ({
     key: `${side[0]}${String(L).replace('.', '')}`, label: `${side === 'home' ? '홈' : '원정'} H ${L}`, line: L, side, solo: side === 'away',
     showIf: (v: Record<string, number | null>) => { const fav = soccerFav(v); return fav != null && SOCCER_LINE_SHOW[L](fav) },
@@ -233,6 +235,7 @@ function basketLeague(key: string, label: string, note: string, judge: BasketJud
       return judge({
         home: v.home, away: v.away, line: v.line, mh: favHome ? v.hh : v.ah, ph: favHome ? v.ah : v.hh,
         line2: v.line2, mh2: favHome ? v.hh2 : v.ah2, ph2: favHome ? v.ah2 : v.hh2,
+        line3: v.line3, mh3: favHome ? v.hh3 : v.ah3, ph3: favHome ? v.ah3 : v.hh3,
       })
     },
   }
@@ -298,13 +301,14 @@ export default function BetAnalysisPanel({ tabs, active = true }: { tabs: ReactN
   const league = sport.leagues.find(l => l.key === leagueKey) ?? null
   const [raw, setRaw] = useState<Record<string, string>>({})
   const [openRow, setOpenRow] = useState<string | null>(null)  // 판정 표에서 눌러서 상세를 펼친 줄
+  const [lineCount, setLineCount] = useState(1)  // 농구 기준점 개수 (1~3, '+ 기준점 추가')
   const inputRefs = useRef<(HTMLInputElement | null)[]>([])
   // 항상 홈 승 칸에 커서 — 처음 보일 때, 종목·리그를 바꿀 때, 초기화할 때 바로 홈 승부터 칠 수 있게
   const [focusTick, setFocusTick] = useState(0)
   useEffect(() => {
     if (active) inputRefs.current[0]?.focus({ preventScroll: true })
   }, [active, sportKey, leagueKey, focusTick])
-  function reset() { setRaw({}); setFocusTick(t => t + 1) }
+  function reset() { setRaw({}); setLineCount(1); setFocusTick(t => t + 1) }
   // 기준점은 정수만 치고 넘어가면 .5를 붙인다 (5 → 5.5, 13 → 13.5). 정수 기준점은 5.0처럼 소수점까지 치면 그대로 둔다
   function finishLine(key: string) {
     setRaw(p => /^\d+$/.test(p[key] ?? '') ? { ...p, [key]: `${p[key]}.5` } : p)
@@ -312,7 +316,7 @@ export default function BetAnalysisPanel({ tabs, active = true }: { tabs: ReactN
 
   function pickSport(key: string) {
     const s = JUDGES.find(x => x.key === key)!
-    setSportKey(key); setLeagueKey(s.leagues[0]?.key ?? null); setRaw({}); setFocusTick(t => t + 1)
+    setSportKey(key); setLeagueKey(s.leagues[0]?.key ?? null); setRaw({}); setLineCount(1); setFocusTick(t => t + 1)
   }
   // 숫자 3자리만 치면 배당으로 바꾸고(123 → 1.23) 다음 칸으로 이동
   function change(idx: number, key: string, v: string, kind: 'odds' | 'line' = 'odds') {
@@ -340,19 +344,21 @@ export default function BetAnalysisPanel({ tabs, active = true }: { tabs: ReactN
     vals[f.key] = f.kind === 'line' ? (Number.isFinite(n) && n >= 0 ? n : null) : (n > 1 ? n : null)
   }
   // 조건부 칸(축구 핸디): 지금 안 보이는 칸은 판정에서 뺀다
-  const fields = (league?.fields ?? []).filter(f => !f.showIf || f.showIf(vals))
+  const fields = (league?.fields ?? []).filter(f => (!f.showIf || f.showIf(vals)) && (f.lineGroup ?? 1) <= lineCount)
+  const canAddLine = (league?.fields ?? []).some(f => (f.lineGroup ?? 1) > lineCount)
   for (const f of league?.fields ?? []) if (!fields.includes(f)) vals[f.key] = null
   const out = league ? league.run(vals) : null
   // 농구 마핸/플핸 줄 이름에 홈/원정과 실제 기준점을 붙여서 보여준다 (홈 마핸 -5.5 / 원정 플핸 +5.5)
   const lineV = vals.line
   const favHome = vals.home != null && vals.away != null && vals.home <= vals.away
-  // 기준점 2개: mh/ph는 기준점, mh2/ph2는 기준점 2
-  const isHcap = (key: string) => /^(mh|ph)2?$/.test(key)
-  const lineOf = (key: string) => key.endsWith('2') ? vals.line2 : lineV
+  // 기준점 최대 3개: mh/ph는 기준점, mh2/ph2는 기준점 2, mh3/ph3는 기준점 3
+  const isHcap = (key: string) => /^(mh|ph)[23]?$/.test(key)
+  const lineNo = (key: string) => key.match(/[23]$/)?.[0] ?? ''
+  const lineOf = (key: string) => (lineNo(key) ? vals[`line${lineNo(key)}`] : lineV)
   const sideOf = (key: string) => key.startsWith('mh') === favHome ? '홈' : '원정'
   const betName = (b: JudgeBet) => isHcap(b.key) && lineOf(b.key) != null ? `${sideOf(b.key)} ${b.key.startsWith('mh') ? '마핸 -' : '플핸 +'}${lineOf(b.key)}` : b.name
   // 판정 결과의 마핸/플핸을 입력 칸(홈 핸디캡/원정 핸디캡) 순서로 맞춘다
-  const fieldKeyOf = (key: string) => isHcap(key) ? `${sideOf(key) === '홈' ? 'hh' : 'ah'}${key.endsWith('2') ? '2' : ''}` : key
+  const fieldKeyOf = (key: string) => isHcap(key) ? `${sideOf(key) === '홈' ? 'hh' : 'ah'}${lineNo(key)}` : key
   // 홈/원정 핸디캡 칸 이름 옆에 지금 배당 기준으로 마핸/플핸 어느 쪽인지 붙여준다
   // 칸 이름 아래 작은 글씨 — 기준점은 자동 .5 안내, 핸디캡은 지금 배당 기준 마핸/플핸 (이름 폭을 줄여 칸이 좁아도 한 줄에 두 칸)
   const fieldSub = (f: OddsField) => {
@@ -360,9 +366,9 @@ export default function BetAnalysisPanel({ tabs, active = true }: { tabs: ReactN
       if (vals.home == null || vals.away == null) return null
       return `${(f.side === 'home') === (out?.minusHome ?? favHome) ? '마핸 -' : '플핸 +'}${f.line}`
     }
-    if (!/^(hh|ah)2?$/.test(f.key) || vals.home == null || vals.away == null) return null
+    if (!/^(hh|ah)[23]?$/.test(f.key) || vals.home == null || vals.away == null) return null
     const isFav = f.key.startsWith('hh') === favHome
-    const ln = f.key.endsWith('2') ? vals.line2 : lineV
+    const ln = lineOf(f.key)
     return `${isFav ? '마핸 -' : '플핸 +'}${ln ?? '기준점'}`
   }
   // 입력칸 자리는 모든 종목 한 줄 3칸 기준. 축구는 3칸(승무패)을 다 쓰고, 농구·배구는 2칸씩만 써서 세로 배치는 그대로.
@@ -411,7 +417,7 @@ export default function BetAnalysisPanel({ tabs, active = true }: { tabs: ReactN
             {/* 리그 칩 + 리그 정보(ⓘ) — 데이터 현황·기준 데이터·리그 특성·판정 기준은 ⓘ에 마우스를 올리거나 눌렀을 때만 */}
             <div style={{ position: 'relative', display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
               {sport.leagues.map(l => (
-                <button key={l.key} onClick={() => { setLeagueKey(l.key); setRaw({}); setFocusTick(t => t + 1) }} style={{ ...chip(l.key === leagueKey), fontSize: 11, padding: '4px 10px' }}>{l.label}</button>
+                <button key={l.key} onClick={() => { setLeagueKey(l.key); setRaw({}); setLineCount(1); setFocusTick(t => t + 1) }} style={{ ...chip(l.key === leagueKey), fontSize: 11, padding: '4px 10px' }}>{l.label}</button>
               ))}
               {league && <LeagueInfo league={league} />}
             </div>
@@ -435,6 +441,9 @@ export default function BetAnalysisPanel({ tabs, active = true }: { tabs: ReactN
                 </label>
               ))}
             </div>
+            {canAddLine && (
+              <button onClick={() => setLineCount(c => c + 1)} style={{ marginTop: -4, marginBottom: 10, background: 'var(--bg-elevated)', border: '1px dashed var(--border)', borderRadius: 6, color: 'var(--text-secondary)', cursor: 'pointer', padding: '4px 10px', fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-body)' }}>+ 기준점 추가</button>
+            )}
 
             {!out ? (
               <div style={{ padding: '14px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>{requiredLabels} 배당을 넣으면 판정</div>

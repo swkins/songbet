@@ -43,7 +43,7 @@ export interface JudgeOutput {
 }
 
 const NAMES: Record<BetKey, string> = {
-  home: '홈 승', away: '원정 승', m15: '-1.5 마핸', o35: '3.5 오버', u45: '4.5 언더', p25: '+2.5 플핸',
+  home: '홈', away: '원정', m15: '-1.5 마핸', o35: '3.5 오버', u45: '4.5 언더', p25: '+2.5 플핸',
 };
 
 // 기준 배당 x 주변 로그 창을 넓혀가며 최소 n 경기 확보

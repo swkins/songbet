@@ -169,9 +169,9 @@ function judgeWith(rows: Row[], sd: number[], oddsCheck: ReturnType<typeof socce
 
   // 정배 승 = m > 0, 역배 승 = m < 0 (시장 확률 [정배, 무, 역배] 기준)
   const FAV: [number, number, number] = [1, 0, 0], DRAW: [number, number, number] = [0, 1, 0], DOG: [number, number, number] = [0, 0, 1];
-  add('home', '홈 승', h, (r) => (favIsHome ? r.m > 0 : r.m < 0), favIsHome ? FAV : DOG, 'home');
+  add('home', '홈', h, (r) => (favIsHome ? r.m > 0 : r.m < 0), favIsHome ? FAV : DOG, 'home');
   add('draw', '무', d, (r) => r.m === 0, DRAW, 'draw');
-  add('away', '원정 승', a, (r) => (favIsHome ? r.m < 0 : r.m > 0), favIsHome ? DOG : FAV, 'away');
+  add('away', '원정', a, (r) => (favIsHome ? r.m < 0 : r.m > 0), favIsHome ? DOG : FAV, 'away');
   // 핸디캡 (반 골 기준점이라 적특 없음): -L은 그 팀이 L골차 넘게 이기면, +L은 그 팀이 L골차 넘게 지지 않으면 적중.
   // 어느 쪽이 마이너스인지는 사이트가 정한다 — 승무패가 거의 같은 경기(홈 2.42 / 원정 2.44)에서 사이트는 원정에 -0.5를 줬는데
   // 판정기가 승무패 배당만 보고 홈을 -0.5로 계산해 플핸·마핸이 뒤집혔다. 0.5 핸디 배당이 있으면 그 배당이 홈 승 쪽(-0.5)과

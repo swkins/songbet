@@ -5,7 +5,7 @@ import { recentSeasons, seasonWeigher, weightedMean, weightedStat } from './seas
 // [홈배당, 원정배당, 홈점수, 원정점수, 시즌(끝나는 해, 선택)] — 시즌이 있으면 최근 시즌일수록 가중치를 크게 (seasonWeight.ts)
 export type Game = [number, number, number, number, number?];
 
-export type BetKey = 'home' | 'away' | 'mh' | 'ph' | 'mh2' | 'ph2';
+export type BetKey = 'home' | 'away' | 'mh' | 'ph' | 'mh2' | 'ph2' | 'mh3' | 'ph3';
 
 export interface Odds {
   home: number | null; // 홈 승 배당
@@ -13,8 +13,9 @@ export interface Odds {
   line: number | null; // 기준점 (정배 기준, 양수. 예: 5.5 → 정배 -5.5 / 역배 +5.5)
   mh: number | null; // 정배 -기준점 마핸 배당
   ph: number | null; // 역배 +기준점 플핸 배당
-  // 두 번째 기준점 (같은 경기 다른 기준점·배당을 나란히 비교할 때 — 선택)
+  // 두 번째·세 번째 기준점 (같은 경기 다른 기준점·배당을 나란히 비교할 때 — 선택)
   line2?: number | null; mh2?: number | null; ph2?: number | null;
+  line3?: number | null; mh3?: number | null; ph3?: number | null;
 }
 
 export interface BetResult {
@@ -46,7 +47,7 @@ export interface JudgeOutput {
 }
 
 const NAMES: Record<BetKey, string> = {
-  home: '홈 승', away: '원정 승', mh: '마핸 (정배 -)', ph: '플핸 (역배 +)', mh2: '마핸 2 (정배 -)', ph2: '플핸 2 (역배 +)',
+  home: '홈', away: '원정', mh: '마핸 (정배 -)', ph: '플핸 (역배 +)', mh2: '마핸 2 (정배 -)', ph2: '플핸 2 (역배 +)', mh3: '마핸 3 (정배 -)', ph3: '플핸 3 (역배 +)',
 };
 
 // 기준 배당 x 주변 로그 창을 넓혀가며 최소 n 경기 확보
@@ -128,8 +129,8 @@ function judgeWith(games: Game[], weight: (g: Game) => number, oddsCheck: Return
     // 추천 배당범위 밖이거나 적중률 50% 미만이면 강도 0 (judgeScore.betStrength), 승은 같은 배당대 과거 실적까지 (oddsCheck.winGate)
     const check = isWin ? oddsCheck(key, site) : undefined;
     const st = isWin && opts.winOff ? { label: '승 추천 안 함', v: 0 }
-      : (key === 'mh' || key === 'mh2') && mhOff ? { label: '마핸 추천 안 함', v: 0 }
-      : (key === 'ph' || key === 'ph2') && phOff ? { label: '플핸 추천 안 함', v: 0 }
+      : key.startsWith('mh') && mhOff ? { label: '마핸 추천 안 함', v: 0 }
+      : key.startsWith('ph') && phOff ? { label: '플핸 추천 안 함', v: 0 }
       : winGate(betStrength(ev, s.pw, eligible), check, opts.winSeasonShare);
     bets.push({
       key, name: NAMES[key], site, hit: s.pw, push: s.pp, se: s.se, be, ev, err: site * s.se,
@@ -151,15 +152,15 @@ function judgeWith(games: Game[], weight: (g: Game) => number, oddsCheck: Return
   add('home', odds.home, favIsHome ? favStat : dogStat);
   add('away', odds.away, favIsHome ? dogStat : favStat);
 
-  const L = odds.line;
-  if (L != null && L >= 0) {
-    add('mh', odds.mh, stat3((m) => (m > L ? 1 : m === L ? 0 : -1)));
-    add('ph', odds.ph, stat3((m) => (m < L ? 1 : m === L ? 0 : -1)));
-  }
-  const L2 = odds.line2;
-  if (L2 != null && L2 >= 0) {
-    add('mh2', odds.mh2 ?? null, stat3((m) => (m > L2 ? 1 : m === L2 ? 0 : -1)));
-    add('ph2', odds.ph2 ?? null, stat3((m) => (m < L2 ? 1 : m === L2 ? 0 : -1)));
+  // 기준점 최대 3개 — 각각 정배 -L 마핸 / 역배 +L 플핸
+  for (const [L, mk, pk, mo, po] of [
+    [odds.line, 'mh', 'ph', odds.mh, odds.ph],
+    [odds.line2, 'mh2', 'ph2', odds.mh2, odds.ph2],
+    [odds.line3, 'mh3', 'ph3', odds.mh3, odds.ph3],
+  ] as const) {
+    if (L == null || L < 0) continue;
+    add(mk, mo ?? null, stat3((m) => (m > L ? 1 : m === L ? 0 : -1)));
+    add(pk, po ?? null, stat3((m) => (m < L ? 1 : m === L ? 0 : -1)));
   }
 
   const recommended = bets.filter((b) => b.ev > 0 && b.strength > 0).sort((x, y) => y.strength - x.strength || y.ev - x.ev);
