@@ -109,7 +109,7 @@ export function createJudge(rawGames: Game[], base: Partial<JudgeOptions> = {}) 
   const P = games.map((g) => probs(g[0], g[5], g[1]));
   const sd = [0, 1, 2].map((i) => std(P.map((p) => p[i]))); // 세 확률을 같은 눈금으로 맞춰 거리 계산
   const rows = games.map((g, i) => ({ g, p: P[i], w: weight(g) }));
-  const defaults: JudgeOptions = { minOdds: 1.1, maxOdds: 3.0, sampleN: 200, ...base };
+  const defaults: JudgeOptions = { minOdds: 1.01, maxOdds: 3.0, sampleN: 200, ...base };
   return (odds: Odds, o: Partial<JudgeOptions> = {}): JudgeOutput | null =>
     judgeWith(rows, sd, odds, { ...defaults, ...o });
 }

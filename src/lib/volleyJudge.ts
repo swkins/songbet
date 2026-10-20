@@ -27,7 +27,7 @@ export interface BetResult {
   strengthLabel: string; // 패스 / 약 / 중 / 강 / 최강
   strength: number; // 베팅 강도 0~10점 (0 = 패스)
   n: number;
-  eligible: boolean; // 사이트 배당 1.30 이상 2.0 미만
+  eligible: boolean; // 사이트 배당 3.00 미만 (추천 배당범위)
 }
 
 export interface JudgeOutput {
@@ -72,7 +72,7 @@ export interface JudgeOptions {
 
 export function createJudge(allGames: Game[], base: Partial<JudgeOptions> = {}) {
   const games = recentSeasons(allGames); // 최근 5시즌만
-  const defaults: JudgeOptions = { minOdds: 1.3, maxOdds: 2.0, minMarketN: 150, minSideN: 120, ...base };
+  const defaults: JudgeOptions = { minOdds: 1.01, maxOdds: 3.0, minMarketN: 150, minSideN: 120, ...base };
   const weight = seasonWeigher(games);
   return (odds: Odds, o: Partial<JudgeOptions> = {}): JudgeOutput | null =>
     judgeWith(games, weight, odds, { ...defaults, ...o });
