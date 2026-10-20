@@ -39,10 +39,14 @@ import { judgeLaliga } from '../leagues/laliga'
 import { judgeBundesliga } from '../leagues/bundesliga'
 import { UCL_GAMES } from '../data/uclGames'
 import { judgeUcl } from '../leagues/ucl'
+import { LIGUE1_GAMES } from '../data/ligue1Games'
+import { SERIEA_GAMES } from '../data/serieaGames'
+import { judgeLigue1 } from '../leagues/ligue1'
+import { judgeSeriea } from '../leagues/seriea'
 
 /* ── 베팅분석 — 대시보드 사이트 현황 자리에서 탭으로 바꿔 보는 패널. 종목 → 리그를 고르고 배당을 넣으면 과거 경기 데이터로 각 베팅의 가치(기대수익)를 판정 ──
    판정기는 종목·리그별로 등록한다(리그마다 과거 경기 데이터 + 최소 표본 수가 다름 — src/leagues).
-   지금은 축구 4개·배구 8개·농구 6개 리그이고, 다른 종목/리그는 과거 데이터가 생기면 JUDGES에 추가하면 된다.
+   지금은 축구 6개·배구 8개·농구 6개 리그이고, 다른 종목/리그는 과거 데이터가 생기면 JUDGES에 추가하면 된다.
    종목마다 판정기 입력·출력 모양이 조금 달라서(농구는 기준점 + 적특) 아래 공통 모양으로 맞춰서 쓴다. */
 
 // 판정 결과 공통 모양 — 배구/농구 판정기 결과가 모두 이 모양을 만족한다
@@ -260,6 +264,11 @@ const JUDGES: SportJudges[] = [
       soccerLeague('bundesliga', '분데스리가', '2021-22 ~ 2025-26 정규리그 (BetExplorer 평균 배당) · 비교 경기는 홈정배/원정정배 따로, 승무패 세 배당이 비슷한 200경기', judgeBundesliga, BUNDESLIGA_GAMES,
         // 홈정배: 정배 1.30 미만 (학습 77% → 확인 91%) / 원정정배: 정배 1.50 미만 & 무 5.0 이상 (74% → 75%)
         { home: { favMax: 1.3 }, away: { favMax: 1.5, drawMin: 5.0 } }),
+      soccerLeague('seriea', '세리에A', '2021-22 ~ 2025-26 정규리그 (BetExplorer 평균 배당) · 비교 경기는 홈정배/원정정배 따로, 승무패 세 배당이 비슷한 200경기', judgeSeriea, SERIEA_GAMES),
+        // 2.5 오버 구역 없음 — 학습 시즌에 좋던 조건이 확인 시즌에 45~57%로 떨어짐 (세리에A는 골이 적은 리그, 2.5 오버 49%)
+      soccerLeague('ligue1', '리그1', '2021-22 ~ 2025-26 정규리그 (BetExplorer 평균 배당) · 비교 경기는 홈정배/원정정배 따로, 승무패 세 배당이 비슷한 200경기', judgeLigue1, LIGUE1_GAMES,
+        // 홈정배: 정배 1.40 미만 & 무 5.5 이상 (학습 79% → 확인 65%) / 원정정배: 확인 시즌 58%라 구역 없음
+        { home: { favMax: 1.4, drawMin: 5.5 } }),
       soccerLeague('ucl', '챔피언스리그', '2021-22 ~ 2025-26 조별리그·리그 페이즈, 토너먼트 제외 (BetExplorer 평균 배당) · 비교 경기는 홈정배/원정정배 따로, 세 배당이 비슷한 80경기', judgeUcl, UCL_GAMES,
         // 홈정배: 정배 1.50 미만 & 무 6.5 이상 (학습 81% → 확인 68%) / 원정정배: 정배 1.70 미만 & 무 5.5 미만 (78% → 67%) — 표본 작음
         { home: { favMax: 1.5, drawMin: 6.5 }, away: { favMax: 1.7, drawMax: 5.5 } }),
