@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { RotateCcw } from 'lucide-react'
 import type { Odds as VolleyOdds, Game as VolleyGame } from '../lib/volleyJudge'
 import { cleanGames, type Game as BasketGame, type Odds as BasketOdds } from '../lib/basketJudge'
-import { latestSeason, seasonWeigher } from '../lib/seasonWeight'
+import { latestSeason, seasonSummary, seasonWeigher } from '../lib/seasonWeight'
 import { NBA_GAMES } from '../data/nbaGames'
 import { KBL_GAMES } from '../data/kblGames'
 import { CBA_GAMES } from '../data/cbaGames'
@@ -57,6 +57,7 @@ interface LeagueJudge {
   run: (v: Record<string, number | null>) => JudgeOut | null
   profile: () => { n: number; weighted: boolean; items: [string, string][] }  // 리그 특성 요약 (판정기가 쓰는 과거 경기 기준, weighted = 최근 시즌 가중 적용)
   recNote: string
+  data: () => ReturnType<typeof seasonSummary>  // 데이터 현황 (시즌별 경기 수·반영도)
 }
 interface SportJudges { key: string; label: string; emoji: string; leagues: LeagueJudge[] }
 
@@ -136,13 +137,13 @@ const VOLLEY_REC = '기대수익 플러스 + 배당 1.30 이상 2.00 미만 (원
 const BASKET_REC = '기대수익 플러스 + 배당 1.30 이상 2.50 미만 · 기준점이 정수면 적특(환불) 반영'
 function volleyLeague(key: string, label: string, note: string, judge: VolleyJudgeFn, games: VolleyGame[]): LeagueJudge {
   return {
-    key, label, note, fields: VOLLEY_FIELDS, recNote: VOLLEY_REC, profile: () => volleyProfile(games),
+    key, label, note, fields: VOLLEY_FIELDS, recNote: VOLLEY_REC, profile: () => volleyProfile(games), data: () => seasonSummary(games),
     run: v => judge({ home: v.home, away: v.away, m15: v.m15, o35: v.o35, u45: v.u45, p25: v.p25 }),
   }
 }
 function basketLeague(key: string, label: string, note: string, judge: BasketJudgeFn, games: BasketGame[]): LeagueJudge {
   return {
-    key, label, note, fields: BASKET_FIELDS, recNote: BASKET_REC, profile: () => basketProfile(games),
+    key, label, note, fields: BASKET_FIELDS, recNote: BASKET_REC, profile: () => basketProfile(games), data: () => seasonSummary(cleanGames(games)),
     // 홈/원정 핸디캡 배당으로 받고, 승패 배당이 낮은 쪽(정배)이 자동으로 -기준점 마핸이 된다
     run: v => {
       const favHome = v.home != null && v.away != null && v.home <= v.away
@@ -156,7 +157,7 @@ const JUDGES: SportJudges[] = [
   { key: 'baseball', label: '야구', emoji: '⚾', leagues: [] },
   {
     key: 'basketball', label: '농구', emoji: '🏀', leagues: [
-      basketLeague('nba', 'NBA', '2018-19 ~ 2025-26(1월) 정규+플레이오프 (kyleskom OddsData 머니라인)', judgeNba, NBA_GAMES),
+      basketLeague('nba', 'NBA', '2021-22 ~ 2025-26 정규시즌 (BetExplorer 평균 배당)', judgeNba, NBA_GAMES),
       basketLeague('kbl', 'KBL', '2020-21 ~ 2025-26 정규시즌 (BetExplorer 평균 배당)', judgeKbl, KBL_GAMES),
       basketLeague('cba', 'CBA', '2022-23 ~ 2025-26 정규시즌 (BetExplorer 평균 배당)', judgeCba, CBA_GAMES),
       basketLeague('bleague', 'B.LEAGUE', 'B1 2021-22 ~ 2025-26 정규시즌 (BetExplorer 평균 배당)', judgeBleague, BLEAGUE_GAMES),
@@ -278,6 +279,7 @@ export default function BetAnalysisPanel({ tabs, active = true }: { tabs: ReactN
                 <button key={l.key} onClick={() => { setLeagueKey(l.key); setRaw({}); setFocusTick(t => t + 1) }} style={{ ...chip(l.key === leagueKey), fontSize: 11, padding: '4px 10px' }}>{l.label}</button>
               ))}
             </div>
+            <DataStatus leagues={sport.leagues} />
             {league && <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 6 }}>기준 데이터: {league.note}</div>}
             {league && (() => {
               const pr = league.profile()
@@ -360,6 +362,57 @@ export default function BetAnalysisPanel({ tabs, active = true }: { tabs: ReactN
             )}
           </>
         )}
+    </div>
+  )
+}
+
+// 데이터 현황 — 고른 종목의 리그마다 어느 시즌 파일이 있는지, 시즌별 경기 수와 반영도(최근 시즌 가중치)를 한눈에.
+// 접어 두면 한 줄 요약(시즌 반영 리그 수 / 시즌 정보 없는 리그 수)만 보인다
+function DataStatus({ leagues }: { leagues: LeagueJudge[] }) {
+  const [open, setOpen] = useState(false)
+  const rows = leagues.map(l => ({ l, d: l.data() }))
+  const seasons = [...new Set(rows.flatMap(r => r.d.seasons.map(s => s.season)))].sort((a, b) => a - b)
+  const withSeason = rows.filter(r => r.d.seasons.length > 0).length
+  const label = (y: number) => `${String(y - 1).slice(2)}-${String(y).slice(2)}`
+  const cell: React.CSSProperties = { padding: '3px 6px', fontSize: 10, whiteSpace: 'nowrap', borderBottom: '1px solid var(--border-light)' }
+  return (
+    <div style={{ marginBottom: 6 }}>
+      <button onClick={() => setOpen(o => !o)} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: 10, fontFamily: 'var(--font-body)', color: 'var(--text-muted)' }}>
+        {open ? '▾' : '▸'} 데이터 현황 — 시즌 반영 <b style={{ color: 'var(--green)' }}>{withSeason}</b>개 리그
+        {rows.length - withSeason > 0 && <> · 시즌 정보 없음(가중 미적용) <b style={{ color: 'var(--orange)' }}>{rows.length - withSeason}</b>개</>}
+      </button>
+      {open && (
+        <div style={{ overflowX: 'auto', marginTop: 4, border: '1px solid var(--border)', borderRadius: 6 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr>
+                <th style={{ ...cell, textAlign: 'left' }}>리그</th>
+                {seasons.map(y => <th key={y} style={{ ...cell, textAlign: 'center' }}>{label(y)}</th>)}
+                <th style={{ ...cell, textAlign: 'right' }}>합계</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(({ l, d }) => (
+                <tr key={l.key}>
+                  <td style={{ ...cell, fontWeight: 700 }}>{l.label}</td>
+                  {d.seasons.length === 0 ? (
+                    <td colSpan={seasons.length || 1} style={{ ...cell, textAlign: 'center', color: 'var(--orange)' }}>시즌 정보 없음 — 파일 다시 필요 (모든 시즌 같은 비중)</td>
+                  ) : seasons.map(y => {
+                    const s = d.seasons.find(x => x.season === y)
+                    return (
+                      <td key={y} style={{ ...cell, textAlign: 'center', color: s ? 'var(--text-primary)' : 'var(--text-muted)' }}>
+                        {s ? <>{s.n}<span style={{ color: s.w >= 0.99 ? 'var(--green)' : 'var(--text-muted)' }}> · {Math.round(s.w * 100)}%</span></> : '없음'}
+                      </td>
+                    )
+                  })}
+                  <td style={{ ...cell, textAlign: 'right' }}>{d.total}경기</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div style={{ fontSize: 9, color: 'var(--text-muted)', padding: '3px 6px' }}>칸 = 경기 수 · 반영도(가장 최근 시즌 100%, 한 시즌 오래될수록 ×0.8, 최소 30%)</div>
+        </div>
+      )}
     </div>
   )
 }

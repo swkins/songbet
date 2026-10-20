@@ -40,3 +40,13 @@ export function weightedMean<T>(rows: readonly T[], weight: (r: T) => number, va
   for (const r of rows) { const w = weight(r); sw += w; s += w * value(r); }
   return sw ? s / sw : 0;
 }
+
+// 데이터 현황 — 시즌별 경기 수와 반영도(가중치). 시즌 칸이 없는 데이터면 seasons가 빈 배열
+export function seasonSummary(games: readonly WithSeason[]): { total: number; seasons: { season: number; n: number; w: number }[] } {
+  const weight = seasonWeigher(games);
+  const by = new Map<number, number>();
+  for (const g of games) if (g[4] != null) by.set(g[4], (by.get(g[4]) ?? 0) + 1);
+  const seasons = [...by.entries()].sort((a, b) => a[0] - b[0])
+    .map(([season, n]) => ({ season, n, w: weight([0, 0, 0, 0, season]) }));
+  return { total: games.length, seasons };
+}
