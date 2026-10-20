@@ -547,20 +547,20 @@ tr:hover td { background: var(--bg-hover); }
 .dashboard-bets { width: 100%; }
 .dashboard-analysis { width: 100%; min-width: 0; }
 /* 베팅분석 입력칸 — 좌측 정렬 [이름][칸] [이름][칸], 입력칸은 모두 같은 가로·세로. 기준점 줄은 나머지 칸을 비워서 다음 줄로 */
-.bet-inputs { display: grid; grid-template-columns: max-content 120px max-content 120px; justify-content: start; align-items: center; gap: 6px 8px; margin-bottom: 12px; }
+/* 베팅분석 배당 입력 — 모든 종목 한 줄 3칸 자리 (이름 + 입력칸) × 3, 좌측 정렬 */
+.bet-inputs { display: grid; grid-template-columns: repeat(3, max-content 92px); justify-content: start; align-items: center; gap: 5px 6px; margin-bottom: 12px; }
 .bet-inputs__label { white-space: nowrap; }
-.bet-inputs > label > input.bet-odds-input, .bet-inputs input.bet-odds-input { width: 120px; height: 32px; box-sizing: border-box; padding: 0 8px; }
-.bet-inputs__rest { grid-column: span 2; }
+.bet-inputs > label > input.bet-odds-input, .bet-inputs input.bet-odds-input { width: 92px; height: 28px; box-sizing: border-box; padding: 0 6px; }
 /* 판정 결과 표 — 칸 여백을 줄여 베팅~베팅 강도가 가로 스크롤 없이 한 번에 */
 .bet-judge-table th, .bet-judge-table td { padding-left: 6px; padding-right: 6px; }
 .bet-judge-table td { padding-top: 6px; padding-bottom: 6px; }
 @media (max-width: 600px) {
-  .bet-inputs { grid-template-columns: max-content 120px; }
+  .bet-inputs { grid-template-columns: max-content 92px; }
   .bet-inputs__rest { display: none; }
   .bet-inputs .bet-inputs__label { padding-left: 0 !important; }
 }
 /* 베팅분석 입력칸 안내 글씨 — 칸이 좁아도 다 보이게 작게 */
-.bet-odds-input::placeholder { font-size: 11px; letter-spacing: -0.3px; }
+.bet-odds-input::placeholder { font-size: 10px; letter-spacing: -0.3px; }
 
 /* ── 사이트 현황(채굴) 카드 그리드 ── */
 .mining-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 8px; }

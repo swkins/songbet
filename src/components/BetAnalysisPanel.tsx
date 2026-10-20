@@ -63,6 +63,7 @@ interface OddsField { key: string; label: string; kind?: 'odds' | 'line'; requir
 interface LeagueJudge {
   key: string; label: string; note: string
   fields: OddsField[]
+  perRow?: number  // 입력칸 한 줄에 몇 칸 (축구 3 — 승무패 한 줄, 나머지 2). 칸 자리는 모든 종목 3칸 기준
   run: (v: Record<string, number | null>) => JudgeOut | null
   profile: () => { n: number; weighted: boolean; items: [string, string][] }  // 리그 특성 요약 (판정기가 쓰는 과거 경기 기준, weighted = 최근 시즌 가중 적용)
   recNote: string
@@ -87,7 +88,7 @@ const SOCCER_FIELDS: OddsField[] = [
   { key: 'home', label: '홈 승', required: true }, { key: 'draw', label: '무', required: true },
   { key: 'away', label: '원정 승', required: true, solo: true },
   ...[0.5, 1.5, 2.5].flatMap(L => (['home', 'away'] as const).map(side => ({
-    key: `${side[0]}${String(L).replace('.', '')}`, label: `${side === 'home' ? '홈' : '원정'} 핸디 ${L}`, line: L, side,
+    key: `${side[0]}${String(L).replace('.', '')}`, label: `${side === 'home' ? '홈' : '원정'} 핸디 ${L}`, line: L, side, solo: side === 'away',
   }))),
   { key: 'o25', label: '2.5 오버' },
 ]
@@ -205,7 +206,7 @@ function basketLeague(key: string, label: string, note: string, judge: BasketJud
 
 function soccerLeague(key: string, label: string, note: string, judge: SoccerJudgeFn, games: SoccerGame[]): LeagueJudge {
   return {
-    key, label, note, fields: SOCCER_FIELDS, recNote: SOCCER_REC, profile: () => soccerProfile(games), data: () => seasonSummary(cleanSoccer(games)),
+    key, label, note, fields: SOCCER_FIELDS, perRow: 3, recNote: SOCCER_REC, profile: () => soccerProfile(games), data: () => seasonSummary(cleanSoccer(games)),
     run: v => judge({
       home: v.home, draw: v.draw, away: v.away, h05: v.h05, a05: v.a05, h15: v.h15, a15: v.a15, h25: v.h25, a25: v.a25, o25: v.o25,
     }),
@@ -308,11 +309,17 @@ export default function BetAnalysisPanel({ tabs, active = true }: { tabs: ReactN
     const isFav = (f.key === 'hh') === favHome
     return `${isFav ? '마핸 -' : '플핸 +'}${lineV ?? '기준점'}`
   }
-  // 입력칸이 한 줄의 첫째(0)/둘째(1) 자리 중 어디에 놓이는지 — 둘째 자리 이름 앞에만 간격 (기준점·solo 칸 뒤에서 줄 바꿈)
-  const endsRow = (f: OddsField) => f.kind === 'line' || !!f.solo
+  // 입력칸 자리는 모든 종목 한 줄 3칸 기준. 축구는 3칸(승무패)을 다 쓰고, 농구·배구는 2칸씩만 써서 세로 배치는 그대로.
+  // 각 칸이 한 줄의 몇째(0/1/2) 자리인지 — 첫째 자리가 아니면 이름 앞에 간격 (기준점·solo 칸 뒤에서 줄 바꿈)
+  const SLOTS = 3
+  const perRow = league?.perRow ?? 2
   const inputCol: number[] = []
+  const rowEnd: boolean[] = []
   let col = 0
-  for (const f of league?.fields ?? []) { inputCol.push(col); col = endsRow(f) ? 0 : (col + 1) % 2 }
+  for (const f of league?.fields ?? []) {
+    const end = f.kind === 'line' || !!f.solo || col + 1 >= perRow
+    inputCol.push(col); rowEnd.push(end); col = end ? 0 : col + 1
+  }
   const recommendedKeys = new Set(out?.recommended.map(b => b.key) ?? [])
   const ruleKeys = new Set(out?.rule?.keys ?? [])
   const requiredLabels = (league?.fields ?? []).filter(f => f.required).map(f => f.label).join(' / ')
@@ -376,13 +383,13 @@ export default function BetAnalysisPanel({ tabs, active = true }: { tabs: ReactN
             <div className="bet-inputs">
               {league.fields.map((f, i) => (
                 <label key={f.key} style={{ display: 'contents' }}>
-                  <span className="bet-inputs__label" style={{ paddingLeft: inputCol[i] === 1 ? 14 : 0, fontSize: 11, fontWeight: 700, color: f.required ? 'var(--text-primary)' : f.kind === 'line' ? 'var(--gold)' : 'var(--text-muted)' }}>{f.label}{f.required && ' *'}{fieldSub(f) && <div style={{ fontSize: 9, fontWeight: 600, color: 'var(--text-muted)' }}>{fieldSub(f)}</div>}</span>
-                  <input ref={el => { inputRefs.current[i] = el }} className="form-input bet-odds-input" inputMode="decimal" placeholder={f.kind === 'line' ? '5 → 5.5' : '배당 (185=1.85)'}
+                  <span className="bet-inputs__label" style={{ paddingLeft: inputCol[i] > 0 ? 12 : 0, fontSize: 10, fontWeight: 700, color: f.required ? 'var(--text-primary)' : f.kind === 'line' ? 'var(--gold)' : 'var(--text-muted)' }}>{f.label}{f.required && ' *'}{fieldSub(f) && <div style={{ fontSize: 8.5, fontWeight: 600, color: 'var(--text-muted)' }}>{fieldSub(f)}</div>}</span>
+                  <input ref={el => { inputRefs.current[i] = el }} className="form-input bet-odds-input" inputMode="decimal" placeholder={f.kind === 'line' ? '5 → 5.5' : '185=1.85'}
                     onBlur={f.kind === 'line' ? () => finishLine(f.key) : undefined}
                     value={raw[f.key] ?? ''} onChange={e => change(i, f.key, e.target.value, f.kind)} onFocus={e => e.target.select()}
                     onKeyDown={e => { if (e.key === 'Enter') { const el = inputRefs.current[i + 1]; if (el) { el.focus(); el.select() } } }}
-                    style={{ fontSize: 13, fontFamily: 'var(--font-mono)' }} />
-                  {endsRow(f) && inputCol[i] === 0 && <span className="bet-inputs__rest" />}
+                    style={{ fontSize: 12, fontFamily: 'var(--font-mono)' }} />
+                  {rowEnd[i] && inputCol[i] < SLOTS - 1 && <span className="bet-inputs__rest" style={{ gridColumn: `span ${2 * (SLOTS - 1 - inputCol[i])}` }} />}
                 </label>
               ))}
             </div>
