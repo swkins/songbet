@@ -24,16 +24,8 @@ export interface MiningCashout {
   perf_site_ids: string[]    // 실적현황 대상 베팅사이트 id 목록
   perf_period: '2w' | '1m' | null // 목표 날짜로부터 얼마나 이전 시기까지의 실적을 볼지
   perf_amount: number        // 실적 목표 금액
-  gift_goal_date: string | null        // 'YYYY-MM-DD' — 기프티콘교환 목표 날짜
-  gift_auto_set_3d: boolean            // on이면 기프티콘교환 실행 시 목표 날짜를 자동으로 3일 뒤로 설정
-  gift_last_at: string | null
-  gift_next_allowed_at: string | null  // 기프티콘교환 3일 쿨다운
 }
 
-/** 기프티콘교환 버튼을 띄우는 채굴 사이트 / 1회 교환 금액 / 자동설정·쿨다운 일수 */
-export const GIFTICON_SITES = ['카센터']
-export const GIFTICON_AMOUNT = 50000
-export const GIFTICON_CYCLE_DAYS = 3
 
 export const MINING_HISTORY_DAYS = 59 // 오늘 포함 60일치 (달력 2개월 안팎 + 그래프 30일 + 일평균 계산용)
 
@@ -173,60 +165,6 @@ export function useMiningData() {
     if (data) setCashouts(prev => existing ? prev.map(c => c.id === (data as MiningCashout).id ? (data as MiningCashout) : c) : [...prev, data as MiningCashout])
   }
 
-  /** 기프티콘교환 목표 날짜 설정. */
-  async function setGiftGoal(siteName: string, goalDate: string) {
-    await upsertCashout(siteName, { gift_goal_date: goalDate })
-  }
-
-  /** 3일 자동 설정 토글: on이면 기프티콘교환 실행 시 목표 날짜가 자동으로 오늘로부터 3일 뒤로 설정된다. */
-  async function setGiftAuto3d(siteName: string, enabled: boolean) {
-    await upsertCashout(siteName, { gift_auto_set_3d: enabled })
-  }
-
-  async function upsertCashout(siteName: string, fields: Record<string, unknown>) {
-    const existing = cashoutFor(siteName)
-    const payload = { site_name: siteName, ...fields }
-    const { data } = existing
-      ? await supabase.from('mining_cashouts').update(payload).eq('id', existing.id).select().single()
-      : await supabase.from('mining_cashouts').insert(payload).select().single()
-    if (data) setCashouts(prev => existing ? prev.map(c => c.id === (data as MiningCashout).id ? (data as MiningCashout) : c) : [...prev, data as MiningCashout])
-  }
-
-  /** 기프티콘교환 실행: 현재가에서 기프티콘 금액(5만)만큼 빼서 시작가/현재가로 새로 설정하고,
-   *  3일 쿨다운 + (자동 설정이 켜져 있으면) 목표 날짜를 3일 뒤로 설정한다.
-   *  결산(cashflows)에는 기존 수동 기록과 같은 형식("카센터 / 기프티콘", 기프티콘 카테고리)으로 남긴다. */
-  async function doGifticon(entry: MiningEntry, amount: number) {
-    const newPoint = entry.current_point - amount
-    const { data } = await supabase.from('mining_entries')
-      .update({ start_point: newPoint, current_point: newPoint }).eq('id', entry.id).select().single()
-    if (data) {
-      setEntries(prev => prev.map(e => e.id === entry.id ? (data as MiningEntry) : e))
-      setHistory(prev => prev.map(e => e.id === entry.id ? (data as MiningEntry) : e))
-    }
-    const now = dayjs()
-    const autoOn = cashoutFor(entry.site_name)?.gift_auto_set_3d ?? true
-    const fields: Record<string, unknown> = {
-      gift_last_at: now.toISOString(),
-      gift_next_allowed_at: now.add(GIFTICON_CYCLE_DAYS, 'day').toISOString(),
-    }
-    if (autoOn) fields.gift_goal_date = now.add(GIFTICON_CYCLE_DAYS, 'day').format('YYYY-MM-DD')
-    await upsertCashout(entry.site_name, fields)
-
-    // 결산 사이트별 손익에 바로 묶이도록 같은 이름의 사이트가 있으면 site_id도 채운다
-    const { data: site } = await supabase.from('sites').select('id').eq('name', entry.site_name).maybeSingle()
-    const { data: cf } = await supabase.from('cashflows').insert({
-      flow_date: today, type: 'income', category: '기프티콘',
-      description: `${entry.site_name} / 기프티콘`, amount,
-      site_id: site?.id ?? null, currency: 'krw', usd_krw_rate: null, amount_krw: amount,
-    }).select().single()
-    await logAction({
-      action_type: 'update', table_name: 'mining_entries', record_id: entry.id,
-      before_data: entry as never, after_data: (data ?? entry) as never,
-      description: `${entry.site_name} 채굴 기프티콘교환 +${amount.toLocaleString()}`,
-      cashflow_id: cf?.id ?? null,
-    })
-  }
-
   /** 실적현황 목표 설정: 베팅사이트 목록 + 기간(목표 날짜로부터 얼마나 이전까지) + 목표 금액. */
   async function setPerfGoal(siteName: string, siteIds: string[], period: '2w' | '1m', amount: number) {
     const existing = cashoutFor(siteName)
@@ -275,5 +213,5 @@ export function useMiningData() {
     })
   }
 
-  return { today, entries, history, loading, knownSites, addEntry, updateField, deleteEntry, cashouts, cashoutFor, setCashGoal, setAutoSet2w, setPerfGoal, doCashout, setGiftGoal, setGiftAuto3d, doGifticon }
+  return { today, entries, history, loading, knownSites, addEntry, updateField, deleteEntry, cashouts, cashoutFor, setCashGoal, setAutoSet2w, setPerfGoal, doCashout }
 }
