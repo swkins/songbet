@@ -174,7 +174,7 @@ const JUDGES: SportJudges[] = [
       volleyLeague('trMen', '터키 남자', '2021-22 ~ 2025-26 정규시즌 (BetExplorer)', judgeTrMen, TRMEN_GAMES),
       volleyLeague('trWomen', '터키 여자', '2021-22 ~ 2025-26 정규시즌 (BetExplorer)', judgeTrWomen, TRWOMEN_GAMES),
       volleyLeague('plMen', '폴란드 남자', '2021-22 ~ 2025-26 정규시즌 (BetExplorer)', judgePlMen, PLMEN_GAMES),
-      volleyLeague('plWomen', '폴란드 여자', '2022-23 ~ 2025-26 정규시즌 (BetExplorer)', judgePlWomen, PLWOMEN_GAMES),
+      volleyLeague('plWomen', '폴란드 여자', '2021-22 ~ 2025-26 정규시즌 (BetExplorer)', judgePlWomen, PLWOMEN_GAMES),
     ],
   },
   { key: 'esports', label: 'LOL', emoji: '🎮', leagues: [] },
