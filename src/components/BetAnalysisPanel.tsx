@@ -465,7 +465,7 @@ function LeagueInfo({ league }: { league: LeagueJudge }) {
           </div>
           <div style={{ fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.6, borderTop: '1px solid var(--border)', paddingTop: 6 }}>
             추천 조건: {league.recNote} · ±는 95% 오차<br />
-            베팅 강도: 0 패스(기대수익 마이너스) · 1~10 플러스(기대수익 크고 확실할수록 높음 — 1~3 약은 오차에 묻히는 작은 플러스)<br />
+            베팅 강도: 0 패스(기대수익 마이너스 · 추천 배당범위 밖 · 적중률 50% 미만) · 1~10 플러스(기대수익 크고 확실할수록 높음 — 1~3 약은 오차에 묻히는 작은 플러스)<br />
             표의 줄에 마우스를 올리거나 누르면 오차·경기 수 등 상세가 나옵니다
           </div>
         </div>

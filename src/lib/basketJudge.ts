@@ -1,4 +1,4 @@
-import { strengthOf } from './judgeScore';
+import { betStrength } from './judgeScore';
 import { recentSeasons, seasonWeigher, weightedMean, weightedStat } from './seasonWeight';
 
 // [홈배당, 원정배당, 홈점수, 원정점수, 시즌(끝나는 해, 선택)] — 시즌이 있으면 최근 시즌일수록 가중치를 크게 (seasonWeight.ts)
@@ -100,11 +100,13 @@ function judgeWith(games: Game[], weight: (g: Game) => number, odds: Odds, opts:
     const pl = 1 - s.pw - s.pp;
     const be = (s.pw + pl) / s.pw; // 적특 제외 손익분기: pw*(o-1) = pl
     const ev = s.pw * (site - 1) - pl;
-    const st = strengthOf(ev, site * s.se);
+    const eligible = site >= opts.minOdds && site < opts.maxOdds;
+    // 추천 배당범위 밖이거나 적중률 50% 미만이면 강도 0 (judgeScore.betStrength)
+    const st = betStrength(ev, site * s.se, s.pw, eligible);
     bets.push({
       key, name: NAMES[key], site, hit: s.pw, push: s.pp, se: s.se, be, ev, err: site * s.se,
       strengthLabel: st.label, strength: st.v, n: s.n,
-      eligible: site >= opts.minOdds && site < opts.maxOdds,
+      eligible,
     });
   };
 
@@ -121,7 +123,7 @@ function judgeWith(games: Game[], weight: (g: Game) => number, odds: Odds, opts:
     add('ph', odds.ph, stat3((m) => (m < L ? 1 : m === L ? 0 : -1)));
   }
 
-  const recommended = bets.filter((b) => b.ev > 0 && b.eligible).sort((x, y) => y.strength - x.strength || y.ev - x.ev);
+  const recommended = bets.filter((b) => b.ev > 0 && b.strength > 0).sort((x, y) => y.strength - x.strength || y.ev - x.ev);
   const leastLoss = [...bets].filter((b) => b.eligible).sort((x, y) => y.ev - x.ev)[0] ?? null;
 
   return {

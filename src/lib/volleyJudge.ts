@@ -1,4 +1,4 @@
-import { strengthOf } from './judgeScore';
+import { betStrength } from './judgeScore';
 import { recentSeasons, seasonWeigher, weightedStat } from './seasonWeight';
 
 // [홈배당, 원정배당, 홈세트, 원정세트, 시즌(끝나는 해, 선택)] — 시즌이 있으면 최근 시즌일수록 가중치를 크게 (seasonWeight.ts)
@@ -97,11 +97,13 @@ function judgeWith(games: Game[], weight: (g: Game) => number, odds: Odds, opts:
     if (!site || s.n === 0 || s.p === 0) return;
     const be = 1 / s.p;
     const ev = site * s.p - 1;
-    const st = strengthOf(ev, site * s.se);
+    const eligible = site >= opts.minOdds && site < opts.maxOdds;
+    // 추천 배당범위 밖이거나 적중률 50% 미만이면 강도 0 (judgeScore.betStrength)
+    const st = betStrength(ev, site * s.se, s.p, eligible);
     bets.push({
       key, name: NAMES[key], site, hit: s.p, se: s.se, be, ev, err: site * s.se,
       strengthLabel: st.label, strength: st.v, n: s.n,
-      eligible: site >= opts.minOdds && site < opts.maxOdds,
+      eligible,
     });
   };
 
@@ -117,7 +119,7 @@ function judgeWith(games: Game[], weight: (g: Game) => number, odds: Odds, opts:
 
   // 원정 승은 추천에서 제외 (원하면 아래 필터에서 key !== 'away' 조건 삭제)
   const recommended = bets
-    .filter((b) => b.ev > 0 && b.eligible && b.key !== 'away')
+    .filter((b) => b.ev > 0 && b.strength > 0 && b.key !== 'away')
     .sort((x, y) => y.strength - x.strength || y.ev - x.ev);
   const leastLoss = [...bets].filter((b) => b.eligible).sort((x, y) => y.ev - x.ev)[0] ?? null;
 
