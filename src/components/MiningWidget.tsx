@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import dayjs from 'dayjs'
 import { Plus, Trash2, Pencil, Check, X, ClipboardPaste, DollarSign, Target, TrendingUp } from 'lucide-react'
 import { supabase } from '../lib/supabase'
@@ -284,7 +284,8 @@ function CashoutModal({ entry, cashout, onClose, onSetGoal, onSetAuto, onSetPerf
 
 /** 대시보드 좌측에 얹는 채굴 현황 위젯. 전체 로직(오늘 데이터 로딩/자동 승계/추가/수정/삭제)은
  *  useMiningData 훅을 통해 Mining.tsx(채굴 탭)와 그대로 공유한다 — 달력/그래프는 여기선 생략. */
-export default function MiningWidget() {
+// tabs: 넘기면 "사이트 현황" 제목 대신 사이트 현황 / 베팅분석 전환 버튼을 보여준다 (대시보드)
+export default function MiningWidget({ tabs }: { tabs?: ReactNode } = {}) {
   const { today, entries, loading, knownSites, addEntry: addEntryToDb, updateField, deleteEntry: deleteEntryFromDb, cashouts, cashoutFor, setCashGoal, setAutoSet2w, setPerfGoal, doCashout } = useMiningData()
 
   const [addModalOpen, setAddModalOpen] = useState(false)
@@ -372,7 +373,7 @@ export default function MiningWidget() {
     <div className="card" style={{ padding: '10px 14px' }}>
       <div className="flex-between mb-10">
         <span className="card-title" style={{ margin: 0 }}>
-          사이트 현황
+          {tabs ?? '사이트 현황'}
           {entries.length > 0 && (
             <span style={{ marginLeft: 8, fontSize: 13, fontWeight: 600, color: 'var(--text-muted)' }}>
               <b style={{ color: 'var(--gold)', fontFamily: 'var(--font-num)' }}>{fmt(totals)}</b> / {fmt(totalsTarget)}

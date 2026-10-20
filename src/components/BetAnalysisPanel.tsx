@@ -1,5 +1,5 @@
-import { useRef, useState } from 'react'
-import { X, TrendingUp, RotateCcw } from 'lucide-react'
+import { useRef, useState, type ReactNode } from 'react'
+import { RotateCcw } from 'lucide-react'
 import type { Odds as VolleyOdds, Game as VolleyGame } from '../lib/volleyJudge'
 import { cleanGames, type Game as BasketGame, type Odds as BasketOdds } from '../lib/basketJudge'
 import { NBA_GAMES } from '../data/nbaGames'
@@ -25,7 +25,7 @@ import { judgeItWomen } from '../leagues/itWomen'
 import { judgeTrMen } from '../leagues/trMen'
 import { judgeTrWomen } from '../leagues/trWomen'
 
-/* ── 베팅분석 — 종목 → 리그를 고르고 배당을 넣으면 과거 경기 데이터로 각 베팅의 가치(기대수익)를 판정 ──
+/* ── 베팅분석 — 대시보드 사이트 현황 자리에서 탭으로 바꿔 보는 패널. 종목 → 리그를 고르고 배당을 넣으면 과거 경기 데이터로 각 베팅의 가치(기대수익)를 판정 ──
    판정기는 종목·리그별로 등록한다(리그마다 과거 경기 데이터 + 최소 표본 수가 다름 — src/leagues).
    지금은 배구 6개·농구 5개 리그이고, 다른 종목/리그는 과거 데이터가 생기면 JUDGES에 추가하면 된다.
    종목마다 판정기 입력·출력 모양이 조금 달라서(농구는 기준점 + 적특) 아래 공통 모양으로 맞춰서 쓴다. */
@@ -162,7 +162,8 @@ const JUDGES: SportJudges[] = [
 
 const signedPct = (v: number) => `${v > 0 ? '+' : ''}${(v * 100).toFixed(1)}%`
 
-export default function BetAnalysisModal({ onClose }: { onClose: () => void }) {
+// tabs: 카드 제목 자리에 들어갈 사이트 현황 / 베팅분석 전환 버튼
+export default function BetAnalysisPanel({ tabs }: { tabs: ReactNode }) {
   const [sportKey, setSportKey] = useState('volleyball')
   const sport = JUDGES.find(s => s.key === sportKey)!
   const [leagueKey, setLeagueKey] = useState<string | null>(sport.leagues[0]?.key ?? null)
@@ -215,13 +216,10 @@ export default function BetAnalysisModal({ onClose }: { onClose: () => void }) {
   })
 
   return (
-    // 바깥을 눌러도 닫히지 않음 — 오른쪽 위 X로만 닫는다 (입력하다 실수로 날아가지 않게)
-    <div className="modal-overlay">
-      <div className="modal" style={{ maxWidth: 720 }}>
-        <div className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <TrendingUp size={16} color="var(--gold)" /> 베팅분석 · 가치판단기
-          <button onClick={() => setRaw({})} title="배당 초기화" style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex' }}><RotateCcw size={14} /></button>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex' }}><X size={16} /></button>
+    <div className="card" style={{ padding: '10px 14px' }}>
+        <div className="flex-between mb-10">
+          {tabs}
+          <button onClick={() => setRaw({})} title="배당 초기화" style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-secondary)', cursor: 'pointer', padding: '3px 8px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-body)' }}><RotateCcw size={12} /> 초기화</button>
         </div>
 
         {/* 종목 */}
@@ -324,7 +322,6 @@ export default function BetAnalysisModal({ onClose }: { onClose: () => void }) {
             )}
           </>
         )}
-      </div>
     </div>
   )
 }

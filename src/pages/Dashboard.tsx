@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useMemo } from 'react'
+import { useEffect, useState, useRef, useMemo, lazy, Suspense } from 'react'
 import { supabase } from '../lib/supabase'
 import { logAction } from '../lib/logger'
 import type { Bet, Site, Sport, Market, BetResult, GameRolling } from '../types'
@@ -8,6 +8,8 @@ import { applyNumericTemplate, extractNumericTemplateValue, extractNumericTempla
 import { sportGlyph } from '../components/SportIcons'
 import MiningWidget from '../components/MiningWidget'
 import DailyPnLWidget from '../components/DailyPnLWidget'
+// 베팅분석은 과거 경기 데이터가 커서 처음 고를 때만 따로 불러온다
+const BetAnalysisPanel = lazy(() => import('../components/BetAnalysisPanel'))
 import RulebookNotes from './RulebookNotes'
 import dayjs from 'dayjs'
 import isoWeek from 'dayjs/plugin/isoWeek'
@@ -2832,6 +2834,29 @@ export default function Dashboard() {
   const [layoutMode, setLayoutMode] = useState<'side' | 'stacked'>(() => {
     try { return localStorage.getItem('songbet_dashboard_layout') === 'stacked' ? 'stacked' : 'side' } catch { return 'side' }
   })
+  // 사이트 현황 자리에 보여줄 것: 'site'(사이트 현황) · 'analysis'(베팅분석) — 이 기기에 기억
+  const [sidePanel, setSidePanel] = useState<'site' | 'analysis'>(() => {
+    try { return localStorage.getItem('songbet_dashboard_side_panel') === 'analysis' ? 'analysis' : 'site' } catch { return 'site' }
+  })
+  // 베팅분석은 한 번 열면 계속 붙여 둔다 — 사이트 현황으로 갔다 와도 넣던 배당이 남게
+  const [analysisOpened, setAnalysisOpened] = useState(sidePanel === 'analysis')
+  function pickSidePanel(next: 'site' | 'analysis') {
+    setSidePanel(next)
+    if (next === 'analysis') setAnalysisOpened(true)
+    try { localStorage.setItem('songbet_dashboard_side_panel', next) } catch { /* 저장 못 해도 이번 화면에선 적용 */ }
+  }
+  const sidePanelTabs = (
+    <span style={{ display: 'inline-flex', gap: 4, verticalAlign: 'middle' }}>
+      {([['site', '사이트 현황'], ['analysis', '베팅분석']] as const).map(([k, label]) => (
+        <button key={k} onClick={() => pickSidePanel(k)} style={{
+          padding: '3px 10px', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 700, fontFamily: 'var(--font-body)', whiteSpace: 'nowrap',
+          border: `1px solid ${sidePanel === k ? 'var(--gold-border)' : 'var(--border)'}`,
+          background: sidePanel === k ? 'var(--gold-bg)' : 'transparent',
+          color: sidePanel === k ? 'var(--gold)' : 'var(--text-secondary)',
+        }}>{label}</button>
+      ))}
+    </span>
+  )
   function toggleLayoutMode() {
     const next = layoutMode === 'side' ? 'stacked' : 'side'
     setLayoutMode(next)
@@ -3822,11 +3847,21 @@ export default function Dashboard() {
       {/* 데스크탑: 사이트 현황(좌, 카드 세로 쌓기) / 베팅 현황(우)을 한 줄에 두고 1 : 베팅 사이트 수 비율로 가로폭을 나눠
           모든 카드가 같은 폭이 되게 한다 — 베팅 사이트를 추가하면 전체 카드 폭이 똑같이 줄어든다 */}
       {/* 레이아웃 모드 — 좌우(기본): 사이트 현황 좌 / 베팅 현황 우, 상하: 사이트 현황 위 / 베팅 현황 아래 */}
-      <div className={`dashboard-main${layoutMode === 'stacked' ? ' stacked' : ''}`} style={{ '--mining-n': 1, '--bet-n': colCount } as React.CSSProperties}>
+      <div className={`dashboard-main${layoutMode === 'stacked' ? ' stacked' : ''}`} style={{ '--mining-n': sidePanel === 'analysis' ? 2 : 1, '--bet-n': colCount } as React.CSSProperties}>
 
         {/* ── 사이트 현황 (좌측) */}
         <div className="dashboard-side">
-          <MiningWidget />
+          {/* 사이트 현황 / 베팅분석 — 제목 자리 버튼으로 골라서 같은 자리에 보여준다 (베팅분석은 좌우 모드에서 카드 2장 폭) */}
+          <div style={{ minWidth: 0 }}>
+            <div style={{ display: sidePanel === 'site' ? undefined : 'none' }}><MiningWidget tabs={sidePanelTabs} /></div>
+            {analysisOpened && (
+              <div style={{ display: sidePanel === 'analysis' ? undefined : 'none' }}>
+                <Suspense fallback={<div className="card" style={{ padding: '10px 14px' }}>{sidePanelTabs}<div style={{ color: 'var(--text-muted)', fontSize: 13, padding: '10px 0' }}>불러오는 중...</div></div>}>
+                  <BetAnalysisPanel tabs={sidePanelTabs} />
+                </Suspense>
+              </div>
+            )}
+          </div>
           <div className="dashboard-pnl-slot">
           <DailyPnLWidget compact={layoutMode === 'stacked'} usdKrwRate={usdKrwRate} refreshKey={(() => { const st = bets.filter(b => b.result !== 'pending'); return `${st.length}:${st.reduce((a, b) => a + b.profit, 0)}` })()} />
           </div>
