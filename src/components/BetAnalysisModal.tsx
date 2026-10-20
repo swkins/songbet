@@ -142,7 +142,7 @@ export default function BetAnalysisModal({ onClose }: { onClose: () => void }) {
                     <thead>
                       <tr>
                         <th>베팅</th><th className="td-right">배당</th><th className="td-right">과거 적중률</th>
-                        <th className="td-right">손익분기</th><th className="td-right">기대수익</th><th>판정</th>
+                        <th className="td-right">손익분기</th><th className="td-right">기대수익</th><th>베팅 강도</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -156,7 +156,7 @@ export default function BetAnalysisModal({ onClose }: { onClose: () => void }) {
                     <>
                       <span style={{ fontWeight: 700, color: 'var(--green)' }}>추천</span>{' '}
                       {out.recommended.map((b, i) => (
-                        <span key={b.key}>{i > 0 && ' · '}<b>{b.name}</b> {b.site.toFixed(2)} ({signedPct(b.ev)}, {b.strengthLabel})</span>
+                        <span key={b.key}>{i > 0 && ' · '}<b>{b.name}</b> {b.site.toFixed(2)} ({signedPct(b.ev)}, {b.strength}점)</span>
                       ))}
                     </>
                   ) : (
@@ -166,7 +166,8 @@ export default function BetAnalysisModal({ onClose }: { onClose: () => void }) {
                     </>
                   )}
                   <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4 }}>
-                    추천 조건: 기대수익 플러스 + 배당 1.30 이상 2.00 미만 (원정 승은 추천 제외) · ±는 95% 오차
+                    추천 조건: 기대수익 플러스 + 배당 1.30 이상 2.00 미만 (원정 승은 추천 제외) · ±는 95% 오차<br />
+                    베팅 강도: 0 패스(오차 감안해도 마이너스) · 1~3 약(마이너스지만 오차 범위 안) · 4~10 플러스(기대수익 크고 확실할수록 높음)
                   </div>
                 </div>
               </>
@@ -178,6 +179,11 @@ export default function BetAnalysisModal({ onClose }: { onClose: () => void }) {
   )
 }
 
+// 베팅 강도 색: 0 회색(패스) · 1~3 주황(약) · 4~6 금색(중) · 7~10 초록(강/최강)
+function strengthColor(v: number) {
+  return v === 0 ? 'var(--text-muted)' : v <= 3 ? 'var(--orange)' : v <= 6 ? 'var(--gold)' : 'var(--green)'
+}
+
 function JudgeRow({ b, recommended }: { b: BetResult; recommended: boolean }) {
   const evColor = b.ev > 0 ? 'var(--green)' : 'var(--red)'
   return (
@@ -187,8 +193,15 @@ function JudgeRow({ b, recommended }: { b: BetResult; recommended: boolean }) {
       <td className="td-right" style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{pct(b.hit)} <span style={{ color: 'var(--text-muted)' }}>±{pct(b.se)} · {b.n}경기</span></td>
       <td className="td-right" style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{b.be.toFixed(2)}</td>
       <td className="td-right" style={{ fontSize: 12, fontWeight: 700, color: evColor, whiteSpace: 'nowrap' }}>{signedPct(b.ev)} <span style={{ fontWeight: 400, fontSize: 10, color: 'var(--text-muted)' }}>±{pct(b.err)}</span></td>
-      <td style={{ fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap', color: b.strength >= 1 ? 'var(--green)' : b.strength > 0 ? 'var(--gold)' : 'var(--text-muted)' }}>
-        {b.strengthLabel}{!b.eligible && <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}> (배당범위 밖)</span>}
+      <td style={{ fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap', color: strengthColor(b.strength) }}>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ fontFamily: 'var(--font-num)', fontSize: 13, minWidth: 34 }}>{b.strength}<span style={{ fontSize: 9, opacity: 0.7 }}>/10</span></span>
+          <span style={{ display: 'inline-block', width: 50, height: 5, borderRadius: 3, background: 'var(--bg-elevated)', overflow: 'hidden' }}>
+            <span style={{ display: 'block', width: `${b.strength * 10}%`, height: '100%', background: strengthColor(b.strength) }} />
+          </span>
+          {b.strengthLabel}
+        </span>
+        {!b.eligible && <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}> (배당범위 밖)</span>}
       </td>
     </tr>
   )

@@ -20,8 +20,8 @@ export interface BetResult {
   be: number; // 손익분기 배당
   ev: number; // 기대수익 (0.05 = +5%)
   err: number; // 기대수익 95% 오차
-  strengthLabel: string;
-  strength: 0 | 0.25 | 0.5 | 1;
+  strengthLabel: string; // 패스 / 약 / 중 / 강 / 최강
+  strength: number; // 베팅 강도 0~10점 (0 = 패스)
   n: number;
   eligible: boolean; // 사이트 배당 1.30 이상 2.0 미만
 }
@@ -60,13 +60,18 @@ function stat<T>(rows: T[], test: (r: T) => boolean) {
   return { n, p, se: 1.96 * Math.sqrt((p * (1 - p)) / n) };
 }
 
-// 사이트 배당이 손익분기보다 얼마나 높은지로 강도 결정
-function strengthOf(site: number, be: number, ev: number): { label: string; v: 0 | 0.25 | 0.5 | 1 } {
-  if (ev <= 0) return { label: '패스', v: 0 };
-  const d = site - be;
-  if (d < 0.05) return { label: '약 0.25단위', v: 0.25 };
-  if (d < 0.15) return { label: '중 0.5단위', v: 0.5 };
-  return { label: '강 1단위', v: 1 };
+// 베팅 강도 0~10점
+//  - 기대수익이 오차(95%)를 감안해도 마이너스(ev + err ≤ 0)면 0점 = 패스
+//  - 기대수익이 마이너스지만 오차 범위 안이면 1~3점 (0에 가까울수록 3점)
+//  - 기대수익이 플러스면 4~10점: 기대수익 크기(15% 이상이면 만점)와 확실성(하한도 플러스면 만점)을 반반 반영
+function strengthOf(ev: number, err: number): { label: string; v: number } {
+  let v: number;
+  if (ev + err <= 0) v = 0;
+  else if (ev <= 0) v = Math.round(1 + 2 * (1 + ev / err));
+  else v = Math.round(4 + 3 * Math.min(1, ev / 0.15) + 3 * Math.min(1, err > 0 ? ev / err : 1));
+  v = Math.max(0, Math.min(10, v));
+  const label = v === 0 ? '패스' : v <= 3 ? '약' : v <= 6 ? '중' : v <= 8 ? '강' : '최강';
+  return { label, v };
 }
 
 export interface JudgeOptions {
@@ -101,7 +106,7 @@ function judgeWith(games: Game[], odds: Odds, opts: JudgeOptions): JudgeOutput |
     if (!site || s.n === 0 || s.p === 0) return;
     const be = 1 / s.p;
     const ev = site * s.p - 1;
-    const st = strengthOf(site, be, ev);
+    const st = strengthOf(ev, site * s.se);
     bets.push({
       key, name: NAMES[key], site, hit: s.p, se: s.se, be, ev, err: site * s.se,
       strengthLabel: st.label, strength: st.v, n: s.n,
@@ -121,7 +126,7 @@ function judgeWith(games: Game[], odds: Odds, opts: JudgeOptions): JudgeOutput |
   // 원정 승은 추천에서 제외 (원하면 아래 필터에서 key !== 'away' 조건 삭제)
   const recommended = bets
     .filter((b) => b.ev > 0 && b.eligible && b.key !== 'away')
-    .sort((x, y) => y.ev - x.ev);
+    .sort((x, y) => y.strength - x.strength || y.ev - x.ev);
   const leastLoss = [...bets].filter((b) => b.eligible).sort((x, y) => y.ev - x.ev)[0] ?? null;
 
   return {
