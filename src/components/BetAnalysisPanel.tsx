@@ -73,14 +73,14 @@ interface SportJudges { key: string; label: string; emoji: string; leagues: Leag
 
 const VOLLEY_FIELDS: OddsField[] = [
   { key: 'home', label: '홈 승', required: true }, { key: 'away', label: '원정 승', required: true },
-  { key: 'm15', label: '정배 -1.5 마핸' }, { key: 'p25', label: '역배 +2.5 플핸' },
+  { key: 'm15', label: '-1.5 H' }, { key: 'p25', label: '+2.5 H' },  // -1.5는 정배, +2.5는 역배
   { key: 'o35', label: '3.5 오버' }, { key: 'u45', label: '4.5 언더' },
 ]
 
 const BASKET_FIELDS: OddsField[] = [
   { key: 'home', label: '홈 승', required: true }, { key: 'away', label: '원정 승', required: true },
   { key: 'line', label: '기준점', kind: 'line' },
-  { key: 'hh', label: '홈 핸디캡' }, { key: 'ah', label: '원정 핸디캡' },
+  { key: 'hh', label: '홈 H' }, { key: 'ah', label: '원정 H' },
 ]
 
 // 승무패는 사이트 순서대로 홈 승 → 무 → 원정 승, 그다음 홈/원정 핸디캡을 기준점마다 짝으로
@@ -88,9 +88,10 @@ const SOCCER_FIELDS: OddsField[] = [
   { key: 'home', label: '홈 승', required: true }, { key: 'draw', label: '무', required: true },
   { key: 'away', label: '원정 승', required: true, solo: true },
   ...[0.5, 1.5, 2.5].flatMap(L => (['home', 'away'] as const).map(side => ({
-    key: `${side[0]}${String(L).replace('.', '')}`, label: `${side === 'home' ? '홈' : '원정'} 핸디 ${L}`, line: L, side, solo: side === 'away',
+    key: `${side[0]}${String(L).replace('.', '')}`, label: `${side === 'home' ? '홈' : '원정'} H ${L}`, line: L, side, solo: side === 'away',
   }))),
-  { key: 'o25', label: '2.5 오버' },
+  { key: 'o25', label: '2.5 오버' }, { key: 'u25', label: '2.5 언더', solo: true },
+  { key: 'o35', label: '3.5 오버' }, { key: 'u35', label: '3.5 언더', solo: true },
 ]
 
 const pct = (v: number, d = 1) => `${(v * 100).toFixed(d)}%`
@@ -208,7 +209,7 @@ function soccerLeague(key: string, label: string, note: string, judge: SoccerJud
   return {
     key, label, note, fields: SOCCER_FIELDS, perRow: 3, recNote: SOCCER_REC, profile: () => soccerProfile(games), data: () => seasonSummary(cleanSoccer(games)),
     run: v => judge({
-      home: v.home, draw: v.draw, away: v.away, h05: v.h05, a05: v.a05, h15: v.h15, a15: v.a15, h25: v.h25, a25: v.a25, o25: v.o25,
+      home: v.home, draw: v.draw, away: v.away, h05: v.h05, a05: v.a05, h15: v.h15, a15: v.a15, h25: v.h25, a25: v.a25, o25: v.o25, u25: v.u25, o35: v.o35, u35: v.u35,
     }),
   }
 }
@@ -300,7 +301,6 @@ export default function BetAnalysisPanel({ tabs, active = true }: { tabs: ReactN
   // 홈/원정 핸디캡 칸 이름 옆에 지금 배당 기준으로 마핸/플핸 어느 쪽인지 붙여준다
   // 칸 이름 아래 작은 글씨 — 기준점은 자동 .5 안내, 핸디캡은 지금 배당 기준 마핸/플핸 (이름 폭을 줄여 칸이 좁아도 한 줄에 두 칸)
   const fieldSub = (f: OddsField) => {
-    if (f.kind === 'line') return '5 → 5.5 자동'
     if (f.line != null) {
       if (vals.home == null || vals.away == null) return null
       return `${(f.side === 'home') === favHome ? '마핸 -' : '플핸 +'}${f.line}`
