@@ -5,7 +5,7 @@ import { recentSeasons, seasonWeigher, weightedMean, weightedStat } from './seas
 // [홈배당, 원정배당, 홈골, 원정골, 시즌(끝나는 해), 무배당] — 앞 5칸은 배구·농구와 같은 순서라 시즌 가중치(seasonWeight.ts)를 그대로 쓴다
 export type Game = [number, number, number, number, number, number];
 
-export type BetKey = 'home' | 'draw' | 'away' | 'h05' | 'a05' | 'h15' | 'a15' | 'h25' | 'a25' | 'o25' | 'u25' | 'o35' | 'u35';
+export type BetKey = 'home' | 'draw' | 'away' | 'h05' | 'a05' | 'h15' | 'a15' | 'h25' | 'a25' | 'o25' | 'u25';
 
 export interface Odds {
   home: number | null; // 홈 승
@@ -15,7 +15,6 @@ export interface Odds {
   h15: number | null; a15: number | null; // 1.5
   h25: number | null; a25: number | null; // 2.5
   o25: number | null; u25: number | null; // 2.5 오버 / 언더
-  o35: number | null; u35: number | null; // 3.5 오버 / 언더
 }
 
 export interface BetResult {
@@ -200,8 +199,6 @@ function judgeWith(rows: Row[], sd: number[], oddsCheck: ReturnType<typeof socce
   }
   add('o25', '2.5 오버', odds.o25, (r) => r.t > 2.5);
   add('u25', '2.5 언더', odds.u25, (r) => r.t < 2.5);
-  add('o35', '3.5 오버', odds.o35, (r) => r.t > 3.5);
-  add('u35', '3.5 언더', odds.u35, (r) => r.t < 3.5);
 
   const recommended = bets.filter((b) => b.ev > 0 && b.strength > 0).sort((x, y) => y.strength - x.strength || y.ev - x.ev);
   const leastLoss = [...bets].filter((b) => b.eligible).sort((x, y) => y.ev - x.ev)[0] ?? null;

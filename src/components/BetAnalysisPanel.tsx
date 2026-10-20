@@ -99,6 +99,10 @@ const SOCCER_LINE_SHOW: Record<number, (fav: number) => boolean> = {
   1.5: fav => fav >= 1.4 && fav < 1.8,
   0.5: fav => fav >= 1.8,
 }
+const soccerOuZone = (v: Record<string, number | null>) => {
+  const fav = soccerFav(v)
+  return fav != null && v.draw != null && ((fav < 1.4 && v.draw >= 5.5) || (fav >= 2.5 && v.draw <= 3.25))
+}
 const SOCCER_FIELDS: OddsField[] = [
   { key: 'home', label: '홈 승', required: true }, { key: 'draw', label: '무', required: true },
   { key: 'away', label: '원정 승', required: true, solo: true },
@@ -106,8 +110,9 @@ const SOCCER_FIELDS: OddsField[] = [
     key: `${side[0]}${String(L).replace('.', '')}`, label: `${side === 'home' ? '홈' : '원정'} H ${L}`, line: L, side, solo: side === 'away',
     showIf: (v: Record<string, number | null>) => { const fav = soccerFav(v); return fav != null && SOCCER_LINE_SHOW[L](fav) },
   }))),
-  { key: 'o25', label: '2.5 오버' }, { key: 'u25', label: '2.5 언더', solo: true },
-  { key: 'o35', label: '3.5 오버' }, { key: 'u35', label: '3.5 언더', solo: true },
+  // 2.5 오버·언더 칸은 과거 데이터로 해볼 만했던 조건일 때만 (사용자 요청, 3.5 오버·언더는 뺐다)
+  //  오버: 정배 1.39 이하 & 무 5.5 이상 (3개 리그 69%, 5시즌 모두 66% 이상) / 언더: 정배 2.50 이상 & 무 3.25 이하 (검증 시즌 68%)
+  { key: 'o25', label: '2.5 오버', showIf: soccerOuZone }, { key: 'u25', label: '2.5 언더', solo: true, showIf: soccerOuZone },
 ]
 
 const pct = (v: number, d = 1) => `${(v * 100).toFixed(d)}%`
@@ -230,7 +235,7 @@ function soccerLeague(key: string, label: string, note: string, judge: SoccerJud
   return {
     key, label, note, fields: SOCCER_FIELDS, perRow: 3, recNote: SOCCER_REC, profile: () => soccerProfile(games), data: () => seasonSummary(cleanSoccer(games)),
     run: v => judge({
-      home: v.home, draw: v.draw, away: v.away, h05: v.h05, a05: v.a05, h15: v.h15, a15: v.a15, h25: v.h25, a25: v.a25, o25: v.o25, u25: v.u25, o35: v.o35, u35: v.u35,
+      home: v.home, draw: v.draw, away: v.away, h05: v.h05, a05: v.a05, h15: v.h15, a15: v.a15, h25: v.h25, a25: v.a25, o25: v.o25, u25: v.u25,
     }),
   }
 }
