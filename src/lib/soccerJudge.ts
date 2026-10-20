@@ -31,7 +31,8 @@ export interface BetResult {
   strength: number; // 베팅 강도 0~10점 (0 = 패스)
   n: number;
   eligible: boolean; // 사이트 배당이 추천 범위 안
-  check?: OddsCheck; // 같은 배당대 과거 실적 (승무패·정배 -0.5 — 이 리그에서 그 결과의 배당이 비슷했던 경기들의 실제 적중률·수익률)
+  check?: OddsCheck; // 같은 배당대 과거 실적
+  plusCheck?: { n: number; hit: number }; // 플핸: 무배당·그 팀 승 배당이 둘 다 비슷했던 과거 경기(같은 쪽 정배)에서 이 플핸의 실제 적중률 (승무패·정배 -0.5 — 이 리그에서 그 결과의 배당이 비슷했던 경기들의 실제 적중률·수익률)
 }
 
 export interface JudgeOutput {
@@ -69,6 +70,9 @@ export interface JudgeOptions {
   // 3시즌 백테스트(이전 시즌으로만 판정)에서 상한 1.90은 152건 +2.3%(EPL 77건 -10.9%), 1.75는 83건 +12.8%(EPL 26건 +3.6%)였다.
   // 시즌 일관성 0.6을 더하면 67건 +8.0% — 둘 다 오차 ±15~17%라 확정은 아니지만 엉뚱한 추천이 크게 줄어 보수적으로 1.75 + 0.6
   winMaxOdds: number;
+  // 플핸 추가 확인(무·역배 배당이 비슷했던 경기 적중률)으로 패스시킬지 — 3시즌 검증(공정+5% 배당 가정)에서 걸러진 플핸이
+  // 라리가 -0.7%·분데스 -9.8%·챔스 -13.1%로 도움이 됐지만 EPL은 +13.7%(좋은 걸 걸러냄)라 EPL은 참고만 (leagues/epl.ts)
+  plusGate: boolean;
 }
 
 type OutcomeKind = 'home' | 'draw' | 'away';
@@ -91,7 +95,7 @@ export function createJudge(rawGames: Game[], base: Partial<JudgeOptions> = {}) 
   const P = games.map((g) => probs(g[0], g[5], g[1]));
   const sd = [0, 1, 2].map((i) => std(P.map((p) => p[i]))); // 세 확률을 같은 눈금으로 맞춰 거리 계산
   const rows = games.map((g, i) => ({ g, p: P[i], w: weight(g), favHome: g[0] <= g[1] }));
-  const defaults: JudgeOptions = { minOdds: 1.3, maxOdds: 3.0, winMaxOdds: 1.75, winSeasonShare: 0.6, sampleN: 200, ...base };
+  const defaults: JudgeOptions = { minOdds: 1.3, maxOdds: 3.0, winMaxOdds: 1.75, winSeasonShare: 0.6, plusGate: true, sampleN: 200, ...base };
   const check = soccerOddsHistory(games, weight);
   return (odds: Odds, o: Partial<JudgeOptions> = {}): JudgeOutput | null =>
     judgeWith(rows, sd, check, odds, { ...defaults, ...o });
@@ -121,7 +125,23 @@ function judgeWith(rows: Row[], sd: number[], oddsCheck: ReturnType<typeof socce
   // 비교 경기 비율을 그대로 쓰면 정배 1.09처럼 과거에 드문 경기는 비교 경기가 더 약한 정배(1.3대)까지 넓어져서
   // 무·역배 확률을 크게 부풀렸다 (EPL 정배 1.15 미만: 판정기 무 14.5% vs 시장 9% vs 실제 0%) — 시즌 하나씩 빼고 검증해 전체 정확도도 같거나 나았다
   const shrink = shrinkFactor(F.map((r) => r.w)); // 표본이 작을수록 시장 확률 쪽으로 (oddsCheck.ts SHRINK_K)
-  const add = (key: BetKey, name: string, site: number | null, test: (r: R) => boolean, market?: [number, number, number], checkKind?: OutcomeKind) => {
+  // 플핸 추가 확인: 무배당과 그 팀(플러스 받는 쪽) 승 배당이 둘 다 비슷했던 과거 경기(같은 쪽 정배) — 로그 창을 넓혀가며 50경기 이상.
+  // 세 배당 거리로 고른 비교 경기와 따로, 무·역배 배당만 맞춰서 한 번 더 본다 (사용자 요청)
+  const plusHistory = (side: 'h' | 'a', L: number) => {
+    const teamOdds = side === 'h' ? h : a;
+    const same = rows.filter((r) => r.favHome === favIsHome);
+    let bw = 0.03, sel = same;
+    while (bw <= 0.4) {
+      sel = same.filter((r) => Math.abs(Math.log(r.g[5] / d)) <= bw && Math.abs(Math.log((side === 'h' ? r.g[0] : r.g[1]) / teamOdds)) <= bw);
+      if (sel.length >= 50) break;
+      bw += 0.01;
+    }
+    if (!sel.length) return undefined;
+    const sw = sel.reduce((x, r) => x + r.w, 0);
+    const hit = sel.reduce((x, r) => x + ((side === 'h' ? r.g[2] - r.g[3] : r.g[3] - r.g[2]) > -L ? r.w : 0), 0) / sw;
+    return { n: sel.length, hit };
+  };
+  const add = (key: BetKey, name: string, site: number | null, test: (r: R) => boolean, market?: [number, number, number], checkKind?: OutcomeKind, plus?: { side: 'h' | 'a'; L: number }) => {
     if (!site) return; // 안 넣은 배당은 판정하지 않는다
     let s = stat(test);
     if (market && s.n) {
@@ -135,13 +155,16 @@ function judgeWith(rows: Row[], sd: number[], oddsCheck: ReturnType<typeof socce
     // 승 베팅(홈 승·원정 승·-0.5)은 winMaxOdds(1.75) 미만까지만 추천 범위
     const eligible = site >= opts.minOdds && site < (checkKind && checkKind !== 'draw' ? opts.winMaxOdds : opts.maxOdds);
     // 추천 배당범위 밖(고배당·초저배당은 과거 데이터가 적어 숫자를 못 믿음)이거나 적중률 50% 미만이면 강도 0
-    let st = betStrength(ev, site * s.se, s.pw, eligible);
+    let st = betStrength(ev, s.pw, eligible);
     const check = checkKind ? oddsCheck(checkKind, site) : undefined;
     // 같은 배당대 과거 실적 확인 — 무는 수익률만, 승(홈 승·원정 승·-0.5)은 시즌 일관성까지
     st = winGate(st, check, checkKind === 'draw' ? 0 : opts.winSeasonShare);
+    // 플핸은 무·역배 배당이 비슷했던 과거 경기 적중률로도 손익분기를 넘어야 추천
+    const plusCheck = plus ? plusHistory(plus.side, plus.L) : undefined;
+    if (opts.plusGate && st.v > 0 && plusCheck && plusCheck.hit * site <= 1) st = { label: '무·역배 비슷한 경기 실적 미달', v: 0 };
     bets.push({
       key, name, site, hit: s.pw, se: s.se, be: 1 / s.pw, ev, err: site * s.se,
-      strengthLabel: st.label, strength: st.v, n: s.n, eligible, check,
+      strengthLabel: st.label, strength: st.v, n: s.n, eligible, check, plusCheck,
     });
   };
 
@@ -172,7 +195,7 @@ function judgeWith(rows: Row[], sd: number[], oddsCheck: ReturnType<typeof socce
       const market: [number, number, number] | undefined = L === 0.5 ? (isMinus ? win : (oppWin.map((v) => 1 - v) as [number, number, number])) : undefined;
       // -0.5는 그 팀 승과 같은 결과라 그 쪽 승 배당의 같은 배당대 실적도 확인한다
       const checkKind: OutcomeKind | undefined = L === 0.5 && isMinus ? (side === 'h' ? 'home' : 'away') : undefined;
-      add(`${side}${sfx}` as BetKey, name, odds[`${side}${sfx}` as BetKey], (r) => (isMinus ? sideMargin(r) > L : sideMargin(r) > -L), market, checkKind);
+      add(`${side}${sfx}` as BetKey, name, odds[`${side}${sfx}` as BetKey], (r) => (isMinus ? sideMargin(r) > L : sideMargin(r) > -L), market, checkKind, isMinus ? undefined : { side, L });
     }
   }
   add('o25', '2.5 오버', odds.o25, (r) => r.t > 2.5);

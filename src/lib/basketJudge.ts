@@ -130,7 +130,7 @@ function judgeWith(games: Game[], weight: (g: Game) => number, oddsCheck: Return
     const st = isWin && opts.winOff ? { label: '승 추천 안 함', v: 0 }
       : (key === 'mh' || key === 'mh2') && mhOff ? { label: '마핸 추천 안 함', v: 0 }
       : (key === 'ph' || key === 'ph2') && phOff ? { label: '플핸 추천 안 함', v: 0 }
-      : winGate(betStrength(ev, site * s.se, s.pw, eligible), check, opts.winSeasonShare);
+      : winGate(betStrength(ev, s.pw, eligible), check, opts.winSeasonShare);
     bets.push({
       key, name: NAMES[key], site, hit: s.pw, push: s.pp, se: s.se, be, ev, err: site * s.se,
       strengthLabel: st.label, strength: st.v, n: s.n,

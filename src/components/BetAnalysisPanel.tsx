@@ -51,7 +51,8 @@ interface JudgeBet {
   hit: number; se: number; be: number; ev: number; err: number
   strength: number; strengthLabel: string; n: number; eligible: boolean
   push?: number  // 농구 정수 기준점 적특 비율
-  check?: { n: number; hit: number; roi: number; seasons: number; seasonsUp: number }  // 축구: 같은 배당대 과거 실적
+  check?: { n: number; hit: number; roi: number; seasons: number; seasonsUp: number }  // 같은 배당대 과거 실적
+  plusCheck?: { n: number; hit: number }  // 축구 플핸: 무·역배 배당이 비슷했던 과거 경기 적중률
 }
 interface JudgeOut {
   fav: number; favIsHome: boolean; margin: number; marketN: number
@@ -432,7 +433,7 @@ export default function BetAnalysisPanel({ tabs, active = true }: { tabs: ReactN
                     <thead>
                       <tr>
                         <th>베팅</th><th className="td-right">배당</th><th className="td-right">적중률</th>
-                        <th className="td-right">손익분기</th><th className="td-right">기대수익</th><th>베팅 강도</th>
+                        <th className="td-right">손익분기</th><th className="td-right">기대수익</th><th>판정</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -446,7 +447,7 @@ export default function BetAnalysisPanel({ tabs, active = true }: { tabs: ReactN
                     <>
                       <span style={{ fontWeight: 700, color: 'var(--green)' }}>추천</span>{' '}
                       {out.recommended.map((b, i) => (
-                        <span key={b.key}>{i > 0 && ' · '}<b>{betName(b)}</b> {b.site.toFixed(2)} ({signedPct(b.ev)}, {b.strength}점)</span>
+                        <span key={b.key}>{i > 0 && ' · '}<b>{betName(b)}</b> {b.site.toFixed(2)} ({signedPct(b.ev)}, {b.strengthLabel})</span>
                       ))}
                     </>
                   ) : (
@@ -494,7 +495,7 @@ function LeagueInfo({ league }: { league: LeagueJudge }) {
           </div>
           <div style={{ fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.6, borderTop: '1px solid var(--border)', paddingTop: 6 }}>
             추천 조건: {league.recNote} · ±는 95% 오차<br />
-            베팅 강도: 0 패스(기대수익 마이너스 · 추천 배당범위 밖 · 적중률 50% 미만) · 1~10 플러스(기대수익 크고 확실할수록 높음 — 1~3 약은 오차에 묻히는 작은 플러스)<br />
+            판정: 손익분기보다 배당이 높으면(기대수익 플러스) 추천 — 기대수익 10% 이상 강 · 5% 이상 중 · 그 밖 약. 패스는 이유를 함께 표시<br />
             표의 줄에 마우스를 올리거나 누르면 오차·경기 수 등 상세가 나옵니다
           </div>
         </div>
@@ -530,9 +531,9 @@ function DataStatus({ league }: { league: LeagueJudge }) {
   )
 }
 
-// 베팅 강도 색: 0 회색(패스) · 1~3 주황(약) · 4~6 금색(중) · 7~10 초록(강/최강)
+// 판정 색: 패스 회색 · 약 주황 · 중 금색 · 강 초록
 function strengthColor(v: number) {
-  return v === 0 ? 'var(--text-muted)' : v <= 3 ? 'var(--orange)' : v <= 6 ? 'var(--gold)' : 'var(--green)'
+  return v === 0 ? 'var(--text-muted)' : v === 1 ? 'var(--orange)' : v === 2 ? 'var(--gold)' : 'var(--green)'
 }
 
 // 오차·경기 수·적특·배당범위 같은 상세는 평소엔 숨기고, 줄에 마우스를 올리면(툴팁) / 누르면(아래로 펼침) 보여준다
@@ -542,6 +543,7 @@ function JudgeRow({ b, name, recommended, recNote, open, onToggle }: { b: JudgeB
     `적중률 ${pct(b.hit)} ±${pct(b.se)} (비교 ${b.n}경기)`,
     b.push ? `적특 ${pct(b.push)}` : null,
     `기대수익 ${signedPct(b.ev)} ±${pct(b.err)}`,
+    b.plusCheck ? `무·역배 배당 비슷한 경기에서 적중 ${pct(b.plusCheck.hit)} (${b.plusCheck.n}경기, 이 배당이면 ${b.plusCheck.hit * b.site > 1 ? '이득' : '손해'})` : null,
     b.check ? `같은 배당대 과거 실적 ${pct(b.check.hit)} · 수익률 ${signedPct(b.check.roi)} (${b.check.n}경기 · 플러스 시즌 ${b.check.seasonsUp}/${b.check.seasons})` : null,
     !b.eligible ? `추천 배당범위 밖 (${recNote.split(' · ')[0]})` : null,
   ].filter(Boolean) as string[]
@@ -554,13 +556,9 @@ function JudgeRow({ b, name, recommended, recNote, open, onToggle }: { b: JudgeB
       <td className="td-right" style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{b.be.toFixed(2)}</td>
       <td className="td-right" style={{ fontSize: 12, fontWeight: 700, color: evColor, whiteSpace: 'nowrap' }}>{signedPct(b.ev)}</td>
       <td style={{ fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap', color: strengthColor(b.strength) }}>
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-          <span style={{ fontFamily: 'var(--font-num)', fontSize: 13 }}>{b.strength}<span style={{ fontSize: 9, opacity: 0.7 }}>/10</span></span>
-          <span style={{ display: 'inline-block', width: 32, height: 5, borderRadius: 3, background: 'var(--bg-elevated)', overflow: 'hidden' }}>
-            <span style={{ display: 'block', width: `${b.strength * 10}%`, height: '100%', background: strengthColor(b.strength) }} />
-          </span>
-          {b.strengthLabel}
-        </span>
+        {b.strength > 0
+          ? <span>추천 · {b.strengthLabel}</span>
+          : <span style={{ fontWeight: 400, fontSize: 10 }}>패스 · {b.strengthLabel}</span>}
       </td>
     </tr>
     {open && (
