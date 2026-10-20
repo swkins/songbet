@@ -73,7 +73,7 @@ export function cleanGames(games: Game[]): Game[] {
 export function createJudge(rawGames: Game[], base: Partial<JudgeOptions> = {}) {
   const games = recentSeasons(cleanGames(rawGames)); // 최근 5시즌만
   const weight = seasonWeigher(games);
-  const defaults: JudgeOptions = { minOdds: 1.01, maxOdds: 3.0, minMarketN: 200, ...base };
+  const defaults: JudgeOptions = { minOdds: 1.3, maxOdds: 3.0, minMarketN: 200, ...base };
   return (odds: Odds, o: Partial<JudgeOptions> = {}): JudgeOutput | null =>
     judgeWith(games, weight, odds, { ...defaults, ...o });
 }

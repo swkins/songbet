@@ -187,9 +187,9 @@ function soccerProfile(raw: SoccerGame[]) {
 type VolleyJudgeFn = (o: VolleyOdds) => JudgeOut | null
 type BasketJudgeFn = (o: BasketOdds) => JudgeOut | null
 type SoccerJudgeFn = (o: SoccerOdds) => JudgeOut | null
-const SOCCER_REC = '기대수익 플러스 + 배당 3.00 미만 + 적중률 50% 이상 · 핸디캡은 반 골 기준점이라 적특 없음'
-const VOLLEY_REC = '기대수익 플러스 + 배당 3.00 미만 + 적중률 50% 이상 (원정 승은 추천 제외)'
-const BASKET_REC = '기대수익 플러스 + 배당 3.00 미만 + 적중률 50% 이상 · 기준점이 정수면 적특(환불) 반영'
+const SOCCER_REC = '기대수익 플러스 + 배당 1.30 이상 3.00 미만 + 적중률 50% 이상 · 핸디캡은 반 골 기준점이라 적특 없음'
+const VOLLEY_REC = '기대수익 플러스 + 배당 1.30 이상 3.00 미만 + 적중률 50% 이상 (원정 승은 추천 제외)'
+const BASKET_REC = '기대수익 플러스 + 배당 1.30 이상 3.00 미만 + 적중률 50% 이상 · 기준점이 정수면 적특(환불) 반영'
 function volleyLeague(key: string, label: string, note: string, judge: VolleyJudgeFn, games: VolleyGame[]): LeagueJudge {
   return {
     key, label, note, fields: VOLLEY_FIELDS, recNote: VOLLEY_REC, profile: () => volleyProfile(games), data: () => seasonSummary(games),
