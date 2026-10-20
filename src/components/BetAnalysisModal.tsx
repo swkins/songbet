@@ -1,6 +1,12 @@
 import { useRef, useState } from 'react'
 import { X, TrendingUp, RotateCcw } from 'lucide-react'
-import type { Odds, BetKey, BetResult, JudgeOutput } from '../lib/volleyJudge'
+import type { Odds, BetKey, BetResult, JudgeOutput, Game } from '../lib/volleyJudge'
+import { KRMEN_GAMES } from '../data/krMenGames'
+import { KRWOMEN_GAMES } from '../data/krWomenGames'
+import { ITMEN_GAMES } from '../data/itMenGames'
+import { ITWOMEN_GAMES } from '../data/itWomenGames'
+import { TRMEN_GAMES } from '../data/trMenGames'
+import { TRWOMEN_GAMES } from '../data/trWomenGames'
 import { judgeKrMen } from '../leagues/krMen'
 import { judgeKrWomen } from '../leagues/krWomen'
 import { judgeItMen } from '../leagues/itMen'
@@ -17,6 +23,7 @@ interface LeagueJudge {
   key: string; label: string; note: string
   fields: OddsField[]
   run: (odds: Odds) => JudgeOutput | null
+  games: Game[]   // 리그 특성 요약용 (판정기가 쓰는 것과 같은 과거 경기)
 }
 interface SportJudges { key: string; label: string; emoji: string; leagues: LeagueJudge[] }
 
@@ -32,16 +39,36 @@ const JUDGES: SportJudges[] = [
   { key: 'basketball', label: '농구', emoji: '🏀', leagues: [] },
   {
     key: 'volleyball', label: '배구', emoji: '🏐', leagues: [
-      { key: 'krMen', label: '한국 남자', note: '2021-22 ~ 2025-26 정규시즌 630경기 (BetExplorer)', fields: VOLLEY_FIELDS, run: judgeKrMen },
-      { key: 'krWomen', label: '한국 여자', note: '2021-22 ~ 2025-26 정규시즌 615경기 (BetExplorer)', fields: VOLLEY_FIELDS, run: judgeKrWomen },
-      { key: 'itMen', label: '이탈리아 남자', note: '2021-22 ~ 2025-26 정규시즌 683경기 (BetExplorer)', fields: VOLLEY_FIELDS, run: judgeItMen },
-      { key: 'itWomen', label: '이탈리아 여자', note: '2021-22 ~ 2025-26 정규시즌 910경기 (BetExplorer)', fields: VOLLEY_FIELDS, run: judgeItWomen },
-      { key: 'trMen', label: '터키 남자', note: '2021-22 ~ 2025-26 정규시즌 861경기 (BetExplorer)', fields: VOLLEY_FIELDS, run: judgeTrMen },
-      { key: 'trWomen', label: '터키 여자', note: '2021-22 ~ 2025-26 정규시즌 910경기 (BetExplorer)', fields: VOLLEY_FIELDS, run: judgeTrWomen },
+      { key: 'krMen', label: '한국 남자', note: '2021-22 ~ 2025-26 정규시즌 630경기 (BetExplorer)', fields: VOLLEY_FIELDS, run: judgeKrMen, games: KRMEN_GAMES },
+      { key: 'krWomen', label: '한국 여자', note: '2021-22 ~ 2025-26 정규시즌 615경기 (BetExplorer)', fields: VOLLEY_FIELDS, run: judgeKrWomen, games: KRWOMEN_GAMES },
+      { key: 'itMen', label: '이탈리아 남자', note: '2021-22 ~ 2025-26 정규시즌 683경기 (BetExplorer)', fields: VOLLEY_FIELDS, run: judgeItMen, games: ITMEN_GAMES },
+      { key: 'itWomen', label: '이탈리아 여자', note: '2021-22 ~ 2025-26 정규시즌 910경기 (BetExplorer)', fields: VOLLEY_FIELDS, run: judgeItWomen, games: ITWOMEN_GAMES },
+      { key: 'trMen', label: '터키 남자', note: '2021-22 ~ 2025-26 정규시즌 861경기 (BetExplorer)', fields: VOLLEY_FIELDS, run: judgeTrMen, games: TRMEN_GAMES },
+      { key: 'trWomen', label: '터키 여자', note: '2021-22 ~ 2025-26 정규시즌 910경기 (BetExplorer)', fields: VOLLEY_FIELDS, run: judgeTrWomen, games: TRWOMEN_GAMES },
     ],
   },
   { key: 'esports', label: 'LOL', emoji: '🎮', leagues: [] },
 ]
+
+/* 리그 특성 요약 — 판정기가 맞게 만들어졌는지 눈으로 확인하는 용도. 과거 경기 전체 기준 비율 */
+function leagueProfile(games: Game[]) {
+  const n = games.length
+  let favWin = 0, homeWin = 0, m15 = 0, p25 = 0, o35 = 0, u45 = 0, margin = 0, favOdds = 0
+  for (const [h, a, hs, as] of games) {
+    const favHome = h <= a
+    const fs = favHome ? hs : as, us = favHome ? as : hs
+    if (fs > us) favWin++
+    if (hs > as) homeWin++
+    if (fs === 3 && us <= 1) m15++
+    if (!(fs === 3 && us === 0)) p25++
+    if (hs + as >= 4) o35++
+    if (hs + as <= 4) u45++
+    margin += 1 / h + 1 / a - 1
+    favOdds += Math.min(h, a)
+  }
+  const r = (k: number) => k / n
+  return { n, favWin: r(favWin), homeWin: r(homeWin), m15: r(m15), p25: r(p25), o35: r(o35), u45: r(u45), margin: margin / n, favOdds: favOdds / n, fiveSet: 1 - r(u45) }
+}
 
 const pct = (v: number, d = 1) => `${(v * 100).toFixed(d)}%`
 const signedPct = (v: number) => `${v > 0 ? '+' : ''}${(v * 100).toFixed(1)}%`
@@ -111,7 +138,23 @@ export default function BetAnalysisModal({ onClose }: { onClose: () => void }) {
                 <button key={l.key} onClick={() => { setLeagueKey(l.key); setRaw({}) }} style={{ ...chip(l.key === leagueKey), fontSize: 11, padding: '4px 10px' }}>{l.label}</button>
               ))}
             </div>
-            {league && <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 12 }}>기준 데이터: {league.note}</div>}
+            {league && <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 6 }}>기준 데이터: {league.note}</div>}
+            {league && (() => {
+              const pr = leagueProfile(league.games)
+              const items: [string, string][] = [
+                ['정배 승률', pct(pr.favWin)], ['홈 승률', pct(pr.homeWin)], ['정배 -1.5 (3-0·3-1)', pct(pr.m15)],
+                ['역배 +2.5 (1세트↑)', pct(pr.p25)], ['3.5 오버 (4세트↑)', pct(pr.o35)], ['4.5 언더', pct(pr.u45)],
+                ['풀세트(3-2)', pct(pr.fiveSet)], ['정배 평균배당', pr.favOdds.toFixed(2)], ['평균 마진', pct(pr.margin)],
+              ]
+              return (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 12px', padding: '7px 10px', marginBottom: 12, borderRadius: 8, background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--gold)' }}>{league.label} 특성 ({pr.n}경기)</span>
+                  {items.map(([k, v]) => (
+                    <span key={k} style={{ fontSize: 10, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{k} <b style={{ color: 'var(--text-primary)' }}>{v}</b></span>
+                  ))}
+                </div>
+              )
+            })()}
           </>
         )}
 
