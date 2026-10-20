@@ -159,7 +159,7 @@ const JUDGES: SportJudges[] = [
     key: 'basketball', label: '농구', emoji: '🏀', leagues: [
       basketLeague('nba', 'NBA', '2021-22 ~ 2025-26 정규시즌 (BetExplorer 평균 배당)', judgeNba, NBA_GAMES),
       basketLeague('kbl', 'KBL', '2020-21 ~ 2025-26 정규시즌 (BetExplorer 평균 배당)', judgeKbl, KBL_GAMES),
-      basketLeague('cba', 'CBA', '2022-23 ~ 2025-26 정규시즌 (BetExplorer 평균 배당)', judgeCba, CBA_GAMES),
+      basketLeague('cba', 'CBA', '2021-22 ~ 2025-26 정규시즌 (BetExplorer 평균 배당)', judgeCba, CBA_GAMES),
       basketLeague('bleague', 'B.LEAGUE', 'B1 2021-22 ~ 2025-26 정규시즌 (BetExplorer 평균 배당)', judgeBleague, BLEAGUE_GAMES),
       basketLeague('euroleague', '유로리그', '2021-22 ~ 2025-26 정규시즌 (BetExplorer 평균 배당)', judgeEuroleague, EUROLEAGUE_GAMES),
       basketLeague('nbl', '호주 NBL', '2021-22 ~ 2025-26 정규시즌 (BetExplorer 평균 배당)', judgeNbl, NBL_GAMES),
