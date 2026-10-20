@@ -49,12 +49,15 @@ export function weightedMean<T>(rows: readonly T[], weight: (r: T) => number, va
   return sw ? s / sw : 0;
 }
 
-// 데이터 현황 — 시즌별 경기 수와 반영도(가중치). 시즌 칸이 없는 데이터면 seasons가 빈 배열
-export function seasonSummary(games: readonly WithSeason[]): { total: number; seasons: { season: number; n: number; w: number }[] } {
+// 데이터 현황 — 데이터에 들어 있는 시즌마다 경기 수와 반영도(가중치).
+// 최근 5시즌 밖의 시즌은 데이터에 남아 있어도 applied = false, w = 0 (판정에 안 씀)
+export function seasonSummary(games: readonly WithSeason[]): { season: number; n: number; applied: boolean; w: number }[] {
+  const latest = latestSeason(games);
   const weight = seasonWeigher(games);
   const by = new Map<number, number>();
   for (const g of games) if (g[4] != null) by.set(g[4], (by.get(g[4]) ?? 0) + 1);
-  const seasons = [...by.entries()].sort((a, b) => a[0] - b[0])
-    .map(([season, n]) => ({ season, n, w: weight([0, 0, 0, 0, season]) }));
-  return { total: games.length, seasons };
+  return [...by.entries()].sort((a, b) => a[0] - b[0]).map(([season, n]) => {
+    const applied = latest == null || season > latest - MAX_SEASONS;
+    return { season, n, applied, w: applied ? weight([0, 0, 0, 0, season]) : 0 };
+  });
 }
