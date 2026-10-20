@@ -4,6 +4,8 @@
 // 새 시즌을 추가하면 그 시즌이 1.0이 되고 나머지는 자동으로 한 칸씩 줄어든다. 시즌 칸이 없는 경기는 1.0.
 export const SEASON_DECAY = 0.8;
 export const SEASON_MIN_WEIGHT = 0.3;
+// 모든 리그 공통으로 최근 5시즌만 쓴다 — 새 시즌을 넣으면 가장 오래된 시즌은 자동으로 빠진다
+export const MAX_SEASONS = 5;
 
 type WithSeason = readonly [number, number, number, number, number?];
 
@@ -11,6 +13,12 @@ export function latestSeason(games: readonly WithSeason[]): number | null {
   let latest: number | null = null;
   for (const g of games) if (g[4] != null && (latest == null || g[4] > latest)) latest = g[4];
   return latest;
+}
+
+// 최근 MAX_SEASONS 시즌 경기만 남긴다 (시즌 칸이 없는 경기는 그대로)
+export function recentSeasons<T extends WithSeason>(games: readonly T[]): T[] {
+  const latest = latestSeason(games);
+  return games.filter((g) => latest == null || g[4] == null || g[4] > latest - MAX_SEASONS);
 }
 
 // 경기 → 가중치 함수 (리그 데이터 전체 기준으로 최신 시즌을 정한다)

@@ -1,5 +1,5 @@
 import { strengthOf } from './judgeScore';
-import { seasonWeigher, weightedStat } from './seasonWeight';
+import { recentSeasons, seasonWeigher, weightedStat } from './seasonWeight';
 
 // [홈배당, 원정배당, 홈세트, 원정세트, 시즌(끝나는 해, 선택)] — 시즌이 있으면 최근 시즌일수록 가중치를 크게 (seasonWeight.ts)
 export type Game = [number, number, number, number, number?];
@@ -70,7 +70,8 @@ export interface JudgeOptions {
   minSideN: number; // 홈 승/원정 승 표본 최소 경기 수
 }
 
-export function createJudge(games: Game[], base: Partial<JudgeOptions> = {}) {
+export function createJudge(allGames: Game[], base: Partial<JudgeOptions> = {}) {
+  const games = recentSeasons(allGames); // 최근 5시즌만
   const defaults: JudgeOptions = { minOdds: 1.3, maxOdds: 2.0, minMarketN: 150, minSideN: 120, ...base };
   const weight = seasonWeigher(games);
   return (odds: Odds, o: Partial<JudgeOptions> = {}): JudgeOutput | null =>

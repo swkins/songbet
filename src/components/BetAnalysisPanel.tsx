@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { RotateCcw } from 'lucide-react'
 import type { Odds as VolleyOdds, Game as VolleyGame } from '../lib/volleyJudge'
 import { cleanGames, type Game as BasketGame, type Odds as BasketOdds } from '../lib/basketJudge'
-import { latestSeason, seasonSummary, seasonWeigher } from '../lib/seasonWeight'
+import { latestSeason, MAX_SEASONS, recentSeasons, seasonSummary, seasonWeigher } from '../lib/seasonWeight'
 import { NBA_GAMES } from '../data/nbaGames'
 import { KBL_GAMES } from '../data/kblGames'
 import { CBA_GAMES } from '../data/cbaGames'
@@ -76,7 +76,8 @@ const BASKET_FIELDS: OddsField[] = [
 const pct = (v: number, d = 1) => `${(v * 100).toFixed(d)}%`
 
 /* 리그 특성 요약 — 판정기가 맞게 만들어졌는지 눈으로 확인하는 용도. 과거 경기 전체 기준 비율 */
-function volleyProfile(games: VolleyGame[]) {
+function volleyProfile(allGames: VolleyGame[]) {
+  const games = recentSeasons(allGames) // 판정기와 같이 최근 5시즌만
   const n = games.length
   const weight = seasonWeigher(games)
   // 최근 시즌 가중 비율 (판정기와 같은 가중치)
@@ -106,7 +107,7 @@ function volleyProfile(games: VolleyGame[]) {
   }
 }
 function basketProfile(raw: BasketGame[]) {
-  const games = cleanGames(raw)
+  const games = recentSeasons(cleanGames(raw)) // 판정기와 같이 최근 5시즌만
   const n = games.length
   const weight = seasonWeigher(games)
   let sw = 0, favWin = 0, homeWin = 0, favMargin = 0, total = 0, margin = 0, favOdds = 0, big = 0
@@ -137,13 +138,13 @@ const VOLLEY_REC = '기대수익 플러스 + 배당 1.30 이상 2.00 미만 (원
 const BASKET_REC = '기대수익 플러스 + 배당 1.30 이상 2.50 미만 · 기준점이 정수면 적특(환불) 반영'
 function volleyLeague(key: string, label: string, note: string, judge: VolleyJudgeFn, games: VolleyGame[]): LeagueJudge {
   return {
-    key, label, note, fields: VOLLEY_FIELDS, recNote: VOLLEY_REC, profile: () => volleyProfile(games), data: () => seasonSummary(games),
+    key, label, note, fields: VOLLEY_FIELDS, recNote: VOLLEY_REC, profile: () => volleyProfile(games), data: () => seasonSummary(recentSeasons(games)),
     run: v => judge({ home: v.home, away: v.away, m15: v.m15, o35: v.o35, u45: v.u45, p25: v.p25 }),
   }
 }
 function basketLeague(key: string, label: string, note: string, judge: BasketJudgeFn, games: BasketGame[]): LeagueJudge {
   return {
-    key, label, note, fields: BASKET_FIELDS, recNote: BASKET_REC, profile: () => basketProfile(games), data: () => seasonSummary(cleanGames(games)),
+    key, label, note, fields: BASKET_FIELDS, recNote: BASKET_REC, profile: () => basketProfile(games), data: () => seasonSummary(recentSeasons(cleanGames(games))),
     // 홈/원정 핸디캡 배당으로 받고, 승패 배당이 낮은 쪽(정배)이 자동으로 -기준점 마핸이 된다
     run: v => {
       const favHome = v.home != null && v.away != null && v.home <= v.away
@@ -158,7 +159,7 @@ const JUDGES: SportJudges[] = [
   {
     key: 'basketball', label: '농구', emoji: '🏀', leagues: [
       basketLeague('nba', 'NBA', '2021-22 ~ 2025-26 정규시즌 (BetExplorer 평균 배당)', judgeNba, NBA_GAMES),
-      basketLeague('kbl', 'KBL', '2020-21 ~ 2025-26 정규시즌 (BetExplorer 평균 배당)', judgeKbl, KBL_GAMES),
+      basketLeague('kbl', 'KBL', '2021-22 ~ 2025-26 정규시즌 (BetExplorer 평균 배당)', judgeKbl, KBL_GAMES),
       basketLeague('cba', 'CBA', '2021-22 ~ 2025-26 정규시즌 (BetExplorer 평균 배당)', judgeCba, CBA_GAMES),
       basketLeague('bleague', 'B.LEAGUE', 'B1 2021-22 ~ 2025-26 정규시즌 (BetExplorer 평균 배당)', judgeBleague, BLEAGUE_GAMES),
       basketLeague('euroleague', '유로리그', '2021-22 ~ 2025-26 정규시즌 (BetExplorer 평균 배당)', judgeEuroleague, EUROLEAGUE_GAMES),
@@ -381,7 +382,9 @@ function DataStatus({ leagues }: { leagues: LeagueJudge[] }) {
   const rows = leagues.map(l => {
     const d = l.data()
     const have = new Map(d.seasons.map(x => [x.season, x]))
-    return { l, d, have, expected: [...new Set([...expectedOf(l.note), ...d.seasons.map(x => x.season)])] }
+    const all = [...new Set([...expectedOf(l.note), ...d.seasons.map(x => x.season)])]
+    const newest = Math.max(...all)
+    return { l, d, have, expected: all.filter(y => y > newest - MAX_SEASONS) } // 최근 5시즌만 표시
   })
   const seasons = [...new Set(rows.flatMap(r => r.expected))].sort((a, b) => a - b)
   const missing = rows.reduce((k, r) => k + r.expected.filter(y => !r.have.has(y)).length, 0)
@@ -426,7 +429,7 @@ function DataStatus({ leagues }: { leagues: LeagueJudge[] }) {
               ))}
             </tbody>
           </table>
-          <div style={{ fontSize: 9, color: 'var(--text-muted)', padding: '3px 6px' }}>✓ 경기 수 · 반영도(가장 최근 시즌 100%, 한 시즌 오래될수록 ×0.8, 최소 30%) · ✗ 없음 = 그 시즌 파일 필요 · 시즌 구분 없는 옛 데이터는 모든 시즌 같은 비중</div>
+          <div style={{ fontSize: 9, color: 'var(--text-muted)', padding: '3px 6px' }}>최근 5시즌만 사용 · ✓ 경기 수 · 반영도(가장 최근 시즌 100%, 한 시즌 오래될수록 ×0.8) · ✗ 없음 = 그 시즌 파일 필요 · 시즌 구분 없는 옛 데이터는 모든 시즌 같은 비중</div>
         </div>
       )}
     </div>
