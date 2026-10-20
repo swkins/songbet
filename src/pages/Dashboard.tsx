@@ -3858,7 +3858,7 @@ export default function Dashboard() {
         {/* ── 사이트 현황 (좌측 / 상하 모드에선 위) */}
         <div className="dashboard-side">
           {stacked ? (
-            <div style={{ minWidth: 0 }}><MiningWidget /></div>
+            <div style={{ minWidth: 0 }}><MiningWidget compact /></div>
           ) : (
             /* 사이트 현황 / 베팅분석 — 제목 자리 버튼으로 골라서 같은 자리에 보여준다 (베팅분석은 카드 1.2장 폭) */
             <div style={{ minWidth: 0 }}>

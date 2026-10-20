@@ -285,7 +285,9 @@ function CashoutModal({ entry, cashout, onClose, onSetGoal, onSetAuto, onSetPerf
 /** 대시보드 좌측에 얹는 채굴 현황 위젯. 전체 로직(오늘 데이터 로딩/자동 승계/추가/수정/삭제)은
  *  useMiningData 훅을 통해 Mining.tsx(채굴 탭)와 그대로 공유한다 — 달력/그래프는 여기선 생략. */
 // tabs: 넘기면 "사이트 현황" 제목 대신 사이트 현황 / 베팅분석 전환 버튼을 보여준다 (대시보드)
-export default function MiningWidget({ tabs }: { tabs?: ReactNode } = {}) {
+// compact: 대시보드 "상하" 모드 — 글씨·눈금·여백을 줄여 세로 길이를 약 70%로
+export default function MiningWidget({ tabs, compact = false }: { tabs?: ReactNode; compact?: boolean } = {}) {
+  const c = compact
   const { today, entries, loading, knownSites, addEntry: addEntryToDb, updateField, deleteEntry: deleteEntryFromDb, cashouts, cashoutFor, setCashGoal, setAutoSet2w, setPerfGoal, doCashout } = useMiningData()
 
   const [addModalOpen, setAddModalOpen] = useState(false)
@@ -370,8 +372,8 @@ export default function MiningWidget({ tabs }: { tabs?: ReactNode } = {}) {
   const totalsTarget = entries.reduce((a, e) => a + e.target_point, 0)
 
   return (
-    <div className="card" style={{ padding: '10px 14px' }}>
-      <div className="flex-between mb-10">
+    <div className="card" style={{ padding: c ? '6px 12px' : '10px 14px' }}>
+      <div className="flex-between" style={{ marginBottom: c ? 5 : 10 }}>
         <span className="card-title" style={{ margin: 0 }}>
           {tabs ?? '사이트 현황'}
           {entries.length > 0 && (
@@ -392,7 +394,7 @@ export default function MiningWidget({ tabs }: { tabs?: ReactNode } = {}) {
         </div>
       )}
 
-      <div className="mining-cards">
+      <div className="mining-cards" style={c ? { gap: 6 } : undefined}>
         {entries.map(e => {
           const m = mined(e)
           // 목표량은 "현재 포인트 총량" 기준 — 오늘 오른 양(m)이 아니라 e.current_point를 target_point와 직접 비교한다
@@ -430,11 +432,11 @@ export default function MiningWidget({ tabs }: { tabs?: ReactNode } = {}) {
           return (
             <div key={e.id} style={{
               background: 'var(--bg-elevated)', border: `1px solid ${done ? 'var(--green-border)' : 'var(--border)'}`,
-              borderRadius: 8, padding: '9px 10px',
+              borderRadius: 8, padding: c ? '5px 9px' : '9px 10px',
             }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: c ? 3 : 5 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-                  <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>{e.site_name}</span>
+                  <span style={{ fontSize: c ? 13 : 15, fontWeight: 700, color: 'var(--text-primary)' }}>{e.site_name}</span>
                   <button onClick={() => setCashoutEntry(e)} title="현금교환" style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, cursor: 'pointer', color: 'var(--purple)', display: 'flex', alignItems: 'center', gap: 3, padding: '2px 7px', fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-body)', flexShrink: 0 }}>
                     <DollarSign size={11} /> 현금교환
                   </button>
@@ -447,7 +449,7 @@ export default function MiningWidget({ tabs }: { tabs?: ReactNode } = {}) {
                 </div>
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: c ? 1 : 4 }}>
                 {isEditingCurrent ? (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                     <input autoFocus style={{ width: 120, background: 'var(--bg-card)', border: '1px solid var(--gold-border)', borderRadius: 5, padding: '3px 6px', fontSize: 18, fontWeight: 800, color: done ? 'var(--green)' : 'var(--gold)', fontFamily: 'var(--font-num)', outline: 'none', boxSizing: 'border-box' }}
@@ -460,9 +462,9 @@ export default function MiningWidget({ tabs }: { tabs?: ReactNode } = {}) {
                   </div>
                 ) : (
                   <span onClick={() => startEdit(e, 'current')} style={{ display: 'flex', alignItems: 'baseline', gap: 5, cursor: 'pointer' }}>
-                    <span style={{ fontFamily: 'var(--font-num)', fontSize: 20, fontWeight: 800, color: done ? 'var(--green)' : 'var(--gold)' }}>{fmt(e.current_point)}</span>
+                    <span style={{ fontFamily: 'var(--font-num)', fontSize: c ? 16 : 20, fontWeight: 800, color: done ? 'var(--green)' : 'var(--gold)' }}>{fmt(e.current_point)}</span>
                     {m !== 0 && (
-                      <span style={{ fontFamily: 'var(--font-num)', fontSize: 13, fontWeight: 700, color: m > 0 ? 'var(--green)' : 'var(--red)' }}>
+                      <span style={{ fontFamily: 'var(--font-num)', fontSize: c ? 11 : 13, fontWeight: 700, color: m > 0 ? 'var(--green)' : 'var(--red)' }}>
                         ({m > 0 ? '+' : ''}{fmt(m)})
                       </span>
                     )}
@@ -479,16 +481,16 @@ export default function MiningWidget({ tabs }: { tabs?: ReactNode } = {}) {
                     <button onClick={cancelEdit} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex' }}><X size={13} /></button>
                   </div>
                 ) : (
-                  <span onClick={() => startEdit(e, 'target')} style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: 'var(--font-num)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 2 }}>
+                  <span onClick={() => startEdit(e, 'target')} style={{ fontSize: c ? 11 : 12, color: 'var(--text-muted)', fontFamily: 'var(--font-num)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 2 }}>
                     / {fmt(e.target_point)} <Pencil size={10} />
                   </span>
                 )}
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 5 }}>
-                <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-muted)' }}>채굴현황</span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: c ? 3 : 5 }}>
+                <span style={{ fontSize: c ? 11 : 13, fontWeight: 700, color: 'var(--text-muted)' }}>채굴현황</span>
                 {goalDate && (
-                  <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>
+                  <span style={{ fontSize: c ? 11 : 13, fontWeight: 600, color: 'var(--text-secondary)' }}>
                     {remainingAmount <= 0
                       ? (isExcess ? `목표 달성 (초과 ${fmt(-remaining)})` : '목표 달성')
                       : `하루 ${fmt(requiredPerDay)} 필요 · ${remainingDays}일 남음`}
@@ -502,7 +504,7 @@ export default function MiningWidget({ tabs }: { tabs?: ReactNode } = {}) {
                       {Array.from({ length: tickCount }, (_, i) => {
                         const fillPct = i < fullTicks ? 100 : i === fullTicks ? partialFill * 100 : 0
                         return (
-                          <div key={i} title={`목표까지 ${remainingDays}일`} style={{ flex: 1, height: 13, background: 'var(--bg-card)', borderRadius: 2, overflow: 'hidden', border: '1px solid var(--border)', position: 'relative' }}>
+                          <div key={i} title={`목표까지 ${remainingDays}일`} style={{ flex: 1, height: c ? 8 : 13, background: 'var(--bg-card)', borderRadius: 2, overflow: 'hidden', border: '1px solid var(--border)', position: 'relative' }}>
                             <div style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: `${fillPct}%`, background: paceColor, transition: 'width 0.3s' }} />
                           </div>
                         )
@@ -511,13 +513,13 @@ export default function MiningWidget({ tabs }: { tabs?: ReactNode } = {}) {
                     {/* 오늘 위치 마커: 14일 사이클 중 경과일만큼 우측으로 이동. 14일 남음(경과 0일)=맨 왼쪽, 하루 지날 때마다 한 칸씩 우측 이동.
                         채워진 눈금(진행률)과 이 마커(경과 시간) 위치를 비교하면 지금 밀리고 있는지 바로 보인다 */}
                     <div title={`오늘 · 사이클 ${elapsedDays}/14일 경과`} style={{
-                      position: 'absolute', top: -4, bottom: -4,
+                      position: 'absolute', top: c ? -3 : -4, bottom: c ? -3 : -4,
                       left: `${Math.min(100, Math.max(0, (elapsedDays / 14) * 100))}%`,
                       width: 2, background: 'var(--text-primary)', transform: 'translateX(-1px)',
                       transition: 'left 0.3s', pointerEvents: 'none',
                     }}>
                       <div style={{
-                        position: 'absolute', top: -5, left: '50%', transform: 'translateX(-50%)',
+                        position: 'absolute', top: c ? -4 : -5, left: '50%', transform: 'translateX(-50%)',
                         width: 0, height: 0, borderLeft: '4px solid transparent', borderRight: '4px solid transparent',
                         borderTop: '5px solid var(--text-primary)',
                       }} />
@@ -525,22 +527,22 @@ export default function MiningWidget({ tabs }: { tabs?: ReactNode } = {}) {
                   </div>
                 </div>
               ) : (
-                <div style={{ height: 13, background: 'var(--bg-card)', borderRadius: 3, overflow: 'hidden' }}>
+                <div style={{ height: c ? 8 : 13, background: 'var(--bg-card)', borderRadius: 3, overflow: 'hidden' }}>
                   <div style={{ height: '100%', width: `${pct}%`, borderRadius: 3, transition: 'width 0.4s ease',
                     background: done ? 'var(--green)' : 'linear-gradient(90deg, var(--orange), #FFAD42)' }} />
                 </div>
               )}
 
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 5 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: c ? 2 : 5 }}>
                 <span style={{
-                  fontSize: 13, fontWeight: 700, fontFamily: 'var(--font-num)', padding: '3px 9px', borderRadius: 999,
+                  fontSize: c ? 11 : 13, fontWeight: 700, fontFamily: 'var(--font-num)', padding: c ? '0 7px' : '3px 9px', borderRadius: 999,
                   background: isExcess ? 'var(--green-bg)' : 'var(--bg-card)',
                   color: isExcess ? 'var(--green)' : 'var(--text-muted)',
                   border: `1px solid ${isExcess ? 'var(--green-border)' : 'var(--border)'}`,
                 }}>
                   {isExcess ? `초과 ${fmt(-remaining)}` : `남음 ${fmt(Math.max(0, remaining))}`}
                 </span>
-                <span style={{ fontSize: 17, fontWeight: 800, fontFamily: 'var(--font-num)', color: done ? 'var(--green)' : 'var(--text-secondary)' }}>{pctDisplay.toFixed(0)}%</span>
+                <span style={{ fontSize: c ? 14 : 17, fontWeight: 800, fontFamily: 'var(--font-num)', color: done ? 'var(--green)' : 'var(--text-secondary)' }}>{pctDisplay.toFixed(0)}%</span>
               </div>
 
               {/* 실적현황: 선택한 베팅사이트들의 (목표 날짜로부터 지정한 기간 이전까지) 입금 실적 진행률
@@ -572,16 +574,16 @@ export default function MiningWidget({ tabs }: { tabs?: ReactNode } = {}) {
                 const perfEnd = dayjs().isBefore(dayjs(c.goal_date!)) ? dayjs() : dayjs(c.goal_date!)
 
                 return (
-                  <div style={{ marginTop: 5, paddingTop: 5 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 5 }}>
-                      <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-muted)' }}>실적현황</span>
-                      <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>
+                  <div style={{ marginTop: c ? 2 : 5, paddingTop: c ? 1 : 5 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: c ? 3 : 5 }}>
+                      <span style={{ fontSize: c ? 11 : 13, fontWeight: 700, color: 'var(--text-muted)' }}>실적현황</span>
+                      <span style={{ fontSize: c ? 11 : 13, fontWeight: 600, color: 'var(--text-secondary)' }}>
                         {perfRemaining <= 0
                           ? (perfExcess ? `목표 달성 (초과 ${fmt(-perfRemaining)})` : '목표 달성')
                           : `하루 ${fmt(perfRequiredPerDay)} 필요 · ${perfDaysLeft}일 남음`}
                       </span>
                     </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 4, fontSize: 12, color: 'var(--text-muted)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: c ? 1 : 4, fontSize: c ? 11 : 12, color: 'var(--text-muted)' }}>
                       <span>{perfStart.format('MM.DD')} ~ {perfEnd.format('MM.DD')} 기준</span>
                       <span><b style={{ color: 'var(--gold)', fontFamily: 'var(--font-num)' }}>{fmt(progress)}</b> / {fmt(c.perf_amount)}</span>
                     </div>
@@ -590,7 +592,7 @@ export default function MiningWidget({ tabs }: { tabs?: ReactNode } = {}) {
                         {Array.from({ length: PERF_TICK_COUNT }, (_, i) => {
                           const fillPct = i < perfFullTicks ? 100 : i === perfFullTicks ? perfPartialFill * 100 : 0
                           return (
-                            <div key={i} style={{ flex: 1, height: 13, background: 'var(--bg-card)', borderRadius: 2, overflow: 'hidden', border: '1px solid var(--border)', position: 'relative' }}>
+                            <div key={i} style={{ flex: 1, height: c ? 8 : 13, background: 'var(--bg-card)', borderRadius: 2, overflow: 'hidden', border: '1px solid var(--border)', position: 'relative' }}>
                               <div style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: `${fillPct}%`, background: perfPaceColor, transition: 'width 0.3s' }} />
                             </div>
                           )
@@ -598,28 +600,28 @@ export default function MiningWidget({ tabs }: { tabs?: ReactNode } = {}) {
                       </div>
                       {/* 오늘 위치 마커 — 채굴현황과 동일하게 기간(2주/1개월) 대비 경과 비율만큼 우측 이동 */}
                       <div title={`오늘 · 기간 ${perfElapsedDays}/${periodDays}일 경과`} style={{
-                        position: 'absolute', top: -4, bottom: -4,
+                        position: 'absolute', top: c ? -3 : -4, bottom: c ? -3 : -4,
                         left: `${Math.min(100, Math.max(0, (perfElapsedDays / periodDays) * 100))}%`,
                         width: 2, background: 'var(--text-primary)', transform: 'translateX(-1px)',
                         transition: 'left 0.3s', pointerEvents: 'none',
                       }}>
                         <div style={{
-                          position: 'absolute', top: -5, left: '50%', transform: 'translateX(-50%)',
+                          position: 'absolute', top: c ? -4 : -5, left: '50%', transform: 'translateX(-50%)',
                           width: 0, height: 0, borderLeft: '4px solid transparent', borderRight: '4px solid transparent',
                           borderTop: '5px solid var(--text-primary)',
                         }} />
                       </div>
                     </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 5 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: c ? 2 : 5 }}>
                       <span style={{
-                        fontSize: 13, fontWeight: 700, fontFamily: 'var(--font-num)', padding: '3px 9px', borderRadius: 999,
+                        fontSize: c ? 11 : 13, fontWeight: 700, fontFamily: 'var(--font-num)', padding: c ? '0 7px' : '3px 9px', borderRadius: 999,
                         background: perfExcess ? 'var(--green-bg)' : 'var(--bg-card)',
                         color: perfExcess ? 'var(--green)' : 'var(--text-muted)',
                         border: `1px solid ${perfExcess ? 'var(--green-border)' : 'var(--border)'}`,
                       }}>
                         {perfExcess ? `초과 ${fmt(-perfRemaining)}` : `남음 ${fmt(Math.max(0, perfRemaining))}`}
                       </span>
-                      <span style={{ fontSize: 17, fontWeight: 800, fontFamily: 'var(--font-num)', color: perfDone ? 'var(--green)' : 'var(--text-secondary)' }}>{perfPctDisplay.toFixed(0)}%</span>
+                      <span style={{ fontSize: c ? 14 : 17, fontWeight: 800, fontFamily: 'var(--font-num)', color: perfDone ? 'var(--green)' : 'var(--text-secondary)' }}>{perfPctDisplay.toFixed(0)}%</span>
                     </div>
                   </div>
                 )
