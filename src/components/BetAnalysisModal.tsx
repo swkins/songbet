@@ -1,6 +1,15 @@
 import { useRef, useState } from 'react'
 import { X, TrendingUp, RotateCcw } from 'lucide-react'
-import type { Odds, BetKey, BetResult, JudgeOutput, Game } from '../lib/volleyJudge'
+import type { Odds as VolleyOdds, Game as VolleyGame } from '../lib/volleyJudge'
+import { cleanGames, type Game as BasketGame, type Odds as BasketOdds } from '../lib/basketJudge'
+import { NBA_GAMES } from '../data/nbaGames'
+import { KBL_GAMES } from '../data/kblGames'
+import { CBA_GAMES } from '../data/cbaGames'
+import { BLEAGUE_GAMES } from '../data/bleagueGames'
+import { judgeNba } from '../leagues/nba'
+import { judgeKbl } from '../leagues/kbl'
+import { judgeCba } from '../leagues/cba'
+import { judgeBleague } from '../leagues/bleague'
 import { KRMEN_GAMES } from '../data/krMenGames'
 import { KRWOMEN_GAMES } from '../data/krWomenGames'
 import { ITMEN_GAMES } from '../data/itMenGames'
@@ -16,42 +25,48 @@ import { judgeTrWomen } from '../leagues/trWomen'
 
 /* ── 베팅분석 — 종목 → 리그를 고르고 배당을 넣으면 과거 경기 데이터로 각 베팅의 가치(기대수익)를 판정 ──
    판정기는 종목·리그별로 등록한다(리그마다 과거 경기 데이터 + 최소 표본 수가 다름 — src/leagues).
-   지금은 배구 6개 리그이고, 다른 종목/리그는 과거 데이터가 생기면 JUDGES에 추가하면 된다. */
+   지금은 배구 6개·농구 4개 리그이고, 다른 종목/리그는 과거 데이터가 생기면 JUDGES에 추가하면 된다.
+   종목마다 판정기 입력·출력 모양이 조금 달라서(농구는 기준점 + 적특) 아래 공통 모양으로 맞춰서 쓴다. */
 
-interface OddsField { key: BetKey; label: string }
+// 판정 결과 공통 모양 — 배구/농구 판정기 결과가 모두 이 모양을 만족한다
+interface JudgeBet {
+  key: string; name: string; site: number
+  hit: number; se: number; be: number; ev: number; err: number
+  strength: number; strengthLabel: string; n: number; eligible: boolean
+  push?: number  // 농구 정수 기준점 적특 비율
+}
+interface JudgeOut {
+  fav: number; favIsHome: boolean; margin: number; marketN: number
+  expMargin?: number  // 농구: 표본의 정배 평균 점수차
+  bets: JudgeBet[]; recommended: JudgeBet[]; leastLoss: JudgeBet | null
+}
+// kind: 'odds' = 배당(3자리 → 1.23, 다음 칸 이동) / 'line' = 농구 기준점(그대로 입력, 예: 5.5)
+interface OddsField { key: string; label: string; kind?: 'odds' | 'line'; required?: boolean }
 interface LeagueJudge {
   key: string; label: string; note: string
   fields: OddsField[]
-  run: (odds: Odds) => JudgeOutput | null
-  games: Game[]   // 리그 특성 요약용 (판정기가 쓰는 것과 같은 과거 경기)
+  run: (v: Record<string, number | null>) => JudgeOut | null
+  profile: () => { n: number; items: [string, string][] }  // 리그 특성 요약 (판정기가 쓰는 과거 경기 기준)
+  recNote: string
 }
 interface SportJudges { key: string; label: string; emoji: string; leagues: LeagueJudge[] }
 
 const VOLLEY_FIELDS: OddsField[] = [
-  { key: 'home', label: '홈 승' }, { key: 'away', label: '원정 승' },
+  { key: 'home', label: '홈 승', required: true }, { key: 'away', label: '원정 승', required: true },
   { key: 'm15', label: '정배 -1.5 마핸' }, { key: 'p25', label: '역배 +2.5 플핸' },
   { key: 'o35', label: '3.5 오버' }, { key: 'u45', label: '4.5 언더' },
 ]
 
-const JUDGES: SportJudges[] = [
-  { key: 'soccer', label: '축구', emoji: '⚽', leagues: [] },
-  { key: 'baseball', label: '야구', emoji: '⚾', leagues: [] },
-  { key: 'basketball', label: '농구', emoji: '🏀', leagues: [] },
-  {
-    key: 'volleyball', label: '배구', emoji: '🏐', leagues: [
-      { key: 'krMen', label: '한국 남자', note: '2021-22 ~ 2025-26 정규시즌 630경기 (BetExplorer)', fields: VOLLEY_FIELDS, run: judgeKrMen, games: KRMEN_GAMES },
-      { key: 'krWomen', label: '한국 여자', note: '2021-22 ~ 2025-26 정규시즌 615경기 (BetExplorer)', fields: VOLLEY_FIELDS, run: judgeKrWomen, games: KRWOMEN_GAMES },
-      { key: 'itMen', label: '이탈리아 남자', note: '2021-22 ~ 2025-26 정규시즌 683경기 (BetExplorer)', fields: VOLLEY_FIELDS, run: judgeItMen, games: ITMEN_GAMES },
-      { key: 'itWomen', label: '이탈리아 여자', note: '2021-22 ~ 2025-26 정규시즌 910경기 (BetExplorer)', fields: VOLLEY_FIELDS, run: judgeItWomen, games: ITWOMEN_GAMES },
-      { key: 'trMen', label: '터키 남자', note: '2021-22 ~ 2025-26 정규시즌 861경기 (BetExplorer)', fields: VOLLEY_FIELDS, run: judgeTrMen, games: TRMEN_GAMES },
-      { key: 'trWomen', label: '터키 여자', note: '2021-22 ~ 2025-26 정규시즌 910경기 (BetExplorer)', fields: VOLLEY_FIELDS, run: judgeTrWomen, games: TRWOMEN_GAMES },
-    ],
-  },
-  { key: 'esports', label: 'LOL', emoji: '🎮', leagues: [] },
+const BASKET_FIELDS: OddsField[] = [
+  { key: 'home', label: '홈 승', required: true }, { key: 'away', label: '원정 승', required: true },
+  { key: 'line', label: '기준점 (정배 기준, 예: 5.5)', kind: 'line' },
+  { key: 'mh', label: '정배 -기준점 마핸' }, { key: 'ph', label: '역배 +기준점 플핸' },
 ]
 
+const pct = (v: number, d = 1) => `${(v * 100).toFixed(d)}%`
+
 /* 리그 특성 요약 — 판정기가 맞게 만들어졌는지 눈으로 확인하는 용도. 과거 경기 전체 기준 비율 */
-function leagueProfile(games: Game[]) {
+function volleyProfile(games: VolleyGame[]) {
   const n = games.length
   let favWin = 0, homeWin = 0, m15 = 0, p25 = 0, o35 = 0, u45 = 0, margin = 0, favOdds = 0
   for (const [h, a, hs, as] of games) {
@@ -67,10 +82,77 @@ function leagueProfile(games: Game[]) {
     favOdds += Math.min(h, a)
   }
   const r = (k: number) => k / n
-  return { n, favWin: r(favWin), homeWin: r(homeWin), m15: r(m15), p25: r(p25), o35: r(o35), u45: r(u45), margin: margin / n, favOdds: favOdds / n, fiveSet: 1 - r(u45) }
+  return {
+    n, items: [
+      ['정배 승률', pct(r(favWin))], ['홈 승률', pct(r(homeWin))], ['정배 -1.5 (3-0·3-1)', pct(r(m15))],
+      ['역배 +2.5 (1세트↑)', pct(r(p25))], ['3.5 오버 (4세트↑)', pct(r(o35))], ['4.5 언더', pct(r(u45))],
+      ['풀세트(3-2)', pct(1 - r(u45))], ['정배 평균배당', (favOdds / n).toFixed(2)], ['평균 마진', pct(margin / n)],
+    ] as [string, string][],
+  }
+}
+function basketProfile(raw: BasketGame[]) {
+  const games = cleanGames(raw)
+  const n = games.length
+  let favWin = 0, homeWin = 0, favMargin = 0, total = 0, margin = 0, favOdds = 0, big = 0
+  for (const [h, a, hs, as] of games) {
+    const m = h <= a ? hs - as : as - hs
+    if (m > 0) favWin++
+    if (hs > as) homeWin++
+    if (m >= 10) big++
+    favMargin += m; total += hs + as
+    margin += 1 / h + 1 / a - 1
+    favOdds += Math.min(h, a)
+  }
+  const r = (k: number) => k / n
+  return {
+    n, items: [
+      ['정배 승률', pct(r(favWin))], ['홈 승률', pct(r(homeWin))], ['정배 평균 점수차', `${favMargin / n >= 0 ? '+' : ''}${(favMargin / n).toFixed(1)}`],
+      ['정배 10점차↑ 승', pct(r(big))], ['총점 평균', (total / n).toFixed(1)], ['정배 평균배당', (favOdds / n).toFixed(2)], ['평균 마진', pct(margin / n)],
+    ] as [string, string][],
+  }
 }
 
-const pct = (v: number, d = 1) => `${(v * 100).toFixed(d)}%`
+type VolleyJudgeFn = (o: VolleyOdds) => JudgeOut | null
+type BasketJudgeFn = (o: BasketOdds) => JudgeOut | null
+const VOLLEY_REC = '기대수익 플러스 + 배당 1.30 이상 2.00 미만 (원정 승은 추천 제외)'
+const BASKET_REC = '기대수익 플러스 + 배당 1.30 이상 2.50 미만 · 기준점이 정수면 적특(환불) 반영'
+function volleyLeague(key: string, label: string, note: string, judge: VolleyJudgeFn, games: VolleyGame[]): LeagueJudge {
+  return {
+    key, label, note, fields: VOLLEY_FIELDS, recNote: VOLLEY_REC, profile: () => volleyProfile(games),
+    run: v => judge({ home: v.home, away: v.away, m15: v.m15, o35: v.o35, u45: v.u45, p25: v.p25 }),
+  }
+}
+function basketLeague(key: string, label: string, note: string, judge: BasketJudgeFn, games: BasketGame[]): LeagueJudge {
+  return {
+    key, label, note, fields: BASKET_FIELDS, recNote: BASKET_REC, profile: () => basketProfile(games),
+    run: v => judge({ home: v.home, away: v.away, line: v.line, mh: v.mh, ph: v.ph }),
+  }
+}
+
+const JUDGES: SportJudges[] = [
+  { key: 'soccer', label: '축구', emoji: '⚽', leagues: [] },
+  { key: 'baseball', label: '야구', emoji: '⚾', leagues: [] },
+  {
+    key: 'basketball', label: '농구', emoji: '🏀', leagues: [
+      basketLeague('nba', 'NBA', '2018-19 ~ 2025-26(1월) 정규+플레이오프 (kyleskom OddsData 머니라인)', judgeNba, NBA_GAMES),
+      basketLeague('kbl', 'KBL', '2020-21 ~ 2025-26 정규시즌 (BetExplorer 평균 배당)', judgeKbl, KBL_GAMES),
+      basketLeague('cba', 'CBA', '2022-23 ~ 2025-26 정규시즌 (BetExplorer 평균 배당)', judgeCba, CBA_GAMES),
+      basketLeague('bleague', 'B.LEAGUE', 'B1 2021-22 ~ 2025-26 정규시즌 (BetExplorer 평균 배당)', judgeBleague, BLEAGUE_GAMES),
+    ],
+  },
+  {
+    key: 'volleyball', label: '배구', emoji: '🏐', leagues: [
+      volleyLeague('krMen', '한국 남자', '2021-22 ~ 2025-26 정규시즌 (BetExplorer)', judgeKrMen, KRMEN_GAMES),
+      volleyLeague('krWomen', '한국 여자', '2021-22 ~ 2025-26 정규시즌 (BetExplorer)', judgeKrWomen, KRWOMEN_GAMES),
+      volleyLeague('itMen', '이탈리아 남자', '2021-22 ~ 2025-26 정규시즌 (BetExplorer)', judgeItMen, ITMEN_GAMES),
+      volleyLeague('itWomen', '이탈리아 여자', '2021-22 ~ 2025-26 정규시즌 (BetExplorer)', judgeItWomen, ITWOMEN_GAMES),
+      volleyLeague('trMen', '터키 남자', '2021-22 ~ 2025-26 정규시즌 (BetExplorer)', judgeTrMen, TRMEN_GAMES),
+      volleyLeague('trWomen', '터키 여자', '2021-22 ~ 2025-26 정규시즌 (BetExplorer)', judgeTrWomen, TRWOMEN_GAMES),
+    ],
+  },
+  { key: 'esports', label: 'LOL', emoji: '🎮', leagues: [] },
+]
+
 const signedPct = (v: number) => `${v > 0 ? '+' : ''}${(v * 100).toFixed(1)}%`
 
 export default function BetAnalysisModal({ onClose }: { onClose: () => void }) {
@@ -86,8 +168,10 @@ export default function BetAnalysisModal({ onClose }: { onClose: () => void }) {
     setSportKey(key); setLeagueKey(s.leagues[0]?.key ?? null); setRaw({})
   }
   // 숫자 3자리만 치면 배당으로 바꾸고(123 → 1.23) 다음 칸으로 이동
-  function change(idx: number, key: string, v: string) {
+  function change(idx: number, key: string, v: string, kind: 'odds' | 'line' = 'odds') {
     let clean = v.replace(/[^0-9.]/g, '')
+    // 기준점은 배당이 아니라 점수라 3자리 변환 없이 그대로 받는다 (5.5, 12, 10.5 …)
+    if (kind === 'line') { setRaw(p => ({ ...p, [key]: clean })); return }
     // 이미 배당(1.85)이 들어있는 칸에 숫자를 더 치면 덧붙이지 않고 새로 친 숫자부터 다시 받는다
     if (/^\d\.\d{2}$/.test(raw[key] ?? '') && /^\d\.\d{3,}$/.test(clean)) clean = clean.slice(4)
     const isTriple = /^\d{3}$/.test(clean)
@@ -95,9 +179,15 @@ export default function BetAnalysisModal({ onClose }: { onClose: () => void }) {
     // 바로 다음 칸으로 포커스 — 빠르게 이어 치거나 붙여넣어도 다음 숫자가 이 칸에 덧붙지 않게 즉시 옮긴다
     if (isTriple) { const el = inputRefs.current[idx + 1]; if (el) { el.focus(); el.select() } }
   }
-  const num = (k: string) => { const n = parseFloat(raw[k] ?? ''); return n > 1 ? n : null }
-  const odds: Odds = { home: num('home'), away: num('away'), m15: num('m15'), o35: num('o35'), u45: num('u45'), p25: num('p25') }
-  const out = league ? league.run(odds) : null
+  const vals: Record<string, number | null> = {}
+  for (const f of league?.fields ?? []) {
+    const n = parseFloat(raw[f.key] ?? '')
+    vals[f.key] = f.kind === 'line' ? (Number.isFinite(n) && n >= 0 ? n : null) : (n > 1 ? n : null)
+  }
+  const out = league ? league.run(vals) : null
+  // 농구 마핸/플핸 줄 이름에 실제 기준점을 붙여서 보여준다 (마핸 -5.5 / 플핸 +5.5)
+  const lineV = vals.line
+  const betName = (b: JudgeBet) => lineV != null && (b.key === 'mh' || b.key === 'ph') ? `${b.key === 'mh' ? '마핸 정배' : '플핸 역배'} ${b.key === 'mh' ? '-' : '+'}${lineV}` : b.name
   const recommendedKeys = new Set(out?.recommended.map(b => b.key) ?? [])
 
   const chip = (active: boolean): React.CSSProperties => ({
@@ -140,12 +230,8 @@ export default function BetAnalysisModal({ onClose }: { onClose: () => void }) {
             </div>
             {league && <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 6 }}>기준 데이터: {league.note}</div>}
             {league && (() => {
-              const pr = leagueProfile(league.games)
-              const items: [string, string][] = [
-                ['정배 승률', pct(pr.favWin)], ['홈 승률', pct(pr.homeWin)], ['정배 -1.5 (3-0·3-1)', pct(pr.m15)],
-                ['역배 +2.5 (1세트↑)', pct(pr.p25)], ['3.5 오버 (4세트↑)', pct(pr.o35)], ['4.5 언더', pct(pr.u45)],
-                ['풀세트(3-2)', pct(pr.fiveSet)], ['정배 평균배당', pr.favOdds.toFixed(2)], ['평균 마진', pct(pr.margin)],
-              ]
+              const pr = league.profile()
+              const items = pr.items
               return (
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 12px', padding: '7px 10px', marginBottom: 12, borderRadius: 8, background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}>
                   <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--gold)' }}>{league.label} 특성 ({pr.n}경기)</span>
@@ -164,22 +250,24 @@ export default function BetAnalysisModal({ onClose }: { onClose: () => void }) {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 8, marginBottom: 12 }}>
               {league.fields.map((f, i) => (
                 <label key={f.key} style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                  <span style={{ fontSize: 10, fontWeight: 700, color: i < 2 ? 'var(--text-primary)' : 'var(--text-muted)' }}>{f.label}{i < 2 && ' *'}</span>
-                  <input ref={el => { inputRefs.current[i] = el }} className="form-input" inputMode="decimal" placeholder="배당 (185=1.85)"
-                    value={raw[f.key] ?? ''} onChange={e => change(i, f.key, e.target.value)} onFocus={e => e.target.select()}
+                  <span style={{ fontSize: 10, fontWeight: 700, color: f.required ? 'var(--text-primary)' : f.kind === 'line' ? 'var(--gold)' : 'var(--text-muted)' }}>{f.label}{f.required && ' *'}</span>
+                  <input ref={el => { inputRefs.current[i] = el }} className="form-input" inputMode="decimal" placeholder={f.kind === 'line' ? '점수 (예: 5.5)' : '배당 (185=1.85)'}
+                    value={raw[f.key] ?? ''} onChange={e => change(i, f.key, e.target.value, f.kind)} onFocus={e => e.target.select()}
+                    onKeyDown={e => { if (e.key === 'Enter') { const el = inputRefs.current[i + 1]; if (el) { el.focus(); el.select() } } }}
                     style={{ fontSize: 13, padding: '6px 8px', fontFamily: 'var(--font-mono)' }} />
                 </label>
               ))}
             </div>
 
             {!out ? (
-              <div style={{ padding: '14px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>홈 승 / 원정 승 배당을 넣으면 판정합니다 (나머지는 있는 것만 넣어도 됨)</div>
+              <div style={{ padding: '14px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>홈 승 / 원정 승 배당을 넣으면 판정합니다 (나머지는 있는 것만 넣어도 됨{league.fields.some(f => f.kind === 'line') ? ' · 마핸/플핸은 기준점도 넣어야 판정' : ''})</div>
             ) : (
               <>
                 <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', fontSize: 11, color: 'var(--text-secondary)', marginBottom: 8 }}>
                   <span>정배 <b style={{ color: 'var(--text-primary)' }}>{out.favIsHome ? '홈' : '원정'} {out.fav.toFixed(2)}</b></span>
                   <span>마진 <b style={{ color: out.margin <= 0.05 ? 'var(--green)' : 'var(--orange)' }}>{pct(out.margin)}</b></span>
                   <span>비교 경기 <b style={{ color: 'var(--text-primary)' }}>{out.marketN}</b></span>
+                  {out.expMargin != null && <span>비교 경기 정배 평균 점수차 <b style={{ color: 'var(--text-primary)' }}>{out.expMargin >= 0 ? '+' : ''}{out.expMargin.toFixed(1)}</b></span>}
                 </div>
 
                 <div className="table-wrap">
@@ -191,7 +279,7 @@ export default function BetAnalysisModal({ onClose }: { onClose: () => void }) {
                       </tr>
                     </thead>
                     <tbody>
-                      {[...out.bets].sort((x, y) => league.fields.findIndex(f => f.key === x.key) - league.fields.findIndex(f => f.key === y.key)).map(b => <JudgeRow key={b.key} b={b} recommended={recommendedKeys.has(b.key)} />)}
+                      {[...out.bets].sort((x, y) => league.fields.findIndex(f => f.key === x.key) - league.fields.findIndex(f => f.key === y.key)).map(b => <JudgeRow key={b.key} b={b} name={betName(b)} recommended={recommendedKeys.has(b.key)} />)}
                     </tbody>
                   </table>
                 </div>
@@ -201,17 +289,17 @@ export default function BetAnalysisModal({ onClose }: { onClose: () => void }) {
                     <>
                       <span style={{ fontWeight: 700, color: 'var(--green)' }}>추천</span>{' '}
                       {out.recommended.map((b, i) => (
-                        <span key={b.key}>{i > 0 && ' · '}<b>{b.name}</b> {b.site.toFixed(2)} ({signedPct(b.ev)}, {b.strength}점)</span>
+                        <span key={b.key}>{i > 0 && ' · '}<b>{betName(b)}</b> {b.site.toFixed(2)} ({signedPct(b.ev)}, {b.strength}점)</span>
                       ))}
                     </>
                   ) : (
                     <>
                       <span style={{ fontWeight: 700, color: 'var(--text-muted)' }}>추천 없음</span>
-                      {out.leastLoss && <span style={{ color: 'var(--text-secondary)' }}> — 그나마 손해가 적은 건 <b>{out.leastLoss.name}</b> {out.leastLoss.site.toFixed(2)} ({signedPct(out.leastLoss.ev)})</span>}
+                      {out.leastLoss && <span style={{ color: 'var(--text-secondary)' }}> — 그나마 손해가 적은 건 <b>{betName(out.leastLoss)}</b> {out.leastLoss.site.toFixed(2)} ({signedPct(out.leastLoss.ev)})</span>}
                     </>
                   )}
                   <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4 }}>
-                    추천 조건: 기대수익 플러스 + 배당 1.30 이상 2.00 미만 (원정 승은 추천 제외) · ±는 95% 오차<br />
+                    추천 조건: {league.recNote} · ±는 95% 오차<br />
                     베팅 강도: 0 패스(오차 감안해도 마이너스) · 1~3 약(마이너스지만 오차 범위 안) · 4~10 플러스(기대수익 크고 확실할수록 높음)
                   </div>
                 </div>
@@ -229,13 +317,13 @@ function strengthColor(v: number) {
   return v === 0 ? 'var(--text-muted)' : v <= 3 ? 'var(--orange)' : v <= 6 ? 'var(--gold)' : 'var(--green)'
 }
 
-function JudgeRow({ b, recommended }: { b: BetResult; recommended: boolean }) {
+function JudgeRow({ b, name, recommended }: { b: JudgeBet; name: string; recommended: boolean }) {
   const evColor = b.ev > 0 ? 'var(--green)' : 'var(--red)'
   return (
     <tr style={recommended ? { background: 'var(--green-bg)' } : !b.eligible ? { opacity: 0.55 } : undefined}>
-      <td style={{ fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap' }}>{b.name}</td>
+      <td style={{ fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap' }}>{name}</td>
       <td className="td-right" style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{b.site.toFixed(2)}</td>
-      <td className="td-right" style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{pct(b.hit)} <span style={{ color: 'var(--text-muted)' }}>±{pct(b.se)} · {b.n}경기</span></td>
+      <td className="td-right" style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{pct(b.hit)} <span style={{ color: 'var(--text-muted)' }}>±{pct(b.se)}{b.push ? ` · 적특 ${pct(b.push)}` : ''} · {b.n}경기</span></td>
       <td className="td-right" style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{b.be.toFixed(2)}</td>
       <td className="td-right" style={{ fontSize: 12, fontWeight: 700, color: evColor, whiteSpace: 'nowrap' }}>{signedPct(b.ev)} <span style={{ fontWeight: 400, fontSize: 10, color: 'var(--text-muted)' }}>±{pct(b.err)}</span></td>
       <td style={{ fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap', color: strengthColor(b.strength) }}>

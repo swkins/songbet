@@ -1,9 +1,10 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, lazy, Suspense } from 'react'
 import type { Tab, ActionLog, Todo } from './types'
 import Dashboard from './pages/Dashboard'
 import Settlement from './pages/Settlement'
 import Stats from './pages/Stats'
-import BetAnalysisModal from './components/BetAnalysisModal'
+// 베팅분석은 과거 경기 데이터가 커서 처음 열 때만 따로 불러온다
+const BetAnalysisModal = lazy(() => import('./components/BetAnalysisModal'))
 import { supabase } from './lib/supabase'
 import { purgeOldLogs } from './lib/logger'
 import dayjs from 'dayjs'
@@ -785,7 +786,7 @@ export default function App() {
         </>
       )}
 
-      {showAnalysis && <BetAnalysisModal onClose={() => setShowAnalysis(false)} />}
+      {showAnalysis && <Suspense fallback={null}><BetAnalysisModal onClose={() => setShowAnalysis(false)} /></Suspense>}
 
       {/* 마진율 계산기 패널 — 우측 패널들(메모장/코드수정/할일/LOG)과 독립적으로 열리며, 항상 그 왼쪽에 위치 */}
       {showMargin && (
