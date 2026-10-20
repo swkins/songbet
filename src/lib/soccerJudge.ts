@@ -46,17 +46,17 @@ export interface JudgeOutput {
 
 const LINES = { '05': 0.5, '15': 1.5, '25': 2.5 } as const;
 
-// 기준 배당 x 주변 로그 창을 넓혀가며 최소 n 경기 확보
-function pick<T>(games: T[], getX: (g: T) => number, x: number, minN: number): T[] {
-  let w = 0.02;
-  let rows: T[] = [];
-  while (w <= 0.4) {
-    rows = games.filter((g) => Math.abs(Math.log(getX(g) / x)) <= w);
-    if (rows.length >= minN) break;
-    w += 0.01;
-  }
-  return rows;
+// 승무패 세 배당 → 마진을 뺀 [정배, 무, 역배] 확률 (사이트마다 다른 마진을 걷어내고 비교)
+function probs(home: number, draw: number, away: number): [number, number, number] {
+  const fav = Math.min(home, away), dog = Math.max(home, away);
+  const s = 1 / fav + 1 / draw + 1 / dog;
+  return [1 / fav / s, 1 / draw / s, 1 / dog / s];
 }
+
+const std = (xs: number[]) => {
+  const m = xs.reduce((a, b) => a + b, 0) / xs.length;
+  return Math.sqrt(xs.reduce((a, b) => a + (b - m) ** 2, 0) / xs.length) || 1;
+};
 
 // 내 룰북 (정배 배당 기준). 1.60~1.68 · 2.20 이상 · 1.10 미만은 룰 없음
 //  1.10~1.29 역배 +2.5 / 1.30~1.59 정배 승 / 1.69~1.89 역배 +1.5 / 1.90~2.19 역배 +0.5 · 정배 1.01~1.39면 2.5 오버도
@@ -76,7 +76,7 @@ export function ruleFor(fav: number, favIsHome: boolean): { text: string; keys: 
 export interface JudgeOptions {
   minOdds: number; // 추천 하한 사이트 배당
   maxOdds: number; // 추천 상한 사이트 배당 (미만)
-  minMarketN: number; // 비교 경기 최소 수 (정배 배당이 비슷한 경기)
+  sampleN: number; // 비교 경기 수 (세 배당이 가장 비슷한 경기)
 }
 
 // 판정에 쓸 수 없는 경기 제외: 배당 1.00 이하(빈 값)
@@ -84,24 +84,34 @@ export function cleanGames(games: Game[]): Game[] {
   return games.filter(([h, a, , , , d]) => h > 1 && a > 1 && d > 1);
 }
 
+// 비교 경기는 승무패 세 배당(마진 뺀 확률)이 가장 비슷한 경기 sampleN개.
+// 정배 배당만 보면 같은 정배 1.75라도 저득점·무승부 경기(무배당 낮음)와 다득점 경기(무배당 높음)가 섞여서
+// 핸디·언더오버 판정이 크게 틀렸다 — 지난 시즌 백테스트로 비교해 세 배당 · 3개 리그 합침 · 300경기가 가장 잘 맞았다.
+// (리그별로 나누거나 홈/원정 정배를 나눠도 더 나아지지 않아서 섞어서 본다. 리그 차이는 무배당에 대부분 담겨 있다)
 export function createJudge(rawGames: Game[], base: Partial<JudgeOptions> = {}) {
   const games = recentSeasons(cleanGames(rawGames)); // 최근 5시즌만
   const weight = seasonWeigher(games);
-  const defaults: JudgeOptions = { minOdds: 1.1, maxOdds: 3.0, minMarketN: 150, ...base };
+  const P = games.map((g) => probs(g[0], g[5], g[1]));
+  const sd = [0, 1, 2].map((i) => std(P.map((p) => p[i]))); // 세 확률을 같은 눈금으로 맞춰 거리 계산
+  const rows = games.map((g, i) => ({ g, p: P[i], w: weight(g) }));
+  const defaults: JudgeOptions = { minOdds: 1.1, maxOdds: 3.0, sampleN: 300, ...base };
   return (odds: Odds, o: Partial<JudgeOptions> = {}): JudgeOutput | null =>
-    judgeWith(games, weight, odds, { ...defaults, ...o });
+    judgeWith(rows, sd, odds, { ...defaults, ...o });
 }
 
-function judgeWith(games: Game[], weight: (g: Game) => number, odds: Odds, opts: JudgeOptions): JudgeOutput | null {
+type Row = { g: Game; p: [number, number, number]; w: number };
+
+function judgeWith(rows: Row[], sd: number[], odds: Odds, opts: JudgeOptions): JudgeOutput | null {
   const { home: h, draw: d, away: a } = odds;
   if (!h || !d || !a) return null;
   const fav = Math.min(h, a);
   const favIsHome = h <= a;
 
-  // 비교 경기: 정배 배당이 비슷한 경기 → 정배 기준 골차(m)와 총골(t)
-  // 축구는 홈/원정 정배를 나누면 강정배 구간 원정정배 표본이 너무 적어서(리그당 수십 경기) 정배 배당만으로 고른다
-  const mk = pick(games, (g) => Math.min(g[0], g[1]), fav, opts.minMarketN);
-  const F = mk.map((g) => ({ m: g[0] <= g[1] ? g[2] - g[3] : g[3] - g[2], t: g[2] + g[3], w: weight(g) }));
+  // 비교 경기: 세 배당이 가장 비슷한 경기 → 정배 기준 골차(m)와 총골(t)
+  const q = probs(h, d, a);
+  const dist = (p: number[]) => Math.hypot((p[0] - q[0]) / sd[0], (p[1] - q[1]) / sd[1], (p[2] - q[2]) / sd[2]);
+  const mk = rows.map((r) => ({ r, k: dist(r.p) })).sort((x, y) => x.k - y.k).slice(0, opts.sampleN).map((x) => x.r);
+  const F = mk.map(({ g, w }) => ({ m: g[0] <= g[1] ? g[2] - g[3] : g[3] - g[2], t: g[2] + g[3], w }));
   const W = (r: { w: number }) => r.w;
   type R = (typeof F)[number];
   const stat = (test: (r: R) => boolean) => weightedStat(F, W, (r) => (test(r) ? 1 : -1));

@@ -217,9 +217,9 @@ function soccerLeague(key: string, label: string, note: string, judge: SoccerJud
 const JUDGES: SportJudges[] = [
   {
     key: 'soccer', label: '축구', emoji: '⚽', leagues: [
-      soccerLeague('epl', 'EPL', '2021-22 ~ 2025-26 정규리그 (BetExplorer 평균 배당)', judgeEpl, EPL_GAMES),
-      soccerLeague('laliga', '라리가', '2021-22 ~ 2025-26 정규리그 (BetExplorer 평균 배당)', judgeLaliga, LALIGA_GAMES),
-      soccerLeague('bundesliga', '분데스리가', '2021-22 ~ 2025-26 정규리그 (BetExplorer 평균 배당)', judgeBundesliga, BUNDESLIGA_GAMES),
+      soccerLeague('epl', 'EPL', '2021-22 ~ 2025-26 정규리그 (BetExplorer 평균 배당) · 비교 경기는 3개 리그에서 승무패 세 배당이 비슷한 300경기', judgeEpl, EPL_GAMES),
+      soccerLeague('laliga', '라리가', '2021-22 ~ 2025-26 정규리그 (BetExplorer 평균 배당) · 비교 경기는 3개 리그에서 승무패 세 배당이 비슷한 300경기', judgeLaliga, LALIGA_GAMES),
+      soccerLeague('bundesliga', '분데스리가', '2021-22 ~ 2025-26 정규리그 (BetExplorer 평균 배당) · 비교 경기는 3개 리그에서 승무패 세 배당이 비슷한 300경기', judgeBundesliga, BUNDESLIGA_GAMES),
     ],
   },
   { key: 'baseball', label: '야구', emoji: '⚾', leagues: [] },
