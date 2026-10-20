@@ -52,7 +52,7 @@ interface JudgeBet {
   hit: number; se: number; be: number; ev: number; err: number
   strength: number; strengthLabel: string; n: number; eligible: boolean
   push?: number  // 농구 정수 기준점 적특 비율
-  check?: { n: number; hit: number; roi: number }  // 축구: 같은 배당대 과거 실적
+  check?: { n: number; hit: number; roi: number; seasons: number; seasonsUp: number }  // 축구: 같은 배당대 과거 실적
 }
 interface JudgeOut {
   fav: number; favIsHome: boolean; margin: number; marketN: number
@@ -191,7 +191,7 @@ function soccerProfile(raw: SoccerGame[]) {
 type VolleyJudgeFn = (o: VolleyOdds) => JudgeOut | null
 type BasketJudgeFn = (o: BasketOdds) => JudgeOut | null
 type SoccerJudgeFn = (o: SoccerOdds) => JudgeOut | null
-const SOCCER_REC = '기대수익 플러스 + 배당 1.30 이상 3.00 미만 (홈 승·원정 승·-0.5는 1.90 미만) + 적중률 50% 이상 + 승무패는 같은 배당대 과거 수익률 플러스 · 핸디캡은 반 골 기준점이라 적특 없음'
+const SOCCER_REC = '기대수익 플러스 + 배당 1.30 이상 3.00 미만 (홈 승·원정 승·-0.5는 1.75 미만 + 같은 배당대 과거 실적이 시즌 60% 이상 플러스) + 적중률 50% 이상 + 승무패는 같은 배당대 과거 수익률 플러스 · 핸디캡은 반 골 기준점이라 적특 없음'
 const VOLLEY_REC = '기대수익 플러스 + 배당 1.30 이상 3.00 미만 + 적중률 50% 이상 (원정 승은 추천 제외)'
 const BASKET_REC = '기대수익 플러스 + 배당 1.30 이상 3.00 미만 + 적중률 50% 이상 · 기준점이 정수면 적특(환불) 반영'
 function volleyLeague(key: string, label: string, note: string, judge: VolleyJudgeFn, games: VolleyGame[]): LeagueJudge {
@@ -519,7 +519,7 @@ function JudgeRow({ b, name, recommended, rule = false, ruleMin, recNote, open, 
     `적중률 ${pct(b.hit)} ±${pct(b.se)} (비교 ${b.n}경기)`,
     b.push ? `적특 ${pct(b.push)}` : null,
     `기대수익 ${signedPct(b.ev)} ±${pct(b.err)}`,
-    b.check ? `같은 배당대 과거 실적 ${pct(b.check.hit)} · 수익률 ${signedPct(b.check.roi)} (${b.check.n}경기)` : null,
+    b.check ? `같은 배당대 과거 실적 ${pct(b.check.hit)} · 수익률 ${signedPct(b.check.roi)} (${b.check.n}경기 · 플러스 시즌 ${b.check.seasonsUp}/${b.check.seasons})` : null,
     short ? `룰 기준 ${ruleMin!.toFixed(2)} 이상 — 미달` : rule && ruleMin != null ? `룰 기준 ${ruleMin.toFixed(2)} 이상 — 충족` : null,
     !b.eligible ? `추천 배당범위 밖 (${recNote.split(' · ')[0]})` : null,
   ].filter(Boolean) as string[]
