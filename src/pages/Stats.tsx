@@ -980,7 +980,7 @@ function LeagueManageModal({ leagues, onRename, onDelete, onClose }: {
 
 // ─── 축구 상세 통계 ──────
 // 추적하는 베팅옵션은 위 "베팅옵션별 성적"에서 보여주고, 여기엔 그 외 베팅만 모아 보여준다.
-const SOCCER_TRACKED_OPTIONS = ['홈 0.5 H', '원정 0.5 H', '홈 1.5 H', '원정 1.5 H', '홈 승리', '원정 승리', '홈 2.5 H', '원정 2.5 H', '2.5 오버'] as const
+const SOCCER_TRACKED_OPTIONS = ['홈 승리', '원정 승리', '홈 0.5 H', '원정 0.5 H', '홈 1.5 H', '원정 1.5 H', '홈 2.5 H', '원정 2.5 H', '2.5 오버'] as const
 function SoccerDetailPanel({ bets, options, numericOptions }: { bets: Bet[]; options: string[]; numericOptions: string[] }) {
   const settled = bets.filter(b => b.result !== 'pending')
   const tracked = new Set<string>(SOCCER_TRACKED_OPTIONS)
