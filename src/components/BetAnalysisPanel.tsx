@@ -387,7 +387,7 @@ export default function BetAnalysisPanel({ tabs, active = true }: { tabs: ReactN
               {league.fields.map((f, i) => (
                 <label key={f.key} style={{ display: 'contents' }}>
                   <span className="bet-inputs__label" style={{ paddingLeft: inputCol[i] > 0 ? 12 : 0, fontSize: 10, fontWeight: 700, color: f.required ? 'var(--text-primary)' : f.kind === 'line' ? 'var(--gold)' : 'var(--text-muted)' }}>{f.label}{f.required && ' *'}{fieldSub(f) && <div style={{ fontSize: 8.5, fontWeight: 600, color: 'var(--text-muted)' }}>{fieldSub(f)}</div>}</span>
-                  <input ref={el => { inputRefs.current[i] = el }} className="form-input bet-odds-input" inputMode="decimal" placeholder={f.kind === 'line' ? '5 → 5.5' : '185=1.85'}
+                  <input ref={el => { inputRefs.current[i] = el }} className="form-input bet-odds-input" inputMode="decimal"
                     onBlur={f.kind === 'line' ? () => finishLine(f.key) : undefined}
                     value={raw[f.key] ?? ''} onChange={e => change(i, f.key, e.target.value, f.kind)} onFocus={e => e.target.select()}
                     onKeyDown={e => { if (e.key === 'Escape') { reset(); return } if (e.key === 'Enter') { const el = inputRefs.current[i + 1]; if (el) { el.focus(); el.select() } } }}
