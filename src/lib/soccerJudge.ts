@@ -44,7 +44,6 @@ export interface JudgeOutput {
   bets: BetResult[];
   recommended: BetResult[]; // EV>0 & eligible, 강도 내림차순
   leastLoss: BetResult | null; // 전부 마이너스일 때 가장 덜 잃는 쪽
-  rule: { text: string; keys: BetKey[]; min: Partial<Record<BetKey, number>> }; // 내 룰북 기준 이 경기에서 할 베팅 · min = 이 배당 이상일 때만
 }
 
 const LINES = { '05': 0.5, '15': 1.5, '25': 2.5 } as const;
@@ -61,73 +60,15 @@ const std = (xs: number[]) => {
   return Math.sqrt(xs.reduce((a, b) => a + (b - m) ** 2, 0) / xs.length) || 1;
 };
 
-// 2.5 오버 룰 조건: 정배 1.01~1.39 & 무 5.5 이상 (강정배인데 무배당이 낮으면 시장이 저득점을 본다는 뜻 — 적중률이 61%로 떨어지고 시즌별로도 흔들렸다)
-const isOverRule = (fav: number, draw: number) => Math.round(fav * 100) >= 101 && Math.round(fav * 100) <= 139 && draw >= 5.5;
-
-// 2.5 오버 룰 기준 배당 = 그 리그 과거 같은 조건 경기의 손익분기 × 1.05 (5% 여유). 시즌 가중 적중률로 계산해서 새 시즌을 넣으면 같이 바뀐다
-// 홈정배 / 원정정배 따로 계산한다 (예: EPL 홈정배 70% → 1.51, 원정정배 53% → 2.00). 같은 조건 경기가 10경기 미만이면 기준 없음
-export type OverMin = { home?: number; away?: number };
-export function overRuleMin(rawGames: Game[]): OverMin {
-  const games = recentSeasons(cleanGames(rawGames));
-  const weight = seasonWeigher(games);
-  const min = (favHome: boolean) => {
-    const rows = games.filter((g) => (g[0] <= g[1]) === favHome && isOverRule(Math.min(g[0], g[1]), g[5]));
-    const s = weightedStat(rows, weight, (g) => (g[2] + g[3] > 2.5 ? 1 : -1));
-    return rows.length >= 10 && s.pw ? Math.ceil((1.05 / s.pw) * 100) / 100 : undefined;
-  };
-  return { home: min(true), away: min(false) };
-}
-
-// 3.5 오버 룰 조건: 홈정배 & 정배 1.01~1.29 & 무 minDraw 이상 (분데스리가 5.5, 나머지 7.5) — 리그별·홈원정별로 보니 이 조건에서만 3.5 오버가 꾸준했다
-// (분데스 홈정배 57~62%, EPL 52%, 챔스 56%. 라리가는 해당 조건이 거의 없음)
-const isOver35Rule = (fav: number, favIsHome: boolean, draw: number, minDraw: number) =>
-  favIsHome && Math.round(fav * 100) >= 101 && Math.round(fav * 100) <= 129 && draw >= minDraw;
-
-// 3.5 오버 룰 기준 배당 = 그 리그 홈정배 같은 조건 경기의 손익분기 × 1.05. 10경기 미만이면 기준 없음
-export function over35RuleMin(rawGames: Game[], minDraw: number): number | undefined {
-  const games = recentSeasons(cleanGames(rawGames));
-  const weight = seasonWeigher(games);
-  const rows = games.filter((g) => isOver35Rule(Math.min(g[0], g[1]), g[0] <= g[1], g[5], minDraw));
-  const s = weightedStat(rows, weight, (g) => (g[2] + g[3] > 3.5 ? 1 : -1));
-  return rows.length >= 10 && s.pw ? Math.ceil((1.05 / s.pw) * 100) / 100 : undefined;
-}
-
-// 내 룰북 (정배 배당 기준). 1.60~1.68 · 2.20 이상 · 1.10 미만은 룰 없음
-//  1.10~1.29 역배 +2.5 / 1.30~1.59 정배 승 / 1.69~1.89 역배 +1.5 / 1.90~2.19 역배 +0.5 · 정배 1.01~1.39 & 무 5.5 이상이면 2.5 오버도 (overMin 배당 이상일 때만)
-// minusHome: 사이트가 핸디 마이너스를 준 쪽 — 룰의 '역배 +핸디'는 플러스를 받은 쪽에 건다 (보통 승무패 역배와 같다)
-export function ruleFor(fav: number, favIsHome: boolean, draw: number, overMin?: number, o35?: { minDraw: number; min?: number }, minusHome = favIsHome): JudgeOutput['rule'] {
-  const dog = minusHome ? 'a' : 'h';
-  const parts: string[] = [];
-  const keys: BetKey[] = [];
-  const min: JudgeOutput['rule']['min'] = {};
-  const f = Math.round(fav * 100);
-  if (f >= 110 && f <= 129) { parts.push('역배 +2.5'); keys.push(`${dog}25` as BetKey); }
-  else if (f >= 130 && f <= 159) { parts.push('정배 승'); keys.push(favIsHome ? 'home' : 'away'); }
-  else if (f >= 169 && f <= 189) { parts.push('역배 +1.5'); keys.push(`${dog}15` as BetKey); }
-  else if (f >= 190 && f <= 219) { parts.push('역배 +0.5'); keys.push(`${dog}05` as BetKey); }
-  if (isOverRule(fav, draw)) {
-    parts.push(overMin ? `2.5 오버 ${overMin.toFixed(2)}↑` : '2.5 오버'); keys.push('o25');
-    if (overMin) min.o25 = overMin;
-  }
-  if (o35 && isOver35Rule(fav, favIsHome, draw, o35.minDraw)) {
-    parts.push(o35.min ? `3.5 오버 ${o35.min.toFixed(2)}↑` : '3.5 오버'); keys.push('o35');
-    if (o35.min) min.o35 = o35.min;
-  }
-  return { text: parts.length ? parts.join(' + ') : '해당 룰 없음', keys, min };
-}
-
 export interface JudgeOptions {
   minOdds: number; // 추천 하한 사이트 배당
   maxOdds: number; // 추천 상한 사이트 배당 (미만)
   sampleN: number; // 비교 경기 수 (세 배당이 가장 비슷한 경기)
-  overMin?: OverMin; // 2.5 오버 룰 기준 배당 (리그별 · 홈정배/원정정배 따로, overRuleMin)
   winSeasonShare: number; // 승 베팅: 같은 배당대 과거 실적이 플러스였던 시즌 비율이 이 이상이어야 추천 (0.6)
   // 홈 승·원정 승(·같은 결과인 -0.5) 추천 상한 배당 (미만, 1.75) — 정배 승 1.90부터는 4개 리그 거의 모두 적중률 50% 밑이고,
   // 3시즌 백테스트(이전 시즌으로만 판정)에서 상한 1.90은 152건 +2.3%(EPL 77건 -10.9%), 1.75는 83건 +12.8%(EPL 26건 +3.6%)였다.
   // 시즌 일관성 0.6을 더하면 67건 +8.0% — 둘 다 오차 ±15~17%라 확정은 아니지만 엉뚱한 추천이 크게 줄어 보수적으로 1.75 + 0.6
   winMaxOdds: number;
-  over35Draw?: number; // 3.5 오버 룰 무배당 하한 (기본 7.5, 분데스리가 5.5)
-  over35Min?: number; // 3.5 오버 룰 기준 배당 (over35RuleMin)
 }
 
 type OutcomeKind = 'home' | 'draw' | 'away';
@@ -244,6 +185,6 @@ function judgeWith(rows: Row[], sd: number[], oddsCheck: ReturnType<typeof socce
 
   return {
     fav, favIsHome, minusHome, margin: 1 / h + 1 / d + 1 / a - 1, marketN: mk.length, expMargin,
-    bets, recommended, leastLoss, rule: ruleFor(fav, favIsHome, d, favIsHome ? opts.overMin?.home : opts.overMin?.away, { minDraw: opts.over35Draw ?? 7.5, min: opts.over35Min }, minusHome),
+    bets, recommended, leastLoss,
   };
 }

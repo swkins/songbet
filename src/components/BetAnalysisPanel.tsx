@@ -57,7 +57,6 @@ interface JudgeOut {
   fav: number; favIsHome: boolean; margin: number; marketN: number
   minusHome?: boolean  // 축구: 사이트가 핸디 마이너스를 준 쪽이 홈인지
   expMargin?: number  // 농구·축구: 표본의 정배 평균 점수차(골차)
-  rule?: { text: string; keys: string[]; min?: Record<string, number | undefined> }  // 축구: 내 룰북 기준 이 경기에서 할 베팅 · min = 이 배당 이상일 때만
   bets: JudgeBet[]; recommended: JudgeBet[]; leastLoss: JudgeBet | null
 }
 // kind: 'odds' = 배당(3자리 → 1.23, 다음 칸 이동) / 'line' = 농구 기준점(그대로 입력, 예: 5.5)
@@ -338,7 +337,6 @@ export default function BetAnalysisPanel({ tabs, active = true }: { tabs: ReactN
     inputCol.push(col); rowEnd.push(end); col = end ? 0 : col + 1
   }
   const recommendedKeys = new Set(out?.recommended.map(b => b.key) ?? [])
-  const ruleKeys = new Set<string>(out?.rule?.keys ?? [])
   const requiredLabels = (league?.fields ?? []).filter(f => f.required).map(f => f.label).join(' / ')
 
   const chip = (active: boolean): React.CSSProperties => ({
@@ -406,7 +404,6 @@ export default function BetAnalysisPanel({ tabs, active = true }: { tabs: ReactN
                   style={{ display: 'flex', gap: 14, flexWrap: 'wrap', fontSize: 11, color: 'var(--text-secondary)', marginBottom: 8 }}>
                   <span>정배 <b style={{ color: 'var(--text-primary)' }}>{out.favIsHome ? '홈' : '원정'} {out.fav.toFixed(2)}</b></span>
                   <span>마진 <b style={{ color: out.margin <= 0.05 ? 'var(--green)' : 'var(--orange)' }}>{pct(out.margin)}</b></span>
-                  {out.rule && <span>내 룰 <b style={{ color: out.rule.keys.length ? 'var(--gold)' : 'var(--text-muted)' }}>{out.rule.text}</b></span>}
                 </div>
 
                 <div className="table-wrap">
@@ -418,7 +415,7 @@ export default function BetAnalysisPanel({ tabs, active = true }: { tabs: ReactN
                       </tr>
                     </thead>
                     <tbody>
-                      {[...out.bets].sort((x, y) => league.fields.findIndex(f => f.key === fieldKeyOf(x.key)) - league.fields.findIndex(f => f.key === fieldKeyOf(y.key))).map(b => <JudgeRow key={b.key} b={b} name={betName(b)} recommended={recommendedKeys.has(b.key)} rule={ruleKeys.has(b.key)} ruleMin={out.rule?.min?.[b.key]} recNote={league.recNote} open={openRow === b.key} onToggle={() => setOpenRow(k => k === b.key ? null : b.key)} />)}
+                      {[...out.bets].sort((x, y) => league.fields.findIndex(f => f.key === fieldKeyOf(x.key)) - league.fields.findIndex(f => f.key === fieldKeyOf(y.key))).map(b => <JudgeRow key={b.key} b={b} name={betName(b)} recommended={recommendedKeys.has(b.key)} recNote={league.recNote} open={openRow === b.key} onToggle={() => setOpenRow(k => k === b.key ? null : b.key)} />)}
                     </tbody>
                   </table>
                 </div>
@@ -517,23 +514,20 @@ function strengthColor(v: number) {
   return v === 0 ? 'var(--text-muted)' : v <= 3 ? 'var(--orange)' : v <= 6 ? 'var(--gold)' : 'var(--green)'
 }
 
-// rule: 축구 내 룰북이 이 경기에서 고르는 베팅 (이름 옆에 '룰' 표시) · ruleMin: 룰 기준 배당 — 사이트 배당이 못 미치면 '미달'
 // 오차·경기 수·적특·배당범위 같은 상세는 평소엔 숨기고, 줄에 마우스를 올리면(툴팁) / 누르면(아래로 펼침) 보여준다
-function JudgeRow({ b, name, recommended, rule = false, ruleMin, recNote, open, onToggle }: { b: JudgeBet; name: string; recommended: boolean; rule?: boolean; ruleMin?: number; recNote: string; open: boolean; onToggle: () => void }) {
-  const short = rule && ruleMin != null && b.site < ruleMin
+function JudgeRow({ b, name, recommended, recNote, open, onToggle }: { b: JudgeBet; name: string; recommended: boolean; recNote: string; open: boolean; onToggle: () => void }) {
   const evColor = b.ev > 0 ? 'var(--green)' : 'var(--red)'
   const detail = [
     `적중률 ${pct(b.hit)} ±${pct(b.se)} (비교 ${b.n}경기)`,
     b.push ? `적특 ${pct(b.push)}` : null,
     `기대수익 ${signedPct(b.ev)} ±${pct(b.err)}`,
     b.check ? `같은 배당대 과거 실적 ${pct(b.check.hit)} · 수익률 ${signedPct(b.check.roi)} (${b.check.n}경기 · 플러스 시즌 ${b.check.seasonsUp}/${b.check.seasons})` : null,
-    short ? `룰 기준 ${ruleMin!.toFixed(2)} 이상 — 미달` : rule && ruleMin != null ? `룰 기준 ${ruleMin.toFixed(2)} 이상 — 충족` : null,
     !b.eligible ? `추천 배당범위 밖 (${recNote.split(' · ')[0]})` : null,
   ].filter(Boolean) as string[]
   return (
     <>
     <tr onClick={onToggle} title={detail.join('\n')} style={{ cursor: 'pointer', ...(recommended ? { background: 'var(--green-bg)' } : !b.eligible ? { opacity: 0.55 } : {}) }}>
-      <td style={{ fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap' }}>{name}{rule && <span style={{ marginLeft: 4, padding: '0 4px', borderRadius: 3, fontSize: 9, color: short ? 'var(--text-muted)' : 'var(--gold)', border: `1px solid ${short ? 'var(--border)' : 'var(--gold-border)'}` }}>{short ? '룰 미달' : '룰'}</span>}</td>
+      <td style={{ fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap' }}>{name}</td>
       <td className="td-right" style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{b.site.toFixed(2)}</td>
       <td className="td-right" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>{pct(b.hit)}</td>
       <td className="td-right" style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{b.be.toFixed(2)}</td>
