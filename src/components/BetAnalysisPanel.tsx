@@ -99,10 +99,20 @@ const SOCCER_LINE_SHOW: Record<number, (fav: number) => boolean> = {
   1.5: fav => fav >= 1.4 && fav < 1.8,
   0.5: fav => fav >= 1.8,
 }
-const soccerOuZone = (v: Record<string, number | null>) => {
+// 2.5 오버 해볼 만한 구역 (리그별 · 홈정배/원정정배 따로) — 이 구역일 때만 2.5 오버·언더 칸을 보여준다 (언더 배당은 마진 확인용)
+// 2021-22~2023-24로 고르고 2024-25·2025-26으로 확인해서 유지된 구역만 (라리가는 확인 시즌에 50% 안팎으로 무너져서 없음)
+type OuRange = { favMax?: number; drawMin?: number; drawMax?: number }
+export type OuZone = { home?: OuRange; away?: OuRange }
+const inOuZone = (zone: OuZone | undefined, v: Record<string, number | null>) => {
   const fav = soccerFav(v)
-  return fav != null && v.draw != null && fav < 1.4 && v.draw >= 5.5
+  if (!zone || fav == null || v.draw == null || v.home == null || v.away == null) return false
+  const r = zone[v.home <= v.away ? 'home' : 'away']
+  return !!r && fav < (r.favMax ?? 99) && v.draw >= (r.drawMin ?? 0) && v.draw < (r.drawMax ?? 99)
 }
+const soccerFields = (zone?: OuZone): OddsField[] => [
+  ...SOCCER_FIELDS,
+  { key: 'o25', label: '2.5 오버', showIf: v => inOuZone(zone, v) }, { key: 'u25', label: '2.5 언더', solo: true, showIf: v => inOuZone(zone, v) },
+]
 const SOCCER_FIELDS: OddsField[] = [
   { key: 'home', label: '홈 승', required: true }, { key: 'draw', label: '무', required: true },
   { key: 'away', label: '원정 승', required: true, solo: true },
@@ -110,9 +120,6 @@ const SOCCER_FIELDS: OddsField[] = [
     key: `${side[0]}${String(L).replace('.', '')}`, label: `${side === 'home' ? '홈' : '원정'} H ${L}`, line: L, side, solo: side === 'away',
     showIf: (v: Record<string, number | null>) => { const fav = soccerFav(v); return fav != null && SOCCER_LINE_SHOW[L](fav) },
   }))),
-  // 2.5 오버·언더 칸은 과거 데이터로 해볼 만했던 조건일 때만 (사용자 요청, 3.5 오버·언더는 뺐다)
-  //  정배 1.39 이하 & 무 5.5 이상 (2.5 오버가 3개 리그 69%, 5시즌 모두 66% 이상) — 언더 배당은 마진 확인용으로 같이 넣는다
-  { key: 'o25', label: '2.5 오버', showIf: soccerOuZone }, { key: 'u25', label: '2.5 언더', solo: true, showIf: soccerOuZone },
 ]
 
 const pct = (v: number, d = 1) => `${(v * 100).toFixed(d)}%`
@@ -231,9 +238,9 @@ function basketLeague(key: string, label: string, note: string, judge: BasketJud
   }
 }
 
-function soccerLeague(key: string, label: string, note: string, judge: SoccerJudgeFn, games: SoccerGame[]): LeagueJudge {
+function soccerLeague(key: string, label: string, note: string, judge: SoccerJudgeFn, games: SoccerGame[], ouZone?: OuZone): LeagueJudge {
   return {
-    key, label, note, fields: SOCCER_FIELDS, perRow: 3, recNote: SOCCER_REC, profile: () => soccerProfile(games), data: () => seasonSummary(cleanSoccer(games)),
+    key, label, note, fields: soccerFields(ouZone), perRow: 3, recNote: SOCCER_REC, profile: () => soccerProfile(games), data: () => seasonSummary(cleanSoccer(games)),
     run: v => judge({
       home: v.home, draw: v.draw, away: v.away, h05: v.h05, a05: v.a05, h15: v.h15, a15: v.a15, h25: v.h25, a25: v.a25, o25: v.o25, u25: v.u25,
     }),
@@ -243,10 +250,16 @@ function soccerLeague(key: string, label: string, note: string, judge: SoccerJud
 const JUDGES: SportJudges[] = [
   {
     key: 'soccer', label: '축구', emoji: '⚽', leagues: [
-      soccerLeague('epl', 'EPL', '2021-22 ~ 2025-26 정규리그 (BetExplorer 평균 배당) · 비교 경기는 홈정배/원정정배 따로, 승무패 세 배당이 비슷한 200경기', judgeEpl, EPL_GAMES),
+      soccerLeague('epl', 'EPL', '2021-22 ~ 2025-26 정규리그 (BetExplorer 평균 배당) · 비교 경기는 홈정배/원정정배 따로, 승무패 세 배당이 비슷한 200경기', judgeEpl, EPL_GAMES,
+        // 홈정배: 정배 1.50 미만 & 무 5.5 이상 (학습 73% → 확인 66%) / 원정정배: 정배 2.00 미만 & 무 4.3~5.5 (66% → 73%)
+        { home: { favMax: 1.5, drawMin: 5.5 }, away: { favMax: 2.0, drawMin: 4.3, drawMax: 5.5 } }),
       soccerLeague('laliga', '라리가', '2021-22 ~ 2025-26 정규리그 (BetExplorer 평균 배당) · 비교 경기는 홈정배/원정정배 따로, 승무패 세 배당이 비슷한 200경기', judgeLaliga, LALIGA_GAMES),
-      soccerLeague('bundesliga', '분데스리가', '2021-22 ~ 2025-26 정규리그 (BetExplorer 평균 배당) · 비교 경기는 홈정배/원정정배 따로, 승무패 세 배당이 비슷한 200경기', judgeBundesliga, BUNDESLIGA_GAMES),
-      soccerLeague('ucl', '챔피언스리그', '2021-22 ~ 2025-26 조별리그·리그 페이즈, 토너먼트 제외 (BetExplorer 평균 배당) · 비교 경기는 홈정배/원정정배 따로, 세 배당이 비슷한 80경기', judgeUcl, UCL_GAMES),
+      soccerLeague('bundesliga', '분데스리가', '2021-22 ~ 2025-26 정규리그 (BetExplorer 평균 배당) · 비교 경기는 홈정배/원정정배 따로, 승무패 세 배당이 비슷한 200경기', judgeBundesliga, BUNDESLIGA_GAMES,
+        // 홈정배: 정배 1.30 미만 (학습 77% → 확인 91%) / 원정정배: 정배 1.50 미만 & 무 5.0 이상 (74% → 75%)
+        { home: { favMax: 1.3 }, away: { favMax: 1.5, drawMin: 5.0 } }),
+      soccerLeague('ucl', '챔피언스리그', '2021-22 ~ 2025-26 조별리그·리그 페이즈, 토너먼트 제외 (BetExplorer 평균 배당) · 비교 경기는 홈정배/원정정배 따로, 세 배당이 비슷한 80경기', judgeUcl, UCL_GAMES,
+        // 홈정배: 정배 1.50 미만 & 무 6.5 이상 (학습 81% → 확인 68%) / 원정정배: 정배 1.70 미만 & 무 5.5 미만 (78% → 67%) — 표본 작음
+        { home: { favMax: 1.5, drawMin: 6.5 }, away: { favMax: 1.7, drawMax: 5.5 } }),
     ],
   },
   { key: 'baseball', label: '야구', emoji: '⚾', leagues: [] },
