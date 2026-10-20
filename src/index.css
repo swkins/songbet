@@ -547,12 +547,15 @@ tr:hover td { background: var(--bg-hover); }
 .dashboard-bets { width: 100%; }
 .dashboard-analysis { width: 100%; min-width: 0; }
 /* 베팅분석 입력칸 — 좌측 정렬 [이름][칸] [이름][칸], 입력칸은 모두 같은 가로·세로. 기준점 줄은 나머지 칸을 비워서 다음 줄로 */
-.bet-inputs { display: grid; grid-template-columns: max-content 130px max-content 130px; justify-content: start; align-items: center; gap: 6px 8px; margin-bottom: 12px; }
+.bet-inputs { display: grid; grid-template-columns: max-content 120px max-content 120px; justify-content: start; align-items: center; gap: 6px 8px; margin-bottom: 12px; }
 .bet-inputs__label { white-space: nowrap; }
-.bet-inputs > label > input.bet-odds-input, .bet-inputs input.bet-odds-input { width: 130px; height: 32px; box-sizing: border-box; padding: 0 8px; }
+.bet-inputs > label > input.bet-odds-input, .bet-inputs input.bet-odds-input { width: 120px; height: 32px; box-sizing: border-box; padding: 0 8px; }
 .bet-inputs__rest { grid-column: span 2; }
+/* 판정 결과 표 — 칸 여백을 줄여 베팅~베팅 강도가 가로 스크롤 없이 한 번에 */
+.bet-judge-table th, .bet-judge-table td { padding-left: 6px; padding-right: 6px; }
+.bet-judge-table td { padding-top: 6px; padding-bottom: 6px; }
 @media (max-width: 600px) {
-  .bet-inputs { grid-template-columns: max-content 130px; }
+  .bet-inputs { grid-template-columns: max-content 120px; }
   .bet-inputs__rest { display: none; }
   .bet-inputs .bet-inputs__label { padding-left: 0 !important; }
 }
@@ -568,6 +571,7 @@ tr:hover td { background: var(--bg-hover); }
 @media (min-width: 901px) {
   .dashboard-main { flex-direction: row; align-items: flex-start; gap: 10px; }
   .dashboard-side { flex: var(--mining-n, 1) 1 0; min-width: 0; width: auto; }
+  .dashboard-side.analysis-open { min-width: 450px; }
   .dashboard-bets { flex: var(--bet-n, 1) 1 0; min-width: 0; width: auto; }
   .mining-cards { grid-template-columns: minmax(0, 1fr); }
   .site-cards-wrap { grid-template-columns: repeat(var(--site-cols, 1), minmax(0, 1fr)); }
@@ -578,6 +582,8 @@ tr:hover td { background: var(--bg-hover); }
   /* 아래 줄은 베팅분석(카드 1.2장 폭) 좌 / 베팅 현황 우 — 사이트 현황 줄은 한 줄 전체를 차지해서 자동으로 줄바꿈된다 */
   .dashboard-main.stacked { flex-direction: row; flex-wrap: wrap; align-items: flex-start; }
   .dashboard-main.stacked .dashboard-analysis { flex: 1.2 1 0; width: auto; }
+  /* 베팅분석 판정 표(베팅~베팅 강도)가 가로 스크롤 없이 다 보이는 최소 폭 */
+  .dashboard-main.stacked .dashboard-analysis { min-width: 450px; }
   .dashboard-main.stacked .dashboard-side { flex: none; width: 100%; flex-direction: row; align-items: stretch; }
   /* 일별 손익은 사이트 현황 높이에 맞춘다 — 슬롯은 행 높이만 따라가고(내용이 높이를 늘리지 않게) 카드를 그 안에 꽉 채움 */
   .dashboard-main.stacked .dashboard-pnl-slot { position: relative; }

@@ -63,7 +63,7 @@ const VOLLEY_FIELDS: OddsField[] = [
 
 const BASKET_FIELDS: OddsField[] = [
   { key: 'home', label: '홈 승', required: true }, { key: 'away', label: '원정 승', required: true },
-  { key: 'line', label: '기준점 (5 → 5.5 자동)', kind: 'line' },
+  { key: 'line', label: '기준점', kind: 'line' },
   { key: 'hh', label: '홈 핸디캡' }, { key: 'ah', label: '원정 핸디캡' },
 ]
 
@@ -214,10 +214,12 @@ export default function BetAnalysisPanel({ tabs, active = true }: { tabs: ReactN
   // 판정 결과의 마핸/플핸을 입력 칸(홈 핸디캡/원정 핸디캡) 순서로 맞춘다
   const fieldKeyOf = (key: string) => key === 'mh' || key === 'ph' ? (sideOf(key) === '홈' ? 'hh' : 'ah') : key
   // 홈/원정 핸디캡 칸 이름 옆에 지금 배당 기준으로 마핸/플핸 어느 쪽인지 붙여준다
-  const fieldLabel = (f: OddsField) => {
-    if ((f.key !== 'hh' && f.key !== 'ah') || vals.home == null || vals.away == null) return f.label
+  // 칸 이름 아래 작은 글씨 — 기준점은 자동 .5 안내, 핸디캡은 지금 배당 기준 마핸/플핸 (이름 폭을 줄여 칸이 좁아도 한 줄에 두 칸)
+  const fieldSub = (f: OddsField) => {
+    if (f.kind === 'line') return '5 → 5.5 자동'
+    if ((f.key !== 'hh' && f.key !== 'ah') || vals.home == null || vals.away == null) return null
     const isFav = (f.key === 'hh') === favHome
-    return `${f.label} (${isFav ? '마핸 -' : '플핸 +'}${lineV ?? '기준점'})`
+    return `${isFav ? '마핸 -' : '플핸 +'}${lineV ?? '기준점'}`
   }
   // 입력칸이 한 줄의 첫째(0)/둘째(1) 자리 중 어디에 놓이는지 — 둘째 자리 이름 앞에만 간격 (기준점은 혼자 한 줄)
   const inputCol: number[] = []
@@ -283,7 +285,7 @@ export default function BetAnalysisPanel({ tabs, active = true }: { tabs: ReactN
             <div className="bet-inputs">
               {league.fields.map((f, i) => (
                 <label key={f.key} style={{ display: 'contents' }}>
-                  <span className="bet-inputs__label" style={{ paddingLeft: inputCol[i] === 1 ? 14 : 0, fontSize: 11, fontWeight: 700, color: f.required ? 'var(--text-primary)' : f.kind === 'line' ? 'var(--gold)' : 'var(--text-muted)' }}>{fieldLabel(f)}{f.required && ' *'}</span>
+                  <span className="bet-inputs__label" style={{ paddingLeft: inputCol[i] === 1 ? 14 : 0, fontSize: 11, fontWeight: 700, color: f.required ? 'var(--text-primary)' : f.kind === 'line' ? 'var(--gold)' : 'var(--text-muted)' }}>{f.label}{f.required && ' *'}{fieldSub(f) && <div style={{ fontSize: 9, fontWeight: 600, color: 'var(--text-muted)' }}>{fieldSub(f)}</div>}</span>
                   <input ref={el => { inputRefs.current[i] = el }} className="form-input bet-odds-input" inputMode="decimal" placeholder={f.kind === 'line' ? '5 → 5.5' : '배당 (185=1.85)'}
                     onBlur={f.kind === 'line' ? () => finishLine(f.key) : undefined}
                     value={raw[f.key] ?? ''} onChange={e => change(i, f.key, e.target.value, f.kind)} onFocus={e => e.target.select()}
@@ -306,7 +308,7 @@ export default function BetAnalysisPanel({ tabs, active = true }: { tabs: ReactN
                 </div>
 
                 <div className="table-wrap">
-                  <table style={{ width: '100%' }}>
+                  <table className="bet-judge-table" style={{ width: '100%' }}>
                     <thead>
                       <tr>
                         <th>베팅</th><th className="td-right">배당</th><th className="td-right">과거 적중률</th>
@@ -357,18 +359,19 @@ function JudgeRow({ b, name, recommended }: { b: JudgeBet; name: string; recomme
     <tr style={recommended ? { background: 'var(--green-bg)' } : !b.eligible ? { opacity: 0.55 } : undefined}>
       <td style={{ fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap' }}>{name}</td>
       <td className="td-right" style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{b.site.toFixed(2)}</td>
-      <td className="td-right" style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{pct(b.hit)} <span style={{ color: 'var(--text-muted)' }}>±{pct(b.se)}{b.push ? ` · 적특 ${pct(b.push)}` : ''} · {b.n}경기</span></td>
+      {/* 오차·경기 수 같은 보조 정보는 아랫줄에 작게 — 가로 스크롤 없이 표가 한 번에 보이게 */}
+      <td className="td-right" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>{pct(b.hit)}<div style={{ fontSize: 9, color: 'var(--text-muted)' }}>±{pct(b.se)}{b.push ? ` · 적특 ${pct(b.push)}` : ''} · {b.n}경기</div></td>
       <td className="td-right" style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{b.be.toFixed(2)}</td>
-      <td className="td-right" style={{ fontSize: 12, fontWeight: 700, color: evColor, whiteSpace: 'nowrap' }}>{signedPct(b.ev)} <span style={{ fontWeight: 400, fontSize: 10, color: 'var(--text-muted)' }}>±{pct(b.err)}</span></td>
+      <td className="td-right" style={{ fontSize: 12, fontWeight: 700, color: evColor, whiteSpace: 'nowrap' }}>{signedPct(b.ev)}<div style={{ fontWeight: 400, fontSize: 9, color: 'var(--text-muted)' }}>±{pct(b.err)}</div></td>
       <td style={{ fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap', color: strengthColor(b.strength) }}>
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ fontFamily: 'var(--font-num)', fontSize: 13, minWidth: 34 }}>{b.strength}<span style={{ fontSize: 9, opacity: 0.7 }}>/10</span></span>
-          <span style={{ display: 'inline-block', width: 50, height: 5, borderRadius: 3, background: 'var(--bg-elevated)', overflow: 'hidden' }}>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+          <span style={{ fontFamily: 'var(--font-num)', fontSize: 13 }}>{b.strength}<span style={{ fontSize: 9, opacity: 0.7 }}>/10</span></span>
+          <span style={{ display: 'inline-block', width: 32, height: 5, borderRadius: 3, background: 'var(--bg-elevated)', overflow: 'hidden' }}>
             <span style={{ display: 'block', width: `${b.strength * 10}%`, height: '100%', background: strengthColor(b.strength) }} />
           </span>
           {b.strengthLabel}
         </span>
-        {!b.eligible && <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}> (배당범위 밖)</span>}
+        {!b.eligible && <div style={{ fontWeight: 400, fontSize: 9, color: 'var(--text-muted)' }}>배당범위 밖</div>}
       </td>
     </tr>
   )

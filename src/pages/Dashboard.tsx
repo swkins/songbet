@@ -3856,7 +3856,7 @@ export default function Dashboard() {
       <div className={`dashboard-main${stacked ? ' stacked' : ''}`} style={{ '--mining-n': !stacked && sidePanel === 'analysis' ? 1.2 : 1, '--bet-n': colCount } as React.CSSProperties}>
 
         {/* ── 사이트 현황 (좌측 / 상하 모드에선 위) */}
-        <div className="dashboard-side">
+        <div className={`dashboard-side${!stacked && sidePanel === 'analysis' ? ' analysis-open' : ''}`}>
           {stacked ? (
             <div style={{ minWidth: 0 }}><MiningWidget compact /></div>
           ) : (
