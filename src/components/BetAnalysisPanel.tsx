@@ -390,12 +390,14 @@ export default function BetAnalysisPanel({ tabs, active = true }: { tabs: ReactN
                   <input ref={el => { inputRefs.current[i] = el }} className="form-input bet-odds-input" inputMode="decimal" placeholder={f.kind === 'line' ? '5 → 5.5' : '185=1.85'}
                     onBlur={f.kind === 'line' ? () => finishLine(f.key) : undefined}
                     value={raw[f.key] ?? ''} onChange={e => change(i, f.key, e.target.value, f.kind)} onFocus={e => e.target.select()}
-                    onKeyDown={e => { if (e.key === 'Enter') { const el = inputRefs.current[i + 1]; if (el) { el.focus(); el.select() } } }}
+                    onKeyDown={e => { if (e.key === 'Escape') { reset(); return } if (e.key === 'Enter') { const el = inputRefs.current[i + 1]; if (el) { el.focus(); el.select() } } }}
                     style={{ fontSize: 12, fontFamily: 'var(--font-mono)' }} />
                   {rowEnd[i] && inputCol[i] < SLOTS - 1 && <span className="bet-inputs__rest" style={{ gridColumn: `span ${2 * (SLOTS - 1 - inputCol[i])}` }} />}
                 </label>
               ))}
             </div>
+            {/* 입력한 배당 모두 지우기 — 입력칸 바로 아래 (Esc 키로도 지워진다) */}
+            <button onClick={reset} title="입력한 배당 모두 지우기 (Esc)" style={{ marginTop: -4, marginBottom: 10, background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-secondary)', cursor: 'pointer', padding: '4px 10px', display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-body)' }}><RotateCcw size={12} /> 입력 지우기</button>
 
             {!out ? (
               <div style={{ padding: '14px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>{requiredLabels} 배당을 넣으면 판정합니다 (나머지는 있는 것만 넣어도 됨{league.fields.some(f => f.kind === 'line') ? ' · 마핸/플핸은 기준점도 넣어야 판정' : ''})</div>
@@ -439,7 +441,7 @@ export default function BetAnalysisPanel({ tabs, active = true }: { tabs: ReactN
                   )}
                   <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4 }}>
                     추천 조건: {league.recNote} · ±는 95% 오차<br />
-                    베팅 강도: 0 패스(오차 감안해도 마이너스) · 1~3 약(마이너스지만 오차 범위 안) · 4~10 플러스(기대수익 크고 확실할수록 높음)
+                    베팅 강도: 0 패스(기대수익 마이너스) · 1~10 플러스(기대수익 크고 확실할수록 높음 — 1~3 약은 오차에 묻히는 작은 플러스)
                   </div>
                 </div>
               </>
