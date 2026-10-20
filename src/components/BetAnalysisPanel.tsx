@@ -160,11 +160,13 @@ function soccerProfile(raw: SoccerGame[]) {
   const n = games.length
   const weight = seasonWeigher(games)
   let sw = 0, favWin = 0, homeWin = 0, draw = 0, big = 0, total = 0, o25 = 0, btts = 0, margin = 0, favOdds = 0
+  let swH = 0, winH = 0, swA = 0, winA = 0  // 홈정배 / 원정정배 따로 정배 승률
   for (const g of games) {
     const [h, a, hs, as, , d] = g
     const w = weight(g)
     sw += w
     const m = h <= a ? hs - as : as - hs
+    if (h <= a) { swH += w; if (m > 0) winH += w } else { swA += w; if (m > 0) winA += w }
     if (m > 0) favWin += w
     if (hs > as) homeWin += w
     if (m === 0) draw += w
@@ -178,7 +180,7 @@ function soccerProfile(raw: SoccerGame[]) {
   const r = (k: number) => k / sw
   return {
     n, weighted: latestSeason(games) != null, items: [
-      ['정배 승률', pct(r(favWin))], ['홈 승률', pct(r(homeWin))], ['무승부', pct(r(draw))], ['정배 2골차↑ 승', pct(r(big))],
+      ['정배 승률', pct(r(favWin))], ['홈정배 승률', pct(winH / swH)], ['원정정배 승률', pct(winA / swA)], ['홈 승률', pct(r(homeWin))], ['무승부', pct(r(draw))], ['정배 2골차↑ 승', pct(r(big))],
       ['평균 골', r(total).toFixed(2)], ['2.5 오버', pct(r(o25))], ['양팀 득점', pct(r(btts))], ['정배 평균배당', r(favOdds).toFixed(2)], ['평균 마진', pct(r(margin))],
     ] as [string, string][],
   }
@@ -219,10 +221,10 @@ function soccerLeague(key: string, label: string, note: string, judge: SoccerJud
 const JUDGES: SportJudges[] = [
   {
     key: 'soccer', label: '축구', emoji: '⚽', leagues: [
-      soccerLeague('epl', 'EPL', '2021-22 ~ 2025-26 정규리그 (BetExplorer 평균 배당) · 비교 경기는 승무패 세 배당이 비슷한 200경기', judgeEpl, EPL_GAMES),
-      soccerLeague('laliga', '라리가', '2021-22 ~ 2025-26 정규리그 (BetExplorer 평균 배당) · 비교 경기는 승무패 세 배당이 비슷한 200경기', judgeLaliga, LALIGA_GAMES),
-      soccerLeague('bundesliga', '분데스리가', '2021-22 ~ 2025-26 정규리그 (BetExplorer 평균 배당) · 비교 경기는 승무패 세 배당이 비슷한 200경기', judgeBundesliga, BUNDESLIGA_GAMES),
-      soccerLeague('ucl', '챔피언스리그', '2021-22 ~ 2025-26 조별리그·리그 페이즈, 토너먼트 제외 (BetExplorer 평균 배당) · 비교 경기는 세 배당이 비슷한 80경기', judgeUcl, UCL_GAMES),
+      soccerLeague('epl', 'EPL', '2021-22 ~ 2025-26 정규리그 (BetExplorer 평균 배당) · 비교 경기는 홈정배/원정정배 따로, 승무패 세 배당이 비슷한 200경기', judgeEpl, EPL_GAMES),
+      soccerLeague('laliga', '라리가', '2021-22 ~ 2025-26 정규리그 (BetExplorer 평균 배당) · 비교 경기는 홈정배/원정정배 따로, 승무패 세 배당이 비슷한 200경기', judgeLaliga, LALIGA_GAMES),
+      soccerLeague('bundesliga', '분데스리가', '2021-22 ~ 2025-26 정규리그 (BetExplorer 평균 배당) · 비교 경기는 홈정배/원정정배 따로, 승무패 세 배당이 비슷한 200경기', judgeBundesliga, BUNDESLIGA_GAMES),
+      soccerLeague('ucl', '챔피언스리그', '2021-22 ~ 2025-26 조별리그·리그 페이즈, 토너먼트 제외 (BetExplorer 평균 배당) · 비교 경기는 홈정배/원정정배 따로, 세 배당이 비슷한 80경기', judgeUcl, UCL_GAMES),
     ],
   },
   { key: 'baseball', label: '야구', emoji: '⚾', leagues: [] },

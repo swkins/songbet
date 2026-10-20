@@ -100,7 +100,8 @@ export function cleanGames(games: Game[]): Game[] {
   return games.filter(([h, a, , , , d]) => h > 1 && a > 1 && d > 1);
 }
 
-// 비교 경기는 그 리그 과거 경기 중 승무패 세 배당(마진 뺀 확률)이 가장 비슷한 경기 sampleN개 — 리그마다 자기 데이터로만 판정한다.
+// 비교 경기는 그 리그 과거 경기 중 정배가 같은 쪽(홈정배 / 원정정배)인 경기에서 승무패 세 배당(마진 뺀 확률)이 가장 비슷한 경기 sampleN개
+// — 리그마다 자기 데이터로만, 홈정배와 원정정배도 따로 판정한다 (사용자 요청: 원정정배는 표본이 작아도 홈정배와 섞지 않는다).
 // 정배 배당만 보면 같은 정배 1.75라도 저득점·무승부 경기(무배당 낮음)와 다득점 경기(무배당 높음)가 섞여서
 // 핸디·언더오버 판정이 크게 틀렸다 — 지난 시즌 백테스트로 세 배당 방식이 모든 베팅 종류에서 더 잘 맞았다.
 export function createJudge(rawGames: Game[], base: Partial<JudgeOptions> = {}) {
@@ -108,13 +109,13 @@ export function createJudge(rawGames: Game[], base: Partial<JudgeOptions> = {}) 
   const weight = seasonWeigher(games);
   const P = games.map((g) => probs(g[0], g[5], g[1]));
   const sd = [0, 1, 2].map((i) => std(P.map((p) => p[i]))); // 세 확률을 같은 눈금으로 맞춰 거리 계산
-  const rows = games.map((g, i) => ({ g, p: P[i], w: weight(g) }));
+  const rows = games.map((g, i) => ({ g, p: P[i], w: weight(g), favHome: g[0] <= g[1] }));
   const defaults: JudgeOptions = { minOdds: 1.3, maxOdds: 3.0, sampleN: 200, ...base };
   return (odds: Odds, o: Partial<JudgeOptions> = {}): JudgeOutput | null =>
     judgeWith(rows, sd, odds, { ...defaults, ...o });
 }
 
-type Row = { g: Game; p: [number, number, number]; w: number };
+type Row = { g: Game; p: [number, number, number]; w: number; favHome: boolean };
 
 function judgeWith(rows: Row[], sd: number[], odds: Odds, opts: JudgeOptions): JudgeOutput | null {
   const { home: h, draw: d, away: a } = odds;
@@ -122,10 +123,10 @@ function judgeWith(rows: Row[], sd: number[], odds: Odds, opts: JudgeOptions): J
   const fav = Math.min(h, a);
   const favIsHome = h <= a;
 
-  // 비교 경기: 세 배당이 가장 비슷한 경기 → 정배 기준 골차(m)와 총골(t)
+  // 비교 경기: 정배가 같은 쪽(홈/원정)인 경기 중 세 배당이 가장 비슷한 경기 → 정배 기준 골차(m)와 총골(t)
   const q = probs(h, d, a);
   const dist = (p: number[]) => Math.hypot((p[0] - q[0]) / sd[0], (p[1] - q[1]) / sd[1], (p[2] - q[2]) / sd[2]);
-  const mk = rows.map((r) => ({ r, k: dist(r.p) })).sort((x, y) => x.k - y.k).slice(0, opts.sampleN).map((x) => x.r);
+  const mk = rows.filter((r) => r.favHome === favIsHome).map((r) => ({ r, k: dist(r.p) })).sort((x, y) => x.k - y.k).slice(0, opts.sampleN).map((x) => x.r);
   const F = mk.map(({ g, p, w }) => ({ m: g[0] <= g[1] ? g[2] - g[3] : g[3] - g[2], t: g[2] + g[3], p, w }));
   const W = (r: { w: number }) => r.w;
   type R = (typeof F)[number];
