@@ -1,4 +1,5 @@
 import { betStrength } from './judgeScore';
+import { oddsHistory, shrinkFactor, winGate, type OddsCheck } from './oddsCheck';
 import { recentSeasons, seasonWeigher, weightedMean, weightedStat } from './seasonWeight';
 
 // [홈배당, 원정배당, 홈점수, 원정점수, 시즌(끝나는 해, 선택)] — 시즌이 있으면 최근 시즌일수록 가중치를 크게 (seasonWeight.ts)
@@ -28,6 +29,7 @@ export interface BetResult {
   strength: number; // 베팅 강도 0~10점 (0 = 패스)
   n: number;
   eligible: boolean; // 사이트 배당이 추천 범위 안
+  check?: OddsCheck; // 승 베팅: 같은 배당대 과거 실적
 }
 
 export interface JudgeOutput {
@@ -63,7 +65,15 @@ export interface JudgeOptions {
   minOdds: number; // 추천 하한 사이트 배당
   maxOdds: number; // 추천 상한 사이트 배당 (미만)
   minMarketN: number; // 표본 최소 경기 수 (정배 배당 + 정배 홈/원정이 같은 경기 — 승패·핸디캡 모두 이 표본)
+  winMaxOdds: number; // 홈 승·원정 승 추천 상한 배당 (미만)
+  winSeasonShare: number; // 승 베팅: 같은 배당대 과거 실적이 플러스였던 시즌 비율이 이 이상이어야 추천
+  winAnchor: boolean; // 승 적중률을 시장 확률 기준으로 잡을지 (false면 비교 경기 비율 그대로)
+  winOff: boolean; // 이 리그는 승 추천 안 함 (적중률·손익분기는 보여주고 강도 0)
 }
+// 농구 승 추천 기준 — 리그별 3시즌 백테스트(각 시즌을 이전 시즌으로만 판정, 평균배당)로 정함:
+//  예전(비교 경기 비율, 1.30~3.00) 1701건 -1.4% · 시장 기준 보정 140건 -7.0% · 비교 경기 비율 + 상한 1.75 + 시즌 일관성 0.6 376건 -2.5%
+//  (CBA 26건 +25%, B.LEAGUE 28건 +18%, NBA 208건 -2.8%, 유로리그 95건 -14%, KBL 19건 -9%)
+//  → 기본은 비교 경기 비율 + 1.75 + 0.6, NBA·KBL·유로리그는 어떤 방식으로도 마이너스라 승 추천을 끈다 (leagues/*.ts winOff)
 
 // 판정에 쓸 수 없는 경기 제외: 동점(0:0 등 취소·미진행), 배당 1.00 이하(빈 값), 두 배당 마진이 마이너스(배당 기록 오류)
 export function cleanGames(games: Game[]): Game[] {
@@ -73,12 +83,16 @@ export function cleanGames(games: Game[]): Game[] {
 export function createJudge(rawGames: Game[], base: Partial<JudgeOptions> = {}) {
   const games = recentSeasons(cleanGames(rawGames)); // 최근 5시즌만
   const weight = seasonWeigher(games);
-  const defaults: JudgeOptions = { minOdds: 1.3, maxOdds: 3.0, minMarketN: 200, ...base };
+  const defaults: JudgeOptions = { minOdds: 1.3, maxOdds: 3.0, minMarketN: 200, winMaxOdds: 1.75, winSeasonShare: 0.6, winAnchor: false, winOff: false, ...base };
+  const check = oddsHistory<'home' | 'away'>(games.map((g) => ({ odds: { home: g[0], away: g[1] }, won: { home: g[2] > g[3], away: g[3] > g[2] }, w: weight(g), season: g[4] })));
   return (odds: Odds, o: Partial<JudgeOptions> = {}): JudgeOutput | null =>
-    judgeWith(games, weight, odds, { ...defaults, ...o });
+    judgeWith(games, weight, check, odds, { ...defaults, ...o });
 }
 
-function judgeWith(games: Game[], weight: (g: Game) => number, odds: Odds, opts: JudgeOptions): JudgeOutput | null {
+// 승패 배당 → 마진 뺀 정배 승 확률
+const favProb = (h: number, a: number) => (1 / Math.min(h, a)) / (1 / h + 1 / a);
+
+function judgeWith(games: Game[], weight: (g: Game) => number, oddsCheck: ReturnType<typeof oddsHistory<'home' | 'away'>>, odds: Odds, opts: JudgeOptions): JudgeOutput | null {
   const { home: h, away: a } = odds;
   if (!h || !a) return null;
   const fav = Math.min(h, a);
@@ -88,7 +102,7 @@ function judgeWith(games: Game[], weight: (g: Game) => number, odds: Odds, opts:
   const same = games.filter((g) => (g[0] <= g[1]) === favIsHome);
   const mk = pick(same, (g) => Math.min(g[0], g[1]), fav, opts.minMarketN);
   // 정배 기준 점수차 + 그 경기의 시즌 가중치 (최근 시즌일수록 크게)
-  const FM = mk.map((g) => ({ m: g[0] <= g[1] ? g[2] - g[3] : g[3] - g[2], w: weight(g) }));
+  const FM = mk.map((g) => ({ m: g[0] <= g[1] ? g[2] - g[3] : g[3] - g[2], w: weight(g), pf: favProb(g[0], g[1]) }));
   const W = (r: { w: number }) => r.w;
   const stat3 = (res: (m: number) => 1 | 0 | -1) => weightedStat(FM, W, (r) => res(r.m));
   const expMargin = weightedMean(FM, W, (r) => r.m);
@@ -100,22 +114,31 @@ function judgeWith(games: Game[], weight: (g: Game) => number, odds: Odds, opts:
     const pl = 1 - s.pw - s.pp;
     const be = (s.pw + pl) / s.pw; // 적특 제외 손익분기: pw*(o-1) = pl
     const ev = s.pw * (site - 1) - pl;
-    const eligible = site >= opts.minOdds && site < opts.maxOdds;
-    // 추천 배당범위 밖이거나 적중률 50% 미만이면 강도 0 (judgeScore.betStrength)
-    const st = betStrength(ev, site * s.se, s.pw, eligible);
+    const isWin = key === 'home' || key === 'away';
+    // 승 베팅은 winMaxOdds 미만까지만 추천 범위 (정배 승 1.75~1.90부터 거의 모든 리그 수익률 마이너스)
+    const eligible = site >= opts.minOdds && site < (isWin ? opts.winMaxOdds : opts.maxOdds);
+    // 추천 배당범위 밖이거나 적중률 50% 미만이면 강도 0 (judgeScore.betStrength), 승은 같은 배당대 과거 실적까지 (oddsCheck.winGate)
+    const check = isWin ? oddsCheck(key, site) : undefined;
+    const st = isWin && opts.winOff ? { label: '승 추천 안 함', v: 0 } : winGate(betStrength(ev, site * s.se, s.pw, eligible), check, opts.winSeasonShare);
     bets.push({
       key, name: NAMES[key], site, hit: s.pw, push: s.pp, se: s.se, be, ev, err: site * s.se,
       strengthLabel: st.label, strength: st.v, n: s.n,
-      eligible,
+      eligible, check,
     });
   };
 
   // 홈 승/원정 승도 핸디캡과 같은 표본(FM)으로 본다 — 표본이 다르면 역배 +1.5(= 역배 승 + 1점차 패)가
   // 역배 승보다 몇 %씩 더 잘 맞는 것처럼 나와서, 일반승이 나은 경기에도 플핸을 추천하는 문제가 있었다
+  // 승 적중률은 시장 확률 기준: 이 경기 정배 승 확률 + 비교 경기에서 정배가 시장보다 얼마나 더/덜 이겼나 (표본 작을수록 줄임)
+  // — 비교 경기 비율을 그대로 쓰면 아주 강한 정배처럼 드문 경기에서 비교 경기가 약한 정배까지 넓어져 역배 승을 부풀린다
   const favRes = (m: number): 1 | -1 => (m > 0 ? 1 : -1);
-  const dogRes = (m: number): 1 | -1 => (m < 0 ? 1 : -1);
-  add('home', odds.home, stat3(favIsHome ? favRes : dogRes));
-  add('away', odds.away, stat3(favIsHome ? dogRes : favRes));
+  const base = stat3(favRes);
+  const pFav = opts.winAnchor ? Math.min(0.995, Math.max(0.005, favProb(h, a) + shrinkFactor(FM.map((r) => r.w)) * weightedMean(FM, W, (r) => (r.m > 0 ? 1 : 0) - r.pf))) : base.pw;
+  const seAt = (p: number) => (base.pw * (1 - base.pw) ? base.se * Math.sqrt((p * (1 - p)) / (base.pw * (1 - base.pw))) : base.se);
+  const favStat = { n: base.n, pw: pFav, pp: 0, se: seAt(pFav) };
+  const dogStat = { n: base.n, pw: 1 - pFav, pp: 0, se: seAt(1 - pFav) };
+  add('home', odds.home, favIsHome ? favStat : dogStat);
+  add('away', odds.away, favIsHome ? dogStat : favStat);
 
   const L = odds.line;
   if (L != null && L >= 0) {

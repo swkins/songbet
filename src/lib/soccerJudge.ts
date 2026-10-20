@@ -1,4 +1,5 @@
 import { betStrength } from './judgeScore';
+import { oddsHistory, shrinkFactor, winGate, type OddsCheck } from './oddsCheck';
 import { recentSeasons, seasonWeigher, weightedMean, weightedStat } from './seasonWeight';
 
 // [홈배당, 원정배당, 홈골, 원정골, 시즌(끝나는 해), 무배당] — 앞 5칸은 배구·농구와 같은 순서라 시즌 가중치(seasonWeight.ts)를 그대로 쓴다
@@ -30,7 +31,7 @@ export interface BetResult {
   strength: number; // 베팅 강도 0~10점 (0 = 패스)
   n: number;
   eligible: boolean; // 사이트 배당이 추천 범위 안
-  check?: { n: number; hit: number; roi: number; seasons: number; seasonsUp: number }; // 같은 배당대 과거 실적 (승무패·정배 -0.5 — 이 리그에서 그 결과의 배당이 비슷했던 경기들의 실제 적중률·수익률)
+  check?: OddsCheck; // 같은 배당대 과거 실적 (승무패·정배 -0.5 — 이 리그에서 그 결과의 배당이 비슷했던 경기들의 실제 적중률·수익률)
 }
 
 export interface JudgeOutput {
@@ -129,35 +130,9 @@ export interface JudgeOptions {
   over35Min?: number; // 3.5 오버 룰 기준 배당 (over35RuleMin)
 }
 
-// 승무패 적중률을 시장 확률에서 얼마나 벗어나게 볼지 줄이는 정도 — 비교 경기에서 나온 "시장보다 더/덜 나온 차이"에
-// 유효 경기 수 / (유효 경기 수 + SHRINK_K)를 곱한다. 표본이 작을수록 시장 확률 쪽으로 붙는다
-// (챔스 홈 2.42: 비교 경기 80개가 우연히 시장보다 14%p 더 이겨서 +28.5% 최강이 나왔다. 백테스트에서 200이 가장 나았다)
-const SHRINK_K = 200;
-
-// 같은 배당대 과거 실적: 이 리그에서 그 결과(홈 승/무/원정 승)의 배당이 비슷했던 경기들 — 로그 창을 넓혀가며 60경기 이상
-// 이 실적의 수익률이 0 이하면 판정기 기대수익이 플러스여도 강도 0 ('배당대 실적 미달')
 type OutcomeKind = 'home' | 'draw' | 'away';
-function oddsHistory(games: Game[], weight: (g: Game) => number) {
-  const hist = games.map((g) => ({ odds: { home: g[0], draw: g[5], away: g[1] }, won: { home: g[2] > g[3], draw: g[2] === g[3], away: g[3] > g[2] }, w: weight(g), season: g[4] }));
-  return (kind: OutcomeKind, site: number) => {
-    let bw = 0.03;
-    let rows = hist;
-    while (bw <= 0.3) {
-      rows = hist.filter((h) => Math.abs(Math.log(h.odds[kind] / site)) <= bw);
-      if (rows.length >= 60) break;
-      bw += 0.01;
-    }
-    if (!rows.length) return undefined;
-    const sw = rows.reduce((a, h) => a + h.w, 0);
-    const hit = rows.reduce((a, h) => a + (h.won[kind] ? h.w : 0), 0) / sw;
-    const roi = rows.reduce((a, h) => a + h.w * (h.won[kind] ? h.odds[kind] - 1 : -1), 0) / sw;
-    // 시즌별 일관성: 5경기 이상 있는 시즌 중 수익률이 플러스였던 시즌 수
-    const bySeason = new Map<number, number[]>();
-    for (const h of rows) { const x = bySeason.get(h.season) ?? []; x.push(h.won[kind] ? h.odds[kind] - 1 : -1); bySeason.set(h.season, x); }
-    const counted = [...bySeason.values()].filter((x) => x.length >= 5);
-    const seasonsUp = counted.filter((x) => x.reduce((a, b) => a + b, 0) > 0).length;
-    return { n: rows.length, hit, roi, seasons: counted.length, seasonsUp };
-  };
+function soccerOddsHistory(games: Game[], weight: (g: Game) => number) {
+  return oddsHistory<OutcomeKind>(games.map((g) => ({ odds: { home: g[0], draw: g[5], away: g[1] }, won: { home: g[2] > g[3], draw: g[2] === g[3], away: g[3] > g[2] }, w: weight(g), season: g[4] })));
 }
 
 // 판정에 쓸 수 없는 경기 제외: 배당 1.00 이하(빈 값)
@@ -176,14 +151,14 @@ export function createJudge(rawGames: Game[], base: Partial<JudgeOptions> = {}) 
   const sd = [0, 1, 2].map((i) => std(P.map((p) => p[i]))); // 세 확률을 같은 눈금으로 맞춰 거리 계산
   const rows = games.map((g, i) => ({ g, p: P[i], w: weight(g), favHome: g[0] <= g[1] }));
   const defaults: JudgeOptions = { minOdds: 1.3, maxOdds: 3.0, winMaxOdds: 1.75, winSeasonShare: 0.6, sampleN: 200, ...base };
-  const check = oddsHistory(games, weight);
+  const check = soccerOddsHistory(games, weight);
   return (odds: Odds, o: Partial<JudgeOptions> = {}): JudgeOutput | null =>
     judgeWith(rows, sd, check, odds, { ...defaults, ...o });
 }
 
 type Row = { g: Game; p: [number, number, number]; w: number; favHome: boolean };
 
-function judgeWith(rows: Row[], sd: number[], oddsCheck: ReturnType<typeof oddsHistory>, odds: Odds, opts: JudgeOptions): JudgeOutput | null {
+function judgeWith(rows: Row[], sd: number[], oddsCheck: ReturnType<typeof soccerOddsHistory>, odds: Odds, opts: JudgeOptions): JudgeOutput | null {
   const { home: h, draw: d, away: a } = odds;
   if (!h || !d || !a) return null;
   const fav = Math.min(h, a);
@@ -204,8 +179,7 @@ function judgeWith(rows: Row[], sd: number[], oddsCheck: ReturnType<typeof oddsH
   // 이런 베팅은 "이 경기 시장 확률 + 비교 경기에서 실제가 시장보다 얼마나 더/덜 나왔나"로 적중률을 잡는다.
   // 비교 경기 비율을 그대로 쓰면 정배 1.09처럼 과거에 드문 경기는 비교 경기가 더 약한 정배(1.3대)까지 넓어져서
   // 무·역배 확률을 크게 부풀렸다 (EPL 정배 1.15 미만: 판정기 무 14.5% vs 시장 9% vs 실제 0%) — 시즌 하나씩 빼고 검증해 전체 정확도도 같거나 나았다
-  const sw = F.reduce((a, r) => a + r.w, 0), sw2 = F.reduce((a, r) => a + r.w * r.w, 0);
-  const shrink = sw ? (sw * sw) / sw2 / ((sw * sw) / sw2 + SHRINK_K) : 0;
+  const shrink = shrinkFactor(F.map((r) => r.w)); // 표본이 작을수록 시장 확률 쪽으로 (oddsCheck.ts SHRINK_K)
   const add = (key: BetKey, name: string, site: number | null, test: (r: R) => boolean, market?: [number, number, number], checkKind?: OutcomeKind) => {
     if (!site) return; // 안 넣은 배당은 판정하지 않는다
     let s = stat(test);
@@ -222,9 +196,8 @@ function judgeWith(rows: Row[], sd: number[], oddsCheck: ReturnType<typeof oddsH
     // 추천 배당범위 밖(고배당·초저배당은 과거 데이터가 적어 숫자를 못 믿음)이거나 적중률 50% 미만이면 강도 0
     let st = betStrength(ev, site * s.se, s.pw, eligible);
     const check = checkKind ? oddsCheck(checkKind, site) : undefined;
-    if (st.v > 0 && check && check.roi <= 0) st = { label: '배당대 실적 미달', v: 0 };
-    const isWin = checkKind === 'home' || checkKind === 'away';
-    if (st.v > 0 && isWin && check && check.seasons && check.seasonsUp / check.seasons < opts.winSeasonShare) st = { label: '시즌 일관성 부족', v: 0 };
+    // 같은 배당대 과거 실적 확인 — 무는 수익률만, 승(홈 승·원정 승·-0.5)은 시즌 일관성까지
+    st = winGate(st, check, checkKind === 'draw' ? 0 : opts.winSeasonShare);
     bets.push({
       key, name, site, hit: s.pw, se: s.se, be: 1 / s.pw, ev, err: site * s.se,
       strengthLabel: st.label, strength: st.v, n: s.n, eligible, check,
