@@ -264,15 +264,15 @@ export default function BetAnalysisPanel({ tabs }: { tabs: ReactNode }) {
 
         {league && (
           <>
-            {/* 배당 입력 */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 8, marginBottom: 12 }}>
+            {/* 배당 입력 — 한 줄에 두 칸씩 (홈/원정 짝). 농구 기준점은 혼자 한 줄 → 홈 핸디캡/원정 핸디캡이 아래 줄에 짝으로 */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '6px 16px', marginBottom: 12 }}>
               {league.fields.map((f, i) => (
-                <label key={f.key} style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                  <span style={{ fontSize: 10, fontWeight: 700, color: f.required ? 'var(--text-primary)' : f.kind === 'line' ? 'var(--gold)' : 'var(--text-muted)' }}>{fieldLabel(f)}{f.required && ' *'}</span>
+                <label key={f.key} style={{ display: 'flex', alignItems: 'center', gap: 8, gridColumn: f.kind === 'line' ? '1 / -1' : undefined }}>
+                  <span style={{ flex: '0 0 140px', fontSize: 11, fontWeight: 700, color: f.required ? 'var(--text-primary)' : f.kind === 'line' ? 'var(--gold)' : 'var(--text-muted)' }}>{fieldLabel(f)}{f.required && ' *'}</span>
                   <input ref={el => { inputRefs.current[i] = el }} className="form-input" inputMode="decimal" placeholder={f.kind === 'line' ? '점수 (예: 5.5)' : '배당 (185=1.85)'}
                     value={raw[f.key] ?? ''} onChange={e => change(i, f.key, e.target.value, f.kind)} onFocus={e => e.target.select()}
                     onKeyDown={e => { if (e.key === 'Enter') { const el = inputRefs.current[i + 1]; if (el) { el.focus(); el.select() } } }}
-                    style={{ fontSize: 13, padding: '6px 8px', fontFamily: 'var(--font-mono)' }} />
+                    style={{ flex: '0 1 160px', minWidth: 0, fontSize: 13, padding: '6px 8px', fontFamily: 'var(--font-mono)' }} />
                 </label>
               ))}
             </div>

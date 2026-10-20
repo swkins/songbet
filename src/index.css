@@ -563,9 +563,9 @@ tr:hover td { background: var(--bg-hover); }
 
 /* ── 대시보드 "상하" 모드: 사이트 현황(채굴·일별손익)을 위 한 줄에, 베팅 현황을 그 아래 전체 폭으로 ── */
 @media (min-width: 901px) {
-  /* 아래 줄은 베팅분석(카드 2장 폭) 좌 / 베팅 현황 우 — 사이트 현황 줄은 한 줄 전체를 차지해서 자동으로 줄바꿈된다 */
+  /* 아래 줄은 베팅분석(카드 1.5장 폭) 좌 / 베팅 현황 우 — 사이트 현황 줄은 한 줄 전체를 차지해서 자동으로 줄바꿈된다 */
   .dashboard-main.stacked { flex-direction: row; flex-wrap: wrap; align-items: flex-start; }
-  .dashboard-main.stacked .dashboard-analysis { flex: 2 1 0; width: auto; }
+  .dashboard-main.stacked .dashboard-analysis { flex: 1.5 1 0; width: auto; }
   .dashboard-main.stacked .dashboard-side { flex: none; width: 100%; flex-direction: row; align-items: stretch; }
   /* 일별 손익은 사이트 현황 높이에 맞춘다 — 슬롯은 행 높이만 따라가고(내용이 높이를 늘리지 않게) 카드를 그 안에 꽉 채움 */
   .dashboard-main.stacked .dashboard-pnl-slot { position: relative; }
