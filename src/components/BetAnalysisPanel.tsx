@@ -56,7 +56,6 @@ interface JudgeBet {
 interface JudgeOut {
   fav: number; favIsHome: boolean; margin: number; marketN: number
   minusHome?: boolean  // 축구: 사이트가 핸디 마이너스를 준 쪽이 홈인지
-  lines?: { mhMax: number | null; phMin: number | null }  // 농구: 핸디 기준점 가이드 (정배 -mhMax 이하 마핸, 역배 +phMin 이상 플핸이 과거에 이득)
   expMargin?: number  // 농구·축구: 표본의 정배 평균 점수차(골차)
   rule?: { text: string; keys: string[]; min?: Record<string, number | undefined> }  // 축구: 내 룰북 기준 이 경기에서 할 베팅 · min = 이 배당 이상일 때만
   bets: JudgeBet[]; recommended: JudgeBet[]; leastLoss: JudgeBet | null
@@ -196,7 +195,7 @@ type BasketJudgeFn = (o: BasketOdds) => JudgeOut | null
 type SoccerJudgeFn = (o: SoccerOdds) => JudgeOut | null
 const SOCCER_REC = '기대수익 플러스 + 배당 1.30 이상 3.00 미만 (홈 승·원정 승·-0.5는 1.75 미만 + 같은 배당대 과거 실적이 시즌 60% 이상 플러스) + 적중률 50% 이상 + 승무패는 같은 배당대 과거 수익률 플러스 · 핸디캡은 반 골 기준점이라 적특 없음'
 const VOLLEY_REC = '기대수익 플러스 + 배당 1.30 이상 3.00 미만 + 적중률 50% 이상 · 홈 승·원정 승은 추천 안 함 (3시즌 백테스트에서 모든 리그 마이너스) · 세트 판정은 홈정배/원정정배 따로'
-const BASKET_REC = '기대수익 플러스 + 배당 1.30 이상 3.00 미만 + 적중률 50% 이상 · 홈 승·원정 승은 1.75 미만 + 같은 배당대 과거 실적 시즌 60% 이상 플러스 (NBA·KBL·유로리그는 승 추천 안 함) · 핸디 가이드(마핸 -X 이하 / 플핸 +Y 이상)는 비교 경기에서 적중률 52.6%(NBA·KBL 58%)를 넘는 기준점, 리그별로 정배 배당 구역에 따라 마핸·플핸 중 한쪽만 추천 · 기준점이 정수면 적특(환불) 반영'
+const BASKET_REC = '기대수익 플러스 + 배당 1.30 이상 3.00 미만 + 적중률 50% 이상 · 홈 승·원정 승은 1.75 미만 + 같은 배당대 과거 실적 시즌 60% 이상 플러스 (NBA·KBL·유로리그는 승 추천 안 함) · 리그별로 정배 배당 구역에 따라 마핸·플핸 중 한쪽만 추천 · 기준점이 정수면 적특(환불) 반영'
 function volleyLeague(key: string, label: string, note: string, judge: VolleyJudgeFn, games: VolleyGame[]): LeagueJudge {
   return {
     key, label, note, fields: VOLLEY_FIELDS, recNote: VOLLEY_REC, profile: () => volleyProfile(games), data: () => seasonSummary(games),
@@ -340,12 +339,6 @@ export default function BetAnalysisPanel({ tabs, active = true }: { tabs: ReactN
   }
   const recommendedKeys = new Set(out?.recommended.map(b => b.key) ?? [])
   const ruleKeys = new Set<string>(out?.rule?.keys ?? [])
-  // 농구: 넣은 기준점이 가이드에 들면 마핸/플핸 줄에 '룰' 표시
-  for (const [ln, sfx] of [[lineV, ''], [vals.line2, '2']] as const) {
-    if (!out?.lines || ln == null) continue
-    if (out.lines.mhMax != null && ln <= out.lines.mhMax) ruleKeys.add('mh' + sfx)
-    if (out.lines.phMin != null && ln >= out.lines.phMin) ruleKeys.add('ph' + sfx)
-  }
   const requiredLabels = (league?.fields ?? []).filter(f => f.required).map(f => f.label).join(' / ')
 
   const chip = (active: boolean): React.CSSProperties => ({
@@ -414,7 +407,6 @@ export default function BetAnalysisPanel({ tabs, active = true }: { tabs: ReactN
                   <span>정배 <b style={{ color: 'var(--text-primary)' }}>{out.favIsHome ? '홈' : '원정'} {out.fav.toFixed(2)}</b></span>
                   <span>마진 <b style={{ color: out.margin <= 0.05 ? 'var(--green)' : 'var(--orange)' }}>{pct(out.margin)}</b></span>
                   {out.rule && <span>내 룰 <b style={{ color: out.rule.keys.length ? 'var(--gold)' : 'var(--text-muted)' }}>{out.rule.text}</b></span>}
-                  {out.lines && <span>핸디 <b style={{ color: 'var(--gold)' }}>{out.lines.mhMax != null ? `마핸 -${out.lines.mhMax} 이하` : '마핸 없음'} · {out.lines.phMin != null ? `플핸 +${out.lines.phMin} 이상` : '플핸 없음'}</b></span>}
                 </div>
 
                 <div className="table-wrap">

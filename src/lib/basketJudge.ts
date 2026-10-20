@@ -40,8 +40,6 @@ export interface JudgeOutput {
   margin: number; // 승패 배당 마진
   marketN: number; // 핸디캡 표본 경기 수
   expMargin: number; // 표본에서 정배 평균 점수차
-  // 핸디 기준점 가이드 (비교 경기 기준, 핸디 배당 1.90의 손익분기 52.6%): 정배 -mhMax 이하면 마핸, 역배 +phMin 이상이면 플핸이 과거에 이득
-  lines: { mhMax: number | null; phMin: number | null };
   bets: BetResult[];
   recommended: BetResult[]; // EV>0 & eligible, EV 내림차순
   leastLoss: BetResult | null; // 전부 마이너스일 때 가장 덜 잃는 쪽
@@ -76,7 +74,6 @@ export interface JudgeOptions {
   // 핸디 구역 (홈정배/원정정배 따로): 마핸은 정배 배당 mhBelow 미만에서만, 플핸은 phFrom 이상에서만 추천·가이드
   // (호주 NBL 1.45/1.45 — 강정배는 크게 이기고 약한 정배는 못 이긴다)
   hcapZone: { home?: { mhBelow?: number; phFrom?: number }; away?: { mhBelow?: number; phFrom?: number } } | null;
-  guideP: number; // 핸디 가이드 기준점을 정하는 적중률 (기본 1/1.90 = 52.6% — 높이면 더 엄격한 기준점)
 }
 // 농구 승 추천 기준 — 리그별 3시즌 백테스트(각 시즌을 이전 시즌으로만 판정, 평균배당)로 정함:
 //  예전(비교 경기 비율, 1.30~3.00) 1701건 -1.4% · 시장 기준 보정 140건 -7.0% · 비교 경기 비율 + 상한 1.75 + 시즌 일관성 0.6 376건 -2.5%
@@ -91,7 +88,7 @@ export function cleanGames(games: Game[]): Game[] {
 export function createJudge(rawGames: Game[], base: Partial<JudgeOptions> = {}) {
   const games = recentSeasons(cleanGames(rawGames)); // 최근 5시즌만
   const weight = seasonWeigher(games);
-  const defaults: JudgeOptions = { minOdds: 1.3, maxOdds: 3.0, minMarketN: 200, winMaxOdds: 1.75, winSeasonShare: 0.6, winAnchor: false, winOff: false, hcapZone: null, guideP: 1 / 1.9, ...base };
+  const defaults: JudgeOptions = { minOdds: 1.3, maxOdds: 3.0, minMarketN: 200, winMaxOdds: 1.75, winSeasonShare: 0.6, winAnchor: false, winOff: false, hcapZone: null, ...base };
   const check = oddsHistory<'home' | 'away'>(games.map((g) => ({ odds: { home: g[0], away: g[1] }, won: { home: g[2] > g[3], away: g[3] > g[2] }, w: weight(g), season: g[4] })));
   return (odds: Odds, o: Partial<JudgeOptions> = {}): JudgeOutput | null =>
     judgeWith(games, weight, check, odds, { ...defaults, ...o });
@@ -168,14 +165,8 @@ function judgeWith(games: Game[], weight: (g: Game) => number, oddsCheck: Return
   const recommended = bets.filter((b) => b.ev > 0 && b.strength > 0).sort((x, y) => y.strength - x.strength || y.ev - x.ev);
   const leastLoss = [...bets].filter((b) => b.eligible).sort((x, y) => y.ev - x.ev)[0] ?? null;
 
-  // 핸디 기준점 가이드: 비교 경기에서 정배가 L점 넘게 이긴 비율이 52.6% 이상인 가장 큰 L(마핸), 정배가 L점 미만인 비율이 52.6% 이상인 가장 작은 L(플핸)
-  const cand = Array.from({ length: 41 }, (_, i) => i + 0.5);
-  const over = (L: number) => weightedMean(FM, W, (r) => (r.m > L ? 1 : 0));
-  const mhOk = cand.filter((L) => over(L) >= opts.guideP), phOk = cand.filter((L) => 1 - over(L) >= opts.guideP);
-  const lines = { mhMax: mhOk.length && !mhOff ? Math.max(...mhOk) : null, phMin: phOk.length && !phOff ? Math.min(...phOk) : null };
-
   return {
-    fav, favIsHome, margin: 1 / h + 1 / a - 1, marketN: mk.length, expMargin, lines,
+    fav, favIsHome, margin: 1 / h + 1 / a - 1, marketN: mk.length, expMargin,
     bets, recommended, leastLoss,
   };
 }
