@@ -2857,6 +2857,11 @@ export default function Dashboard() {
       ))}
     </span>
   )
+  const stacked = layoutMode === 'stacked'
+  const analysisTitle = <span className="card-title" style={{ margin: 0 }}>베팅분석</span>
+  const analysisFallback = (title: React.ReactNode) => (
+    <div className="card" style={{ padding: '10px 14px' }}>{title}<div style={{ color: 'var(--text-muted)', fontSize: 13, padding: '10px 0' }}>불러오는 중...</div></div>
+  )
   function toggleLayoutMode() {
     const next = layoutMode === 'side' ? 'stacked' : 'side'
     setLayoutMode(next)
@@ -3846,26 +3851,40 @@ export default function Dashboard() {
     <div className="page">
       {/* 데스크탑: 사이트 현황(좌, 카드 세로 쌓기) / 베팅 현황(우)을 한 줄에 두고 1 : 베팅 사이트 수 비율로 가로폭을 나눠
           모든 카드가 같은 폭이 되게 한다 — 베팅 사이트를 추가하면 전체 카드 폭이 똑같이 줄어든다 */}
-      {/* 레이아웃 모드 — 좌우(기본): 사이트 현황 좌 / 베팅 현황 우, 상하: 사이트 현황 위 / 베팅 현황 아래 */}
-      <div className={`dashboard-main${layoutMode === 'stacked' ? ' stacked' : ''}`} style={{ '--mining-n': sidePanel === 'analysis' ? 2 : 1, '--bet-n': colCount } as React.CSSProperties}>
+      {/* 레이아웃 모드 — 좌우(기본): 사이트 현황·베팅분석(버튼으로 전환) 좌 / 베팅 현황 우,
+          상하: 사이트 현황 위 / 아래 줄에 베팅분석 좌 · 베팅 현황 우 */}
+      <div className={`dashboard-main${stacked ? ' stacked' : ''}`} style={{ '--mining-n': !stacked && sidePanel === 'analysis' ? 2 : 1, '--bet-n': colCount } as React.CSSProperties}>
 
-        {/* ── 사이트 현황 (좌측) */}
+        {/* ── 사이트 현황 (좌측 / 상하 모드에선 위) */}
         <div className="dashboard-side">
-          {/* 사이트 현황 / 베팅분석 — 제목 자리 버튼으로 골라서 같은 자리에 보여준다 (베팅분석은 좌우 모드에서 카드 2장 폭) */}
-          <div style={{ minWidth: 0 }}>
-            <div style={{ display: sidePanel === 'site' ? undefined : 'none' }}><MiningWidget tabs={sidePanelTabs} /></div>
-            {analysisOpened && (
-              <div style={{ display: sidePanel === 'analysis' ? undefined : 'none' }}>
-                <Suspense fallback={<div className="card" style={{ padding: '10px 14px' }}>{sidePanelTabs}<div style={{ color: 'var(--text-muted)', fontSize: 13, padding: '10px 0' }}>불러오는 중...</div></div>}>
-                  <BetAnalysisPanel tabs={sidePanelTabs} />
-                </Suspense>
-              </div>
-            )}
-          </div>
+          {stacked ? (
+            <div style={{ minWidth: 0 }}><MiningWidget /></div>
+          ) : (
+            /* 사이트 현황 / 베팅분석 — 제목 자리 버튼으로 골라서 같은 자리에 보여준다 (베팅분석은 카드 2장 폭) */
+            <div style={{ minWidth: 0 }}>
+              <div style={{ display: sidePanel === 'site' ? undefined : 'none' }}><MiningWidget tabs={sidePanelTabs} /></div>
+              {analysisOpened && (
+                <div style={{ display: sidePanel === 'analysis' ? undefined : 'none' }}>
+                  <Suspense fallback={analysisFallback(sidePanelTabs)}>
+                    <BetAnalysisPanel tabs={sidePanelTabs} />
+                  </Suspense>
+                </div>
+              )}
+            </div>
+          )}
           <div className="dashboard-pnl-slot">
-          <DailyPnLWidget compact={layoutMode === 'stacked'} usdKrwRate={usdKrwRate} refreshKey={(() => { const st = bets.filter(b => b.result !== 'pending'); return `${st.length}:${st.reduce((a, b) => a + b.profit, 0)}` })()} />
+          <DailyPnLWidget compact={stacked} usdKrwRate={usdKrwRate} refreshKey={(() => { const st = bets.filter(b => b.result !== 'pending'); return `${st.length}:${st.reduce((a, b) => a + b.profit, 0)}` })()} />
           </div>
         </div>
+
+        {/* ── 베팅분석 (상하 모드에서만 — 아래 줄 좌측) */}
+        {stacked && (
+          <div className="dashboard-analysis">
+            <Suspense fallback={analysisFallback(analysisTitle)}>
+              <BetAnalysisPanel tabs={analysisTitle} />
+            </Suspense>
+          </div>
+        )}
 
         {/* ── 베팅 현황 (전체) */}
         <div className="dashboard-bets">
@@ -3874,7 +3893,7 @@ export default function Dashboard() {
               <div className="flex-between mb-10">
                 <span className="card-title" style={{ margin: 0 }}>베팅 현황</span>
                 <div style={{ display: 'flex', gap: 6 }}>
-                <button onClick={toggleLayoutMode} title={layoutMode === 'side' ? '사이트 현황을 위로, 베팅 현황을 아래로' : '사이트 현황 좌측 / 베팅 현황 우측으로'} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-secondary)', cursor: 'pointer', padding: '3px 8px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-body)' }}>
+                <button onClick={toggleLayoutMode} title={layoutMode === 'side' ? '사이트 현황을 위로, 베팅분석·베팅 현황을 아래로' : '사이트 현황 좌측 / 베팅 현황 우측으로'} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-secondary)', cursor: 'pointer', padding: '3px 8px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-body)' }}>
                     {layoutMode === 'side' ? <Rows3 size={11} /> : <Columns3 size={11} />} {layoutMode === 'side' ? '상하' : '좌우'}
                   </button>
                   <button onClick={openRulebook} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--gold)', cursor: 'pointer', padding: '3px 8px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-body)' }}>
@@ -3899,7 +3918,7 @@ export default function Dashboard() {
                       <span style={{ fontSize: 11, fontWeight: 700, color: aggPct >= 100 ? 'var(--green)' : 'var(--orange)' }}>{aggPct.toFixed(1)}%</span>
                     </div>
                   )}
-                  <button onClick={toggleLayoutMode} title={layoutMode === 'side' ? '사이트 현황을 위로, 베팅 현황을 아래로' : '사이트 현황 좌측 / 베팅 현황 우측으로'} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-secondary)', cursor: 'pointer', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-body)' }}>
+                  <button onClick={toggleLayoutMode} title={layoutMode === 'side' ? '사이트 현황을 위로, 베팅분석·베팅 현황을 아래로' : '사이트 현황 좌측 / 베팅 현황 우측으로'} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-secondary)', cursor: 'pointer', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-body)' }}>
                     {layoutMode === 'side' ? <Rows3 size={12} /> : <Columns3 size={12} />} {layoutMode === 'side' ? '상하' : '좌우'}
                   </button>
                   <button onClick={openRulebook} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--gold)', cursor: 'pointer', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-body)' }}>
