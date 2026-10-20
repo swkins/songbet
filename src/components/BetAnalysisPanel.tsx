@@ -7,11 +7,13 @@ import { KBL_GAMES } from '../data/kblGames'
 import { CBA_GAMES } from '../data/cbaGames'
 import { BLEAGUE_GAMES } from '../data/bleagueGames'
 import { EUROLEAGUE_GAMES } from '../data/euroleagueGames'
+import { NBL_GAMES } from '../data/nblGames'
 import { judgeNba } from '../leagues/nba'
 import { judgeKbl } from '../leagues/kbl'
 import { judgeCba } from '../leagues/cba'
 import { judgeBleague } from '../leagues/bleague'
 import { judgeEuroleague } from '../leagues/euroleague'
+import { judgeNbl } from '../leagues/nbl'
 import { KRMEN_GAMES } from '../data/krMenGames'
 import { KRWOMEN_GAMES } from '../data/krWomenGames'
 import { ITMEN_GAMES } from '../data/itMenGames'
@@ -27,7 +29,7 @@ import { judgeTrWomen } from '../leagues/trWomen'
 
 /* ── 베팅분석 — 대시보드 사이트 현황 자리에서 탭으로 바꿔 보는 패널. 종목 → 리그를 고르고 배당을 넣으면 과거 경기 데이터로 각 베팅의 가치(기대수익)를 판정 ──
    판정기는 종목·리그별로 등록한다(리그마다 과거 경기 데이터 + 최소 표본 수가 다름 — src/leagues).
-   지금은 배구 6개·농구 5개 리그이고, 다른 종목/리그는 과거 데이터가 생기면 JUDGES에 추가하면 된다.
+   지금은 배구 6개·농구 6개 리그이고, 다른 종목/리그는 과거 데이터가 생기면 JUDGES에 추가하면 된다.
    종목마다 판정기 입력·출력 모양이 조금 달라서(농구는 기준점 + 적특) 아래 공통 모양으로 맞춰서 쓴다. */
 
 // 판정 결과 공통 모양 — 배구/농구 판정기 결과가 모두 이 모양을 만족한다
@@ -145,6 +147,7 @@ const JUDGES: SportJudges[] = [
       basketLeague('cba', 'CBA', '2022-23 ~ 2025-26 정규시즌 (BetExplorer 평균 배당)', judgeCba, CBA_GAMES),
       basketLeague('bleague', 'B.LEAGUE', 'B1 2021-22 ~ 2025-26 정규시즌 (BetExplorer 평균 배당)', judgeBleague, BLEAGUE_GAMES),
       basketLeague('euroleague', '유로리그', '2021-22 ~ 2025-26 정규시즌 (BetExplorer 평균 배당)', judgeEuroleague, EUROLEAGUE_GAMES),
+      basketLeague('nbl', '호주 NBL', '2021-22 ~ 2025-26 정규시즌 (BetExplorer 평균 배당)', judgeNbl, NBL_GAMES),
     ],
   },
   {
