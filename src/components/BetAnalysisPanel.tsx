@@ -54,7 +54,7 @@ interface JudgeBet {
 interface JudgeOut {
   fav: number; favIsHome: boolean; margin: number; marketN: number
   expMargin?: number  // 농구·축구: 표본의 정배 평균 점수차(골차)
-  rule?: { text: string; keys: string[] }  // 축구: 내 룰북 기준 이 경기에서 할 베팅
+  rule?: { text: string; keys: string[]; min?: Record<string, number | undefined> }  // 축구: 내 룰북 기준 이 경기에서 할 베팅 · min = 이 배당 이상일 때만
   bets: JudgeBet[]; recommended: JudgeBet[]; leastLoss: JudgeBet | null
 }
 // kind: 'odds' = 배당(3자리 → 1.23, 다음 칸 이동) / 'line' = 농구 기준점(그대로 입력, 예: 5.5)
@@ -415,7 +415,7 @@ export default function BetAnalysisPanel({ tabs, active = true }: { tabs: ReactN
                       </tr>
                     </thead>
                     <tbody>
-                      {[...out.bets].sort((x, y) => league.fields.findIndex(f => f.key === fieldKeyOf(x.key)) - league.fields.findIndex(f => f.key === fieldKeyOf(y.key))).map(b => <JudgeRow key={b.key} b={b} name={betName(b)} recommended={recommendedKeys.has(b.key)} rule={ruleKeys.has(b.key)} />)}
+                      {[...out.bets].sort((x, y) => league.fields.findIndex(f => f.key === fieldKeyOf(x.key)) - league.fields.findIndex(f => f.key === fieldKeyOf(y.key))).map(b => <JudgeRow key={b.key} b={b} name={betName(b)} recommended={recommendedKeys.has(b.key)} rule={ruleKeys.has(b.key)} ruleMin={out.rule?.min?.[b.key]} />)}
                     </tbody>
                   </table>
                 </div>
@@ -479,12 +479,13 @@ function strengthColor(v: number) {
   return v === 0 ? 'var(--text-muted)' : v <= 3 ? 'var(--orange)' : v <= 6 ? 'var(--gold)' : 'var(--green)'
 }
 
-// rule: 축구 내 룰북이 이 경기에서 고르는 베팅 (이름 옆에 '룰' 표시)
-function JudgeRow({ b, name, recommended, rule = false }: { b: JudgeBet; name: string; recommended: boolean; rule?: boolean }) {
+// rule: 축구 내 룰북이 이 경기에서 고르는 베팅 (이름 옆에 '룰' 표시) · ruleMin: 룰 기준 배당 — 사이트 배당이 못 미치면 '미달'
+function JudgeRow({ b, name, recommended, rule = false, ruleMin }: { b: JudgeBet; name: string; recommended: boolean; rule?: boolean; ruleMin?: number }) {
+  const short = rule && ruleMin != null && b.site < ruleMin
   const evColor = b.ev > 0 ? 'var(--green)' : 'var(--red)'
   return (
     <tr style={recommended ? { background: 'var(--green-bg)' } : !b.eligible ? { opacity: 0.55 } : undefined}>
-      <td style={{ fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap' }}>{name}{rule && <span style={{ marginLeft: 4, padding: '0 4px', borderRadius: 3, fontSize: 9, color: 'var(--gold)', border: '1px solid var(--gold-border)' }}>룰</span>}</td>
+      <td style={{ fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap' }}>{name}{rule && <span style={{ marginLeft: 4, padding: '0 4px', borderRadius: 3, fontSize: 9, color: short ? 'var(--text-muted)' : 'var(--gold)', border: `1px solid ${short ? 'var(--border)' : 'var(--gold-border)'}` }}>{short ? `룰 ${ruleMin!.toFixed(2)}↑ 미달` : '룰'}</span>}</td>
       <td className="td-right" style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{b.site.toFixed(2)}</td>
       {/* 오차·경기 수 같은 보조 정보는 아랫줄에 작게 — 가로 스크롤 없이 표가 한 번에 보이게 */}
       <td className="td-right" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>{pct(b.hit)}<div style={{ fontSize: 9, color: 'var(--text-muted)' }}>±{pct(b.se)}{b.push ? ` · 적특 ${pct(b.push)}` : ''} · {b.n}경기</div></td>

@@ -41,7 +41,7 @@ export interface JudgeOutput {
   bets: BetResult[];
   recommended: BetResult[]; // EV>0 & eligible, 강도 내림차순
   leastLoss: BetResult | null; // 전부 마이너스일 때 가장 덜 잃는 쪽
-  rule: { text: string; keys: BetKey[] }; // 내 룰북 기준 이 경기에서 할 베팅
+  rule: { text: string; keys: BetKey[]; min: Partial<Record<BetKey, number>> }; // 내 룰북 기준 이 경기에서 할 베팅 · min = 이 배당 이상일 때만
 }
 
 const LINES = { '05': 0.5, '15': 1.5, '25': 2.5 } as const;
@@ -58,25 +58,41 @@ const std = (xs: number[]) => {
   return Math.sqrt(xs.reduce((a, b) => a + (b - m) ** 2, 0) / xs.length) || 1;
 };
 
+// 2.5 오버 룰 조건: 정배 1.01~1.39 & 무 5.5 이상 (강정배인데 무배당이 낮으면 시장이 저득점을 본다는 뜻 — 적중률이 61%로 떨어지고 시즌별로도 흔들렸다)
+const isOverRule = (fav: number, draw: number) => Math.round(fav * 100) >= 101 && Math.round(fav * 100) <= 139 && draw >= 5.5;
+
+// 2.5 오버 룰 기준 배당 = 그 리그 과거 같은 조건 경기의 손익분기 × 1.05 (5% 여유). 시즌 가중 적중률로 계산해서 새 시즌을 넣으면 같이 바뀐다
+export function overRuleMin(rawGames: Game[]): number | undefined {
+  const games = recentSeasons(cleanGames(rawGames));
+  const weight = seasonWeigher(games);
+  const s = weightedStat(games.filter((g) => isOverRule(Math.min(g[0], g[1]), g[5])), weight, (g) => (g[2] + g[3] > 2.5 ? 1 : -1));
+  return s.pw ? Math.ceil((1.05 / s.pw) * 100) / 100 : undefined;
+}
+
 // 내 룰북 (정배 배당 기준). 1.60~1.68 · 2.20 이상 · 1.10 미만은 룰 없음
-//  1.10~1.29 역배 +2.5 / 1.30~1.59 정배 승 / 1.69~1.89 역배 +1.5 / 1.90~2.19 역배 +0.5 · 정배 1.01~1.39면 2.5 오버도
-export function ruleFor(fav: number, favIsHome: boolean): { text: string; keys: BetKey[] } {
+//  1.10~1.29 역배 +2.5 / 1.30~1.59 정배 승 / 1.69~1.89 역배 +1.5 / 1.90~2.19 역배 +0.5 · 정배 1.01~1.39 & 무 5.5 이상이면 2.5 오버도 (overMin 배당 이상일 때만)
+export function ruleFor(fav: number, favIsHome: boolean, draw: number, overMin?: number): JudgeOutput['rule'] {
   const dog = favIsHome ? 'a' : 'h';
   const parts: string[] = [];
   const keys: BetKey[] = [];
+  const min: JudgeOutput['rule']['min'] = {};
   const f = Math.round(fav * 100);
   if (f >= 110 && f <= 129) { parts.push('역배 +2.5'); keys.push(`${dog}25` as BetKey); }
   else if (f >= 130 && f <= 159) { parts.push('정배 승'); keys.push(favIsHome ? 'home' : 'away'); }
   else if (f >= 169 && f <= 189) { parts.push('역배 +1.5'); keys.push(`${dog}15` as BetKey); }
   else if (f >= 190 && f <= 219) { parts.push('역배 +0.5'); keys.push(`${dog}05` as BetKey); }
-  if (f >= 101 && f <= 139) { parts.push('2.5 오버'); keys.push('o25'); }
-  return { text: parts.length ? parts.join(' + ') : '해당 룰 없음', keys };
+  if (isOverRule(fav, draw)) {
+    parts.push(overMin ? `2.5 오버 ${overMin.toFixed(2)}↑` : '2.5 오버'); keys.push('o25');
+    if (overMin) min.o25 = overMin;
+  }
+  return { text: parts.length ? parts.join(' + ') : '해당 룰 없음', keys, min };
 }
 
 export interface JudgeOptions {
   minOdds: number; // 추천 하한 사이트 배당
   maxOdds: number; // 추천 상한 사이트 배당 (미만)
   sampleN: number; // 비교 경기 수 (세 배당이 가장 비슷한 경기)
+  overMin?: number; // 2.5 오버 룰 기준 배당 (리그별, overRuleMin)
 }
 
 // 판정에 쓸 수 없는 경기 제외: 배당 1.00 이하(빈 값)
@@ -154,6 +170,6 @@ function judgeWith(rows: Row[], sd: number[], odds: Odds, opts: JudgeOptions): J
 
   return {
     fav, favIsHome, margin: 1 / h + 1 / d + 1 / a - 1, marketN: mk.length, expMargin,
-    bets, recommended, leastLoss, rule: ruleFor(fav, favIsHome),
+    bets, recommended, leastLoss, rule: ruleFor(fav, favIsHome, d, opts.overMin),
   };
 }
