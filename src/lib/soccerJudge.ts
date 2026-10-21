@@ -172,6 +172,12 @@ function judgeWith(rows: Row[], sd: number[], oddsCheck: ReturnType<typeof socce
     const check = checkKind ? oddsCheck(checkKind, site) : undefined;
     // 같은 배당대 과거 실적 확인 — 무는 수익률만, 승(홈 승·원정 승·-0.5)은 시즌 일관성까지
     st = winGate(st, check, checkKind === 'draw' ? 0 : opts.winSeasonShare);
+    // 축구는 정배 승과 플핸(+0.5·+1.5·+2.5)만 추천한다 (사용자 요청 — 안전하게. 마핸·무·역배 승은 적중률·손익분기만 보여준다)
+    const favWin = key === (favIsHome ? 'home' : 'away');
+    if (!favWin && !plus) st = { label: '정배 승·플핸만 추천', v: 0 };
+    // +0.5 플핸은 기대수익 3% 초과(★★★)만 — 27개 리그 3시즌(이전 시즌으로만, 승무패 마진 그대로의 +0.5 배당 가정): ★ 2,053건 -8%·★★ 350건 -6%로
+    // 세 시즌 모두 마이너스, ★★★ 37건 +12% (세 시즌 모두 플러스). 판정기 +0.5 적중률이 실제보다 1~1.5%p 높게 나와서 경계 근처는 손해
+    if (plus && plus.L === 0.5 && st.v > 0 && ev <= 0.03) st = { label: '+0.5는 기대수익 3% 초과만', v: 0 };
     // 플핸은 무·역배 배당이 비슷했던 과거 경기 적중률로도 기대수익이 추천 하한(-3%) 이상이어야 추천
     const plusCheck = plus ? plusHistory(plus.side, plus.L) : undefined;
     if (opts.plusGate && st.v > 0 && plusCheck && plusCheck.hit * site - 1 < EV_FLOOR) st = { label: '무·역배 비슷한 경기 실적 미달', v: 0 };
