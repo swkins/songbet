@@ -228,7 +228,7 @@ type BasketJudgeFn = (o: BasketOdds) => JudgeOut | null
 type SoccerJudgeFn = (o: SoccerOdds) => JudgeOut | null
 const SOCCER_REC = '기대수익 플러스 + 배당 1.30 이상 3.00 미만 (홈·원정·-0.5는 1.55 미만 + 같은 배당대 과거 실적이 시즌 60% 이상 플러스) + 적중률 50% 이상 + 승무패는 같은 배당대 과거 수익률 플러스 · 핸디캡은 반 골 기준점이라 적특 없음'
 const VOLLEY_REC = '기대수익 플러스 + 배당 1.30 이상 3.00 미만 + 적중률 50% 이상 · 홈 승·원정 승은 추천 안 함 (3시즌 백테스트에서 모든 리그 마이너스) · 세트 판정은 홈정배/원정정배 따로'
-const BASKET_REC = '기대수익 플러스 + 배당 1.30 이상 3.00 미만 + 적중률 50% 이상 · 홈 승·원정 승은 1.75 미만 + 같은 배당대 과거 실적 시즌 60% 이상 플러스 (NBA·KBL·유로리그는 승 추천 안 함) · 리그별로 정배 배당 구역에 따라 마핸·플핸 중 한쪽만 추천 · 기준점이 정수면 적특(환불) 반영'
+const BASKET_REC = '기대수익 플러스 + 배당 1.30 이상 3.00 미만 + 적중률 50% 이상 · 홈 승·원정 승은 1.75 미만 + 같은 배당대 과거 실적 시즌 60% 이상 플러스 (NBA·KBL·유로리그는 승 추천 안 함) · 핸디·승 적중률은 점수차 곡선 · 기준점이 정수면 적특(환불) 반영'
 // 처음 열 때 한 번만 계산
 function once<T>(f: () => T): () => T { let v: T | undefined; return () => (v ??= f()) }
 function volleyLeague(key: string, label: string, note: string, judge: VolleyJudgeFn, games: VolleyGame[]): LeagueJudge {
@@ -318,7 +318,6 @@ export default function BetAnalysisPanel({ tabs, active = true }: { tabs: ReactN
   const [raw, setRaw] = useState<Record<string, string>>({})
   const [openRow, setOpenRow] = useState<string | null>(null)  // 판정 표에서 눌러서 상세를 펼친 줄
   const [lineCount, setLineCount] = useState(1)  // 농구 기준점 개수 (1~3, '+ 기준점 추가')
-  const [showCurve, setShowCurve] = useState(false)  // 리그 곡선 그래프 보기
   const inputRefs = useRef<(HTMLInputElement | null)[]>([])
   // 항상 홈 승 칸에 커서 — 처음 보일 때, 종목·리그를 바꿀 때, 초기화할 때 바로 홈 승부터 칠 수 있게
   const [focusTick, setFocusTick] = useState(0)
@@ -436,16 +435,9 @@ export default function BetAnalysisPanel({ tabs, active = true }: { tabs: ReactN
               {sport.leagues.map(l => (
                 <button key={l.key} onClick={() => { setLeagueKey(l.key); setRaw({}); setLineCount(1); setFocusTick(t => t + 1) }} style={{ ...chip(l.key === leagueKey), fontSize: 11, padding: '4px 10px' }}>{l.label}</button>
               ))}
-              {league && <LeagueInfo league={league} />}
-              {league?.curves && (
-                <button onClick={() => setShowCurve(v => !v)} title="이 리그 곡선 그래프" style={{ ...chip(showCurve), fontSize: 11, padding: '4px 10px' }}>곡선</button>
-              )}
+              {league && <LeagueInfo league={league} fav={vals.home != null && vals.away != null ? Math.min(vals.home, vals.away) : null} favIsHome={vals.home != null && vals.away != null ? vals.home <= vals.away : null} />}
             </div>
           </>
-        )}
-
-        {league?.curves && showCurve && (
-          <CurveChart key={league.key} data={league.curves()} fav={vals.home != null && vals.away != null ? Math.min(vals.home, vals.away) : null} favIsHome={vals.home != null && vals.away != null ? vals.home <= vals.away : null} />
         )}
 
         {league && (
@@ -520,8 +512,8 @@ export default function BetAnalysisPanel({ tabs, active = true }: { tabs: ReactN
 }
 
 // 리그 정보 ⓘ — 마우스를 올리면 보이고, 누르면 고정(다시 누르거나 바깥을 누르면 닫힘).
-// 데이터 현황 · 기준 데이터 · 리그 특성 · 판정 기준(추천 조건·베팅 강도)을 한곳에 모아 평소 화면을 간단하게
-function LeagueInfo({ league }: { league: LeagueJudge }) {
+// 데이터 현황 · 기준 데이터 · 리그 특성 · 판정 기준(추천 조건·베팅 강도) · 곡선 그래프를 한곳에 모아 평소 화면을 간단하게 (사용자 요청)
+function LeagueInfo({ league, fav, favIsHome }: { league: LeagueJudge; fav: number | null; favIsHome: boolean | null }) {
   const [hover, setHover] = useState(false)
   const [pinned, setPinned] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -538,7 +530,7 @@ function LeagueInfo({ league }: { league: LeagueJudge }) {
     <div ref={ref} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
       <button onClick={() => setPinned(p => !p)} title="리그 정보" style={{ width: 24, height: 24, borderRadius: 12, cursor: 'pointer', fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-body)', border: `1px solid ${open ? 'var(--gold-border)' : 'var(--border)'}`, background: open ? 'var(--gold-bg)' : 'var(--bg-elevated)', color: open ? 'var(--gold)' : 'var(--text-muted)' }}>i</button>
       {open && (
-        <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: 4, zIndex: 30, width: 'min(440px, 100%)', boxSizing: 'border-box', padding: '10px 12px', borderRadius: 8, background: 'var(--bg-card)', border: '1px solid var(--border)', boxShadow: '0 8px 24px rgba(0,0,0,0.45)' }}>
+        <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: 4, zIndex: 30, width: 'min(600px, 100%)', boxSizing: 'border-box', padding: '10px 12px', borderRadius: 8, background: 'var(--bg-card)', border: '1px solid var(--border)', boxShadow: '0 8px 24px rgba(0,0,0,0.45)' }}>
           <DataStatus league={league} />
           <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 8 }}>기준 데이터: {league.note}</div>
           <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--gold)', marginBottom: 4 }}>{league.label} 특성 ({pr.n}경기 · {pr.weighted ? '최근 시즌 가중' : '시즌 정보 없음, 가중 미적용'})</div>
@@ -552,6 +544,7 @@ function LeagueInfo({ league }: { league: LeagueJudge }) {
             판정: 기대수익 -3% 이상이면 추천 — 3% 초과 ★★★ · 0~3% ★★ · -3~0% ★. 패스는 이유를 함께 표시<br />
             표의 줄에 마우스를 올리거나 누르면 오차·경기 수 등 상세가 나옵니다
           </div>
+          {league.curves && <div style={{ marginTop: 8 }}><CurveChart key={league.key} data={league.curves()} fav={fav} favIsHome={favIsHome} /></div>}
         </div>
       )}
     </div>
@@ -637,7 +630,7 @@ function CurveChart({ data, fav, favIsHome }: { data: CurveChartData; fav: numbe
   const fmt = (v: number) => (m.unit === '%' ? `${v.toFixed(1)}%` : `${v > 0 ? '+' : ''}${v.toFixed(1)}`)
   const chipStyle = (on: boolean): React.CSSProperties => ({ padding: '2px 8px', borderRadius: 6, cursor: 'pointer', fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-body)', border: `1px solid ${on ? 'var(--gold-border)' : 'var(--border)'}`, background: on ? 'var(--gold-bg)' : 'var(--bg-elevated)', color: on ? 'var(--gold)' : 'var(--text-secondary)' })
   return (
-    <div style={{ marginBottom: 12, padding: '8px 10px', borderRadius: 8, background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}>
+    <div style={{ padding: '8px 10px', borderRadius: 8, background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}>
       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginBottom: 6 }}>
         {data.markets.length > 1 ? data.markets.map(x => <button key={x.key} onClick={() => setMk(x.key)} style={chipStyle(x.key === m.key)}>{x.label}</button>)
           : <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)' }}>{m.label}</span>}
