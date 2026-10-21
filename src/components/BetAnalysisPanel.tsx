@@ -133,7 +133,8 @@ const BASKET_FIELDS: OddsField[] = [
 const soccerFav = (v: Record<string, number | null>) => v.home != null && v.draw != null && v.away != null ? Math.min(v.home, v.away) : null
 const SOCCER_LINE_SHOW: Record<number, (fav: number) => boolean> = {
   2.5: fav => fav < 1.4,
-  1.5: fav => fav >= 1.4 && fav < 1.8,
+  // 1.5는 강정배(1.40 미만)에도 보인다 — 정배 -1.5가 50%를 넘는 건 정배 1.35 미만뿐 (19개 리그: 1.15 미만 75% · 1.15~1.24 58% · 1.25~1.34 52% · 1.35~1.44 45%), 사용자 요청으로 2.5 플핸과 나란히 비교
+  1.5: fav => fav < 1.8,
   0.5: fav => fav >= 1.8,
 }
 // 2.5 오버 해볼 만한 구역 (리그별 · 홈정배/원정정배 따로) — 이 구역일 때만 2.5 오버·언더 칸을 보여준다 (언더 배당은 마진 확인용)
