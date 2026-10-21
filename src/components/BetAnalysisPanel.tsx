@@ -51,6 +51,7 @@ import { K1_GAMES } from '../data/k1Games'
 import { K2_GAMES } from '../data/k2Games'
 import { MLS_GAMES } from '../data/mlsGames'
 import { CHAMPIONSHIP_GAMES } from '../data/championshipGames'
+import { LALIGA2_GAMES } from '../data/laliga2Games'
 import { SERIEA_GAMES } from '../data/serieaGames'
 import { judgeLigue1 } from '../leagues/ligue1'
 import { judgeEredivisie } from '../leagues/eredivisie'
@@ -62,6 +63,7 @@ import { judgeK1 } from '../leagues/k1'
 import { judgeK2 } from '../leagues/k2'
 import { judgeMls } from '../leagues/mls'
 import { judgeChampionship } from '../leagues/championship'
+import { judgeLaliga2 } from '../leagues/laliga2'
 import { judgeSeriea } from '../leagues/seriea'
 
 /* ── 베팅분석 — 대시보드 사이트 현황 자리에서 탭으로 바꿔 보는 패널. 종목 → 리그를 고르고 배당을 넣으면 과거 경기 데이터로 각 베팅의 가치(기대수익)를 판정 ──
@@ -311,6 +313,8 @@ const JUDGES: SportJudges[] = [
       soccerLeague('mls', 'MLS', '2021 ~ 2025 시즌 정규리그, 플레이오프 제외 (BetExplorer 평균 배당) · 비교 경기는 홈정배/원정정배 따로, 승무패 세 배당이 비슷한 200경기', judgeMls, MLS_GAMES),
         // 2.5 오버 구역 없음 (아직 리그별 검증 전)
       soccerLeague('championship', '챔피언십', '2021-22 ~ 2025-26 정규리그, 승격 플레이오프 제외 (BetExplorer 평균 배당) · 비교 경기는 홈정배/원정정배 따로, 승무패 세 배당이 비슷한 200경기', judgeChampionship, CHAMPIONSHIP_GAMES),
+        // 2.5 오버 구역 없음 (아직 리그별 검증 전)
+      soccerLeague('laliga2', '라리가2', '2021-22 ~ 2025-26 정규리그, 승격 플레이오프 제외 (BetExplorer 평균 배당) · 비교 경기는 홈정배/원정정배 따로, 승무패 세 배당이 비슷한 200경기', judgeLaliga2, LALIGA2_GAMES),
         // 2.5 오버 구역 없음 (아직 리그별 검증 전)
       soccerLeague('ucl', '챔피언스리그', '2021-22 ~ 2025-26 조별리그·리그 페이즈, 토너먼트 제외 (BetExplorer 평균 배당) · 비교 경기는 홈정배/원정정배 따로, 세 배당이 비슷한 80경기', judgeUcl, UCL_GAMES,
         // 홈정배: 정배 1.50 미만 & 무 6.5 이상 (학습 81% → 확인 68%) / 원정정배: 정배 1.70 미만 & 무 5.5 미만 (78% → 67%) — 표본 작음
