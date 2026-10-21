@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { ComposedChart, Line, Scatter, XAxis, YAxis, ZAxis, CartesianGrid, Tooltip, ReferenceLine, ResponsiveContainer } from 'recharts'
+import { basketCurves, volleyCurves, type CurveChartData } from '../lib/curveChart'
 import type { Odds as VolleyOdds, Game as VolleyGame } from '../lib/volleyJudge'
 import { cleanGames, type Game as BasketGame, type Odds as BasketOdds } from '../lib/basketJudge'
 import { latestSeason, MAX_SEASONS, recentSeasons, seasonSummary, seasonWeigher } from '../lib/seasonWeight'
@@ -78,6 +80,7 @@ interface LeagueJudge {
   profile: () => { n: number; weighted: boolean; items: [string, string][] }  // 리그 특성 요약 (판정기가 쓰는 과거 경기 기준, weighted = 최근 시즌 가중 적용)
   recNote: string
   data: () => ReturnType<typeof seasonSummary>  // 데이터 현황 (시즌별 경기 수·반영 여부·반영도)
+  curves?: () => CurveChartData  // 곡선 그래프 (농구 점수차 곡선 · 배구 결과별 적중률 곡선)
 }
 interface SportJudges { key: string; label: string; emoji: string; leagues: LeagueJudge[] }
 
@@ -226,15 +229,17 @@ type SoccerJudgeFn = (o: SoccerOdds) => JudgeOut | null
 const SOCCER_REC = '기대수익 플러스 + 배당 1.30 이상 3.00 미만 (홈·원정·-0.5는 1.55 미만 + 같은 배당대 과거 실적이 시즌 60% 이상 플러스) + 적중률 50% 이상 + 승무패는 같은 배당대 과거 수익률 플러스 · 핸디캡은 반 골 기준점이라 적특 없음'
 const VOLLEY_REC = '기대수익 플러스 + 배당 1.30 이상 3.00 미만 + 적중률 50% 이상 · 홈 승·원정 승은 추천 안 함 (3시즌 백테스트에서 모든 리그 마이너스) · 세트 판정은 홈정배/원정정배 따로'
 const BASKET_REC = '기대수익 플러스 + 배당 1.30 이상 3.00 미만 + 적중률 50% 이상 · 홈 승·원정 승은 1.75 미만 + 같은 배당대 과거 실적 시즌 60% 이상 플러스 (NBA·KBL·유로리그는 승 추천 안 함) · 리그별로 정배 배당 구역에 따라 마핸·플핸 중 한쪽만 추천 · 기준점이 정수면 적특(환불) 반영'
+// 처음 열 때 한 번만 계산
+function once<T>(f: () => T): () => T { let v: T | undefined; return () => (v ??= f()) }
 function volleyLeague(key: string, label: string, note: string, judge: VolleyJudgeFn, games: VolleyGame[]): LeagueJudge {
   return {
-    key, label, note, fields: VOLLEY_FIELDS, recNote: VOLLEY_REC, profile: () => volleyProfile(games), data: () => seasonSummary(games),
+    key, label, note, fields: VOLLEY_FIELDS, recNote: VOLLEY_REC, profile: () => volleyProfile(games), data: () => seasonSummary(games), curves: once(() => volleyCurves(games)),
     run: v => judge({ home: v.home, away: v.away, m15: v.m15, o35: v.o35, u45: v.u45, p25: v.p25 }),
   }
 }
 function basketLeague(key: string, label: string, note: string, judge: BasketJudgeFn, games: BasketGame[]): LeagueJudge {
   return {
-    key, label, note, fields: BASKET_FIELDS, recNote: BASKET_REC, profile: () => basketProfile(games), data: () => seasonSummary(cleanGames(games)),
+    key, label, note, fields: BASKET_FIELDS, recNote: BASKET_REC, profile: () => basketProfile(games), data: () => seasonSummary(cleanGames(games)), curves: once(() => basketCurves(games)),
     // 홈/원정 핸디캡 배당으로 받고, 승패 배당이 낮은 쪽(정배)이 자동으로 -기준점 마핸이 된다
     run: v => {
       const favHome = v.home != null && v.away != null && v.home <= v.away
@@ -313,6 +318,7 @@ export default function BetAnalysisPanel({ tabs, active = true }: { tabs: ReactN
   const [raw, setRaw] = useState<Record<string, string>>({})
   const [openRow, setOpenRow] = useState<string | null>(null)  // 판정 표에서 눌러서 상세를 펼친 줄
   const [lineCount, setLineCount] = useState(1)  // 농구 기준점 개수 (1~3, '+ 기준점 추가')
+  const [showCurve, setShowCurve] = useState(false)  // 리그 곡선 그래프 보기
   const inputRefs = useRef<(HTMLInputElement | null)[]>([])
   // 항상 홈 승 칸에 커서 — 처음 보일 때, 종목·리그를 바꿀 때, 초기화할 때 바로 홈 승부터 칠 수 있게
   const [focusTick, setFocusTick] = useState(0)
@@ -431,8 +437,15 @@ export default function BetAnalysisPanel({ tabs, active = true }: { tabs: ReactN
                 <button key={l.key} onClick={() => { setLeagueKey(l.key); setRaw({}); setLineCount(1); setFocusTick(t => t + 1) }} style={{ ...chip(l.key === leagueKey), fontSize: 11, padding: '4px 10px' }}>{l.label}</button>
               ))}
               {league && <LeagueInfo league={league} />}
+              {league?.curves && (
+                <button onClick={() => setShowCurve(v => !v)} title="이 리그 곡선 그래프" style={{ ...chip(showCurve), fontSize: 11, padding: '4px 10px' }}>곡선</button>
+              )}
             </div>
           </>
+        )}
+
+        {league?.curves && showCurve && (
+          <CurveChart key={league.key} data={league.curves()} fav={vals.home != null && vals.away != null ? Math.min(vals.home, vals.away) : null} favIsHome={vals.home != null && vals.away != null ? vals.home <= vals.away : null} />
         )}
 
         {league && (
@@ -608,5 +621,52 @@ function JudgeRow({ b, name, recommended, recNote, open, onToggle }: { b: JudgeB
       </tr>
     )}
     </>
+  )
+}
+
+// 리그 곡선 그래프 — x = 정배 배당, 선 = 곡선(판정에 쓰는 값), 점 = 그 배당대(0.05 단위) 실제 값 · 점 크기 = 경기 수.
+// 홈정배 금색 / 원정정배 하늘색. 배당을 넣으면 그 정배 배당에 세로선
+function CurveChart({ data, fav, favIsHome }: { data: CurveChartData; fav: number | null; favIsHome: boolean | null }) {
+  const [mk, setMk] = useState(data.markets[0].key)
+  const m = data.markets.find(x => x.key === mk) ?? data.markets[0]
+  const [lo, hi] = useMemo(() => {
+    const xs = [...m.home.curve, ...m.away.curve].map(p => p.x)
+    return [Math.min(...xs), Math.max(...xs)]
+  }, [m])
+  const HOME = 'var(--gold)', AWAY = 'var(--cyan)'
+  const fmt = (v: number) => (m.unit === '%' ? `${v.toFixed(1)}%` : `${v > 0 ? '+' : ''}${v.toFixed(1)}`)
+  const chipStyle = (on: boolean): React.CSSProperties => ({ padding: '2px 8px', borderRadius: 6, cursor: 'pointer', fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-body)', border: `1px solid ${on ? 'var(--gold-border)' : 'var(--border)'}`, background: on ? 'var(--gold-bg)' : 'var(--bg-elevated)', color: on ? 'var(--gold)' : 'var(--text-secondary)' })
+  return (
+    <div style={{ marginBottom: 12, padding: '8px 10px', borderRadius: 8, background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+        {data.markets.length > 1 ? data.markets.map(x => <button key={x.key} onClick={() => setMk(x.key)} style={chipStyle(x.key === m.key)}>{x.label}</button>)
+          : <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)' }}>{m.label}</span>}
+        <span style={{ fontSize: 10, color: 'var(--text-muted)', marginLeft: 'auto' }}>
+          <b style={{ color: HOME }}>━ 홈정배</b> {m.home.n}경기 · <b style={{ color: AWAY }}>━ 원정정배</b> {m.away.n}경기 · 선 = 곡선, 점 = 실제 (클수록 경기 많음)
+        </span>
+      </div>
+      <div style={{ width: '100%', height: 220 }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <ComposedChart margin={{ top: 16, right: 10, bottom: 4, left: 0 }}>
+            <CartesianGrid stroke="var(--border)" strokeDasharray="2 4" />
+            <XAxis type="number" dataKey="x" domain={[lo, hi]} tickCount={8} tick={{ fontSize: 9, fill: 'var(--text-muted)' }} tickFormatter={(v: number) => v.toFixed(2)} />
+            <YAxis type="number" dataKey="y" tick={{ fontSize: 9, fill: 'var(--text-muted)' }} tickFormatter={(v: number) => (m.unit === '%' ? `${v}%` : `${v}`)} width={42} domain={['auto', 'auto']} />
+            <ZAxis type="number" dataKey="n" range={[12, 90]} />
+            {m.unit === '점' && <ReferenceLine y={0} stroke="var(--text-muted)" />}
+            {m.unit === '%' && <ReferenceLine y={50} stroke="var(--text-muted)" strokeDasharray="3 3" />}
+            {fav != null && <ReferenceLine x={fav} stroke={favIsHome ? HOME : AWAY} strokeDasharray="4 3" label={{ value: fav.toFixed(2), position: 'top', fontSize: 9, fill: 'var(--text-primary)' }} />}
+            <Tooltip
+              contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 4, fontSize: 10 }}
+              labelStyle={{ color: 'var(--text-muted)' }}
+              formatter={(v: number, name: string) => [name === 'n' ? `${v}경기` : name === 'x' ? v.toFixed(2) : fmt(v), name === 'x' ? '정배 배당' : name === 'n' ? '경기 수' : m.label]}
+            />
+            <Scatter name="홈정배 실제" data={m.home.dots} fill={HOME} fillOpacity={0.45} />
+            <Scatter name="원정정배 실제" data={m.away.dots} fill={AWAY} fillOpacity={0.45} />
+            <Line name="홈정배 곡선" data={m.home.curve} dataKey="y" type="monotone" stroke={HOME} strokeWidth={2} dot={false} isAnimationActive={false} />
+            <Line name="원정정배 곡선" data={m.away.curve} dataKey="y" type="monotone" stroke={AWAY} strokeWidth={2} dot={false} isAnimationActive={false} />
+          </ComposedChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
   )
 }
