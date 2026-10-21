@@ -253,6 +253,8 @@ type SoccerJudgeFn = (o: SoccerOdds) => JudgeOut | null
 const SOCCER_REC = '기대수익 플러스 + 배당 1.30 이상 3.00 미만 (홈·원정·-0.5는 1.55 미만 + 같은 배당대 과거 실적이 시즌 60% 이상 플러스) + 적중률 50% 이상 + 승무패는 같은 배당대 과거 수익률 플러스 · 핸디캡은 반 골 기준점이라 적특 없음'
 const VOLLEY_REC = '기대수익 플러스 + 배당 1.30 이상 3.00 미만 + 적중률 50% 이상 · 홈 승·원정 승은 추천 안 함 (3시즌 백테스트에서 모든 리그 마이너스) · 세트 판정은 홈정배/원정정배 따로'
 const BASKET_REC = '기대수익 플러스 + 배당 1.30 이상 3.00 미만 + 적중률 50% 이상 · 홈 승·원정 승은 1.75 미만 + 같은 배당대 과거 실적 시즌 60% 이상 플러스 (NBA·KBL·유로리그는 승 추천 안 함) · 핸디·승 적중률은 점수차 곡선 · 기준점이 정수면 적특(환불) 반영'
+// 축구: 낮은 쪽 승 배당이 이 이상이면 접전(정배 없음)으로 표시 — 18개 리그 평균 정배 37% 대 역배 34% (사용자 지적: 2.50~3.20은 정배가 아니다)
+const SOCCER_EVEN_FROM = 2.5
 // 처음 열 때 한 번만 계산
 function once<T>(f: () => T): () => T { let v: T | undefined; return () => (v ??= f()) }
 function volleyLeague(key: string, label: string, note: string, judge: VolleyJudgeFn, games: VolleyGame[]): LeagueJudge {
@@ -515,7 +517,9 @@ export default function BetAnalysisPanel({ tabs, active = true }: { tabs: ReactN
               <>
                 <div title={`비교 경기 ${out.marketN}경기${out.expMargin != null ? ` · 비교 경기 정배 평균 점수차 ${out.expMargin >= 0 ? '+' : ''}${out.expMargin.toFixed(1)}` : ''}`}
                   style={{ display: 'flex', gap: 14, flexWrap: 'wrap', fontSize: 11, color: 'var(--text-secondary)', marginBottom: 8 }}>
-                  <span>정배 <b style={{ color: 'var(--text-primary)' }}>{out.favIsHome ? '홈' : '원정'} {out.fav.toFixed(2)}</b></span>
+                  {out.minusHome !== undefined && out.fav >= SOCCER_EVEN_FROM
+                    ? <span title="낮은 쪽 배당이 2.50 이상이면 두 팀 승 확률이 거의 같다 (평균 37% 대 34%) — 정배가 아니라 접전">접전 <b style={{ color: 'var(--text-primary)' }}>정배 없음</b> (낮은 쪽 {out.favIsHome ? '홈' : '원정'} {out.fav.toFixed(2)})</span>
+                    : <span>정배 <b style={{ color: 'var(--text-primary)' }}>{out.favIsHome ? '홈' : '원정'} {out.fav.toFixed(2)}</b></span>}
                   <span>마진 <b style={{ color: out.margin <= 0.05 ? 'var(--green)' : 'var(--orange)' }}>{pct(out.margin)}</b></span>
                   {out.curveMargin != null && <span title="같은 쪽 정배 과거 경기 전체(모든 배당대)로 본, 이 배당 경기의 정배 평균 점수차 — 기준점이 이보다 낮으면 마핸, 높으면 플핸 쪽이 유리">예상 점수차 <b style={{ color: 'var(--text-primary)' }}>{out.favIsHome ? '홈' : '원정'} {out.curveMargin >= 0 ? '+' : ''}{out.curveMargin.toFixed(1)}</b></span>}
                   {out.band && <span title="같은 쪽 정배 과거 경기를 모든 배당대로 배당-적중률 곡선을 맞추고, 넣은 배당 자리 값을 읽는다">곡선 <b style={{ color: 'var(--text-primary)' }}>{out.favIsHome ? '홈' : '원정'}정배 전 배당대 {out.marketN}경기</b> · {out.band.lo.toFixed(2)}~{out.band.hi.toFixed(2)} 실제 <b style={{ color: 'var(--text-primary)' }}>{out.bandN}경기</b></span>}
