@@ -129,7 +129,7 @@ const BASKET_FIELDS: OddsField[] = [
 
 // 승무패는 사이트 순서대로 홈 승 → 무 → 원정 승, 그다음 홈/원정 핸디캡을 기준점마다 짝으로
 // 축구 핸디 칸은 승무패 세 배당을 다 넣은 뒤, 정배 배당에 맞는 기준점만 보여준다 (사용자 요청)
-//  정배 1.39 이하 → 2.5 핸디 / 1.40~1.79 → 1.5 핸디 / 1.80 이상 → 0.5 핸디
+//  정배 1.39 이하 → 2.5·1.5 핸디 / 1.40~1.79 → 1.5 핸디 / 1.80 이상 → 0.5 핸디
 const soccerFav = (v: Record<string, number | null>) => v.home != null && v.draw != null && v.away != null ? Math.min(v.home, v.away) : null
 const SOCCER_LINE_SHOW: Record<number, (fav: number) => boolean> = {
   2.5: fav => fav < 1.4,
