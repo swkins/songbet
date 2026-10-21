@@ -74,11 +74,6 @@ export interface JudgeOptions {
   winSeasonShare: number; // 승 베팅: 같은 배당대 과거 실적이 플러스였던 시즌 비율이 이 이상이어야 추천
   winAnchor: boolean; // 승 적중률을 시장 확률 기준으로 잡을지 (false면 비교 경기 비율 그대로)
   winOff: boolean; // 이 리그는 승 추천 안 함 (적중률·손익분기는 보여주고 강도 0)
-  // 핸디 구역 (홈정배/원정정배 따로): 마핸은 정배 배당 mhBelow 미만에서만, 플핸은 phFrom 이상에서만 추천·가이드
-  // (호주 NBL 1.45/1.45 — 강정배는 크게 이기고 약한 정배는 못 이긴다)
-  // 핸디 적중률 = 배당-적중률 곡선 (같은 쪽 정배 전 배당대 경기로 기준점마다 로지스틱, oddsCurve.ts). 3시즌 백테스트(이전 시즌으로만, 반점 기준점
-  // 0.5~24.5 중 시장 예상 점수차 ±6) Brier: 예전 비교 경기 비율 0.2396 → 곡선 0.2377, 6개 리그 모두 개선 (2차 곡선 0.2379)
-  curveHcap: boolean;
   // 승 적중률 = 예전 비교 경기 비율과 곡선의 반반 (사용자 요청). 3시즌 같은 경기 비교(Brier×1만, 예전 대비): 곡선만은 NBA -9.0·유로리그 -43.8·
   // B.LEAGUE -12.7로 좋지만 CBA +16.1(3시즌 모두 예전이 나음)·NBL +11.9, 반반은 6개 리그 모두 예전보다 나쁘지 않음 (NBA -6.4·유로 -28.4·B.LEAGUE -9.0·CBA +0.8)
   winCurveShare: number; // 0 = 예전 비율만, 1 = 곡선만
@@ -88,7 +83,6 @@ export interface JudgeOptions {
   // null이면 예전처럼 최소 경기 수(minMarketN)까지 넓힘
   winBand: number | null;
   winTri: boolean; // 범위 안에서 넣은 배당과 가까울수록 크게 (false면 범위 안 모두 같게)
-  hcapZone: { home?: { mhBelow?: number; phFrom?: number }; away?: { mhBelow?: number; phFrom?: number } } | null;
 }
 // 농구 승 추천 기준 — 리그별 3시즌 백테스트(각 시즌을 이전 시즌으로만 판정, 평균배당)로 정함:
 //  예전(비교 경기 비율, 1.30~3.00) 1701건 -1.4% · 시장 기준 보정 140건 -7.0% · 비교 경기 비율 + 상한 1.75 + 시즌 일관성 0.6 376건 -2.5%
@@ -103,7 +97,7 @@ export function cleanGames(games: Game[]): Game[] {
 export function createJudge(rawGames: Game[], base: Partial<JudgeOptions> = {}) {
   const games = recentSeasons(cleanGames(rawGames)); // 최근 5시즌만
   const weight = seasonWeigher(games);
-  const defaults: JudgeOptions = { minOdds: 1.3, maxOdds: 3.0, minMarketN: 200, winMaxOdds: 1.75, winSeasonShare: 0.6, winAnchor: false, winOff: false, curveHcap: true, winCurveShare: 0.5, winBand: 0.08, winTri: true, hcapZone: null, ...base };
+  const defaults: JudgeOptions = { minOdds: 1.3, maxOdds: 3.0, minMarketN: 200, winMaxOdds: 1.75, winSeasonShare: 0.6, winAnchor: false, winOff: false, winCurveShare: 0.5, winBand: 0.08, winTri: true, ...base };
   const check = oddsHistory<'home' | 'away'>(games.map((g) => ({ odds: { home: g[0], away: g[1] }, won: { home: g[2] > g[3], away: g[3] > g[2] }, w: weight(g), season: g[4] })));
   // 곡선용: 같은 쪽 정배 과거 경기 전체 (모든 정배 배당대) — x = logit(정배 확률), m = 정배 기준 점수차
   const sideRows = new Map<boolean, CurveRow[]>();
@@ -157,9 +151,6 @@ function judgeWith(games: Game[], weight: (g: Game) => number, oddsCheck: Return
     return { n: all.length, pw: Number.isInteger(L) ? r.p : (minus ? over.p : 1 - over.p), pp, se: r.se || over.se };
   };
 
-  const zone = opts.hcapZone?.[favIsHome ? 'home' : 'away'];
-  const mhOff = zone?.mhBelow != null && fav >= zone.mhBelow;
-  const phOff = zone?.phFrom != null && fav < zone.phFrom;
   const bets: BetResult[] = [];
   const add = (key: BetKey, site: number | null, s: { n: number; pw: number; pp: number; se: number }) => {
     // 표본이 없거나 한 번도 안 맞았으면 손익분기가 무한대가 되므로 판정하지 않는다
@@ -173,8 +164,6 @@ function judgeWith(games: Game[], weight: (g: Game) => number, oddsCheck: Return
     // 추천 배당범위 밖이거나 적중률 50% 미만이면 강도 0 (judgeScore.betStrength), 승은 같은 배당대 과거 실적까지 (oddsCheck.winGate)
     const check = isWin ? oddsCheck(key, site) : undefined;
     const st = isWin && opts.winOff ? { label: '승 추천 안 함', v: 0 }
-      : key.startsWith('mh') && mhOff ? { label: '마핸 추천 안 함', v: 0 }
-      : key.startsWith('ph') && phOff ? { label: '플핸 추천 안 함', v: 0 }
       : winGate(betStrength(ev, s.pw, eligible), check, opts.winSeasonShare);
     bets.push({
       key, name: NAMES[key], site, hit: s.pw, push: s.pp, se: s.se, be, ev, err: site * s.se,
@@ -206,15 +195,17 @@ function judgeWith(games: Game[], weight: (g: Game) => number, oddsCheck: Return
   add('home', odds.home, favIsHome ? favStat : dogStat);
   add('away', odds.away, favIsHome ? dogStat : favStat);
 
-  // 기준점 최대 3개 — 각각 정배 -L 마핸 / 역배 +L 플핸
+  // 기준점 최대 3개 — 각각 정배 -L 마핸 / 역배 +L 플핸. 적중률은 항상 곡선 (같은 쪽 정배 전 배당대 경기로 기준점마다 로지스틱, oddsCurve.ts)
+  // 3시즌 백테스트(이전 시즌으로만, 반점 기준점 0.5~24.5 중 시장 예상 점수차 ±6) Brier: 예전 비교 경기 비율 0.2396 → 곡선 0.2377, 6개 리그 모두 개선
+  // 핸디 구역(정배 배당대별로 마핸/플핸 추천을 막던 hcapZone)은 사용자 요청으로 뺐다 — 심플하게 곡선만 (구역이 있던 마지막 커밋 bb77c32)
   for (const [L, mk, pk, mo, po] of [
     [odds.line, 'mh', 'ph', odds.mh, odds.ph],
     [odds.line2, 'mh2', 'ph2', odds.mh2, odds.ph2],
     [odds.line3, 'mh3', 'ph3', odds.mh3, odds.ph3],
   ] as const) {
     if (L == null || L < 0) continue;
-    add(mk, mo ?? null, opts.curveHcap ? curveStat3(L, true) : stat3((m) => (m > L ? 1 : m === L ? 0 : -1)));
-    add(pk, po ?? null, opts.curveHcap ? curveStat3(L, false) : stat3((m) => (m < L ? 1 : m === L ? 0 : -1)));
+    add(mk, mo ?? null, curveStat3(L, true));
+    add(pk, po ?? null, curveStat3(L, false));
   }
 
   const recommended = bets.filter((b) => b.strength > 0).sort((x, y) => y.strength - x.strength || y.ev - x.ev);
