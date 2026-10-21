@@ -37,6 +37,7 @@ export interface JudgeOutput {
   favIsHome: boolean;
   margin: number;
   marketN: number;
+  band: { lo: number; hi: number }; // 비교한 정배 배당 구간 (예: 1.20~1.29)
   bets: BetResult[];
   recommended: BetResult[]; // EV>0 & eligible, EV 내림차순
   leastLoss: BetResult | null;
@@ -45,18 +46,6 @@ export interface JudgeOutput {
 const NAMES: Record<BetKey, string> = {
   home: '홈', away: '원정', m15: '-1.5 마핸', o35: '3.5 오버', u45: '4.5 언더', p25: '+2.5 플핸',
 };
-
-// 기준 배당 x 주변 로그 창을 넓혀가며 최소 n 경기 확보
-function pick(games: Game[], getX: (g: Game) => number, x: number, minN: number): { rows: Game[]; w: number } {
-  let w = 0.03;
-  let rows: Game[] = [];
-  while (w <= 0.3) {
-    rows = games.filter((g) => Math.abs(Math.log(getX(g) / x)) <= w);
-    if (rows.length >= minN) break;
-    w += 0.01;
-  }
-  return { rows, w };
-}
 
 // 가중 적중률 (최근 시즌 경기일수록 크게 반영)
 function stat<T>(rows: T[], weight: (r: T) => number, test: (r: T) => boolean) {
@@ -68,8 +57,9 @@ function stat<T>(rows: T[], weight: (r: T) => number, test: (r: T) => boolean) {
 export interface JudgeOptions {
   minOdds: number; // 추천 하한 사이트 배당
   maxOdds: number; // 추천 상한 사이트 배당 (미만)
-  minMarketN: number; // 마켓(-1.5/오버/언더/플핸) 표본 최소 경기 수
-  minSideN: number; // (예전 홈 승/원정 승 표본 최소 경기 수 — 지금은 승도 정배 쪽이 같은 경기 표본(minMarketN)으로 본다)
+  // 비교 경기 = 정배가 같은 쪽(홈정배/원정정배)이고 정배 배당이 같은 0.1 구간인 경기 (정배 1.20 → 1.20~1.29). 경기 수가 적어도 넓히지 않는다
+  // (사용자 요청: 예전엔 최소 경기 수(리그별 123~217)를 채우려고 범위를 넓혀서, 정배 1.20에 1.10~1.31 경기까지 섞여 +2.5·3.5 오버를 부풀렸다)
+  band: number;
   winMaxOdds: number; // 홈 승·원정 승 추천 상한 배당 (미만)
   winSeasonShare: number; // 승 베팅: 같은 배당대 과거 실적이 플러스였던 시즌 비율이 이 이상이어야 추천
   winAnchor: boolean; // 승 적중률을 시장 확률 기준으로 잡을지 (false면 비교 경기 비율 그대로)
@@ -80,7 +70,7 @@ export interface JudgeOptions {
 
 export function createJudge(allGames: Game[], base: Partial<JudgeOptions> = {}) {
   const games = recentSeasons(allGames); // 최근 5시즌만
-  const defaults: JudgeOptions = { minOdds: 1.3, maxOdds: 3.0, minMarketN: 150, minSideN: 120, winMaxOdds: 1.75, winSeasonShare: 0.6, winAnchor: true, winOff: true, ...base };
+  const defaults: JudgeOptions = { minOdds: 1.3, maxOdds: 3.0, band: 0.1, winMaxOdds: 1.75, winSeasonShare: 0.6, winAnchor: true, winOff: true, ...base };
   const weight = seasonWeigher(games);
   const check = oddsHistory<'home' | 'away'>(games.map((g) => ({ odds: { home: g[0], away: g[1] }, won: { home: g[2] > g[3], away: g[3] > g[2] }, w: weight(g), season: g[4] })));
   return (odds: Odds, o: Partial<JudgeOptions> = {}): JudgeOutput | null =>
@@ -96,11 +86,14 @@ function judgeWith(games: Game[], weight: (g: Game) => number, oddsCheck: Return
   const fav = Math.min(h, a);
   const favIsHome = h <= a;
 
-  // 비교 경기: 정배가 같은 쪽(홈정배 / 원정정배)이고 정배 배당이 비슷한 경기 — 홈정배와 원정정배를 섞지 않는다 (사용자 요청)
-  // 정배 쪽(fs)과 역배 쪽(us)의 세트 수로 환산
-  const same = games.filter((g) => (g[0] <= g[1]) === favIsHome);
-  const mk = pick(same, (g) => Math.min(g[0], g[1]), fav, opts.minMarketN);
-  const F = mk.rows.map((g) => {
+  // 비교 경기: 정배가 같은 쪽(홈정배 / 원정정배)이고 정배 배당이 같은 0.1 구간인 경기 — 홈정배와 원정정배를 섞지 않는다 (사용자 요청)
+  // 정배 쪽(fs)과 역배 쪽(us)의 세트 수로 환산 (배당은 0.01 단위 정수로 바꿔서 구간 경계 오차를 없앤다)
+  const step = Math.round(opts.band * 100);
+  const loC = Math.floor(Math.round(fav * 100) / step) * step;
+  const inBand = (g: Game) => { const c = Math.round(Math.min(g[0], g[1]) * 100); return c >= loC && c < loC + step; };
+  const rows = games.filter((g) => (g[0] <= g[1]) === favIsHome && inBand(g));
+  const band = { lo: loC / 100, hi: (loC + step - 1) / 100 };
+  const F = rows.map((g) => {
     const f = g[0] <= g[1];
     return { fs: f ? g[2] : g[3], us: f ? g[3] : g[2], w: weight(g), pf: favProb(g[0], g[1]) };
   });
@@ -144,7 +137,7 @@ function judgeWith(games: Game[], weight: (g: Game) => number, oddsCheck: Return
   const leastLoss = [...bets].filter((b) => b.eligible).sort((x, y) => y.ev - x.ev)[0] ?? null;
 
   return {
-    fav, favIsHome, margin: 1 / h + 1 / a - 1, marketN: mk.rows.length,
+    fav, favIsHome, margin: 1 / h + 1 / a - 1, marketN: rows.length, band,
     bets, recommended, leastLoss,
   };
 }
