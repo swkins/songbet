@@ -44,10 +44,12 @@ import { judgeUcl } from '../leagues/ucl'
 import { LIGUE1_GAMES } from '../data/ligue1Games'
 import { EREDIVISIE_GAMES } from '../data/eredivisieGames'
 import { PORTUGAL_GAMES } from '../data/portugalGames'
+import { SUPERLIG_GAMES } from '../data/superligGames'
 import { SERIEA_GAMES } from '../data/serieaGames'
 import { judgeLigue1 } from '../leagues/ligue1'
 import { judgeEredivisie } from '../leagues/eredivisie'
 import { judgePortugal } from '../leagues/portugal'
+import { judgeSuperlig } from '../leagues/superlig'
 import { judgeSeriea } from '../leagues/seriea'
 
 /* ── 베팅분석 — 대시보드 사이트 현황 자리에서 탭으로 바꿔 보는 패널. 종목 → 리그를 고르고 배당을 넣으면 과거 경기 데이터로 각 베팅의 가치(기대수익)를 판정 ──
@@ -283,6 +285,8 @@ const JUDGES: SportJudges[] = [
       soccerLeague('eredivisie', '에레디비시', '2021-22 ~ 2025-26 정규리그 (BetExplorer 평균 배당) · 비교 경기는 홈정배/원정정배 따로, 승무패 세 배당이 비슷한 200경기', judgeEredivisie, EREDIVISIE_GAMES),
         // 2.5 오버 구역 없음 (아직 리그별 검증 전)
       soccerLeague('portugal', '포르투갈', '2021-22 ~ 2025-26 정규리그 (BetExplorer 평균 배당) · 비교 경기는 홈정배/원정정배 따로, 승무패 세 배당이 비슷한 200경기', judgePortugal, PORTUGAL_GAMES),
+        // 2.5 오버 구역 없음 (아직 리그별 검증 전)
+      soccerLeague('superlig', '튀르키예', '2021-22 ~ 2025-26 정규리그 (BetExplorer 평균 배당, 몰수 경기 제외) · 비교 경기는 홈정배/원정정배 따로, 승무패 세 배당이 비슷한 200경기', judgeSuperlig, SUPERLIG_GAMES),
         // 2.5 오버 구역 없음 (아직 리그별 검증 전)
       soccerLeague('ucl', '챔피언스리그', '2021-22 ~ 2025-26 조별리그·리그 페이즈, 토너먼트 제외 (BetExplorer 평균 배당) · 비교 경기는 홈정배/원정정배 따로, 세 배당이 비슷한 80경기', judgeUcl, UCL_GAMES,
         // 홈정배: 정배 1.50 미만 & 무 6.5 이상 (학습 81% → 확인 68%) / 원정정배: 정배 1.70 미만 & 무 5.5 미만 (78% → 67%) — 표본 작음
