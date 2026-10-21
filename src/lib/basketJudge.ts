@@ -1,4 +1,5 @@
 import { betStrength } from './judgeScore';
+import { fitCurve, logit, type Curve } from './oddsCurve';
 import { oddsHistory, shrinkFactor, winGate, type OddsCheck } from './oddsCheck';
 import { recentSeasons, seasonWeigher, weightedMean, weightedStat } from './seasonWeight';
 
@@ -74,6 +75,11 @@ export interface JudgeOptions {
   winOff: boolean; // 이 리그는 승 추천 안 함 (적중률·손익분기는 보여주고 강도 0)
   // 핸디 구역 (홈정배/원정정배 따로): 마핸은 정배 배당 mhBelow 미만에서만, 플핸은 phFrom 이상에서만 추천·가이드
   // (호주 NBL 1.45/1.45 — 강정배는 크게 이기고 약한 정배는 못 이긴다)
+  // 핸디 적중률 = 배당-적중률 곡선 (같은 쪽 정배 전 배당대 경기로 기준점마다 로지스틱, oddsCurve.ts). 3시즌 백테스트(이전 시즌으로만, 반점 기준점
+  // 0.5~24.5 중 시장 예상 점수차 ±6) Brier: 예전 비교 경기 비율 0.2396 → 곡선 0.2377, 6개 리그 모두 개선 (2차 곡선 0.2379)
+  curveHcap: boolean;
+  // 승은 곡선을 안 쓴다 — Brier는 0.1957 → 0.1949로 조금 좋았지만 NBL·CBA는 나빠졌고, 승 추천 수익이 CBA +14.3%→+9.9%, NBA·KBL도 나빠짐
+  curveWin: boolean;
   hcapZone: { home?: { mhBelow?: number; phFrom?: number }; away?: { mhBelow?: number; phFrom?: number } } | null;
 }
 // 농구 승 추천 기준 — 리그별 3시즌 백테스트(각 시즌을 이전 시즌으로만 판정, 평균배당)로 정함:
@@ -89,16 +95,28 @@ export function cleanGames(games: Game[]): Game[] {
 export function createJudge(rawGames: Game[], base: Partial<JudgeOptions> = {}) {
   const games = recentSeasons(cleanGames(rawGames)); // 최근 5시즌만
   const weight = seasonWeigher(games);
-  const defaults: JudgeOptions = { minOdds: 1.3, maxOdds: 3.0, minMarketN: 200, winMaxOdds: 1.75, winSeasonShare: 0.6, winAnchor: false, winOff: false, hcapZone: null, ...base };
+  const defaults: JudgeOptions = { minOdds: 1.3, maxOdds: 3.0, minMarketN: 200, winMaxOdds: 1.75, winSeasonShare: 0.6, winAnchor: false, winOff: false, curveHcap: true, curveWin: false, hcapZone: null, ...base };
   const check = oddsHistory<'home' | 'away'>(games.map((g) => ({ odds: { home: g[0], away: g[1] }, won: { home: g[2] > g[3], away: g[3] > g[2] }, w: weight(g), season: g[4] })));
+  // 곡선용: 같은 쪽 정배 과거 경기 전체 (모든 정배 배당대) — x = logit(정배 확률), m = 정배 기준 점수차
+  const sideRows = new Map<boolean, CurveRow[]>();
+  for (const side of [true, false]) sideRows.set(side, games.filter((g) => (g[0] <= g[1]) === side).map((g) => ({ x: logit(favProb(g[0], g[1])), w: weight(g), m: side ? g[2] - g[3] : g[3] - g[2] })));
+  const cache = new Map<string, Curve | null>();
+  const curve: CurveFn = (side, key, test) => {
+    const id = `${side}:${key}`;
+    if (!cache.has(id)) cache.set(id, fitCurve(sideRows.get(side)!.map((r) => ({ x: r.x, w: r.w, y: test(r.m) ? 1 : 0 }))));
+    return cache.get(id)!;
+  };
   return (odds: Odds, o: Partial<JudgeOptions> = {}): JudgeOutput | null =>
-    judgeWith(games, weight, check, odds, { ...defaults, ...o });
+    judgeWith(games, weight, check, sideRows, curve, odds, { ...defaults, ...o });
 }
+
+interface CurveRow { x: number; w: number; m: number }
+type CurveFn = (side: boolean, key: string, test: (m: number) => boolean) => Curve | null;
 
 // 승패 배당 → 마진 뺀 정배 승 확률
 const favProb = (h: number, a: number) => (1 / Math.min(h, a)) / (1 / h + 1 / a);
 
-function judgeWith(games: Game[], weight: (g: Game) => number, oddsCheck: ReturnType<typeof oddsHistory<'home' | 'away'>>, odds: Odds, opts: JudgeOptions): JudgeOutput | null {
+function judgeWith(games: Game[], weight: (g: Game) => number, oddsCheck: ReturnType<typeof oddsHistory<'home' | 'away'>>, sideRows: Map<boolean, CurveRow[]>, curve: CurveFn, odds: Odds, opts: JudgeOptions): JudgeOutput | null {
   const { home: h, away: a } = odds;
   if (!h || !a) return null;
   const fav = Math.min(h, a);
@@ -112,6 +130,16 @@ function judgeWith(games: Game[], weight: (g: Game) => number, oddsCheck: Return
   const W = (r: { w: number }) => r.w;
   const stat3 = (res: (m: number) => 1 | 0 | -1) => weightedStat(FM, W, (r) => res(r.m));
   const expMargin = weightedMean(FM, W, (r) => r.m);
+  // 곡선: 같은 쪽 정배 과거 경기 전체로 "정배 확률 → 이 결과가 나올 확률" 로지스틱을 맞추고 이 경기 자리 값을 읽는다 (oddsCurve.ts)
+  const all = sideRows.get(favIsHome)!;
+  const x0 = logit(favProb(h, a));
+  const at = (key: string, test: (m: number) => boolean) => curve(favIsHome, key, test)?.at(x0) ?? { p: 0, se: 0 };
+  const curveStat3 = (L: number, minus: boolean) => {
+    const over = at(`>${L}`, (m) => m > L), under = at(`<${L}`, (m) => m < L);
+    const pp = Number.isInteger(L) ? Math.max(0, 1 - over.p - under.p) : 0; // 정수 기준점만 적특
+    const r = minus ? over : under;
+    return { n: all.length, pw: Number.isInteger(L) ? r.p : (minus ? over.p : 1 - over.p), pp, se: r.se || over.se };
+  };
 
   const zone = opts.hcapZone?.[favIsHome ? 'home' : 'away'];
   const mhOff = zone?.mhBelow != null && fav >= zone.mhBelow;
@@ -145,10 +173,12 @@ function judgeWith(games: Game[], weight: (g: Game) => number, oddsCheck: Return
   // — 비교 경기 비율을 그대로 쓰면 아주 강한 정배처럼 드문 경기에서 비교 경기가 약한 정배까지 넓어져 역배 승을 부풀린다
   const favRes = (m: number): 1 | -1 => (m > 0 ? 1 : -1);
   const base = stat3(favRes);
-  const pFav = opts.winAnchor ? Math.min(0.995, Math.max(0.005, favProb(h, a) + shrinkFactor(FM.map((r) => r.w)) * weightedMean(FM, W, (r) => (r.m > 0 ? 1 : 0) - r.pf))) : base.pw;
+  const cw = opts.curveWin ? at('win', (m) => m > 0) : null;
+  const pFav = cw ? cw.p : opts.winAnchor ? Math.min(0.995, Math.max(0.005, favProb(h, a) + shrinkFactor(FM.map((r) => r.w)) * weightedMean(FM, W, (r) => (r.m > 0 ? 1 : 0) - r.pf))) : base.pw;
   const seAt = (p: number) => (base.pw * (1 - base.pw) ? base.se * Math.sqrt((p * (1 - p)) / (base.pw * (1 - base.pw))) : base.se);
-  const favStat = { n: base.n, pw: pFav, pp: 0, se: seAt(pFav) };
-  const dogStat = { n: base.n, pw: 1 - pFav, pp: 0, se: seAt(1 - pFav) };
+  const wn = cw ? all.length : base.n, wse = cw ? cw.se : seAt(pFav);
+  const favStat = { n: wn, pw: pFav, pp: 0, se: wse };
+  const dogStat = { n: wn, pw: 1 - pFav, pp: 0, se: cw ? cw.se : seAt(1 - pFav) };
   add('home', odds.home, favIsHome ? favStat : dogStat);
   add('away', odds.away, favIsHome ? dogStat : favStat);
 
@@ -159,8 +189,8 @@ function judgeWith(games: Game[], weight: (g: Game) => number, oddsCheck: Return
     [odds.line3, 'mh3', 'ph3', odds.mh3, odds.ph3],
   ] as const) {
     if (L == null || L < 0) continue;
-    add(mk, mo ?? null, stat3((m) => (m > L ? 1 : m === L ? 0 : -1)));
-    add(pk, po ?? null, stat3((m) => (m < L ? 1 : m === L ? 0 : -1)));
+    add(mk, mo ?? null, opts.curveHcap ? curveStat3(L, true) : stat3((m) => (m > L ? 1 : m === L ? 0 : -1)));
+    add(pk, po ?? null, opts.curveHcap ? curveStat3(L, false) : stat3((m) => (m < L ? 1 : m === L ? 0 : -1)));
   }
 
   const recommended = bets.filter((b) => b.strength > 0).sort((x, y) => y.strength - x.strength || y.ev - x.ev);
