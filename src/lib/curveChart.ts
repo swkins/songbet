@@ -2,6 +2,7 @@
 // x = 정배 배당, 선 = 곡선 값, 점 = 그 배당대(0.05 단위) 실제 값 (점 크기 = 경기 수). 홈정배/원정정배 따로.
 import { cleanGames, type Game as BasketGame } from './basketJudge';
 import type { Game as VolleyGame } from './volleyJudge';
+import { cleanGames as cleanSoccer, type Game as SoccerGame } from './soccerJudge';
 import { fitMargin } from './marginCurve';
 import { fitCurve, logit } from './oddsCurve';
 import { recentSeasons, seasonWeigher, weightedMean } from './seasonWeight';
@@ -10,16 +11,16 @@ export interface CurveSide { curve: { x: number; y: number }[]; dots: { x: numbe
 export interface CurveMarket { key: string; label: string; unit: '점' | '%'; home: CurveSide; away: CurveSide }
 export interface CurveChartData { markets: CurveMarket[] }
 
-type G = readonly [number, number, number, number, number?];
+type G = readonly [number, number, number, number, number?, ...number[]];
 const favProb = (h: number, a: number) => (1 / Math.min(h, a)) / (1 / h + 1 / a);
 const STEP = 0.05;
 
 // 곡선을 그릴 정배 배당 범위와, 정배 배당만으로 x(마진 뺀 정배 확률의 logit)를 잡기 위한 리그 평균 마진
-function axis(games: readonly G[], side: boolean) {
+function axis(games: readonly G[], side: boolean, overround = (g: G) => 1 / g[0] + 1 / g[1] - 1) {
   const favs = games.filter((g) => (g[0] <= g[1]) === side).map((g) => Math.min(g[0], g[1])).sort((p, q) => p - q);
   const q = (t: number) => favs[Math.min(favs.length - 1, Math.floor(t * favs.length))] ?? 1.5;
-  const lo = Math.max(1.02, Math.floor(q(0.01) * 50) / 50), hi = Math.min(2.2, Math.ceil(q(0.99) * 50) / 50);
-  const over = games.reduce((s, g) => s + 1 / g[0] + 1 / g[1] - 1, 0) / Math.max(1, games.length);
+  const lo = Math.max(1.02, Math.floor(q(0.01) * 50) / 50), hi = Math.min(3.0, Math.ceil(q(0.99) * 50) / 50);
+  const over = games.reduce((s, g) => s + overround(g), 0) / Math.max(1, games.length);
   const xs: number[] = [];
   for (let f = lo; f <= hi + 1e-9; f += 0.02) xs.push(Math.round(f * 100) / 100);
   return { xs, toX: (f: number) => logit(Math.min(0.995, (1 / f) / (1 + over))) };
@@ -65,4 +66,24 @@ export function volleyCurves(raw: VolleyGame[]): CurveChartData {
     return { n: rows.length, curve: c ? xs.map((f) => ({ x: f, y: Math.round(c.at(toX(f)).p * 1000) / 10 })) : [], dots: dotsOf(rows, (r) => (hit(r.fs, r.us) ? 1 : 0), 100) };
   };
   return { markets: VOLLEY_MARKETS.map((m) => ({ key: m.key, label: m.label, unit: '%', home: side(true, m.hit), away: side(false, m.hit) })) };
+}
+
+// 축구: 역배 +1.5·+2.5 적중률 곡선 (판정기 ±1.5·±2.5와 같은 곡선 — x = 승무패 마진 뺀 정배 확률). 정배 -L은 100%에서 뺀 값
+const SOCCER_MARKETS: { key: string; label: string; L: number }[] = [
+  { key: 'p15', label: '역배 +1.5', L: 1.5 },
+  { key: 'p25', label: '역배 +2.5', L: 2.5 },
+];
+
+export function soccerCurves(raw: SoccerGame[]): CurveChartData {
+  const games = recentSeasons(cleanSoccer(raw));
+  const weight = seasonWeigher(games);
+  const pf = (g: SoccerGame) => { const s = 1 / g[0] + 1 / g[5] + 1 / g[1]; return 1 / Math.min(g[0], g[1]) / s; };
+  const over3 = (g: G) => 1 / g[0] + 1 / g[1] + 1 / (g[5] as number) - 1;
+  const side = (home: boolean, L: number): CurveSide => {
+    const rows = games.filter((g) => (g[0] <= g[1]) === home).map((g) => ({ x: logit(pf(g)), w: weight(g), m: home ? g[2] - g[3] : g[3] - g[2], fav: Math.min(g[0], g[1]) }));
+    const c = fitCurve(rows.map((r) => ({ x: r.x, w: r.w, y: r.m > L ? 1 : 0 })));
+    const { xs, toX } = axis(games, home, over3);
+    return { n: rows.length, curve: c ? xs.map((f) => ({ x: f, y: Math.round((1 - c.at(toX(f)).p) * 1000) / 10 })) : [], dots: dotsOf(rows, (r) => (r.m < L ? 1 : 0), 100) };
+  };
+  return { markets: SOCCER_MARKETS.map((m) => ({ key: m.key, label: m.label, unit: '%', home: side(true, m.L), away: side(false, m.L) })) };
 }

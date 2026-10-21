@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ComposedChart, Line, Scatter, XAxis, YAxis, ZAxis, CartesianGrid, Tooltip, ReferenceLine, ResponsiveContainer } from 'recharts'
-import { basketCurves, volleyCurves, type CurveChartData } from '../lib/curveChart'
+import { basketCurves, soccerCurves, volleyCurves, type CurveChartData } from '../lib/curveChart'
 import type { Odds as VolleyOdds, Game as VolleyGame } from '../lib/volleyJudge'
 import { cleanGames, type Game as BasketGame, type Odds as BasketOdds } from '../lib/basketJudge'
 import { latestSeason, MAX_SEASONS, recentSeasons, seasonSummary, seasonWeigher } from '../lib/seasonWeight'
@@ -254,7 +254,7 @@ function basketLeague(key: string, label: string, note: string, judge: BasketJud
 
 function soccerLeague(key: string, label: string, note: string, judge: SoccerJudgeFn, games: SoccerGame[], ouZone?: OuZone): LeagueJudge {
   return {
-    key, label, note, fields: soccerFields(ouZone), perRow: 3, recNote: SOCCER_REC, profile: () => soccerProfile(games), data: () => seasonSummary(cleanSoccer(games)),
+    key, label, note, fields: soccerFields(ouZone), perRow: 3, recNote: SOCCER_REC, profile: () => soccerProfile(games), data: () => seasonSummary(cleanSoccer(games)), curves: once(() => soccerCurves(games)),
     run: v => judge({
       home: v.home, draw: v.draw, away: v.away, h05: v.h05, a05: v.a05, h15: v.h15, a15: v.a15, h25: v.h25, a25: v.a25, o25: v.o25, u25: v.u25,
     }),
