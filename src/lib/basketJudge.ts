@@ -82,6 +82,12 @@ export interface JudgeOptions {
   // 승 적중률 = 예전 비교 경기 비율과 곡선의 반반 (사용자 요청). 3시즌 같은 경기 비교(Brier×1만, 예전 대비): 곡선만은 NBA -9.0·유로리그 -43.8·
   // B.LEAGUE -12.7로 좋지만 CBA +16.1(3시즌 모두 예전이 나음)·NBL +11.9, 반반은 6개 리그 모두 예전보다 나쁘지 않음 (NBA -6.4·유로 -28.4·B.LEAGUE -9.0·CBA +0.8)
   winCurveShare: number; // 0 = 예전 비율만, 1 = 곡선만
+  // 승 비교 경기 = 같은 쪽 정배, 정배 배당 ±winBand 안 (1.40 → 1.32~1.48), 가까울수록 크게 (삼각 가중). 경기 수를 채우려고 넓히지 않는다 (사용자 요청:
+  // 예전엔 200경기를 채우려고 KBL 원정 1.10에 1.01~1.50까지 봤다). 3시즌 백테스트(반반 섞은 승 확률): Brier 예전 0.1949 · ±0.03 0.1964 · ±0.05 0.1957 ·
+  // ±0.08 0.1952 · ±0.10 0.1951, 승 추천 리그(CBA·B.LEAGUE·NBL) 수익 예전 66건 +14.1% → ±0.08 94건 +19.6% (CBA +14.3→+16.9%, B.LEAGUE +13.9→+22.0%)
+  // null이면 예전처럼 최소 경기 수(minMarketN)까지 넓힘
+  winBand: number | null;
+  winTri: boolean; // 범위 안에서 넣은 배당과 가까울수록 크게 (false면 범위 안 모두 같게)
   hcapZone: { home?: { mhBelow?: number; phFrom?: number }; away?: { mhBelow?: number; phFrom?: number } } | null;
 }
 // 농구 승 추천 기준 — 리그별 3시즌 백테스트(각 시즌을 이전 시즌으로만 판정, 평균배당)로 정함:
@@ -97,7 +103,7 @@ export function cleanGames(games: Game[]): Game[] {
 export function createJudge(rawGames: Game[], base: Partial<JudgeOptions> = {}) {
   const games = recentSeasons(cleanGames(rawGames)); // 최근 5시즌만
   const weight = seasonWeigher(games);
-  const defaults: JudgeOptions = { minOdds: 1.3, maxOdds: 3.0, minMarketN: 200, winMaxOdds: 1.75, winSeasonShare: 0.6, winAnchor: false, winOff: false, curveHcap: true, winCurveShare: 0.5, hcapZone: null, ...base };
+  const defaults: JudgeOptions = { minOdds: 1.3, maxOdds: 3.0, minMarketN: 200, winMaxOdds: 1.75, winSeasonShare: 0.6, winAnchor: false, winOff: false, curveHcap: true, winCurveShare: 0.5, winBand: 0.08, winTri: true, hcapZone: null, ...base };
   const check = oddsHistory<'home' | 'away'>(games.map((g) => ({ odds: { home: g[0], away: g[1] }, won: { home: g[2] > g[3], away: g[3] > g[2] }, w: weight(g), season: g[4] })));
   // 곡선용: 같은 쪽 정배 과거 경기 전체 (모든 정배 배당대) — x = logit(정배 확률), m = 정배 기준 점수차
   const sideRows = new Map<boolean, CurveRow[]>();
@@ -182,11 +188,16 @@ function judgeWith(games: Game[], weight: (g: Game) => number, oddsCheck: Return
   // 승 적중률은 시장 확률 기준: 이 경기 정배 승 확률 + 비교 경기에서 정배가 시장보다 얼마나 더/덜 이겼나 (표본 작을수록 줄임)
   // — 비교 경기 비율을 그대로 쓰면 아주 강한 정배처럼 드문 경기에서 비교 경기가 약한 정배까지 넓어져 역배 승을 부풀린다
   const favRes = (m: number): 1 | -1 => (m > 0 ? 1 : -1);
-  const base = stat3(favRes);
+  const wb = opts.winBand;
+  const near = wb == null ? null : same.filter((g) => Math.abs(Math.min(g[0], g[1]) - fav) <= wb + 1e-9).map((g) => ({
+    m: g[0] <= g[1] ? g[2] - g[3] : g[3] - g[2],
+    w: weight(g) * (opts.winTri ? Math.max(0.05, 1 - Math.abs(Math.min(g[0], g[1]) - fav) / (wb + 0.005)) : 1),
+  }));
+  const base = near ? weightedStat(near, W, (r) => favRes(r.m)) : stat3(favRes);
   const cw = opts.winCurveShare > 0 ? at('win', (m) => m > 0) : null;
   const pOld = opts.winAnchor ? Math.min(0.995, Math.max(0.005, favProb(h, a) + shrinkFactor(FM.map((r) => r.w)) * weightedMean(FM, W, (r) => (r.m > 0 ? 1 : 0) - r.pf))) : base.pw;
-  const k = cw ? opts.winCurveShare : 0;
-  const pFav = cw ? k * cw.p + (1 - k) * pOld : pOld;
+  const k = cw ? (base.n ? opts.winCurveShare : 1) : 0; // 범위 안 경기가 없으면 곡선만
+  const pFav = Math.min(0.995, Math.max(0.005, cw ? k * cw.p + (1 - k) * pOld : pOld));
   const seAt = (p: number) => (base.pw * (1 - base.pw) ? base.se * Math.sqrt((p * (1 - p)) / (base.pw * (1 - base.pw))) : base.se);
   // 오차도 두 방식을 같은 비율로 섞는다
   const seMix = (p: number) => (cw ? k * cw.se + (1 - k) * seAt(p) : seAt(p));
