@@ -1,5 +1,6 @@
 import { betStrength, EV_FLOOR } from './judgeScore';
 import { oddsHistory, shrinkFactor, winGate, type OddsCheck } from './oddsCheck';
+import { fitCurve, logit, type Curve } from './oddsCurve';
 import { recentSeasons, seasonWeigher, weightedMean, weightedStat } from './seasonWeight';
 
 // [홈배당, 원정배당, 홈골, 원정골, 시즌(끝나는 해), 무배당] — 앞 5칸은 배구·농구와 같은 순서라 시즌 가중치(seasonWeight.ts)를 그대로 쓴다
@@ -98,13 +99,24 @@ export function createJudge(rawGames: Game[], base: Partial<JudgeOptions> = {}) 
   const rows = games.map((g, i) => ({ g, p: P[i], w: weight(g), favHome: g[0] <= g[1] }));
   const defaults: JudgeOptions = { minOdds: 1.3, maxOdds: 3.0, winMaxOdds: 1.55, winSeasonShare: 0.6, plusGate: true, sampleN: 200, ...base };
   const check = soccerOddsHistory(games, weight);
+  // ±1.5·±2.5 핸디 곡선: 같은 쪽 정배 과거 경기 전체(모든 배당대)로 "정배 확률(승무패 마진 뺀 값) → 정배 골차 > c" 로지스틱 (oddsCurve.ts)
+  const cache = new Map<string, Curve | null>();
+  const curve: GoalCurve = (side, c) => {
+    const id = `${side}:${c}`;
+    if (!cache.has(id)) {
+      const rs = rows.filter((r) => r.favHome === side);
+      cache.set(id, fitCurve(rs.map((r) => ({ x: logit(side ? r.p[0] : r.p[2]), w: r.w, y: (side ? r.g[2] - r.g[3] : r.g[3] - r.g[2]) > c ? 1 : 0 }))));
+    }
+    return cache.get(id)!;
+  };
   return (odds: Odds, o: Partial<JudgeOptions> = {}): JudgeOutput | null =>
-    judgeWith(rows, sd, check, odds, { ...defaults, ...o });
+    judgeWith(rows, sd, check, curve, odds, { ...defaults, ...o });
 }
 
 type Row = { g: Game; p: [number, number, number]; w: number; favHome: boolean };
+type GoalCurve = (favHome: boolean, c: number) => Curve | null;
 
-function judgeWith(rows: Row[], sd: number[], oddsCheck: ReturnType<typeof soccerOddsHistory>, odds: Odds, opts: JudgeOptions): JudgeOutput | null {
+function judgeWith(rows: Row[], sd: number[], oddsCheck: ReturnType<typeof soccerOddsHistory>, curve: GoalCurve, odds: Odds, opts: JudgeOptions): JudgeOutput | null {
   const { home: h, draw: d, away: a } = odds;
   if (!h || !d || !a) return null;
   const fav = Math.min(h, a);
@@ -142,9 +154,9 @@ function judgeWith(rows: Row[], sd: number[], oddsCheck: ReturnType<typeof socce
     const hit = sel.reduce((x, r) => x + ((side === 'h' ? r.g[2] - r.g[3] : r.g[3] - r.g[2]) > -L ? r.w : 0), 0) / sw;
     return { n: sel.length, hit };
   };
-  const add = (key: BetKey, name: string, site: number | null, test: (r: R) => boolean, market?: [number, number, number], checkKind?: OutcomeKind, plus?: { side: 'h' | 'a'; L: number }) => {
+  const add = (key: BetKey, name: string, site: number | null, test: (r: R) => boolean, market?: [number, number, number], checkKind?: OutcomeKind, plus?: { side: 'h' | 'a'; L: number }, fixed?: { n: number; pw: number; se: number }) => {
     if (!site) return; // 안 넣은 배당은 판정하지 않는다
-    let s = stat(test);
+    let s = fixed ? { ...stat(test), ...fixed } : stat(test);
     if (market && s.n) {
       const mp = (p: number[]) => market[0] * p[0] + market[1] * p[1] + market[2] * p[2];
       const pw = Math.min(0.995, Math.max(0.005, mp(q) + shrink * weightedMean(F, W, (r) => (test(r) ? 1 : 0) - mp(r.p))));
@@ -196,7 +208,16 @@ function judgeWith(rows: Row[], sd: number[], oddsCheck: ReturnType<typeof socce
       const market: [number, number, number] | undefined = L === 0.5 ? (isMinus ? win : (oppWin.map((v) => 1 - v) as [number, number, number])) : undefined;
       // -0.5는 그 팀 승과 같은 결과라 그 쪽 승 배당의 같은 배당대 실적도 확인한다
       const checkKind: OutcomeKind | undefined = L === 0.5 && isMinus ? (side === 'h' ? 'home' : 'away') : undefined;
-      add(`${side}${sfx}` as BetKey, name, odds[`${side}${sfx}` as BetKey], (r) => (isMinus ? sideMargin(r) > L : sideMargin(r) > -L), market, checkKind, isMinus ? undefined : { side, L });
+      // ±1.5·±2.5는 곡선: 이 팀 기준 골차 > ±L을 정배 기준 골차로 바꿔 읽는다 (정배 팀이면 m > c, 역배 팀이면 m < -c = 1 - (m > -c), 반 골 기준점이라 같을 수 없음)
+      let fixed: { n: number; pw: number; se: number } | undefined;
+      if (L !== 0.5) {
+        const c = isMinus ? L : -L; // 이 팀 골차 > c
+        const isFav = (side === 'h') === favIsHome;
+        const cv = curve(favIsHome, isFav ? c : -c);
+        const at = cv?.at(logit(q[favIsHome ? 0 : 2]));
+        if (at) fixed = { n: rows.filter((r) => r.favHome === favIsHome).length, pw: isFav ? at.p : 1 - at.p, se: at.se };
+      }
+      add(`${side}${sfx}` as BetKey, name, odds[`${side}${sfx}` as BetKey], (r) => (isMinus ? sideMargin(r) > L : sideMargin(r) > -L), market, checkKind, isMinus ? undefined : { side, L }, fixed);
     }
   }
   add('o25', '2.5 오버', odds.o25, (r) => r.t > 2.5);
