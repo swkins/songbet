@@ -62,7 +62,7 @@ interface JudgeOut {
   fav: number; favIsHome: boolean; margin: number; marketN: number
   minusHome?: boolean  // 축구: 사이트가 핸디 마이너스를 준 쪽이 홈인지
   expMargin?: number  // 농구·축구: 표본의 정배 평균 점수차(골차)
-  band?: { lo: number; hi: number }  // 배구: 비교한 정배 배당 구간 (같은 쪽 정배, 0.1 단위)
+  band?: { lo: number; hi: number }; bandN?: number  // 배구: 넣은 정배 배당의 0.1 구간과 그 구간 실제 경기 수 (판정은 전 배당대 곡선)
   bets: JudgeBet[]; recommended: JudgeBet[]; leastLoss: JudgeBet | null
 }
 // kind: 'odds' = 배당(3자리 → 1.23, 다음 칸 이동) / 'line' = 농구 기준점(그대로 입력, 예: 5.5)
@@ -463,7 +463,7 @@ export default function BetAnalysisPanel({ tabs, active = true }: { tabs: ReactN
                   style={{ display: 'flex', gap: 14, flexWrap: 'wrap', fontSize: 11, color: 'var(--text-secondary)', marginBottom: 8 }}>
                   <span>정배 <b style={{ color: 'var(--text-primary)' }}>{out.favIsHome ? '홈' : '원정'} {out.fav.toFixed(2)}</b></span>
                   <span>마진 <b style={{ color: out.margin <= 0.05 ? 'var(--green)' : 'var(--orange)' }}>{pct(out.margin)}</b></span>
-                  {out.band && <span>비교 <b style={{ color: 'var(--text-primary)' }}>{out.favIsHome ? '홈' : '원정'}정배 {out.band.lo.toFixed(2)}~{out.band.hi.toFixed(2)}</b> · <b style={{ color: out.marketN < 30 ? 'var(--orange)' : 'var(--text-primary)' }}>{out.marketN}경기</b></span>}
+                  {out.band && <span title="같은 쪽 정배 과거 경기를 모든 배당대로 배당-적중률 곡선을 맞추고, 넣은 배당 자리 값을 읽는다">곡선 <b style={{ color: 'var(--text-primary)' }}>{out.favIsHome ? '홈' : '원정'}정배 전 배당대 {out.marketN}경기</b> · {out.band.lo.toFixed(2)}~{out.band.hi.toFixed(2)} 실제 <b style={{ color: 'var(--text-primary)' }}>{out.bandN}경기</b></span>}
                   {vals.o25 != null && vals.u25 != null && <span>2.5 오버/언더 마진 <b style={{ color: 1 / vals.o25 + 1 / vals.u25 - 1 <= 0.05 ? 'var(--green)' : 'var(--orange)' }}>{pct(1 / vals.o25 + 1 / vals.u25 - 1)}</b></span>}
                 </div>
 
