@@ -79,8 +79,9 @@ export interface JudgeOptions {
   // 핸디 적중률 = 배당-적중률 곡선 (같은 쪽 정배 전 배당대 경기로 기준점마다 로지스틱, oddsCurve.ts). 3시즌 백테스트(이전 시즌으로만, 반점 기준점
   // 0.5~24.5 중 시장 예상 점수차 ±6) Brier: 예전 비교 경기 비율 0.2396 → 곡선 0.2377, 6개 리그 모두 개선 (2차 곡선 0.2379)
   curveHcap: boolean;
-  // 승은 곡선을 안 쓴다 — Brier는 0.1957 → 0.1949로 조금 좋았지만 NBL·CBA는 나빠졌고, 승 추천 수익이 CBA +14.3%→+9.9%, NBA·KBL도 나빠짐
-  curveWin: boolean;
+  // 승 적중률 = 예전 비교 경기 비율과 곡선의 반반 (사용자 요청). 3시즌 같은 경기 비교(Brier×1만, 예전 대비): 곡선만은 NBA -9.0·유로리그 -43.8·
+  // B.LEAGUE -12.7로 좋지만 CBA +16.1(3시즌 모두 예전이 나음)·NBL +11.9, 반반은 6개 리그 모두 예전보다 나쁘지 않음 (NBA -6.4·유로 -28.4·B.LEAGUE -9.0·CBA +0.8)
+  winCurveShare: number; // 0 = 예전 비율만, 1 = 곡선만
   hcapZone: { home?: { mhBelow?: number; phFrom?: number }; away?: { mhBelow?: number; phFrom?: number } } | null;
 }
 // 농구 승 추천 기준 — 리그별 3시즌 백테스트(각 시즌을 이전 시즌으로만 판정, 평균배당)로 정함:
@@ -96,7 +97,7 @@ export function cleanGames(games: Game[]): Game[] {
 export function createJudge(rawGames: Game[], base: Partial<JudgeOptions> = {}) {
   const games = recentSeasons(cleanGames(rawGames)); // 최근 5시즌만
   const weight = seasonWeigher(games);
-  const defaults: JudgeOptions = { minOdds: 1.3, maxOdds: 3.0, minMarketN: 200, winMaxOdds: 1.75, winSeasonShare: 0.6, winAnchor: false, winOff: false, curveHcap: true, curveWin: false, hcapZone: null, ...base };
+  const defaults: JudgeOptions = { minOdds: 1.3, maxOdds: 3.0, minMarketN: 200, winMaxOdds: 1.75, winSeasonShare: 0.6, winAnchor: false, winOff: false, curveHcap: true, winCurveShare: 0.5, hcapZone: null, ...base };
   const check = oddsHistory<'home' | 'away'>(games.map((g) => ({ odds: { home: g[0], away: g[1] }, won: { home: g[2] > g[3], away: g[3] > g[2] }, w: weight(g), season: g[4] })));
   // 곡선용: 같은 쪽 정배 과거 경기 전체 (모든 정배 배당대) — x = logit(정배 확률), m = 정배 기준 점수차
   const sideRows = new Map<boolean, CurveRow[]>();
@@ -182,12 +183,15 @@ function judgeWith(games: Game[], weight: (g: Game) => number, oddsCheck: Return
   // — 비교 경기 비율을 그대로 쓰면 아주 강한 정배처럼 드문 경기에서 비교 경기가 약한 정배까지 넓어져 역배 승을 부풀린다
   const favRes = (m: number): 1 | -1 => (m > 0 ? 1 : -1);
   const base = stat3(favRes);
-  const cw = opts.curveWin ? at('win', (m) => m > 0) : null;
-  const pFav = cw ? cw.p : opts.winAnchor ? Math.min(0.995, Math.max(0.005, favProb(h, a) + shrinkFactor(FM.map((r) => r.w)) * weightedMean(FM, W, (r) => (r.m > 0 ? 1 : 0) - r.pf))) : base.pw;
+  const cw = opts.winCurveShare > 0 ? at('win', (m) => m > 0) : null;
+  const pOld = opts.winAnchor ? Math.min(0.995, Math.max(0.005, favProb(h, a) + shrinkFactor(FM.map((r) => r.w)) * weightedMean(FM, W, (r) => (r.m > 0 ? 1 : 0) - r.pf))) : base.pw;
+  const k = cw ? opts.winCurveShare : 0;
+  const pFav = cw ? k * cw.p + (1 - k) * pOld : pOld;
   const seAt = (p: number) => (base.pw * (1 - base.pw) ? base.se * Math.sqrt((p * (1 - p)) / (base.pw * (1 - base.pw))) : base.se);
-  const wn = cw ? all.length : base.n, wse = cw ? cw.se : seAt(pFav);
-  const favStat = { n: wn, pw: pFav, pp: 0, se: wse };
-  const dogStat = { n: wn, pw: 1 - pFav, pp: 0, se: cw ? cw.se : seAt(1 - pFav) };
+  // 오차도 두 방식을 같은 비율로 섞는다
+  const seMix = (p: number) => (cw ? k * cw.se + (1 - k) * seAt(p) : seAt(p));
+  const favStat = { n: base.n, pw: pFav, pp: 0, se: seMix(pFav) };
+  const dogStat = { n: base.n, pw: 1 - pFav, pp: 0, se: seMix(1 - pFav) };
   add('home', odds.home, favIsHome ? favStat : dogStat);
   add('away', odds.away, favIsHome ? dogStat : favStat);
 
