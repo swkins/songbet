@@ -42,6 +42,7 @@ export interface JudgeOutput {
   margin: number; // 승패 배당 마진
   marketN: number; // 핸디캡 표본 경기 수
   expMargin: number; // 표본에서 정배 평균 점수차
+  curveMargin: number; // 전 배당대 곡선으로 본 이 배당의 정배 평균 점수차 (같은 쪽 정배 과거 경기 전체에 '정배 확률 → 점수차' 직선)
   bets: BetResult[];
   recommended: BetResult[]; // EV>0 & eligible, EV 내림차순
   leastLoss: BetResult | null; // 전부 마이너스일 때 가장 덜 잃는 쪽
@@ -100,6 +101,14 @@ export function createJudge(rawGames: Game[], base: Partial<JudgeOptions> = {}) 
   // 곡선용: 같은 쪽 정배 과거 경기 전체 (모든 정배 배당대) — x = logit(정배 확률), m = 정배 기준 점수차
   const sideRows = new Map<boolean, CurveRow[]>();
   for (const side of [true, false]) sideRows.set(side, games.filter((g) => (g[0] <= g[1]) === side).map((g) => ({ x: logit(favProb(g[0], g[1])), w: weight(g), m: side ? g[2] - g[3] : g[3] - g[2] })));
+  // 평균 점수차 곡선 (사용자 제안): 기준점과 비교해서 갈만한지 보는 참고값. 판정에 쓰면 기준점별 곡선과 Brier가 같아서(0.2375 vs 0.2377) 표시만
+  const marginLine = new Map<boolean, (x: number) => number>();
+  for (const side of [true, false]) {
+    let sw = 0, sx = 0, sy = 0, sxx = 0, sxy = 0;
+    for (const r of sideRows.get(side)!) { sw += r.w; sx += r.w * r.x; sy += r.w * r.m; sxx += r.w * r.x * r.x; sxy += r.w * r.x * r.m; }
+    const b = sw ? (sw * sxy - sx * sy) / (sw * sxx - sx * sx || 1) : 0, a0 = sw ? (sy - b * sx) / sw : 0;
+    marginLine.set(side, (x) => a0 + b * x);
+  }
   const cache = new Map<string, Curve | null>();
   const curve: CurveFn = (side, key, test) => {
     const id = `${side}:${key}`;
@@ -107,7 +116,7 @@ export function createJudge(rawGames: Game[], base: Partial<JudgeOptions> = {}) 
     return cache.get(id)!;
   };
   return (odds: Odds, o: Partial<JudgeOptions> = {}): JudgeOutput | null =>
-    judgeWith(games, weight, check, sideRows, curve, odds, { ...defaults, ...o });
+    judgeWith(games, weight, check, sideRows, curve, marginLine, odds, { ...defaults, ...o });
 }
 
 interface CurveRow { x: number; w: number; m: number }
@@ -116,7 +125,7 @@ type CurveFn = (side: boolean, key: string, test: (m: number) => boolean) => Cur
 // 승패 배당 → 마진 뺀 정배 승 확률
 const favProb = (h: number, a: number) => (1 / Math.min(h, a)) / (1 / h + 1 / a);
 
-function judgeWith(games: Game[], weight: (g: Game) => number, oddsCheck: ReturnType<typeof oddsHistory<'home' | 'away'>>, sideRows: Map<boolean, CurveRow[]>, curve: CurveFn, odds: Odds, opts: JudgeOptions): JudgeOutput | null {
+function judgeWith(games: Game[], weight: (g: Game) => number, oddsCheck: ReturnType<typeof oddsHistory<'home' | 'away'>>, sideRows: Map<boolean, CurveRow[]>, curve: CurveFn, marginLine: Map<boolean, (x: number) => number>, odds: Odds, opts: JudgeOptions): JudgeOutput | null {
   const { home: h, away: a } = odds;
   if (!h || !a) return null;
   const fav = Math.min(h, a);
@@ -197,7 +206,7 @@ function judgeWith(games: Game[], weight: (g: Game) => number, oddsCheck: Return
   const leastLoss = [...bets].filter((b) => b.eligible).sort((x, y) => y.ev - x.ev)[0] ?? null;
 
   return {
-    fav, favIsHome, margin: 1 / h + 1 / a - 1, marketN: mk.length, expMargin,
+    fav, favIsHome, margin: 1 / h + 1 / a - 1, marketN: mk.length, expMargin, curveMargin: marginLine.get(favIsHome)!(logit(favProb(h, a))),
     bets, recommended, leastLoss,
   };
 }
