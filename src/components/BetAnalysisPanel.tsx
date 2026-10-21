@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ComposedChart, Line, Scatter, XAxis, YAxis, ZAxis, CartesianGrid, Tooltip, ReferenceLine, ResponsiveContainer } from 'recharts'
+import { MIN_HIT } from '../lib/judgeScore'
 import { basketCurves, soccerCurves, volleyCurves, type CurveChartData } from '../lib/curveChart'
 import type { Odds as VolleyOdds, Game as VolleyGame } from '../lib/volleyJudge'
 import { cleanGames, type Game as BasketGame, type Odds as BasketOdds } from '../lib/basketJudge'
@@ -129,12 +130,13 @@ const BASKET_FIELDS: OddsField[] = [
 
 // 승무패는 사이트 순서대로 홈 승 → 무 → 원정 승, 그다음 홈/원정 핸디캡을 기준점마다 짝으로
 // 축구 핸디 칸은 승무패 세 배당을 다 넣은 뒤, 정배 배당에 맞는 기준점만 보여준다 (사용자 요청)
-//  정배 1.39 이하 → 2.5·1.5 핸디 / 1.40~1.79 → 1.5 핸디 / 1.80 이상 → 0.5 핸디
+//  정배 1.39 이하 → 2.5 핸디 (+ 그 리그 판정기로 정배 -1.5 적중률이 50% 이상이면 정배 쪽 -1.5 칸도) / 1.40~1.79 → 1.5 핸디 / 1.80 이상 → 0.5 핸디
+//  강정배 -1.5 칸 (사용자 요청): 정배 -1.5가 50%를 넘는 건 정배 1.35 미만뿐 (19개 리그: 1.15 미만 75% · 1.15~1.24 58% · 1.25~1.34 52% · 1.35~1.44 45%)이라,
+//  리그마다 판정기에 승무패를 넣어 정배 -1.5 적중률이 MIN_HIT 이상일 때만 칸을 보여준다
 const soccerFav = (v: Record<string, number | null>) => v.home != null && v.draw != null && v.away != null ? Math.min(v.home, v.away) : null
 const SOCCER_LINE_SHOW: Record<number, (fav: number) => boolean> = {
   2.5: fav => fav < 1.4,
-  // 1.5는 강정배(1.40 미만)에도 보인다 — 정배 -1.5가 50%를 넘는 건 정배 1.35 미만뿐 (19개 리그: 1.15 미만 75% · 1.15~1.24 58% · 1.25~1.34 52% · 1.35~1.44 45%), 사용자 요청으로 2.5 플핸과 나란히 비교
-  1.5: fav => fav < 1.8,
+  1.5: fav => fav >= 1.4 && fav < 1.8,
   0.5: fav => fav >= 1.8,
 }
 // 2.5 오버 해볼 만한 구역 (리그별 · 홈정배/원정정배 따로) — 이 구역일 때만 2.5 오버·언더 칸을 보여준다 (언더 배당은 마진 확인용)
@@ -147,8 +149,18 @@ const inOuZone = (zone: OuZone | undefined, v: Record<string, number | null>) =>
   const r = zone[v.home <= v.away ? 'home' : 'away']
   return !!r && fav < (r.favMax ?? 99) && v.draw >= (r.drawMin ?? 0) && v.draw < (r.drawMax ?? 99)
 }
-const soccerFields = (zone?: OuZone): OddsField[] => [
-  ...SOCCER_FIELDS,
+const soccerFields = (zone?: OuZone, m15ok?: (v: Record<string, number | null>) => boolean): OddsField[] => [
+  ...SOCCER_FIELDS.map(f => f.line !== 1.5 ? f : {
+    ...f,
+    // 강정배(1.40 미만)면 정배 쪽 -1.5 칸만, 그 리그에서 -1.5가 갈만할 때만
+    showIf: (v: Record<string, number | null>) => {
+      const fav = soccerFav(v)
+      if (fav == null) return false
+      if (fav >= 1.4) return f.showIf!(v)
+      const favSide = v.home! <= v.away! ? 'home' : 'away'
+      return f.side === favSide && !!m15ok?.(v)
+    },
+  }),
   { key: 'o25', label: '2.5 오버', showIf: v => inOuZone(zone, v) }, { key: 'u25', label: '2.5 언더', solo: true, showIf: v => inOuZone(zone, v) },
 ]
 const SOCCER_FIELDS: OddsField[] = [
@@ -283,7 +295,12 @@ function basketLeague(key: string, label: string, note: string, judge: BasketJud
 
 function soccerLeague(key: string, label: string, note: string, judge: SoccerJudgeFn, games: SoccerGame[], ouZone?: OuZone): LeagueJudge {
   return {
-    key, label, note, fields: soccerFields(ouZone), perRow: 3, recNote: SOCCER_REC, profile: () => soccerProfile(games), data: () => seasonSummary(cleanSoccer(games)), curves: once(() => soccerCurves(games)),
+    key, label, note, fields: soccerFields(ouZone, v => {
+      // 승무패만 넣고 판정기로 정배 -1.5 적중률 확인 (0.5 핸디가 없으면 정배 쪽이 마이너스)
+      const r = judge({ home: v.home, draw: v.draw, away: v.away, h05: null, a05: null, h15: 2, a15: 2, h25: null, a25: null, o25: null, u25: null })
+      const b = r?.bets.find(x => x.key === (v.home! <= v.away! ? 'h15' : 'a15'))
+      return !!b && b.hit >= MIN_HIT
+    }), perRow: 3, recNote: SOCCER_REC, profile: () => soccerProfile(games), data: () => seasonSummary(cleanSoccer(games)), curves: once(() => soccerCurves(games)),
     run: v => judge({
       home: v.home, draw: v.draw, away: v.away, h05: v.h05, a05: v.a05, h15: v.h15, a15: v.a15, h25: v.h25, a25: v.a25, o25: v.o25, u25: v.u25,
     }),
