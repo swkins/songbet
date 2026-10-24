@@ -6,7 +6,7 @@ import Stats from './pages/Stats'
 import { supabase } from './lib/supabase'
 import { purgeOldLogs } from './lib/logger'
 import dayjs from 'dayjs'
-import { RotateCcw, ClipboardList, X, LayoutTemplate, Code2, Check, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Save, CheckSquare, Plus, Trash2, Settings, Pin, GripVertical, Percent } from 'lucide-react'
+import { RotateCcw, ClipboardList, X, LayoutTemplate, Code2, Check, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Save, CheckSquare, Plus, Trash2, Settings, Pin, GripVertical, Percent, BarChart3 } from 'lucide-react'
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'dashboard', label: '대시보드' },
@@ -525,6 +525,16 @@ export default function App() {
             ))}
           </div>
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
+
+            {/* 베팅분석 버튼 — 대시보드에 넣지 않고 새 창으로 연다 */}
+            <button onClick={() => window.open(`${window.location.pathname}?view=analysis`, '_blank')} style={{
+              background: 'transparent', border: '1px solid var(--border)',
+              borderRadius: 'var(--radius-sm)', color: 'var(--text-secondary)',
+              cursor: 'pointer', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 5,
+              fontSize: 11, fontWeight: 600, fontFamily: 'var(--font-body)', transition: 'all 0.15s',
+            }}>
+              <BarChart3 size={13} /><span className="nav-btn-label">베팅분석</span>
+            </button>
 
             {/* 마진율 계산기 버튼 */}
             <button onClick={() => { if (!showMargin) setMarginOdds(['', '', '']); setShowMargin(p => !p) }} style={{

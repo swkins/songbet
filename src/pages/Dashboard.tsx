@@ -10,6 +10,8 @@ import MiningWidget from '../components/MiningWidget'
 import DailyPnLWidget from '../components/DailyPnLWidget'
 // 베팅분석은 과거 경기 데이터가 커서 처음 고를 때만 따로 불러온다
 const BetAnalysisPanel = lazy(() => import('../components/BetAnalysisPanel'))
+// 베팅분석은 대시보드에서 숨기고 상단 '베팅분석' 버튼(새 창)으로만 연다 (사용자 요청) — 대시보드에 다시 넣으려면 true
+const ANALYSIS_IN_DASHBOARD = false
 import RulebookNotes from './RulebookNotes'
 import dayjs from 'dayjs'
 import isoWeek from 'dayjs/plugin/isoWeek'
@@ -2835,9 +2837,10 @@ export default function Dashboard() {
     try { return localStorage.getItem('songbet_dashboard_layout') === 'stacked' ? 'stacked' : 'side' } catch { return 'side' }
   })
   // 사이트 현황 자리에 보여줄 것: 'site'(사이트 현황) · 'analysis'(베팅분석) — 이 기기에 기억
-  const [sidePanel, setSidePanel] = useState<'site' | 'analysis'>(() => {
+  const [sidePanelPick, setSidePanel] = useState<'site' | 'analysis'>(() => {
     try { return localStorage.getItem('songbet_dashboard_side_panel') === 'analysis' ? 'analysis' : 'site' } catch { return 'site' }
   })
+  const sidePanel = ANALYSIS_IN_DASHBOARD ? sidePanelPick : 'site'
   // 베팅분석은 한 번 열면 계속 붙여 둔다 — 사이트 현황으로 갔다 와도 넣던 배당이 남게
   const [analysisOpened, setAnalysisOpened] = useState(sidePanel === 'analysis')
   function pickSidePanel(next: 'site' | 'analysis') {
@@ -3862,8 +3865,8 @@ export default function Dashboard() {
           ) : (
             /* 사이트 현황 / 베팅분석 — 제목 자리 버튼으로 골라서 같은 자리에 보여준다 (베팅분석은 카드 1.2장 폭) */
             <div style={{ minWidth: 0 }}>
-              <div style={{ display: sidePanel === 'site' ? undefined : 'none' }}><MiningWidget tabs={sidePanelTabs} /></div>
-              {analysisOpened && (
+              <div style={{ display: sidePanel === 'site' ? undefined : 'none' }}><MiningWidget tabs={ANALYSIS_IN_DASHBOARD ? sidePanelTabs : undefined} /></div>
+              {ANALYSIS_IN_DASHBOARD && analysisOpened && (
                 <div style={{ display: sidePanel === 'analysis' ? undefined : 'none' }}>
                   <Suspense fallback={analysisFallback(sidePanelTabs)}>
                     <BetAnalysisPanel tabs={sidePanelTabs} active={sidePanel === 'analysis'} />
@@ -3878,7 +3881,7 @@ export default function Dashboard() {
         </div>
 
         {/* ── 베팅분석 (상하 모드에서만 — 아래 줄 좌측) */}
-        {stacked && (
+        {ANALYSIS_IN_DASHBOARD && stacked && (
           <div className="dashboard-analysis">
             <Suspense fallback={analysisFallback(analysisTitle)}>
               <BetAnalysisPanel tabs={analysisTitle} />
