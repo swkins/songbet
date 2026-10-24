@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, lazy, Suspense } from 'react'
 import type { Tab, ActionLog, Todo } from './types'
 import Dashboard from './pages/Dashboard'
 import Settlement from './pages/Settlement'
@@ -6,6 +6,8 @@ import Stats from './pages/Stats'
 import { supabase } from './lib/supabase'
 import { purgeOldLogs } from './lib/logger'
 import dayjs from 'dayjs'
+// 베팅분석은 과거 경기 데이터가 커서 버튼을 처음 누를 때만 불러온다
+const BetAnalysisPanel = lazy(() => import('./components/BetAnalysisPanel'))
 import { RotateCcw, ClipboardList, X, LayoutTemplate, Code2, Check, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Save, CheckSquare, Plus, Trash2, Settings, Pin, GripVertical, Percent, BarChart3 } from 'lucide-react'
 
 const TABS: { id: Tab; label: string }[] = [
@@ -222,6 +224,9 @@ export default function App() {
   const [showLog, setShowLog] = useState(false)
   const [showTodo, setShowTodo] = useState(false)
   const [showMargin, setShowMargin] = useState(false)
+  // 베팅분석 창 (룰북처럼 모달) — 한 번 열면 닫아도 붙여 둬서 넣던 배당이 남는다
+  const [showAnalysis, setShowAnalysis] = useState(false)
+  const [analysisOpened, setAnalysisOpened] = useState(false)
   const [marginCount, setMarginCount] = useState<2 | 3>(2)
   const [marginOdds, setMarginOdds] = useState<string[]>(['', '', ''])
   const marginInputRefs = useRef<(HTMLInputElement | null)[]>([])
@@ -526,10 +531,11 @@ export default function App() {
           </div>
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
 
-            {/* 베팅분석 버튼 — 대시보드에 넣지 않고 새 창으로 연다 */}
-            <button onClick={() => window.open(`${window.location.pathname}?view=analysis`, '_blank')} style={{
-              background: 'transparent', border: '1px solid var(--border)',
-              borderRadius: 'var(--radius-sm)', color: 'var(--text-secondary)',
+            {/* 베팅분석 버튼 — 대시보드에 넣지 않고 룰북처럼 모달 창으로 연다 */}
+            <button onClick={() => { setShowAnalysis(true); setAnalysisOpened(true) }} style={{
+              background: showAnalysis ? 'var(--gold-bg)' : 'transparent',
+              border: `1px solid ${showAnalysis ? 'var(--gold-border)' : 'var(--border)'}`,
+              borderRadius: 'var(--radius-sm)', color: showAnalysis ? 'var(--gold)' : 'var(--text-secondary)',
               cursor: 'pointer', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 5,
               fontSize: 11, fontWeight: 600, fontFamily: 'var(--font-body)', transition: 'all 0.15s',
             }}>
@@ -783,6 +789,20 @@ export default function App() {
       )}
 
       
+      {/* 베팅분석 창 — 룰북과 같은 모달 */}
+      {analysisOpened && (
+        <div className="modal-overlay" style={{ display: showAnalysis ? undefined : 'none' }}>
+          <div style={{ width: '100%', maxWidth: 900, maxHeight: '92vh', overflowY: 'auto', borderRadius: 'var(--radius-lg)', boxShadow: '0 20px 60px rgba(0,0,0,0.7)' }}>
+            <Suspense fallback={<div className="card" style={{ padding: '10px 14px', color: 'var(--text-muted)', fontSize: 13 }}>불러오는 중...</div>}>
+              <BetAnalysisPanel active={showAnalysis} tabs={<>
+                <span className="card-title" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 6 }}><BarChart3 size={14} color="var(--gold)" /> 베팅분석</span>
+                <button onClick={() => setShowAnalysis(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex' }}><X size={16} /></button>
+              </>} />
+            </Suspense>
+          </div>
+        </div>
+      )}
+
       {/* 마진율 계산기 패널 — 우측 패널들(메모장/코드수정/할일/LOG)과 독립적으로 열리며, 항상 그 왼쪽에 위치 */}
       {showMargin && (
         <>

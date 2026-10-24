@@ -3,7 +3,7 @@
 ## 베팅분석 (가치판단기) 리그 데이터
 
 - 리그별 과거 경기는 `src/data/*Games.ts`, 판정기는 `src/leagues/*.ts` (배구 `src/lib/volleyJudge.ts`, 농구 `src/lib/basketJudge.ts`, 축구 `src/lib/soccerJudge.ts`), 화면 등록은 `src/components/BetAnalysisPanel.tsx`.
-- 베팅분석은 대시보드에서 숨겼다 (사용자 요청) — 상단 '마진율' 왼쪽 '베팅분석' 버튼이 새 창(`?view=analysis`, `src/pages/BetAnalysisPage.tsx`)으로 연다. 대시보드에 다시 넣어 달라고 하면 `src/pages/Dashboard.tsx`의 `ANALYSIS_IN_DASHBOARD`를 `true`로.
+- 베팅분석은 대시보드에서 숨겼다 (사용자 요청) — 상단 '마진율' 왼쪽 '베팅분석' 버튼이 룰북처럼 모달 창으로 연다 (`src/App.tsx`). 대시보드에 다시 넣어 달라고 하면 `src/pages/Dashboard.tsx`의 `ANALYSIS_IN_DASHBOARD`를 `true`로.
 - 경기 한 줄 = `[홈배당, 원정배당, 홈점수(세트), 원정점수(세트), 시즌]` — 시즌은 끝나는 해 (2025-26 → 2026). 축구는 6번째 칸에 무배당: `[홈배당, 원정배당, 홈골, 원정골, 시즌, 무배당]`.
 - 한 해 시즌 리그(J1·J2·K리그1·K리그2·MLS·브라질·중국 등)는 시즌 칸 = 그 해 (2025 시즌 → 2025), 기준 데이터 문구를 '2021 ~ 2025 시즌'처럼 쓰면 데이터 현황도 그 해로 표시된다.
 - 축구·농구·배구 모두 사용자 룰북을 판정기에 넣지 않는다 (사용자 요청 — 처음 준 룰북은 기본 가이드였을 뿐, 거기 얽매이지 말고 과거 데이터로만 판단). 예전 축구 룰북 표시(2.5·3.5 오버 기준 배당 포함)는 커밋 `77be776`까지 있었다.
