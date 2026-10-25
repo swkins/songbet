@@ -110,7 +110,7 @@ function TeamContentInput({ value, onChange, candidates, allBets: _allBets, plac
   // 리그 관리에서 등록한 팀(이 종목 전체 리그) — 한 글자만 입력해도 포함하는 팀을 리그와 함께 추천하고, 고르면 onPickTeam으로 리그까지 넘긴다
   teams?: { league: string; name: string }[]
   onPickTeam?: (name: string, league: string) => void
-  // 팀 이름을 쓰고 쉼표(,) 뒤에 한 글자만 더 쓰면 상대팀을 추천, 고르면 "팀A vs 팀B"로 채운다 (경기 자체 옵션 베팅용)
+  // 팀 이름을 쓰고 스페이스 두 번(→ " vs " 자동) 또는 쉼표(,) 뒤에 한 글자만 더 쓰면 상대팀을 추천, 고르면 "팀A vs 팀B"로 채운다 (경기 자체 옵션 베팅용)
   multiTeam?: boolean
 }) {
   const [open, setOpen] = useState(false)
@@ -154,7 +154,7 @@ function TeamContentInput({ value, onChange, candidates, allBets: _allBets, plac
     <div style={{ position: 'relative' }}>
       <input ref={ref} className="form-input inline-bet-input" placeholder={placeholder} value={value}
         autoFocus={autoFocus}
-        onChange={e => { onChange(e.target.value); setOpen(true); setHi(-1) }}
+        onChange={e => { onChange(multiTeam ? autoVs(value, e.target.value) : e.target.value); setOpen(true); setHi(-1) }}
         onDoubleClick={() => setOpen(true)}
         onBlur={() => setTimeout(() => setOpen(false), 150)}
         onKeyDown={e => {
@@ -182,13 +182,21 @@ function TeamContentInput({ value, onChange, candidates, allBets: _allBets, plac
   )
 }
 
+/** 팀 이름 칸(multiTeam): 첫 팀 뒤에 스페이스를 두 번 누르면 "팀A vs "로 바꿔 바로 다음 팀을 쓰게 한다.
+ *  아이폰 키보드는 스페이스 두 번을 ". "로 바꾸므로 그것도 같이 본다. 이미 vs가 있으면 그대로. */
+function autoVs(prev: string, next: string): string {
+  if (/ vs /i.test(next) || !next.trim()) return next
+  if (next.endsWith('  ')) return `${next.trimEnd()} vs `
+  if (next.endsWith('. ') && prev.endsWith(' ') && next.length === prev.length + 1) return `${next.slice(0, -2).trimEnd()} vs `
+  return next
+}
 /** 팀 이름 칸: 쉼표로 두 팀을 적으면("A, B") 경기 자체 옵션(2.5 오버 등) 베팅이므로 "A vs B"로 바꿔 저장 */
 function joinTeamsVs(text: string): string {
   if (!text.includes(',')) return text.trim()
   const parts = text.split(',').map(t => t.trim()).filter(Boolean)
   return parts.length >= 2 ? parts.join(' vs ') : (parts[0] ?? '')
 }
-const TEAM_INPUT_PLACEHOLDER = '팀 이름 (두 팀이면 쉼표 , 로 구분 → A vs B)'
+const TEAM_INPUT_PLACEHOLDER = '팀 이름 (두 팀이면 스페이스 두 번 → A vs B)'
 
 // 큰 금액 베팅 기준: 원화 3만원 이상, 달러 20달러 이상
 function isBigStake(stake: number, isusd: boolean): boolean {
