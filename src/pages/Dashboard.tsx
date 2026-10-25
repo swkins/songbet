@@ -247,6 +247,11 @@ function parseBetMatch(sport: string, match: string, knownOptions: string[] = []
     if (rest === opt) { knownOptionLabel = opt; rest = ''; break }
     if (rest.endsWith(' ' + opt)) { knownOptionLabel = opt; rest = rest.slice(0, -(opt.length + 1)); break }
   }
+  // 베팅옵션을 안 고르면 제출 시 "승리"가 자동으로 붙는다 — 그 종목에 "승리" 옵션이 등록 안 돼 있어도 승리로 알아본다
+  // (LOL "1세트 승리"도 아래 1b에서 세트 번호가 붙도록 먼저 벗긴다)
+  if (!knownOptionLabel && (rest === '승리' || rest.endsWith(' 승리'))) {
+    knownOptionLabel = '승리'; rest = rest === '승리' ? '' : rest.slice(0, -3).trimEnd()
+  }
   // 1b) LOL 세트 옵션("… BO3 1세트 드래곤 4.5 오버")은 세트 번호까지 옵션 배지에 붙인다
   if (sport === 'esports' && knownOptionLabel) {
     const sm = rest.match(/ (\d+세트)$/)
@@ -269,13 +274,9 @@ function parseBetMatch(sport: string, match: string, knownOptions: string[] = []
     else if (rest === 'BO5') { boSuffix = 'BO5'; rest = '' }
   }
 
-  // 베팅옵션을 안 고르면 제출 시 "승리"가 자동으로 붙는다 — 그 종목에 "승리" 옵션이 등록 안 돼 있어도 승리로 알아본다
-  if (!knownOptionLabel && (rest === '승리' || rest.endsWith(' 승리'))) {
-    knownOptionLabel = '승리'; rest = rest === '승리' ? '' : rest.slice(0, -3).trimEnd()
-  }
 
   if (knownOptionLabel) {
-    return { team: (rest || raw).trim(), side, boTag: boSuffix, optionLabel: knownOptionLabel, accent: knownOptionLabel === '승리' ? 'gold' : 'purple' }
+    return { team: (rest || raw).trim(), side, boTag: boSuffix, optionLabel: knownOptionLabel, accent: /(^| )승리$/.test(knownOptionLabel) ? 'gold' : 'purple' }
   }
 
   // 3) 등록된 옵션이 아니면(과거 데이터 등) 기존 종목별 패턴(숫자 핸디캡/BO태그)으로 폴백
@@ -327,7 +328,8 @@ function mergeLolOptions(map: Record<string, string[]>): Record<string, string[]
 }
 
 /* LOL 베팅옵션 칩 — 위 줄은 BO1/BO3/BO5 옵션, "N세트" 칩을 누르면 아래 줄에 세트 세부옵션(드래곤 4.5 오버 등)이 열리고
-   세부옵션을 고르면 "1세트 드래곤 4.5 오버"처럼 세트와 합쳐진 라벨이 선택된다. */
+   세부옵션을 고르면 "1세트 드래곤 4.5 오버"처럼 세트와 합쳐진 라벨이 선택된다.
+   세부옵션 맨 앞에는 늘 "승리"가 있고, 세트만 고르고 세부옵션을 안 고르면 "1세트 승리"로 친다. */
 function LolOptionChips({ options, numericOptions, setOptions, numericSetOptions, selected, onSelect, onManage, onManageSet, oddsRef }: {
   options: string[]; numericOptions: string[]; setOptions: string[]; numericSetOptions: string[]; selected: string[]
   onSelect: (labels: string[]) => void
@@ -336,12 +338,13 @@ function LolOptionChips({ options, numericOptions, setOptions, numericSetOptions
 }) {
   const selSet = selected[0]?.match(/^(\d+세트) (.+)$/)
   const [openSet, setOpenSet] = useState<string | null>(selSet?.[1] ?? null)
+  const subOptions = ['승리', ...setOptions.filter(o => o !== '승리')]
   return (
     <>
       <BetOptionChips options={options} numericOptions={numericOptions} selected={openSet ? [openSet] : selected}
         onSelect={labels => {
           const l = labels[0]
-          if (l && isLolSetChip(l)) { setOpenSet(l); onSelect([]) }
+          if (l && isLolSetChip(l)) { setOpenSet(l); onSelect([`${l} 승리`]) }
           else { setOpenSet(null); onSelect(labels) }
         }}
         onManage={onManage} oddsRef={oddsRef} />
@@ -349,9 +352,9 @@ function LolOptionChips({ options, numericOptions, setOptions, numericSetOptions
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6, paddingLeft: 8, borderLeft: '2px solid var(--gold-border)' }}>
           <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--gold)', whiteSpace: 'nowrap', marginTop: 10 }}>{openSet}</span>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <BetOptionChips options={setOptions} numericOptions={numericSetOptions}
-              selected={selSet && selSet[1] === openSet ? [selSet[2]] : []}
-              onSelect={labels => onSelect(labels.length ? [`${openSet} ${labels[0]}`] : [])}
+            <BetOptionChips options={subOptions} numericOptions={numericSetOptions}
+              selected={selSet && selSet[1] === openSet ? [selSet[2]] : ['승리']}
+              onSelect={labels => onSelect([`${openSet} ${labels[0] ?? '승리'}`])}
               onManage={onManageSet} oddsRef={oddsRef} />
           </div>
         </div>
