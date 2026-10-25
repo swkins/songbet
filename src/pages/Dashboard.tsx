@@ -224,7 +224,8 @@ function parseBetMatch(sport: string, match: string, knownOptions: string[] = []
     let setTag = ''
     if (sport === 'esports') { const sm = r.match(/ (\d+세트)$/); if (sm) { setTag = sm[1] + ' '; r = r.slice(0, -sm[0].length).trimEnd() } }
     if (sport === 'esports' && !side) {
-      if (r.endsWith(' BO3')) { boTag = 'BO3'; r = r.slice(0, -4).trimEnd() }
+      if (r.endsWith(' BO1')) { boTag = 'BO1'; r = r.slice(0, -4).trimEnd() }
+      else if (r.endsWith(' BO3')) { boTag = 'BO3'; r = r.slice(0, -4).trimEnd() }
       else if (r.endsWith(' BO5')) { boTag = 'BO5'; r = r.slice(0, -4).trimEnd() }
     }
     return { team: r || raw, side, boTag, optionLabel: setTag + numericOptionDisplay(tpl, v), optionText: text, accent: 'purple' }
@@ -249,11 +250,13 @@ function parseBetMatch(sport: string, match: string, knownOptions: string[] = []
   else if (rest.endsWith(' 원정')) { side = '원정'; rest = rest.slice(0, -3).trimEnd() }
   else if (rest === '홈') { side = '홈'; rest = '' }
   else if (rest === '원정') { side = '원정'; rest = '' }
-  // 2b) LOL(esports)은 베팅추가에서 홈/원정 대신 BO3/BO5를 고르므로 그 접미어도 벗겨낸다(괄호 없는 새 포맷).
+  // 2b) LOL(esports)은 베팅추가에서 홈/원정 대신 BO1/BO3/BO5를 고르므로 그 접미어도 벗겨낸다(괄호 없는 새 포맷).
   let boSuffix: string | undefined
   if (sport === 'esports' && !side) {
-    if (rest.endsWith(' BO3')) { boSuffix = 'BO3'; rest = rest.slice(0, -4).trimEnd() }
+    if (rest.endsWith(' BO1')) { boSuffix = 'BO1'; rest = rest.slice(0, -4).trimEnd() }
+    else if (rest.endsWith(' BO3')) { boSuffix = 'BO3'; rest = rest.slice(0, -4).trimEnd() }
     else if (rest.endsWith(' BO5')) { boSuffix = 'BO5'; rest = rest.slice(0, -4).trimEnd() }
+    else if (rest === 'BO1') { boSuffix = 'BO1'; rest = '' }
     else if (rest === 'BO3') { boSuffix = 'BO3'; rest = '' }
     else if (rest === 'BO5') { boSuffix = 'BO5'; rest = '' }
   }
@@ -295,7 +298,7 @@ function parseBetMatch(sport: string, match: string, knownOptions: string[] = []
       if (setOver) return { team, side, boTag: bo, optionLabel: `${num} 세트오버`, accent: 'orange' }
       return { team, side, boTag: bo, optionLabel: `${num} 핸디`, accent: num.startsWith('-') ? 'red' : 'purple' }
     }
-    // 괄호 없는 새 포맷(BO3/BO5는 위 2b에서 이미 벗겨냄) — 팀 이름만 남았으면 승리, 아니면 원문 그대로
+    // 괄호 없는 새 포맷(BO1/BO3/BO5는 위 2b에서 이미 벗겨냄) — 팀 이름만 남았으면 승리, 아니면 원문 그대로
     if (boSuffix || side) return { team: s, side, boTag: boSuffix, optionLabel: '승리', accent: 'gold' }
     return null
   }
@@ -306,16 +309,16 @@ function parseBetMatch(sport: string, match: string, knownOptions: string[] = []
 
 // 베팅옵션 칩 한 줄 — 일반 옵션은 눌러서 단일선택(다시 누르면 해제), 세부 수치 입력 옵션은
 // 누르면 숫자 입력창이 뜨고 확정하면 "{값} {템플릿}" 형태로 합쳐진 라벨이 선택된다.
-// LOL 베팅옵션은 BO3/BO5별 목록(esports_bo3 / esports_bo5)과 세트 세부옵션(esports_set)으로 따로 관리한다.
+// LOL 베팅옵션은 BO1/BO3/BO5별 목록(esports_bo1 / esports_bo3 / esports_bo5)과 세트 세부옵션(esports_set)으로 따로 관리한다.
 // 표시·통계용으로는 예전 'esports' 목록과 합쳐서 하나로 본다 ("1세트" 같은 세트 칩 자체는 옵션이 아니라 세부옵션을 여는 버튼이라 제외).
-const LOL_OPTION_KEYS = ['esports', 'esports_bo3', 'esports_bo5', 'esports_set']
+const LOL_OPTION_KEYS = ['esports', 'esports_bo1', 'esports_bo3', 'esports_bo5', 'esports_set']
 const isLolSetChip = (label: string) => /^\d+세트$/.test(label)
 function mergeLolOptions(map: Record<string, string[]>): Record<string, string[]> {
   const merged = Array.from(new Set(LOL_OPTION_KEYS.flatMap(k => map[k] ?? []))).filter(l => !isLolSetChip(l))
   return { ...map, esports: merged }
 }
 
-/* LOL 베팅옵션 칩 — 위 줄은 BO3/BO5 옵션, "N세트" 칩을 누르면 아래 줄에 세트 세부옵션(드래곤 4.5 오버 등)이 열리고
+/* LOL 베팅옵션 칩 — 위 줄은 BO1/BO3/BO5 옵션, "N세트" 칩을 누르면 아래 줄에 세트 세부옵션(드래곤 4.5 오버 등)이 열리고
    세부옵션을 고르면 "1세트 드래곤 4.5 오버"처럼 세트와 합쳐진 라벨이 선택된다. */
 function LolOptionChips({ options, numericOptions, setOptions, numericSetOptions, selected, onSelect, onManage, onManageSet, oddsRef }: {
   options: string[]; numericOptions: string[]; setOptions: string[]; numericSetOptions: string[]; selected: string[]
@@ -1178,11 +1181,11 @@ function InlineBetEditForm({ bet, site, onClose, onSave, baseballOverrides, socc
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [content])
 
-  // LOL(esports)은 홈/원정 대신 BO3/BO5를 고른다 — 같은 버튼, 종목에 따라 순환 목록만 다름.
+  // LOL(esports)은 홈/원정 대신 BO1/BO3/BO5를 고른다 — 같은 버튼, 종목에 따라 순환 목록만 다름.
   function cycleSide() {
-    if (sport === 'esports') setSide(prev => prev === '' ? 'BO3' : prev === 'BO3' ? 'BO5' : '')
+    if (sport === 'esports') setSide(prev => prev === '' ? 'BO1' : prev === 'BO1' ? 'BO3' : prev === 'BO3' ? 'BO5' : '')
     else setSide(prev => prev === '' ? '홈' : prev === '홈' ? '원정' : '')
-    // 베팅옵션 칩처럼, 홈/원정(BO3/BO5)을 고르면 바로 배당을 입력할 수 있게 배당칸으로 커서 이동
+    // 베팅옵션 칩처럼, 홈/원정(BO1/BO3/BO5)을 고르면 바로 배당을 입력할 수 있게 배당칸으로 커서 이동
     oddsRef.current?.focus()
   }
   function handleOdds(raw: string) {
@@ -2193,13 +2196,13 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, betOptionStakesBySpor
   const [content, setContent]   = useState('')
   // 홈/원정 — 베팅 내용 우측 토글. 없음 → 홈 → 원정 → 없음 순으로 클릭할 때마다 바뀌고,
   // 베팅 내용 텍스트에는 섞지 않고 버튼 자체에 "홈"/"원정"으로 표시만 한다. 제출할 때만 내용 뒤에 합쳐진다.
-  // LOL(esports)은 홈/원정 개념이 없으므로 같은 버튼이 BO3/BO5를 순환하도록 바뀐다.
+  // LOL(esports)은 홈/원정 개념이 없으므로 같은 버튼이 BO1/BO3/BO5를 순환하도록 바뀐다.
   const [side, setSide] = useState<string>('')
   function cycleSide() {
-    // LOL은 BO3/BO5마다 베팅옵션 목록이 달라서, 바꾸면 고른 옵션도 해제
-    if (sport === 'esports') { setSide(prev => prev === '' ? 'BO3' : prev === 'BO3' ? 'BO5' : ''); setSelectedOptions([]) }
+    // LOL은 BO1/BO3/BO5마다 베팅옵션 목록이 달라서, 바꾸면 고른 옵션도 해제
+    if (sport === 'esports') { setSide(prev => prev === '' ? 'BO1' : prev === 'BO1' ? 'BO3' : prev === 'BO3' ? 'BO5' : ''); setSelectedOptions([]) }
     else setSide(prev => prev === '' ? '홈' : prev === '홈' ? '원정' : '')
-    // 베팅옵션 칩처럼, 홈/원정(BO3/BO5)을 고르면 바로 배당을 입력할 수 있게 배당칸으로 커서 이동
+    // 베팅옵션 칩처럼, 홈/원정(BO1/BO3/BO5)을 고르면 바로 배당을 입력할 수 있게 배당칸으로 커서 이동
     oddsRef.current?.focus()
   }
   // 베팅옵션 — 종목별로 따로 관리되는 자유 등록 옵션 목록(예: "1.5 핸디").
@@ -2207,8 +2210,8 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, betOptionStakesBySpor
   // 추가/수정/삭제/순서변경은 실수로 지우는 걸 막기 위해 "옵션 관리" 모달에서만 가능.
   const [optionsManagerOpen, setOptionsManagerOpen] = useState(false)
   const [selectedOptions, setSelectedOptions] = useState<string[]>([])
-  // 옵션 목록 키 — LOL은 BO3/BO5를 골라야 그에 맞는 목록이 나오고(안 고르면 옵션 없음), 나머지 종목은 종목 그대로
-  const optKey: string | null = sport === 'esports' ? (side === 'BO3' ? 'esports_bo3' : side === 'BO5' ? 'esports_bo5' : null) : sport
+  // 옵션 목록 키 — LOL은 BO1/BO3/BO5를 골라야 그에 맞는 목록이 나오고(안 고르면 옵션 없음), 나머지 종목은 종목 그대로
+  const optKey: string | null = sport === 'esports' ? (side === 'BO1' ? 'esports_bo1' : side === 'BO3' ? 'esports_bo3' : side === 'BO5' ? 'esports_bo5' : null) : sport
   const betOptions = optKey ? betOptionsBySport[optKey] ?? [] : []
   const numericBetOptions = optKey ? numericBetOptionsBySport[optKey] ?? [] : []
   const [lolSetManagerOpen, setLolSetManagerOpen] = useState(false)
@@ -2566,7 +2569,7 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, betOptionStakesBySpor
         />
       )}
       {mode === 'single' && sport === 'esports' && !optKey && (
-        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4 }}>BO3 / BO5를 먼저 고르면 그에 맞는 베팅옵션이 나옵니다</div>
+        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4 }}>BO1 / BO3 / BO5를 먼저 고르면 그에 맞는 베팅옵션이 나옵니다</div>
       )}
       {mode === 'single' && sport === 'esports' && optKey && (
         <LolOptionChips key={optKey} options={betOptions} numericOptions={numericBetOptions}
@@ -2907,7 +2910,7 @@ export default function Dashboard() {
   const [numericBetOptionsBySport, setNumericBetOptionsBySport] = useState<Record<string, string[]>>({})
   // 옵션별 기본 베팅금액 (베팅옵션 관리에서 설정) — sport → label → 금액
   const [betOptionStakesBySport, setBetOptionStakesBySport] = useState<Record<string, Record<string, number>>>({})
-  // 표시·수정용: LOL은 BO3/BO5/세트 세부옵션 목록까지 합친 목록으로 배지를 알아본다
+  // 표시·수정용: LOL은 BO1/BO3/BO5/세트 세부옵션 목록까지 합친 목록으로 배지를 알아본다
   const displayOptionsBySport = useMemo(() => mergeLolOptions(betOptionsBySport), [betOptionsBySport])
   const displayNumericBySport = useMemo(() => mergeLolOptions(numericBetOptionsBySport), [numericBetOptionsBySport])
   // 축구/야구/농구/배구/LOL — 리그/팀 직접 등록 후 자동완성으로 선택하는 방식 (자유입력 대신)
