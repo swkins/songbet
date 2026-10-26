@@ -236,7 +236,7 @@ function parseBetMatch(sport: string, match: string, knownOptions: string[] = []
       else if (r.endsWith(' BO3')) { boTag = 'BO3'; r = r.slice(0, -4).trimEnd() }
       else if (r.endsWith(' BO5')) { boTag = 'BO5'; r = r.slice(0, -4).trimEnd() }
     }
-    return { team: r || raw, side, boTag, optionLabel: setTag + numericOptionDisplay(tpl, v), optionText: text, accent: 'purple' }
+    return { team: r || raw, side, boTag, optionLabel: setTag + numericOptionDisplay(tpl, v), optionText: setTag + text, accent: 'purple' }
   }
   // 1) 등록된 베팅옵션 라벨을 뒤에서부터 벗겨낸다 (여러 개 중 가장 긴 것부터 매치해 오탐 최소화).
   //    베팅추가 화면에서 홈/원정·옵션을 고르면 "팀이름 홈 1.5 핸디"처럼 뒤에 그대로 합쳐져 저장되기 때문에,
@@ -1270,8 +1270,17 @@ function InlineBetEditForm({ bet, site, onClose, onSave, baseballOverrides, socc
           onRenameTeam={RENAME_TEAM_BY_SPORT[sport]}
         />
       )}
-      <BetOptionChips options={betOptions} numericOptions={numericBetOptions} selected={selectedOptions}
-        onSelect={setSelectedOptions} onManage={() => setOptionsManagerOpen(true)} oddsRef={oddsRef} />
+      {sport === 'esports' ? (
+        // LOL은 베팅추가처럼 세트 칩 → 세트 세부옵션으로 고른다 (그래야 "1세트 32분 오버"를 고쳐도 세트가 안 빠진다)
+        <LolOptionChips key={side} options={/^BO\d$/.test(side) ? betOptionsBySport[`esports_${side.toLowerCase()}`] ?? [] : betOptions}
+          numericOptions={/^BO\d$/.test(side) ? numericBetOptionsBySport[`esports_${side.toLowerCase()}`] ?? [] : numericBetOptions}
+          setOptions={betOptionsBySport['esports_set'] ?? []} numericSetOptions={numericBetOptionsBySport['esports_set'] ?? []}
+          selected={selectedOptions} onSelect={setSelectedOptions}
+          onManage={() => setOptionsManagerOpen(true)} onManageSet={() => setOptionsManagerOpen(true)} oddsRef={oddsRef} />
+      ) : (
+        <BetOptionChips options={betOptions} numericOptions={numericBetOptions} selected={selectedOptions}
+          onSelect={setSelectedOptions} onManage={() => setOptionsManagerOpen(true)} oddsRef={oddsRef} />
+      )}
       {optionsManagerOpen && (
         <BetOptionsManagerModal sportLabel={SPORTS.find(s => s.value === sport)?.label ?? sport} betOptions={betOptions} numericOptions={numericBetOptions} onClose={() => setOptionsManagerOpen(false)}
           onAddBetOption={(label, numeric) => onAddBetOption(sport, label, numeric)}
