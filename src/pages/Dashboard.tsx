@@ -568,7 +568,7 @@ function BetBadgeRow({ sport, match, live, knownOptions = [], numericOptions = [
   )
 }
 
-// 진행중 베팅 전용 — 단폴: 팀 이름 + 홈/원정 + BO태그는 한 줄, 베팅옵션은 그 아래 줄로 분리(stacked=true, 기본값).
+// 진행중 베팅 전용 — 단폴: 팀 이름 + 홈/원정·BO태그(우측)는 한 줄, 베팅옵션은 그 아래 줄, 배당은 또 그 아래(stacked=true, 기본값).
 // 두폴(다리별): 한 줄에 다 표시(stacked=false) — 다리 수가 많아 세로로 길어지는 걸 막기 위함.
 // 베팅옵션도 홈/원정과 같은 뱃지(알약) 스타일로 표시 — 평문 글씨 대신 통일된 배지 톤을 유지한다.
 // "승리"(일반승/moneyline)도 다른 옵션과 똑같이 배지로 표시한다.
@@ -590,12 +590,18 @@ function BetMatchLine({ sport, match, fontSize = 15, teamColor, live, stacked = 
     )
   }
   return (
-    <span style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap', flex: 1, minWidth: 0 }}>
-      <span style={{ fontSize, fontWeight: 700, color: teamColor ?? 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{team}</span>
-      {parts?.side && <MatchBadge label={sideBadgeLabel(parts.side)} accent={parts.side === '홈' ? 'blue' : 'orange'} />}
-      {showOption && <MatchBadge label={parts.optionLabel} accent={parts.accent} />}
-      {parts?.boTag && <MatchBadge label={parts.boTag} accent="neutral" />}
-      {live && <MatchBadge label="LIVE" accent="red" />}
+    <span style={{ display: 'flex', flexDirection: 'column', gap: 3, flex: 1, minWidth: 0 }}>
+      <span style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
+        <span style={{ fontSize, fontWeight: 700, color: teamColor ?? 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{team}</span>
+        {parts?.side && <MatchBadge label={sideBadgeLabel(parts.side)} accent={parts.side === '홈' ? 'blue' : 'orange'} />}
+        {parts?.boTag && <MatchBadge label={parts.boTag} accent="neutral" />}
+        {live && <MatchBadge label="LIVE" accent="red" />}
+      </span>
+      {showOption && (
+        <span style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap', minWidth: 0 }}>
+          <MatchBadge label={parts.optionLabel} accent={parts.accent} />
+        </span>
+      )}
     </span>
   )
 }
@@ -4227,7 +4233,7 @@ export default function Dashboard() {
                                       <span style={{ fontSize: 18, lineHeight: 1, flexShrink: 0, width: 22, textAlign: 'center', marginTop: 1 }}>{sportGlyph(bet.sport) ?? SPORT_SHORT[bet.sport] ?? '📋'}</span>
                                       <BetMatchLine sport={bet.sport} match={bet.match} live={bet.is_live} knownOptions={displayOptionsBySport[bet.sport] ?? []} numericOptions={displayNumericBySport[bet.sport] ?? []} />
                                     </div>
-                                    <div style={{ paddingLeft: 26, marginTop: 2 }}>
+                                    <div style={{ paddingLeft: 26, marginTop: 4 }}>
                                       <BetOddsStakeLine odds={bet.odds} stake={bet.stake} prefix={pfx} suffix={sfx} big={isBigStake(bet.stake, isusd)} mock={bet.is_mock} />
                                     </div>
                                   </div>
