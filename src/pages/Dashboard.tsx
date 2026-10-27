@@ -99,7 +99,7 @@ function suggestLeague(sport: string, content: string, baseballOverrides: League
 }
 
 /* ── 경기 내용 입력창: 팀 이름 자동완성(제거됨) + 빈칸 클릭 시 "베팅관리"에서 체크한 빠른 선택 목록 ── */
-function TeamContentInput({ value, onChange, candidates, allBets: _allBets, placeholder, inputRef, autoFocus, onEnter, quickPicks, teams, onPickTeam, multiTeam }: {
+function TeamContentInput({ value, onChange, candidates, allBets: _allBets, placeholder, inputRef, autoFocus, onEnter, quickPicks, teams, onPickTeam, multiTeam, currentSport }: {
   value: string; onChange: (v: string) => void
   candidates: TeamCandidate[]; allBets: BetLite[]
   placeholder: string
@@ -107,9 +107,11 @@ function TeamContentInput({ value, onChange, candidates, allBets: _allBets, plac
   autoFocus?: boolean
   onEnter?: () => void
   quickPicks?: string[]
-  // 리그 관리에서 등록한 팀(이 종목 전체 리그) — 한 글자만 입력해도 포함하는 팀을 리그와 함께 추천하고, 고르면 onPickTeam으로 리그까지 넘긴다
-  teams?: { league: string; name: string }[]
-  onPickTeam?: (name: string, league: string) => void
+  // 리그 관리에서 등록한 팀(모든 종목 공용) — 한 글자만 입력해도 포함하는 팀을 리그와 함께 추천하고, 고르면 onPickTeam으로 리그·종목까지 넘긴다
+  teams?: { league: string; name: string; sport?: string }[]
+  onPickTeam?: (name: string, league: string, sport?: string) => void
+  // 지금 고른 종목 — 이 종목 팀을 먼저 보여주고, 다른 종목 팀은 종목 표시를 붙인다
+  currentSport?: string
   // 팀 이름을 쓰고 스페이스 두 번(→ " vs " 자동) 또는 쉼표(,) 뒤에 한 글자만 더 쓰면 상대팀을 추천, 고르면 "팀A vs 팀B"로 채운다 (경기 자체 옵션 베팅용)
   multiTeam?: boolean
 }) {
@@ -132,21 +134,23 @@ function TeamContentInput({ value, onChange, candidates, allBets: _allBets, plac
   }
   const teamItems = teams?.length && q
     ? teams.filter(t => t.name.toLowerCase().includes(q))
-        .sort((a, b) => Number(!a.name.toLowerCase().startsWith(q)) - Number(!b.name.toLowerCase().startsWith(q)) || a.name.localeCompare(b.name, 'ko'))
+        .sort((a, b) => Number(!a.name.toLowerCase().startsWith(q)) - Number(!b.name.toLowerCase().startsWith(q))
+          || Number(!!currentSport && a.sport !== currentSport) - Number(!!currentSport && b.sport !== currentSport)
+          || a.name.localeCompare(b.name, 'ko'))
         .slice(0, 10)
     : []
   const quickItems: string[] = quickPicks?.length
     ? (value.trim() ? quickPicks.filter(q => q.includes(value.trim())) : quickPicks)
     : []
-  type Item = { key: string; label: string; league?: string }
+  type Item = { key: string; label: string; league?: string; sport?: string }
   const suggestions: Item[] = [
-    ...teamItems.map(t => ({ key: `t:${t.league}:${t.name}`, label: t.name, league: t.league })),
+    ...teamItems.map(t => ({ key: `t:${t.sport ?? ''}:${t.league}:${t.name}`, label: t.name, league: t.league, sport: t.sport })),
     ...quickItems.map(qp => ({ key: `q:${qp}`, label: qp })),
   ]
 
   function pick(item: Item) {
     onChange(teamPrefix && item.league !== undefined ? teamPrefix + item.label : item.label)
-    if (item.league !== undefined && !teamPrefix) onPickTeam?.(item.label, item.league)
+    if (item.league !== undefined && !teamPrefix) onPickTeam?.(item.label, item.league, item.sport)
     setOpen(false); setHi(-1)
   }
 
@@ -173,7 +177,7 @@ function TeamContentInput({ value, onChange, candidates, allBets: _allBets, plac
               style={{ padding: '6px 9px', fontSize: 11, cursor: 'pointer', fontWeight: i === hi ? 700 : 500, display: 'flex', justifyContent: 'space-between', gap: 8,
                 background: i === hi ? 'var(--gold-bg)' : 'transparent', color: i === hi ? 'var(--gold)' : 'var(--text-primary)' }}>
               <span>{s.label}</span>
-              {s.league && <span style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 600, flexShrink: 0 }}>{s.league}</span>}
+              {(s.league || (s.sport && s.sport !== currentSport)) && <span style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 600, flexShrink: 0 }}>{s.sport && s.sport !== currentSport ? `${SPORT_SHORT[s.sport] ?? ''} ${SPORTS.find(x => x.value === s.sport)?.label ?? s.sport} · ` : ''}{s.league}</span>}
             </div>
           ))}
         </div>
@@ -1171,9 +1175,12 @@ function InlineBetEditForm({ bet, site, onClose, onSave, baseballOverrides, socc
     soccer: onRenameSoccerTeam, baseball: onRenameBaseballTeam, basketball: onRenameBasketballTeam, volleyball: onRenameVolleyballTeam, esports: onRenameEsportsTeam,
   }
   const sportTeams = TEAMS_BY_SPORT[sport] ?? []
+  // 팀 이름 추천은 모든 종목 공용 — 다른 종목 팀을 고르면 그 종목으로 바꾼다
+  const allSportTeams = useMemo(() => Object.entries(TEAMS_BY_SPORT).flatMap(([sp, ts]) => (ts ?? []).map(t => ({ ...t, sport: sp }))), [soccerTeams, baseballTeams, basketballTeams, volleyballTeams, esportsTeams]) // eslint-disable-line react-hooks/exhaustive-deps
   // 자동으로 채운 리그를 기억 — 사용자가 직접 바꾼 리그는 덮어쓰지 않는다
   const autoLeagueRef = useRef('')
-  function pickTeamLeague(_name: string, league: string) {
+  function pickTeamLeague(_name: string, league: string, teamSport?: string) {
+    if (teamSport && teamSport !== sport) setSport(teamSport as typeof bet.sport)
     setLeagueInput(league); autoLeagueRef.current = league; setLeagueSuggestOpen(false)
   }
   const skipFirstTeamLeagueEffect = useRef(true)
@@ -1218,7 +1225,7 @@ function InlineBetEditForm({ bet, site, onClose, onSave, baseballOverrides, socc
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'stretch' }}>
         <div style={{ flex: '1 1 140px', minWidth: 0 }}>
           <TeamContentInput inputRef={contentRef} placeholder={TEAM_INPUT_PLACEHOLDER} value={content} onChange={setContent}
-            candidates={[]} allBets={allBetsHistory} autoFocus onEnter={submit} teams={sportTeams} onPickTeam={pickTeamLeague} multiTeam />
+            candidates={[]} allBets={allBetsHistory} autoFocus onEnter={submit} teams={allSportTeams} onPickTeam={pickTeamLeague} currentSport={sport} multiTeam />
         </div>
         <button type="button" onClick={cycleSide} style={{
           flexShrink: 0, width: 46, borderRadius: 'var(--radius-sm)', cursor: 'pointer',
@@ -2352,7 +2359,9 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, betOptionStakesBySpor
   const leagueInputSuggestions = !sportLeagueNames ? [] : trimmedLeagueInput
     ? sportLeagueNames.filter(lg => lg.toLowerCase().includes(trimmedLeagueInput.toLowerCase()) && lg !== trimmedLeagueInput).slice(0, 8)
     : leagueShowAll ? [...sportLeagueNames].sort((a, b) => a.localeCompare(b, 'ko')) : []
-  useEffect(() => { setLeagueInput(''); setLeagueSuggestOpen(false); setLeagueShowAll(false); setLeagueHighlight(-1); setLeagueOnlyMgmtOpen(false) }, [sport])
+  // 다른 종목 팀을 골라 종목이 바뀐 경우엔 그 팀의 리그를 넣는다 (종목이 바뀌면 리그칸을 비우므로 여기서 채운다)
+  const pendingLeagueRef = useRef('')
+  useEffect(() => { setLeagueInput(pendingLeagueRef.current); pendingLeagueRef.current = ''; setLeagueSuggestOpen(false); setLeagueShowAll(false); setLeagueHighlight(-1); setLeagueOnlyMgmtOpen(false) }, [sport])
   function onLeagueInputKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if (!leagueSuggestOpen || leagueInputSuggestions.length === 0) return
     if (e.key === 'ArrowDown') { e.preventDefault(); setLeagueHighlight(i => Math.min(i + 1, leagueInputSuggestions.length - 1)) }
@@ -2378,12 +2387,14 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, betOptionStakesBySpor
     soccer: onRenameSoccerTeam, baseball: onRenameBaseballTeam, basketball: onRenameBasketballTeam, volleyball: onRenameVolleyballTeam, esports: onRenameEsportsTeam,
   }
   const sportTeams = TEAMS_BY_SPORT[sport] ?? []
-  // 다폴은 종목 구분 없이(기타) 쓰므로 모든 종목에 등록된 팀에서 추천
-  const allSportTeams = useMemo(() => Object.values(TEAMS_BY_SPORT).flatMap(t => t ?? []), [soccerTeams, baseballTeams, basketballTeams, volleyballTeams, esportsTeams]) // eslint-disable-line react-hooks/exhaustive-deps
+  // 팀 이름 추천은 모든 종목 공용 (단폴·다폴 모두) — 단폴에서 다른 종목 팀을 고르면 그 종목으로 바꾼다
+  const allSportTeams = useMemo(() => Object.entries(TEAMS_BY_SPORT).flatMap(([sp, ts]) => (ts ?? []).map(t => ({ ...t, sport: sp }))), [soccerTeams, baseballTeams, basketballTeams, volleyballTeams, esportsTeams]) // eslint-disable-line react-hooks/exhaustive-deps
   // 자동으로 채운 리그를 기억 — 사용자가 직접 바꾼 리그는 덮어쓰지 않는다
   const autoLeagueRef = useRef('')
-  function pickTeamLeague(_name: string, league: string) {
-    setLeagueInput(league); autoLeagueRef.current = league; setLeagueSuggestOpen(false)
+  function pickTeamLeague(_name: string, league: string, teamSport?: string) {
+    autoLeagueRef.current = league; setLeagueSuggestOpen(false)
+    if (teamSport && teamSport !== sport) { pendingLeagueRef.current = league; setSport(teamSport); return }
+    setLeagueInput(league)
   }
   const skipFirstTeamLeagueEffect = useRef(true)
   useEffect(() => {
@@ -2466,7 +2477,7 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, betOptionStakesBySpor
         <div style={{ flex: '1 1 140px', minWidth: 0 }}>
           <TeamContentInput inputRef={contentRef} placeholder={mode === 'multi' ? `팀 이름 ${LEG_MARKS[0]} (두 팀이면 쉼표 ,)` : TEAM_INPUT_PLACEHOLDER} value={content} onChange={setContent}
             candidates={[]} allBets={allBetsHistory} autoFocus onEnter={submit} quickPicks={mode === 'multi' ? quickPicks : undefined}
-            teams={mode === 'single' ? sportTeams : allSportTeams} onPickTeam={mode === 'single' ? pickTeamLeague : undefined} multiTeam />
+            teams={allSportTeams} onPickTeam={mode === 'single' ? pickTeamLeague : undefined} currentSport={mode === 'single' ? sport : undefined} multiTeam />
         </div>
         {mode === 'single' && (
           <button type="button" onClick={cycleSide} style={{
