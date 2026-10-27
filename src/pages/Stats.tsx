@@ -644,7 +644,7 @@ function RuleStatsTable({ title, rows, extra }: { title: string; rows: RuleRow[]
 }
 
 // ─── 그외 베팅 패널 ───────────────────────────────────────────────
-function OtherBetsPanel({ bets }: { bets: Bet[] }) {
+function OtherBetsPanel({ bets, onDelete }: { bets: Bet[]; onDelete?: () => void }) {
   const settled = bets.filter(b => b.result !== 'pending')
   if (!settled.length) return null
   const s = calcStats(settled)
@@ -655,6 +655,12 @@ function OtherBetsPanel({ bets }: { bets: Bet[] }) {
         <span style={{ fontSize: 9, color: 'var(--text-muted)', background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 4, padding: '1px 6px' }}>{settled.length}건</span>
         <span style={{ fontSize: 10, fontWeight: 700, marginLeft: 'auto', color: s.roi >= 0 ? '#4ade80' : '#f87171' }}>ROI {s.roi >= 0 ? '+' : ''}{s.roi.toFixed(1)}%</span>
         <span style={{ fontSize: 10, fontWeight: 700, color: s.profit >= 0 ? '#4ade80' : '#f87171' }}>{s.profit >= 0 ? '+' : ''}{s.profit.toLocaleString()}원</span>
+        {onDelete && (
+          <button className="btn btn-ghost btn-xs" title="룰북 외 베팅 데이터 삭제" onClick={onDelete}
+            style={{ fontSize: 10, color: 'var(--red)', display: 'flex', alignItems: 'center', gap: 3, flexShrink: 0 }}>
+            <Trash2 size={11} /> 삭제
+          </button>
+        )}
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 200, overflowY: 'auto' }}>
         {settled.slice(0, 30).map(b => (
@@ -982,12 +988,16 @@ function LeagueManageModal({ leagues, onRename, onDelete, onClose }: {
 // 추적하는 베팅옵션은 위 "베팅옵션별 성적"에서 보여주고, 여기엔 그 외 베팅만 모아 보여준다.
 // 새 룰북 (사용자 요청): 홈 승리 · 원정 0.5 · 홈/원정 1.5 · 홈/원정 2.5(테스트)만 — 원정 승리·홈 0.5·2.5 오버는 뺐다
 const SOCCER_TRACKED_OPTIONS = ['홈 승리', '원정 0.5 H', '홈 1.5 H', '원정 1.5 H', '홈 2.5 H', '원정 2.5 H'] as const
-function SoccerDetailPanel({ bets, options, numericOptions }: { bets: Bet[]; options: string[]; numericOptions: string[] }) {
+// 룰북 외 베팅은 삭제 버튼으로 언제든 지울 수 있다 (사용자 요청) — 지금 보이는 룰북 외 정산 베팅만 지운다
+function SoccerDetailPanel({ bets, options, numericOptions, onDeleteRequest }: { bets: Bet[]; options: string[]; numericOptions: string[]; onDeleteRequest?: (target: DeleteTarget) => void }) {
   const settled = bets.filter(b => b.result !== 'pending')
   const tracked = new Set<string>(SOCCER_TRACKED_OPTIONS)
   const trackedIds = new Set(classifySportBetsByOption(settled, options, numericOptions)
     .filter(c => tracked.has(c.label)).flatMap(c => c.bets).map(b => b.id))
-  return <OtherBetsPanel bets={settled.filter(b => !trackedIds.has(b.id))} />
+  const otherBets = settled.filter(b => !trackedIds.has(b.id))
+  const otherIds = new Set(otherBets.map(b => b.id))
+  return <OtherBetsPanel bets={otherBets}
+    onDelete={onDeleteRequest && (() => onDeleteRequest({ label: '룰북 외', emoji: '⚽', matchFn: b => otherIds.has(b.id), keepView: true }))} />
 }
 
 // ─── 축구 핸디캡 — 리그별 (홈/원정 0.5·1.5·2.5 여섯 구간을 리그 단위로 한 표에서 비교) ────
@@ -1361,7 +1371,7 @@ function RecentSettledSection({ bets, onToggleExclude }: {
 }
 
 /* ── 데이터 삭제 대상 (종목 / 라이브 공용) ── */
-interface DeleteTarget { label: string; emoji: string; matchFn: (b: Bet) => boolean }
+interface DeleteTarget { label: string; emoji: string; matchFn: (b: Bet) => boolean; keepView?: boolean }
 
 /* ── 데이터 삭제 모달 (종목 / 라이브 공용) ── */
 function DeleteBetsModal({ target, bets, onClose, onDeleted }: {
@@ -1627,8 +1637,9 @@ function MockPanel({ bets, betOptionsBySport, numericBetOptionsBySport, onAssign
   )
 }
 
-function SportPanel({ bets, sport, onDeleteRequest, leagueOverrides, baseballLeagues, onRenameBaseballLeague, onDeleteBaseballLeague, esportsOverrides, esportsLeagues, onRenameEsportsLeague, onDeleteEsportsLeague, basketballOverrides, basketballLeagues, onRenameBasketballLeague, onDeleteBasketballLeague, volleyballOverrides, volleyballLeagues, onRenameVolleyballLeague, onDeleteVolleyballLeague, betOptions, numericBetOptions, onAssignBetOption, onExcludeBet }: {
+function SportPanel({ bets, sport, onDeleteRequest, onDeleteTargetRequest, leagueOverrides, baseballLeagues, onRenameBaseballLeague, onDeleteBaseballLeague, esportsOverrides, esportsLeagues, onRenameEsportsLeague, onDeleteEsportsLeague, basketballOverrides, basketballLeagues, onRenameBasketballLeague, onDeleteBasketballLeague, volleyballOverrides, volleyballLeagues, onRenameVolleyballLeague, onDeleteVolleyballLeague, betOptions, numericBetOptions, onAssignBetOption, onExcludeBet }: {
   bets: Bet[]; sport: typeof SPORTS[0]; onDeleteRequest: () => void
+  onDeleteTargetRequest: (target: DeleteTarget) => void
   betOptions: string[]
   numericBetOptions: string[]
   onAssignBetOption: (ids: string[], label: string) => Promise<void>
@@ -1717,7 +1728,7 @@ function SportPanel({ bets, sport, onDeleteRequest, leagueOverrides, baseballLea
           </div>
         )}
         {sport.value === 'baseball'   && <BaseballDetailPanel bets={periodBets} overrides={leagueOverrides} knownLeagues={baseballLeagues} onRenameLeague={onRenameBaseballLeague} onDeleteLeague={onDeleteBaseballLeague} />}
-        {sport.value === 'soccer'     && <SoccerDetailPanel bets={periodBets} options={betOptions} numericOptions={numericBetOptions} />}
+        {sport.value === 'soccer'     && <SoccerDetailPanel bets={periodBets} options={betOptions} numericOptions={numericBetOptions} onDeleteRequest={onDeleteTargetRequest} />}
         {sport.value === 'basketball' && <BasketballLeagueDetailPanel bets={periodBets} options={betOptions} numericOptions={numericBetOptions} overrides={basketballOverrides} knownLeagues={basketballLeagues} onRenameLeague={onRenameBasketballLeague} onDeleteLeague={onDeleteBasketballLeague} />}
         {sport.value === 'esports'    && <EsportsDetailPanel bets={periodBets} overrides={esportsOverrides} knownLeagues={esportsLeagues} onRenameLeague={onRenameEsportsLeague} onDeleteLeague={onDeleteEsportsLeague} />}
         {sport.value === 'volleyball' && <VolleyballDetailPanel bets={periodBets} options={betOptions} numericOptions={numericBetOptions} overrides={volleyballOverrides} knownLeagues={volleyballLeagues} onRenameLeague={onRenameVolleyballLeague} onDeleteLeague={onDeleteVolleyballLeague} />}
@@ -2212,6 +2223,7 @@ export default function Stats() {
               volleyballLeagues={volleyballLeagues}
               onRenameVolleyballLeague={renameVolleyballLeague}
               onDeleteVolleyballLeague={deleteVolleyballLeague}
+              onDeleteTargetRequest={setDeleteTarget}
               onDeleteRequest={() => {
                 const sp = SPORTS.find(s => s.value === activeSport)!
                 setDeleteTarget({ label: sp.label, emoji: sp.emoji, matchFn: b => b.sport === sp.value && b.parlay_group === null && !b.is_live && !b.is_mock })
@@ -2226,7 +2238,7 @@ export default function Stats() {
           target={deleteTarget}
           bets={allBets}
           onClose={() => setDeleteTarget(null)}
-          onDeleted={() => { loadBets(); setActiveSport('all') }}
+          onDeleted={() => { loadBets(); if (!deleteTarget.keepView) setActiveSport('all') }}
         />
       )}
     </div>
