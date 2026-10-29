@@ -351,7 +351,7 @@ function LolOptionChips({ options, numericOptions, setOptions, numericSetOptions
           if (l && isLolSetChip(l)) { setOpenSet(l); onSelect([`${l} 승리`]) }
           else { setOpenSet(null); onSelect(labels) }
         }}
-        onManage={onManage} oddsRef={oddsRef} />
+        onManage={onManage} oddsRef={oddsRef} halfPoint />
       {openSet && (
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6, paddingLeft: 8, borderLeft: '2px solid var(--gold-border)' }}>
           <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--gold)', whiteSpace: 'nowrap', marginTop: 10 }}>{openSet}</span>
@@ -359,7 +359,7 @@ function LolOptionChips({ options, numericOptions, setOptions, numericSetOptions
             <BetOptionChips options={subOptions} numericOptions={numericSetOptions}
               selected={selSet && selSet[1] === openSet ? [selSet[2]] : ['승리']}
               onSelect={labels => onSelect([`${openSet} ${labels[0] ?? '승리'}`])}
-              onManage={onManageSet} oddsRef={oddsRef} />
+              onManage={onManageSet} oddsRef={oddsRef} halfPoint />
           </div>
         </div>
       )}
@@ -369,7 +369,7 @@ function LolOptionChips({ options, numericOptions, setOptions, numericSetOptions
 
 function BetOptionChips({ options, numericOptions, selected, onSelect, onManage, oddsRef, halfPoint }: {
   options: string[]; numericOptions: string[]; selected: string[]
-  // 농구·배구: 적특 베팅은 안 하므로 정수만 쓰면 .5를 붙인다 (12 → 12.5, 235 언더 → 235.5 언더) — 사용자 요청
+  // 농구·배구·LOL: 적특 베팅은 안 하므로 정수만 쓰면 .5를 붙인다 (12 → 12.5, 235 언더 → 235.5 언더) — 사용자 요청
   halfPoint?: boolean
   onSelect: (labels: string[]) => void
   onManage: () => void
