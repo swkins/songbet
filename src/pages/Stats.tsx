@@ -19,7 +19,6 @@ const SPORTS: { value: Sport; label: string; emoji: string }[] = [
   { value: 'basketball', label: '농구', emoji: '🏀' },
   { value: 'volleyball', label: '배구', emoji: '🏐' },
   { value: 'esports',    label: 'LOL',  emoji: '🎮' },
-  { value: 'hockey',     label: '하키', emoji: '🏒' },
   { value: 'other',      label: '기타', emoji: '📋' },
 ]
 const MARKET_LABELS: Record<Market, string> = {
@@ -52,15 +51,19 @@ function matchesBetOptionLabel(matchText: string, label: string): boolean {
 interface OptionCell { label: string; bets: Bet[] }
 // 홈/원정을 고르지 않은 베팅은 옵션 카드에 넣지 않고 반환해서 "기타"로 보낸다 (베팅옵션별 성적엔 홈/원정 지정된 것만).
 // 단 오버/언더처럼 경기 전체에 거는 옵션은 원래 홈/원정이 없으므로 그대로 옵션 카드에 둔다.
+// LOL은 홈/원정 대신 BO를 고르므로 홈/원정 없이 옵션 카드에 두고, "기타"에서 직접 지정한 베팅(bet_option)도
+// 홈/원정이 없다고 다시 기타로 돌려보내지 않는다 (지정해도 기타에 그대로 남던 문제).
 function pushOptionCells(cells: OptionCell[], label: string, matched: Bet[]): Bet[] {
   if (matched.length === 0) { cells.push({ label, bets: [] }); return [] }
   if (/오버|언더/.test(label)) { cells.push({ label, bets: matched }); return [] }
   const home = matched.filter(b => extractSide(b.match) === '홈')
   const away = matched.filter(b => extractSide(b.match) === '원정')
+  const noSide = matched.filter(b => !extractSide(b.match))
+  const keep = noSide.filter(b => b.sport === 'esports' || b.bet_option === label)
   if (home.length) cells.push({ label: `홈 ${label}`, bets: home })
   if (away.length) cells.push({ label: `원정 ${label}`, bets: away })
-  if (!home.length && !away.length) cells.push({ label, bets: [] })
-  return matched.filter(b => !extractSide(b.match))
+  if (keep.length || (!home.length && !away.length)) cells.push({ label, bets: keep })
+  return noSide.filter(b => !keep.includes(b))
 }
 // numericOptions에 속한 템플릿(예: "포인트 오버")은 베팅추가에서 매번 다른 숫자가 입력되지만
 // 그건 어디까지나 같은 베팅옵션이므로 값에 상관없이 템플릿 이름 하나로 통합해서 집계한다
@@ -105,7 +108,6 @@ const OPTION_STATS_SPORTS: { value: Sport; label: string; emoji: string }[] = [
   { value: 'basketball', label: '농구', emoji: '🏀' },
   { value: 'volleyball', label: '배구', emoji: '🏐' },
   { value: 'esports', label: 'LOL', emoji: '🎮' },
-  { value: 'hockey', label: '하키', emoji: '🏒' },
   { value: 'other', label: '기타', emoji: '📋' },
 ]
 
@@ -284,9 +286,31 @@ function MarketTypeOverviewSection({ settled, betOptionsBySport, numericBetOptio
   )
 }
 
+// LOL 킬 오버·시간 오버는 배당이 아니라 기준점(킬 수 / 분)별로 본다 (사용자 요청)
+function lineRowsTemplate(label: string): string | null {
+  return /킬 오버|시간 오버/.test(label) ? label : null
+}
+function lineRows(list: Bet[], template: string): RuleRow[] {
+  const unit = /시간/.test(template) ? '분' : ''
+  const byLine = new Map<number, Bet[]>()
+  const noLine: Bet[] = []
+  for (const b of list) {
+    const v = extractNumericTemplateValueFromText(template, b.match)
+    if (v === null) { noLine.push(b); continue }
+    const n = Number(v)
+    byLine.set(n, [...(byLine.get(n) ?? []), b])
+  }
+  const rows: RuleRow[] = [...byLine.entries()].sort((a, b) => a[0] - b[0])
+    .map(([n, bs]) => ({ label: `${formatLine(n)}${unit}`, tier: 'none' as const, bets: bs }))
+  if (noLine.length) rows.push({ label: '기준점 없음', tier: 'none', bets: noLine })
+  return rows
+}
+
 // 베팅옵션 카드 하나 — 배당 0.1단위 구간별 고정(리그별 보기는 아래 리그×옵션 매트릭스에서).
+// 킬 오버·시간 오버만 기준점별.
 function BetOptionOddsCard({ label, bets }: { label: string; bets: Bet[] }) {
   const s = calcStats(bets)
+  const lineTemplate = lineRowsTemplate(label)
   return (
     <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, padding: '12px 14px', flex: '1 0 260px' }}>
       <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 8 }}>{label}</div>
@@ -300,7 +324,8 @@ function BetOptionOddsCard({ label, bets }: { label: string; bets: Bet[] }) {
             <span style={{ fontSize: 12, fontWeight: 800, color: s.roi >= 0 ? '#4ade80' : '#f87171' }}>{s.roi >= 0 ? '+' : ''}{s.roi.toFixed(1)}%</span>
             <span style={{ fontSize: 10, fontWeight: 700, color: s.profit >= 0 ? '#4ade80' : '#f87171' }}>{s.profit >= 0 ? '+' : ''}{s.profit.toLocaleString()}원</span>
           </div>
-          <RuleStatsRows rows={oddsBinRows(bets)} />
+          {lineTemplate && <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 4 }}>기준점별 {/시간/.test(lineTemplate) ? '(분)' : '(킬)'}</div>}
+          <RuleStatsRows rows={lineTemplate ? lineRows(bets, lineTemplate) : oddsBinRows(bets)} />
         </>
       )}
     </div>
@@ -2038,7 +2063,6 @@ export default function Stats() {
               { value: 'basketball' as const, label: '농구', emoji: '🏀', cnt: settled.filter(b => b.sport === 'basketball').length },
               { value: 'volleyball' as const, label: '배구', emoji: '🏐', cnt: settled.filter(b => b.sport === 'volleyball').length },
               { value: 'esports' as const, label: 'LOL', emoji: '🎮', cnt: settled.filter(b => b.sport === 'esports').length },
-              { value: 'hockey' as const, label: '하키', emoji: '🏒', cnt: settled.filter(b => b.sport === 'hockey').length },
               { value: 'live' as const, label: '라이브', emoji: '🔴', cnt: liveBets.filter(b => b.result !== 'pending').length },
               { value: 'mock' as const, label: '모의', emoji: '🧪', cnt: mockBets.filter(b => b.result !== 'pending').length },
             ]).map(s => (
@@ -2085,7 +2109,6 @@ export default function Stats() {
                     { value: 'baseball', label: '야구', emoji: '⚾' },
                     { value: 'basketball', label: '농구', emoji: '🏀' },
                     { value: 'volleyball', label: '배구', emoji: '🏐' },
-                    { value: 'hockey', label: '하키', emoji: '🏒' },
                     { value: 'esports', label: 'LOL', emoji: '🎮' },
                   ]).map(s => {
                     const sb = settled.filter(b => b.sport === s.value)
@@ -2126,7 +2149,6 @@ export default function Stats() {
                   { value: 'baseball' as const,    label: '야구',   color: '#e74c3c' },
                   { value: 'basketball' as const,  label: '농구',   color: '#f39c12' },
                   { value: 'volleyball' as const,  label: '배구',   color: '#9b59b6' },
-                  { value: 'hockey' as const,      label: '하키',   color: '#1abc9c' },
                   { value: 'esports' as const,     label: 'LOL',    color: '#2ecc71' },
                 ]).filter(s => settled.some(b => b.sport === s.value))
                 if (trendSports.length === 0) return null
