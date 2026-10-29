@@ -367,8 +367,10 @@ function LolOptionChips({ options, numericOptions, setOptions, numericSetOptions
   )
 }
 
-function BetOptionChips({ options, numericOptions, selected, onSelect, onManage, oddsRef }: {
+function BetOptionChips({ options, numericOptions, selected, onSelect, onManage, oddsRef, halfPoint }: {
   options: string[]; numericOptions: string[]; selected: string[]
+  // 농구·배구: 적특 베팅은 안 하므로 정수만 쓰면 .5를 붙인다 (12 → 12.5, 235 언더 → 235.5 언더) — 사용자 요청
+  halfPoint?: boolean
   onSelect: (labels: string[]) => void
   onManage: () => void
   oddsRef: React.RefObject<HTMLInputElement>
@@ -378,7 +380,8 @@ function BetOptionChips({ options, numericOptions, selected, onSelect, onManage,
   const numericSet = new Set(numericOptions)
 
   function commitNumeric(template: string) {
-    const v = draft.trim()
+    let v = draft.trim()
+    if (halfPoint && /^[+-]?\d+$/.test(v)) v = `${v}.5`
     if (v && /^[+-]?\d+(\.\d+)?$/.test(v)) { onSelect([applyNumericTemplate(template, v)]); oddsRef.current?.focus() }
     setEditingTemplate(null)
   }
@@ -1292,7 +1295,7 @@ function InlineBetEditForm({ bet, site, onClose, onSave, baseballOverrides, socc
           onManage={() => setOptionsManagerOpen(true)} onManageSet={() => setOptionsManagerOpen(true)} oddsRef={oddsRef} />
       ) : (
         <BetOptionChips options={betOptions} numericOptions={numericBetOptions} selected={selectedOptions}
-          onSelect={setSelectedOptions} onManage={() => setOptionsManagerOpen(true)} oddsRef={oddsRef} />
+          onSelect={setSelectedOptions} onManage={() => setOptionsManagerOpen(true)} oddsRef={oddsRef} halfPoint={sport === 'basketball' || sport === 'volleyball'} />
       )}
       {optionsManagerOpen && (
         <BetOptionsManagerModal sportLabel={SPORTS.find(s => s.value === sport)?.label ?? sport} betOptions={betOptions} numericOptions={numericBetOptions} onClose={() => setOptionsManagerOpen(false)}
@@ -2616,7 +2619,7 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, betOptionStakesBySpor
       )}
       {mode === 'single' && sport !== 'esports' && (
         <BetOptionChips options={betOptions} numericOptions={numericBetOptions} selected={selectedOptions}
-          onSelect={selectOptions} onManage={() => setOptionsManagerOpen(true)} oddsRef={oddsRef} />
+          onSelect={selectOptions} onManage={() => setOptionsManagerOpen(true)} oddsRef={oddsRef} halfPoint={sport === 'basketball' || sport === 'volleyball'} />
       )}
       {optionsManagerOpen && optKey && (
         <BetOptionsManagerModal sportLabel={sport === 'esports' ? `LOL ${side}` : SPORTS.find(s => s.value === sport)?.label ?? sport} betOptions={betOptions} numericOptions={numericBetOptions} onClose={() => setOptionsManagerOpen(false)}
