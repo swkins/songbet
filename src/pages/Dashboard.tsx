@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useMemo, lazy, Suspense } from 'react'
-import { supabase } from '../lib/supabase'
+import { supabase, fetchAllRows } from '../lib/supabase'
 import { logAction } from '../lib/logger'
 import type { Bet, Site, Sport, Market, BetResult, GameRolling } from '../types'
 import { inferBaseballLeague, inferSoccerLeague, inferLeagueByKeyword, buildLeagueCandidates, suggestLeagueCandidates, koCompare, type LeagueOverride, type LeagueCandidate } from '../lib/league'
@@ -2988,7 +2988,7 @@ export default function Dashboard() {
     if (data) setSites(data)
   }
   async function loadBets() {
-    const { data } = await supabase.from('bets').select('*').eq('is_hidden', false).order('bet_date', { ascending: true }).order('created_at', { ascending: true })
+    const data = await fetchAllRows<Bet>((from, to) => supabase.from('bets').select('*').eq('is_hidden', false).order('bet_date', { ascending: true }).order('created_at', { ascending: true }).order('id').range(from, to))
     if (data) setBets(data)
   }
   async function loadBetOptions() {
@@ -3079,8 +3079,8 @@ export default function Dashboard() {
     if (vb) setVolleyballOverrides(vb as LeagueOverride[])
   }
   async function loadAllBetsHistory() {
-    const { data } = await supabase.from('bets').select('sport, match, result, profit, stake, odds, bet_date, created_at, league').neq('sport', 'casino').eq('is_mock', false).order('bet_date', { ascending: false }).limit(5000)
-    if (data) setAllBetsHistory(data as BetLite[])
+    const data = await fetchAllRows<BetLite>((from, to) => supabase.from('bets').select('sport, match, result, profit, stake, odds, bet_date, created_at, league').neq('sport', 'casino').eq('is_mock', false).order('bet_date', { ascending: false }).order('id').range(from, to))
+    if (data) setAllBetsHistory(data)
   }
   // 축구/야구/농구/LOL — 등록된 리그/팀 목록 로드 (베팅추가에서 자유입력 대신 드롭다운으로 선택)
   async function loadSportTeamData() {

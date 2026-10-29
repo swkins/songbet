@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { supabase } from '../lib/supabase'
+import { supabase, fetchAllRows } from '../lib/supabase'
 import { logAction } from '../lib/logger'
 import type { Bet, Sport, Market, Site } from '../types'
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, BarChart, Bar, ResponsiveContainer, Cell, LineChart, Line, Legend } from 'recharts'
@@ -1821,7 +1821,7 @@ export default function Stats() {
     })
   }
   async function loadBets() {
-    const { data } = await supabase.from('bets').select('*').order('bet_date').order('created_at')
+    const data = await fetchAllRows<Bet>((from, to) => supabase.from('bets').select('*').order('bet_date').order('created_at').order('id').range(from, to))
     if (data) setRawBets(data)
   }
   async function loadBetOptions() {
