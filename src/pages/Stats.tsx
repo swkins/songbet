@@ -1303,11 +1303,79 @@ function EsportsDetailPanel(props: LeagueSectionProps) {
   )
 }
 
-function BasketballLeagueDetailPanel({ options, numericOptions, ...props }: LeagueSectionProps & { options: string[]; numericOptions: string[] }) {
+// 농구는 NBA·WNBA·KBL·WKBL 네 리그만, 리그마다 플핸·마핸·오버·언더 카드 네 장 (사용자 요청 — 표 대신 카드).
+// 카드 안은 기준점별 (플핸·마핸은 핸디 숫자, 오버·언더는 기준 점수).
+const BASKETBALL_LEAGUES = ['NBA', 'WNBA', 'KBL', 'WKBL'] as const
+type BasketMarket = '플핸' | '마핸' | '오버' | '언더'
+const BASKET_MARKETS: BasketMarket[] = ['플핸', '마핸', '오버', '언더']
+function basketMarketOf(b: Bet): BasketMarket | null {
+  const t = `${b.match ?? ''} ${b.pick ?? ''}`
+  if (b.market === 'over' || /오버|over/i.test(t)) return '오버'
+  if (b.market === 'under' || /언더|under/i.test(t)) return '언더'
+  if (b.market === 'handicap' || /핸디|플핸|마핸/.test(t)) {
+    if (/마핸/.test(t) || /(?:^|\s)-\s?\d/.test(b.match ?? '')) return '마핸'
+    return '플핸'
+  }
+  return null
+}
+function basketLineRows(list: Bet[]): RuleRow[] {
+  const lineOf = (b: Bet) => { const m = (b.match ?? '').match(/(\d+(?:\.\d+)?)(?!.*\d)/); return m ? Number(m[1]) : null }
+  const byLine = new Map<number, Bet[]>()
+  const noLine: Bet[] = []
+  for (const b of list) { const n = lineOf(b); if (n === null) noLine.push(b); else byLine.set(n, [...(byLine.get(n) ?? []), b]) }
+  const rows: RuleRow[] = [...byLine.entries()].sort((a, b) => a[0] - b[0]).map(([n, bs]) => ({ label: formatLine(n), tier: 'none' as const, bets: bs }))
+  if (noLine.length) rows.push({ label: '기준점 없음', tier: 'none', bets: noLine })
+  return rows
+}
+function BasketballLeagueDetailPanel({ options: _options, numericOptions: _numericOptions, ...props }: LeagueSectionProps & { options: string[]; numericOptions: string[] }) {
+  const settled = props.bets.filter(b => b.result !== 'pending')
+  const leagueOf = (b: Bet) => freeLeagueOf(b, props.overrides)
   return (
-    <div style={{ flex: 1, minWidth: 0 }}>
-      {/* 농구 오버/언더는 일단 추적하지 않음 */}
-      <LeagueOptionMatrix emoji="🏀" bets={props.bets} overrides={props.overrides} options={options.filter(o => !/오버|언더/.test(o))} numericOptions={numericOptions} />
+    <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 14 }}>
+      {BASKETBALL_LEAGUES.map(lg => {
+        const lb = settled.filter(b => leagueOf(b) === lg)
+        const ls = calcStats(lb)
+        const rest = lb.filter(b => basketMarketOf(b) === null).length
+        return (
+          <div key={lg}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+              <div className="card-title" style={{ margin: 0 }}>🏀 {lg}</div>
+              {ls.total > 0 && (
+                <>
+                  <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{ls.total}건</span>
+                  <span style={{ fontSize: 11, fontWeight: 800, color: ls.roi >= 0 ? '#4ade80' : '#f87171' }}>{ls.roi >= 0 ? '+' : ''}{ls.roi.toFixed(1)}%</span>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: ls.profit >= 0 ? '#4ade80' : '#f87171' }}>{ls.profit >= 0 ? '+' : ''}{ls.profit.toLocaleString()}원</span>
+                </>
+              )}
+              {rest > 0 && <span style={{ fontSize: 9, color: 'var(--text-muted)', marginLeft: 'auto' }}>그 외(승리 등) {rest}건</span>}
+            </div>
+            <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))' }}>
+              {BASKET_MARKETS.map(mk => {
+                const mb = lb.filter(b => basketMarketOf(b) === mk)
+                const s = calcStats(mb)
+                return (
+                  <div key={mk} style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, padding: '12px 14px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                      <span style={{ fontSize: 12, fontWeight: 800, color: 'var(--text-primary)' }}>{mk}</span>
+                      {s.total > 0 && (
+                        <>
+                          <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{s.total}건</span>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: s.winRate >= 50 ? '#4ade80' : '#f87171' }}>{s.winRate.toFixed(0)}%</span>
+                          <span style={{ fontSize: 12, fontWeight: 800, color: s.roi >= 0 ? '#4ade80' : '#f87171' }}>{s.roi >= 0 ? '+' : ''}{s.roi.toFixed(1)}%</span>
+                          <span style={{ fontSize: 10, fontWeight: 700, marginLeft: 'auto', color: s.profit >= 0 ? '#4ade80' : '#f87171' }}>{s.profit >= 0 ? '+' : ''}{s.profit.toLocaleString()}원</span>
+                        </>
+                      )}
+                    </div>
+                    {s.total === 0
+                      ? <div style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'center', padding: '10px 0' }}>데이터 없음</div>
+                      : <RuleStatsRows rows={basketLineRows(mb)} />}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )
+      })}
     </div>
   )
 }
