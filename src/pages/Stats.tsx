@@ -53,24 +53,8 @@ interface OptionCell { label: string; bets: Bet[] }
 // 단 오버/언더처럼 경기 전체에 거는 옵션은 원래 홈/원정이 없으므로 그대로 옵션 카드에 둔다.
 // LOL은 홈/원정 대신 BO를 고르므로 홈/원정 없이 옵션 카드에 두고, "기타"에서 직접 지정한 베팅(bet_option)도
 // 홈/원정이 없다고 다시 기타로 돌려보내지 않는다 (지정해도 기타에 그대로 남던 문제).
-// LOL은 같은 옵션이라도 BO1·BO3·BO5가 전혀 다른 베팅이라 BO별로 따로 본다 (사용자 요청 — 승리 3개, -1.5는 BO3·BO5 따로 등).
-// 세트 세부옵션(드래곤·킬 핸디·시간 오버·킬 오버)은 나누지 않고, "1세트 승리"처럼 세트를 고른 베팅은 "세트 승리"로 모은다.
-const LOL_SET_DETAIL_RE = /드래곤|킬 핸디|시간 오버|킬 오버/
-function lolBoKey(b: Bet): string {
-  if (/(?:^|\s)\d세트(?:\s|$)/.test(b.match)) return '세트'
-  const m = b.match.match(/\bBO([135])\b/i)
-  return m ? `BO${m[1]}` : 'BO 미지정'
-}
-const LOL_BO_ORDER = ['BO1', 'BO3', 'BO5', '세트', 'BO 미지정']
 function pushOptionCells(cells: OptionCell[], label: string, matched: Bet[]): Bet[] {
   if (matched.length === 0) { cells.push({ label, bets: [] }); return [] }
-  if (matched[0].sport === 'esports' && !LOL_SET_DETAIL_RE.test(label)) {
-    for (const key of LOL_BO_ORDER) {
-      const bs = matched.filter(b => lolBoKey(b) === key)
-      if (bs.length) cells.push({ label: `${key} ${label}`, bets: bs })
-    }
-    return []
-  }
   if (/오버|언더/.test(label)) { cells.push({ label, bets: matched }); return [] }
   const home = matched.filter(b => extractSide(b.match) === '홈')
   const away = matched.filter(b => extractSide(b.match) === '원정')
