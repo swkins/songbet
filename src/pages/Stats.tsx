@@ -1016,7 +1016,44 @@ const STAR_STAKES: { stars: number; stake: number }[] = [
   { stars: 5, stake: 30000 }, { stars: 4, stake: 20000 }, { stars: 3, stake: 15000 },
   { stars: 2, stake: 10000 }, { stars: 1, stake: 5000 },
 ]
-function StarStakePanel({ bets, emoji }: { bets: Bet[]; emoji: string }) {
+// 카드 안은 베팅옵션별 표 (사용자 요청): 건수·적중률·평균 배당·수익률·손익. 베팅이 있는 옵션만, "기타"는 맨 아래.
+// fallbackOf: 등록 옵션에 안 걸려 "기타"로 간 베팅을 한 번 더 나눌 때 (농구 = 플핸·마핸·오버·언더).
+function StarOptionTable({ bets, options, numericOptions, fallbackOf }: { bets: Bet[]; options: string[]; numericOptions: string[]; fallbackOf?: (b: Bet) => string | null }) {
+  const cells = classifySportBetsByOption(bets, options, numericOptions).filter(c => c.bets.length > 0).flatMap(c => {
+    if (c.label !== '기타' || !fallbackOf) return [c]
+    const by = new Map<string, Bet[]>()
+    for (const b of c.bets) { const k = fallbackOf(b) ?? '기타'; by.set(k, [...(by.get(k) ?? []), b]) }
+    return [...by.entries()].sort((a, b) => (a[0] === '기타' ? 1 : 0) - (b[0] === '기타' ? 1 : 0)).map(([label, bs]) => ({ label, bets: bs }))
+  })
+  const pc = (v: number) => v >= 0 ? '#4ade80' : '#f87171'
+  const th: React.CSSProperties = { fontSize: 9, color: 'var(--text-secondary)', fontWeight: 700, padding: '3px 3px', textAlign: 'center', whiteSpace: 'nowrap' }
+  const td: React.CSSProperties = { padding: '4px 3px', textAlign: 'center', whiteSpace: 'nowrap', fontSize: 10 }
+  return (
+    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+      <thead>
+        <tr style={{ borderBottom: '1px solid var(--border)' }}>
+          <th style={{ ...th, textAlign: 'left' }}>옵션</th><th style={th}>건</th><th style={th}>적중</th><th style={th}>배당</th><th style={th}>수익률</th><th style={th}>손익</th>
+        </tr>
+      </thead>
+      <tbody>
+        {cells.map(c => {
+          const s = calcStats(c.bets)
+          return (
+            <tr key={c.label} style={{ borderBottom: '1px solid var(--border-light)' }}>
+              <td style={{ ...td, textAlign: 'left', fontWeight: 600, color: 'var(--text-primary)', maxWidth: 90, overflow: 'hidden', textOverflow: 'ellipsis' }} title={c.label}>{c.label}</td>
+              <td style={{ ...td, color: 'var(--text-secondary)' }}>{s.total}</td>
+              <td style={{ ...td, fontWeight: 700, color: s.winRate >= 50 ? '#4ade80' : '#f87171' }}>{s.winRate.toFixed(0)}%</td>
+              <td style={{ ...td, color: 'var(--text-secondary)' }}>{s.avgOdds.toFixed(2)}</td>
+              <td style={{ ...td, fontWeight: 800, color: pc(s.roi) }}>{s.roi >= 0 ? '+' : ''}{s.roi.toFixed(1)}%</td>
+              <td style={{ ...td, fontWeight: 700, color: pc(s.profit) }}>{s.profit >= 0 ? '+' : ''}{s.profit.toLocaleString()}</td>
+            </tr>
+          )
+        })}
+      </tbody>
+    </table>
+  )
+}
+function StarStakePanel({ bets, emoji, options, numericOptions, fallbackOf }: { bets: Bet[]; emoji: string; options: string[]; numericOptions: string[]; fallbackOf?: (b: Bet) => string | null }) {
   const settled = bets.filter(b => b.result !== 'pending')
   const pendingOf = (stake: number) => bets.filter(b => b.result === 'pending' && b.stake === stake).length
   const starBets = settled.filter(b => STAR_STAKES.some(t => t.stake === b.stake))
@@ -1036,34 +1073,38 @@ function StarStakePanel({ bets, emoji }: { bets: Bet[]; emoji: string }) {
         )}
         {rest > 0 && <span style={{ fontSize: 9, color: 'var(--text-muted)', marginLeft: 'auto' }}>그 외 금액 {rest}건 (카드에 안 넣음)</span>}
       </div>
-      <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))' }}>
-        {STAR_STAKES.map(({ stars, stake }) => {
-          const s = calcStats(settled.filter(b => b.stake === stake))
-          const pending = pendingOf(stake)
-          return (
-            <div key={stars} style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 6 }}>
-                <span style={{ fontSize: 13, fontWeight: 800, color: '#fbbf24', letterSpacing: -1 }}>{'★'.repeat(stars)}<span style={{ color: 'var(--border)' }}>{'★'.repeat(5 - stars)}</span></span>
-                <span style={{ fontSize: 10, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{stake.toLocaleString()}원</span>
+      {/* 좌측부터 ★5 → ★1 순서를 지키려고 다섯 칸 고정, 좁은 화면에선 가로 스크롤 */}
+      <div style={{ overflowX: 'auto' }}>
+        <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(5, minmax(270px, 1fr))' }}>
+          {STAR_STAKES.map(({ stars, stake }) => {
+            const sb = settled.filter(b => b.stake === stake)
+            const s = calcStats(sb)
+            const pending = pendingOf(stake)
+            return (
+              <div key={stars} style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, padding: '12px 12px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 6 }}>
+                  <span style={{ fontSize: 13, fontWeight: 800, color: '#fbbf24', letterSpacing: -1 }}>{'★'.repeat(stars)}<span style={{ color: 'var(--border)' }}>{'★'.repeat(5 - stars)}</span></span>
+                  <span style={{ fontSize: 10, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{stake.toLocaleString()}원</span>
+                </div>
+                {s.total === 0 ? (
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'center', padding: '14px 0' }}>데이터 없음</div>
+                ) : (
+                  <>
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: 18, fontWeight: 800, color: pc(s.roi) }}>{s.roi >= 0 ? '+' : ''}{s.roi.toFixed(1)}%</span>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: pc(s.profit) }}>{s.profit >= 0 ? '+' : ''}{s.profit.toLocaleString()}원</span>
+                    </div>
+                    <div style={{ fontSize: 10, color: 'var(--text-secondary)' }}>
+                      {s.total}건 ({s.wins.length}W {s.losses.length}L{s.pushes.length ? ` ${s.pushes.length}P` : ''}) · 적중 <b style={{ color: s.winRate >= 50 ? '#4ade80' : '#f87171' }}>{s.winRate.toFixed(1)}%</b> · 평균 배당 {s.avgOdds.toFixed(2)}
+                    </div>
+                    <StarOptionTable bets={sb} options={options} numericOptions={numericOptions} fallbackOf={fallbackOf} />
+                  </>
+                )}
+                {pending > 0 && <div style={{ fontSize: 9, color: 'var(--text-muted)' }}>진행중 {pending}건</div>}
               </div>
-              {s.total === 0 ? (
-                <div style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'center', padding: '14px 0' }}>데이터 없음</div>
-              ) : (
-                <>
-                  <div style={{ fontSize: 20, fontWeight: 800, color: pc(s.roi) }}>{s.roi >= 0 ? '+' : ''}{s.roi.toFixed(1)}%</div>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: pc(s.profit) }}>{s.profit >= 0 ? '+' : ''}{s.profit.toLocaleString()}원</div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', columnGap: 8, rowGap: 2, fontSize: 10, color: 'var(--text-secondary)' }}>
-                    <span>건수</span><span style={{ textAlign: 'right' }}>{s.total}건 ({s.wins.length}W {s.losses.length}L{s.pushes.length ? ` ${s.pushes.length}P` : ''})</span>
-                    <span>적중률</span><span style={{ textAlign: 'right', fontWeight: 700, color: s.winRate >= 50 ? '#4ade80' : '#f87171' }}>{s.winRate.toFixed(1)}%</span>
-                    <span>평균 배당</span><span style={{ textAlign: 'right' }}>{s.avgOdds.toFixed(2)}</span>
-                    <span>총 베팅</span><span style={{ textAlign: 'right' }}>{s.stake.toLocaleString()}원</span>
-                  </div>
-                </>
-              )}
-              {pending > 0 && <div style={{ fontSize: 9, color: 'var(--text-muted)' }}>진행중 {pending}건</div>}
-            </div>
-          )
-        })}
+            )
+          })}
+        </div>
       </div>
     </div>
   )
@@ -1881,8 +1922,8 @@ function SportPanel({ bets, sport, onDeleteRequest, onDeleteTargetRequest, leagu
           </div>
         )}
         {sport.value === 'baseball'   && <BaseballDetailPanel bets={periodBets} overrides={leagueOverrides} knownLeagues={baseballLeagues} onRenameLeague={onRenameBaseballLeague} onDeleteLeague={onDeleteBaseballLeague} />}
-        {sport.value === 'soccer'     && <StarStakePanel bets={periodBets} emoji="⚽" />}
-        {sport.value === 'basketball' && <StarStakePanel bets={periodBets} emoji="🏀" />}
+        {sport.value === 'soccer'     && <StarStakePanel bets={periodBets} emoji="⚽" options={betOptions} numericOptions={numericBetOptions} />}
+        {sport.value === 'basketball' && <StarStakePanel bets={periodBets} emoji="🏀" options={betOptions} numericOptions={numericBetOptions} fallbackOf={basketMarketOf} />}
         {sport.value === 'esports'    && <EsportsDetailPanel bets={periodBets} overrides={esportsOverrides} knownLeagues={esportsLeagues} onRenameLeague={onRenameEsportsLeague} onDeleteLeague={onDeleteEsportsLeague} />}
         {sport.value === 'volleyball' && <VolleyballDetailPanel bets={periodBets} options={betOptions} numericOptions={numericBetOptions} overrides={volleyballOverrides} knownLeagues={volleyballLeagues} onRenameLeague={onRenameVolleyballLeague} onDeleteLeague={onDeleteVolleyballLeague} />}
         {!['baseball','soccer','basketball','esports','volleyball'].includes(sport.value) && <GenericDetailPanel bets={periodBets} />}
