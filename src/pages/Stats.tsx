@@ -1009,6 +1009,66 @@ function LeagueManageModal({ leagues, onRename, onDelete, onClose }: {
   )
 }
 
+// ─── 추천도(별점)별 성적 — 축구·농구 (사용자 요청) ───────────────────────
+// 베팅 금액이 곧 추천도: 3만 ★5 · 2만 ★4 · 1만5천 ★3 · 1만 ★2 · 5천 ★1. 좌측부터 ★5 → ★1 카드 다섯 장.
+// 예전 베팅옵션별 정리 대신 이 카드로 본다. 다섯 금액 외 베팅은 아래 "그 외 금액"으로만 센다.
+const STAR_STAKES: { stars: number; stake: number }[] = [
+  { stars: 5, stake: 30000 }, { stars: 4, stake: 20000 }, { stars: 3, stake: 15000 },
+  { stars: 2, stake: 10000 }, { stars: 1, stake: 5000 },
+]
+function StarStakePanel({ bets, emoji }: { bets: Bet[]; emoji: string }) {
+  const settled = bets.filter(b => b.result !== 'pending')
+  const pendingOf = (stake: number) => bets.filter(b => b.result === 'pending' && b.stake === stake).length
+  const starBets = settled.filter(b => STAR_STAKES.some(t => t.stake === b.stake))
+  const rest = settled.length - starBets.length
+  const all = calcStats(starBets)
+  const pc = (v: number) => v >= 0 ? '#4ade80' : '#f87171'
+  return (
+    <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <div className="card-title" style={{ margin: 0 }}>{emoji} 추천도별 성적</div>
+        {all.total > 0 && (
+          <>
+            <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{all.total}건</span>
+            <span style={{ fontSize: 11, fontWeight: 800, color: pc(all.roi) }}>{all.roi >= 0 ? '+' : ''}{all.roi.toFixed(1)}%</span>
+            <span style={{ fontSize: 10, fontWeight: 700, color: pc(all.profit) }}>{all.profit >= 0 ? '+' : ''}{all.profit.toLocaleString()}원</span>
+          </>
+        )}
+        {rest > 0 && <span style={{ fontSize: 9, color: 'var(--text-muted)', marginLeft: 'auto' }}>그 외 금액 {rest}건 (카드에 안 넣음)</span>}
+      </div>
+      <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))' }}>
+        {STAR_STAKES.map(({ stars, stake }) => {
+          const s = calcStats(settled.filter(b => b.stake === stake))
+          const pending = pendingOf(stake)
+          return (
+            <div key={stars} style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 6 }}>
+                <span style={{ fontSize: 13, fontWeight: 800, color: '#fbbf24', letterSpacing: -1 }}>{'★'.repeat(stars)}<span style={{ color: 'var(--border)' }}>{'★'.repeat(5 - stars)}</span></span>
+                <span style={{ fontSize: 10, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{stake.toLocaleString()}원</span>
+              </div>
+              {s.total === 0 ? (
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'center', padding: '14px 0' }}>데이터 없음</div>
+              ) : (
+                <>
+                  <div style={{ fontSize: 20, fontWeight: 800, color: pc(s.roi) }}>{s.roi >= 0 ? '+' : ''}{s.roi.toFixed(1)}%</div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: pc(s.profit) }}>{s.profit >= 0 ? '+' : ''}{s.profit.toLocaleString()}원</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', columnGap: 8, rowGap: 2, fontSize: 10, color: 'var(--text-secondary)' }}>
+                    <span>건수</span><span style={{ textAlign: 'right' }}>{s.total}건 ({s.wins.length}W {s.losses.length}L{s.pushes.length ? ` ${s.pushes.length}P` : ''})</span>
+                    <span>적중률</span><span style={{ textAlign: 'right', fontWeight: 700, color: s.winRate >= 50 ? '#4ade80' : '#f87171' }}>{s.winRate.toFixed(1)}%</span>
+                    <span>평균 배당</span><span style={{ textAlign: 'right' }}>{s.avgOdds.toFixed(2)}</span>
+                    <span>총 베팅</span><span style={{ textAlign: 'right' }}>{s.stake.toLocaleString()}원</span>
+                  </div>
+                </>
+              )}
+              {pending > 0 && <div style={{ fontSize: 9, color: 'var(--text-muted)' }}>진행중 {pending}건</div>}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 // ─── 축구 상세 통계 ──────
 // 추적하는 베팅옵션은 위 "베팅옵션별 성적"에서 보여주고, 여기엔 그 외 베팅만 모아 보여준다.
 // 새 룰북 (사용자 요청): 홈 승리 · 원정 0.5 · 홈/원정 1.5 · 홈/원정 2.5(테스트)만 — 원정 승리·홈 0.5·2.5 오버는 뺐다
@@ -1798,7 +1858,7 @@ function SportPanel({ bets, sport, onDeleteRequest, onDeleteTargetRequest, leagu
         </button>
       </div>
 
-      {sport.value !== 'basketball' && sport.value !== 'volleyball' && <BetOptionStatsSection key={sport.value} settledBets={stats.settled} options={betOptions} numericOptions={numericBetOptions} onlyLabels={sport.value === 'soccer' ? SOCCER_TRACKED_OPTIONS : undefined} onAssignBetOption={onAssignBetOption} onExcludeBet={onExcludeBet} />}
+      {!['soccer', 'basketball', 'volleyball'].includes(sport.value) && <BetOptionStatsSection key={sport.value} settledBets={stats.settled} options={betOptions} numericOptions={numericBetOptions} onlyLabels={sport.value === 'soccer' ? SOCCER_TRACKED_OPTIONS : undefined} onAssignBetOption={onAssignBetOption} onExcludeBet={onExcludeBet} />}
 
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-start' }}>
         {byMarket.length > 0 && !['soccer', 'basketball', 'volleyball'].includes(sport.value) && (
@@ -1821,8 +1881,8 @@ function SportPanel({ bets, sport, onDeleteRequest, onDeleteTargetRequest, leagu
           </div>
         )}
         {sport.value === 'baseball'   && <BaseballDetailPanel bets={periodBets} overrides={leagueOverrides} knownLeagues={baseballLeagues} onRenameLeague={onRenameBaseballLeague} onDeleteLeague={onDeleteBaseballLeague} />}
-        {sport.value === 'soccer'     && <SoccerDetailPanel bets={periodBets} options={betOptions} numericOptions={numericBetOptions} onDeleteRequest={onDeleteTargetRequest} />}
-        {sport.value === 'basketball' && <BasketballLeagueDetailPanel bets={periodBets} options={betOptions} numericOptions={numericBetOptions} overrides={basketballOverrides} knownLeagues={basketballLeagues} onRenameLeague={onRenameBasketballLeague} onDeleteLeague={onDeleteBasketballLeague} />}
+        {sport.value === 'soccer'     && <StarStakePanel bets={periodBets} emoji="⚽" />}
+        {sport.value === 'basketball' && <StarStakePanel bets={periodBets} emoji="🏀" />}
         {sport.value === 'esports'    && <EsportsDetailPanel bets={periodBets} overrides={esportsOverrides} knownLeagues={esportsLeagues} onRenameLeague={onRenameEsportsLeague} onDeleteLeague={onDeleteEsportsLeague} />}
         {sport.value === 'volleyball' && <VolleyballDetailPanel bets={periodBets} options={betOptions} numericOptions={numericBetOptions} overrides={volleyballOverrides} knownLeagues={volleyballLeagues} onRenameLeague={onRenameVolleyballLeague} onDeleteLeague={onDeleteVolleyballLeague} />}
         {!['baseball','soccer','basketball','esports','volleyball'].includes(sport.value) && <GenericDetailPanel bets={periodBets} />}
@@ -1851,6 +1911,14 @@ function SportPanel({ bets, sport, onDeleteRequest, onDeleteTargetRequest, leagu
       )}
     </div>
   )
+}
+
+// 축구 통계 초기화 (사용자 요청, 추천도별 카드로 새로 시작): 이 시각 전에 결과가 난 축구 베팅은 통계 전체에서 뺀다.
+// 베팅 기록 자체는 DB에 남아 잔액·결산·일별 손익에는 그대로 반영된다. 되돌리려면 이 값을 null로.
+const SOCCER_STATS_RESET_AT: string | null = '2026-10-31T15:10:00Z'
+function beforeSoccerReset(b: Bet): boolean {
+  if (b.sport !== 'soccer' || !SOCCER_STATS_RESET_AT || b.result === 'pending') return false
+  return (b.result_at ?? b.created_at) < SOCCER_STATS_RESET_AT
 }
 
 export default function Stats() {
@@ -2063,9 +2131,9 @@ export default function Stats() {
   // 모의베팅도 실제 통계에서는 전부 빼고 "모의" 탭에서만 따로 집계한다.
   const mockAll: Bet[] = allBets.filter(b => !b.stats_excluded && b.is_mock)
   // 카지노는 더 이상 쓰지 않으므로 예전 카지노 기록도 통계에서 뺀다
-  const bets: Bet[] = allBets.filter(b => !b.stats_excluded && !b.is_mock && b.sport !== 'casino')
+  const bets: Bet[] = allBets.filter(b => !b.stats_excluded && !b.is_mock && b.sport !== 'casino' && !beforeSoccerReset(b))
   // 현재 종목 탭의 "최근 합류" 대상 (라이브 탭은 라이브 베팅, 종목 탭은 그 종목의 단폴·비라이브 베팅)
-  const recentSportBets = activeSport === 'all' || activeSport === 'mock' ? [] : allBets.filter(b => !b.is_mock).filter(b => activeSport === 'live' ? b.is_live : (b.sport === activeSport && b.parlay_group === null && !b.is_live))
+  const recentSportBets = activeSport === 'all' || activeSport === 'mock' ? [] : allBets.filter(b => !b.is_mock && !beforeSoccerReset(b)).filter(b => activeSport === 'live' ? b.is_live : (b.sport === activeSport && b.parlay_group === null && !b.is_live))
 
   const periodAll = bets.filter(b => {
     if (period === 'all') return true
