@@ -669,14 +669,14 @@ function RuleStatsTable({ title, rows, extra }: { title: string; rows: RuleRow[]
 }
 
 // ─── 그외 베팅 패널 ───────────────────────────────────────────────
-function OtherBetsPanel({ bets, onDelete }: { bets: Bet[]; onDelete?: () => void }) {
+function OtherBetsPanel({ bets, onDelete, title = '룰북 외 베팅' }: { bets: Bet[]; onDelete?: () => void; title?: string }) {
   const settled = bets.filter(b => b.result !== 'pending')
   if (!settled.length) return null
   const s = calcStats(settled)
   return (
     <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, padding: '12px 14px', marginTop: 10 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)' }}>룰북 외 베팅</div>
+        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)' }}>{title}</div>
         <span style={{ fontSize: 9, color: 'var(--text-muted)', background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 4, padding: '1px 6px' }}>{settled.length}건</span>
         <span style={{ fontSize: 10, fontWeight: 700, marginLeft: 'auto', color: s.roi >= 0 ? '#4ade80' : '#f87171' }}>ROI {s.roi >= 0 ? '+' : ''}{s.roi.toFixed(1)}%</span>
         <span style={{ fontSize: 10, fontWeight: 700, color: s.profit >= 0 ? '#4ade80' : '#f87171' }}>{s.profit >= 0 ? '+' : ''}{s.profit.toLocaleString()}원</span>
@@ -1053,7 +1053,7 @@ function StarOptionTable({ bets, options, numericOptions, fallbackOf }: { bets: 
     </table>
   )
 }
-function StarStakePanel({ bets, emoji, options, numericOptions, fallbackOf }: { bets: Bet[]; emoji: string; options: string[]; numericOptions: string[]; fallbackOf?: (b: Bet) => string | null }) {
+function StarStakePanel({ bets, emoji, title = '추천도별 성적', options, numericOptions, fallbackOf }: { bets: Bet[]; emoji: string; title?: string; options: string[]; numericOptions: string[]; fallbackOf?: (b: Bet) => string | null }) {
   const settled = bets.filter(b => b.result !== 'pending')
   const pendingOf = (stake: number) => bets.filter(b => b.result === 'pending' && b.stake === stake).length
   const starBets = settled.filter(b => STAR_STAKES.some(t => t.stake === b.stake))
@@ -1063,7 +1063,7 @@ function StarStakePanel({ bets, emoji, options, numericOptions, fallbackOf }: { 
   return (
     <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        <div className="card-title" style={{ margin: 0 }}>{emoji} 추천도별 성적</div>
+        <div className="card-title" style={{ margin: 0 }}>{emoji} {title}</div>
         {all.total > 0 && (
           <>
             <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{all.total}건</span>
@@ -1106,6 +1106,23 @@ function StarStakePanel({ bets, emoji, options, numericOptions, fallbackOf }: { 
           })}
         </div>
       </div>
+    </div>
+  )
+}
+
+// 농구는 NBA·KBL·WKBL 세 리그만 리그별 추천도 카드, 그 밖의 리그는 추천도 없이 "기타"로 (사용자 요청).
+const BASKET_STAR_LEAGUES = ['NBA', 'KBL', 'WKBL'] as const
+function BasketballStarPanel({ bets, overrides, options, numericOptions }: { bets: Bet[]; overrides: LeagueOverride[]; options: string[]; numericOptions: string[] }) {
+  const leagueOf = (b: Bet) => freeLeagueOf(b, overrides).toUpperCase()
+  const known = new Set<string>(BASKET_STAR_LEAGUES)
+  const others = bets.filter(b => !known.has(leagueOf(b)))
+  return (
+    <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 18 }}>
+      {BASKET_STAR_LEAGUES.map(lg => (
+        <StarStakePanel key={lg} bets={bets.filter(b => leagueOf(b) === lg)} emoji="🏀" title={`${lg} 추천도별 성적`}
+          options={options} numericOptions={numericOptions} fallbackOf={basketMarketOf} />
+      ))}
+      <OtherBetsPanel bets={others} title="기타 (NBA·KBL·WKBL 외)" />
     </div>
   )
 }
@@ -1923,7 +1940,7 @@ function SportPanel({ bets, sport, onDeleteRequest, onDeleteTargetRequest, leagu
         )}
         {sport.value === 'baseball'   && <BaseballDetailPanel bets={periodBets} overrides={leagueOverrides} knownLeagues={baseballLeagues} onRenameLeague={onRenameBaseballLeague} onDeleteLeague={onDeleteBaseballLeague} />}
         {sport.value === 'soccer'     && <StarStakePanel bets={periodBets} emoji="⚽" options={betOptions} numericOptions={numericBetOptions} />}
-        {sport.value === 'basketball' && <StarStakePanel bets={periodBets} emoji="🏀" options={betOptions} numericOptions={numericBetOptions} fallbackOf={basketMarketOf} />}
+        {sport.value === 'basketball' && <BasketballStarPanel bets={periodBets} overrides={basketballOverrides} options={betOptions} numericOptions={numericBetOptions} />}
         {sport.value === 'esports'    && <EsportsDetailPanel bets={periodBets} overrides={esportsOverrides} knownLeagues={esportsLeagues} onRenameLeague={onRenameEsportsLeague} onDeleteLeague={onDeleteEsportsLeague} />}
         {sport.value === 'volleyball' && <VolleyballDetailPanel bets={periodBets} options={betOptions} numericOptions={numericBetOptions} overrides={volleyballOverrides} knownLeagues={volleyballLeagues} onRenameLeague={onRenameVolleyballLeague} onDeleteLeague={onDeleteVolleyballLeague} />}
         {!['baseball','soccer','basketball','esports','volleyball'].includes(sport.value) && <GenericDetailPanel bets={periodBets} />}
@@ -1956,7 +1973,7 @@ function SportPanel({ bets, sport, onDeleteRequest, onDeleteTargetRequest, leagu
 
 // 축구 통계 초기화 (사용자 요청, 추천도별 카드로 새로 시작): 이 시각 전에 결과가 난 축구 베팅은 통계 전체에서 뺀다.
 // 베팅 기록 자체는 DB에 남아 잔액·결산·일별 손익에는 그대로 반영된다. 되돌리려면 이 값을 null로.
-const SOCCER_STATS_RESET_AT: string | null = '2026-10-31T15:10:00Z'
+const SOCCER_STATS_RESET_AT: string | null = null  // 기존 기록 다시 포함 (사용자 요청 — 삭제는 직접 수동으로). 초기화했던 시각: '2026-10-31T15:10:00Z'
 function beforeSoccerReset(b: Bet): boolean {
   if (b.sport !== 'soccer' || !SOCCER_STATS_RESET_AT || b.result === 'pending') return false
   return (b.result_at ?? b.created_at) < SOCCER_STATS_RESET_AT
