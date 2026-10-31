@@ -1110,22 +1110,29 @@ function StarStakePanel({ bets, emoji, title = '추천도별 성적', options, n
   )
 }
 
-// 농구는 NBA·KBL·WKBL 세 리그만 리그별 추천도 카드, 그 밖의 리그는 추천도 없이 "기타"로 (사용자 요청).
-const BASKET_STAR_LEAGUES = ['NBA', 'KBL', 'WKBL'] as const
-function BasketballStarPanel({ bets, overrides, options, numericOptions }: { bets: Bet[]; overrides: LeagueOverride[]; options: string[]; numericOptions: string[] }) {
-  const leagueOf = (b: Bet) => freeLeagueOf(b, overrides).toUpperCase()
-  const known = new Set<string>(BASKET_STAR_LEAGUES)
-  const others = bets.filter(b => !known.has(leagueOf(b)))
+// 리그 몇 개만 리그별 추천도 카드, 그 밖의 리그는 추천도 없이 "기타"로 (사용자 요청).
+// 농구 NBA·KBL·WKBL, 야구 MLB·KBO·NPB.
+function LeagueStarPanel({ bets, leagues, emoji, leagueOf, options, numericOptions, fallbackOf }: {
+  bets: Bet[]; leagues: readonly string[]; emoji: string; leagueOf: (b: Bet) => string
+  options: string[]; numericOptions: string[]; fallbackOf?: (b: Bet) => string | null
+}) {
+  const key = (b: Bet) => leagueOf(b).toUpperCase()
+  const known = new Set<string>(leagues)
+  const others = bets.filter(b => !known.has(key(b)))
   return (
     <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 18 }}>
-      {BASKET_STAR_LEAGUES.map(lg => (
-        <StarStakePanel key={lg} bets={bets.filter(b => leagueOf(b) === lg)} emoji="🏀" title={`${lg} 추천도별 성적`}
-          options={options} numericOptions={numericOptions} fallbackOf={basketMarketOf} />
+      {leagues.map(lg => (
+        <StarStakePanel key={lg} bets={bets.filter(b => key(b) === lg)} emoji={emoji} title={`${lg} 추천도별 성적`}
+          options={options} numericOptions={numericOptions} fallbackOf={fallbackOf} />
       ))}
-      <OtherBetsPanel bets={others} title="기타 (NBA·KBL·WKBL 외)" />
+      <OtherBetsPanel bets={others} title={`기타 (${leagues.join('·')} 외)`} />
     </div>
   )
 }
+const BASKET_STAR_LEAGUES = ['NBA', 'KBL', 'WKBL'] as const
+const BASEBALL_STAR_LEAGUES = ['MLB', 'KBO', 'NPB'] as const
+// 야구: 등록 옵션에 안 걸린 베팅은 마켓(승패·핸디캡·오버·언더)으로 한 번 더 나눈다
+const baseballMarketOf = (b: Bet): string | null => b.market && b.market !== 'other' ? MARKET_LABELS[b.market] : null
 
 // ─── 축구 상세 통계 ──────
 // 추적하는 베팅옵션은 위 "베팅옵션별 성적"에서 보여주고, 여기엔 그 외 베팅만 모아 보여준다.
@@ -1916,10 +1923,10 @@ function SportPanel({ bets, sport, onDeleteRequest, onDeleteTargetRequest, leagu
         </button>
       </div>
 
-      {!['soccer', 'basketball', 'volleyball'].includes(sport.value) && <BetOptionStatsSection key={sport.value} settledBets={stats.settled} options={betOptions} numericOptions={numericBetOptions} onlyLabels={sport.value === 'soccer' ? SOCCER_TRACKED_OPTIONS : undefined} onAssignBetOption={onAssignBetOption} onExcludeBet={onExcludeBet} />}
+      {!['soccer', 'basketball', 'volleyball', 'baseball'].includes(sport.value) && <BetOptionStatsSection key={sport.value} settledBets={stats.settled} options={betOptions} numericOptions={numericBetOptions} onlyLabels={sport.value === 'soccer' ? SOCCER_TRACKED_OPTIONS : undefined} onAssignBetOption={onAssignBetOption} onExcludeBet={onExcludeBet} />}
 
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-        {byMarket.length > 0 && !['soccer', 'basketball', 'volleyball'].includes(sport.value) && (
+        {byMarket.length > 0 && !['soccer', 'basketball', 'volleyball', 'baseball'].includes(sport.value) && (
           <div className="card" style={{ width: 280, flexShrink: 0 }}>
             <div className="card-title">마켓별 성적</div>
             <table style={{ width: '100%' }}>
@@ -1938,9 +1945,9 @@ function SportPanel({ bets, sport, onDeleteRequest, onDeleteTargetRequest, leagu
             </table>
           </div>
         )}
-        {sport.value === 'baseball'   && <BaseballDetailPanel bets={periodBets} overrides={leagueOverrides} knownLeagues={baseballLeagues} onRenameLeague={onRenameBaseballLeague} onDeleteLeague={onDeleteBaseballLeague} />}
+        {sport.value === 'baseball'   && <LeagueStarPanel bets={periodBets} leagues={BASEBALL_STAR_LEAGUES} emoji="⚾" leagueOf={b => baseballLeagueKeyOf(b, leagueOverrides)} options={betOptions} numericOptions={numericBetOptions} fallbackOf={baseballMarketOf} />}
         {sport.value === 'soccer'     && <StarStakePanel bets={periodBets} emoji="⚽" options={betOptions} numericOptions={numericBetOptions} />}
-        {sport.value === 'basketball' && <BasketballStarPanel bets={periodBets} overrides={basketballOverrides} options={betOptions} numericOptions={numericBetOptions} />}
+        {sport.value === 'basketball' && <LeagueStarPanel bets={periodBets} leagues={BASKET_STAR_LEAGUES} emoji="🏀" leagueOf={b => freeLeagueOf(b, basketballOverrides)} options={betOptions} numericOptions={numericBetOptions} fallbackOf={basketMarketOf} />}
         {sport.value === 'esports'    && <EsportsDetailPanel bets={periodBets} overrides={esportsOverrides} knownLeagues={esportsLeagues} onRenameLeague={onRenameEsportsLeague} onDeleteLeague={onDeleteEsportsLeague} />}
         {sport.value === 'volleyball' && <VolleyballDetailPanel bets={periodBets} options={betOptions} numericOptions={numericBetOptions} overrides={volleyballOverrides} knownLeagues={volleyballLeagues} onRenameLeague={onRenameVolleyballLeague} onDeleteLeague={onDeleteVolleyballLeague} />}
         {!['baseball','soccer','basketball','esports','volleyball'].includes(sport.value) && <GenericDetailPanel bets={periodBets} />}
