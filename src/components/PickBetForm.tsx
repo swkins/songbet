@@ -48,9 +48,13 @@ export default function PickBetForm({ site, bets, sites, onBet, onClose }: Props
     return () => { alive = false; supabase.removeChannel(ch) }
   }, [site.id])
 
-  const sorted = useMemo(() => [...picks].sort((a, b) =>
-    (a.kickoff_at ?? '').localeCompare(b.kickoff_at ?? '') || (b.grade ?? 0) - (a.grade ?? 0) || (a.sort_order ?? 0) - (b.sort_order ?? 0)), [picks])
   const pendingBets = useMemo(() => bets.filter(b => b.result === 'pending'), [bets])
+  // 아직 안 건 픽이 위, 베팅완료(진행중 베팅 있음)는 아래 — 그 안에서는 경기 시간순, 같은 시간이면 별점 높은 순
+  const sorted = useMemo(() => {
+    const doneOf = (p: Pick) => matchBets(p, pendingBets).length > 0 ? 1 : 0
+    return [...picks].sort((a, b) => doneOf(a) - doneOf(b) ||
+      (a.kickoff_at ?? '').localeCompare(b.kickoff_at ?? '') || (b.grade ?? 0) - (a.grade ?? 0) || (a.sort_order ?? 0) - (b.sort_order ?? 0))
+  }, [picks, pendingBets])
   const siteName = (id: string | null) => sites.find(s => s.id === id)?.name ?? ''
 
   function open(p: Pick) {
@@ -80,18 +84,17 @@ export default function PickBetForm({ site, bets, sites, onBet, onClose }: Props
               const done = matchBets(p, pendingBets)
               const isOpen = openId === p.id
               return (
-                <div key={p.id} style={{ border: `1px solid ${isOpen ? 'var(--gold-border)' : 'var(--border)'}`, borderRadius: 6, background: isOpen ? 'var(--gold-bg)' : 'var(--bg-elevated)' }}>
+                <div key={p.id} style={{ border: `1px solid ${isOpen ? 'var(--gold-border)' : 'var(--border)'}`, borderRadius: 6, background: isOpen ? 'var(--gold-bg)' : 'var(--bg-elevated)', opacity: done.length && !isOpen ? 0.7 : 1 }}>
                   <button type="button" onClick={() => open(p)} style={{ width: '100%', textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer', padding: '6px 8px', color: 'inherit', fontFamily: 'inherit', display: 'flex', flexDirection: 'column', gap: 2 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, color: 'var(--text-muted)' }}>
-                      <span>{p.kickoff_at ? dayjs(p.kickoff_at).format('M/D HH:mm') : ''}</span>
-                      <span>{SPORT_EMOJI[p.sport] ?? ''} {p.league}</span>
-                      <span style={{ marginLeft: 'auto', fontSize: 11 }}>{stars(p.grade)}</span>
+                    {/* 윗줄: 시간·리그·경기·별점·배당·금액 / 아랫줄: 픽만 크게 한 줄로 (오른쪽에 아무것도 두지 않음) */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, color: 'var(--text-muted)', whiteSpace: 'nowrap', minWidth: 0 }}>
+                      <span style={{ fontSize: 11, flexShrink: 0 }}>{stars(p.grade)}</span>
+                      <span style={{ flexShrink: 0 }}>{p.kickoff_at ? dayjs(p.kickoff_at).format('M/D HH:mm') : ''}</span>
+                      <span style={{ flexShrink: 0 }}>{SPORT_EMOJI[p.sport] ?? ''} {p.league}</span>
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>{p.home_team} vs {p.away_team}</span>
+                      <span style={{ marginLeft: 'auto', flexShrink: 0, color: 'var(--text-secondary)', fontWeight: 700 }}>@{p.base_odds != null ? Number(p.base_odds).toFixed(2) : '—'} · {p.stake != null ? Number(p.stake).toLocaleString() : '—'}</span>
                     </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <span style={{ fontSize: 12, fontWeight: 800, color: 'var(--text-primary)' }}>{p.pick_label}</span>
-                      <span style={{ fontSize: 10, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{p.home_team} vs {p.away_team}</span>
-                      <span style={{ marginLeft: 'auto', fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap' }}>{p.base_odds != null ? Number(p.base_odds).toFixed(2) : '—'} · {p.stake != null ? Number(p.stake).toLocaleString() : '—'}</span>
-                    </div>
+                    <div style={{ fontSize: 15, fontWeight: 800, color: done.length ? 'var(--text-secondary)' : 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.pick_label}</div>
                     {done.length > 0 && (
                       <div style={{ fontSize: 10, fontWeight: 800, color: '#4ade80' }}
                         title={done.map(b => `${siteName(b.site_id)} ${b.match} ${Number(b.stake).toLocaleString()} @${Number(b.odds).toFixed(2)}`).join('\n')}>

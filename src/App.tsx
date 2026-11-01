@@ -9,6 +9,8 @@ import { purgeOldLogs } from './lib/logger'
 import dayjs from 'dayjs'
 // 베팅분석은 과거 경기 데이터가 커서 버튼을 처음 누를 때만 불러온다
 const BetAnalysisPanel = lazy(() => import('./components/BetAnalysisPanel'))
+// 베팅분석 버튼은 사용자 요청으로 뺐다 (코드·데이터는 남김) — 다시 보이려면 true
+const SHOW_ANALYSIS_BUTTON = false
 import { RotateCcw, ClipboardList, X, LayoutTemplate, Code2, Check, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Save, CheckSquare, Plus, Trash2, Settings, Pin, GripVertical, Percent, BarChart3 } from 'lucide-react'
 
 const TABS: { id: Tab; label: string }[] = [
@@ -534,7 +536,7 @@ export default function App() {
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
 
             {/* 베팅분석 버튼 — 대시보드에 넣지 않고 룰북처럼 모달 창으로 연다 */}
-            <button onClick={() => { setShowAnalysis(true); setAnalysisOpened(true) }} style={{
+            {SHOW_ANALYSIS_BUTTON && <button onClick={() => { setShowAnalysis(true); setAnalysisOpened(true) }} style={{
               background: showAnalysis ? 'var(--gold-bg)' : 'transparent',
               border: `1px solid ${showAnalysis ? 'var(--gold-border)' : 'var(--border)'}`,
               borderRadius: 'var(--radius-sm)', color: showAnalysis ? 'var(--gold)' : 'var(--text-secondary)',
@@ -542,7 +544,7 @@ export default function App() {
               fontSize: 11, fontWeight: 600, fontFamily: 'var(--font-body)', transition: 'all 0.15s',
             }}>
               <BarChart3 size={13} /><span className="nav-btn-label">베팅분석</span>
-            </button>
+            </button>}
 
             {/* 마진율 계산기 버튼 */}
             <button onClick={() => { if (!showMargin) setMarginOdds(['', '', '']); setShowMargin(p => !p) }} style={{
