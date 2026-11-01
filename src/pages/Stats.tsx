@@ -1138,8 +1138,8 @@ const baseballMarketOf = (b: Bet): string | null => b.market && b.market !== 'ot
 // 추천도 = 베팅 금액 (STAR_STAKES: 3만 ★5 · 2만 ★4 · 1만5천 ★3 · 1만 ★2 · 5천 ★1). 칸 안은 리그 × 베팅옵션별 건·적중·배당·ROI·손익.
 const PICK_GRID_SPORTS: { value: Sport; label: string }[] = [
   { value: 'soccer', label: '축구' }, { value: 'baseball', label: '야구' }, { value: 'basketball', label: '농구' },
-  { value: 'volleyball', label: '배구' }, { value: 'esports', label: 'LOL' },
-]
+  { value: 'volleyball', label: '배구' },
+]  // LOL은 빼고 탭으로 따로 (사용자 요청)
 function PickGridSection({ settled, betOptionsBySport, numericBetOptionsBySport }: { settled: Bet[]; betOptionsBySport: Record<string, string[]>; numericBetOptionsBySport: Record<string, string[]> }) {
   const pc = (v: number) => v >= 0 ? '#4ade80' : '#f87171'
   const fallback: Partial<Record<Sport, (b: Bet) => string | null>> = { basketball: basketMarketOf, baseball: baseballMarketOf }
@@ -1160,7 +1160,7 @@ function PickGridSection({ settled, betOptionsBySport, numericBetOptionsBySport 
   }
   return (
     <div style={{ overflowX: 'auto' }}>
-      <div style={{ display: 'grid', gap: 8, gridTemplateColumns: '52px repeat(5, minmax(270px, 1fr))', alignItems: 'stretch' }}>
+      <div style={{ display: 'grid', gap: 8, gridTemplateColumns: `52px repeat(${PICK_GRID_SPORTS.length}, minmax(270px, 1fr))`, alignItems: 'stretch' }}>
         <div />
         {PICK_GRID_SPORTS.map(sp => {
           const s = calcStats(settled.filter(b => b.sport === sp.value && STAR_STAKES.some(t => t.stake === b.stake)))
@@ -2352,12 +2352,12 @@ export default function Stats() {
           <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
             {([
               { value: 'picks' as const, label: '추천픽', emoji: '⭐', cnt: settled.filter(b => STAR_STAKES.some(t => t.stake === b.stake) && PICK_GRID_SPORTS.some(sp => sp.value === b.sport)).length },
+              { value: 'esports' as const, label: 'LOL', emoji: '🎮', cnt: settled.filter(b => b.sport === 'esports').length },
               { value: 'all' as const, label: '수익률', emoji: '📊', cnt: settled.length },
               { value: 'soccer' as const, label: '축구', emoji: '⚽', cnt: settled.filter(b => b.sport === 'soccer').length },
               { value: 'baseball' as const, label: '야구', emoji: '⚾', cnt: settled.filter(b => b.sport === 'baseball').length },
               { value: 'basketball' as const, label: '농구', emoji: '🏀', cnt: settled.filter(b => b.sport === 'basketball').length },
               { value: 'volleyball' as const, label: '배구', emoji: '🏐', cnt: settled.filter(b => b.sport === 'volleyball').length },
-              { value: 'esports' as const, label: 'LOL', emoji: '🎮', cnt: settled.filter(b => b.sport === 'esports').length },
               { value: 'live' as const, label: '라이브', emoji: '🔴', cnt: liveBets.filter(b => b.result !== 'pending').length },
               // 모의 탭은 사용자 요청으로 뺐다 (MockPanel 코드·모의베팅 데이터는 남김)
             ]).map(s => (
