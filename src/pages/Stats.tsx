@@ -9,6 +9,7 @@ import { inferBaseballLeague, inferSoccerLeague, koCompare, KBO_TEAMS, MLB_TEAMS
 import { sportGlyph } from '../components/SportIcons'
 import { applyNumericTemplate, extractNumericTemplateValueFromText } from '../lib/betOptions'
 import { settledDayOf, aggregatePnL } from '../lib/pnl'
+import { isPickBet, parsePickMemo } from '../lib/picks'
 
 // 리그 관리 시스템(베팅옵션·리그별 순위, 리그 미지정 베팅 지정) — 데이터/로직은 유지하되 화면에는 표출하지 않음
 const SHOW_LEAGUE_UI = false
@@ -1135,12 +1136,19 @@ const BASEBALL_STAR_LEAGUES = ['MLB', 'KBO', 'NPB'] as const
 const baseballMarketOf = (b: Bet): string | null => b.market && b.market !== 'other' ? MARKET_LABELS[b.market] : null
 
 // ─── 추천픽 탭 (사용자 요청): 종목(가로: 축구·야구·농구·배구·LOL) × 추천도(세로: ★5 → ★1) 한눈에 ─────
-// 추천도 = 베팅 금액 (STAR_STAKES: 3만 ★5 · 2만 ★4 · 1만5천 ★3 · 1만 ★2 · 5천 ★1). 칸 안은 리그 × 베팅옵션별 건·적중·배당·ROI·손익.
+// 베팅추가 › 추천픽으로 건 베팅만 (memo "추천픽|…", 사용자 요청). 추천도 = 픽 별점(memo에 저장), 별점이 없는 예전 것은 베팅 금액
+// (STAR_STAKES: 3만 ★5 · 2만 ★4 · 1만5천 ★3 · 1만 ★2 · 5천 ★1). 칸 안은 리그 × 베팅옵션별 건·적중·배당·ROI·손익.
 const PICK_GRID_SPORTS: { value: Sport; label: string }[] = [
   { value: 'soccer', label: '축구' }, { value: 'baseball', label: '야구' }, { value: 'basketball', label: '농구' },
   { value: 'volleyball', label: '배구' },
 ]  // LOL은 빼고 탭으로 따로 (사용자 요청)
-function PickGridSection({ settled, betOptionsBySport, numericBetOptionsBySport }: { settled: Bet[]; betOptionsBySport: Record<string, string[]>; numericBetOptionsBySport: Record<string, string[]> }) {
+function pickStarOf(b: Bet): number | null {
+  const g = parsePickMemo(b.memo)?.grade
+  if (g != null && g >= 1 && g <= 5) return g
+  return STAR_STAKES.find(t => t.stake === b.stake)?.stars ?? null
+}
+function PickGridSection({ settled: allSettled, betOptionsBySport, numericBetOptionsBySport }: { settled: Bet[]; betOptionsBySport: Record<string, string[]>; numericBetOptionsBySport: Record<string, string[]> }) {
+  const settled = allSettled.filter(isPickBet)
   const pc = (v: number) => v >= 0 ? '#4ade80' : '#f87171'
   const fallback: Partial<Record<Sport, (b: Bet) => string | null>> = { basketball: basketMarketOf, baseball: baseballMarketOf }
   const th: React.CSSProperties = { fontSize: 9, color: 'var(--text-secondary)', fontWeight: 700, padding: '3px 3px', textAlign: 'center', whiteSpace: 'nowrap', borderBottom: '1px solid var(--border)' }
@@ -1160,10 +1168,11 @@ function PickGridSection({ settled, betOptionsBySport, numericBetOptionsBySport 
   }
   return (
     <div style={{ overflowX: 'auto' }}>
+      {settled.length === 0 && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8 }}>베팅추가 › 추천픽으로 건 베팅 중 결과가 난 것이 아직 없습니다 — 추천픽으로 걸면 여기에 쌓입니다</div>}
       <div style={{ display: 'grid', gap: 8, gridTemplateColumns: `52px repeat(${PICK_GRID_SPORTS.length}, minmax(270px, 1fr))`, alignItems: 'stretch' }}>
         <div />
         {PICK_GRID_SPORTS.map(sp => {
-          const s = calcStats(settled.filter(b => b.sport === sp.value && STAR_STAKES.some(t => t.stake === b.stake)))
+          const s = calcStats(settled.filter(b => b.sport === sp.value && pickStarOf(b) != null))
           return (
             <div key={sp.value} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 2px' }}>
               <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 4 }}>{sportGlyph(sp.value, '1.2em')} {sp.label}</span>
@@ -1182,7 +1191,7 @@ function PickGridSection({ settled, betOptionsBySport, numericBetOptionsBySport 
               <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>{stake >= 10000 ? `${stake / 10000}만` : `${stake / 1000}천`}</span>
             </div>
             {PICK_GRID_SPORTS.map(sp => {
-              const list = settled.filter(b => b.sport === sp.value && b.stake === stake)
+              const list = settled.filter(b => b.sport === sp.value && pickStarOf(b) === stars)
               const s = calcStats(list)
               return (
                 <div key={sp.value} style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 10px', minWidth: 0 }}>
@@ -2351,7 +2360,7 @@ export default function Stats() {
       <>
           <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
             {([
-              { value: 'picks' as const, label: '추천픽', emoji: '⭐', cnt: settled.filter(b => STAR_STAKES.some(t => t.stake === b.stake) && PICK_GRID_SPORTS.some(sp => sp.value === b.sport)).length },
+              { value: 'picks' as const, label: '추천픽', emoji: '⭐', cnt: settled.filter(b => isPickBet(b) && pickStarOf(b) != null && PICK_GRID_SPORTS.some(sp => sp.value === b.sport)).length },
               { value: 'esports' as const, label: 'LOL', emoji: '🎮', cnt: settled.filter(b => b.sport === 'esports').length },
               { value: 'all' as const, label: '수익률', emoji: '📊', cnt: settled.length },
               { value: 'soccer' as const, label: '축구', emoji: '⚽', cnt: settled.filter(b => b.sport === 'soccer').length },

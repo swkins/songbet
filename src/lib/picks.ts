@@ -15,14 +15,17 @@ export const SPORT_EMOJI: Record<string, string> = { soccer: '⚽', baseball: '�
 
 const isOU = (p: Pick) => p.pick_side === 'under' || p.pick_side === 'over'
 // 추천픽으로 건 베팅은 memo에 "추천픽|홈팀|원정팀"을 남겨, 진행중 목록에서 두 팀을 같이 보여준다 (사용자 요청).
+// 4번째 칸은 픽 별점(grade) — 통계 추천픽 탭이 이 별점으로 나눈다 (금액을 고쳐 걸어도 별점은 픽 그대로).
 // 캐시아웃하면 memo 뒤에 " · 캐시아웃 …"이 붙으므로 그 앞까지만 읽는다.
 export const PICK_MEMO_PREFIX = '추천픽|'
-export function pickMemo(p: Pick): string { return `${PICK_MEMO_PREFIX}${p.home_team}|${p.away_team}` }
-export function parsePickMemo(memo: string | null | undefined): { home: string; away: string } | null {
+export function pickMemo(p: Pick): string { return `${PICK_MEMO_PREFIX}${p.home_team}|${p.away_team}|${p.grade ?? ''}` }
+export function parsePickMemo(memo: string | null | undefined): { home: string; away: string; grade: number | null } | null {
   if (!memo || !memo.startsWith(PICK_MEMO_PREFIX)) return null
-  const [home, away] = memo.slice(PICK_MEMO_PREFIX.length).split(' · ')[0].split('|')
-  return home && away ? { home, away } : null
+  const [home, away, g] = memo.slice(PICK_MEMO_PREFIX.length).split(' · ')[0].split('|')
+  const grade = g ? Number(g) : NaN
+  return home && away ? { home, away, grade: Number.isFinite(grade) ? grade : null } : null
 }
+export const isPickBet = (b: { memo?: string | null }) => !!b.memo && b.memo.startsWith(PICK_MEMO_PREFIX)
 
 export const pickTeam = (p: Pick) => p.pick_side === 'home' ? p.home_team : p.pick_side === 'away' ? p.away_team : ''
 
