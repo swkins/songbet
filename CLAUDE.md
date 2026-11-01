@@ -48,3 +48,8 @@
 ## 베팅추가 팀 이름 추천
 
 - 리그 관리에서 지운 리그의 팀은 팀 이름 추천에 안 나온다 (사용자 요청): 불러올 때 리그 목록에 남은 리그의 팀만 쓰고(`loadSportTeamData` `alive`, `src/pages/Dashboard.tsx`), 리그를 지울 때 그 리그 팀도 `*_teams`에서 같이 지운다 (Dashboard·`LeagueManage.tsx`). 모든 종목 공통.
+
+## 픽 탭
+
+- 상단 '결산' 오른쪽 '픽' 탭 (`src/pages/Picks.tsx`, 사용자 요청): Supabase `picks` 테이블을 경기일(최신순)별로, 같은 날은 별점 높은 순으로 나열. 줄을 누르면 근거·태그. 실제 건 베팅(`bets`, 경기일 ±1일, 핸디·승은 픽 팀 이름 / 언오버는 팀 + 언더·오버)을 "베팅" 칸에 표시.
+- 새 픽은 Supabase Realtime으로 바로 뜬다 (`picks`를 `supabase_realtime` publication에 등록함, 마이그레이션 `picks_realtime`). 연결이 안 되면 1분마다·창으로 돌아올 때 다시 불러온다.
