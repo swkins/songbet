@@ -1,41 +1,18 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import dayjs from 'dayjs'
 import { supabase } from '../lib/supabase'
+import { matchBets, SPORT_EMOJI, type Pick, type PickBetLite } from '../lib/picks'
 
 // ─── 픽 (사용자 요청): Supabase `picks` 테이블을 그대로 나열 ─────────────────
 // 새 픽이 들어오면 실시간(Supabase Realtime, picks 테이블을 supabase_realtime에 등록함)으로 바로 반영하고,
 // 실시간 연결이 끊겨도 창으로 돌아올 때·1분마다 다시 불러온다.
 // 실제로 건 베팅(bets)과 팀 이름으로 맞춰 "베팅함" 표시.
 
-interface Pick {
-  id: string; created_at: string; kickoff_at: string | null
-  sport: string; league: string; home_team: string; away_team: string
-  grade: number | null; stake: number | null
-  market_type: string | null; pick_label: string; pick_side: string | null; line: number | null
-  base_odds: number | null; ticket_info: string | null; flow_info: string | null; rationale: string | null
-  tags: string[] | null; rule_version: string | null; game_key: string | null; sort_order: number | null
-}
-interface BetLite { match: string; stake: number; odds: number; result: string; profit: number; bet_date: string; sport: string }
-
-const SPORT_EMOJI: Record<string, string> = { soccer: '⚽', baseball: '⚾', basketball: '🏀', volleyball: '🏐', esports: '🎮' }
+interface BetLite extends PickBetLite {}
 
 function stars(g: number | null) {
   const n = Math.max(0, Math.min(5, g ?? 0))
   return <span style={{ color: '#fbbf24', letterSpacing: -1, whiteSpace: 'nowrap' }}>{'★'.repeat(n)}<span style={{ color: 'var(--border)' }}>{'★'.repeat(5 - n)}</span></span>
-}
-
-// 픽과 같은 베팅 찾기: 경기일 ±1일, 핸디·승은 픽 팀 이름이, 언오버는 두 팀 중 하나와 언더/오버가 경기 내용에 있어야 한다
-function matchBets(p: Pick, bets: BetLite[]): BetLite[] {
-  const day = dayjs(p.kickoff_at ?? p.created_at)
-  const near = bets.filter(b => Math.abs(dayjs(b.bet_date).diff(day.startOf('day'), 'day')) <= 1)
-  if (p.pick_side === 'under' || p.pick_side === 'over') {
-    const word = p.pick_side === 'under' ? /언더|under/i : /오버|over/i
-    return near.filter(b => word.test(b.match) && (b.match.includes(p.home_team) || b.match.includes(p.away_team)))
-  }
-  const team = p.pick_side === 'home' ? p.home_team : p.pick_side === 'away' ? p.away_team : ''
-  if (!team) return []
-  const short = team.replace(/^(FC|AS|SC)\s+|\s+(FC|SC)$/g, '').trim()
-  return near.filter(b => !/언더|오버|under|over/i.test(b.match) && (b.match.includes(team) || (short.length >= 2 && b.match.includes(short))))
 }
 
 export default function Picks() {
