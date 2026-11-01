@@ -3104,11 +3104,13 @@ export default function Dashboard() {
     if (kl) { setBasketballLeagues(kl.map(r => r.name)); setBasketballFavoriteLeagues(kl.filter(r => r.is_favorite).map(r => r.name)) }
     if (vl) { setVolleyballLeagues(vl.map(r => r.name)); setVolleyballFavoriteLeagues(vl.filter(r => r.is_favorite).map(r => r.name)) }
     if (el) { setEsportsLeagues(el.map(r => r.name)); setEsportsFavoriteLeagues(el.filter(r => r.is_favorite).map(r => r.name)) }
-    if (st) setSoccerTeams(st)
-    if (bt) setBaseballTeams(bt)
-    if (kt) setBasketballTeams(kt)
-    if (vt) setVolleyballTeams(vt)
-    if (et) setEsportsTeams(et)
+    // 리그 관리에서 지운 리그의 팀은 팀 이름 추천에서 뺀다 (사용자 요청) — 리그 목록에 남아 있는 리그의 팀만
+    const alive = <T extends { league: string }>(ts: T[], ls: { name: string }[] | null) => ls ? ts.filter(t => ls.some(l => l.name === t.league)) : ts
+    if (st) setSoccerTeams(alive(st, sl))
+    if (bt) setBaseballTeams(alive(bt, bl))
+    if (kt) setBasketballTeams(alive(kt, kl))
+    if (vt) setVolleyballTeams(alive(vt, vl))
+    if (et) setEsportsTeams(alive(et, el))
   }
   // 리그 즐겨찾기 토글 — 드롭다운 열었을 때 맨 위 우선순위로 노출하기 위한 용도
   async function toggleSoccerLeagueFavorite(name: string) {
@@ -3179,6 +3181,7 @@ export default function Dashboard() {
   }
   async function deleteSoccerLeague(name: string) {
     await supabase.from('soccer_leagues').delete().eq('name', name) // 팀도 cascade로 함께 삭제됨
+    await supabase.from('soccer_teams').delete().eq('league', name)
     await supabase.from('bets').update({ league: '' }).eq('league', name).eq('sport', 'soccer')
     setSoccerLeagues(p => p.filter(l => l !== name))
     setSoccerTeams(p => p.filter(t => t.league !== name))
@@ -3194,6 +3197,7 @@ export default function Dashboard() {
   }
   async function deleteBaseballLeague(name: string) {
     await supabase.from('baseball_leagues').delete().eq('name', name)
+    await supabase.from('baseball_teams').delete().eq('league', name)
     await supabase.from('bets').update({ league: '' }).eq('league', name).eq('sport', 'baseball')
     setBaseballLeagues(p => p.filter(l => l !== name))
     setBaseballTeams(p => p.filter(t => t.league !== name))
@@ -3209,6 +3213,7 @@ export default function Dashboard() {
   }
   async function deleteBasketballLeague(name: string) {
     await supabase.from('basketball_leagues').delete().eq('name', name)
+    await supabase.from('basketball_teams').delete().eq('league', name)
     await supabase.from('bets').update({ league: '' }).eq('league', name).eq('sport', 'basketball')
     setBasketballLeagues(p => p.filter(l => l !== name))
     setBasketballTeams(p => p.filter(t => t.league !== name))
@@ -3224,6 +3229,7 @@ export default function Dashboard() {
   }
   async function deleteEsportsLeague(name: string) {
     await supabase.from('esports_leagues').delete().eq('name', name)
+    await supabase.from('esports_teams').delete().eq('league', name)
     await supabase.from('bets').update({ league: '' }).eq('league', name).eq('sport', 'esports')
     setEsportsLeagues(p => p.filter(l => l !== name))
     setEsportsTeams(p => p.filter(t => t.league !== name))
@@ -3239,6 +3245,7 @@ export default function Dashboard() {
   }
   async function deleteVolleyballLeague(name: string) {
     await supabase.from('volleyball_leagues').delete().eq('name', name)
+    await supabase.from('volleyball_teams').delete().eq('league', name)
     await supabase.from('bets').update({ league: '' }).eq('league', name).eq('sport', 'volleyball')
     setVolleyballLeagues(p => p.filter(l => l !== name))
     setVolleyballTeams(p => p.filter(t => t.league !== name))

@@ -70,6 +70,7 @@ export default function LeagueManage({ sport }: { sport: StructuredSport }) {
   async function deleteLeague(name: string) {
     if (!confirm(`"${name}" 리그를 삭제할까요? 등록된 팀도 함께 삭제됩니다.`)) return
     await supabase.from(leaguesTable).delete().eq('name', name)
+    await supabase.from(teamsTable).delete().eq('league', name)  // cascade가 없어도 팀이 남아 추천되지 않게
     await supabase.from('bets').update({ league: '' }).eq('league', name).eq('sport', sport)
     setLeagues(p => p.filter(l => l.name !== name))
     setTeams(p => p.filter(t => t.league !== name))
