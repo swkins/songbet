@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import dayjs from 'dayjs'
 import { X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
-import { matchBets, pickToContent, SPORT_EMOJI, type Pick, type PickBetLite } from '../lib/picks'
+import { matchBets, pickTeam, pickToContent, SPORT_EMOJI, type Pick, type PickBetLite } from '../lib/picks'
 import type { Site } from '../types'
 
 // ─── 베팅추가 › 추천픽 (사용자 요청) ───────────────────────────────────────
@@ -84,19 +84,23 @@ export default function PickBetForm({ site, bets, sites, onBet, onClose }: Props
     return (
       <div key={p.id} style={{ border: `1px solid ${isOpen ? 'var(--gold-border)' : 'var(--border)'}`, borderRadius: 6, background: isOpen ? 'var(--gold-bg)' : 'var(--bg-elevated)', opacity: done.length && !isOpen ? 0.7 : 1 }}>
         <button type="button" onClick={() => open(p)} style={{ width: '100%', textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer', padding: '6px 8px', color: 'inherit', fontFamily: 'inherit', display: 'flex', flexDirection: 'column', gap: 2 }}>
-          {/* 윗줄: 시간·리그·경기·별점·배당·금액 / 아랫줄: 픽만 크게 한 줄로 (오른쪽에 아무것도 두지 않음) */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, color: 'var(--text-muted)', whiteSpace: 'nowrap', minWidth: 0 }}>
-            <span style={{ fontSize: 11, flexShrink: 0 }}>{stars(p.grade)}</span>
-            <span style={{ flexShrink: 0 }}>{p.kickoff_at ? dayjs(p.kickoff_at).format('M/D HH:mm') : ''}</span>
-            <span style={{ flexShrink: 0 }}>{SPORT_EMOJI[p.sport] ?? ''} {p.league}</span>
-            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>{p.home_team} vs {p.away_team}</span>
-            <span style={{ marginLeft: 'auto', flexShrink: 0, color: 'var(--text-secondary)', fontWeight: 700 }}>@{p.base_odds != null ? Number(p.base_odds).toFixed(2) : '—'} · {p.stake != null ? Number(p.stake).toLocaleString() : '—'}</span>
+          {/* 1줄 홈 vs 원정(팀 이름) · 2줄 베팅옵션(픽) · 3줄 별점·시간·리그·배당·금액 — 가로로 넘치지 않게 줄바꿈 (사용자 요청) */}
+          <div style={{ fontSize: 13, fontWeight: 700, color: done.length ? 'var(--text-secondary)' : 'var(--text-primary)', wordBreak: 'keep-all', overflowWrap: 'anywhere' }}>
+            <span style={{ color: pickTeam(p) === p.home_team ? 'var(--gold)' : undefined }}>{p.home_team}</span>
+            <span style={{ fontSize: 10, fontWeight: 400, color: 'var(--text-muted)', margin: '0 5px' }}>vs</span>
+            <span style={{ color: pickTeam(p) === p.away_team ? 'var(--gold)' : undefined }}>{p.away_team}</span>
           </div>
-          <div style={{ fontSize: 15, fontWeight: 800, color: done.length ? 'var(--text-secondary)' : 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.pick_label}</div>
+          <div style={{ fontSize: 12, fontWeight: 800, color: done.length ? 'var(--text-secondary)' : '#60a5fa', overflowWrap: 'anywhere' }}>{p.pick_label}</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', columnGap: 8, rowGap: 2, fontSize: 10, color: 'var(--text-muted)' }}>
+            <span style={{ fontSize: 11 }}>{stars(p.grade)}</span>
+            <span>{p.kickoff_at ? dayjs(p.kickoff_at).format('M/D HH:mm') : ''}</span>
+            <span>{SPORT_EMOJI[p.sport] ?? ''} {p.league}</span>
+            <span style={{ color: 'var(--text-secondary)', fontWeight: 700 }}>@{p.base_odds != null ? Number(p.base_odds).toFixed(2) : '—'} · {p.stake != null ? Number(p.stake).toLocaleString() : '—'}원</span>
+          </div>
           {done.length > 0 && (
             <div style={{ fontSize: 10, fontWeight: 800, color: '#4ade80' }}
               title={done.map(b => `${siteName(b.site_id)} ${b.match} ${Number(b.stake).toLocaleString()} @${Number(b.odds).toFixed(2)}`).join('\n')}>
-              ✓ 베팅완료 {done.length}건 <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>({done.map(b => siteName(b.site_id) || '—').join(', ')}) · 눌러서 추가 베팅</span>
+              ✓ 베팅완료 {done.length}건 <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>({done.map(b => siteName(b.site_id) || '—').join(', ')})</span>
             </div>
           )}
         </button>
@@ -128,7 +132,7 @@ export default function PickBetForm({ site, bets, sites, onBet, onClose }: Props
             {todo.length === 0 && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '6px 0', textAlign: 'center' }}>남은 추천픽을 모두 걸었습니다</div>}
             {doneList.length > 0 && (
               <button type="button" onClick={() => setShowDone(v => !v)} style={{ marginTop: 2, padding: '6px 8px', borderRadius: 6, border: '1px dashed var(--border)', background: 'transparent', color: '#4ade80', cursor: 'pointer', fontSize: 11, fontWeight: 800, fontFamily: 'inherit', textAlign: 'left' }}>
-                {showDone ? '▾' : '▸'} 베팅완료 {doneList.length}건 <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>{showDone ? '접기' : '— 눌러서 보기·추가 베팅'}</span>
+                {showDone ? '▾' : '▸'} 베팅완료 {doneList.length}건
               </button>
             )}
             {showDone && doneList.map(renderPick)}

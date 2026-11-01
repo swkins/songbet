@@ -577,7 +577,7 @@ function BetBadgeRow({ sport, match, live, knownOptions = [], numericOptions = [
 // 베팅옵션도 홈/원정과 같은 뱃지(알약) 스타일로 표시 — 평문 글씨 대신 통일된 배지 톤을 유지한다.
 // "승리"(일반승/moneyline)도 다른 옵션과 똑같이 배지로 표시한다.
 // (배당·금액은 이 아래 별도 줄 — BetOddsStakeLine 참고)
-function BetMatchLine({ sport, match, fontSize = 15, teamColor, live, stacked = true, knownOptions = [], numericOptions = [] }: { sport: string; match: string; fontSize?: number; teamColor?: string; live?: boolean; stacked?: boolean; knownOptions?: string[]; numericOptions?: string[] }) {
+function BetMatchLine({ sport, match, fontSize = 13, teamColor, live, stacked = true, knownOptions = [], numericOptions = [] }: { sport: string; match: string; fontSize?: number; teamColor?: string; live?: boolean; stacked?: boolean; knownOptions?: string[]; numericOptions?: string[] }) {
   const parts = parseBetMatch(sport, match, knownOptions, numericOptions)
   const team = parts ? parts.team : match
   const showOption = !!parts
