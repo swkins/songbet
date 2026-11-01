@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import dayjs from 'dayjs'
 import { X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
-import { matchBets, pickTeam, pickToContent, SPORT_EMOJI, type Pick, type PickBetLite } from '../lib/picks'
+import { matchBets, pickMemo, pickTeam, pickToContent, SPORT_EMOJI, type Pick, type PickBetLite } from '../lib/picks'
 import type { Site } from '../types'
 
 // ─── 베팅추가 › 추천픽 (사용자 요청) ───────────────────────────────────────
@@ -14,7 +14,7 @@ interface Props {
   site: Site
   bets: (PickBetLite & { site_id: string | null })[]
   sites: Site[]
-  onBet: (sport: string, content: string, odds: number, stake: number, league: string) => Promise<boolean>
+  onBet: (sport: string, content: string, odds: number, stake: number, league: string, memo: string) => Promise<boolean>
   onClose: () => void
 }
 
@@ -73,7 +73,7 @@ export default function PickBetForm({ site, bets, sites, onBet, onClose }: Props
     const o = Number(odds), a = Number(amount.replace(/,/g, ''))
     if (!content.trim() || !(o > 1) || !(a > 0)) return
     setSubmitting(true)
-    const ok = await onBet(p.sport, content.trim(), o, a, p.league)
+    const ok = await onBet(p.sport, content.trim(), o, a, p.league, pickMemo(p))
     setSubmitting(false)
     if (ok) onClose()
   }

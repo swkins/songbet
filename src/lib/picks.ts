@@ -14,6 +14,16 @@ export interface PickBetLite { match: string; stake: number; odds: number; resul
 export const SPORT_EMOJI: Record<string, string> = { soccer: '⚽', baseball: '⚾', basketball: '🏀', volleyball: '🏐', esports: '🎮' }
 
 const isOU = (p: Pick) => p.pick_side === 'under' || p.pick_side === 'over'
+// 추천픽으로 건 베팅은 memo에 "추천픽|홈팀|원정팀"을 남겨, 진행중 목록에서 두 팀을 같이 보여준다 (사용자 요청).
+// 캐시아웃하면 memo 뒤에 " · 캐시아웃 …"이 붙으므로 그 앞까지만 읽는다.
+export const PICK_MEMO_PREFIX = '추천픽|'
+export function pickMemo(p: Pick): string { return `${PICK_MEMO_PREFIX}${p.home_team}|${p.away_team}` }
+export function parsePickMemo(memo: string | null | undefined): { home: string; away: string } | null {
+  if (!memo || !memo.startsWith(PICK_MEMO_PREFIX)) return null
+  const [home, away] = memo.slice(PICK_MEMO_PREFIX.length).split(' · ')[0].split('|')
+  return home && away ? { home, away } : null
+}
+
 export const pickTeam = (p: Pick) => p.pick_side === 'home' ? p.home_team : p.pick_side === 'away' ? p.away_team : ''
 
 // 픽과 같은 베팅 찾기: 경기일 ±1일, 핸디·승은 픽 팀 이름이, 언오버는 두 팀 중 하나와 언더/오버가 경기 내용에 있어야 한다
