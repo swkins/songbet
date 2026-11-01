@@ -32,6 +32,8 @@ export default function PickBetForm({ site, bets, sites, onBet, onClose }: Props
   const [odds, setOdds] = useState('')
   const [amount, setAmount] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  // 베팅완료 픽은 아래에 접어 둔다 — 누르면 펼쳐서 보고 다시 걸 수 있다 (사용자 요청)
+  const [showDone, setShowDone] = useState(false)
 
   useEffect(() => {
     let alive = true
@@ -55,6 +57,9 @@ export default function PickBetForm({ site, bets, sites, onBet, onClose }: Props
     return [...picks].sort((a, b) => doneOf(a) - doneOf(b) ||
       (a.kickoff_at ?? '').localeCompare(b.kickoff_at ?? '') || (b.grade ?? 0) - (a.grade ?? 0) || (a.sort_order ?? 0) - (b.sort_order ?? 0))
   }, [picks, pendingBets])
+  const isDone = (p: Pick) => matchBets(p, pendingBets).length > 0
+  const todo = sorted.filter(p => !isDone(p))
+  const doneList = sorted.filter(isDone)
   const siteName = (id: string | null) => sites.find(s => s.id === id)?.name ?? ''
 
   function open(p: Pick) {
@@ -73,6 +78,45 @@ export default function PickBetForm({ site, bets, sites, onBet, onClose }: Props
     if (ok) onClose()
   }
 
+  function renderPick(p: Pick) {
+    const done = matchBets(p, pendingBets)
+    const isOpen = openId === p.id
+    return (
+      <div key={p.id} style={{ border: `1px solid ${isOpen ? 'var(--gold-border)' : 'var(--border)'}`, borderRadius: 6, background: isOpen ? 'var(--gold-bg)' : 'var(--bg-elevated)', opacity: done.length && !isOpen ? 0.7 : 1 }}>
+        <button type="button" onClick={() => open(p)} style={{ width: '100%', textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer', padding: '6px 8px', color: 'inherit', fontFamily: 'inherit', display: 'flex', flexDirection: 'column', gap: 2 }}>
+          {/* 윗줄: 시간·리그·경기·별점·배당·금액 / 아랫줄: 픽만 크게 한 줄로 (오른쪽에 아무것도 두지 않음) */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, color: 'var(--text-muted)', whiteSpace: 'nowrap', minWidth: 0 }}>
+            <span style={{ fontSize: 11, flexShrink: 0 }}>{stars(p.grade)}</span>
+            <span style={{ flexShrink: 0 }}>{p.kickoff_at ? dayjs(p.kickoff_at).format('M/D HH:mm') : ''}</span>
+            <span style={{ flexShrink: 0 }}>{SPORT_EMOJI[p.sport] ?? ''} {p.league}</span>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>{p.home_team} vs {p.away_team}</span>
+            <span style={{ marginLeft: 'auto', flexShrink: 0, color: 'var(--text-secondary)', fontWeight: 700 }}>@{p.base_odds != null ? Number(p.base_odds).toFixed(2) : '—'} · {p.stake != null ? Number(p.stake).toLocaleString() : '—'}</span>
+          </div>
+          <div style={{ fontSize: 15, fontWeight: 800, color: done.length ? 'var(--text-secondary)' : 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.pick_label}</div>
+          {done.length > 0 && (
+            <div style={{ fontSize: 10, fontWeight: 800, color: '#4ade80' }}
+              title={done.map(b => `${siteName(b.site_id)} ${b.match} ${Number(b.stake).toLocaleString()} @${Number(b.odds).toFixed(2)}`).join('\n')}>
+              ✓ 베팅완료 {done.length}건 <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>({done.map(b => siteName(b.site_id) || '—').join(', ')}) · 눌러서 추가 베팅</span>
+            </div>
+          )}
+        </button>
+        {isOpen && (
+          <div style={{ padding: '0 8px 8px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {p.rationale && <div style={{ fontSize: 10, color: 'var(--text-secondary)' }}>{p.rationale}</div>}
+            <input className="form-input" style={input} value={content} onChange={e => setContent(e.target.value)} placeholder="베팅 내용" />
+            <div style={{ display: 'flex', gap: 4 }}>
+              <input className="form-input" style={{ ...input, flex: 1 }} value={odds} onChange={e => setOdds(e.target.value)} inputMode="decimal" placeholder="배당" />
+              <input className="form-input" style={{ ...input, flex: 1.4 }} value={amount} onChange={e => setAmount(e.target.value.replace(/[^\d.,]/g, ''))}
+                onKeyDown={e => e.key === 'Enter' && submit(p)} inputMode="numeric" placeholder={isusd ? '금액($)' : '금액'} />
+              <button type="button" className="btn" disabled={submitting} onClick={() => submit(p)}
+                style={{ background: 'var(--gold)', color: '#000', border: 'none', fontWeight: 800, flexShrink: 0 }}>{submitting ? '...' : '베팅'}</button>
+            </div>
+          </div>
+        )}
+      </div>
+    )
+  }
+
   const input: React.CSSProperties = { fontSize: 12, padding: '6px 8px' }
   return (
     <div className="inline-bet-form" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -80,44 +124,14 @@ export default function PickBetForm({ site, bets, sites, onBet, onClose }: Props
         : sorted.length === 0 ? <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '10px 0', textAlign: 'center' }}>지금 걸 수 있는 추천픽이 없습니다 — 직접 베팅을 이용하세요</div>
         : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 420, overflowY: 'auto' }}>
-            {sorted.map(p => {
-              const done = matchBets(p, pendingBets)
-              const isOpen = openId === p.id
-              return (
-                <div key={p.id} style={{ border: `1px solid ${isOpen ? 'var(--gold-border)' : 'var(--border)'}`, borderRadius: 6, background: isOpen ? 'var(--gold-bg)' : 'var(--bg-elevated)', opacity: done.length && !isOpen ? 0.7 : 1 }}>
-                  <button type="button" onClick={() => open(p)} style={{ width: '100%', textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer', padding: '6px 8px', color: 'inherit', fontFamily: 'inherit', display: 'flex', flexDirection: 'column', gap: 2 }}>
-                    {/* 윗줄: 시간·리그·경기·별점·배당·금액 / 아랫줄: 픽만 크게 한 줄로 (오른쪽에 아무것도 두지 않음) */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, color: 'var(--text-muted)', whiteSpace: 'nowrap', minWidth: 0 }}>
-                      <span style={{ fontSize: 11, flexShrink: 0 }}>{stars(p.grade)}</span>
-                      <span style={{ flexShrink: 0 }}>{p.kickoff_at ? dayjs(p.kickoff_at).format('M/D HH:mm') : ''}</span>
-                      <span style={{ flexShrink: 0 }}>{SPORT_EMOJI[p.sport] ?? ''} {p.league}</span>
-                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>{p.home_team} vs {p.away_team}</span>
-                      <span style={{ marginLeft: 'auto', flexShrink: 0, color: 'var(--text-secondary)', fontWeight: 700 }}>@{p.base_odds != null ? Number(p.base_odds).toFixed(2) : '—'} · {p.stake != null ? Number(p.stake).toLocaleString() : '—'}</span>
-                    </div>
-                    <div style={{ fontSize: 15, fontWeight: 800, color: done.length ? 'var(--text-secondary)' : 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.pick_label}</div>
-                    {done.length > 0 && (
-                      <div style={{ fontSize: 10, fontWeight: 800, color: '#4ade80' }}
-                        title={done.map(b => `${siteName(b.site_id)} ${b.match} ${Number(b.stake).toLocaleString()} @${Number(b.odds).toFixed(2)}`).join('\n')}>
-                        ✓ 베팅완료 {done.length}건 <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>({done.map(b => siteName(b.site_id) || '—').join(', ')}) · 눌러서 추가 베팅</span>
-                      </div>
-                    )}
-                  </button>
-                  {isOpen && (
-                    <div style={{ padding: '0 8px 8px', display: 'flex', flexDirection: 'column', gap: 4 }}>
-                      {p.rationale && <div style={{ fontSize: 10, color: 'var(--text-secondary)' }}>{p.rationale}</div>}
-                      <input className="form-input" style={input} value={content} onChange={e => setContent(e.target.value)} placeholder="베팅 내용" />
-                      <div style={{ display: 'flex', gap: 4 }}>
-                        <input className="form-input" style={{ ...input, flex: 1 }} value={odds} onChange={e => setOdds(e.target.value)} inputMode="decimal" placeholder="배당" />
-                        <input className="form-input" style={{ ...input, flex: 1.4 }} value={amount} onChange={e => setAmount(e.target.value.replace(/[^\d.,]/g, ''))}
-                          onKeyDown={e => e.key === 'Enter' && submit(p)} inputMode="numeric" placeholder={isusd ? '금액($)' : '금액'} />
-                        <button type="button" className="btn" disabled={submitting} onClick={() => submit(p)}
-                          style={{ background: 'var(--gold)', color: '#000', border: 'none', fontWeight: 800, flexShrink: 0 }}>{submitting ? '...' : '베팅'}</button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )
-            })}
+            {todo.map(renderPick)}
+            {todo.length === 0 && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '6px 0', textAlign: 'center' }}>남은 추천픽을 모두 걸었습니다</div>}
+            {doneList.length > 0 && (
+              <button type="button" onClick={() => setShowDone(v => !v)} style={{ marginTop: 2, padding: '6px 8px', borderRadius: 6, border: '1px dashed var(--border)', background: 'transparent', color: '#4ade80', cursor: 'pointer', fontSize: 11, fontWeight: 800, fontFamily: 'inherit', textAlign: 'left' }}>
+                {showDone ? '▾' : '▸'} 베팅완료 {doneList.length}건 <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>{showDone ? '접기' : '— 눌러서 보기·추가 베팅'}</span>
+              </button>
+            )}
+            {showDone && doneList.map(renderPick)}
           </div>
         )}
       <button type="button" className="btn btn-ghost btn-xs" onClick={onClose} style={{ alignSelf: 'flex-end', fontSize: 10, display: 'flex', alignItems: 'center', gap: 3 }}><X size={11} /> 닫기</button>
