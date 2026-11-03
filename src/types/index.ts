@@ -70,4 +70,4 @@ export interface SoccerOddsLog {
 }
 // 카지노(sport='casino')는 더 이상 입력하지 않음 — 예전 기록만 대시보드에 남아 삭제 가능, 통계에서는 제외
 
-export type Tab = 'dashboard' | 'stats' | 'settlement' | 'picks' | 'simul' | 'rulebook'
+export type Tab = 'dashboard' | 'stats' | 'settlement' | 'simul' | 'rulebook'
