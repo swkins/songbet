@@ -1843,6 +1843,8 @@ function SportPanel({ bets, sport, onDeleteRequest, onDeleteTargetRequest, leagu
   if (stats.total === 0) return (
     <div>
       <div style={{ padding: '24px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>결과 처리된 베팅이 없습니다</div>
+      {/* 축구는 베팅이 없어도 통계 박스(추가한 옵션 카드·+ 추가)를 보여준다 (사용자 요청) */}
+      {sport.value === 'soccer' && <BetOptionStatsSection key="soccer" settledBets={[]} options={betOptions} numericOptions={numericBetOptions} tracked={soccerTracked} onAddTracked={onAddSoccerTracked} onRemoveTracked={onRemoveSoccerTracked} onAssignBetOption={onAssignBetOption} onExcludeBet={onExcludeBet} />}
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
         <button onClick={onDeleteRequest} className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--red)', borderColor: 'var(--red-border)', display: 'flex', alignItems: 'center', gap: 4 }}>
           <Trash2 size={11} /> 데이터 삭제
