@@ -308,12 +308,20 @@ function lineRows(list: Bet[], template: string): RuleRow[] {
 
 // 베팅옵션 카드 하나 — 배당 0.1단위 구간별 고정(리그별 보기는 아래 리그×옵션 매트릭스에서).
 // 킬 오버·시간 오버만 기준점별.
-function BetOptionOddsCard({ label, bets }: { label: string; bets: Bet[] }) {
+function BetOptionOddsCard({ label, bets, onRemove }: { label: string; bets: Bet[]; onRemove?: () => void }) {
   const s = calcStats(bets)
   const lineTemplate = lineRowsTemplate(label)
   return (
     <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, padding: '12px 14px', flex: '1 0 260px' }}>
-      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 8 }}>{label}</div>
+      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)' }}>{label}</div>
+        {onRemove && (
+          <button type="button" onClick={onRemove} title="통계 박스에서 빼기"
+            style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', padding: 2, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}>
+            <X size={12} />
+          </button>
+        )}
+      </div>
       {s.total === 0 ? (
         <div style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'center', padding: '10px 0' }}>데이터 없음</div>
       ) : (
@@ -408,30 +416,100 @@ function UnclassifiedBetOptionCard({ bets, options, onAssign, onExclude }: {
 // 등록된 옵션 하나하나가 각각 카드 하나 — 탭으로 감추지 않고 전부 한 화면에 펼쳐서 보여준다(배당 기준 고정).
 // 삭제된 옵션에 걸려있던(또는 어디에도 안 걸리는) 베팅은 "기타" 카드로, 거기서 직접 재지정 가능.
 // 그 아래엔 축구 리그표처럼 리그를 세로로, 옵션을 가로로 깔아 리그별 성적을 한 표에서 비교하는 매트릭스.
-function BetOptionStatsSection({ settledBets, options, numericOptions, onlyLabels, onAssignBetOption, onExcludeBet }: {
+// 통계에 띄울 베팅옵션 (축구 — 사용자가 '추가'로 고른 것, Supabase stats_tracked_options).
+// side가 없으면 홈·원정 구분 없이 그 옵션 전체(공통)로 집계한다.
+export interface TrackedOption { id: string; sport: string; label: string; side: '홈' | '원정' | null; sort_order: number }
+function trackedTitle(t: Pick<TrackedOption, 'label' | 'side'>): string {
+  if (t.side) return `${t.side} ${t.label}`
+  return /오버|언더/.test(t.label) ? t.label : `${t.label} (홈·원정 공통)`
+}
+function trackedCellsOf(allCells: OptionCell[], tracked: TrackedOption[]): (OptionCell & { tracked: TrackedOption })[] {
+  return tracked.map(t => {
+    const labels = t.side ? [`${t.side} ${t.label}`] : [`홈 ${t.label}`, `원정 ${t.label}`, t.label]
+    const bets = allCells.filter(c => labels.includes(c.label)).flatMap(c => c.bets)
+    return { label: trackedTitle(t), bets, tracked: t }
+  })
+}
+
+// 통계 박스에 베팅옵션 추가 — 대시보드(베팅추가) 종목별 베팅옵션 중 고르고, 홈/원정을 고르거나(각각) 안 고르면 공통
+function TrackedOptionAdder({ options, tracked, onAdd }: {
+  options: string[]; tracked: TrackedOption[]; onAdd: (label: string, side: '홈' | '원정' | null) => Promise<void>
+}) {
+  const [open, setOpen] = useState(false)
+  const [label, setLabel] = useState<string | null>(null)
+  const [side, setSide] = useState<'홈' | '원정' | null>(null)
+  const [saving, setSaving] = useState(false)
+  const dup = label !== null && tracked.some(t => t.label === label && t.side === side)
+  const chip = (active: boolean): React.CSSProperties => ({
+    fontSize: 11, fontWeight: 700, padding: '4px 10px', borderRadius: 999, cursor: 'pointer', fontFamily: 'var(--font-body)',
+    border: `1px solid ${active ? 'var(--gold-border)' : 'var(--border)'}`, background: active ? 'var(--gold-bg)' : 'var(--bg-elevated)',
+    color: active ? 'var(--gold)' : 'var(--text-secondary)',
+  })
+  async function add() {
+    if (!label || dup) return
+    setSaving(true)
+    await onAdd(label, side)
+    setSaving(false)
+    setLabel(null); setSide(null); setOpen(false)
+  }
+  if (!open) return (
+    <button type="button" onClick={() => setOpen(true)} style={{ ...chip(true), marginLeft: 'auto' }}>+ 추가</button>
+  )
+  return (
+    <div style={{ flex: '1 0 100%', background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 8, padding: '10px 12px', marginTop: 6, display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 10, color: 'var(--text-muted)', width: 52 }}>베팅옵션</span>
+        {options.length === 0 && <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>대시보드에 등록된 베팅옵션이 없습니다</span>}
+        {options.map(o => <button key={o} type="button" style={chip(label === o)} onClick={() => setLabel(label === o ? null : o)}>{o}</button>)}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 10, color: 'var(--text-muted)', width: 52 }}>홈/원정</span>
+        {(['홈', '원정'] as const).map(sd => <button key={sd} type="button" style={chip(side === sd)} onClick={() => setSide(side === sd ? null : sd)}>{sd}</button>)}
+        <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>안 고르면 홈·원정 공통으로 집계</span>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <span style={{ fontSize: 11, color: 'var(--text-primary)', fontWeight: 700 }}>{label ? trackedTitle({ label, side }) : '옵션을 고르세요'}</span>
+        {dup && <span style={{ fontSize: 10, color: 'var(--red)' }}>이미 있음</span>}
+        <button type="button" onClick={add} disabled={!label || dup || saving} style={{ ...chip(true), marginLeft: 'auto', opacity: !label || dup ? 0.5 : 1 }}>{saving ? '저장중' : '추가'}</button>
+        <button type="button" onClick={() => { setOpen(false); setLabel(null); setSide(null) }} style={chip(false)}>닫기</button>
+      </div>
+    </div>
+  )
+}
+
+function BetOptionStatsSection({ settledBets, options, numericOptions, tracked, onAddTracked, onRemoveTracked, onAssignBetOption, onExcludeBet }: {
   settledBets: Bet[]; options: string[]; numericOptions: string[]
-  // 지정하면 이 라벨(예: "원정 0.5 H")의 카드만 이 순서대로 보여주고 "기타"는 숨긴다.
-  onlyLabels?: readonly string[]
+  // 지정하면 이 옵션(홈/원정/공통)의 카드만 이 순서대로 보여주고 "기타"는 숨긴다 (축구).
+  tracked?: TrackedOption[]
+  onAddTracked?: (label: string, side: '홈' | '원정' | null) => Promise<void>
+  onRemoveTracked?: (t: TrackedOption) => Promise<void>
   onAssignBetOption: (ids: string[], label: string) => Promise<void>
   onExcludeBet: (bet: Bet, exclude: boolean) => Promise<void>
 }) {
-  if (options.length === 0) return null
+  if (options.length === 0 && !tracked) return null
   const allCells = classifySportBetsByOption(settledBets, options, numericOptions)
-  const cells = onlyLabels
-    ? onlyLabels.map(l => allCells.find(c => c.label === l) ?? { label: l, bets: [] })
-    : allCells
-  if (cells.length === 0) return null
+  const cells: (OptionCell & { tracked?: TrackedOption })[] = tracked ? trackedCellsOf(allCells, tracked) : allCells
+  if (cells.length === 0 && !onAddTracked) return null
   const matrixColumns = cells.filter(c => c.label !== '기타')
 
   return (
     <div style={{ marginBottom: 14 }}>
-      <div className="card-title" style={{ marginBottom: 2 }}>🎯 베팅옵션별 성적</div>
-      <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 10 }}>베팅추가에 등록된 옵션 전부, 배당 0.1단위 구간별 — 삭제된 옵션에 걸린 베팅이나 어디에도 안 걸리는 베팅은 "기타"로 표시</div>
+      <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
+        <div className="card-title" style={{ marginBottom: 2 }}>🎯 베팅옵션별 성적</div>
+        {onAddTracked && tracked && <TrackedOptionAdder options={options} tracked={tracked} onAdd={onAddTracked} />}
+      </div>
+      <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 10 }}>
+        {tracked
+          ? '+ 추가로 대시보드 베팅옵션을 골라 넣는다 (홈/원정을 고르면 각각, 안 고르면 공통) — 배당 0.1단위 구간별'
+          : '베팅추가에 등록된 옵션 전부, 배당 0.1단위 구간별 — 삭제된 옵션에 걸린 베팅이나 어디에도 안 걸리는 베팅은 "기타"로 표시'}
+      </div>
+      {cells.length === 0 && <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0' }}>추가된 베팅옵션이 없습니다.</div>}
       {/* 격자로 깔아서 줄 끝에 혼자 남은 카드(예: 2.5 오버)도 위 카드들과 같은 폭 */}
       <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
-        {cells.map(c => c.label === '기타'
+        {cells.map(c => c.label === '기타' && !c.tracked
           ? <UnclassifiedBetOptionCard key="기타" bets={c.bets} options={options} onAssign={onAssignBetOption} onExclude={onExcludeBet} />
-          : <BetOptionOddsCard key={c.label} label={c.label} bets={c.bets} />)}
+          : <BetOptionOddsCard key={c.label} label={c.label} bets={c.bets}
+              onRemove={c.tracked && onRemoveTracked ? () => { if (confirm(`"${c.label}" 통계 박스를 뺄까요? (베팅 기록은 그대로)`)) onRemoveTracked(c.tracked!) } : undefined} />)}
       </div>
       {matrixColumns.length > 0 && (
         <div style={{ marginTop: 14 }}>
@@ -1011,14 +1089,12 @@ function LeagueManageModal({ leagues, onRename, onDelete, onClose }: {
 
 // ─── 축구 상세 통계 ──────
 // 추적하는 베팅옵션은 위 "베팅옵션별 성적"에서 보여주고, 여기엔 그 외 베팅만 모아 보여준다.
-// 새 룰북 (사용자 요청): 홈 승리 · 원정 0.5 · 홈/원정 1.5 · 홈/원정 2.5(테스트)만 — 원정 승리·홈 0.5·2.5 오버는 뺐다
-const SOCCER_TRACKED_OPTIONS = ['홈 승리', '원정 0.5 H', '홈 1.5 H', '원정 1.5 H', '홈 2.5 H', '원정 2.5 H'] as const
+// 통계에 띄울 옵션은 사용자가 '+ 추가'로 고른다 (stats_tracked_options) — 처음엔 예전 룰북 여섯 개(홈 승리·원정 0.5·홈/원정 1.5·홈/원정 2.5)로 채움
 // 룰북 외 베팅은 삭제 버튼으로 언제든 지울 수 있다 (사용자 요청) — 지금 보이는 룰북 외 정산 베팅만 지운다
-function SoccerDetailPanel({ bets, options, numericOptions, onDeleteRequest }: { bets: Bet[]; options: string[]; numericOptions: string[]; onDeleteRequest?: (target: DeleteTarget) => void }) {
+function SoccerDetailPanel({ bets, options, numericOptions, tracked, onDeleteRequest }: { bets: Bet[]; options: string[]; numericOptions: string[]; tracked: TrackedOption[]; onDeleteRequest?: (target: DeleteTarget) => void }) {
   const settled = bets.filter(b => b.result !== 'pending')
-  const tracked = new Set<string>(SOCCER_TRACKED_OPTIONS)
-  const trackedIds = new Set(classifySportBetsByOption(settled, options, numericOptions)
-    .filter(c => tracked.has(c.label)).flatMap(c => c.bets).map(b => b.id))
+  const trackedIds = new Set(trackedCellsOf(classifySportBetsByOption(settled, options, numericOptions), tracked)
+    .flatMap(c => c.bets).map(b => b.id))
   const otherBets = settled.filter(b => !trackedIds.has(b.id))
   const otherIds = new Set(otherBets.map(b => b.id))
   return <OtherBetsPanel bets={otherBets}
@@ -1730,8 +1806,11 @@ function MockPanel({ bets, betOptionsBySport, numericBetOptionsBySport, onAssign
   )
 }
 
-function SportPanel({ bets, sport, onDeleteRequest, onDeleteTargetRequest, leagueOverrides, baseballLeagues, onRenameBaseballLeague, onDeleteBaseballLeague, esportsOverrides, esportsLeagues, onRenameEsportsLeague, onDeleteEsportsLeague, basketballOverrides, basketballLeagues, onRenameBasketballLeague, onDeleteBasketballLeague, volleyballOverrides, volleyballLeagues, onRenameVolleyballLeague, onDeleteVolleyballLeague, betOptions, numericBetOptions, onAssignBetOption, onExcludeBet }: {
+function SportPanel({ bets, sport, onDeleteRequest, onDeleteTargetRequest, leagueOverrides, baseballLeagues, onRenameBaseballLeague, onDeleteBaseballLeague, esportsOverrides, esportsLeagues, onRenameEsportsLeague, onDeleteEsportsLeague, basketballOverrides, basketballLeagues, onRenameBasketballLeague, onDeleteBasketballLeague, volleyballOverrides, volleyballLeagues, onRenameVolleyballLeague, onDeleteVolleyballLeague, betOptions, numericBetOptions, onAssignBetOption, onExcludeBet, soccerTracked, onAddSoccerTracked, onRemoveSoccerTracked }: {
   bets: Bet[]; sport: typeof SPORTS[0]; onDeleteRequest: () => void
+  soccerTracked: TrackedOption[]
+  onAddSoccerTracked: (label: string, side: '홈' | '원정' | null) => Promise<void>
+  onRemoveSoccerTracked: (t: TrackedOption) => Promise<void>
   onDeleteTargetRequest: (target: DeleteTarget) => void
   betOptions: string[]
   numericBetOptions: string[]
@@ -1798,7 +1877,7 @@ function SportPanel({ bets, sport, onDeleteRequest, onDeleteTargetRequest, leagu
         </button>
       </div>
 
-      {sport.value !== 'basketball' && sport.value !== 'volleyball' && <BetOptionStatsSection key={sport.value} settledBets={stats.settled} options={betOptions} numericOptions={numericBetOptions} onlyLabels={sport.value === 'soccer' ? SOCCER_TRACKED_OPTIONS : undefined} onAssignBetOption={onAssignBetOption} onExcludeBet={onExcludeBet} />}
+      {sport.value !== 'basketball' && sport.value !== 'volleyball' && <BetOptionStatsSection key={sport.value} settledBets={stats.settled} options={betOptions} numericOptions={numericBetOptions} tracked={sport.value === 'soccer' ? soccerTracked : undefined} onAddTracked={sport.value === 'soccer' ? onAddSoccerTracked : undefined} onRemoveTracked={sport.value === 'soccer' ? onRemoveSoccerTracked : undefined} onAssignBetOption={onAssignBetOption} onExcludeBet={onExcludeBet} />}
 
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-start' }}>
         {byMarket.length > 0 && !['soccer', 'basketball', 'volleyball'].includes(sport.value) && (
@@ -1821,7 +1900,7 @@ function SportPanel({ bets, sport, onDeleteRequest, onDeleteTargetRequest, leagu
           </div>
         )}
         {sport.value === 'baseball'   && <BaseballDetailPanel bets={periodBets} overrides={leagueOverrides} knownLeagues={baseballLeagues} onRenameLeague={onRenameBaseballLeague} onDeleteLeague={onDeleteBaseballLeague} />}
-        {sport.value === 'soccer'     && <SoccerDetailPanel bets={periodBets} options={betOptions} numericOptions={numericBetOptions} onDeleteRequest={onDeleteTargetRequest} />}
+        {sport.value === 'soccer'     && <SoccerDetailPanel bets={periodBets} options={betOptions} numericOptions={numericBetOptions} tracked={soccerTracked} onDeleteRequest={onDeleteTargetRequest} />}
         {sport.value === 'basketball' && <BasketballLeagueDetailPanel bets={periodBets} options={betOptions} numericOptions={numericBetOptions} overrides={basketballOverrides} knownLeagues={basketballLeagues} onRenameLeague={onRenameBasketballLeague} onDeleteLeague={onDeleteBasketballLeague} />}
         {sport.value === 'esports'    && <EsportsDetailPanel bets={periodBets} overrides={esportsOverrides} knownLeagues={esportsLeagues} onRenameLeague={onRenameEsportsLeague} onDeleteLeague={onDeleteEsportsLeague} />}
         {sport.value === 'volleyball' && <VolleyballDetailPanel bets={periodBets} options={betOptions} numericOptions={numericBetOptions} overrides={volleyballOverrides} knownLeagues={volleyballLeagues} onRenameLeague={onRenameVolleyballLeague} onDeleteLeague={onDeleteVolleyballLeague} />}
@@ -1875,9 +1954,27 @@ export default function Stats() {
   // "세부 수치 입력" 옵션(예: "포인트 오버") — betOptionsBySport의 부분집합, 문구에서 실제 입력값을 뽑아 값별로 쪼개는 데 사용
   const [numericBetOptionsBySport, setNumericBetOptionsBySport] = useState<Record<string, string[]>>({})
 
+  // 축구 통계 박스에 띄울 베팅옵션 (사용자가 '+ 추가'로 고름)
+  const [soccerTracked, setSoccerTracked] = useState<TrackedOption[]>([])
+
   const BASEBALL_FIXED_LEAGUES = ['KBO', 'MLB', 'NPB', 'CPBL', 'LMB']
 
-  useEffect(() => { loadBets(); loadSites(); loadRates(); loadSoccerLeagueData(); loadBaseballLeagueData(); loadEsportsLeagueData(); loadBasketballLeagueData(); loadVolleyballLeagueData(); loadBetOptions() }, [])
+  useEffect(() => { loadSoccerTracked(); loadBets(); loadSites(); loadRates(); loadSoccerLeagueData(); loadBaseballLeagueData(); loadEsportsLeagueData(); loadBasketballLeagueData(); loadVolleyballLeagueData(); loadBetOptions() }, [])
+  async function loadSoccerTracked() {
+    const { data } = await supabase.from('stats_tracked_options').select('*').eq('sport', 'soccer').order('sort_order').order('created_at')
+    if (data) setSoccerTracked(data as TrackedOption[])
+  }
+  async function addSoccerTracked(label: string, side: '홈' | '원정' | null) {
+    const sort_order = soccerTracked.reduce((m, t) => Math.max(m, t.sort_order), -1) + 1
+    const { error } = await supabase.from('stats_tracked_options').insert({ sport: 'soccer', label, side, sort_order })
+    if (error) { alert('추가 실패: ' + error.message); return }
+    await loadSoccerTracked()
+  }
+  async function removeSoccerTracked(t: TrackedOption) {
+    const { error } = await supabase.from('stats_tracked_options').delete().eq('id', t.id)
+    if (error) { alert('삭제 실패: ' + error.message); return }
+    setSoccerTracked(prev => prev.filter(x => x.id !== t.id))
+  }
   async function loadSoccerLeagueData() {
     const { data } = await supabase.from('soccer_leagues').select('name').order('sort_order').order('name')
     if (data) setSoccerLeagues(data.map(r => r.name).sort(koCompare))
@@ -2297,6 +2394,9 @@ export default function Stats() {
               numericBetOptions={numericBetOptionsBySport[activeSport] ?? []}
               onAssignBetOption={assignBetOptionToBets}
               onExcludeBet={setStatsExcluded}
+              soccerTracked={soccerTracked}
+              onAddSoccerTracked={addSoccerTracked}
+              onRemoveSoccerTracked={removeSoccerTracked}
               leagueOverrides={leagueOverrides}
               baseballLeagues={baseballLeagues}
               onRenameBaseballLeague={renameBaseballLeague}
