@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import dayjs from 'dayjs'
-import { supabase } from '../lib/supabase'
+import { loadSchedules, gameState, koName, type ScheduleGame, type ScheduleTeam, type ScheduleRow } from '../lib/gameSchedule'
 
 // '분석' 탭 — 종목별 다음 경기 일정.
 // 일정은 Supabase 함수 update-schedule이 ESPN·KBL·WKBL·KOVO에서 받아 game_schedules(sport, league, game_date=한국 날짜)에 넣는다.
@@ -14,30 +14,8 @@ const SPORTS: { id: string; label: string; leagues: string[] }[] = [
   { id: 'baseball', label: '⚾ 야구', leagues: [] },
 ]
 
-const NBA_KO: Record<string, string> = {
-  'Atlanta Hawks': '애틀랜타', 'Boston Celtics': '보스턴', 'Brooklyn Nets': '브루클린', 'Charlotte Hornets': '샬럿',
-  'Chicago Bulls': '시카고', 'Cleveland Cavaliers': '클리블랜드', 'Dallas Mavericks': '댈러스', 'Denver Nuggets': '덴버',
-  'Detroit Pistons': '디트로이트', 'Golden State Warriors': '골든스테이트', 'Houston Rockets': '휴스턴', 'Indiana Pacers': '인디애나',
-  'LA Clippers': 'LA 클리퍼스', 'Los Angeles Clippers': 'LA 클리퍼스', 'Los Angeles Lakers': 'LA 레이커스', 'Memphis Grizzlies': '멤피스',
-  'Miami Heat': '마이애미', 'Milwaukee Bucks': '밀워키', 'Minnesota Timberwolves': '미네소타', 'New Orleans Pelicans': '뉴올리언스',
-  'New York Knicks': '뉴욕', 'Oklahoma City Thunder': '오클라호마시티', 'Orlando Magic': '올랜도', 'Philadelphia 76ers': '필라델피아',
-  'Phoenix Suns': '피닉스', 'Portland Trail Blazers': '포틀랜드', 'Sacramento Kings': '새크라멘토', 'San Antonio Spurs': '샌안토니오',
-  'Toronto Raptors': '토론토', 'Utah Jazz': '유타', 'Washington Wizards': '워싱턴',
-}
-const koName = (n?: string) => (n && NBA_KO[n]) || n || '?'
-
-interface Team { name?: string; abbr?: string; record?: string | null; score?: string | number | null }
-interface Game { id: string; start: string; home: Team; away: Team; venue?: string | null; status?: string | null; note?: string | null }
-interface Row { league: string; game_date: string; games: Game[]; fetched_at: string }
-interface Item extends Game { league: string; date: string; fetchedAt: string }
-
-type State = 'pre' | 'live' | 'ended'
-function gameState(g: Game): State {
-  if (g.status === '종료' || /final/i.test(g.status ?? '')) return 'ended'
-  // ESPN은 경기 전에도 status("11/17 - 7:30 PM EST")·점수 0이 와서, 시작 시각이 지났을 때만 진행 중으로 본다
-  if (g.status && Date.now() >= Date.parse(g.start)) return 'live'
-  return 'pre'
-}
+interface Item extends ScheduleGame { league: string; date: string; fetchedAt: string }
+type Team = ScheduleTeam
 
 const KO_DAY = '일월화수목금토'
 const mdDay = (d: string) => `${dayjs(d).format('M/D')} (${KO_DAY[dayjs(d).day()]})`
@@ -48,7 +26,7 @@ const dateLabel = (d: string) => {
 
 export default function Schedule() {
   const [sport, setSport] = useState('basketball')
-  const [rows, setRows] = useState<Row[]>([])
+  const [rows, setRows] = useState<ScheduleRow[]>([])
   const [selId, setSelId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [narrow, setNarrow] = useState(() => window.innerWidth < 800)
@@ -62,10 +40,7 @@ export default function Schedule() {
   useEffect(() => {
     setLoading(true)
     setSelId(null)
-    const from = dayjs().format('YYYY-MM-DD')
-    supabase.from('game_schedules').select('league, game_date, games, fetched_at')
-      .eq('sport', sport).gte('game_date', from).order('game_date')
-      .then(({ data }) => { setRows((data ?? []) as Row[]); setLoading(false) })
+    loadSchedules(sport).then(r => { setRows(r); setLoading(false) })
   }, [sport])
 
   const sportDef = SPORTS.find(s => s.id === sport)!

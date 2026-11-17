@@ -13,6 +13,7 @@ const BetAnalysisPanel = lazy(() => import('../components/BetAnalysisPanel'))
 // 베팅분석은 대시보드에서 숨기고 상단 '베팅분석' 버튼(새 창)으로만 연다 (사용자 요청) — 대시보드에 다시 넣으려면 true
 const ANALYSIS_IN_DASHBOARD = false
 import RulebookNotes from './RulebookNotes'
+import { loadSchedules, upcomingForBet, type BetPickGame } from '../lib/gameSchedule'
 import dayjs from 'dayjs'
 import isoWeek from 'dayjs/plugin/isoWeek'
 dayjs.extend(isoWeek)
@@ -99,7 +100,7 @@ function suggestLeague(sport: string, content: string, baseballOverrides: League
 }
 
 /* ── 경기 내용 입력창: 팀 이름 자동완성(제거됨) + 빈칸 클릭 시 "베팅관리"에서 체크한 빠른 선택 목록 ── */
-function TeamContentInput({ value, onChange, candidates, allBets: _allBets, placeholder, inputRef, autoFocus, onEnter, quickPicks, teams, onPickTeam, multiTeam, currentSport }: {
+function TeamContentInput({ value, onChange, candidates, allBets: _allBets, placeholder, inputRef, autoFocus, onEnter, quickPicks, teams, onPickTeam, multiTeam, currentSport, games, onPickGame }: {
   value: string; onChange: (v: string) => void
   candidates: TeamCandidate[]; allBets: BetLite[]
   placeholder: string
@@ -114,6 +115,10 @@ function TeamContentInput({ value, onChange, candidates, allBets: _allBets, plac
   currentSport?: string
   // 팀 이름을 쓰고 스페이스 두 번(→ " vs " 자동) 또는 쉼표(,) 뒤에 한 글자만 더 쓰면 상대팀을 추천, 고르면 "팀A vs 팀B"로 채운다 (경기 자체 옵션 베팅용)
   multiTeam?: boolean
+  // 경기 일정(끝나지 않은 경기) — 칸을 누르면 목록이 뜨고, 홈/원정/경기를 누르면 그 팀(또는 "A vs B")으로 채운다.
+  // 글자를 쓰면 그 글자가 들어간 팀의 경기만. onPickGame이 있으면 종목·리그·홈원정까지 넘긴다.
+  games?: BetPickGame[]
+  onPickGame?: (g: BetPickGame, which: 'home' | 'away' | 'both') => void
 }) {
   const [open, setOpen] = useState(false)
   const [hi, setHi] = useState(-1)
@@ -148,6 +153,16 @@ function TeamContentInput({ value, onChange, candidates, allBets: _allBets, plac
     ...quickItems.map(qp => ({ key: `q:${qp}`, label: qp })),
   ]
 
+  const gq = value.trim().toLowerCase()
+  const gameItems = (games ?? [])
+    .filter(g => !gq || g.home.toLowerCase().includes(gq) || g.away.toLowerCase().includes(gq) || g.league.toLowerCase().includes(gq))
+    .sort((a, b) => Number(!!currentSport && a.sport !== currentSport) - Number(!!currentSport && b.sport !== currentSport) || a.start.localeCompare(b.start))
+  function pickGame(g: BetPickGame, which: 'home' | 'away' | 'both') {
+    onChange(which === 'both' ? `${g.home} vs ${g.away}` : which === 'home' ? g.home : g.away)
+    onPickGame?.(g, which)
+    setOpen(false); setHi(-1)
+  }
+
   function pick(item: Item) {
     onChange(teamPrefix && item.league !== undefined ? teamPrefix + item.label : item.label)
     if (item.league !== undefined && !teamPrefix) onPickTeam?.(item.label, item.league, item.sport)
@@ -160,6 +175,7 @@ function TeamContentInput({ value, onChange, candidates, allBets: _allBets, plac
         autoFocus={autoFocus}
         onChange={e => { onChange(multiTeam ? autoVs(value, e.target.value) : e.target.value); setOpen(true); setHi(-1) }}
         onDoubleClick={() => setOpen(true)}
+        onClick={() => { if (games?.length) setOpen(true) }}
         onBlur={() => setTimeout(() => setOpen(false), 150)}
         onKeyDown={e => {
           if (open && suggestions.length > 0) {
@@ -170,8 +186,9 @@ function TeamContentInput({ value, onChange, candidates, allBets: _allBets, plac
           }
           if (e.key === 'Enter') onEnter?.()
         }} />
-      {open && suggestions.length > 0 && (
-        <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 30, marginTop: 2, background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 6, maxHeight: 170, overflowY: 'auto', boxShadow: '0 4px 12px rgba(0,0,0,0.3)' }}>
+      {open && (suggestions.length > 0 || gameItems.length > 0) && (
+        <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 30, marginTop: 2, background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 6, maxHeight: gameItems.length ? 300 : 170, overflowY: 'auto', boxShadow: '0 4px 12px rgba(0,0,0,0.3)', minWidth: gameItems.length ? 300 : undefined }}>
+          {gameItems.length > 0 && <GamePickList games={gameItems} currentSport={currentSport} onPick={pickGame} />}
           {suggestions.map((s, i) => (
             <div key={s.key} onMouseDown={() => pick(s)} onMouseEnter={() => setHi(i)}
               style={{ padding: '6px 9px', fontSize: 11, cursor: 'pointer', fontWeight: i === hi ? 700 : 500, display: 'flex', justifyContent: 'space-between', gap: 8,
@@ -182,6 +199,48 @@ function TeamContentInput({ value, onChange, candidates, allBets: _allBets, plac
           ))}
         </div>
       )}
+    </div>
+  )
+}
+
+/** 베팅추가 팀 이름 칸 드롭다운의 경기 일정 목록 — 경기마다 [홈 팀] vs [원정 팀] [경기] 버튼 */
+function GamePickList({ games, currentSport, onPick }: { games: BetPickGame[]; currentSport?: string; onPick: (g: BetPickGame, which: 'home' | 'away' | 'both') => void }) {
+  const today = dayjs().format('YYYY-MM-DD')
+  const chip = (label: string, sub: string, onDown: () => void, grow = true): React.ReactNode => (
+    <button type="button" onMouseDown={e => { e.preventDefault(); onDown() }} style={{
+      flex: grow ? 1 : 'none', minWidth: 0, padding: '4px 6px', borderRadius: 4, cursor: 'pointer', fontFamily: 'var(--font-body)',
+      border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text-primary)', fontSize: 11, fontWeight: 700,
+      display: 'flex', alignItems: 'center', gap: 4, overflow: 'hidden',
+    }}
+      onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--gold-border)'; e.currentTarget.style.color = 'var(--gold)' }}
+      onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-primary)' }}>
+      {sub && <span style={{ fontSize: 9, fontWeight: 600, color: 'var(--text-muted)', flexShrink: 0 }}>{sub}</span>}
+      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
+    </button>
+  )
+  return (
+    <div style={{ borderBottom: '1px solid var(--border)' }}>
+      <div style={{ padding: '5px 9px 2px', fontSize: 9, fontWeight: 700, color: 'var(--text-muted)' }}>경기 일정 (종료 제외) — 팀을 누르면 홈/원정까지 채움</div>
+      {games.map(g => {
+        const d = dayjs(g.start)
+        return (
+          <div key={g.id} style={{ padding: '4px 8px 6px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 9, marginBottom: 3 }}>
+              <span style={{ fontWeight: 700, color: g.state === 'live' ? 'var(--gold)' : 'var(--text-secondary)' }}>
+                {d.format('YYYY-MM-DD') === today ? '' : `${d.format('M/D')} `}{d.format('HH:mm')}
+              </span>
+              <span style={{ color: 'var(--text-muted)' }}>{g.sport !== currentSport ? `${SPORT_SHORT[g.sport] ?? ''} ` : ''}{g.league}</span>
+              {g.state === 'live' && <span style={{ marginLeft: 'auto', color: 'var(--gold)', fontWeight: 700 }}>● 경기중</span>}
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              {chip(g.home, '홈', () => onPick(g, 'home'))}
+              <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>vs</span>
+              {chip(g.away, '원정', () => onPick(g, 'away'))}
+              {chip('경기', '', () => onPick(g, 'both'), false)}
+            </div>
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -2423,7 +2482,22 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, betOptionStakesBySpor
   }, [content])
 
   // 베팅옵션은 종목별로 따로 관리되므로, 종목을 바꾸면 이전 종목에서 선택했던 옵션/홈원정·BO값은 해제
-  useEffect(() => { setSelectedOptions([]); setSide('') }, [sport])
+  // (경기 일정에서 다른 종목 팀을 골라 종목이 바뀐 경우엔 고른 홈/원정을 넣는다)
+  const pendingSideRef = useRef('')
+  useEffect(() => { setSelectedOptions([]); setSide(pendingSideRef.current); pendingSideRef.current = '' }, [sport])
+
+  // 경기 일정 (끝나지 않은 경기) — 팀 이름 칸을 누르면 드롭다운으로 뜬다
+  const [scheduleRows, setScheduleRows] = useState<Awaited<ReturnType<typeof loadSchedules>>>([])
+  useEffect(() => { loadSchedules().then(setScheduleRows).catch(() => {}) }, [])
+  const pickGames = useMemo(() => upcomingForBet(scheduleRows, allSportTeams), [scheduleRows, allSportTeams])
+  function pickGame(g: BetPickGame, which: 'home' | 'away' | 'both') {
+    const sd = which === 'home' ? '홈' : which === 'away' ? '원정' : ''
+    autoLeagueRef.current = g.league; setLeagueSuggestOpen(false)
+    if (g.state === 'live') setIsLive(true)
+    if (g.sport !== sport) { pendingLeagueRef.current = g.league; pendingSideRef.current = sd; setSport(g.sport) }
+    else { setLeagueInput(g.league); setSide(sd) }
+    setTimeout(() => oddsRef.current?.focus(), 0)
+  }
 
   function handleOdds(raw: string) {
     const clean = raw.replace(/[^0-9.]/g, '')
@@ -2486,7 +2560,8 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, betOptionStakesBySpor
         <div style={{ flex: '1 1 140px', minWidth: 0 }}>
           <TeamContentInput inputRef={contentRef} placeholder={mode === 'multi' ? `팀 이름 ${LEG_MARKS[0]} (두 팀이면 쉼표 ,)` : TEAM_INPUT_PLACEHOLDER} value={content} onChange={setContent}
             candidates={[]} allBets={allBetsHistory} autoFocus onEnter={submit} quickPicks={mode === 'multi' ? quickPicks : undefined}
-            teams={allSportTeams} onPickTeam={mode === 'single' ? pickTeamLeague : undefined} currentSport={mode === 'single' ? sport : undefined} multiTeam />
+            teams={allSportTeams} onPickTeam={mode === 'single' ? pickTeamLeague : undefined} currentSport={mode === 'single' ? sport : undefined} multiTeam
+            games={pickGames} onPickGame={mode === 'single' ? pickGame : undefined} />
         </div>
         {mode === 'single' && (
           <button type="button" onClick={cycleSide} style={{

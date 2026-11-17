@@ -55,4 +55,7 @@
 - 상단 '결산' 오른쪽 '분석' 탭(`src/pages/Schedule.tsx`, Tab `schedule`) — 종목별(농구·축구·야구·배구) 다음 경기 일정. 연결된 리그: 농구 KBL·WKBL·NBA, 배구 V리그 남자·여자 (축구·야구는 "연결 전"). 화면 리그 순서는 `SPORTS[].leagues`. 레이아웃(사용자 요청): 좌 일정 2 : 우 분석 8 — 오늘·내일을 탭 없이 한 목록(날짜 머리글), 종료 경기는 흐리게 + '종료' 뱃지·이긴 쪽 굵게, 경기를 누르면 오른쪽 `GameAnalysis`에 나온다 (분석 내용은 아직 '준비 중'). 800px 미만은 위아래.
 - 일정은 Supabase 함수 `update-schedule`(소스 `supabase/functions/update-schedule/index.ts`, 출처·주의점은 파일 맨 위 주석)이 받아 `game_schedules`(sport, league, game_date = 한국 날짜, games jsonb)에 넣는다 — 기본 오늘·내일, 일주일 지난 건 지움. ESPN은 브라우저 User-Agent 없으면 403, 날짜 범위(`dates=A-B`)는 400이라 하루씩. KBL API는 헤더 Channel·TeamCode 필수. WKBL은 HTML 목록이고 첫 팀이 홈. 네이버 스포츠 API는 Supabase 서버에서 응답이 없어 못 쓴다. 한 리그가 실패해도 다른 리그는 저장되고 실패한 리그는 예전 데이터가 남는다.
 - 자동 업데이트: pg_cron `update-schedule-am`(UTC 01:00 = 오전 10시) · `update-schedule-pm`(UTC 13:00 = 오후 10시)이 pg_net으로 함수를 부른다. 지금 바로 받으려면 SQL에서 같은 `net.http_post` 실행.
+- **베팅추가 경기 일정** (사용자 요청): 팀 이름 칸을 누르면 드롭다운 맨 위에 끝나지 않은 경기(경기 전·경기중)가 나온다 (`GamePickList`, `TeamContentInput` `games`/`onPickGame`, 모든 종목, 지금 종목 먼저). [홈 팀]/[원정 팀]을 누르면 팀·리그·종목·홈/원정을 채우고 배당칸으로, [경기]는 "A vs B". 경기중 경기를 고르면 라이브도 켠다. 글자를 쓰면 그 글자가 든 팀·리그 경기만.
+  - 끝난 경기 판단(`gameState`, `src/lib/gameSchedule.ts`): 상태가 종료/Final이거나 시작 후 3시간 지남 (일정이 하루 두 번만 갱신돼서).
+  - 팀 이름은 리그 관리 등록 이름으로 바꿔 넣는다 (`resolveTeamName` — 띄어쓰기 무시 일치 → 포함 → 단어 겹침, NBA는 영어→한글 표). 못 찾으면 일정 이름 그대로 (2026-11 기준: OK저축은행·정관장(여)·하나은행·SOOP·페퍼저축은행 — 등록 이름이 예전 이름이거나 없음). KBL은 함수가 정식 이름(`full`, 예: 서울 삼성 썬더스)도 넣는다.
 - 이 컨테이너에서는 ESPN·supabase.co로 직접 못 나가서 MCP(deploy_edge_function, execute_sql)로만 다룬다.

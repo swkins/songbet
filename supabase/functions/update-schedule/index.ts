@@ -17,7 +17,7 @@ const kstDate = (ms: number) => new Date(ms + KST).toISOString().slice(0, 10)
 const compact = (d: string) => d.replaceAll('-', '')
 const kstIso = (date: string, hhmm: string) => new Date(`${date}T${hhmm.slice(0, 2)}:${hhmm.slice(-2)}:00+09:00`).toISOString()
 
-interface Team { name?: string; abbr?: string | null; record?: string | null; score?: string | number | null }
+interface Team { name?: string; full?: string | null; abbr?: string | null; record?: string | null; score?: string | number | null }
 interface Game { id: string; start: string; home: Team; away: Team; venue?: string | null; status?: string | null; note?: string | null }
 
 // ── NBA ──
@@ -71,7 +71,7 @@ async function kbl(dates: string[]) {
     if (!out[date]) continue
     out[date].push({
       id: String(g.gmkey), start: kstIso(date, g.gameStart ?? '1900'),
-      home: { name: g.tnameH, score: g.isStarted ? g.scoreH : null }, away: { name: g.tnameA, score: g.isStarted ? g.scoreA : null },
+      home: { name: g.tnameH, full: g.tnameFH || null, score: g.isStarted ? g.scoreH : null }, away: { name: g.tnameA, full: g.tnameFA || null, score: g.isStarted ? g.scoreA : null },
       venue: g.stadiumnameF || g.stadiumname || null, status: g.isEnded ? '종료' : g.isStarted ? '진행 중' : null,
       note: g.seasonCategoryName && g.seasonCategoryName !== '정규시즌' ? g.seasonCategoryName : null,
     })

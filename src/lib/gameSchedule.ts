@@ -1,0 +1,87 @@
+// ─── 경기 일정 (Supabase game_schedules) — 분석 탭·베팅추가 공용 ─────
+// 일정은 Supabase 함수 update-schedule이 넣는다 (supabase/functions/update-schedule).
+import dayjs from 'dayjs'
+import { supabase } from './supabase'
+
+export interface ScheduleTeam { name?: string; full?: string; abbr?: string; record?: string | null; score?: string | number | null }
+export interface ScheduleGame { id: string; start: string; home: ScheduleTeam; away: ScheduleTeam; venue?: string | null; status?: string | null; note?: string | null }
+export interface ScheduleRow { sport: string; league: string; game_date: string; games: ScheduleGame[]; fetched_at: string }
+
+export type GameState = 'pre' | 'live' | 'ended'
+// 일정은 하루 몇 번만 갱신되므로, 상태가 '경기 전'으로 남아 있어도 시작 후 이 시간이 지나면 끝난 걸로 본다
+const MAX_GAME_HOURS = 3
+
+export function gameState(g: ScheduleGame, now = Date.now()): GameState {
+  if (g.status === '종료' || /final/i.test(g.status ?? '')) return 'ended'
+  const start = Date.parse(g.start)
+  if (now >= start + MAX_GAME_HOURS * 3600000) return 'ended'
+  // ESPN은 경기 전에도 status("11/17 - 7:30 PM EST")·점수 0이 와서, 시작 시각이 지났을 때만 진행 중으로 본다
+  if (now >= start) return 'live'
+  return 'pre'
+}
+
+// NBA는 ESPN 영어 이름 → 한글 (짧은 이름은 분석 탭, 긴 이름은 등록 팀과 맞추는 데 씀)
+const NBA: Record<string, [string, string]> = {
+  'Atlanta Hawks': ['애틀랜타', '애틀랜타 호크스'], 'Boston Celtics': ['보스턴', '보스턴 셀틱스'], 'Brooklyn Nets': ['브루클린', '브루클린 네츠'],
+  'Charlotte Hornets': ['샬럿', '샬럿 호네츠'], 'Chicago Bulls': ['시카고', '시카고 불스'], 'Cleveland Cavaliers': ['클리블랜드', '클리블랜드 캐벌리어스'],
+  'Dallas Mavericks': ['댈러스', '댈러스 매버릭스'], 'Denver Nuggets': ['덴버', '덴버 너기츠'], 'Detroit Pistons': ['디트로이트', '디트로이트 피스톤스'],
+  'Golden State Warriors': ['골든스테이트', '골든 스테이트 워리어스'], 'Houston Rockets': ['휴스턴', '휴스턴 로키츠'], 'Indiana Pacers': ['인디애나', '인디애나 페이서스'],
+  'LA Clippers': ['LA 클리퍼스', '로스앤젤레스 클리퍼스'], 'Los Angeles Clippers': ['LA 클리퍼스', '로스앤젤레스 클리퍼스'],
+  'Los Angeles Lakers': ['LA 레이커스', '로스앤젤레스 레이커스'], 'Memphis Grizzlies': ['멤피스', '멤피스 그리즐리스'],
+  'Miami Heat': ['마이애미', '마이애미 히트'], 'Milwaukee Bucks': ['밀워키', '밀워키 벅스'], 'Minnesota Timberwolves': ['미네소타', '미네소타 팀버울브스'],
+  'New Orleans Pelicans': ['뉴올리언스', '뉴올리언스 펠리컨스'], 'New York Knicks': ['뉴욕', '뉴욕 닉스'], 'Oklahoma City Thunder': ['오클라호마시티', '오클라호마 시티 썬더'],
+  'Orlando Magic': ['올랜도', '올랜도 매직'], 'Philadelphia 76ers': ['필라델피아', '필라델피아 76ers'], 'Phoenix Suns': ['피닉스', '피닉스 선스'],
+  'Portland Trail Blazers': ['포틀랜드', '포틀랜드 트레일 블레이저스'], 'Sacramento Kings': ['새크라멘토', '새크라멘토 킹스'],
+  'San Antonio Spurs': ['샌안토니오', '샌안토니오 스퍼스'], 'Toronto Raptors': ['토론토', '토론토 랩터스'], 'Utah Jazz': ['유타', '유타 재즈'],
+  'Washington Wizards': ['워싱턴', '워싱턴 위저즈'],
+}
+/** 화면용 짧은 이름 */
+export const koName = (n?: string) => (n && NBA[n]?.[0]) || n || '?'
+
+const norm = (s: string) => s.toLowerCase().replace(/\s+/g, '')
+
+/** 일정의 팀 이름 → 리그 관리에 등록된 팀 이름 (베팅 기록·통계가 같은 이름으로 쌓이게).
+ *  같은 리그 등록 팀 중: 띄어쓰기 무시 일치 → 한쪽이 다른 쪽을 포함(하나뿐일 때) → 단어가 가장 많이 겹치는 팀(하나뿐일 때).
+ *  못 찾으면 일정 이름 그대로 (팀 이름이 바뀐 경우 등). */
+export function resolveTeamName(t: ScheduleTeam, league: string, registered: { league: string; name: string }[]): string {
+  const pool = registered.filter(r => r.league === league)
+  const names = [t.name && NBA[t.name]?.[1], t.full, t.name].filter((x): x is string => !!x)
+  for (const nm of names) {
+    const n = norm(nm)
+    const exact = pool.find(r => norm(r.name) === n)
+    if (exact) return exact.name
+    const contains = pool.filter(r => norm(r.name).includes(n) || n.includes(norm(r.name)))
+    if (contains.length === 1) return contains[0].name
+  }
+  for (const nm of names) {
+    const tokens = nm.split(/\s+/).filter(w => w.length >= 2).map(norm)
+    if (tokens.length < 2) continue
+    const scored = pool.map(r => ({ r, s: tokens.filter(w => norm(r.name).includes(w)).length })).filter(x => x.s > 0)
+    const best = Math.max(0, ...scored.map(x => x.s))
+    const top = scored.filter(x => x.s === best)
+    if (best > 0 && top.length === 1) return top[0].r.name
+  }
+  return names[0] ? (t.name && NBA[t.name]?.[1]) || t.full || t.name! : '?'
+}
+
+/** 오늘부터의 일정 (모든 종목) */
+export async function loadSchedules(sport?: string): Promise<ScheduleRow[]> {
+  let q = supabase.from('game_schedules').select('sport, league, game_date, games, fetched_at').gte('game_date', dayjs().format('YYYY-MM-DD')).order('game_date')
+  if (sport) q = q.eq('sport', sport)
+  const { data } = await q
+  return (data ?? []) as ScheduleRow[]
+}
+
+/** 베팅추가용: 끝나지 않은 경기(경기 전·경기 중)만, 팀 이름은 등록 팀 이름으로 */
+export interface BetPickGame { id: string; sport: string; league: string; start: string; state: GameState; status?: string | null; home: string; away: string }
+export function upcomingForBet(rows: ScheduleRow[], registered: { league: string; name: string; sport?: string }[]): BetPickGame[] {
+  const now = Date.now()
+  return rows.flatMap(r => r.games.map(g => ({ g, r })))
+    .map(({ g, r }) => ({ g, r, state: gameState(g, now) }))
+    .filter(x => x.state !== 'ended')
+    .map(({ g, r, state }) => {
+      const reg = registered.filter(t => !t.sport || t.sport === r.sport)
+      return { id: g.id, sport: r.sport, league: r.league, start: g.start, state, status: g.status, home: resolveTeamName(g.home, r.league, reg), away: resolveTeamName(g.away, r.league, reg) }
+    })
+    .sort((a, b) => a.start.localeCompare(b.start))
+}
