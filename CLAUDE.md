@@ -49,3 +49,10 @@
 - 축구 통계의 '베팅옵션별 성적' 박스는 사용자가 '+ 추가'로 고른 옵션만 보인다 (Supabase `stats_tracked_options`: sport·label·side) — 대시보드 축구 베팅옵션 중 고르고 홈/원정을 고르면 그쪽만, 안 고르면 홈·원정 공통으로 집계. 카드 X로 뺀다. 정산된 축구 베팅이 하나도 없어도 박스(빈 카드·+ 추가)는 보인다. 처음엔 예전 고정 여섯 개(홈 승리·원정 0.5·홈/원정 1.5·홈/원정 2.5)로 채웠다. 다른 종목은 아직 예전 그대로.
 - 상단 '픽' 탭과 베팅추가 '추천픽'(Supabase `picks` 연동)은 사용자 요청으로 뺐다 — 베팅추가는 예전 입력(`SingleBetForm`) 하나. 되살리려면 커밋 `031c1d3`의 `src/pages/Picks.tsx`·`src/components/PickBetForm.tsx`·`src/lib/picks.ts` 참고.
 
+
+## 분석 탭 (경기 일정)
+
+- 상단 '결산' 오른쪽 '분석' 탭(`src/pages/Schedule.tsx`, Tab `schedule`) — 종목별(농구·축구·야구·배구) 다음 경기 일정. 지금은 농구 NBA만 연결 (나머지 "연결 전").
+- 일정은 Supabase 함수 `update-schedule`(소스 `supabase/functions/update-schedule/index.ts`)이 ESPN에서 받아 `game_schedules`(sport, league, game_date = 한국 날짜, games jsonb)에 넣는다 — 기본 오늘·내일, 일주일 지난 건 지움. ESPN은 브라우저 User-Agent 없으면 403, 날짜 범위(`dates=A-B`)는 400이라 하루씩 받는다.
+- 자동 업데이트: pg_cron `update-schedule-am`(UTC 01:00 = 오전 10시) · `update-schedule-pm`(UTC 13:00 = 오후 10시)이 pg_net으로 함수를 부른다. 지금 바로 받으려면 SQL에서 같은 `net.http_post` 실행.
+- 이 컨테이너에서는 ESPN·supabase.co로 직접 못 나가서 MCP(deploy_edge_function, execute_sql)로만 다룬다.
