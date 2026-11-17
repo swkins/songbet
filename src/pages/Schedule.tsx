@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import dayjs from 'dayjs'
+import OddsHistory, { Arrow } from '../components/OddsHistory'
+import { loadOdds, oddsTrend, type OddsSnap } from '../lib/odds'
 import OverallAnalysisView, { loadOverallAnalyses, findAnalysis, type OverallAnalysis } from '../components/OverallAnalysisView'
 import { loadSchedules, gameState, koName, type ScheduleGame, type ScheduleTeam, type ScheduleRow } from '../lib/gameSchedule'
 
@@ -31,6 +33,7 @@ export default function Schedule() {
   const [selId, setSelId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [analyses, setAnalyses] = useState<OverallAnalysis[]>([])
+  const [odds, setOdds] = useState<Record<string, OddsSnap[]>>({})
   const [narrow, setNarrow] = useState(() => window.innerWidth < 800)
 
   useEffect(() => {
@@ -42,8 +45,9 @@ export default function Schedule() {
   useEffect(() => {
     setLoading(true)
     setSelId(null)
-    Promise.all([loadSchedules(sport), loadOverallAnalyses(dayjs().subtract(1, 'day').format('YYYY-MM-DD')).catch(() => [])])
-      .then(([r, oa]) => { setRows(r); setAnalyses(oa); setLoading(false) })
+    const since = dayjs().subtract(1, 'day').format('YYYY-MM-DD')
+    Promise.all([loadSchedules(sport), loadOverallAnalyses(since).catch(() => []), loadOdds(since).catch(() => ({}))])
+      .then(([r, oa, od]) => { setRows(r); setAnalyses(oa); setOdds(od); setLoading(false) })
   }, [sport])
 
   const sportDef = SPORTS.find(s => s.id === sport)!
@@ -77,11 +81,18 @@ export default function Schedule() {
         <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', padding: '10px 2px 6px' }}>{dateLabel(g.date)}</div>
       )) : null
       const active = g.id === selId
+      const tr = oddsTrend(odds[g.id])
       const teamLine = (t: Team, score: number, win: boolean, home: boolean) => (
         <div style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: st === 'ended' && !win ? 400 : 700 }}>{koName(t.name)}</span>
           {home && <span style={{ fontSize: 9, color: 'var(--text-muted)', flexShrink: 0 }}>홈</span>}
-          {showScore && <span style={{ marginLeft: 'auto', fontWeight: win ? 700 : 400, flexShrink: 0 }}>{score}</span>}
+          {/* 승패 배당 (오픈·첫 기록 대비 ▲▼) — 점수가 있으면 점수 앞에 */}
+          {tr && (home ? tr.last.home_odds : tr.last.away_odds) != null && (
+            <span style={{ marginLeft: 'auto', flexShrink: 0, fontSize: 11, fontFamily: 'var(--font-num)', color: 'var(--text-secondary)', fontWeight: 600 }}>
+              {(home ? tr.last.home_odds : tr.last.away_odds)!.toFixed(2)}<Arrow d={home ? tr.dH : tr.dA} />
+            </span>
+          )}
+          {showScore && <span style={{ marginLeft: tr ? 8 : 'auto', fontWeight: win ? 700 : 400, flexShrink: 0, minWidth: 22, textAlign: 'right' }}>{score}</span>}
         </div>
       )
       return (
@@ -131,7 +142,7 @@ export default function Schedule() {
           {list}
         </div>
         <div className="card" style={{ flex: narrow ? 'none' : 8, width: narrow ? '100%' : undefined, minWidth: 0, minHeight: 320 }}>
-          {sel ? <GameAnalysis g={sel} analysis={findAnalysis(analyses, sel)} /> : <div style={{ ...muted, padding: 24, textAlign: 'center' }}>왼쪽에서 경기를 누르면 여기에 분석이 나옵니다.</div>}
+          {sel ? <GameAnalysis g={sel} analysis={findAnalysis(analyses, sel)} odds={odds[sel.id]} /> : <div style={{ ...muted, padding: 24, textAlign: 'center' }}>왼쪽에서 경기를 누르면 여기에 분석이 나옵니다.</div>}
         </div>
       </div>
     </div>
@@ -139,7 +150,7 @@ export default function Schedule() {
 }
 
 // 오른쪽 분석 칸 — 지금은 경기 정보만. 분석 내용은 여기 채운다.
-function GameAnalysis({ g, analysis }: { g: Item; analysis: OverallAnalysis | null }) {
+function GameAnalysis({ g, analysis, odds }: { g: Item; analysis: OverallAnalysis | null; odds?: OddsSnap[] }) {
   const st = gameState(g)
   const showScore = st !== 'pre' && g.home.score != null && g.away.score != null
   const side = (t: Team, label: string) => (
@@ -166,6 +177,7 @@ function GameAnalysis({ g, analysis }: { g: Item; analysis: OverallAnalysis | nu
         </div>
         {side(g.away, '원정')}
       </div>
+      {odds?.length ? <OddsHistory list={odds} homeName={koName(g.home.name)} awayName={koName(g.away.name)} /> : null}
       {analysis ? <OverallAnalysisView a={analysis} />
         : <div style={{ padding: '24px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>이 경기 오버롤 분석이 아직 없습니다</div>}
     </div>
