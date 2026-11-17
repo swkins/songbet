@@ -52,7 +52,7 @@
 
 ## 분석 탭 (경기 일정)
 
-- 상단 '결산' 오른쪽 '분석' 탭(`src/pages/Schedule.tsx`, Tab `schedule`) — 종목별(농구·축구·야구·배구) 다음 경기 일정. 지금은 농구 NBA만 연결 (나머지 "연결 전").
-- 일정은 Supabase 함수 `update-schedule`(소스 `supabase/functions/update-schedule/index.ts`)이 ESPN에서 받아 `game_schedules`(sport, league, game_date = 한국 날짜, games jsonb)에 넣는다 — 기본 오늘·내일, 일주일 지난 건 지움. ESPN은 브라우저 User-Agent 없으면 403, 날짜 범위(`dates=A-B`)는 400이라 하루씩 받는다.
+- 상단 '결산' 오른쪽 '분석' 탭(`src/pages/Schedule.tsx`, Tab `schedule`) — 종목별(농구·축구·야구·배구) 다음 경기 일정. 연결된 리그: 농구 KBL·WKBL·NBA, 배구 V리그 남자·여자 (축구·야구는 "연결 전"). 화면 리그 순서는 `SPORTS[].leagues`.
+- 일정은 Supabase 함수 `update-schedule`(소스 `supabase/functions/update-schedule/index.ts`, 출처·주의점은 파일 맨 위 주석)이 받아 `game_schedules`(sport, league, game_date = 한국 날짜, games jsonb)에 넣는다 — 기본 오늘·내일, 일주일 지난 건 지움. ESPN은 브라우저 User-Agent 없으면 403, 날짜 범위(`dates=A-B`)는 400이라 하루씩. KBL API는 헤더 Channel·TeamCode 필수. WKBL은 HTML 목록이고 첫 팀이 홈. 네이버 스포츠 API는 Supabase 서버에서 응답이 없어 못 쓴다. 한 리그가 실패해도 다른 리그는 저장되고 실패한 리그는 예전 데이터가 남는다.
 - 자동 업데이트: pg_cron `update-schedule-am`(UTC 01:00 = 오전 10시) · `update-schedule-pm`(UTC 13:00 = 오후 10시)이 pg_net으로 함수를 부른다. 지금 바로 받으려면 SQL에서 같은 `net.http_post` 실행.
 - 이 컨테이너에서는 ESPN·supabase.co로 직접 못 나가서 MCP(deploy_edge_function, execute_sql)로만 다룬다.

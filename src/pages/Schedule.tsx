@@ -3,14 +3,14 @@ import dayjs from 'dayjs'
 import { supabase } from '../lib/supabase'
 
 // '분석' 탭 — 종목별 다음 경기 일정.
-// 일정은 Supabase 함수 update-schedule이 ESPN에서 받아 game_schedules(sport, league, game_date=한국 날짜)에 넣는다.
+// 일정은 Supabase 함수 update-schedule이 ESPN·KBL·WKBL·KOVO에서 받아 game_schedules(sport, league, game_date=한국 날짜)에 넣는다.
 // 화면은 읽기만 한다. 종목을 늘리려면 SPORTS에 추가하고 함수에도 리그를 넣는다.
 
 const SPORTS: { id: string; label: string; leagues: string[] }[] = [
-  { id: 'basketball', label: '🏀 농구', leagues: ['NBA'] },
+  { id: 'basketball', label: '🏀 농구', leagues: ['KBL', 'WKBL', 'NBA'] },
   { id: 'soccer', label: '⚽ 축구', leagues: [] },
   { id: 'baseball', label: '⚾ 야구', leagues: [] },
-  { id: 'volleyball', label: '🏐 배구', leagues: [] },
+  { id: 'volleyball', label: '🏐 배구', leagues: ['V리그 남자', 'V리그 여자'] },
 ]
 
 const NBA_KO: Record<string, string> = {
@@ -25,8 +25,8 @@ const NBA_KO: Record<string, string> = {
 }
 const koName = (n?: string) => (n && NBA_KO[n]) || n || '?'
 
-interface Team { name?: string; abbr?: string; record?: string | null; score?: string | null }
-interface Game { id: string; start: string; home: Team; away: Team; venue?: string | null; status?: string | null }
+interface Team { name?: string; abbr?: string; record?: string | null; score?: string | number | null }
+interface Game { id: string; start: string; home: Team; away: Team; venue?: string | null; status?: string | null; note?: string | null }
 interface Row { league: string; game_date: string; games: Game[]; fetched_at: string }
 
 export default function Schedule() {
@@ -51,8 +51,9 @@ export default function Schedule() {
   }, [sport])
 
   const dates = [...new Set(rows.map(r => r.game_date))]
-  const shown = rows.filter(r => r.game_date === date)
   const sportDef = SPORTS.find(s => s.id === sport)!
+  const shown = rows.filter(r => r.game_date === date && sportDef.leagues.includes(r.league))
+    .sort((a, b) => sportDef.leagues.indexOf(a.league) - sportDef.leagues.indexOf(b.league))
 
   const btn = (active: boolean): React.CSSProperties => ({
     padding: '6px 14px', borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontFamily: 'var(--font-body)',
@@ -91,19 +92,31 @@ export default function Schedule() {
               <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-muted)' }}>업데이트 {dayjs(r.fetched_at).format('M/D HH:mm')}</span>
             </div>
             {r.games.length === 0 && <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>경기 없음</div>}
-            {r.games.map(g => (
-              <div key={g.id} style={{ display: 'grid', gridTemplateColumns: '52px 1fr auto 1fr', gap: 8, alignItems: 'center', padding: '8px 0', borderTop: '1px solid var(--border)', fontSize: 13 }}>
-                <span style={{ color: 'var(--gold)', fontWeight: 700 }}>{dayjs(g.start).format('HH:mm')}</span>
-                <span style={{ textAlign: 'right' }}>
-                  <b>{koName(g.home.name)}</b> <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{g.home.record ?? ''}</span>
-                  <span style={{ fontSize: 10, color: 'var(--text-muted)', marginLeft: 4 }}>홈</span>
-                </span>
-                <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>vs</span>
-                <span>
-                  <b>{koName(g.away.name)}</b> <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{g.away.record ?? ''}</span>
-                </span>
-              </div>
-            ))}
+            {r.games.map(g => {
+              const ended = g.status === '종료' || /final/i.test(g.status ?? '')
+              const hasScore = g.home.score != null && g.away.score != null && (ended || g.status)
+              return (
+                <div key={g.id} style={{ display: 'grid', gridTemplateColumns: '52px 1fr 56px 1fr', gap: 8, alignItems: 'center', padding: '8px 0', borderTop: '1px solid var(--border)', fontSize: 13 }}>
+                  <span style={{ color: 'var(--gold)', fontWeight: 700 }}>{dayjs(g.start).format('HH:mm')}</span>
+                  <span style={{ textAlign: 'right', minWidth: 0 }}>
+                    <span style={{ fontSize: 10, color: 'var(--text-muted)', marginRight: 4 }}>홈</span>
+                    <b>{koName(g.home.name)}</b> <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{g.home.record ?? ''}</span>
+                  </span>
+                  <span style={{ textAlign: 'center', fontSize: hasScore ? 13 : 11, fontWeight: hasScore ? 700 : 400, color: hasScore ? 'var(--text-primary)' : 'var(--text-muted)' }}>
+                    {hasScore ? `${g.home.score} : ${g.away.score}` : 'vs'}
+                    {g.status && hasScore && <div style={{ fontSize: 10, fontWeight: 400, color: 'var(--text-muted)' }}>{ended ? '종료' : g.status}</div>}
+                  </span>
+                  <span style={{ minWidth: 0 }}>
+                    <b>{koName(g.away.name)}</b> <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{g.away.record ?? ''}</span>
+                  </span>
+                  {(g.venue || g.note) && (
+                    <span style={{ gridColumn: '2 / 5', fontSize: 11, color: 'var(--text-muted)', textAlign: 'center', marginTop: -4 }}>
+                      {[g.note, g.venue].filter(Boolean).join(' · ')}
+                    </span>
+                  )}
+                </div>
+              )
+            })}
           </div>
         ))}
     </div>
