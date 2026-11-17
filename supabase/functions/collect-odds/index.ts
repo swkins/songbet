@@ -1,0 +1,112 @@
+// 승패 배당 수집 → odds_snapshots (바뀌었을 때만 한 줄) + odds_fetch_log (매 요청 결과).
+// body: { league: 'NBA' | 'KBL' | 'WKBL' | 'V리그 남자' | 'V리그 여자' }
+// 리그마다 pg_cron 작업이 따로 30~120분 랜덤으로 부른다 (public.run_collect_odds — supabase/cron_collect.sql).
+//  - NBA: Action Network scoreboard (미국 날짜, 한 번에 전 경기, 9개 북 평균, book 30 = 오픈, 홈 티켓 %)
+//  - 국내: BetExplorer 리그 페이지 1번 (평균배당, 왼쪽 팀 = 홈). 몇 초 간격 여러 번이면 429 → 국내 리그끼리 3분 이상 띄움(SQL 쪽).
+//  오늘·내일 끝나지 않은 경기가 없으면 요청하지 않는다.
+import { createClient } from 'npm:@supabase/supabase-js@2.45.0'
+
+const UA = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36' }
+const KST = 9 * 3600000
+const kstDate = (ms: number) => new Date(ms + KST).toISOString().slice(0, 10)
+const BE: Record<string, string> = {
+  KBL: 'https://www.betexplorer.com/basketball/south-korea/kbl/',
+  WKBL: 'https://www.betexplorer.com/basketball/south-korea/wkbl-women/',
+  'V리그 남자': 'https://www.betexplorer.com/volleyball/south-korea/volleyball-league/',
+  'V리그 여자': 'https://www.betexplorer.com/volleyball/south-korea/volleyball-league-women/',
+}
+// BetExplorer 영어 팀 이름 → 일정(공식 사이트) 한글 팀 이름에 들어 있는 글자. 못 찾으면 로그에 unmatched로 남는다.
+const ALIAS: Record<string, [RegExp, string][]> = {
+  KBL: [[/thunders/i, '삼성'], [/sakers/i, 'LG'], [/knights/i, 'SK'], [/mobis|phoebus/i, '현대모비스'], [/sono/i, '소노'], [/wonju|promy/i, 'DB'],
+        [/kcc|egis/i, 'KCC'], [/kogas|pegasus/i, '가스공사'], [/suwon|\bkt\b|sonicboom/i, 'KT'], [/jungkwanjang|anyang|red boosters/i, '정관장']],
+  WKBL: [[/s-birds|shinhan/i, '신한'], [/kb stars/i, 'KB'], [/hana/i, '하나'], [/woori/i, '우리'], [/samsung|blue minx/i, '삼성'], [/bnk/i, 'BNK']],
+  'V리그 남자': [[/blue fangs|samsung/i, '삼성화재'], [/woori/i, '우리카드'], [/korean air|jumbos/i, '대한항공'], [/hyundai|skywalkers/i, '현대캐피탈'],
+                [/\bkb\b|insurance/i, 'KB'], [/\bok\b|savings|financial/i, 'OK'], [/kepco|vixtorm/i, '한국전력']],
+  'V리그 여자': [[/soop/i, 'SOOP'], [/hillstate|hyundai/i, '현대건설'], [/ibk|altos/i, 'IBK'], [/red sparks|jung ?kwan ?jang/i, '정관장'],
+                [/pink spiders|heungkuk/i, '흥국'], [/gs caltex|kixx/i, 'GS'], [/expressway|hi-?pass/i, '도로공사'], [/pepper/i, '페퍼']],
+}
+const dec = (am: number) => +(am > 0 ? 1 + am / 100 : 1 + 100 / Math.abs(am)).toFixed(2)
+const lastWord = (s: string) => (s ?? '').trim().split(/\s+/).pop()?.toLowerCase() ?? ''
+
+interface Game { id: string; start: string; home: string; away: string; date: string }
+interface Odds { game: Game; home: number; away: number; openH?: number | null; openA?: number | null; tix?: number | null; books?: number; name: string }
+
+Deno.serve(async (req) => {
+  let body: any = {}
+  try { body = await req.json() } catch { /* 빈 body */ }
+  const league: string = body.league
+  const db = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
+  const log = async (status: string, note: Record<string, unknown>) => { await db.from('odds_fetch_log').insert({ league, status, note }) ; return new Response(JSON.stringify({ league, status, ...note }), { headers: { 'Content-Type': 'application/json' } }) }
+  if (!league || (league !== 'NBA' && !BE[league])) return log('error', { message: 'unknown league' })
+
+  // 오늘·내일 끝나지 않은 경기 (시작 후 3시간 지나면 끝난 걸로)
+  const today = kstDate(Date.now()), tomorrow = kstDate(Date.now() + 86400000)
+  const { data: rows } = await db.from('game_schedules').select('game_date, games').eq('league', league).in('game_date', [today, tomorrow])
+  const games: Game[] = (rows ?? []).flatMap((r: any) => (r.games ?? []).map((g: any) => ({ id: g.id, start: g.start, home: g.home?.full || g.home?.name, away: g.away?.full || g.away?.name, date: r.game_date })))
+    .filter(g => Date.parse(g.start) + 3 * 3600000 > Date.now())
+  if (!games.length) return log('skipped', { message: '오늘·내일 남은 경기 없음' })
+
+  const found: Odds[] = []; const unmatched: string[] = []
+  try {
+    if (league === 'NBA') {
+      // Action Network은 미국 동부 날짜 — 경기 시작 시각 -5시간
+      const dates = [...new Set(games.map(g => new Date(Date.parse(g.start) - 5 * 3600000).toISOString().slice(0, 10).replaceAll('-', '')))]
+      for (const d of dates) {
+        const res = await fetch(`https://api.actionnetwork.com/web/v2/scoreboard/nba?bookIds=15,30,79,2988,75,123,71,68,69&periods=event&date=${d}`,
+          { headers: { ...UA, Accept: 'application/json', Origin: 'https://www.actionnetwork.com', Referer: 'https://www.actionnetwork.com/' } })
+        if (res.status === 429) return log('blocked', { http: 429 })
+        if (!res.ok) return log('error', { http: res.status })
+        for (const gm of (await res.json()).games ?? []) {
+          const team = (id: unknown) => (gm.teams ?? []).find((t: any) => String(t.id) === String(id))?.full_name ?? ''
+          const h = team(gm.home_team_id), a = team(gm.away_team_id)
+          const g = games.find(x => Math.abs(Date.parse(x.start) - Date.parse(gm.start_time)) < 20 * 60000 && lastWord(x.home) === lastWord(h))
+          if (!g) continue
+          const hs: number[] = [], as: number[] = []; let oh: number | null = null, oa: number | null = null, tix: number | null = null; let books = 0
+          for (const [book, m] of Object.entries<any>(gm.markets ?? {})) {
+            const ml: any[] = m?.event?.moneyline ?? []; if (!ml.length) continue
+            const H = ml.find(o => o.side === 'home'), A = ml.find(o => o.side === 'away'); if (!H || !A) continue
+            if (book === '30') { oh = dec(H.odds); oa = dec(A.odds); continue }
+            hs.push(dec(H.odds)); as.push(dec(A.odds)); books++
+            if (tix == null && H.bet_info?.tickets?.percent != null) tix = H.bet_info.tickets.percent
+          }
+          if (!hs.length) continue
+          const avg = (v: number[]) => +(v.reduce((s, x) => s + x, 0) / v.length).toFixed(2)
+          found.push({ game: g, home: avg(hs), away: avg(as), openH: oh, openA: oa, tix, books, name: `${a} @ ${h}` })
+        }
+      }
+    } else {
+      const res = await fetch(BE[league], { headers: { ...UA, 'Accept-Language': 'en' } })
+      if (res.status === 429) return log('blocked', { http: 429 })
+      if (!res.ok) return log('error', { http: res.status })
+      const html = await res.text()
+      for (const tr of html.split('<tr')) {
+        if (!tr.includes('data-odd=')) continue
+        const m = tr.match(/href="\/(?:basketball|volleyball)\/south-korea\/[^"]+\/[A-Za-z0-9]{8}\/"[^>]*>([\s\S]*?)<\/a>/); if (!m) continue
+        const name = m[1].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim()
+        if (/\d+:\d+/.test(name)) continue // 끝난 경기
+        const odds = [...tr.matchAll(/data-odd="([0-9.]+)"/g)].map(x => +x[1]); if (odds.length < 2) continue
+        const [bh, ba] = name.split(' - ')
+        const kw = (s: string) => ALIAS[league].find(([re]) => re.test(s ?? ''))?.[1]
+        const kh = kw(bh), ka = kw(ba)
+        const g = kh && ka ? games.find(x => x.home?.includes(kh) && x.away?.includes(ka)) : undefined
+        if (!g) { unmatched.push(name); continue }
+        found.push({ game: g, home: odds[0], away: odds[1], name })
+      }
+    }
+  } catch (e) { return log('error', { message: String(e) }) }
+
+  // 바뀐 것만 저장
+  let changed = 0
+  for (const o of found) {
+    const { data: prev } = await db.from('odds_snapshots').select('home_odds, away_odds').eq('game_id', o.game.id).order('fetched_at', { ascending: false }).limit(1)
+    const p = prev?.[0]
+    if (p && Number(p.home_odds) === o.home && Number(p.away_odds) === o.away) continue
+    const { error } = await db.from('odds_snapshots').insert({ league, game_date: o.game.date, game_id: o.game.id, source: league === 'NBA' ? 'actionnetwork' : 'betexplorer',
+      home_odds: o.home, away_odds: o.away, open_home: o.openH ?? null, open_away: o.openA ?? null, home_tickets: o.tix ?? null, books: o.books ?? null, match_name: o.name })
+    if (!error) changed++
+  }
+  // 보관: 경기 7일 지난 배당, 7일 지난 로그
+  await db.from('odds_snapshots').delete().lt('game_date', kstDate(Date.now() - 7 * 86400000))
+  await db.from('odds_fetch_log').delete().lt('fetched_at', new Date(Date.now() - 7 * 86400000).toISOString())
+  return log('ok', { games: games.length, matched: found.length, changed, unmatched })
+})

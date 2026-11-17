@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import dayjs from 'dayjs'
+import UpdateStatus from '../components/UpdateStatus'
+import { Activity } from 'lucide-react'
 import OddsHistory, { Arrow } from '../components/OddsHistory'
 import { loadOdds, oddsTrend, type OddsSnap } from '../lib/odds'
 import OverallAnalysisView, { loadOverallAnalyses, findAnalysis, type OverallAnalysis } from '../components/OverallAnalysisView'
@@ -34,6 +36,7 @@ export default function Schedule() {
   const [loading, setLoading] = useState(true)
   const [analyses, setAnalyses] = useState<OverallAnalysis[]>([])
   const [odds, setOdds] = useState<Record<string, OddsSnap[]>>({})
+  const [showStatus, setShowStatus] = useState(false)
   const [narrow, setNarrow] = useState(() => window.innerWidth < 800)
 
   useEffect(() => {
@@ -135,8 +138,12 @@ export default function Schedule() {
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12, borderBottom: '1px solid var(--border)', paddingBottom: 12 }}>
         {SPORTS.map(s => <button key={s.id} style={btn(sport === s.id)} onClick={() => setSport(s.id)}>{s.label}</button>)}
         {lastFetch && <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-muted)' }}>일정 업데이트 {dayjs(lastFetch).format('M/D HH:mm')}</span>}
+        <button onClick={() => setShowStatus(true)} style={{ ...btn(false), marginLeft: lastFetch ? 0 : 'auto', display: 'flex', alignItems: 'center', gap: 5 }}>
+          <Activity size={13} /> 업데이트 현황
+        </button>
       </div>
 
+      {showStatus && <UpdateStatus onClose={() => setShowStatus(false)} />}
       <div style={{ display: 'flex', flexDirection: narrow ? 'column' : 'row', gap: 16, alignItems: 'flex-start' }}>
         <div style={{ flex: narrow ? 'none' : 2, width: narrow ? '100%' : undefined, minWidth: 0, maxHeight: narrow ? 360 : 'calc(100vh - 180px)', overflowY: 'auto' }}>
           {list}
