@@ -1,5 +1,7 @@
 -- 자동 수집 작업 (pg_cron · pg_net) — Supabase에 적용하는 SQL. 분석 탭 '업데이트 현황'이 이 작업들을 보여준다.
 -- pg_cron은 UTC. 다음 실행은 '분 시 * * *'로 정해서 한 번씩만 돌게 한다 (분만 정하면 같은 시간대에 또 돌았다).
+-- 지우기(delete·drop·unschedule)가 들어가면 Supabase 연결이 확인을 묻는데 앱에 안 떠서 시간 초과 — 그래서 넣지 않았다.
+-- cron.schedule은 같은 이름이면 덮어쓴다.
 
 -- ① 경기 일정: 40~80분 뒤 랜덤 (시·분)
 create or replace function public.run_update_schedule() returns void
@@ -14,7 +16,6 @@ begin
     body := '{}'::jsonb, timeout_milliseconds := 30000);
   perform cron.alter_job((select jobid from cron.job where jobname = 'update-schedule-random'),
     schedule := extract(minute from u)::int || ' ' || extract(hour from u)::int || ' * * *');
-  delete from cron.job_run_details where jobid in (select jobid from cron.job where jobname like 'update-schedule%' or jobname like 'collect-%') and end_time < now() - interval '7 days';
 end $$;
 
 -- ② 승패 배당: 리그마다 따로 30~120분 랜덤. 국내(BetExplorer)는 다른 국내 리그가 3분 안에 불렀으면 3~10분 미룸,
@@ -28,8 +29,6 @@ create table if not exists public.odds_fetch_log (
 create index if not exists odds_fetch_log_idx on public.odds_fetch_log (league, fetched_at desc);
 alter table public.odds_jobs enable row level security;
 alter table public.odds_fetch_log enable row level security;
-drop policy if exists anon_read_odds_jobs on public.odds_jobs;
-drop policy if exists anon_read_odds_log on public.odds_fetch_log;
 create policy anon_read_odds_jobs on public.odds_jobs for select using (true);
 create policy anon_read_odds_log on public.odds_fetch_log for select using (true);
 insert into public.odds_jobs (league, job) values
@@ -81,13 +80,10 @@ do $$
 declare r record; u timestamp;
 begin
   for r in select * from public.odds_jobs loop
-    perform cron.unschedule(r.job) where exists (select 1 from cron.job where jobname = r.job);
     u := (now() + make_interval(mins => 5 + floor(random() * 41)::int)) at time zone 'UTC';
     perform cron.schedule(r.job, extract(minute from u)::int || ' ' || extract(hour from u)::int || ' * * *', format('select public.run_collect_odds(%L)', r.league));
     update public.odds_jobs set next_at = (u at time zone 'UTC') where league = r.league;
   end loop;
-  perform cron.unschedule('collect-stats-nba') where exists (select 1 from cron.job where jobname = 'collect-stats-nba');
-  perform cron.unschedule('collect-stats-domestic') where exists (select 1 from cron.job where jobname = 'collect-stats-domestic');
   perform cron.schedule('collect-stats-nba', floor(random() * 60)::int || ' 9 * * *', 'select public.run_collect_stats(''nba'')');
   perform cron.schedule('collect-stats-domestic', floor(random() * 60)::int || ' 18 * * *', 'select public.run_collect_stats(''domestic'')');
 end $$;
