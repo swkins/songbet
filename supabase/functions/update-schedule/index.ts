@@ -1,6 +1,6 @@
 // 다음 경기 일정 받아서 game_schedules에 저장 (한국 날짜 기준).
 // body: { dates?: ['YYYY-MM-DD', ...] (KST, 기본 = 오늘·내일) }
-// pg_cron 'update-schedule-am'(10:00 KST)·'update-schedule-pm'(22:00 KST)이 부른다.
+// pg_cron 'update-schedule-random'이 약 1시간마다(분은 매번 랜덤) public.run_update_schedule()로 부른다 — supabase/cron_update_schedule.sql
 // 배포: Supabase MCP deploy_edge_function (verify_jwt true, anon 키로 호출)
 //
 // 출처 (네이버 스포츠는 Supabase 서버에서 응답이 없어 못 씀):
