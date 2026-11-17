@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import dayjs from 'dayjs'
+import OverallAnalysisView, { loadOverallAnalyses, findAnalysis, type OverallAnalysis } from '../components/OverallAnalysisView'
 import { loadSchedules, gameState, koName, type ScheduleGame, type ScheduleTeam, type ScheduleRow } from '../lib/gameSchedule'
 
 // '분석' 탭 — 종목별 다음 경기 일정.
@@ -29,6 +30,7 @@ export default function Schedule() {
   const [rows, setRows] = useState<ScheduleRow[]>([])
   const [selId, setSelId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [analyses, setAnalyses] = useState<OverallAnalysis[]>([])
   const [narrow, setNarrow] = useState(() => window.innerWidth < 800)
 
   useEffect(() => {
@@ -40,7 +42,8 @@ export default function Schedule() {
   useEffect(() => {
     setLoading(true)
     setSelId(null)
-    loadSchedules(sport).then(r => { setRows(r); setLoading(false) })
+    Promise.all([loadSchedules(sport), loadOverallAnalyses(dayjs().subtract(1, 'day').format('YYYY-MM-DD')).catch(() => [])])
+      .then(([r, oa]) => { setRows(r); setAnalyses(oa); setLoading(false) })
   }, [sport])
 
   const sportDef = SPORTS.find(s => s.id === sport)!
@@ -98,6 +101,17 @@ export default function Schedule() {
             </div>
             {teamLine(g.home, hs, st === 'ended' && hs > as, true)}
             {teamLine(g.away, as, st === 'ended' && as > hs, false)}
+            {(() => {
+              const oa = findAnalysis(analyses, g)
+              if (!oa) return null
+              const pk = oa.picks?.[0]
+              return (
+                <div style={{ marginTop: 5, paddingTop: 4, borderTop: '1px dashed var(--border)', fontSize: 10, color: 'var(--text-secondary)', display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  <span>예상 <b>{oa.exp_home_score}-{oa.exp_away_score}</b></span>
+                  {pk && <span style={{ color: 'var(--gold)', fontWeight: 700 }}>{pk.pick} {'★'.repeat(pk.stars ?? 0)}</span>}
+                </div>
+              )
+            })()}
           </div>
         </div>
       )
@@ -117,7 +131,7 @@ export default function Schedule() {
           {list}
         </div>
         <div className="card" style={{ flex: narrow ? 'none' : 8, width: narrow ? '100%' : undefined, minWidth: 0, minHeight: 320 }}>
-          {sel ? <GameAnalysis g={sel} /> : <div style={{ ...muted, padding: 24, textAlign: 'center' }}>왼쪽에서 경기를 누르면 여기에 분석이 나옵니다.</div>}
+          {sel ? <GameAnalysis g={sel} analysis={findAnalysis(analyses, sel)} /> : <div style={{ ...muted, padding: 24, textAlign: 'center' }}>왼쪽에서 경기를 누르면 여기에 분석이 나옵니다.</div>}
         </div>
       </div>
     </div>
@@ -125,7 +139,7 @@ export default function Schedule() {
 }
 
 // 오른쪽 분석 칸 — 지금은 경기 정보만. 분석 내용은 여기 채운다.
-function GameAnalysis({ g }: { g: Item }) {
+function GameAnalysis({ g, analysis }: { g: Item; analysis: OverallAnalysis | null }) {
   const st = gameState(g)
   const showScore = st !== 'pre' && g.home.score != null && g.away.score != null
   const side = (t: Team, label: string) => (
@@ -152,7 +166,8 @@ function GameAnalysis({ g }: { g: Item }) {
         </div>
         {side(g.away, '원정')}
       </div>
-      <div style={{ padding: '24px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>분석 내용 준비 중</div>
+      {analysis ? <OverallAnalysisView a={analysis} />
+        : <div style={{ padding: '24px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>이 경기 오버롤 분석이 아직 없습니다</div>}
     </div>
   )
 }
