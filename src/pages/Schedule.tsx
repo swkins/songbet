@@ -8,9 +8,9 @@ import { supabase } from '../lib/supabase'
 
 const SPORTS: { id: string; label: string; leagues: string[] }[] = [
   { id: 'basketball', label: '🏀 농구', leagues: ['KBL', 'WKBL', 'NBA'] },
+  { id: 'volleyball', label: '🏐 배구', leagues: ['V리그 남자', 'V리그 여자'] },
   { id: 'soccer', label: '⚽ 축구', leagues: [] },
   { id: 'baseball', label: '⚾ 야구', leagues: [] },
-  { id: 'volleyball', label: '🏐 배구', leagues: ['V리그 남자', 'V리그 여자'] },
 ]
 
 const NBA_KO: Record<string, string> = {
