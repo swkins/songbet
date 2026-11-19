@@ -115,3 +115,32 @@ language sql security definer set search_path = public, cron, net as $$
   )
 $$;
 grant execute on function public.analysis_update_status() to anon, authenticated;
+
+-- ⑤ NBA ESPN 부상자 명단: 매일 14:33 · 17:33 · 20:33 KST (UTC 5·8·11시) — Claude 뉴스 확인(15·18·21시 KST) 직전.
+--    같은 함수가 지난 출전 확률(player_status, 경기 이틀 지나면)과 뉴스 확인 기록(14일)을 정리한다.
+create or replace function public.run_collect_injuries() returns void
+language plpgsql security definer set search_path = public, net as $$
+begin
+  perform net.http_post(
+    url := 'https://rgxjwfsmevfwmivsziyq.supabase.co/functions/v1/collect-injuries',
+    headers := '{"Content-Type":"application/json","Authorization":"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJneGp3ZnNtZXZmd21pdnN6aXlxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEzODIzOTUsImV4cCI6MjA5Njk1ODM5NX0.8eD0N5CLCBoDSrlg0nz3Q2JmOYthHepJlTptHCMYetw"}'::jsonb,
+    body := '{}'::jsonb, timeout_milliseconds := 60000);
+end $$;
+revoke all on function public.run_collect_injuries() from public, anon, authenticated;
+select cron.schedule('collect-injuries', '33 5,8,11 * * *', 'select public.run_collect_injuries()');
+
+-- ⑥ 업데이트 현황에 출전 확률·체급 추가 (analysis_update_status 위에 덧붙임)
+create or replace function public.analysis_update_status_v2() returns jsonb
+language sql security definer set search_path = public as $$
+  select public.analysis_update_status() || jsonb_build_object(
+    'injuries', (select jsonb_build_object('count', count(*), 'last', max(fetched_at)) from public.nba_injuries),
+    'news_checks', (select coalesce(jsonb_agg(x order by x->>'ran_at' desc), '[]'::jsonb) from (
+        select jsonb_build_object('ran_at', ran_at, 'task', task, 'games', games, 'players', players, 'note', note) x
+        from public.news_check_log order by ran_at desc limit 8) l),
+    'player_status', (select coalesce(jsonb_agg(jsonb_build_object('league', league, 'game_date', game_date, 'n', n, 'last', l) order by game_date, league), '[]'::jsonb)
+        from (select league, game_date, count(*) n, max(checked_at) l from public.player_status group by league, game_date) s),
+    'player_base', (select coalesce(jsonb_agg(jsonb_build_object('league', league, 'season', season, 'n', n, 'manual', m) order by league), '[]'::jsonb)
+        from (select league, season, count(*) n, count(manual_base) m from public.player_base group by league, season) b)
+  )
+$$;
+grant execute on function public.analysis_update_status_v2() to anon, authenticated;

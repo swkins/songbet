@@ -18,6 +18,10 @@ interface Status {
   player_stats: { league: string; rows: number; games: number; last_game: string; last_insert: string }[]
   kovo_snapshots: { players: number; last: string | null } | null
   analyses: { league: string; count: number; last: string }[]
+  injuries?: { count: number; last: string | null }
+  news_checks?: { ran_at: string; task: string; games: number | null; players: number | null; note: string | null }[]
+  player_status?: { league: string; game_date: string; n: number; last: string }[]
+  player_base?: { league: string; season: string; n: number; manual: number }[]
 }
 
 /** pg_cron 일정(UTC) → 다음 실행 시각 */
@@ -49,7 +53,7 @@ export default function UpdateStatus({ onClose }: { onClose: () => void }) {
   const [loading, setLoading] = useState(true)
   const load = () => {
     setLoading(true)
-    supabase.rpc('analysis_update_status').then(({ data, error }) => {
+    supabase.rpc('analysis_update_status_v2').then(({ data, error }) => {
       if (error) setErr(error.message); else { setS(data as Status); setErr(null) }
       setLoading(false)
     })
@@ -174,6 +178,33 @@ export default function UpdateStatus({ onClose }: { onClose: () => void }) {
                 {!s.player_stats.length && <tr><td style={td} colSpan={5}>아직 쌓인 기록이 없어요</td></tr>}
               </tbody>
             </table>
+          </div>
+
+          {/* 출전 확률 (뉴스) */}
+          <div style={box}>
+            {head('출전 확률 (결장·부상·복귀)', 'Claude 예약 작업 (Sonnet) · NBA 매일 15·18·21시 · 국내 평일 12·15·18시 · 주말 9·12시',
+              'Claude가 뉴스 기사 + ESPN 부상 명단을 읽고 선수별 출전 확률을 최종 판단 → 분석 탭 선수 오버롤 옆 색 · 경기 날짜 이틀 지나면 자동 삭제 · 경기 없으면 바로 끝냄')}
+            <div style={{ fontSize: 11, fontWeight: 700, marginBottom: 2 }}>ESPN 부상 명단 (Supabase, 14:33·17:33·20:33)</div>
+            {jobLine(job('collect-injuries'))}
+            <div style={{ fontSize: 12, marginBottom: 8 }}>{s.injuries?.count ? `${s.injuries.count}명 · 받은 시각 ${t(s.injuries.last)}` : '아직 없음'} <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>(누적 안 함, 매번 통째로 바꿈)</span></div>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead><tr><th style={th}>Claude 확인</th><th style={th}>작업</th><th style={th}>경기</th><th style={th}>선수</th><th style={th}>메모</th></tr></thead>
+              <tbody>
+                {(s.news_checks ?? []).map((n, i) => (
+                  <tr key={i}><td style={td}>{t(n.ran_at)} <span style={{ color: 'var(--text-muted)' }}>{ago(n.ran_at)}</span></td><td style={td}>{n.task}</td><td style={td}>{n.games ?? '–'}</td><td style={td}>{n.players ?? '–'}</td><td style={{ ...td, color: 'var(--text-secondary)' }}>{n.note ?? ''}</td></tr>
+                ))}
+                {!(s.news_checks ?? []).length && <tr><td style={td} colSpan={5}>아직 실행 기록이 없어요</td></tr>}
+              </tbody>
+            </table>
+            {(s.player_status ?? []).length > 0 && (
+              <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 6 }}>저장된 출전 확률: {s.player_status!.map(p => `${LG[p.league] ?? p.league} ${dayjs(p.game_date).format('M/D')} ${p.n}명`).join(' · ')}</div>
+            )}
+          </div>
+
+          {/* 기본 체급 */}
+          <div style={box}>
+            {head('기본 체급 (지난 시즌)', '시즌마다 한 번', 'NBA = ESPN 선수 시즌 기록 · KBL·WKBL = 지난 시즌 박스스코어 평균 · 지난 시즌 기록 없는 새 선수는 Claude 조사 체급')}
+            <div style={{ fontSize: 12 }}>{(s.player_base ?? []).length ? s.player_base!.map(b => `${LG[b.league] ?? b.league} ${b.season} ${b.n}명${b.manual ? ` (조사 ${b.manual}명)` : ''}`).join(' · ') : '아직 없음'}</div>
           </div>
 
           {/* 오버롤 분석 */}

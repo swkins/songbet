@@ -1,6 +1,7 @@
 import dayjs from 'dayjs'
 import { supabase } from '../lib/supabase'
 import { koName, resolveTeamName, type ScheduleGame } from '../lib/gameSchedule'
+import { tierOf } from '../lib/playerOverall'
 
 // ─── 오버롤 분석 (선수 체급+최근폼 → 시뮬레이션) — 분석 탭 오른쪽 칸 ─────
 // 데이터: Supabase overall_analyses (예약 작업/채팅에서 넣는다). 경기는 game_id(game_schedules 경기 id)로,
@@ -48,7 +49,6 @@ function teamMatch(name: string, t: ScheduleGame['home'], league: string): boole
 }
 
 const num = (v: unknown) => (v == null || v === '' ? null : Number(v))
-const grade = (ov: number | null | undefined) => ov == null ? '' : ov >= 90 ? '🟣' : ov >= 80 ? '🔵' : ov >= 70 ? '🟢' : '⚪'
 const signed = (v: number) => `${v > 0 ? '+' : ''}${v}`
 
 const box: React.CSSProperties = { border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '10px 12px', background: 'var(--bg-elevated)' }
@@ -93,7 +93,7 @@ export default function OverallAnalysisView({ a }: { a: OverallAnalysis }) {
                 <td style={{ ...td, textAlign: 'right', color: 'var(--text-muted)' }}>{p.base ?? '–'}</td>
                 <td style={{ ...td, textAlign: 'right', color: p.form != null && p.base != null ? (p.form > p.base ? 'var(--green)' : p.form < p.base ? 'var(--red)' : 'var(--text-muted)') : 'var(--text-muted)' }}>{p.form ?? '–'}</td>
                 <td style={{ ...td, textAlign: 'right', fontWeight: 800, whiteSpace: 'nowrap' }}>
-                  {p.overall == null ? <span style={{ fontSize: 10, fontWeight: 400, color: 'var(--text-muted)' }}>기록 미확보</span> : out ? `(${p.overall})` : <>{grade(p.overall)} {p.overall}</>}
+                  {p.overall == null ? <span style={{ fontSize: 10, fontWeight: 400, color: 'var(--text-muted)' }}>기록 미확보</span> : out ? `(${p.overall})` : <span style={{ color: tierOf(p.overall)?.color }}>{p.overall}</span>}
                 </td>
               </tr>
             )
@@ -107,7 +107,7 @@ export default function OverallAnalysisView({ a }: { a: OverallAnalysis }) {
   const tcRows: [string, unknown, unknown][] = [
     ['팀 레이팅 (시뮬 평균)', tc.home_rating, tc.away_rating],
     ['득실 마진', tc.home_margin, tc.away_margin],
-    ['🟣 선수 수', tc.home_stars, tc.away_stars],
+    ['90+ 선수 수', tc.home_stars, tc.away_stars],
     ['외국인 가용', tc.home_foreign, tc.away_foreign],
   ].filter(([, x, y]) => x != null || y != null) as [string, unknown, unknown][]
 
@@ -196,7 +196,7 @@ export default function OverallAnalysisView({ a }: { a: OverallAnalysis }) {
         {players(`홈 · ${homeShort}`, a.home_players)}
         {players(`원정 · ${awayShort}`, a.away_players)}
       </div>
-      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: -4 }}>오버롤 = 체급 × 0.7 + 폼 × 0.3 · 🟣 90+ 🔵 80~89 🟢 70~79 ⚪ ~69 · 폼 초록 = 시즌보다 좋음</div>
+      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: -4 }}>오버롤 = 체급 × 0.7 + 폼 × 0.3 · 색 = 등급 (전설 주황 90+ · 영웅 보라 80~89 · 희귀 파랑 70~79 · 일반 흰색 60~69 · 하급 회색) · 폼 초록 = 시즌보다 좋음</div>
 
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-start' }}>
         {/* 전력 비교 */}

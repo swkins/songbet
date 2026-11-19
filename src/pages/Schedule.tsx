@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import dayjs from 'dayjs'
 import UpdateStatus from '../components/UpdateStatus'
+import PlayerOverall from '../components/PlayerOverall'
 import { Activity } from 'lucide-react'
 import OddsHistory, { Arrow } from '../components/OddsHistory'
 import { loadOdds, oddsTrend, type OddsSnap } from '../lib/odds'
@@ -156,7 +157,7 @@ export default function Schedule() {
   )
 }
 
-// 오른쪽 분석 칸 — 지금은 경기 정보만. 분석 내용은 여기 채운다.
+// 오른쪽 분석 칸 — 경기 정보 · 승패 배당 변동 · 선수 오버롤·출전 확률(PlayerOverall) · 오버롤 분석(있으면)
 function GameAnalysis({ g, analysis, odds }: { g: Item; analysis: OverallAnalysis | null; odds?: OddsSnap[] }) {
   const st = gameState(g)
   const showScore = st !== 'pre' && g.home.score != null && g.away.score != null
@@ -185,8 +186,9 @@ function GameAnalysis({ g, analysis, odds }: { g: Item; analysis: OverallAnalysi
         {side(g.away, '원정')}
       </div>
       {odds?.length ? <OddsHistory list={odds} homeName={koName(g.home.name)} awayName={koName(g.away.name)} /> : null}
+      <PlayerOverall league={g.league} gameDate={g.date} home={g.home} away={g.away} />
       {analysis ? <OverallAnalysisView a={analysis} />
-        : <div style={{ padding: '24px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>이 경기 오버롤 분석이 아직 없습니다</div>}
+        : null}
     </div>
   )
 }

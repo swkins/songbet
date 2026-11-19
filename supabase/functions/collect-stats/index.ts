@@ -4,6 +4,7 @@
 //  - domestic: KBL(api.kbl.or.kr match/{gmkey}/player-stat) · WKBL(ajax_game_result_2.asp 박스스코어 HTML)
 //              · V리그(KOVO 선수 시즌 누적 스냅샷 → 전날 차이로 경기 기록). pg_cron 매일 새벽 3~4시 KST(랜덤 분).
 //  이미 넣은 경기는 건너뛴다. 한 번에 max경기까지만(기본 40) — 시즌 첫 수집은 여러 번 불러 채운다(응답 remaining).
+//  지난 시즌 받기(체급용, 한 번): { group: "domestic", from: "2025-10-01", wkblPrev: true, skipKovo: true }
 //  보관: 지난 시즌까지만 (그 전 시즌은 지움), KOVO 스냅샷은 14일.
 import { createClient } from 'npm:@supabase/supabase-js@2.45.0'
 
@@ -118,11 +119,12 @@ async function kbl(db: ReturnType<typeof sb>, from: string, max: number) {
 
 // ── WKBL ──
 const strip = (s: string) => s.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
-async function wkbl(db: ReturnType<typeof sb>, from: string, max: number) {
+async function wkbl(db: ReturnType<typeof sb>, from: string, max: number, prevSeason = false) {
   const today = kstDate(Date.now()), have = await existingIds(db, 'WKBL', from)
   const page = await (await fetch('https://www.wkbl.or.kr/game/sch/schedule1.asp', { headers: UA })).text()
-  const seasonGu = page.match(/season_gu\s*=\s*['"]?(\d{3})/)?.[1] ?? page.match(/season_gu=(\d{3})/)?.[1]
-  if (!seasonGu) throw new Error('wkbl season_gu')
+  const seasonGuRaw = page.match(/season_gu\s*=\s*['"]?(\d{3})/)?.[1] ?? page.match(/season_gu=(\d{3})/)?.[1]
+  if (!seasonGuRaw) throw new Error('wkbl season_gu')
+  const seasonGu = prevSeason ? String(+seasonGuRaw - 1).padStart(seasonGuRaw.length, '0') : seasonGuRaw  // 지난 시즌 = 시즌 코드 - 1
   const yms: string[] = []
   for (let d = from.slice(0, 7); d <= today.slice(0, 7); d = addDays(`${d}-01`, 32).slice(0, 7)) yms.push(d.replace('-', ''))
   const todo: { no: string; ym: string; date: string; home: string; away: string }[] = []
@@ -192,7 +194,7 @@ async function kovo(db: ReturnType<typeof sb>) {
   const players = rosters.flatMap(r => r.players.filter(p => p.visible !== false).map(p => ({ code: String(p.playerCode), name: p.name, team: r.c })))
   const snaps = (await pool(players, 10, async p => {
     const d = await kovoJson(`/players/${p.code}/season-record-detail`)
-    return d && d.gameCount ? { snapshot_date: today, gender: p.team.startsWith('1') ? 'MALE' : 'FEMALE', player_code: p.code, player_name: p.name, team_code: p.team, game_count: d.gameCount, stats: d } : null
+    return d && d.gameCount ? { snapshot_date: today, gender: p.team.startsWith('1') ? 'MALE' : 'FEMALE', player_code: p.code, player_name: p.name, team_code: p.team, team_name: names[p.team] ?? null, game_count: d.gameCount, stats: d } : null
   })).filter(Boolean) as Row[]
   if (snaps.length) { const { error } = await db.from('kovo_player_snapshots').upsert(snaps); if (error) throw new Error(error.message) }
   // 바로 전 스냅샷과 비교 — 경기 수가 정확히 1 늘었으면 그 경기 기록
@@ -219,7 +221,7 @@ Deno.serve(async (req) => {
   const db = sb(); const max = body.max ?? 40
   const jobs: [string, () => Promise<unknown>][] = body.group === 'nba'
     ? [['NBA', async () => nba(db, await startFrom(db, 'NBA', body.from), max)]]
-    : [['KBL', async () => kbl(db, await startFrom(db, 'KBL', body.from), max)], ['WKBL', async () => wkbl(db, await startFrom(db, 'WKBL', body.from), max)],
+    : [['KBL', async () => kbl(db, await startFrom(db, 'KBL', body.from), max)], ['WKBL', async () => wkbl(db, await startFrom(db, 'WKBL', body.from), max, !!body.wkblPrev)],
        ...(body.skipKovo ? [] : [['VLEAGUE', () => kovo(db)] as [string, () => Promise<unknown>]])]
   const out: unknown[] = []
   for (const [name, fn] of jobs) { try { out.push(await fn()) } catch (e) { out.push({ league: name, error: String(e) }) } }
