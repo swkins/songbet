@@ -599,9 +599,9 @@ tr:hover td { background: var(--bg-hover); }
   .mining-content { padding: 12px !important; }
 }
 
-/* ── 대시보드 "베팅" 모드: 베팅 모드 패널(종목·리그 → 경기 → 베팅옵션) 좌 / 베팅 현황 우 ── */
+/* ── 대시보드 "베팅" 모드: 베팅 모드 패널(종목·리그 → 경기 → 베팅옵션) 좌 7 / 베팅 현황(세로 한 줄) 우 3 ── */
 .dashboard-betmode { width: 100%; min-width: 0; }
 @media (min-width: 901px) {
-  .dashboard-main.betmode .dashboard-betmode { flex: 2 1 0; min-width: 620px; width: auto; }
-  .dashboard-main.betmode .dashboard-bets { flex: var(--bet-n, 1) 1 0; min-width: 0; width: auto; }
+  .dashboard-main.betmode .dashboard-betmode { flex: 7 1 0; min-width: 620px; width: auto; }
+  .dashboard-main.betmode .dashboard-bets { flex: 3 1 0; min-width: 300px; width: auto; }
 }

@@ -25,8 +25,10 @@ function parseOdds(raw: string): number { const n = Number(raw); return Number.i
 type Pick = 'home' | 'away' | 'game'
 interface Game extends ScheduleGame { sport: string; league: string }
 
-export default function BetModePanel({ sites, betOptionsBySport, numericBetOptionsBySport, teamsBySport, onBet }: {
+export default function BetModePanel({ sites, betOptionsBySport, numericBetOptionsBySport, teamsBySport, onBet, renderAddForm }: {
   sites: Site[]
+  /** 종목·리그 맨 아래 '베팅추가' → 사이트를 고르면 오른쪽 베팅 칸에 기존 베팅추가 폼 (Dashboard SingleBetForm) */
+  renderAddForm?: (site: Site, onClose: () => void) => React.ReactNode
   betOptionsBySport: Record<string, string[]>
   numericBetOptionsBySport: Record<string, string[]>
   teamsBySport: Record<string, { league: string; name: string }[]>
@@ -37,6 +39,10 @@ export default function BetModePanel({ sites, betOptionsBySport, numericBetOptio
   const [sport, setSport] = useState<string | null>(null)
   const [league, setLeague] = useState<string | null>(null)
   const [gameId, setGameId] = useState<string | null>(null)
+  const [addOpen, setAddOpen] = useState(false)          // 베팅추가: 사이트 고르는 중
+  const [addSiteId, setAddSiteId] = useState<string | null>(null)
+  const addSite = sites.find(s => s.id === addSiteId) ?? null
+  const orderedSites = [...sites].sort((a, b) => Number(b.active) - Number(a.active) || a.sort_order - b.sort_order)
 
   useEffect(() => { loadSchedules().then(r => { setRows(r); setLoading(false) }).catch(() => setLoading(false)) }, [])
 
@@ -71,7 +77,7 @@ export default function BetModePanel({ sites, betOptionsBySport, numericBetOptio
         <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>가져온 일정 중 끝나지 않은 경기 · 초안</span>
       </div>
       {loading ? <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>불러오는 중…</div> : (
-        <div style={{ display: 'grid', gridTemplateColumns: '130px minmax(170px, 1fr) minmax(260px, 2fr)', gap: 10, alignItems: 'start' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '150px minmax(200px, 1fr) minmax(320px, 2fr)', gap: 10, alignItems: 'start' }}>
           {/* 1. 종목 → 리그 */}
           <div style={col}>
             <div style={head}>종목 · 리그</div>
@@ -80,13 +86,13 @@ export default function BetModePanel({ sites, betOptionsBySport, numericBetOptio
               const open = sport === s.id
               return (
                 <div key={s.id} style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                  <button type="button" disabled={!lgs.length} onClick={() => { setSport(open ? null : s.id); setLeague(null); setGameId(null) }}
+                  <button type="button" disabled={!lgs.length} onClick={() => { setSport(open ? null : s.id); setLeague(null); setGameId(null); setAddSiteId(null) }}
                     style={{ ...item(open, !lgs.length), fontWeight: 700, display: 'flex', justifyContent: 'space-between' }}>
                     <span>{s.icon} {s.label}</span>
                     <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{lgs.length ? lgs.reduce((a, [, n]) => a + n, 0) : '-'}</span>
                   </button>
                   {open && lgs.map(([lg, n]) => (
-                    <button key={lg} type="button" onClick={() => { setLeague(lg); setGameId(null) }}
+                    <button key={lg} type="button" onClick={() => { setLeague(lg); setGameId(null); setAddSiteId(null) }}
                       style={{ ...item(league === lg), marginLeft: 10, fontSize: 11, display: 'flex', justifyContent: 'space-between' }}>
                       <span>{lg}</span><span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{n}</span>
                     </button>
@@ -94,6 +100,23 @@ export default function BetModePanel({ sites, betOptionsBySport, numericBetOptio
                 </div>
               )
             })}
+            {/* 베팅추가 — 일정에 없는 경기도 기존 베팅추가 폼으로. 어느 사이트에 넣을지 고른다 */}
+            {renderAddForm && (
+              <div style={{ marginTop: 8, borderTop: '1px solid var(--border)', paddingTop: 8, display: 'flex', flexDirection: 'column', gap: 3 }}>
+                <button type="button" onClick={() => { setAddOpen(o => !o); setAddSiteId(null) }}
+                  style={{ ...item(addOpen || !!addSiteId), fontWeight: 700, textAlign: 'center', borderStyle: 'dashed' }}>＋ 베팅추가</button>
+                {addOpen && <>
+                  <div style={{ ...head, paddingTop: 4 }}>어느 사이트에?</div>
+                  {orderedSites.map(st => (
+                    <button key={st.id} type="button" onClick={() => { setAddSiteId(st.id); setAddOpen(false); setGameId(null) }}
+                      style={{ ...item(addSiteId === st.id), fontSize: 11, display: 'flex', alignItems: 'center', gap: 6, opacity: st.active ? 1 : 0.6 }}>
+                      <span style={{ width: 12, height: 12, borderRadius: 3, border: '1px solid var(--border)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, color: 'var(--gold)' }}>{addSiteId === st.id ? '✓' : ''}</span>
+                      {st.name}{st.currency === 'usd' ? ' $' : ''}{st.active && <span className="site-active-dot" style={{ marginLeft: 'auto' }} />}
+                    </button>
+                  ))}
+                </>}
+              </div>
+            )}
           </div>
 
           {/* 2. 경기 목록 */}
@@ -103,7 +126,7 @@ export default function BetModePanel({ sites, betOptionsBySport, numericBetOptio
               : leagueGames.map(g => {
                 const live = gameState(g) === 'live'
                 return (
-                  <button key={g.id} type="button" onClick={() => setGameId(g.id)} style={{ ...item(gameId === g.id), display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  <button key={g.id} type="button" onClick={() => { setGameId(g.id); setAddSiteId(null) }} style={{ ...item(gameId === g.id), display: 'flex', flexDirection: 'column', gap: 2 }}>
                     <span style={{ fontSize: 10, color: live ? 'var(--gold)' : 'var(--text-muted)', fontWeight: 700 }}>{when(g.start)}{live ? ' · ● 경기중' : ''}</span>
                     <span style={{ fontWeight: 700 }}>{koName(g.home.name)} <span style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 400 }}>홈</span></span>
                     <span style={{ fontWeight: 700 }}>{koName(g.away.name)}</span>
@@ -114,8 +137,9 @@ export default function BetModePanel({ sites, betOptionsBySport, numericBetOptio
 
           {/* 3. 베팅옵션 */}
           <div style={{ minWidth: 0 }}>
-            <div style={head}>베팅</div>
-            {!game ? <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: 6 }}>경기를 고르면 여기서 베팅합니다</div>
+            <div style={head}>{addSite ? `베팅추가 · ${addSite.name}` : '베팅'}</div>
+            {addSite && renderAddForm ? renderAddForm(addSite, () => setAddSiteId(null))
+              : !game ? <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: 6 }}>경기를 고르면 여기서 베팅합니다</div>
               : <BetSlip key={game.id} game={game} sites={sites}
                   options={betOptionsBySport[game.sport] ?? []} numeric={numericBetOptionsBySport[game.sport] ?? []}
                   registered={teamsBySport[game.sport] ?? []} onBet={onBet} />}

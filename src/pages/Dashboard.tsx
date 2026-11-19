@@ -3992,167 +3992,75 @@ export default function Dashboard() {
     setInlineEditBetId(null)
   }
 
-  return (
-    <div className="page">
-      {/* 데스크탑: 사이트 현황(좌, 카드 세로 쌓기) / 베팅 현황(우)을 한 줄에 두고 1 : 베팅 사이트 수 비율로 가로폭을 나눠
-          모든 카드가 같은 폭이 되게 한다 — 베팅 사이트를 추가하면 전체 카드 폭이 똑같이 줄어든다 */}
-      {/* 레이아웃 모드 — 좌우(기본): 사이트 현황·베팅분석(버튼으로 전환) 좌 / 베팅 현황 우,
-          상하: 사이트 현황 위 / 아래 줄에 베팅분석 좌 · 베팅 현황 우 */}
-      <div className={`dashboard-main${stacked ? ' stacked' : ''}${betMode ? ' betmode' : ''}`} style={{ '--mining-n': !stacked && sidePanel === 'analysis' ? 1.2 : 1, '--bet-n': colCount } as React.CSSProperties}>
-
-        {/* ── 베팅 모드 (좌측) — 종목 → 리그 → 경기 → 베팅옵션. 사이트 현황 대신 이 자리를 쓰고 베팅 현황은 우측으로 */}
-        {betMode && (
-          <div className="dashboard-betmode">
-            <BetModePanel sites={sites} betOptionsBySport={betOptionsBySport} numericBetOptionsBySport={numericBetOptionsBySport}
-              teamsBySport={{ soccer: soccerTeams, baseball: baseballTeams, basketball: basketballTeams, volleyball: volleyballTeams }}
-              onBet={(site, sp, ct, od, amt, lv, lg) => submitBet(site, sp, ct, od, amt, lv, lg)} />
-          </div>
-        )}
-
-        {/* ── 사이트 현황 (좌측 / 상하 모드에선 위) */}
-        {!betMode && <div className={`dashboard-side${!stacked && sidePanel === 'analysis' ? ' analysis-open' : ''}`}>
-          {stacked ? (
-            <div style={{ minWidth: 0 }}><MiningWidget compact /></div>
-          ) : (
-            /* 사이트 현황 / 베팅분석 — 제목 자리 버튼으로 골라서 같은 자리에 보여준다 (베팅분석은 카드 1.2장 폭) */
-            <div style={{ minWidth: 0 }}>
-              <div style={{ display: sidePanel === 'site' ? undefined : 'none' }}><MiningWidget tabs={ANALYSIS_IN_DASHBOARD ? sidePanelTabs : undefined} /></div>
-              {ANALYSIS_IN_DASHBOARD && analysisOpened && (
-                <div style={{ display: sidePanel === 'analysis' ? undefined : 'none' }}>
-                  <Suspense fallback={analysisFallback(sidePanelTabs)}>
-                    <BetAnalysisPanel tabs={sidePanelTabs} active={sidePanel === 'analysis'} />
-                  </Suspense>
-                </div>
-              )}
-            </div>
-          )}
-          <div className="dashboard-pnl-slot">
-          <DailyPnLWidget compact={stacked} usdKrwRate={usdKrwRate} refreshKey={(() => { const st = bets.filter(b => b.result !== 'pending'); return `${st.length}:${st.reduce((a, b) => a + b.profit, 0)}` })()} />
-          </div>
-        </div>}
-
-        {/* ── 베팅분석 (상하 모드에서만 — 아래 줄 좌측) */}
-        {ANALYSIS_IN_DASHBOARD && stacked && (
-          <div className="dashboard-analysis">
-            <Suspense fallback={analysisFallback(analysisTitle)}>
-              <BetAnalysisPanel tabs={analysisTitle} />
-            </Suspense>
-          </div>
-        )}
-
-        {/* ── 베팅 현황 (전체) */}
-        <div className="dashboard-bets">
-          {sites.length === 0 ? (
-            <div className="card" style={{ padding: '10px 14px' }}>
-              <div className="flex-between mb-10">
-                <span className="card-title" style={{ margin: 0 }}>베팅 현황</span>
-                <div style={{ display: 'flex', gap: 6 }}>
-                {layoutSwitch(true)}
-                  <button onClick={openRulebook} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--gold)', cursor: 'pointer', padding: '3px 8px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-body)' }}>
-                  <BookOpen size={11} /> 룰북
-                </button>
-                <button onClick={() => setShowSiteMgr(true)} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-secondary)', cursor: 'pointer', padding: '3px 8px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-body)' }}>
-                  <Settings size={11} /> 사이트관리
-                </button>
-                </div>
-              </div>
-              <div className="empty"><div className="empty-icon">🎯</div>사이트를 추가하세요</div>
-            </div>
-          ) : (
-            <div className="card" style={{ padding: '10px 14px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, gap: 10, flexWrap: 'wrap' }}>
-                <span className="card-title" style={{ margin: 0 }}>베팅 현황</span>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  {aggRollingTarget > 0 && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <span style={{ fontSize: 12, fontWeight: 800, fontFamily: 'var(--font-num)', color: aggRem > 0 ? 'var(--gold)' : 'var(--green)' }}>{Math.round(aggRem).toLocaleString()}원</span>
-                      <div className="deposit-progress-bar" style={{ width: 150, margin: 0 }}><div className="deposit-progress-fill" style={{ width: `${Math.min(100, aggPct)}%` }} /></div>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: aggPct >= 100 ? 'var(--green)' : 'var(--orange)' }}>{aggPct.toFixed(1)}%</span>
+  // 베팅 모드 우측(세로 한 줄): 사이트 현황 한 상자(사이트마다 한 줄) + 진행 중 베팅 한 상자(사이트 이름별로 이어서)
+  const renderBetModeColumn = () => {
+    const ordered = [...sites].sort((a, b) => Number(b.active) - Number(a.active) || a.sort_order - b.sort_order)
+    const withBets = ordered.filter(s => displayPendingBySite(s.id).length || displaySettledBySite(s.id).length || gameRollingsBySite(s.id).length || casinoBySite(s.id).length)
+    const pendingTotal = ordered.reduce((a, s) => a + displayPendingBySite(s.id).length, 0)
+    const sub: React.CSSProperties = { fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', margin: '2px 0 6px' }
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div>
+          <div style={sub}>사이트 현황</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {ordered.map(site => {
+              const dep = site.last_deposit ?? 0; const pt = site.point_deposit ?? 0
+              const isusd = site.currency === 'usd'; const pfx = isusd ? '$' : ''; const sfx = isusd ? '' : '원'
+              const pct = depositPct(site); const rem = depositRemaining(site); const pnl = sitePnL(site)
+              return (
+                <div key={site.id} style={{ border: `1px solid ${site.active ? 'var(--green-border)' : 'var(--border)'}`, background: site.active ? 'var(--green-bg)' : 'var(--bg-elevated)', borderRadius: 'var(--radius-sm)', padding: '6px 8px', opacity: site.active || dep > 0 ? 1 : 0.6 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                    <span style={{ fontWeight: 700, fontSize: 13 }}>{site.name}</span>
+                    {isusd && <span style={{ fontSize: 9, background: 'var(--blue-bg)', color: 'var(--blue)', border: '1px solid var(--blue-border)', borderRadius: 3, padding: '0 3px', fontWeight: 700 }}>$</span>}
+                    {site.active && <span className="site-active-dot" />}
+                    {pnl !== null && <span style={{ fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-num)' }} className={pnl >= 0 ? 'profit-pos' : 'profit-neg'}>{pnl >= 0 ? '+' : ''}{Math.round(isusd ? pnl * usdKrwRate : pnl).toLocaleString()}원</span>}
+                    <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
+                      <button className={`site-icon-btn site-icon-deposit ${dep > 0 ? 'active' : ''}`} style={{ width: 24, height: 24 }} title="입금" onClick={() => setDepositSite(site)}><ArrowDownToLine size={12} /></button>
+                      <button className="site-icon-btn site-icon-withdraw" style={{ width: 24, height: 24 }} title="출금" onClick={() => setWithdrawSite(site)}><LogOut size={12} /></button>
                     </div>
+                  </div>
+                  {(dep > 0 || pt > 0) && (
+                    <>
+                      <div style={{ display: 'flex', gap: 8, fontSize: 10, color: 'var(--text-muted)', marginTop: 3, flexWrap: 'wrap' }}>
+                        <span>입금 <b style={{ color: '#E2E8F0', fontFamily: 'var(--font-num)' }}>{pfx}{dep.toLocaleString()}{sfx}</b></span>
+                        {pt > 0 && <span style={{ color: 'var(--purple)', fontWeight: 700 }}>+{pt.toLocaleString()}P</span>}
+                        <span style={{ marginLeft: 'auto' }}>남은 롤링 <b style={{ color: rem > 0 ? 'var(--gold)' : 'var(--green)', fontFamily: 'var(--font-num)' }}>{pfx}{rem.toLocaleString()}{sfx}</b></span>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 3 }}>
+                        <div className="deposit-progress-bar" style={{ flex: 1, margin: 0 }}><div className="deposit-progress-fill" style={{ width: `${Math.min(100, pct)}%` }} /></div>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: pct >= 100 ? 'var(--green)' : 'var(--orange)' }}>{pct >= 100 ? '롤링완료' : `${pct.toFixed(1)}%`}</span>
+                      </div>
+                    </>
                   )}
-                  {layoutSwitch(false)}
-                  <button onClick={openRulebook} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--gold)', cursor: 'pointer', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-body)' }}>
-                    <BookOpen size={12} /> 룰북
-                  </button>
-                  <button onClick={() => setShowSiteMgr(true)} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-secondary)', cursor: 'pointer', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-body)' }}>
-                    <Settings size={12} /> 사이트관리
-                  </button>
                 </div>
+              )
+            })}
+          </div>
+        </div>
+        <div>
+          <div style={sub}>베팅 진행 상황 {pendingTotal > 0 && <span style={{ color: 'var(--gold)' }}>({pendingTotal})</span>}</div>
+          {withBets.length === 0 ? <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '6px 2px' }}>진행 중인 베팅이 없어요</div>
+            : withBets.map(site => (
+              <div key={site.id} style={{ marginBottom: 6 }}>
+                <div style={{ fontSize: 10, fontWeight: 800, color: site.active ? 'var(--green)' : 'var(--text-muted)', padding: '2px 4px', borderBottom: '1px solid var(--border-light)' }}>{site.name}</div>
+                {renderBetList(site, false)}
               </div>
-              <div className="site-cards-wrap" style={{ '--site-cols': colCount } as React.CSSProperties}>
-              {sites.map(site => {
-                const dep = site.last_deposit ?? 0; const pt = site.point_deposit ?? 0
-                const isusd = site.currency === 'usd'; const pfx = isusd ? '$' : ''; const sfx = isusd ? '' : '원'
-                const pct = depositPct(site); const rem = depositRemaining(site)
-                const pnl = sitePnL(site)
-                const pending = displayPendingBySite(site.id)
-                const settled = displaySettledBySite(site.id)
-                return (
-                  <div key={site.id} className="card" style={{ padding: 0, overflow: 'hidden', border: site.active ? '1px solid var(--green-border)' : '1px solid var(--border)' }}>
-                    {/* 사이트 헤더 */}
-                    <div style={{ background: site.active ? 'var(--green-bg)' : 'var(--bg-elevated)', padding: '10px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <span style={{ fontWeight: 700, fontSize: 15 }}>{site.name}</span>
-                        {isusd && <span style={{ fontSize: 9, background: 'var(--blue-bg)', color: 'var(--blue)', border: '1px solid var(--blue-border)', borderRadius: 3, padding: '1px 4px', fontWeight: 700 }}>$</span>}
-                        {site.active && <span className="site-active-dot" />}
-                        {pnl !== null && (
-                          <span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-num)', display: 'flex', alignItems: 'baseline', gap: 4 }} className={pnl >= 0 ? 'profit-pos' : 'profit-neg'}>
-                            {/* 사이트별 현재 수익은 통화와 무관하게 항상 원화로만 표시 (달러 금액은 숨김) */}
-                            {pnl >= 0 ? '+' : ''}{Math.round(isusd ? pnl * usdKrwRate : pnl).toLocaleString()}원
-                          </span>
-                        )}
-                      </div>
-                      <div style={{ display: 'flex', gap: 6 }}>
-                        <button className={`site-icon-btn site-icon-deposit ${dep > 0 ? 'active' : ''}`} onClick={e => { e.stopPropagation(); setDepositSite(site) }}><ArrowDownToLine size={15} /></button>
-                        <button className="site-icon-btn site-icon-withdraw" onClick={e => { e.stopPropagation(); setWithdrawSite(site) }}><LogOut size={15} /></button>
-                      </div>
-                    </div>
-                    {/* 롤링 정보 */}
-                    <div style={{ position: 'relative', padding: '8px 14px', borderBottom: '1px solid var(--border-light)', display: 'flex', flexDirection: 'column', gap: 3 }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>입금</span>
-                          <span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-num)', color: '#E2E8F0' }}>{pfx}{dep.toLocaleString()}{sfx}</span>
-                        </div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>포인트</span>
-                          <span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-num)', color: pt > 0 ? 'var(--purple)' : 'var(--text-muted)' }}>{pt > 0 ? `+${pt.toLocaleString()}P` : '–'}</span>
-                        </div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>남은 롤링{(site.rolling_pct ?? 100) !== 100 && <span style={{ marginLeft: 4, fontSize: 9, fontWeight: 700, color: 'var(--gold)' }}>({site.rolling_pct}%)</span>}</span>
-                          <span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-num)', color: rem > 0 ? 'var(--gold)' : 'var(--green)' }}>{pfx}{rem.toLocaleString()}{sfx}</span>
-                        </div>
-                        <div className="deposit-progress-bar"><div className="deposit-progress-fill" style={{ width: `${Math.min(100,pct)}%` }} /></div>
-                        <div style={{ fontSize: 11, color: pct >= 100 ? 'var(--green)' : 'var(--orange)', fontWeight: 700, textAlign: 'right' }}>{pct.toFixed(1)}%</div>
-                        {/* 롤링 100% 완료 도장 — 입금/포인트/남은롤링 표시 영역 가운데에 반투명 오버레이 */}
-                        {pct >= 100 && (
-                          <div style={{
-                            position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            pointerEvents: 'none',
-                          }}>
-                            <div style={{
-                              opacity: 0.4,
-                              transform: 'rotate(-14deg)',
-                              border: '3px solid var(--green)',
-                              color: 'var(--green)',
-                              borderRadius: 8,
-                              padding: '2px 14px',
-                              fontSize: 15,
-                              fontWeight: 900,
-                              letterSpacing: '2px',
-                              fontFamily: 'var(--font-num)',
-                              textShadow: '0 0 4px var(--green)',
-                              background: 'rgba(0,0,0,0.05)',
-                            }}>
-                              롤링완료
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    {/* 베팅 목록 */}
+            ))}
+        </div>
+      </div>
+    )
+  }
+
+  // 사이트 한 곳의 베팅 목록(베팅추가·게임 롤링·카지노·진행 중·완료) — 좌우·상하 모드 사이트 카드와 베팅 모드 '진행 중 베팅' 한 줄에서 같이 쓴다.
+  // withAdd = 맨 위 베팅추가 버튼 (베팅 모드에선 빼고 베팅 모드 패널의 베팅추가로)
+  const renderBetList = (site: Site, withAdd: boolean) => {
+    const isusd = site.currency === 'usd'; const pfx = isusd ? '$' : ''; const sfx = isusd ? '' : '원'
+    const pending = displayPendingBySite(site.id)
+    const settled = displaySettledBySite(site.id)
+    return (
                     <div style={{ padding: '6px 8px' }}>
                       {/* 베팅 추가 — 사이트 활성(입금) 상태일 때만, 항상 맨 위 */}
-                      {site.active && (
+                      {withAdd && site.active && (
                         <div style={{ marginBottom: pending.length > 0 ? 8 : 4 }}>
                           {openFormSiteId !== site.id ? (
                             <div style={{ display: 'flex', justifyContent: 'center' }}>
@@ -4472,10 +4380,173 @@ export default function Dashboard() {
                         )
                       })()}
                     </div>
+    )
+  }
+
+  return (
+    <div className="page">
+      {/* 데스크탑: 사이트 현황(좌, 카드 세로 쌓기) / 베팅 현황(우)을 한 줄에 두고 1 : 베팅 사이트 수 비율로 가로폭을 나눠
+          모든 카드가 같은 폭이 되게 한다 — 베팅 사이트를 추가하면 전체 카드 폭이 똑같이 줄어든다 */}
+      {/* 레이아웃 모드 — 좌우(기본): 사이트 현황·베팅분석(버튼으로 전환) 좌 / 베팅 현황 우,
+          상하: 사이트 현황 위 / 아래 줄에 베팅분석 좌 · 베팅 현황 우 */}
+      <div className={`dashboard-main${stacked ? ' stacked' : ''}${betMode ? ' betmode' : ''}`} style={{ '--mining-n': !stacked && sidePanel === 'analysis' ? 1.2 : 1, '--bet-n': colCount } as React.CSSProperties}>
+
+        {/* ── 베팅 모드 (좌측) — 종목 → 리그 → 경기 → 베팅옵션. 사이트 현황 대신 이 자리를 쓰고 베팅 현황은 우측으로 */}
+        {betMode && (
+          <div className="dashboard-betmode">
+            <BetModePanel sites={sites} betOptionsBySport={betOptionsBySport} numericBetOptionsBySport={numericBetOptionsBySport}
+              teamsBySport={{ soccer: soccerTeams, baseball: baseballTeams, basketball: basketballTeams, volleyball: volleyballTeams }}
+              onBet={(site, sp, ct, od, amt, lv, lg) => submitBet(site, sp, ct, od, amt, lv, lg)}
+              renderAddForm={(site, onClose) => (
+                <SingleBetForm site={site} defaultSport={betsBySite(site.id).slice(-1)[0]?.sport ?? 'soccer'} onClose={onClose} onBet={(sp,ct,od,amt,lv,lg,mk) => submitBet(site,sp,ct,od,amt,lv,lg,mk)} onMultiBet={(sp,cs,od,amt,lgs) => submitMultiBet(site,sp,cs,od,amt,lgs)} betOptionStakesBySport={betOptionStakesBySport} onSetBetOptionStake={setBetOptionStake} baseballOverrides={baseballOverrides} soccerOverrides={soccerOverrides} basketballOverrides={basketballOverrides} volleyballOverrides={volleyballOverrides} teamCandidates={teamCandidates} allBetsHistory={allBetsHistory} leagueCandidates={leagueCandidates} soccerLeagues={soccerLeagues} baseballLeagues={baseballLeagues} basketballLeagues={basketballLeagues} volleyballLeagues={volleyballLeagues} esportsLeagues={esportsLeagues} soccerFavoriteLeagues={soccerFavoriteLeagues} baseballFavoriteLeagues={baseballFavoriteLeagues} basketballFavoriteLeagues={basketballFavoriteLeagues} volleyballFavoriteLeagues={volleyballFavoriteLeagues} esportsFavoriteLeagues={esportsFavoriteLeagues} onToggleSoccerLeagueFavorite={toggleSoccerLeagueFavorite} onToggleBaseballLeagueFavorite={toggleBaseballLeagueFavorite} onToggleBasketballLeagueFavorite={toggleBasketballLeagueFavorite} onToggleVolleyballLeagueFavorite={toggleVolleyballLeagueFavorite} onToggleEsportsLeagueFavorite={toggleEsportsLeagueFavorite} soccerTeams={soccerTeams} baseballTeams={baseballTeams} basketballTeams={basketballTeams} volleyballTeams={volleyballTeams} esportsTeams={esportsTeams} onAddSoccerLeague={addSoccerLeague} onAddBaseballLeague={addBaseballLeague} onAddBasketballLeague={addBasketballLeague} onAddVolleyballLeague={addVolleyballLeague} onAddEsportsLeague={addEsportsLeague} onRenameSoccerLeague={renameSoccerLeague} onDeleteSoccerLeague={deleteSoccerLeague} onRenameBaseballLeague={renameBaseballLeague} onDeleteBaseballLeague={deleteBaseballLeague} onRenameBasketballLeague={renameBasketballLeague} onDeleteBasketballLeague={deleteBasketballLeague} onRenameVolleyballLeague={renameVolleyballLeague} onDeleteVolleyballLeague={deleteVolleyballLeague} onRenameEsportsLeague={renameEsportsLeague} onDeleteEsportsLeague={deleteEsportsLeague} onAddSoccerTeam={addSoccerTeam} onAddBaseballTeam={addBaseballTeam} onAddBasketballTeam={addBasketballTeam} onAddVolleyballTeam={addVolleyballTeam} onAddEsportsTeam={addEsportsTeam} onRenameSoccerTeam={renameSoccerTeam} onDeleteSoccerTeam={deleteSoccerTeam} onRenameBaseballTeam={renameBaseballTeam} onDeleteBaseballTeam={deleteBaseballTeam} onRenameBasketballTeam={renameBasketballTeam} onDeleteBasketballTeam={deleteBasketballTeam} onRenameVolleyballTeam={renameVolleyballTeam} onDeleteVolleyballTeam={deleteVolleyballTeam} onRenameEsportsTeam={renameEsportsTeam} onDeleteEsportsTeam={deleteEsportsTeam} quickPicks={quickPickContents} betOptionsBySport={betOptionsBySport} numericBetOptionsBySport={numericBetOptionsBySport} onAddBetOption={addBetOption} onDeleteBetOption={deleteBetOption} onEditBetOption={editBetOption} onReorderBetOption={reorderBetOption} onToggleNumericBetOption={toggleNumericBetOption} />
+              )} />
+          </div>
+        )}
+
+        {/* ── 사이트 현황 (좌측 / 상하 모드에선 위) */}
+        {!betMode && <div className={`dashboard-side${!stacked && sidePanel === 'analysis' ? ' analysis-open' : ''}`}>
+          {stacked ? (
+            <div style={{ minWidth: 0 }}><MiningWidget compact /></div>
+          ) : (
+            /* 사이트 현황 / 베팅분석 — 제목 자리 버튼으로 골라서 같은 자리에 보여준다 (베팅분석은 카드 1.2장 폭) */
+            <div style={{ minWidth: 0 }}>
+              <div style={{ display: sidePanel === 'site' ? undefined : 'none' }}><MiningWidget tabs={ANALYSIS_IN_DASHBOARD ? sidePanelTabs : undefined} /></div>
+              {ANALYSIS_IN_DASHBOARD && analysisOpened && (
+                <div style={{ display: sidePanel === 'analysis' ? undefined : 'none' }}>
+                  <Suspense fallback={analysisFallback(sidePanelTabs)}>
+                    <BetAnalysisPanel tabs={sidePanelTabs} active={sidePanel === 'analysis'} />
+                  </Suspense>
+                </div>
+              )}
+            </div>
+          )}
+          <div className="dashboard-pnl-slot">
+          <DailyPnLWidget compact={stacked} usdKrwRate={usdKrwRate} refreshKey={(() => { const st = bets.filter(b => b.result !== 'pending'); return `${st.length}:${st.reduce((a, b) => a + b.profit, 0)}` })()} />
+          </div>
+        </div>}
+
+        {/* ── 베팅분석 (상하 모드에서만 — 아래 줄 좌측) */}
+        {ANALYSIS_IN_DASHBOARD && stacked && (
+          <div className="dashboard-analysis">
+            <Suspense fallback={analysisFallback(analysisTitle)}>
+              <BetAnalysisPanel tabs={analysisTitle} />
+            </Suspense>
+          </div>
+        )}
+
+        {/* ── 베팅 현황 (전체) */}
+        <div className="dashboard-bets">
+          {sites.length === 0 ? (
+            <div className="card" style={{ padding: '10px 14px' }}>
+              <div className="flex-between mb-10">
+                <span className="card-title" style={{ margin: 0 }}>베팅 현황</span>
+                <div style={{ display: 'flex', gap: 6 }}>
+                {layoutSwitch(true)}
+                  <button onClick={openRulebook} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--gold)', cursor: 'pointer', padding: '3px 8px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-body)' }}>
+                  <BookOpen size={11} /> 룰북
+                </button>
+                <button onClick={() => setShowSiteMgr(true)} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-secondary)', cursor: 'pointer', padding: '3px 8px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-body)' }}>
+                  <Settings size={11} /> 사이트관리
+                </button>
+                </div>
+              </div>
+              <div className="empty"><div className="empty-icon">🎯</div>사이트를 추가하세요</div>
+            </div>
+          ) : (
+            <div className="card" style={{ padding: '10px 14px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, gap: 10, flexWrap: 'wrap' }}>
+                <span className="card-title" style={{ margin: 0 }}>베팅 현황</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  {aggRollingTarget > 0 && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ fontSize: 12, fontWeight: 800, fontFamily: 'var(--font-num)', color: aggRem > 0 ? 'var(--gold)' : 'var(--green)' }}>{Math.round(aggRem).toLocaleString()}원</span>
+                      <div className="deposit-progress-bar" style={{ width: 150, margin: 0 }}><div className="deposit-progress-fill" style={{ width: `${Math.min(100, aggPct)}%` }} /></div>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: aggPct >= 100 ? 'var(--green)' : 'var(--orange)' }}>{aggPct.toFixed(1)}%</span>
+                    </div>
+                  )}
+                  {layoutSwitch(false)}
+                  <button onClick={openRulebook} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--gold)', cursor: 'pointer', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-body)' }}>
+                    <BookOpen size={12} /> 룰북
+                  </button>
+                  <button onClick={() => setShowSiteMgr(true)} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-secondary)', cursor: 'pointer', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-body)' }}>
+                    <Settings size={12} /> 사이트관리
+                  </button>
+                </div>
+              </div>
+              {betMode ? renderBetModeColumn() : <div className="site-cards-wrap" style={{ '--site-cols': colCount } as React.CSSProperties}>
+              {sites.map(site => {
+                const dep = site.last_deposit ?? 0; const pt = site.point_deposit ?? 0
+                const isusd = site.currency === 'usd'; const pfx = isusd ? '$' : ''; const sfx = isusd ? '' : '원'
+                const pct = depositPct(site); const rem = depositRemaining(site)
+                const pnl = sitePnL(site)
+                return (
+                  <div key={site.id} className="card" style={{ padding: 0, overflow: 'hidden', border: site.active ? '1px solid var(--green-border)' : '1px solid var(--border)' }}>
+                    {/* 사이트 헤더 */}
+                    <div style={{ background: site.active ? 'var(--green-bg)' : 'var(--bg-elevated)', padding: '10px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span style={{ fontWeight: 700, fontSize: 15 }}>{site.name}</span>
+                        {isusd && <span style={{ fontSize: 9, background: 'var(--blue-bg)', color: 'var(--blue)', border: '1px solid var(--blue-border)', borderRadius: 3, padding: '1px 4px', fontWeight: 700 }}>$</span>}
+                        {site.active && <span className="site-active-dot" />}
+                        {pnl !== null && (
+                          <span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-num)', display: 'flex', alignItems: 'baseline', gap: 4 }} className={pnl >= 0 ? 'profit-pos' : 'profit-neg'}>
+                            {/* 사이트별 현재 수익은 통화와 무관하게 항상 원화로만 표시 (달러 금액은 숨김) */}
+                            {pnl >= 0 ? '+' : ''}{Math.round(isusd ? pnl * usdKrwRate : pnl).toLocaleString()}원
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <button className={`site-icon-btn site-icon-deposit ${dep > 0 ? 'active' : ''}`} onClick={e => { e.stopPropagation(); setDepositSite(site) }}><ArrowDownToLine size={15} /></button>
+                        <button className="site-icon-btn site-icon-withdraw" onClick={e => { e.stopPropagation(); setWithdrawSite(site) }}><LogOut size={15} /></button>
+                      </div>
+                    </div>
+                    {/* 롤링 정보 */}
+                    <div style={{ position: 'relative', padding: '8px 14px', borderBottom: '1px solid var(--border-light)', display: 'flex', flexDirection: 'column', gap: 3 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>입금</span>
+                          <span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-num)', color: '#E2E8F0' }}>{pfx}{dep.toLocaleString()}{sfx}</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>포인트</span>
+                          <span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-num)', color: pt > 0 ? 'var(--purple)' : 'var(--text-muted)' }}>{pt > 0 ? `+${pt.toLocaleString()}P` : '–'}</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>남은 롤링{(site.rolling_pct ?? 100) !== 100 && <span style={{ marginLeft: 4, fontSize: 9, fontWeight: 700, color: 'var(--gold)' }}>({site.rolling_pct}%)</span>}</span>
+                          <span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-num)', color: rem > 0 ? 'var(--gold)' : 'var(--green)' }}>{pfx}{rem.toLocaleString()}{sfx}</span>
+                        </div>
+                        <div className="deposit-progress-bar"><div className="deposit-progress-fill" style={{ width: `${Math.min(100,pct)}%` }} /></div>
+                        <div style={{ fontSize: 11, color: pct >= 100 ? 'var(--green)' : 'var(--orange)', fontWeight: 700, textAlign: 'right' }}>{pct.toFixed(1)}%</div>
+                        {/* 롤링 100% 완료 도장 — 입금/포인트/남은롤링 표시 영역 가운데에 반투명 오버레이 */}
+                        {pct >= 100 && (
+                          <div style={{
+                            position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            pointerEvents: 'none',
+                          }}>
+                            <div style={{
+                              opacity: 0.4,
+                              transform: 'rotate(-14deg)',
+                              border: '3px solid var(--green)',
+                              color: 'var(--green)',
+                              borderRadius: 8,
+                              padding: '2px 14px',
+                              fontSize: 15,
+                              fontWeight: 900,
+                              letterSpacing: '2px',
+                              fontFamily: 'var(--font-num)',
+                              textShadow: '0 0 4px var(--green)',
+                              background: 'rgba(0,0,0,0.05)',
+                            }}>
+                              롤링완료
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    {/* 베팅 목록 */}
+                    {renderBetList(site, true)}
                   </div>
                 )
               })}
-              </div>
+              </div>}
             </div>
           )}
         </div>
