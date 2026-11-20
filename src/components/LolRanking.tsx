@@ -42,6 +42,8 @@ export default function LolRanking() {
   const leagues = useMemo(() => [...new Set((rows ?? []).map(r => r.league))].sort((a, b) => { const i = (x: string) => { const k = LEAGUE_ORDER.indexOf(x); return k < 0 ? 99 : k }; return i(a) - i(b) }), [rows])
   const list = useMemo(() => {
     const l = (rows ?? []).filter(r => r.league === league && r.role === role && (!onlyRegular || r.regular))
+    // 순위는 보이는 선수 안에서 (주전급 먼저, 합성 점수 순) — 뷰의 role_rank는 비주전도 섞여 번호가 비었다
+    ;[...l].sort((a, b) => Number(b.regular) - Number(a.regular) || b.composite - a.composite).forEach((r, i) => { r.role_rank = i + 1 })
     const dir = sort === 'role_rank' || sort === 'deaths' || sort === 'fb_victim' ? 1 : -1
     return l.sort((a, b) => ((Number(a[sort] ?? (dir > 0 ? 1e9 : -1e9)) - Number(b[sort] ?? (dir > 0 ? 1e9 : -1e9))) * dir) || a.role_rank - b.role_rank)
   }, [rows, league, role, onlyRegular, sort])
