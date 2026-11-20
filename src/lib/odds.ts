@@ -1,10 +1,11 @@
 // ─── 승패 배당 시간대별 기록 (Supabase odds_snapshots) — 분석 탭 일정 옆·오른쪽 변동표 ─────
-// NBA = Action Network 9개 북 평균(오픈·홈 티켓% 포함), 국내 = BetExplorer 평균배당. 홈/원정은 일정 기준.
+// NBA = Action Network 9개 북 평균(오픈·홈 티켓% 포함), 국내 = BetExplorer 평균배당, 축구 5대 리그 = ESPN · DraftKings 승무패(오픈 포함). 홈/원정은 일정 기준.
 import { supabase } from './supabase'
 
 export interface OddsSnap {
   id: number; fetched_at: string; league: string; game_date: string; game_id: string; source: string
   home_odds: number | null; away_odds: number | null; open_home: number | null; open_away: number | null
+  draw_odds?: number | null; open_draw?: number | null   // 축구만 (ESPN · DraftKings 승무패)
   home_tickets: number | null; books: number | null; match_name: string | null
 }
 
@@ -13,7 +14,7 @@ export async function loadOdds(fromDate: string): Promise<Record<string, OddsSna
   const { data } = await supabase.from('odds_snapshots').select('*').gte('game_date', fromDate).order('fetched_at')
   const out: Record<string, OddsSnap[]> = {}
   for (const r of (data ?? []) as OddsSnap[]) {
-    const s = { ...r, home_odds: num(r.home_odds), away_odds: num(r.away_odds), open_home: num(r.open_home), open_away: num(r.open_away), home_tickets: num(r.home_tickets) }
+    const s = { ...r, home_odds: num(r.home_odds), away_odds: num(r.away_odds), open_home: num(r.open_home), open_away: num(r.open_away), draw_odds: num(r.draw_odds), open_draw: num(r.open_draw), home_tickets: num(r.home_tickets) }
     ;(out[r.game_id] ??= []).push(s)
   }
   return out

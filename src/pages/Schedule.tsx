@@ -16,7 +16,7 @@ import { loadSchedules, gameState, koName, type ScheduleGame, type ScheduleTeam,
 
 // 종목 순서 (사용자 요청): 전체 · 축구 · 야구 · 농구 · 배구 · LOL
 const SPORT_LIST: { id: string; label: string; leagues: string[] }[] = [
-  { id: 'soccer', label: '⚽ 축구', leagues: [] },
+  { id: 'soccer', label: '⚽ 축구', leagues: ['잉글랜드 1부', '스페인 1부', '이탈리아 1부', '독일 1부', '프랑스 1부'] },
   { id: 'baseball', label: '⚾ 야구', leagues: [] },
   { id: 'basketball', label: '🏀 농구', leagues: ['KBL', 'WKBL', 'NBA'] },
   { id: 'volleyball', label: '🏐 배구', leagues: ['V리그 남자', 'V리그 여자'] },
@@ -120,6 +120,7 @@ export default function Schedule() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4, fontSize: 10 }}>
               <span style={{ fontWeight: 700, color: st === 'ended' ? 'var(--text-muted)' : 'var(--gold)' }}>{dayjs(g.start).format('HH:mm')}</span>
               <span style={{ color: 'var(--text-muted)' }}>{g.league}</span>
+              {tr?.last.draw_odds != null && <span style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-num)' }}>무 {tr.last.draw_odds.toFixed(2)}</span>}
               {st === 'ended' && <span style={{ marginLeft: 'auto', padding: '0 6px', borderRadius: 8, border: '1px solid var(--border)', color: 'var(--text-muted)' }}>종료</span>}
               {st === 'live' && <span style={{ marginLeft: 'auto', padding: '0 6px', borderRadius: 8, background: 'var(--gold-bg)', color: 'var(--gold)', fontWeight: 700 }}>● {g.status}</span>}
             </div>

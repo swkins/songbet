@@ -2,7 +2,7 @@ import dayjs from 'dayjs'
 import type { OddsSnap } from '../lib/odds'
 
 // 오른쪽 분석 칸 — 승패 배당 시간대별 변동표 (바뀐 기록만 쌓임)
-const SRC: Record<string, string> = { actionnetwork: 'Action Network 9개 북 평균', betexplorer: 'BetExplorer 평균배당' }
+const SRC: Record<string, string> = { actionnetwork: 'Action Network 9개 북 평균', betexplorer: 'BetExplorer 평균배당', 'espn-draftkings': 'ESPN · DraftKings' }
 
 export function Arrow({ d }: { d: number }) {
   if (!d) return null
@@ -12,6 +12,7 @@ export function Arrow({ d }: { d: number }) {
 export default function OddsHistory({ list, homeName, awayName, compact }: { list: OddsSnap[]; homeName: string; awayName: string; compact?: boolean }) {
   const last = list[list.length - 1]
   const hasOpen = last.open_home != null
+  const hasDraw = list.some(r => r.draw_odds != null)   // 축구 승무패
   const rows = [...list].reverse()
   const th: React.CSSProperties = { textAlign: 'right', fontWeight: 600, color: 'var(--text-muted)', padding: '3px 6px', fontSize: 10, borderBottom: '1px solid var(--border)' }
   const td: React.CSSProperties = { textAlign: 'right', padding: '4px 6px', borderBottom: '1px solid var(--border)', fontFamily: 'var(--font-num)' }
@@ -21,13 +22,13 @@ export default function OddsHistory({ list, homeName, awayName, compact }: { lis
   return (
     <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '10px 12px', background: 'var(--bg-elevated)', marginTop: compact ? 0 : 12 }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>
-        <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)' }}>승패 배당 변동</span>
+        <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)' }}>{hasDraw ? '승무패' : '승패'} 배당 변동</span>
         <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{SRC[last.source] ?? last.source}{last.books ? ` (${last.books}곳)` : ''}{compact ? '' : ' · 바뀐 때만 기록 · 해외 기준이라 사이트 배당과 다를 수 있음'}</span>
       </div>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
         <thead><tr>
           <th style={{ ...th, textAlign: 'left' }}>시각</th>
-          <th style={th}>{compact ? homeName : `홈 · ${homeName}`}</th><th style={th}>{compact ? awayName : `원정 · ${awayName}`}</th>
+          <th style={th}>{compact ? homeName : `홈 · ${homeName}`}</th>{hasDraw && <th style={th}>무</th>}<th style={th}>{compact ? awayName : `원정 · ${awayName}`}</th>
           {last.home_tickets != null && <th style={th}>{compact ? '홈%' : '홈 티켓%'}</th>}
         </tr></thead>
         <tbody>
@@ -36,7 +37,7 @@ export default function OddsHistory({ list, homeName, awayName, compact }: { lis
             return (
               <tr key={r.id}>
                 <td style={{ ...td, textAlign: 'left', color: 'var(--text-secondary)', fontFamily: 'var(--font-body)' }}>{dayjs(r.fetched_at).format('M/D HH:mm')}</td>
-                {cell(r.home_odds, prev?.home_odds)}{cell(r.away_odds, prev?.away_odds)}
+                {cell(r.home_odds, prev?.home_odds)}{hasDraw && cell(r.draw_odds ?? null, prev?.draw_odds)}{cell(r.away_odds, prev?.away_odds)}
                 {last.home_tickets != null && <td style={td}>{r.home_tickets != null ? `${r.home_tickets}%` : '–'}</td>}
               </tr>
             )
@@ -45,6 +46,7 @@ export default function OddsHistory({ list, homeName, awayName, compact }: { lis
             <tr>
               <td style={{ ...td, textAlign: 'left', color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>오픈</td>
               <td style={{ ...td, color: 'var(--text-muted)' }}>{last.open_home?.toFixed(2)}</td>
+              {hasDraw && <td style={{ ...td, color: 'var(--text-muted)' }}>{last.open_draw?.toFixed(2)}</td>}
               <td style={{ ...td, color: 'var(--text-muted)' }}>{last.open_away?.toFixed(2)}</td>
               {last.home_tickets != null && <td style={td}></td>}
             </tr>
