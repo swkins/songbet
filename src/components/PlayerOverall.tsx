@@ -31,6 +31,48 @@ function AvailCell({ p, ov, onCycle }: { p: PlayerOv; ov?: number; onCycle: () =
   )
 }
 
+// 세트 수별 확률과 배당 기준 — 확률 p일 때 배당 o의 기대수익 = p·o − 1.
+// 롤링 가능 = 기대수익 −5% 이상(o ≥ 0.95/p, 사용자 요청: 조금 손해여도 롤링 채울 만한 선), 손익분기 = 1/p, 가치 = +5%(1.05/p)
+const ROLL_EV = -0.05, VALUE_EV = 0.05
+function SetCountOdds({ v }: { v: VolleyResult }) {
+  const d = v.dist
+  const rows: [string, string, number][] = [
+    ['3세트 (셧아웃)', '3.5 언더', d['3-0'] + d['0-3']],
+    ['4세트', '정확히 4세트', d['3-1'] + d['1-3']],
+    ['5세트 (풀세트)', '정확히 5세트', d['3-2'] + d['2-3']],
+    ['4세트 이상', '3.5 오버', 1 - d['3-0'] - d['0-3']],
+    ['4세트 이하', '4.5 언더', 1 - d['3-2'] - d['2-3']],
+  ]
+  const o = (p: number, ev: number) => ((1 + ev) / p).toFixed(2)
+  const th: React.CSSProperties = { textAlign: 'right', fontWeight: 600, color: 'var(--text-muted)', padding: '3px 5px', fontSize: 10, borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }
+  const tdr: React.CSSProperties = { textAlign: 'right', padding: '4px 5px', borderBottom: '1px solid var(--border)', fontSize: 12, fontFamily: 'var(--font-num)' }
+  return (
+    <div style={{ marginTop: 10 }}>
+      <div style={{ fontSize: 12, fontWeight: 800, marginBottom: 2 }}>세트 수 확률 · 배당 기준</div>
+      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <thead><tr>
+          <th style={{ ...th, textAlign: 'left' }}>결과</th><th style={th}>확률</th>
+          <th style={{ ...th, color: '#FACC15' }} title="기대수익 −5% 이상 — 조금 손해지만 롤링 채우기엔 갈 만함">롤링 가능</th>
+          <th style={th} title="기대수익 0">손익분기</th>
+          <th style={{ ...th, color: 'var(--green)' }} title="기대수익 +5% 이상">가치</th>
+        </tr></thead>
+        <tbody>{rows.map(([k, mk, p]) => (
+          <tr key={k}>
+            <td style={{ ...tdr, textAlign: 'left', fontFamily: 'var(--font-body)' }}>{k}<div style={{ fontSize: 9, color: 'var(--text-muted)' }}>{mk}</div></td>
+            <td style={{ ...tdr, fontWeight: 800 }}>{Math.round(p * 1000) / 10}%</td>
+            <td style={{ ...tdr, color: '#FACC15', fontWeight: 700 }}>{o(p, ROLL_EV)}↑</td>
+            <td style={tdr}>{o(p, 0)}↑</td>
+            <td style={{ ...tdr, color: 'var(--green)', fontWeight: 700 }}>{o(p, VALUE_EV)}↑</td>
+          </tr>
+        ))}</tbody>
+      </table>
+      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 3, lineHeight: 1.6 }}>
+        사이트 배당이 <b style={{ color: '#FACC15' }}>롤링 가능</b> 이상이면 기대 손해 5% 이내(롤링용), <b>손익분기</b> 이상이면 본전, <b style={{ color: 'var(--green)' }}>가치</b> 이상이면 기대수익 +5%. 확률은 홈 승률 + 과거 V리그 5시즌 세트 결과 곡선 — 4·5세트는 한 경기 결과라 변동이 크니 금액은 작게.
+      </div>
+    </div>
+  )
+}
+
 // 배구 예상: 세트 스코어 분포 (volleyPredict.ts)
 function VolleyBox({ v, hName, aName, changed, onReset }: { v: VolleyResult & { diff: number }; hName: string; aName: string; changed: number; onReset: () => void }) {
   const max = Math.max(...SET_SCORES.map(k => v.dist[k]))
@@ -69,6 +111,8 @@ function VolleyBox({ v, hName, aName, changed, onReset }: { v: VolleyResult & { 
           )
         })}
       </div>
+      {/* 세트 수 확률 → 배당 기준 (롤링용: 조금 손해여도 갈 만한 배당부터) */}
+      <SetCountOdds v={v} />
       <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4, lineHeight: 1.6 }}>
         오버롤 모델 홈 {v.modelHome}% (팀 오버롤 차 {v.diff > 0 ? '+' : ''}{v.diff}){v.marketHome != null ? ` · 시장 홈 ${v.marketHome}%` : ''} → 세트 분포는 과거 V리그 5시즌 곡선 · 선수 출전 칸을 누르면 다시 계산
       </div>
