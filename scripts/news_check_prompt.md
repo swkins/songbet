@@ -35,7 +35,7 @@ select league, team, player_name, play_prob, status, reason, checked_at from pla
 -- NBA만: select team, player_id, player_name, status, short_comment, return_date from nba_injuries where team in (<팀 이름들>);
 ```
 
-4. 웹 검색 (WebSearch, mode "standard"): 경기당 한 번만, 두 팀을 한 검색어에 넣는다. 예) NBA `"<원정> vs <홈> injury report"`, 국내 `"<홈> <원정> 결장 부상 복귀"`. 핵심 선수 상태가 기사로 확인이 안 될 때만 그 팀으로 한 번 더 (전체 검색은 경기 수 + 3번 이하). 웹페이지는 직접 열 수 없으니 검색 결과 요약으로 판단한다. 최근 3일 기사만 쓴다.
+4. 웹 검색 (WebSearch, mode "extended" — standard는 지난 기사만 나와서 쓰지 않는다): 리그마다 한 번, 그 리그 경기를 한 검색어에 묶는다. 예) NBA `"<원정1> <홈1>, <원정2> <홈2> ... injury report <미국 날짜 Month D YYYY>"` (경기가 6개 넘으면 두 번으로 나눈다), 국내 `"<홈1> <원정1> <홈2> <원정2> <M월 D일> 경기 결장 부상"`. 핵심 선수 상태가 안 나왔을 때만 그 팀으로 한 번 더 (전체 검색은 리그 수 + 2번 이하). 웹페이지는 직접 열 수 없으니 검색 결과 요약으로 판단한다. 최근 3일 기사만 쓴다.
 
 5. 선수마다 출전 확률(0~100)을 최종 판단한다. ESPN 명단(NBA)과 기사를 같이 보고, 둘이 다르면 더 최근 것을 따른다.
    - 기본값: 결장 확정(공식 Out·수술·장기 이탈) 0 / 결장 유력(Doubtful) 15 / 불투명(Questionable·당일 결정) 50 / 출전 유력(Probable) 90 / 이상 없음 100. 기사 표현으로 조정 (예: "훈련 정상 소화" ↑, "무리시키지 않겠다" ↓).

@@ -77,7 +77,7 @@ export default function BetModePanel({ sites, betOptionsBySport, numericBetOptio
         <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>가져온 일정 중 끝나지 않은 경기 · 초안</span>
       </div>
       {loading ? <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>불러오는 중…</div> : (
-        <div style={{ display: 'grid', gridTemplateColumns: '150px minmax(200px, 1fr) minmax(320px, 2fr)', gap: 10, alignItems: 'start' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '200px minmax(240px, 1.2fr) minmax(320px, 2fr)', gap: 10, alignItems: 'start' }}>
           {/* 1. 종목 → 리그 */}
           <div style={col}>
             <div style={head}>종목 · 리그</div>
@@ -123,16 +123,37 @@ export default function BetModePanel({ sites, betOptionsBySport, numericBetOptio
           <div style={col}>
             <div style={head}>{league ? `${league} 경기` : '경기'}</div>
             {!league ? <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: 6 }}>왼쪽에서 리그를 고르세요</div>
-              : leagueGames.map(g => {
-                const live = gameState(g) === 'live'
-                return (
-                  <button key={g.id} type="button" onClick={() => { setGameId(g.id); setAddSiteId(null) }} style={{ ...item(gameId === g.id), display: 'flex', flexDirection: 'column', gap: 2 }}>
-                    <span style={{ fontSize: 10, color: live ? 'var(--gold)' : 'var(--text-muted)', fontWeight: 700 }}>{when(g.start)}{live ? ' · ● 경기중' : ''}</span>
-                    <span style={{ fontWeight: 700 }}>{koName(g.home.name)} <span style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 400 }}>홈</span></span>
-                    <span style={{ fontWeight: 700 }}>{koName(g.away.name)}</span>
-                  </button>
-                )
-              })}
+              : (() => {
+                // 오늘 · 내일 · 그 뒤를 날짜 머리글로 확실히 나눈다 (오늘 = 금색 머리글)
+                const today = dayjs().format('YYYY-MM-DD'), tomorrow = dayjs().add(1, 'day').format('YYYY-MM-DD')
+                let prev = ''
+                return leagueGames.map(g => {
+                  const live = gameState(g) === 'live'
+                  const d = dayjs(g.start), ds = d.format('YYYY-MM-DD')
+                  const tag = ds === today ? '오늘' : ds === tomorrow ? '내일' : ''
+                  const header = ds !== prev ? (prev = ds, (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, margin: '6px 0 2px', fontSize: 11, fontWeight: 800,
+                      color: tag === '오늘' ? 'var(--gold)' : tag === '내일' ? 'var(--blue)' : 'var(--text-secondary)' }}>
+                      <span style={{ padding: '1px 8px', borderRadius: 10, border: `1px solid ${tag === '오늘' ? 'var(--gold-border)' : tag === '내일' ? 'var(--blue-border)' : 'var(--border)'}`,
+                        background: tag === '오늘' ? 'var(--gold-bg)' : tag === '내일' ? 'var(--blue-bg)' : 'transparent' }}>{tag || d.format('M/D')}</span>
+                      <span style={{ fontWeight: 600, color: 'var(--text-muted)' }}>{d.format('M/D')}({KO_DAY[d.day()]})</span>
+                      <span style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+                    </div>
+                  )) : null
+                  return (
+                    <div key={g.id}>
+                      {header}
+                      <button type="button" onClick={() => { setGameId(g.id); setAddSiteId(null) }} style={{ ...item(gameId === g.id), width: '100%', display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: live ? 'var(--gold)' : 'var(--text-muted)', flexShrink: 0, fontFamily: 'var(--font-num)' }}>{live ? '● 경기중' : d.format('HH:mm')}</span>
+                        {/* A(홈) 대 B(원정) — 왼쪽이 홈 */}
+                        <span style={{ fontWeight: 700, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {koName(g.home.name)} <span style={{ color: 'var(--text-muted)', fontWeight: 400, fontSize: 11 }}>대</span> {koName(g.away.name)}
+                        </span>
+                      </button>
+                    </div>
+                  )
+                })
+              })()}
           </div>
 
           {/* 3. 베팅옵션 */}
