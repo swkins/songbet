@@ -3,10 +3,10 @@ import dayjs from 'dayjs'
 import { koName, type ScheduleTeam } from '../lib/gameSchedule'
 import { conditionColor, conditionLabel, type Condition } from '../lib/fatigue'
 import { SET_SCORES, type VolleyResult } from '../lib/volleyPredict'
-import { simulateVolleyGame, getParams, loadGameOverall, tierOf, availColor, TIERS, teamStrength, simulate, statusLabel, type TeamOv, type PlayerOv, type GameOverall } from '../lib/playerOverall'
+import { staminaOf, simulateVolleyGame, getParams, loadGameOverall, tierOf, availColor, TIERS, teamStrength, simulate, statusLabel, type TeamOv, type PlayerOv, type GameOverall } from '../lib/playerOverall'
 
 // ─── 분석 탭 오른쪽 칸: 양 팀 핵심·주전 선수 오버롤 + 출전 확률 ─────
-// 출전 색: 초록(90%↑) · 연두(70~89) · 노랑(40~69) · 빨강(1~39) · 결장 = 빨간 바탕 "결장 0%" 칩 (이름은 취소선 없이 그대로)
+// 출전 색: 초록(90%↑) · 연두(70~89) · 노랑(40~69) · 빨강(1~39) · 결장 = 빨간 바탕 "0%" 칩 (이름은 취소선 없이 그대로)
 // 오버롤 색: WoW 등급 — 전설 주황 · 영웅 보라 · 희귀 파랑 · 일반 흰색 · 하급 회색
 
 const box: React.CSSProperties = { border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '10px 12px', background: 'var(--bg-elevated)' }
@@ -26,7 +26,7 @@ function AvailCell({ p, ov, onCycle }: { p: PlayerOv; ov?: number; onCycle: () =
     // 결장은 눈에 띄게: 빨간 바탕 흰 글씨
     <button type="button" onClick={onCycle} title="눌러서 결장/출전으로 바꿔 보기 (예상 스코어 다시 계산)"
       style={{ background: '#FF3B3B', color: '#fff', border: ov != null ? '1px dashed #fff' : 'none', borderRadius: 6, padding: '1px 6px', cursor: 'pointer', fontSize: 11, fontWeight: 800, whiteSpace: 'nowrap', fontFamily: 'var(--font-num)' }}>
-      결장 0%
+      0%
     </button>
   )
   return (
@@ -127,15 +127,23 @@ function VolleyBox({ v, hName, aName, changed, onReset }: { v: VolleyResult & { 
   )
 }
 
+// 지난 경기 대비 변화 ▲▼ (player_ratings — 예측 저장 때 같이 저장)
+function Delta({ now, prev, date }: { now: number | null | undefined; prev: number | null | undefined; date?: string }) {
+  if (now == null || prev == null) return null
+  const d = Math.round(now - prev)
+  if (!d) return null
+  return <span title={`지난 경기(${date ? dayjs(date).format('M/D') : ''}) ${prev} → 지금 ${now}`} style={{ fontSize: 9, fontWeight: 700, marginLeft: 2, color: d > 0 ? 'var(--green)' : 'var(--red)', cursor: 'help' }}>{d > 0 ? '▲' : '▼'}{Math.abs(d)}</span>
+}
+
 // 선수 체력 % = 팀 컨디션 − 개인 피로(직전 경기·7일 출전시간). 75% 아래 '누적 경고'
 function Stamina({ p, cond }: { p: PlayerOv; cond?: Condition }) {
   if (!cond && !p.fatigue) return <span style={{ color: 'var(--text-muted)', fontSize: 10 }}>–</span>
-  const pct = Math.max(30, Math.round((cond?.pct ?? 100) - (p.fatigue?.pen ?? 0)))
+  const pct = staminaOf(p, cond) ?? 100
   const col = conditionColor(pct), warn = pct < 75
   const why = [...(cond?.items ?? []).map(i => `팀: ${i.text} ${i.pts}`), ...(p.fatigue?.items ?? []).map(i => `개인: ${i.text} ${i.pts}`)]
   return (
     <span title={why.length ? why.join('\n') : '감점 없음'} style={{ cursor: 'help' }}>
-      <span style={{ color: col, fontWeight: 800, fontSize: 11, fontFamily: 'var(--font-num)' }}>{pct}%</span>
+      <span style={{ color: col, fontWeight: 800, fontSize: 11, fontFamily: 'var(--font-num)' }}>{pct}%</span><Delta now={pct} prev={p.prev?.stamina} date={p.prev?.date} />
       {warn && <div style={{ fontSize: 9, fontWeight: 800, color: '#FF4D6D' }}>⚠ 누적</div>}
       {!warn && (p.fatigue?.pen ?? 0) > 0 && <div style={{ fontSize: 9, color: 'var(--text-muted)' }}>개인 −{Math.round(p.fatigue!.pen)}</div>}
     </span>
@@ -235,10 +243,10 @@ function TeamTable({ title, t, ovr, onCycle, cond }: { title: string; t: TeamOv;
                   )}
                 </td>
                 <td style={{ ...td, textAlign: 'right', whiteSpace: 'nowrap' }}><Stamina p={p} cond={cond} /></td>
-                <td style={{ ...td, textAlign: 'right', color: 'var(--text-secondary)', fontFamily: 'var(--font-num)' }} title={p.baseNote}>{p.base ?? '–'}</td>
-                <td style={{ ...td, textAlign: 'right', fontFamily: 'var(--font-num)', color: p.form == null || p.base == null ? 'var(--text-muted)' : p.form > p.base + 2 ? 'var(--green)' : p.form < p.base - 2 ? 'var(--red)' : 'var(--text-secondary)' }}>{p.form ?? '–'}</td>
+                <td style={{ ...td, textAlign: 'right', color: 'var(--text-secondary)', fontFamily: 'var(--font-num)' }} title={p.baseNote}>{p.base ?? '–'}<Delta now={p.base} prev={p.prev?.base} date={p.prev?.date} /></td>
+                <td style={{ ...td, textAlign: 'right', fontFamily: 'var(--font-num)', color: p.form == null || p.base == null ? 'var(--text-muted)' : p.form > p.base + 2 ? 'var(--green)' : p.form < p.base - 2 ? 'var(--red)' : 'var(--text-secondary)' }}>{p.form ?? '–'}<Delta now={p.form} prev={p.prev?.form} date={p.prev?.date} /></td>
                 <td style={{ ...td, textAlign: 'right', whiteSpace: 'nowrap' }}>
-                  <Ov v={p.overall} />
+                  <Ov v={p.overall} /><Delta now={p.overall} prev={p.prev?.overall} date={p.prev?.date} />
                   {tier && <div style={{ fontSize: 9, color: tier.color, opacity: 0.85 }}>{tier.name}</div>}
                 </td>
               </tr>
@@ -337,7 +345,7 @@ export default function PlayerOverall({ league, gameDate, home, away, left, odds
           <div style={{ fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.7 }}>
             오버롤 = 체급 × 0.7 + 최근 5경기 폼 × 0.3 (체급 = 이번 시즌 + 지난 시즌, 경기가 쌓일수록 이번 시즌 비중↑) ·{' '}
             {TIERS.map(t => <span key={t.name} style={{ color: t.color, marginRight: 6 }}>{t.name} {t.min >= 0 ? `${t.min}+` : '~59'}</span>)}
-            <br />출전: <span style={{ color: availColor(95) }}>● 90%↑</span> <span style={{ color: availColor(80) }}>● 70~89</span> <span style={{ color: availColor(50) }}>● 40~69</span> <span style={{ color: availColor(20) }}>● 1~39</span> <span style={{ background: '#FF3B3B', color: '#fff', borderRadius: 4, padding: '0 4px', fontWeight: 700 }}>결장 0%</span>
+            <br />출전: <span style={{ color: availColor(95) }}>● 90%↑</span> <span style={{ color: availColor(80) }}>● 70~89</span> <span style={{ color: availColor(50) }}>● 40~69</span> <span style={{ color: availColor(20) }}>● 1~39</span> <span style={{ background: '#FF3B3B', color: '#fff', borderRadius: 4, padding: '0 4px', fontWeight: 700 }}>0%</span> 결장
             {' '}· 확정/추정 = Claude가 뉴스·ESPN 명단을 읽고 판단 · ↩ 복귀·⏱ 출전 제한 = 경기 기록 · 체력 = 팀 컨디션 − 개인 출전시간 부담(직전 경기·7일 누적), 75% 미만 ⚠ 누적 경고 · 🔄 대승·대패 로테이션 · 팀 오버롤 = 출전시간 × 이번 시즌 출전 비중 가중, 결장 반영 = 결장 확률만큼 대체 선수(50)로
           </div>
         </div>

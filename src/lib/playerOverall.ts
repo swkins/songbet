@@ -28,6 +28,7 @@ export interface PlayerOv {
   base: number | null; form: number | null; overall: number | null
   baseNote: string          // 체급 근거 (이번 시즌 n경기 · 지난 시즌 …)
   fatigue: PlayerFatigue | null   // 개인 피로 (출전시간 부담)
+  prev?: { date: string; base: number | null; form: number | null; overall: number | null; stamina: number | null } | null  // 지난 경기 때 수치 (player_ratings)
   avail: Avail
 }
 export interface TeamOv { team: string | null; players: PlayerOv[]; full: number | null; exp: number | null; stats: TeamStats | null }
@@ -240,7 +241,16 @@ export async function loadGameOverall(league: string, gameDate: string, home: Sc
     const { full, exp } = teamStrength(players, {}, vb)
     return { team, players, full, exp, stats }
   }
-  return { code, home: build(home, hName), away: build(away, aName), checkedAt, news, cond }
+  const H = build(home, hName), A = build(away, aName)
+  // 지난 경기 때 수치 (예측 저장할 때 같이 저장된 player_ratings) — 화면에서 ▲▼ 변화 표시
+  const ids = [...H.players, ...A.players].map(x => x.id)
+  if (ids.length) {
+    const { data: pr } = await supabase.from('player_ratings').select('player_id,game_date,base,form,overall,stamina').eq('league', code).in('player_id', ids).lt('game_date', gameDate).order('game_date', { ascending: false }).limit(1000)
+    const last = new Map<string, { game_date: string; base: number | null; form: number | null; overall: number | null; stamina: number | null }>()
+    for (const r of (pr ?? []) as { player_id: string; game_date: string; base: number | null; form: number | null; overall: number | null; stamina: number | null }[]) if (!last.has(r.player_id)) last.set(r.player_id, r)
+    for (const x of [...H.players, ...A.players]) { const r = last.get(x.id); if (r) x.prev = { date: r.game_date, base: r.base, form: r.form, overall: r.overall, stamina: r.stamina } }
+  }
+  return { code, home: H, away: A, checkedAt, news, cond }
 }
 
 /** 팀 오버롤: 출전시간 × 이번 시즌 출전 비중 가중 평균 (full = 다 뛸 때, exp = 출전 확률·개인 피로 반영 — 빠지는 만큼 대체 선수 50점).
@@ -336,4 +346,10 @@ export function simulateVolleyGame(code: string, home: TeamOv, away: TeamOv, ove
   const diff = Math.round((H.exp - A.exp) * 10) / 10
   const r = predictVolley(code, diff, p, odds)
   return r ? { ...r, diff } : null
+}
+
+/** 선수 체력 % = 팀 컨디션 − 개인 피로 (화면 '체력' 칸과 같은 값) */
+export function staminaOf(p: PlayerOv, cond?: Condition | null): number | null {
+  if (!cond && !p.fatigue) return null
+  return Math.max(30, Math.round((cond?.pct ?? 100) - (p.fatigue?.pen ?? 0)))
 }

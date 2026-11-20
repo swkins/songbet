@@ -4,7 +4,7 @@
 //            'domestic' = KBL·WKBL·V리그 남녀 중 20~100분 뒤 시작 경기 (매시 05분) — 배구는 세트 스코어(volleyPredict.ts)
 //            'grade' = 끝난 경기 채점 (매시 35분) · 'test' = 저장 없이 결과만
 import { supabase } from './db'
-import { loadGameOverall, simulate, simulateVolleyGame, getParams } from '../../../../src/lib/playerOverall'
+import { loadGameOverall, simulate, simulateVolleyGame, getParams, staminaOf } from '../../../../src/lib/playerOverall'
 import { gameState, type ScheduleGame } from '../../../../src/lib/gameSchedule'
 
 const CODE: Record<string, string> = { NBA: 'NBA', KBL: 'KBL', WKBL: 'WKBL', 'V리그 남자': 'VLEAGUE_M', 'V리그 여자': 'VLEAGUE_W' }
@@ -40,7 +40,14 @@ async function snapshot(leagues: string[], from: number, to: number, save: boole
           cond: d.cond ? { home: { pct: d.cond.home.pct, items: d.cond.home.items }, away: { pct: d.cond.away.pct, items: d.cond.away.items } } : null }
         out.push({ game: `${base.away} @ ${base.home}`, pred: `${sim.home}-${sim.away}`, margin: sim.margin })
       }
-      if (save) { const { error } = await supabase.from('predictions').upsert(row); if (error) throw new Error(error.message) }
+      if (save) {
+        const { error } = await supabase.from('predictions').upsert(row); if (error) throw new Error(error.message)
+        // 선수 수치도 저장 — 다음 경기 화면에서 지난 경기 대비 ▲▼
+        const ratings = ([['home', d.home], ['away', d.away]] as const).flatMap(([side, t]) => t.players.map(x => ({
+          league: d.code, player_id: x.id, game_date: r.game_date, team: t.team, base: x.base, form: x.form, overall: x.overall,
+          stamina: staminaOf(x, d.cond ? d.cond[side] : null), saved_at: new Date().toISOString() })))
+        if (ratings.length) await supabase.from('player_ratings').upsert(ratings)
+      }
     } catch (e) { out.push({ game: g.id, error: String(e) }) }
   }
   return out
