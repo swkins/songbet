@@ -23,17 +23,18 @@ with base as (
 ), m as (
   select q.season, q.league, q.pkey, q.role, q.regular, t.k, t.v, t.w
   from q cross join lateral (values
-    ('gd15',   q.gd15,   case q.role when 'Top' then .22 when 'Jungle' then .18 when 'Mid' then .20 when 'Bot' then .18 else .18 end),
-    ('xpd15',  q.xpd15,  case q.role when 'Top' then .16 when 'Jungle' then .16 when 'Mid' then .12 when 'Bot' then .08 else .14 end),
-    ('csd15',  q.csd15,  case q.role when 'Top' then .12 when 'Jungle' then .12 when 'Mid' then .12 when 'Bot' then .14 else 0 end),
-    ('csm',    q.csm,    case q.role when 'Jungle' then .08 when 'Bot' then .08 else 0 end),
-    ('dpm',    q.dpm,    case q.role when 'Top' then .12 when 'Jungle' then .10 when 'Mid' then .16 when 'Bot' then .18 else .08 end),
-    ('solo',   q.solo_kills::numeric / nullif(q.games, 0), case q.role when 'Top' then .12 when 'Jungle' then .04 when 'Mid' then .10 else 0 end),
-    ('deaths', -q.deaths, case q.role when 'Top' then .10 when 'Jungle' then .12 when 'Mid' then .10 when 'Bot' then .12 else .16 end),
-    ('kda',    q.kda,    case q.role when 'Mid' then .12 when 'Bot' then .12 else .10 end),
+    -- 탑·미드·원딜은 15분 골드·경험치 차 비중을 올림 (사용자 요청 2026-11-20 — 매일 지는 픽만 하진 않으니 라인전 우위가 실력), 정글·서폿은 로밍 손해가 있어 그대로
+    ('gd15',   q.gd15,   case q.role when 'Top' then .28 when 'Jungle' then .18 when 'Mid' then .26 when 'Bot' then .26 else .18 end),
+    ('xpd15',  q.xpd15,  case q.role when 'Top' then .20 when 'Jungle' then .16 when 'Mid' then .18 when 'Bot' then .16 else .14 end),
+    ('csd15',  q.csd15,  case q.role when 'Top' then .10 when 'Jungle' then .12 when 'Mid' then .10 when 'Bot' then .12 else 0 end),
+    ('csm',    q.csm,    case q.role when 'Jungle' then .08 when 'Bot' then .04 else 0 end),
+    ('dpm',    q.dpm,    case q.role when 'Top' then .10 when 'Jungle' then .10 when 'Mid' then .14 when 'Bot' then .14 else .08 end),
+    ('solo',   q.solo_kills::numeric / nullif(q.games, 0), case q.role when 'Top' then .10 when 'Jungle' then .04 when 'Mid' then .08 else 0 end),
+    ('deaths', -q.deaths, case q.role when 'Top' then .08 when 'Jungle' then .12 when 'Mid' then .08 when 'Bot' then .10 else .16 end),
+    ('kda',    q.kda,    case q.role when 'Top' then .08 when 'Mid' then .10 when 'Bot' then .10 else .10 end),
     ('assists', q.assists, case q.role when 'Support' then .12 else 0 end),
     ('vspm',   q.vspm,   case q.role when 'Jungle' then .04 when 'Support' then .10 else 0 end),
-    ('wcpm',   q.wcpm,   case q.role when 'Mid' then .02 when 'Bot' then .04 when 'Support' then .06 else 0 end),
+    ('wcpm',   q.wcpm,   case q.role when 'Bot' then .02 when 'Support' then .06 else 0 end),
     ('winrate', q.winrate, .06)
   ) t(k, v, w) where t.w > 0 and t.v is not null
 ), st as (
