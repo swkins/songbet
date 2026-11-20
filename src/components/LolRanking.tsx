@@ -13,7 +13,7 @@ interface Row {
   kp: number | null; dmg_pct: number | null; gold_pct: number | null; vs_pct: number | null; dpm: number | null; vspm: number | null; wcpm: number | null
   gd15: number | null; csd15: number | null; xpd15: number | null; fb: number | null; fb_victim: number | null; solo_kills: number | null; pentas: number | null
   composite: number; base: number; role_rank: number; league_offset: number | null; league_gpr: number | null; global_base: number | null;
-  lp_link: string | null; tier: number | null; tier_now: number | null; seasons: { season: string; league: string; games: number; g: number; team: string | null }[] | null; zs_now: Record<string, number> | null; low_sample: boolean; tournaments: Record<string, number> | null; updated_at: string
+  lp_link: string | null; tier: number | null; tier_now: number | null; seasons: { season: string; league: string; games: number; g: number; team: string | null; team_z?: number; ind?: number }[] | null; zs_now: Record<string, number> | null; low_sample: boolean; tournaments: Record<string, number> | null; updated_at: string
 }
 const LEAGUE_ORDER = ['LCK', 'LPL', 'LEC', 'LCS', 'LCP', 'LCK CL', 'CBLOL']
 const ROLES: [string, string][] = [['Top', '탑'], ['Jungle', '정글'], ['Mid', '미드'], ['Bot', '원딜'], ['Support', '서폿']]
@@ -137,7 +137,7 @@ export default function LolRanking() {
                     <span style={{ fontSize: 10, color: 'var(--text-muted)', marginLeft: 4 }}>{r.country}</span>
                     <div style={{ fontSize: 10, color: 'var(--text-secondary)' }}>{isAll && <b style={{ color: 'var(--gold)', marginRight: 4 }}>{r.league}</b>}{r.team ?? '—'}</div>
                   </td>
-                  <td style={{ ...td }} title={(r.seasons ?? []).map(x => `${x.season} ${x.league === 'INTL' ? '국제전' : x.league}${x.team ? ` ${x.team}` : ''} ${x.games}세트 → ${Math.round(60 + 13 * x.g)}`).join('\n') || '기록 없음'}>
+                  <td style={{ ...td }} title={(r.seasons ?? []).map(x => `${x.season} ${x.league === 'INTL' ? '국제전' : x.league}${x.team ? ` ${x.team}` : ''} ${x.games}세트 → ${Math.round(62 + 9.5 * x.g)} (팀 ${x.team_z != null ? (x.team_z > 0 ? '+' : '') + Number(x.team_z).toFixed(1) : '?'}σ · 개인 ${x.ind != null ? (x.ind > 0 ? '+' : '') + Number(x.ind).toFixed(1) : '?'}σ)`).join('\n') || '기록 없음'}>
                     {r.tier != null ? <span style={{ fontSize: 15, fontWeight: 800, color: t.color }}>{r.tier}</span> : <span style={{ color: 'var(--text-muted)' }}>–</span>}
                     {r.low_sample && <div style={{ fontSize: 9, color: 'var(--orange)' }} title="여러 시즌 합쳐 유효 세트가 60 미만 — 리그 주전 평균보다 조금 낮은 쪽으로 당겨 계산">표본 적음</div>}
                   </td>
@@ -166,9 +166,9 @@ export default function LolRanking() {
         </table>
       </div>
       <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 8, lineHeight: 1.7 }}>
-        체급 = 지표마다 같은 시즌·리그·포지션 주전급 대비 표준점수(σ)를 포지션별 가중치로 합침 (팀 승리보다 라인 지배력 — 킬관여·퍼블관여·피해%·골드%는 승리와 상관이 없어 뺌)
-        → 리그 전력 보정(Riot GPR 지역 점수) + 팀 전력 보정(GPR 팀 점수 − 리그 팀 평균 × 0.8: 약팀끼리만 싸운 기록은 깎임)
-        → 2026 ×1 · 2025 ×0.4 · 2024 ×0.15, 국제전 세트 ×1.5 → 세트 적으면 리그 주전 평균 −0.3σ 쪽으로 40세트만큼 당김 (유효 60세트 미만 '표본 적음') → 62 + 14σ (90+ 전설은 라인마다 0~2명).
+        체급 = 팀 세계 위치(Riot GPR 팀 점수를 주요 6개 리그 팀 안에서 표준화 — LCK 하위 팀 ≈ 다른 리그 상·중위 팀) + 0.55 × 개인 실력(같은 시즌·리그·포지션 주전급 대비 지표 표준점수를 포지션별 가중치로, 국제전은 국제전 참가자 대비)
+        → 2026 ×1 · 2025 ×0.4 · 2024 ×0.15, 국제전 세트 ×1.5 → 세트 적으면 '지금 팀 위치 − 개인 0.3σ' 쪽으로 40세트만큼 (유효 60세트 미만 '표본 적음') → 62 + 9.5σ (90+ 전설은 라인마다 0~2명).
+        GPR 없는 팀은 리그 평균 + 팀 승률로 추정, LCK CL은 LCK 평균 − 300. 개인 지표 가중치(킬관여·퍼블관여·피해%·골드%는 승리와 상관이 없어 뺌):
         탑 GD@15 22 · XPD 16 · CSD 12 · 솔로킬 12 · DPM 12 · 데스 10 · KDA 10 / 정글 GD 18 · XPD 16 · CSD 12 · CSM 8 · 데스 12 · DPM 10 · KDA 10 · 솔로킬 4 · 시야 4 /
         미드 GD 20 · DPM 16 · CSD 12 · XPD 12 · KDA 12 · 솔로킬 10 · 데스 10 · 와드제거 2 / 원딜 GD 18 · DPM 18 · CSD 14 · 데스 12 · KDA 12 · XPD 8 · CSM 8 · 와드제거 4 /
         서폿 GD 18 · 데스 16 · XPD 14 · 어시 12 · KDA 10 · 시야 10 · DPM 8 · 와드제거 6 (모두 승률 6). LPL은 CSD·XPD·솔로킬이 없어 있는 지표로만.

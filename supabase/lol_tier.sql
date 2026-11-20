@@ -129,3 +129,9 @@ $$;
 --   팀 이름은 public.lol_team_key(소문자·악센트·esports/gaming/team/kia 등 뗌) + public.lol_team_match(같음·앞·뒤 일치, 스폰서 이름 대비)). 결과 칸 tadj 추가.
 -- v_lol_player_tier: 2026 ×1 · 2025 ×0.4 · 2024 ×0.15 (국제전 ×1.5), prior = 리그 주전 평균 − 0.3σ, 40세트만큼 당김, low_sample = 유효 세트 < 60,
 --   tier = 62 + 14σ (1~99), tier_now = 2026 리그 기록만 같은 보정. (실제 적용 SQL은 마이그레이션 lol_season_comp_team_adj · lol_player_tier_v3b)
+
+-- ── v4 (사용자 요청 2026-11-20 — 위아래 차이가 너무 크고 LCK 하위 vs 다른 리그 상위가 이상함 → 리그 점수 + 팀 파워랭킹으로 전체 재조정) ──
+-- v_lol_team_power: 시즌별 팀 GPR(없으면 리그 평균 + 100×logit(팀 승률), LCK CL = LCK 평균 − 300, 아카데미는 GPR 매칭 안 함) → 주요 6개 리그 팀 평균·표준편차로 team_z
+-- v_lol_player_tier: 시즌 점수 g = team_z + 0.55 × comp(리그·포지션 안 개인 z, 국제전은 국제전 안 z) → 가중 평균(2026 1 · 2025 0.4 · 2024 0.15, 국제전 ×1.5)
+--   → (raw·n + (지금 team_z − 0.165)·40)/(n+40) → tier = 62 + 9.5σ (1~99). gcomp_now = 2026 g, team_z_now 칸 추가.
+-- (실제 적용 SQL은 마이그레이션 lol_team_power_and_tier_v4)
