@@ -34,7 +34,8 @@ export function PredBadge({ p }: { p: Prediction }) {
   const done = p.result_home != null
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-      <span style={{ color: 'var(--text-muted)' }}>예측 {p.pred_home}-{p.pred_away}</span>
+      {/* 배구는 세트 스코어 하나를 예상으로 내세우지 않고 홈 승률만 (분포는 오른쪽 칸) */}
+      <span style={{ color: 'var(--text-muted)' }}>{p.league.startsWith('VLEAGUE') ? `예측 홈 승 ${p.home_win}%` : `예측 ${p.pred_home}-${p.pred_away}`}</span>
       {done && <HitTag hit={p.win_hit} />}
     </span>
   )
@@ -206,7 +207,7 @@ export default function ModelReport({ onClose }: { onClose: () => void }) {
                         <tr key={p.game_id}>
                           <td style={{ ...td, color: 'var(--text-muted)' }}>{LG[p.league] ?? p.league}</td>
                           <td style={{ ...td, fontWeight: 700 }}>{name(p.league, p.home)} <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>-</span> {name(p.league, p.away)}</td>
-                          <td style={{ ...td, fontFamily: 'var(--font-num)' }}>{p.pred_home}-{p.pred_away}{isVb(p.league) && <span style={{ fontSize: 10, color: 'var(--text-muted)' }}> 세트</span>}<div style={{ fontSize: 10, color: 'var(--text-muted)' }}>홈 승 {p.home_win}%</div></td>
+                          <td style={{ ...td, fontFamily: 'var(--font-num)' }}>{isVb(p.league) ? <>홈 승 {p.home_win}%<div style={{ fontSize: 10, color: 'var(--text-muted)' }}>기대 세트차 {signed(Number(p.margin))}</div></> : <>{p.pred_home}-{p.pred_away}<div style={{ fontSize: 10, color: 'var(--text-muted)' }}>홈 승 {p.home_win}%</div></>}</td>
                           <td style={{ ...td, fontFamily: 'var(--font-num)', fontWeight: 700 }}>{p.result_home != null ? `${p.result_home}-${p.result_away}` : '–'}</td>
                           <td style={{ ...td, fontFamily: 'var(--font-num)' }}>{signed(p.margin)} / {signed(actual)}</td>
                           <td style={{ ...td, fontFamily: 'var(--font-num)', color: p.margin_err == null ? undefined : Math.abs(p.margin_err) <= (isVb(p.league) ? 0.6 : 5) ? 'var(--green)' : Math.abs(p.margin_err) >= (isVb(p.league) ? 2 : 15) ? 'var(--red)' : undefined }}>{p.margin_err == null ? '–' : `${Math.abs(p.margin_err)}${isVb(p.league) ? '세트' : '점'}`}</td>

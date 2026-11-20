@@ -34,6 +34,7 @@ function AvailCell({ p, ov, onCycle }: { p: PlayerOv; ov?: number; onCycle: () =
 // 배구 예상: 세트 스코어 분포 (volleyPredict.ts)
 function VolleyBox({ v, hName, aName, changed, onReset }: { v: VolleyResult & { diff: number }; hName: string; aName: string; changed: number; onReset: () => void }) {
   const max = Math.max(...SET_SCORES.map(k => v.dist[k]))
+  // 한 가지 세트 스코어를 '예상'으로 내세우지 않는다 — 분포가 고르게 퍼져 있어 가장 높은 것도 20%대라 오해를 부른다 (사용자 지적)
   const tile = (k: string, val: string, sub: string) => (
     <div style={{ textAlign: 'center', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '6px 4px', background: 'var(--bg-card)' }}>
       <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{k}</div>
@@ -49,19 +50,19 @@ function VolleyBox({ v, hName, aName, changed, onReset }: { v: VolleyResult & { 
         {changed > 0 && <button type="button" onClick={onReset} style={{ marginLeft: 'auto', fontSize: 10, background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-secondary)', cursor: 'pointer', padding: '1px 6px' }}>가정 지우기</button>}
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
-        {tile('가장 유력 (홈-원정)', v.best, `${Math.round(v.dist[v.best] * 100)}% · ${hName} - ${aName}`)}
-        {tile('홈 승률', `${v.homeWin}%`, `원정 ${Math.round((100 - v.homeWin) * 10) / 10}%`)}
+        {tile('홈 승률', `${v.homeWin}%`, `${hName} · 원정 ${Math.round((100 - v.homeWin) * 10) / 10}%`)}
         {tile('기대 세트차 (홈)', `${v.expDiff > 0 ? '+' : ''}${v.expDiff}`, `기대 ${v.expSets}세트`)}
         {tile('4세트 이상', `${v.over35}%`, `풀세트 ${v.full}%`)}
+        {tile('셧아웃 (3-0·0-3)', `${Math.round((v.dist['3-0'] + v.dist['0-3']) * 1000) / 10}%`, `홈 3-0 ${Math.round(v.dist['3-0'] * 100)}% · 원정 3-0 ${Math.round(v.dist['0-3'] * 100)}%`)}
       </div>
       <div style={{ marginTop: 8 }}>
         {SET_SCORES.map(k => {
           const pv = v.dist[k], homeWin = k.startsWith('3')
           return (
             <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, marginBottom: 3 }}>
-              <span style={{ width: 30, fontFamily: 'var(--font-num)', fontWeight: k === v.best ? 800 : 400 }}>{k}</span>
+              <span style={{ width: 30, fontFamily: 'var(--font-num)' }}>{k}</span>
               <div style={{ flex: 1, height: 10, background: 'var(--bg-card)', borderRadius: 3, overflow: 'hidden' }}>
-                <div style={{ width: `${(pv / max) * 100}%`, height: '100%', background: homeWin ? 'var(--gold)' : 'var(--blue)', opacity: k === v.best ? 1 : 0.7 }} />
+                <div style={{ width: `${(pv / max) * 100}%`, height: '100%', background: homeWin ? 'var(--gold)' : 'var(--blue)', opacity: 0.85 }} />
               </div>
               <span style={{ width: 40, textAlign: 'right', fontFamily: 'var(--font-num)' }}>{Math.round(pv * 1000) / 10}%</span>
             </div>
