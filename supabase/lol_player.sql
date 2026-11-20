@@ -54,3 +54,23 @@ select season, league, player, team, role, country, games, regular, winrate, kda
   rank() over (partition by season, league, role order by composite desc) as role_rank
 from ranked;
 grant select on public.v_lol_player_rating to anon, authenticated;
+
+-- ── 리그 전력 보정 (사용자 요청 — LCK 95와 LCS 95는 다르다) ──
+-- 출처 Riot 글로벌 파워랭킹(GPR) '지역 대회 위력 점수'. 2026 월즈 종료(11/9) 값은 lolesports.com/ko-KR/gpr/2026/current 화면에서 옮김:
+--   LPL 1431 · LCK 1394 · LEC 1231 · LCS 1149 · LCP 1036 · CBLOL 959 (LCK CL 등은 GPR에 없음 → 보정 없음)
+-- Supabase 함수 lol-league-strength가 Liquipedia(Global_Power_Rankings/연도/시점) 최신 페이지에서 팀 점수(lol_team_gpr)와 지역 점수를 받아
+--   저장된 값보다 새 날짜일 때만 lol_league_strength를 바꾼다.
+-- 보정점 = K × (리그 점수 − 최고 리그) × ln10/400, K = 리그 안 '팀 평균 체급 ~ 팀 승률 logit' 기울기 = 18.84 (66팀, r 0.93)
+--   → LPL 0 · LCK −4.0 · LEC −21.7 · LCS −30.6 · LCP −42.8 · CBLOL −51.2
+create table if not exists public.lol_league_strength (
+  season text not null, league text not null, offset_logit numeric, offset_points numeric, k numeric,
+  games int, winrate numeric, source text, detail jsonb, updated_at timestamptz not null default now(), primary key (season, league));
+create table if not exists public.lol_team_gpr (
+  season text not null, snapshot text not null, team text not null, region text, points numeric, rank int, updated_at timestamptz not null default now(),
+  primary key (season, snapshot, team));
+create or replace view public.v_lol_player_global as
+select r.*, s.offset_points as league_offset, (s.detail->>'gpr')::int as league_gpr,
+       case when s.offset_points is null then null else round(r.base + s.offset_points) end as global_base
+from public.v_lol_player_rating r
+left join public.lol_league_strength s on s.season = r.season and s.league = r.league;
+grant select on public.v_lol_player_global to anon, authenticated;
