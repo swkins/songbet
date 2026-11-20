@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import dayjs from 'dayjs'
 import { koName, type ScheduleTeam } from '../lib/gameSchedule'
 import { conditionColor, conditionLabel, type Condition } from '../lib/fatigue'
-import { SET_SCORES, type VolleyResult } from '../lib/volleyPredict'
+import { SET_SCORES, simulateVolley, type VolleyResult } from '../lib/volleyPredict'
 import { staminaOf, simulateVolleyGame, getParams, loadGameOverall, tierOf, availColor, TIERS, teamStrength, simulate, statusLabel, type TeamOv, type PlayerOv, type GameOverall } from '../lib/playerOverall'
 
 // ─── 분석 탭 오른쪽 칸: 양 팀 핵심·주전 선수 오버롤 + 출전 확률 ─────
@@ -83,7 +83,8 @@ function SetCountOdds({ v }: { v: VolleyResult }) {
 // 배구 예상: 세트 스코어 분포 (volleyPredict.ts)
 function VolleyBox({ v, hName, aName, changed, onReset }: { v: VolleyResult & { diff: number }; hName: string; aName: string; changed: number; onReset: () => void }) {
   const max = Math.max(...SET_SCORES.map(k => v.dist[k]))
-  // 한 가지 세트 스코어를 '예상'으로 내세우지 않는다 — 분포가 고르게 퍼져 있어 가장 높은 것도 20%대라 오해를 부른다 (사용자 지적)
+  // 2만 번 시뮬레이션 (사용자 요청): 가장 많이 나온 세트 스코어 + 예상 총득점 — 가장 많이 나온 것도 20~30%대라 비율을 같이 보인다
+  const sim = useMemo(() => simulateVolley(v.dist), [v.dist])
   const tile = (k: string, val: string, sub: string) => (
     <div style={{ textAlign: 'center', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '6px 4px', background: 'var(--bg-card)' }}>
       <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{k}</div>
@@ -97,6 +98,21 @@ function VolleyBox({ v, hName, aName, changed, onReset }: { v: VolleyResult & { 
         <span style={{ fontSize: 13, fontWeight: 800 }}>예상 세트 스코어</span>
         <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{v.marketHome != null ? '배당 70% + 오버롤 30%' : '오버롤만 (배당 없음)'}{changed ? ` · 가정 ${changed}명` : ''}</span>
         {changed > 0 && <button type="button" onClick={onReset} style={{ marginLeft: 'auto', fontSize: 10, background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-secondary)', cursor: 'pointer', padding: '1px 6px' }}>가정 지우기</button>}
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 6 }}>
+        {tile('예상 스코어 (2만 번 중 최다)', sim.best, `${sim.best.startsWith('3') ? hName : aName} 승 · ${sim.bestPct}% · 다음 ${sim.scores[1].score} ${sim.scores[1].pct}%`)}
+        {tile('예상 총득점', `${sim.median}`, `평균 ${sim.total} · 80% 범위 ${sim.lo}~${sim.hi}`)}
+        {tile('예상 득점', `${Math.round(sim.homePts)} : ${Math.round(sim.awayPts)}`, `${hName} : ${aName}`)}
+        {tile('총득점 오버 확률', `${sim.overs.find(o => o.line === 180.5)?.over ?? '-'}%`, '180.5 기준')}
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(76px, 1fr))', gap: 3, marginBottom: 8 }}>
+        {sim.overs.map(o => (
+          <div key={o.line} title={`총득점 ${o.line} 오버 ${o.over}% · 언더 ${Math.round((100 - o.over) * 10) / 10}%`}
+            style={{ fontSize: 10, fontFamily: 'var(--font-num)', border: '1px solid var(--border)', borderRadius: 4, padding: '2px 4px', display: 'flex', justifyContent: 'space-between',
+              color: o.over >= 55 ? 'var(--green)' : o.over <= 45 ? 'var(--blue)' : 'var(--text-secondary)' }}>
+            <span>{o.line}</span><b>{o.over}%</b>
+          </div>
+        ))}
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
         {tile('홈 승률', `${v.homeWin}%`, `${hName} · 원정 ${Math.round((100 - v.homeWin) * 10) / 10}%`)}
@@ -121,7 +137,7 @@ function VolleyBox({ v, hName, aName, changed, onReset }: { v: VolleyResult & { 
       {/* 세트 수 확률 → 배당 기준 (롤링용: 조금 손해여도 갈 만한 배당부터) */}
       <SetCountOdds v={v} />
       <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4, lineHeight: 1.6 }}>
-        오버롤 모델 홈 {v.modelHome}% (팀 오버롤 차 {v.diff > 0 ? '+' : ''}{v.diff}){v.marketHome != null ? ` · 시장 홈 ${v.marketHome}%` : ''} → 세트 분포는 과거 V리그 5시즌 곡선 · 선수 출전 칸을 누르면 다시 계산
+        오버롤 모델 홈 {v.modelHome}% (팀 오버롤 차 {v.diff > 0 ? '+' : ''}{v.diff}){v.marketHome != null ? ` · 시장 홈 ${v.marketHome}%` : ''} → 세트 분포는 과거 V리그 5시즌 곡선 · 점수는 랠리 모델 2만 번(홈 랠리 {Math.round(sim.rally * 1000) / 10}%, 실제 득점으로 검증 전 — 칸 = 총득점 기준점별 오버 %) · 선수 출전 칸을 누르면 다시 계산
       </div>
     </div>
   )
