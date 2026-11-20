@@ -83,7 +83,7 @@ function SetCountOdds({ v }: { v: VolleyResult }) {
 // 배구 예상: 세트 스코어 분포 (volleyPredict.ts)
 function VolleyBox({ v, hName, aName, changed, onReset }: { v: VolleyResult & { diff: number }; hName: string; aName: string; changed: number; onReset: () => void }) {
   const max = Math.max(...SET_SCORES.map(k => v.dist[k]))
-  // 2만 번 시뮬레이션 (사용자 요청): 가장 많이 나온 세트 스코어 + 예상 총득점 — 가장 많이 나온 것도 20~30%대라 비율을 같이 보인다
+  // 2만 번 시뮬레이션 (사용자 요청): 예상 총득점·득점·기준점별 오버 % (최다 세트 스코어 칸은 아래 분포와 겹쳐서 뺐다 — 사용자 요청)
   const sim = useMemo(() => simulateVolley(v.dist), [v.dist])
   const tile = (k: string, val: string, sub: string) => (
     <div style={{ textAlign: 'center', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '6px 4px', background: 'var(--bg-card)' }}>
@@ -95,12 +95,11 @@ function VolleyBox({ v, hName, aName, changed, onReset }: { v: VolleyResult & { 
   return (
     <div style={{ ...box, borderColor: 'var(--gold-border)' }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
-        <span style={{ fontSize: 13, fontWeight: 800 }}>예상 세트 스코어</span>
+        <span style={{ fontSize: 13, fontWeight: 800 }}>예상 스코어</span>
         <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{v.marketHome != null ? '배당 70% + 오버롤 30%' : '오버롤만 (배당 없음)'}{changed ? ` · 가정 ${changed}명` : ''}</span>
         {changed > 0 && <button type="button" onClick={onReset} style={{ marginLeft: 'auto', fontSize: 10, background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-secondary)', cursor: 'pointer', padding: '1px 6px' }}>가정 지우기</button>}
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 6 }}>
-        {tile('예상 스코어 (2만 번 중 최다)', sim.best, `${sim.best.startsWith('3') ? hName : aName} 승 · ${sim.bestPct}% · 다음 ${sim.scores[1].score} ${sim.scores[1].pct}%`)}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6, marginBottom: 6 }}>
         {tile('예상 총득점', `${sim.median}`, `평균 ${sim.total} · 80% 범위 ${sim.lo}~${sim.hi}`)}
         {tile('예상 득점', `${Math.round(sim.homePts)} : ${Math.round(sim.awayPts)}`, `${hName} : ${aName}`)}
         {tile('총득점 오버 확률', `${sim.overs.find(o => o.line === 180.5)?.over ?? '-'}%`, '180.5 기준')}
