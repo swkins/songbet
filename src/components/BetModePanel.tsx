@@ -26,9 +26,13 @@ const when = (iso: string) => {
 function parseOdds(raw: string): number { const n = Number(raw); return Number.isFinite(n) && n > 1 ? n : 0 }
 
 type Pick = 'home' | 'away' | 'game'
+/** 분석 탭 '베팅하기' → 이 경기 베팅슬립을 바로 연다 (at = 누른 시각, 같은 경기를 다시 눌러도 다시 열리게) */
+export interface BetTarget { sport: string; league: string; gameId: string; at?: number }
 interface Game extends ScheduleGame { sport: string; league: string }
 
-export default function BetModePanel({ sites, betOptionsBySport, numericBetOptionsBySport, teamsBySport, onBet, renderAddForm }: {
+export default function BetModePanel({ target, onTargetDone, sites, betOptionsBySport, numericBetOptionsBySport, teamsBySport, onBet, renderAddForm }: {
+  target?: BetTarget | null
+  onTargetDone?: () => void
   sites: Site[]
   /** 종목·리그 맨 아래 '베팅추가' → 사이트를 고르면 오른쪽 베팅 칸에 기존 베팅추가 폼 (Dashboard SingleBetForm) */
   renderAddForm?: (site: Site, onClose: () => void) => React.ReactNode
@@ -48,6 +52,16 @@ export default function BetModePanel({ sites, betOptionsBySport, numericBetOptio
   const orderedSites = [...sites].sort((a, b) => Number(b.active) - Number(a.active) || a.sort_order - b.sort_order)
 
   useEffect(() => { loadSchedules().then(r => { setRows(r); setLoading(false) }).catch(() => setLoading(false)) }, [])
+  // 분석 탭에서 넘어온 경기: 일정을 다 불러온 뒤 종목·리그·경기를 골라 베팅슬립을 연다
+  const [targetMsg, setTargetMsg] = useState<string | null>(null)
+  useEffect(() => {
+    if (!target || loading) return
+    const g = rows.flatMap(r => r.games.map(x => ({ ...x, sport: r.sport, league: r.league }))).find(x => x.id === target.gameId)
+    setSport(target.sport); setLeague(target.league); setAddSiteId(null); setAddOpen(false)
+    if (g && gameState(g) !== 'ended') { setGameId(g.id); setTargetMsg(null) }
+    else { setGameId(null); setTargetMsg(g ? '이미 끝난 경기라 베팅슬립을 열 수 없어요' : '그 경기를 일정에서 못 찾았어요') }
+    onTargetDone?.()
+  }, [target?.gameId, target?.at, loading]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // 끝나지 않은 경기만
   const games: Game[] = useMemo(() => {
@@ -79,6 +93,7 @@ export default function BetModePanel({ sites, betOptionsBySport, numericBetOptio
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 10 }}>
         <span className="card-title" style={{ margin: 0 }}>베팅 모드</span>
         <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>가져온 일정 중 끝나지 않은 경기 · 초안</span>
+        {targetMsg && <span style={{ fontSize: 11, color: 'var(--red)', marginLeft: 'auto' }}>{targetMsg}</span>}
       </div>
       {loading ? <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>불러오는 중…</div> : (
         <div style={{ display: 'grid', gridTemplateColumns: '170px minmax(170px, 1fr) minmax(280px, 1.6fr)', gap: 10, alignItems: 'start' }}>

@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, lazy, Suspense } from 'react'
 import type { Tab, ActionLog, Todo } from './types'
+import type { BetTarget } from './components/BetModePanel'
 import Dashboard from './pages/Dashboard'
 import Settlement from './pages/Settlement'
 import Stats from './pages/Stats'
@@ -224,6 +225,8 @@ function TodoSettingsModal({ todo, onClose, onRename, onDaysChange, onToggleDate
 
 export default function App() {
   const [tab, setTab] = useState<Tab>('dashboard')
+  // 분석 탭 '베팅하기' → 대시보드 베팅 모드의 그 경기 베팅슬립 (사용자 요청)
+  const [betTarget, setBetTarget] = useState<BetTarget | null>(null)
   const [logs, setLogs] = useState<ActionLog[]>([])
   const [showLog, setShowLog] = useState(false)
   const [showTodo, setShowTodo] = useState(false)
@@ -637,10 +640,10 @@ export default function App() {
 
       <div style={{ flex: 1, display: 'flex', justifyContent: 'center' }}>
         <div style={{ width: '100%', maxWidth, minWidth: 0 }}>
-          {tab === 'dashboard' && <Dashboard />}
+          {tab === 'dashboard' && <Dashboard betTarget={betTarget} onBetTargetDone={() => setBetTarget(null)} />}
           {tab === 'stats' && <Stats />}
           {tab === 'settlement' && <Settlement />}
-          {tab === 'schedule' && <Schedule />}
+          {tab === 'schedule' && <Schedule onGoBet={t => { setBetTarget({ ...t, at: Date.now() }); setTab('dashboard') }} />}
         </div>
       </div>
 

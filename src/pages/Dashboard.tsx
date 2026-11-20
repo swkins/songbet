@@ -13,7 +13,7 @@ const BetAnalysisPanel = lazy(() => import('../components/BetAnalysisPanel'))
 // 베팅분석은 대시보드에서 숨기고 상단 '베팅분석' 버튼(새 창)으로만 연다 (사용자 요청) — 대시보드에 다시 넣으려면 true
 const ANALYSIS_IN_DASHBOARD = false
 import RulebookNotes from './RulebookNotes'
-import BetModePanel from '../components/BetModePanel'
+import BetModePanel, { type BetTarget } from '../components/BetModePanel'
 import { loadSchedules, upcomingForBet, type BetPickGame } from '../lib/gameSchedule'
 import dayjs from 'dayjs'
 import isoWeek from 'dayjs/plugin/isoWeek'
@@ -2935,7 +2935,7 @@ function WeekMonthDeposit({ sites, cashflows, weekStart, weekEnd }: {
   )
 }
 
-export default function Dashboard() {
+export default function Dashboard({ betTarget, onBetTargetDone }: { betTarget?: BetTarget | null; onBetTargetDone?: () => void } = {}) {
   const today = dayjs().format('YYYY-MM-DD')
 
   const [sites, setSites]     = useState<Site[]>([])
@@ -2991,6 +2991,8 @@ export default function Dashboard() {
     setLayoutMode(next)
     try { localStorage.setItem('songbet_dashboard_layout', next) } catch { /* 저장 못 해도 이번 화면에선 적용 */ }
   }
+  // 분석 탭 '베팅하기'로 왔으면 베팅 모드로 바꾸고 그 경기 베팅슬립을 연다 (BetModePanel target)
+  useEffect(() => { if (betTarget && layoutMode !== 'bet') pickLayoutMode('bet') }, [betTarget]) // eslint-disable-line react-hooks/exhaustive-deps
   // 베팅 현황 제목줄의 모드 버튼: 좌우 · 상하 · 베팅
   const layoutSwitch = (small: boolean) => (
     <div style={{ display: 'inline-flex', border: '1px solid var(--border)', borderRadius: 4, overflow: 'hidden' }}>
@@ -4335,7 +4337,7 @@ export default function Dashboard() {
         {/* ── 베팅 모드 (좌측) — 종목 → 리그 → 경기 → 베팅옵션. 사이트 현황 대신 이 자리를 쓰고 베팅 현황은 우측으로 */}
         {betMode && (
           <div className="dashboard-betmode">
-            <BetModePanel sites={sites} betOptionsBySport={betOptionsBySport} numericBetOptionsBySport={numericBetOptionsBySport}
+            <BetModePanel target={betTarget ?? null} onTargetDone={onBetTargetDone} sites={sites} betOptionsBySport={betOptionsBySport} numericBetOptionsBySport={numericBetOptionsBySport}
               teamsBySport={{ soccer: soccerTeams, baseball: baseballTeams, basketball: basketballTeams, volleyball: volleyballTeams }}
               onBet={(site, sp, ct, od, amt, lv, lg) => submitBet(site, sp, ct, od, amt, lv, lg)}
               renderAddForm={(site, onClose) => (

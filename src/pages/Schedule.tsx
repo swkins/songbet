@@ -24,7 +24,7 @@ const SPORT_LIST: { id: string; label: string; leagues: string[] }[] = [
 ]
 const SPORTS = [{ id: 'all', label: '전체', leagues: SPORT_LIST.flatMap(s => s.leagues) }, ...SPORT_LIST]
 
-interface Item extends ScheduleGame { league: string; date: string; fetchedAt: string }
+interface Item extends ScheduleGame { sport: string; league: string; date: string; fetchedAt: string }
 type Team = ScheduleTeam
 
 const KO_DAY = '일월화수목금토'
@@ -34,7 +34,7 @@ const dateLabel = (d: string) => {
   return `${mdDay(d)}${d === t ? ' · 오늘' : d === tm ? ' · 내일' : ''}`
 }
 
-export default function Schedule() {
+export default function Schedule({ onGoBet }: { onGoBet?: (t: { sport: string; league: string; gameId: string }) => void } = {}) {
   const [sport, setSport] = useState('all')
   const [rows, setRows] = useState<ScheduleRow[]>([])
   const [selId, setSelId] = useState<string | null>(null)
@@ -67,7 +67,7 @@ export default function Schedule() {
   // 오늘·내일 전부 한 목록: 날짜 → 시작 시각 → 리그 순
   const items: Item[] = useMemo(() => rows
     .filter(r => sportDef.leagues.includes(r.league))
-    .flatMap(r => r.games.map(g => ({ ...g, league: r.league, date: r.game_date, fetchedAt: r.fetched_at })))
+    .flatMap(r => r.games.map(g => ({ ...g, sport: r.sport, league: r.league, date: r.game_date, fetchedAt: r.fetched_at })))
     .sort((a, b) => a.date.localeCompare(b.date) || a.start.localeCompare(b.start)
       || sportDef.leagues.indexOf(a.league) - sportDef.leagues.indexOf(b.league)), [rows, sportDef])
   const sel = items.find(i => i.id === selId) ?? null
@@ -184,7 +184,7 @@ export default function Schedule() {
           {list}
         </div>
         <div className="card" style={{ flex: narrow ? 'none' : 8, width: narrow ? '100%' : undefined, minWidth: 0, minHeight: 320 }}>
-          {sel ? <GameAnalysis g={sel} analysis={findAnalysis(analyses, sel)} odds={odds[sel.id]} /> : <div style={{ ...muted, padding: 24, textAlign: 'center' }}>왼쪽에서 경기를 누르면 여기에 분석이 나옵니다.</div>}
+          {sel ? <GameAnalysis onGoBet={onGoBet} g={sel} analysis={findAnalysis(analyses, sel)} odds={odds[sel.id]} /> : <div style={{ ...muted, padding: 24, textAlign: 'center' }}>왼쪽에서 경기를 누르면 여기에 분석이 나옵니다.</div>}
         </div>
       </div>
     </div>
@@ -192,7 +192,7 @@ export default function Schedule() {
 }
 
 // 오른쪽 분석 칸 — 경기 정보 · 승패 배당 변동 · 선수 오버롤·출전 확률(PlayerOverall) · 오버롤 분석(있으면)
-function GameAnalysis({ g, analysis, odds }: { g: Item; analysis: OverallAnalysis | null; odds?: OddsSnap[] }) {
+function GameAnalysis({ g, analysis, odds, onGoBet }: { g: Item; analysis: OverallAnalysis | null; odds?: OddsSnap[]; onGoBet?: (t: { sport: string; league: string; gameId: string }) => void }) {
   const st = gameState(g)
   const showScore = st !== 'pre' && g.home.score != null && g.away.score != null
   const side = (t: Team, label: string) => (
@@ -204,8 +204,13 @@ function GameAnalysis({ g, analysis, odds }: { g: Item; analysis: OverallAnalysi
   )
   return (
     <div>
-      <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 12 }}>
-        {g.league} · {mdDay(g.start)} {dayjs(g.start).format('HH:mm')}{g.venue ? ` · ${g.venue}` : ''}{g.note ? ` · ${g.note}` : ''}
+      <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <span>{g.league} · {mdDay(g.start)} {dayjs(g.start).format('HH:mm')}{g.venue ? ` · ${g.venue}` : ''}{g.note ? ` · ${g.note}` : ''}</span>
+        {/* 베팅하기 → 대시보드 베팅 모드의 이 경기 베팅슬립 (사용자 요청). 끝난 경기는 없음 */}
+        {onGoBet && st !== 'ended' && (
+          <button type="button" className="btn btn-primary" onClick={() => onGoBet({ sport: g.sport, league: g.league, gameId: g.id })}
+            style={{ marginLeft: 'auto', padding: '6px 14px', fontSize: 12, fontWeight: 700 }}>베팅하기 →</button>
+        )}
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 0', borderBottom: '1px solid var(--border)' }}>
         {side(g.home, '홈')}
