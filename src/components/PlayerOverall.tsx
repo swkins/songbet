@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import dayjs from 'dayjs'
 import { koName, type ScheduleTeam } from '../lib/gameSchedule'
+import { conditionColor, conditionLabel, type Condition } from '../lib/fatigue'
 import { loadGameOverall, tierOf, availColor, TIERS, teamStrength, simulate, statusLabel, type TeamOv, type PlayerOv, type GameOverall } from '../lib/playerOverall'
 
 // ─── 분석 탭 오른쪽 칸: 양 팀 핵심·주전 선수 오버롤 + 출전 확률 ─────
@@ -29,12 +30,57 @@ function AvailCell({ p, ov, onCycle }: { p: PlayerOv; ov?: number; onCycle: () =
   )
 }
 
-function TeamTable({ title, t, ovr, onCycle }: { title: string; t: TeamOv; ovr: Record<string, number>; onCycle: (p: PlayerOv) => void }) {
+// 팀 이름 옆 컨디션 % (마우스 올리면 이유)
+function CondBadge({ c }: { c: Condition }) {
+  const col = conditionColor(c.pct)
+  return (
+    <span title={c.items.length ? c.items.map(i => `${i.text} ${i.pts}`).join('\n') : '2일 이상 휴식 · 감점 없음'}
+      style={{ fontSize: 10, fontWeight: 800, padding: '0 6px', borderRadius: 8, border: `1px solid ${col}`, color: col, fontFamily: 'var(--font-num)', cursor: 'help' }}>
+      컨디션 {c.pct}%
+    </span>
+  )
+}
+
+// 좌측 칸: 두 팀 컨디션 자세히 (백투백·이동·일정 밀도·원정 연전)
+function ConditionBox({ home, away, hName, aName }: { home: Condition; away: Condition; hName: string; aName: string }) {
+  const row = (name: string, c: Condition) => {
+    const col = conditionColor(c.pct)
+    return (
+      <div style={{ marginBottom: 6 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+          <span style={{ fontWeight: 700, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</span>
+          <span style={{ marginLeft: 'auto', fontSize: 10, color: col, fontWeight: 700 }}>{conditionLabel(c.pct)}</span>
+          <span style={{ fontWeight: 800, color: col, fontFamily: 'var(--font-num)', minWidth: 38, textAlign: 'right' }}>{c.pct}%</span>
+        </div>
+        <div style={{ height: 6, background: 'var(--bg-card)', borderRadius: 3, overflow: 'hidden', margin: '3px 0' }}>
+          <div style={{ width: `${c.pct}%`, height: '100%', background: col }} />
+        </div>
+        <div style={{ fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+          {c.items.length ? c.items.map((i, k) => <span key={k}>{k > 0 && ' · '}{i.text} <b style={{ color: 'var(--text-secondary)' }}>{i.pts}</b></span>)
+            : `${c.restDays == null ? '이번 시즌 첫 경기' : `${c.restDays}일 휴식`} · 감점 없음`}
+        </div>
+      </div>
+    )
+  }
+  return (
+    <div style={box}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 6 }}>
+        <span style={{ fontSize: 12, fontWeight: 800 }}>팀 컨디션</span>
+        <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>100% = 2일+ 휴식 · 백투백·이동·일정 밀도·원정 연전 감점</span>
+      </div>
+      {row(`홈 · ${hName}`, home)}
+      {row(`원정 · ${aName}`, away)}
+    </div>
+  )
+}
+
+function TeamTable({ title, t, ovr, onCycle, cond }: { title: string; t: TeamOv; ovr: Record<string, number>; onCycle: (p: PlayerOv) => void; cond?: Condition }) {
   const st = teamStrength(t.players, ovr)
   return (
     <div style={{ ...box, flex: '1 1 280px', minWidth: 0 }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>
         <span style={{ fontSize: 12, fontWeight: 800 }}>{title}</span>
+        {cond && <CondBadge c={cond} />}
         {st.full != null && (
           <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
             팀 오버롤 <Ov v={Math.round(st.full)} size={12} /> → 결장 반영 <Ov v={st.exp == null ? null : Math.round(st.exp)} size={12} />
@@ -101,7 +147,7 @@ export default function PlayerOverall({ league, gameDate, home, away, left }: { 
   }, [league, gameDate, home.name, away.name]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const newsAdj = Number(data?.news?.margin_adj ?? 0) || 0
-  const sim = useMemo(() => data ? simulate(data.code, data.home, data.away, ovr, newsAdj) : null, [data, ovr, newsAdj])
+  const sim = useMemo(() => data ? simulate(data.code, data.home, data.away, ovr, newsAdj, data.cond) : null, [data, ovr, newsAdj])
   const cycle = (p: PlayerOv) => setOvr(o => {
     const cur = o[p.id], n = { ...o }
     if (cur == null) n[p.id] = p.avail.prob === 0 ? 100 : 0
@@ -151,12 +197,13 @@ export default function PlayerOverall({ league, gameDate, home, away, left }: { 
                 ))}
               </div>
               <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 6, lineHeight: 1.6 }}>
-                마진 = 득실 마진 {signed(sim.parts.scoreMargin)} × 0.5 + 오버롤 차 {signed(sim.parts.ovMargin)} × 0.5 + 결장 반영 {signed(sim.parts.injury)} + 홈 {signed(sim.parts.hca)}
+                마진 = 득실 마진 {signed(sim.parts.scoreMargin)} × 0.5 + 오버롤 차 {signed(sim.parts.ovMargin)} × 0.5 + 결장 반영 {signed(sim.parts.injury)} + 홈 {signed(sim.parts.hca)}{sim.parts.cond ? <> + 컨디션 차 {signed(sim.parts.cond)}</> : null}
                 {sim.parts.news ? <> + 뉴스 보정 {signed(sim.parts.news)}{data.news?.adj_note ? ` (${data.news.adj_note})` : ''}</> : null}
                 {' '}· 선수 출전 칸을 누르면 결장/출전으로 바꿔 다시 계산
               </div>
             </div>
           )}
+          {data.cond && <ConditionBox home={data.cond.home} away={data.cond.away} hName={hName} aName={aName} />}
           {!sim && data.code.startsWith('VLEAGUE') && <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>배구는 예상 스코어 시뮬레이션 준비 중 — 선수 오버롤만 표시</div>}
         </div>
         {/* 우: 선수 오버롤 · 출전 확률 */}
@@ -169,8 +216,8 @@ export default function PlayerOverall({ league, gameDate, home, away, left }: { 
             </span>
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-            <TeamTable title={`홈 · ${hName}`} t={data.home} ovr={ovr} onCycle={cycle} />
-            <TeamTable title={`원정 · ${aName}`} t={data.away} ovr={ovr} onCycle={cycle} />
+            <TeamTable title={`홈 · ${hName}`} t={data.home} ovr={ovr} onCycle={cycle} cond={data.cond?.home} />
+            <TeamTable title={`원정 · ${aName}`} t={data.away} ovr={ovr} onCycle={cycle} cond={data.cond?.away} />
           </div>
           <div style={{ fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.7 }}>
             오버롤 = 체급 × 0.7 + 최근 5경기 폼 × 0.3 (체급 = 이번 시즌 + 지난 시즌, 경기가 쌓일수록 이번 시즌 비중↑) ·{' '}

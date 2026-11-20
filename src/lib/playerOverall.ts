@@ -2,6 +2,7 @@ import dayjs from 'dayjs'
 import { supabase } from './supabase'
 import { koName, type ScheduleTeam } from './gameSchedule'
 import { NBA_NAMES_KO } from '../data/nbaNamesKo'
+import { teamCondition, COND_K, type Condition, type PastGame } from './fatigue'
 
 // ─── 선수 오버롤 + 출전 확률 (분석 탭 오른쪽 칸) ─────
 // 체급 = 이번 시즌 × w + 지난 시즌(player_base, 없으면 Claude 조사 manual_base) × (1 − w), w = 이번 시즌 경기 수 ÷ (경기 수 + 15)
@@ -125,7 +126,7 @@ const ESPN_PROB: [RegExp, number, string][] = [
 ]
 export const statusLabel = (p: number) => p >= 90 ? '출전' : p >= 70 ? '출전 유력' : p >= 40 ? '불투명' : p > 0 ? '결장 유력' : '결장'
 
-export interface GameOverall { code: string; home: TeamOv; away: TeamOv; checkedAt: string | null; news: GameNews | null }
+export interface GameOverall { code: string; home: TeamOv; away: TeamOv; checkedAt: string | null; news: GameNews | null; cond: { home: Condition; away: Condition } | null }
 export async function loadGameOverall(league: string, gameDate: string, home: ScheduleTeam, away: ScheduleTeam): Promise<GameOverall | null> {
   const code = OV_LEAGUE[league]; if (!code) return null
   const d = await loadLeague(code)
@@ -134,12 +135,20 @@ export async function loadGameOverall(league: string, gameDate: string, home: Sc
   const hName = matchTeam(home, teams), aName = matchTeam(away, teams)
   const names = [hName, aName].filter((x): x is string => !!x)
   const cur = seasonOf(gameDate)
-  const [g, st, inj, nw] = await Promise.all([
+  const [g, st, inj, nw, tg] = await Promise.all([
     names.length && !vb ? supabase.from('player_game_stats').select('game_id,game_date,team,player_id,minutes').eq('league', code).eq('season', cur).in('team', names).gte('game_date', dayjs(gameDate).subtract(45, 'day').format('YYYY-MM-DD')).limit(3000) : Promise.resolve({ data: [] }),
     supabase.from('player_status').select('*').eq('league', code).eq('game_date', gameDate),
     code === 'NBA' && names.length ? supabase.from('nba_injuries').select('*').in('team', names) : Promise.resolve({ data: [] }),
     supabase.from('game_news').select('*').eq('league', code).eq('game_date', gameDate),
+    names.length && !vb ? supabase.from('v_team_games').select('team,game_date,is_home,opp').eq('league', code).in('team', names)
+      .gte('game_date', dayjs(gameDate).subtract(10, 'day').format('YYYY-MM-DD')).lt('game_date', gameDate) : Promise.resolve({ data: [] }),
   ])
+  // 팀 컨디션 % (백투백·이동 거리·일정 밀도·원정 연전)
+  const pastRows = (tg.data ?? []) as (PastGame & { team: string })[]
+  const cond = hName && aName && !vb ? {
+    home: teamCondition(code, hName, true, hName, gameDate, pastRows.filter(r => r.team === hName)),
+    away: teamCondition(code, aName, false, hName, gameDate, pastRows.filter(r => r.team === aName)),
+  } : null
   const newsRows = (nw.data ?? []) as (GameNews & { home: string; away: string })[]
   const same = (a: string, t: ScheduleTeam) => [t.name, t.full, koName(t.name)].filter((x): x is string => !!x).some(x => norm(x) === norm(a) || norm(x).includes(norm(a)) || norm(a).includes(norm(x)))
   const news = newsRows.find(n => same(n.home, home) && same(n.away, away)) ?? null
@@ -225,7 +234,7 @@ export async function loadGameOverall(league: string, gameDate: string, home: Sc
     const { full, exp } = teamStrength(players, {}, vb)
     return { team, players, full, exp, stats }
   }
-  return { code, home: build(home, hName), away: build(away, aName), checkedAt, news }
+  return { code, home: build(home, hName), away: build(away, aName), checkedAt, news, cond }
 }
 
 /** 팀 오버롤: 출전시간 × 이번 시즌 출전 비중 가중 평균 (full = 다 뛸 때, exp = 출전 확률 반영 — 빠지는 만큼 대체 선수 50점).
@@ -242,7 +251,7 @@ export function teamStrength(players: PlayerOv[], overrides: Record<string, numb
 }
 
 // ─── 예상 스코어 시뮬레이션 (농구) ─────
-// 마진 평균 = 득실 마진 50% + 오버롤 차 50% + 결장 반영(오버롤 손실 전부) + 홈 이점 + 뉴스 보정
+// 마진 평균 = 득실 마진 50% + 오버롤 차 50% + 결장 반영(오버롤 손실 전부) + 홈 이점 + 뉴스 보정 + 컨디션 차(fatigue.ts)
 //  득실 마진 = (홈 득점 + 원정 실점)/2 − (원정 득점 + 홈 실점)/2 (이번 시즌), 오버롤 1점 = k점
 // 총점 = 두 팀 득실 평균 합. 마진·총점을 정규분포로 2만 번 뽑는다.
 export const SIM: Record<string, { sd: number; sdT: number; hca: number; k: number; avg: number }> = {
@@ -250,9 +259,9 @@ export const SIM: Record<string, { sd: number; sdT: number; hca: number; k: numb
   KBL: { sd: 11, sdT: 14, hca: 2, k: 0.8, avg: 80 },
   WKBL: { sd: 10, sdT: 12, hca: 2, k: 0.7, avg: 65 },
 }
-export interface SimResult { home: number; away: number; total: number; margin: number; homeWin: number; p10: number; p90: number; parts: { scoreMargin: number; ovMargin: number; injury: number; hca: number; news: number } }
+export interface SimResult { home: number; away: number; total: number; margin: number; homeWin: number; p10: number; p90: number; parts: { scoreMargin: number; ovMargin: number; injury: number; hca: number; news: number; cond: number } }
 function randn() { let u = 0, v = 0; while (!u) u = Math.random(); while (!v) v = Math.random(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v) }
-export function simulate(code: string, home: TeamOv, away: TeamOv, overrides: Record<string, number>, newsAdj = 0, n = 20000): SimResult | null {
+export function simulate(code: string, home: TeamOv, away: TeamOv, overrides: Record<string, number>, newsAdj = 0, cond: { home: Condition; away: Condition } | null = null, n = 20000): SimResult | null {
   const c = SIM[code]; if (!c) return null
   const H = teamStrength(home.players, overrides), A = teamStrength(away.players, overrides)
   if (H.full == null || A.full == null || H.exp == null || A.exp == null) return null
@@ -262,7 +271,9 @@ export function simulate(code: string, home: TeamOv, away: TeamOv, overrides: Re
   const scoreMargin = hPts - aPts
   const ovMargin = c.k * (H.full - A.full)
   const injury = c.k * ((H.exp - H.full) - (A.exp - A.full))
-  const mu = 0.5 * scoreMargin + 0.5 * ovMargin + injury + c.hca + newsAdj
+  // 컨디션: 1%p 차이 × COND_K (NBA 0.17점)
+  const condAdj = cond ? (COND_K[code] ?? 0.15) * (cond.home.pct - cond.away.pct) : 0
+  const mu = 0.5 * scoreMargin + 0.5 * ovMargin + injury + c.hca + newsAdj + condAdj
   const T = hPts + aPts
   const ms: number[] = []; let win = 0, sumH = 0, sumA = 0
   for (let i = 0; i < n; i++) {
@@ -274,5 +285,5 @@ export function simulate(code: string, home: TeamOv, away: TeamOv, overrides: Re
   const r1 = (x: number) => Math.round(x * 10) / 10
   return { home: Math.round(sumH / n), away: Math.round(sumA / n), total: Math.round(T), margin: r1(mu), homeWin: r1(win / n * 100),
     p10: r1(ms[Math.floor(n * 0.1)]), p90: r1(ms[Math.floor(n * 0.9)]),
-    parts: { scoreMargin: r1(scoreMargin), ovMargin: r1(ovMargin), injury: r1(injury), hca: c.hca, news: newsAdj } }
+    parts: { scoreMargin: r1(scoreMargin), ovMargin: r1(ovMargin), injury: r1(injury), hca: c.hca, news: newsAdj, cond: r1(condAdj) } }
 }
