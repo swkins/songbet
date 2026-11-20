@@ -1,23 +1,26 @@
 // LoL 선수 체급 자료 수집 (사용자 요청) → lol_player_stats
-// body: { league: 'LCK' | 'LCK CL' | 'LPL' | 'LEC' | 'LCS' | 'LCP' | 'CBLOL', season?: 'S16' }  ·  { mode: 'tournaments' } = 대회 목록만
+// body: { league: 'LCK' | 'LCK CL' | 'LPL' | 'LEC' | 'LCS' | 'LCP' | 'CBLOL' | 'INTL', season?: 'S16' (2026) · 'S15' · 'S14' }  ·  { mode: 'tournaments' } = 대회 목록만
 //  1) gol.gg 시즌 대회 목록(ajax.trlist.php)에서 그 리그 대회를 고르고, 대회마다 선수 목록 페이지(상세 통계 24칸)를 받아
 //     경기 수로 가중 평균해서 합친다 (대회 사이 3~6초 쉼). 펜타·솔로킬은 합계.
-//  2) 팀·포지션은 Leaguepedia(ScoreboardPlayers)에서 그 리그 2026 경기 — 팀 = 그 선수가 마지막으로 뛴 팀(2026 시즌 기준),
+//  2) 팀·포지션은 Leaguepedia(ScoreboardPlayers)에서 그 리그·그 해 경기 — 팀 = 그 선수가 그 해 마지막으로 뛴 팀,
 //     포지션 = 가장 많이 뛴 포지션. 이름은 괄호(본명)를 뗀 소문자로 맞춘다.
 //  체급 점수는 SQL 뷰 v_lol_player_rating (supabase/lol_player.sql).
 import { createClient } from 'npm:@supabase/supabase-js@2.45.0'
 
 const UA = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36' }
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
-// gol.gg 대회 이름 → 리그, Leaguepedia OverviewPage 앞부분
-const LEAGUES: Record<string, { gol: RegExp; lp: string[] }> = {
-  LCK: { gol: /^LCK (Cup )?20\d\d(?! CL)/, lp: ['LCK/'] },
-  'LCK CL': { gol: /^LCK CL 20\d\d/, lp: ['LCK CL/'] },
-  LPL: { gol: /^LPL 20\d\d/, lp: ['LPL/'] },
-  LEC: { gol: /^LEC 20\d\d/, lp: ['LEC/'] },
-  LCS: { gol: /^LCS 20\d\d/, lp: ['LCS/'] },
-  LCP: { gol: /^LCP 20\d\d/, lp: ['LCP/'] },
-  CBLOL: { gol: /^CBLOL (Cup )?20\d\d/, lp: ['CBLOL/'] },
+// gol.gg 대회 이름 → 리그 (시즌마다 이름 꼴이 달라서 앞부분만: 'LCK Spring 2024' · 'LCK Cup 2025' · 'LCK 2026 Rounds 1-2'),
+// Leaguepedia OverviewPage LIKE 꼴 ({Y} = 연도). INTL = 국제전 본선(퍼스트 스탠드·MSI·월즈 플레이인/본선·EWC 본선) — 강팀끼리라 체급에 더 무겁게 쓴다.
+const LEAGUES: Record<string, { gol: RegExp; not?: RegExp; lp: string[] }> = {
+  LCK: { gol: /^LCK (?!CL)/, lp: ['LCK/{Y}%'] },
+  'LCK CL': { gol: /^LCK CL /, lp: ['LCK CL/{Y}%'] },
+  LPL: { gol: /^LPL /, lp: ['LPL/{Y}%'] },
+  LEC: { gol: /^LEC /, lp: ['LEC/{Y}%'] },
+  LCS: { gol: /^LCS /, lp: ['LCS/{Y}%'] },
+  LCP: { gol: /^LCP /, lp: ['LCP/{Y}%'] },
+  CBLOL: { gol: /^CBLOL /, lp: ['CBLOL/{Y}%'] },
+  INTL: { gol: /(First Stand|^MSI |^Worlds |^Esports World Cup)/, not: /Qualifier|Online|Kespa|KeSPA/i,
+          lp: ['{Y} First Stand%', '{Y} Mid-Season Invitational%', '{Y} Season World Championship%', 'Esports World Cup {Y}'] },
 }
 const COLS = ['games', 'winrate', 'kda', 'kills', 'deaths', 'assists', 'csm', 'gpm', 'kp', 'dmg_pct', 'gold_pct', 'vs_pct', 'dpm', 'vspm', 'wpm', 'wcpm', 'vwpm', 'gd15', 'csd15', 'xpd15', 'fb', 'fb_victim', 'pentas', 'solo_kills'] as const
 const SUMS = new Set(['games', 'pentas', 'solo_kills'])
@@ -39,8 +42,7 @@ Deno.serve(async (req) => {
     const list = await tournaments(season)
     if (body.mode === 'tournaments') return out(list)
     const lg = LEAGUES[body.league]; if (!lg) return out({ error: 'unknown league' })
-    const trs = list.filter(t => lg.gol.test(t.trname) && !/ CL /.test(t.trname.replace(/^LCK CL/, '')))
-      .filter(t => body.league !== 'LCK' || !t.trname.startsWith('LCK CL'))
+    const trs = list.filter(t => lg.gol.test(t.trname) && !((lg.not ?? /Academy|Challengers|Qualifier/i).test(t.trname)))
     const year = '20' + (Number(season.slice(1)) + 10)   // S16 → 2026
     // 1) gol.gg 대회별 선수 표
     const acc = new Map<string, any>(); const failed: string[] = []
@@ -67,8 +69,8 @@ Deno.serve(async (req) => {
         acc.set(name, a)
       }
     }
-    // 2) Leaguepedia 팀·포지션 (2026 시즌 그 리그 경기)
-    const where = lg.lp.map(p => `SP.OverviewPage LIKE '${p}${year}%'`).join(' OR ')
+    // 2) Leaguepedia 팀·포지션 (그 해 그 리그 경기)
+    const where = lg.lp.map(p => `SP.OverviewPage LIKE '${p.replaceAll('{Y}', year)}'`).join(' OR ')
     const q = new URLSearchParams({ action: 'cargoquery', format: 'json', tables: 'ScoreboardPlayers=SP', fields: 'SP.Link,SP.Team,SP.Role,COUNT(*)=N,MAX(SP.DateTime_UTC)=L', where, group_by: 'SP.Link,SP.Team,SP.Role', limit: '500' })
     await sleep(2000)
     const lpRes = await fetch(`https://lol.fandom.com/api.php?${q}`, { headers: UA })

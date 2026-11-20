@@ -1,0 +1,99 @@
+-- LoL 선수 체급 v2 (사용자 요청 — 팀이 이기는 것보다 그 라인에서 강한가 · 서폿은 서폿 역할 · 정글은 무엇이 중요한지 확인해서)
+-- 1) 시즌·리그별 합성 점수 v_lol_season_comp
+--    지표마다 같은 시즌·리그·포지션 주전급(리그 최다 경기 25%↑, 국제전은 4세트↑)의 평균·표준편차로 표준점수(z, ±3에서 자름)
+--    → 포지션별 가중 평균. 그 리그에 없는 지표(LPL은 CSD·XPD@15·솔로킬 없음)는 빼고 나머지로 다시 나눈다.
+--    가중치는 2026 7개 리그 주전의 '지표 ↔ 승률' 상관으로 확인 (킬관여·퍼블관여·피해%·골드%는 상관 ≈0 → 뺌):
+--      탑   GD@15 .22 · XPD@15 .16 · CSD@15 .12 · 솔로킬 .12 · DPM .12 · 데스(−) .10 · KDA .10 · 승률 .06
+--      정글 GD@15 .18 · XPD@15 .16 · CSD@15 .12 · CSM .08 · 데스(−) .12 · DPM .10 · KDA .10 · 솔로킬 .04 · 시야 .04 · 승률 .06
+--           (정글은 15분 골드·경험치·CS 차 상관이 .61~.68로 모든 포지션 중 최고 — 초반 성장·동선 이득이 핵심)
+--      미드 GD@15 .20 · DPM .16 · CSD@15 .12 · XPD@15 .12 · KDA .12 · 솔로킬 .10 · 데스(−) .10 · 와드제거 .02 · 승률 .06
+--      원딜 GD@15 .18 · DPM .18 · CSD@15 .14 · 데스(−) .12 · KDA .12 · XPD@15 .08 · CSM .08 · 와드제거 .04 · 승률 .06
+--      서폿 GD@15 .18 · 데스(−) .16 · XPD@15 .14 · 어시 .12 · KDA .10 · 시야/분 .10 · DPM .08 · 와드제거 .06 · 승률 .06
+--      (서폿 = 바텀 라인전 우위 + 죽지 않고 판을 여는 것 + 시야 장악. 킬관여·시야 비중은 상관 없음)
+-- 2) 리그 보정: 합성 점수 단위 기울기 Kz(리그 안 팀 평균 합성 ~ 팀 승률 logit) × Riot GPR 리그 보정(logit). GPR 없는 LCK CL은 추정(lol_league_strength source '추정').
+--    국제전(INTL) 점수는 그 대회 참가 선수들의 같은 해 리그 보정 점수 평균에 맞춘다.
+-- 3) 체급 v_lol_player_tier: 시즌 가중 2026 1 · 2025 0.6 · 2024 0.35, 국제전 세트는 ×1.5, 세트 수 가중 평균
+--    → 세트가 적으면 그 선수 리그 평균 쪽으로 (n/(n+20)) → 100점 = 60 + 13 × 점수.
+create or replace view public.v_lol_season_comp as
+with base as (
+  select s.*, coalesce(s.lp_link, s.player) as pkey, max(games) over (partition by season, league) as lg_max
+  from public.lol_player_stats s where s.role is not null
+), q as (
+  select b.*, case when league = 'INTL' then games >= 4 else games >= greatest(5, lg_max * 0.25) end as regular from base b
+), m as (
+  select q.season, q.league, q.pkey, q.role, q.regular, t.k, t.v, t.w
+  from q cross join lateral (values
+    ('gd15',   q.gd15,   case q.role when 'Top' then .22 when 'Jungle' then .18 when 'Mid' then .20 when 'Bot' then .18 else .18 end),
+    ('xpd15',  q.xpd15,  case q.role when 'Top' then .16 when 'Jungle' then .16 when 'Mid' then .12 when 'Bot' then .08 else .14 end),
+    ('csd15',  q.csd15,  case q.role when 'Top' then .12 when 'Jungle' then .12 when 'Mid' then .12 when 'Bot' then .14 else 0 end),
+    ('csm',    q.csm,    case q.role when 'Jungle' then .08 when 'Bot' then .08 else 0 end),
+    ('dpm',    q.dpm,    case q.role when 'Top' then .12 when 'Jungle' then .10 when 'Mid' then .16 when 'Bot' then .18 else .08 end),
+    ('solo',   q.solo_kills::numeric / nullif(q.games, 0), case q.role when 'Top' then .12 when 'Jungle' then .04 when 'Mid' then .10 else 0 end),
+    ('deaths', -q.deaths, case q.role when 'Top' then .10 when 'Jungle' then .12 when 'Mid' then .10 when 'Bot' then .12 else .16 end),
+    ('kda',    q.kda,    case q.role when 'Mid' then .12 when 'Bot' then .12 else .10 end),
+    ('assists', q.assists, case q.role when 'Support' then .12 else 0 end),
+    ('vspm',   q.vspm,   case q.role when 'Jungle' then .04 when 'Support' then .10 else 0 end),
+    ('wcpm',   q.wcpm,   case q.role when 'Mid' then .02 when 'Bot' then .04 when 'Support' then .06 else 0 end),
+    ('winrate', q.winrate, .06)
+  ) t(k, v, w) where t.w > 0 and t.v is not null
+), st as (
+  select season, league, role, k, avg(v) mu, stddev_samp(v) sd from m where regular group by 1, 2, 3, 4
+), z as (
+  select m.*, greatest(-3, least(3, (m.v - st.mu) / nullif(st.sd, 0))) zv from m join st using (season, league, role, k)
+), comp0 as (
+  select season, league, pkey, role, bool_or(regular) regular, sum(w * zv) / nullif(sum(w), 0) c0, jsonb_object_agg(k, round(zv::numeric, 2)) zs from z where zv is not null group by 1, 2, 3, 4
+), comp as (
+  -- 합성 점수를 리그·포지션 주전급 안에서 한 번 더 표준화 (지표 수가 적은 리그(LPL)는 폭이 넓게 나와서 맞춘다)
+  select c.season, c.league, c.pkey, (c.c0 - s2.mu) / nullif(s2.sd, 0) comp, c.zs
+  from comp0 c join (select season, league, role, avg(c0) mu, stddev_samp(c0) sd from comp0 where regular group by 1, 2, 3) s2 using (season, league, role)
+), team as (
+  select q.season, q.league, q.team, sum(q.games) g, sum(q.winrate * q.games) / sum(q.games) / 100 wr, sum(c.comp * q.games) / sum(q.games) tc
+  from q join comp c using (season, league, pkey) where q.regular and q.league <> 'INTL' and q.team is not null
+  group by 1, 2, 3 having sum(q.games) >= 40
+), kz as (
+  select season, sum(dx * dy) / nullif(sum(dx * dx), 0) kz from (
+    select season, lx - avg(lx) over (partition by season, league) dx, tc - avg(tc) over (partition by season, league) dy
+    from (select *, ln(least(.85, greatest(.15, wr)) / (1 - least(.85, greatest(.15, wr)))) lx from team) t) d group by season
+), dom as (
+  select q.season, q.league, q.pkey, q.player, q.team, q.role, q.games, q.regular, c.comp, c.zs,
+         case when q.league = 'INTL' then null else c.comp + coalesce(k.kz, .3) * s.offset_logit end as gcomp
+  from q join comp c using (season, league, pkey)
+  left join kz k using (season)
+  left join public.lol_league_strength s on s.season = q.season and s.league = q.league
+), intl_anchor as (
+  -- 국제전 참가 선수들의 같은 해 리그 보정 점수(경기 가중) 평균 − 국제전 합성 평균
+  select i.season, sum(d.gcomp * i.games) / sum(i.games) - sum(i.comp * i.games) / sum(i.games) a
+  from dom i join dom d on d.season = i.season and d.pkey = i.pkey and d.league <> 'INTL' and d.gcomp is not null
+  where i.league = 'INTL' group by i.season
+)
+select d.season, d.league, d.pkey, d.player, d.team, d.role, d.games, d.regular, round(d.comp::numeric, 3) comp, d.zs,
+       round((case when d.league = 'INTL' then d.comp + a.a else d.gcomp end)::numeric, 3) gcomp
+from dom d left join intl_anchor a on a.season = d.season and d.league = 'INTL';
+grant select on public.v_lol_season_comp to anon, authenticated;
+
+create or replace view public.v_lol_player_tier as
+with e as (
+  select c.*, case season when '2026' then 1.0 when '2025' then 0.6 when '2024' then 0.35 else 0.2 end
+                * case when league = 'INTL' then 1.5 else 1 end * games as w
+  from public.v_lol_season_comp c where gcomp is not null
+), latest as (
+  -- 지금 소속 = 가장 최근 시즌 리그 경기 기록 (국제전 제외)
+  select distinct on (pkey) pkey, season as last_season, league, team, role, player
+  from public.v_lol_season_comp where league <> 'INTL' order by pkey, season desc, games desc
+), agg as (
+  select pkey, sum(w * gcomp) / sum(w) raw, sum(w) n,
+         jsonb_agg(jsonb_build_object('season', season, 'league', league, 'games', games, 'g', gcomp, 'team', team) order by season desc, league) seasons
+  from e group by pkey
+), prior as (
+  -- 세트가 적은 선수는 그 리그(가장 최근 시즌) 주전 평균 쪽으로
+  select season, league, avg(gcomp) p from public.v_lol_season_comp where regular and league <> 'INTL' group by 1, 2
+)
+select l.pkey, l.player, l.team, l.league, l.role, l.last_season, round(a.n::numeric, 1) as weight_games, a.seasons,
+       round(((a.raw * a.n + coalesce(p.p, 0) * 20) / (a.n + 20))::numeric, 3) as tier_z,
+       round((60 + 13 * (a.raw * a.n + coalesce(p.p, 0) * 20) / (a.n + 20))::numeric) as tier,
+       cur.comp as comp_now, cur.gcomp as gcomp_now, cur.games as games_now, cur.regular as regular_now, cur.zs as zs_now,
+       round((60 + 13 * cur.gcomp)::numeric) as tier_now
+from latest l join agg a using (pkey)
+left join prior p on p.season = l.last_season and p.league = l.league
+left join public.v_lol_season_comp cur on cur.pkey = l.pkey and cur.season = l.last_season and cur.league = l.league;
+grant select on public.v_lol_player_tier to anon, authenticated;
