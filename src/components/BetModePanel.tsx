@@ -77,7 +77,7 @@ export default function BetModePanel({ sites, betOptionsBySport, numericBetOptio
         <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>가져온 일정 중 끝나지 않은 경기 · 초안</span>
       </div>
       {loading ? <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>불러오는 중…</div> : (
-        <div style={{ display: 'grid', gridTemplateColumns: '200px minmax(240px, 1.2fr) minmax(320px, 2fr)', gap: 10, alignItems: 'start' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '170px minmax(170px, 1fr) minmax(280px, 1.6fr)', gap: 10, alignItems: 'start' }}>
           {/* 1. 종목 → 리그 */}
           <div style={col}>
             <div style={head}>종목 · 리그</div>
@@ -143,12 +143,11 @@ export default function BetModePanel({ sites, betOptionsBySport, numericBetOptio
                   return (
                     <div key={g.id}>
                       {header}
-                      <button type="button" onClick={() => { setGameId(g.id); setAddSiteId(null) }} style={{ ...item(gameId === g.id), width: '100%', display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <span style={{ fontSize: 11, fontWeight: 700, color: live ? 'var(--gold)' : 'var(--text-muted)', flexShrink: 0, fontFamily: 'var(--font-num)' }}>{live ? '● 경기중' : d.format('HH:mm')}</span>
-                        {/* A(홈) 대 B(원정) — 왼쪽이 홈 */}
-                        <span style={{ fontWeight: 700, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {koName(g.home.name)} <span style={{ color: 'var(--text-muted)', fontWeight: 400, fontSize: 11 }}>대</span> {koName(g.away.name)}
-                        </span>
+                      <button type="button" onClick={() => { setGameId(g.id); setAddSiteId(null) }} style={{ ...item(gameId === g.id), width: '100%', display: 'flex', flexDirection: 'column', gap: 2 }}>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: live ? 'var(--gold)' : 'var(--text-muted)', fontFamily: 'var(--font-num)' }}>{live ? '● 경기중' : d.format('HH:mm')}</span>
+                        {/* 위 = 홈, 아래 = 원정 */}
+                        <span style={{ fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{koName(g.home.name)}</span>
+                        <span style={{ fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{koName(g.away.name)}</span>
                       </button>
                     </div>
                   )
@@ -158,7 +157,7 @@ export default function BetModePanel({ sites, betOptionsBySport, numericBetOptio
 
           {/* 3. 베팅옵션 */}
           <div style={{ minWidth: 0 }}>
-            <div style={head}>{addSite ? `베팅추가 · ${addSite.name}` : '베팅'}</div>
+            <div style={head}>{addSite ? `베팅추가 · ${addSite.name}` : '베팅슬립'}</div>
             {addSite && renderAddForm ? renderAddForm(addSite, () => setAddSiteId(null))
               : !game ? <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: 6 }}>경기를 고르면 여기서 베팅합니다</div>
               : <BetSlip key={game.id} game={game} sites={sites}
@@ -193,6 +192,10 @@ function BetSlip({ game, sites, options, numeric, registered, onBet }: {
   const [busy, setBusy] = useState(false)
   const [done, setDone] = useState<string | null>(null)
   useEffect(() => { setAmount(site ? String(site.default_stake > 0 ? site.default_stake : site.currency === 'usd' ? 5 : 10000) : '') }, [siteId]) // eslint-disable-line react-hooks/exhaustive-deps
+  // 금액 핫키: 누를 때마다 더한다 (원 5,000·10,000·20,000 / 달러 5·10·20)
+  const HOT = isusd ? [5, 10, 20] : [5000, 10000, 20000]
+  const addAmount = (v: number) => setAmount(a => String((Number(String(a).replace(/,/g, '')) || 0) + v))
+  const fmt = (raw: string) => { const [i, d] = raw.split('.'); return (i ? Number(i).toLocaleString() : '') + (d != null ? `.${d}` : '') }
 
   const isNumeric = numeric.includes(opt)
   const optLabel = isNumeric ? (numVal.trim() ? applyNumericTemplate(opt, numVal.trim()) : '') : opt
@@ -260,8 +263,14 @@ function BetSlip({ game, sites, options, numeric, registered, onBet }: {
         </div>
         <div style={{ flex: 1 }}>
           <div style={{ ...label, marginTop: 0 }}>금액{isusd ? ' ($)' : ' (원)'}</div>
-          <input className="form-input" value={amount} inputMode="numeric" onChange={e => setAmount(e.target.value.replace(/[^0-9.]/g, ''))}
+          <input className="form-input" value={fmt(amount)} inputMode="numeric" onChange={e => setAmount(e.target.value.replace(/[^0-9.]/g, ''))}
             onKeyDown={e => { if (e.key === 'Enter') submit() }} />
+          <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
+            {HOT.map(v => (
+              <button key={v} type="button" onClick={() => addAmount(v)} style={{ ...chip(false), flex: 1, padding: '4px 0', fontFamily: 'var(--font-num)' }}>+{v.toLocaleString()}</button>
+            ))}
+            <button type="button" onClick={() => setAmount('')} title="금액 지우기" style={{ ...chip(false), padding: '4px 8px' }}>C</button>
+          </div>
         </div>
       </div>
 
