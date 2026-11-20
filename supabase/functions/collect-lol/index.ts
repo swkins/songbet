@@ -16,9 +16,9 @@ const LEAGUES: Record<string, { gol: RegExp; not?: RegExp; lp: string[] }> = {
   'LCK CL': { gol: /^LCK CL /, lp: ['LCK CL/{Y}%'] },
   LPL: { gol: /^LPL /, lp: ['LPL/{Y}%'] },
   LEC: { gol: /^LEC /, lp: ['LEC/{Y}%'] },
-  LCS: { gol: /^LCS /, lp: ['LCS/{Y}%'] },
+  LCS: { gol: /^(LCS |LTA North )/, lp: ['LCS/{Y}%', 'LTA North/{Y}%'] },   // 2025년엔 LTA 북부
   LCP: { gol: /^LCP /, lp: ['LCP/{Y}%'] },
-  CBLOL: { gol: /^CBLOL /, lp: ['CBLOL/{Y}%'] },
+  CBLOL: { gol: /^(CBLOL |LTA South )/, lp: ['CBLOL/{Y}%', 'LTA South/{Y}%'] },   // 2025년엔 LTA 남부
   INTL: { gol: /(First Stand|^MSI |^Worlds |^Esports World Cup)/, not: /Qualifier|Online|Kespa|KeSPA/i,
           lp: ['{Y} First Stand%', '{Y} Mid-Season Invitational%', '{Y} Season World Championship%', 'Esports World Cup {Y}'] },
 }
