@@ -2,6 +2,7 @@ import dayjs from 'dayjs'
 import { supabase } from './supabase'
 import { koName, type ScheduleTeam } from './gameSchedule'
 import { NBA_NAMES_KO } from '../data/nbaNamesKo'
+import { predictVolley, type VolleyResult } from './volleyPredict'
 import { teamCondition, playerFatigue, COND_K, type Condition, type PastGame, type PlayerFatigue } from './fatigue'
 
 // ─── 선수 오버롤 + 출전 확률 (분석 탭 오른쪽 칸) ─────
@@ -245,7 +246,9 @@ export async function loadGameOverall(league: string, gameDate: string, home: Sc
 /** 팀 오버롤: 출전시간 × 이번 시즌 출전 비중 가중 평균 (full = 다 뛸 때, exp = 출전 확률·개인 피로 반영 — 빠지는 만큼 대체 선수 50점).
  *  overrides = 화면에서 바꾼 출전 확률 (선수 id → 0~100) */
 export function teamStrength(players: PlayerOv[], overrides: Record<string, number>, vb = false): { full: number | null; exp: number | null } {
-  const wOf = (p: PlayerOv) => (vb ? 1 : Math.max(5, p.min ?? 10)) * (vb ? 1 : p.share)
+  // 배구: 체급 순 상위 7명(주전) 1, 나머지 0.3 / 농구: 출전시간 × 이번 시즌 출전 비중
+  const vbW = new Map(players.filter(p => p.overall != null).map((p, i) => [p.id, i < 7 ? 1 : 0.3]))
+  const wOf = (p: PlayerOv) => vb ? (vbW.get(p.id) ?? 0) : Math.max(5, p.min ?? 10) * p.share
   const rated = players.filter(p => p.overall != null && wOf(p) > 0)
   const sw = rated.reduce((a, p) => a + wOf(p), 0)
   if (!sw) return { full: null, exp: null }
@@ -269,6 +272,9 @@ export const DEFAULT_PARAMS: ModelParams = {
     NBA: { sd: 13.5, sdT: 18, hca: 2.5, k: 1.0, avg: 113, wScore: 0.5, wOv: 0.5, condK: COND_K.NBA },
     KBL: { sd: 11, sdT: 14, hca: 2, k: 0.8, avg: 80, wScore: 0.5, wOv: 0.5, condK: COND_K.KBL },
     WKBL: { sd: 10, sdT: 12, hca: 2, k: 0.7, avg: 65, wScore: 0.5, wOv: 0.5, condK: COND_K.WKBL },
+    // 배구: hca = 홈 이점(logit), k = 팀 오버롤 1점당 logit, wScore = 시장 배당 비중, wOv = 오버롤 모델 비중 (volleyPredict.ts)
+    VLEAGUE_M: { sd: 0, sdT: 0, hca: 0.15, k: 0.08, avg: 0, wScore: 0.7, wOv: 0.3, condK: 0 },
+    VLEAGUE_W: { sd: 0, sdT: 0, hca: 0.15, k: 0.08, avg: 0, wScore: 0.7, wOv: 0.3, condK: 0 },
   },
   fatigueK: 0.35,
 }
@@ -320,4 +326,14 @@ export function simulate(code: string, home: TeamOv, away: TeamOv, overrides: Re
     p10: r1(ms[Math.floor(n * 0.1)]), p90: r1(ms[Math.floor(n * 0.9)]),
     parts: { scoreMargin: r1(scoreMargin), ovMargin: r1(ovMargin), injury: r1(injury), hca: c.hca, news: newsAdj, cond: r1(condAdj) },
     raw: { scoreMargin: r1(scoreMargin), ovDiff: r1(ovDiff), injDiff: r1(injDiff), condDiff, hca: c.hca, news: newsAdj, T: r1(T) } }
+}
+
+/** 배구 예측: 팀 오버롤(출전 확률 반영) 차 + 시장 배당 → 세트 스코어 분포 (volleyPredict.ts) */
+export function simulateVolleyGame(code: string, home: TeamOv, away: TeamOv, overrides: Record<string, number>, odds: { home: number; away: number } | null): (VolleyResult & { diff: number }) | null {
+  const p = PARAMS.leagues[code]; if (!p) return null
+  const H = teamStrength(home.players, overrides, true), A = teamStrength(away.players, overrides, true)
+  if (H.exp == null || A.exp == null) return null
+  const diff = Math.round((H.exp - A.exp) * 10) / 10
+  const r = predictVolley(code, diff, p, odds)
+  return r ? { ...r, diff } : null
 }

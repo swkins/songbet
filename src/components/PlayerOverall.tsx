@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import dayjs from 'dayjs'
 import { koName, type ScheduleTeam } from '../lib/gameSchedule'
 import { conditionColor, conditionLabel, type Condition } from '../lib/fatigue'
-import { getParams, loadGameOverall, tierOf, availColor, TIERS, teamStrength, simulate, statusLabel, type TeamOv, type PlayerOv, type GameOverall } from '../lib/playerOverall'
+import { SET_SCORES, type VolleyResult } from '../lib/volleyPredict'
+import { simulateVolleyGame, getParams, loadGameOverall, tierOf, availColor, TIERS, teamStrength, simulate, statusLabel, type TeamOv, type PlayerOv, type GameOverall } from '../lib/playerOverall'
 
 // ─── 분석 탭 오른쪽 칸: 양 팀 핵심·주전 선수 오버롤 + 출전 확률 ─────
 // 출전 색: 초록(90%↑) · 연두(70~89) · 노랑(40~69) · 빨강(1~39) · 진한 빨강+취소선(결장 확정)
@@ -27,6 +28,50 @@ function AvailCell({ p, ov, onCycle }: { p: PlayerOv; ov?: number; onCycle: () =
       <span style={{ width: 9, height: 9, borderRadius: '50%', background: c, flexShrink: 0 }} />
       <span style={{ color: c, fontWeight: 700, fontSize: 11, fontFamily: 'var(--font-num)' }}>{prob}%</span>
     </button>
+  )
+}
+
+// 배구 예상: 세트 스코어 분포 (volleyPredict.ts)
+function VolleyBox({ v, hName, aName, changed, onReset }: { v: VolleyResult & { diff: number }; hName: string; aName: string; changed: number; onReset: () => void }) {
+  const max = Math.max(...SET_SCORES.map(k => v.dist[k]))
+  const tile = (k: string, val: string, sub: string) => (
+    <div style={{ textAlign: 'center', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '6px 4px', background: 'var(--bg-card)' }}>
+      <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{k}</div>
+      <div style={{ fontSize: 18, fontWeight: 800, fontFamily: 'var(--font-num)' }}>{val}</div>
+      <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{sub}</div>
+    </div>
+  )
+  return (
+    <div style={{ ...box, borderColor: 'var(--gold-border)' }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
+        <span style={{ fontSize: 13, fontWeight: 800 }}>예상 세트 스코어</span>
+        <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{v.marketHome != null ? '배당 70% + 오버롤 30%' : '오버롤만 (배당 없음)'}{changed ? ` · 가정 ${changed}명` : ''}</span>
+        {changed > 0 && <button type="button" onClick={onReset} style={{ marginLeft: 'auto', fontSize: 10, background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-secondary)', cursor: 'pointer', padding: '1px 6px' }}>가정 지우기</button>}
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+        {tile('가장 유력 (홈-원정)', v.best, `${Math.round(v.dist[v.best] * 100)}% · ${hName} - ${aName}`)}
+        {tile('홈 승률', `${v.homeWin}%`, `원정 ${Math.round((100 - v.homeWin) * 10) / 10}%`)}
+        {tile('기대 세트차 (홈)', `${v.expDiff > 0 ? '+' : ''}${v.expDiff}`, `기대 ${v.expSets}세트`)}
+        {tile('4세트 이상', `${v.over35}%`, `풀세트 ${v.full}%`)}
+      </div>
+      <div style={{ marginTop: 8 }}>
+        {SET_SCORES.map(k => {
+          const pv = v.dist[k], homeWin = k.startsWith('3')
+          return (
+            <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, marginBottom: 3 }}>
+              <span style={{ width: 30, fontFamily: 'var(--font-num)', fontWeight: k === v.best ? 800 : 400 }}>{k}</span>
+              <div style={{ flex: 1, height: 10, background: 'var(--bg-card)', borderRadius: 3, overflow: 'hidden' }}>
+                <div style={{ width: `${(pv / max) * 100}%`, height: '100%', background: homeWin ? 'var(--gold)' : 'var(--blue)', opacity: k === v.best ? 1 : 0.7 }} />
+              </div>
+              <span style={{ width: 40, textAlign: 'right', fontFamily: 'var(--font-num)' }}>{Math.round(pv * 1000) / 10}%</span>
+            </div>
+          )
+        })}
+      </div>
+      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4, lineHeight: 1.6 }}>
+        오버롤 모델 홈 {v.modelHome}% (팀 오버롤 차 {v.diff > 0 ? '+' : ''}{v.diff}){v.marketHome != null ? ` · 시장 홈 ${v.marketHome}%` : ''} → 세트 분포는 과거 V리그 5시즌 곡선 · 선수 출전 칸을 누르면 다시 계산
+      </div>
+    </div>
   )
 }
 
@@ -154,7 +199,7 @@ function TeamTable({ title, t, ovr, onCycle, cond }: { title: string; t: TeamOv;
 }
 
 // 배치: 좌(좁게) = left(배당 변동) + 예상 스코어 · 우(넓게) = 선수 오버롤·출전 확률 · 아래 = 뉴스
-export default function PlayerOverall({ league, gameDate, home, away, left }: { league: string; gameDate: string; home: ScheduleTeam; away: ScheduleTeam; left?: React.ReactNode }) {
+export default function PlayerOverall({ league, gameDate, home, away, left, odds }: { league: string; gameDate: string; home: ScheduleTeam; away: ScheduleTeam; left?: React.ReactNode; odds?: { home: number; away: number } | null }) {
   const [data, setData] = useState<GameOverall | null | undefined>(undefined)
   const [err, setErr] = useState<string | null>(null)
   const [ovr, setOvr] = useState<Record<string, number>>({})   // 화면에서 바꿔 본 출전 확률
@@ -165,6 +210,7 @@ export default function PlayerOverall({ league, gameDate, home, away, left }: { 
 
   const newsAdj = Number(data?.news?.margin_adj ?? 0) || 0
   const sim = useMemo(() => data ? simulate(data.code, data.home, data.away, ovr, newsAdj, data.cond) : null, [data, ovr, newsAdj])
+  const vsim = useMemo(() => data && data.code.startsWith('VLEAGUE') ? simulateVolleyGame(data.code, data.home, data.away, ovr, odds ?? null) : null, [data, ovr, odds?.home, odds?.away]) // eslint-disable-line react-hooks/exhaustive-deps
   const cycle = (p: PlayerOv) => setOvr(o => {
     const cur = o[p.id], n = { ...o }
     if (cur == null) n[p.id] = p.avail.prob === 0 ? 100 : 0
@@ -221,7 +267,7 @@ export default function PlayerOverall({ league, gameDate, home, away, left }: { 
             </div>
           )}
           {data.cond && <ConditionBox home={data.cond.home} away={data.cond.away} hName={hName} aName={aName} />}
-          {!sim && data.code.startsWith('VLEAGUE') && <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>배구는 예상 스코어 시뮬레이션 준비 중 — 선수 오버롤만 표시</div>}
+          {vsim && <VolleyBox v={vsim} hName={hName} aName={aName} changed={changed} onReset={() => setOvr({})} />}
         </div>
         {/* 우: 선수 오버롤 · 출전 확률 */}
         <div style={{ flex: '3 1 560px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>

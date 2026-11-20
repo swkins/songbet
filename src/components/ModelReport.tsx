@@ -20,7 +20,8 @@ interface Proposal { league: string | null; param: string; from: number; to: num
 interface Review { id: number; created_at: string; review_date: string; summary: string | null; stats: Record<string, unknown> | null; proposals: Proposal[] | null; status: string; decided_at: string | null }
 interface History { id: number; changed_at: string; note: string | null; review_id: number | null }
 
-const LG: Record<string, string> = { NBA: 'NBA', KBL: 'KBL', WKBL: 'WKBL' }
+const LG: Record<string, string> = { NBA: 'NBA', KBL: 'KBL', WKBL: 'WKBL', VLEAGUE_M: 'V리그 남자', VLEAGUE_W: 'V리그 여자' }
+const isVb = (lg: string) => lg.startsWith('VLEAGUE')   // 배구: 예상 = 가장 유력한 세트 스코어, 마진·총점 = 세트
 const PARAM: Record<string, string> = { wScore: '득실 비중', wOv: '오버롤 비중', k: '오버롤 1점당 점수', hca: '홈 이점', condK: '컨디션 1%p당 점수', sd: '점수차 퍼짐', sdT: '총점 퍼짐', avg: '리그 평균 득점', fatigueK: '개인 피로 → 오버롤' }
 
 export async function loadPredictions(fromDate: string): Promise<Prediction[]> {
@@ -139,13 +140,13 @@ export default function ModelReport({ onClose }: { onClose: () => void }) {
             <div style={h}>최근 {days}일 성적</div>
             {!graded.length ? <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>아직 채점된 경기가 없어요 (예측은 NBA 21:30 · 국내 경기 시작 전에 저장되고, 끝나면 채점)</div> : (
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead><tr><th style={th}>리그</th><th style={th}>경기</th><th style={th}>승패 적중</th><th style={th}>시장 정배 적중</th><th style={th}>마진 오차 평균</th><th style={th}>5점 안</th><th style={th}>총점 오차 평균</th></tr></thead>
+                <thead><tr><th style={th}>리그</th><th style={th}>경기</th><th style={th}>승패 적중</th><th style={th}>시장 정배 적중</th><th style={th}>마진 오차 평균 (배구 세트)</th><th style={th}>5점 안</th><th style={th}>총점 오차 평균</th></tr></thead>
                 <tbody>{summary.map(s => (
                   <tr key={s.lg}>
                     <td style={{ ...td, fontWeight: 700 }}>{LG[s.lg] ?? s.lg}</td><td style={td}>{s.n}</td>
                     <td style={{ ...td, fontWeight: 800, color: s.n && s.hit / s.n >= (s.mN ? s.mHit / s.mN : 0) ? 'var(--green)' : 'var(--text-primary)' }}>{s.hit}/{s.n} ({pct(s.hit, s.n)})</td>
                     <td style={{ ...td, color: 'var(--text-secondary)' }}>{s.mN ? `${s.mHit}/${s.mN} (${pct(s.mHit, s.mN)})` : '–'}</td>
-                    <td style={td}>{s.mae ?? '–'}점</td><td style={td}>{pct(s.near, s.n)}</td><td style={td}>{s.tae ?? '–'}점</td>
+                    <td style={td}>{s.lg === '전체' ? '–' : s.mae ?? '–'}{s.lg !== '전체' && isVb(s.lg) ? '세트' : s.lg === '전체' ? '' : '점'}</td><td style={td}>{s.lg === '전체' || isVb(s.lg) ? '–' : pct(s.near, s.n)}</td><td style={td}>{s.lg === '전체' ? '–' : s.tae ?? '–'}{s.lg !== '전체' && isVb(s.lg) ? '세트' : s.lg === '전체' ? '' : '점'}</td>
                   </tr>
                 ))}</tbody>
               </table>
@@ -203,12 +204,12 @@ export default function ModelReport({ onClose }: { onClose: () => void }) {
                       const actual = p.result_home != null ? p.result_home - (p.result_away ?? 0) : null
                       return (
                         <tr key={p.game_id}>
-                          <td style={{ ...td, color: 'var(--text-muted)' }}>{p.league}</td>
+                          <td style={{ ...td, color: 'var(--text-muted)' }}>{LG[p.league] ?? p.league}</td>
                           <td style={{ ...td, fontWeight: 700 }}>{name(p.league, p.home)} <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>-</span> {name(p.league, p.away)}</td>
-                          <td style={{ ...td, fontFamily: 'var(--font-num)' }}>{p.pred_home}-{p.pred_away}<div style={{ fontSize: 10, color: 'var(--text-muted)' }}>홈 승 {p.home_win}%</div></td>
+                          <td style={{ ...td, fontFamily: 'var(--font-num)' }}>{p.pred_home}-{p.pred_away}{isVb(p.league) && <span style={{ fontSize: 10, color: 'var(--text-muted)' }}> 세트</span>}<div style={{ fontSize: 10, color: 'var(--text-muted)' }}>홈 승 {p.home_win}%</div></td>
                           <td style={{ ...td, fontFamily: 'var(--font-num)', fontWeight: 700 }}>{p.result_home != null ? `${p.result_home}-${p.result_away}` : '–'}</td>
                           <td style={{ ...td, fontFamily: 'var(--font-num)' }}>{signed(p.margin)} / {signed(actual)}</td>
-                          <td style={{ ...td, fontFamily: 'var(--font-num)', color: p.margin_err == null ? undefined : Math.abs(p.margin_err) <= 5 ? 'var(--green)' : Math.abs(p.margin_err) >= 15 ? 'var(--red)' : undefined }}>{p.margin_err == null ? '–' : `${Math.abs(p.margin_err)}점`}</td>
+                          <td style={{ ...td, fontFamily: 'var(--font-num)', color: p.margin_err == null ? undefined : Math.abs(p.margin_err) <= (isVb(p.league) ? 0.6 : 5) ? 'var(--green)' : Math.abs(p.margin_err) >= (isVb(p.league) ? 2 : 15) ? 'var(--red)' : undefined }}>{p.margin_err == null ? '–' : `${Math.abs(p.margin_err)}${isVb(p.league) ? '세트' : '점'}`}</td>
                           <td style={td}>{p.result_home != null ? <HitTag hit={p.win_hit} /> : <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>대기</span>}</td>
                           <td style={td}>{p.market_hit == null ? <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>–</span> : <span style={{ fontSize: 10, color: p.market_hit ? 'var(--green)' : 'var(--red)' }}>{p.market_hit ? '✓' : '✗'} {Number(p.odds_home) < Number(p.odds_away) ? '홈' : '원정'} {Math.min(Number(p.odds_home), Number(p.odds_away)).toFixed(2)}</span>}</td>
                         </tr>
@@ -226,6 +227,7 @@ export default function ModelReport({ onClose }: { onClose: () => void }) {
             {params && (
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead><tr><th style={th}>리그</th>{['wScore', 'wOv', 'k', 'hca', 'condK', 'sd'].map(k => <th key={k} style={th}>{PARAM[k]}</th>)}</tr></thead>
+                {/* 배구는 wScore = 시장 배당 비중, wOv = 오버롤 모델 비중, k·hca = logit 단위 */}
                 <tbody>{Object.entries((params.leagues ?? {}) as Record<string, Record<string, number>>).map(([lg, v]) => (
                   <tr key={lg}><td style={{ ...td, fontWeight: 700 }}>{lg}</td>{['wScore', 'wOv', 'k', 'hca', 'condK', 'sd'].map(k => <td key={k} style={{ ...td, fontFamily: 'var(--font-num)' }}>{v[k]}</td>)}</tr>
                 ))}</tbody>

@@ -198,7 +198,8 @@ function GameAnalysis({ g, analysis, odds }: { g: Item; analysis: OverallAnalysi
       </div>
       {/* 좌: 배당 변동 + 예상 스코어 / 우: 선수 오버롤·출전 확률 / 아래: 뉴스 */}
       <PlayerOverall league={g.league} gameDate={g.date} home={g.home} away={g.away}
-        left={odds?.length ? <OddsHistory compact list={odds} homeName={koName(g.home.name)} awayName={koName(g.away.name)} /> : null} />
+        left={odds?.length ? <OddsHistory compact list={odds} homeName={koName(g.home.name)} awayName={koName(g.away.name)} /> : null}
+        odds={(() => { const l = odds?.[odds.length - 1]; return l?.home_odds && l?.away_odds ? { home: Number(l.home_odds), away: Number(l.away_odds) } : null })()} />
       {analysis ? <OverallAnalysisView a={analysis} />
         : null}
     </div>
