@@ -59,7 +59,8 @@ export default function BetModePanel({ sites, betOptionsBySport, numericBetOptio
     games.filter(g => g.sport === sp).forEach(g => m.set(g.league, (m.get(g.league) ?? 0) + 1))
     return [...m.entries()]
   }
-  const leagueGames = games.filter(g => g.sport === sport && g.league === league)
+  // 리그를 안 고르면 그 종목 전체 (사용자 요청)
+  const leagueGames = games.filter(g => g.sport === sport && (!league || g.league === league))
   const game = games.find(g => g.id === gameId) ?? null
 
   const col: React.CSSProperties = { minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4, overflowY: 'auto', maxHeight: 'calc(100vh - 170px)' }
@@ -92,6 +93,12 @@ export default function BetModePanel({ sites, betOptionsBySport, numericBetOptio
                     <span>{s.icon} {s.label}</span>
                     <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{lgs.length ? lgs.reduce((a, [, n]) => a + n, 0) : '-'}</span>
                   </button>
+                  {open && lgs.length > 1 && (
+                    <button type="button" onClick={() => { setLeague(null); setGameId(null); setAddSiteId(null) }}
+                      style={{ ...item(league === null), marginLeft: 10, fontSize: 11, display: 'flex', justifyContent: 'space-between' }}>
+                      <span>전체</span><span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{lgs.reduce((a, [, n]) => a + n, 0)}</span>
+                    </button>
+                  )}
                   {open && lgs.map(([lg, n]) => (
                     <button key={lg} type="button" onClick={() => { setLeague(lg); setGameId(null); setAddSiteId(null) }}
                       style={{ ...item(league === lg), marginLeft: 10, fontSize: 11, display: 'flex', justifyContent: 'space-between' }}>
@@ -122,8 +129,8 @@ export default function BetModePanel({ sites, betOptionsBySport, numericBetOptio
 
           {/* 2. 경기 목록 */}
           <div style={col}>
-            <div style={head}>{league ? `${league} 경기` : '경기'}</div>
-            {!league ? <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: 6 }}>왼쪽에서 리그를 고르세요</div>
+            <div style={head}>{league ? `${league} 경기` : sport ? `${SPORT_DEF.find(s => s.id === sport)?.label ?? ''} 전체 경기` : '경기'}</div>
+            {!sport ? <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: 6 }}>왼쪽에서 종목이나 리그를 고르세요</div>
               : (() => {
                 // 오늘 · 내일 · 그 뒤를 날짜 머리글로 확실히 나눈다 (오늘 = 금색 머리글)
                 const today = dayjs().format('YYYY-MM-DD'), tomorrow = dayjs().add(1, 'day').format('YYYY-MM-DD')
@@ -145,7 +152,7 @@ export default function BetModePanel({ sites, betOptionsBySport, numericBetOptio
                     <div key={g.id}>
                       {header}
                       <button type="button" onClick={() => { setGameId(g.id); setAddSiteId(null) }} style={{ ...item(gameId === g.id), width: '100%', display: 'flex', flexDirection: 'column', gap: 2 }}>
-                        <span style={{ fontSize: 10, fontWeight: 700, color: live ? 'var(--gold)' : 'var(--text-muted)', fontFamily: 'var(--font-num)' }}>{live ? '● 경기중' : d.format('HH:mm')}</span>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: live ? 'var(--gold)' : 'var(--text-muted)', fontFamily: 'var(--font-num)' }}>{live ? '● 경기중' : d.format('HH:mm')}{!league && <span style={{ fontWeight: 600, fontFamily: 'var(--font-body)', marginLeft: 6 }}>{g.league}</span>}</span>
                         {/* 위 = 홈, 아래 = 원정 */}
                         <span style={{ fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{koName(g.home.name)}</span>
                         <span style={{ fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{koName(g.away.name)}</span>
@@ -161,7 +168,7 @@ export default function BetModePanel({ sites, betOptionsBySport, numericBetOptio
             <div style={head}>{addSite ? `베팅추가 · ${addSite.name}` : '베팅슬립'}</div>
             {addSite && renderAddForm ? renderAddForm(addSite, () => setAddSiteId(null))
               : !game ? <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: 6 }}>경기를 고르면 여기서 베팅합니다</div>
-              : game.sport === 'basketball'
+              : game.sport === 'basketball' || game.sport === 'volleyball'
                 ? <BasketSlip key={game.id} game={game} sites={sites} registered={teamsBySport[game.sport] ?? []} onBet={onBet} />
                 : <BetSlip key={game.id} game={game} sites={sites}
                   options={betOptionsBySport[game.sport] ?? []} numeric={numericBetOptionsBySport[game.sport] ?? []}
@@ -295,7 +302,7 @@ function BetSlip({ game, sites, options, numeric, registered, onBet }: {
   )
 }
 
-// ─── 농구 베팅슬립 (베팅 모드, 사용자 요청) ─────
+// ─── 농구·배구 베팅슬립 (베팅 모드, 사용자 요청) ─────
 // 승리팀: 홈/원정 중 하나 (최신 승패 배당 — 분석 탭과 같은 odds_snapshots)
 // 핸디캡: 승패 배당으로 기준점을 대충 유추해 정배 마핸 / 역배 플핸 0.5 단위 다섯 개 (정수 기준점은 적특이 생겨서 안 씀).
 //  기준점 ≈ σ × 정규분포 역함수(마진 뺀 정배 승률), σ = 리그 점수차 퍼짐 (NBA 13.5·KBL 11·WKBL 10) — 예: 1.47/2.45 → 약 4.3 → 2.5~6.5
@@ -313,13 +320,19 @@ function invNorm(p: number): number {
   const r = q - 0.5, t = r * r
   return (((((a[0] * t + a[1]) * t + a[2]) * t + a[3]) * t + a[4]) * t + a[5]) * r / (((((b[0] * t + b[1]) * t + b[2]) * t + b[3]) * t + b[4]) * t + 1)
 }
+// 예상 기준점 근처 .5 일곱 개 (사용자 요청)
 function handicapLines(margin: number): number[] {
   const c = Math.floor(Math.abs(margin)) + 0.5
-  const lo = Math.max(0.5, c - 2)
-  return [0, 1, 2, 3, 4].map(i => lo + i)
+  const lo = Math.max(0.5, c - 3)
+  return [0, 1, 2, 3, 4, 5, 6].map(i => lo + i)
 }
+// 배구 (사용자 요청): 핸디는 정배 -1.5·-2.5 / 역배 +1.5·+2.5만, 그 아래 3.5 세트 오버·4.5 세트 언더, 총득점 174.5~186.5 언오버
+//  저장 문구는 예전 배구 베팅과 같게: "팀 홈 -1.5 H"·"팀 원정 2.5 H"·"A vs B 3.5 세트 오버"·"A vs B 180.5 오버"
+const VOLLEY_LINES = [1.5, 2.5]
+const VOLLEY_TOTALS = Array.from({ length: 13 }, (_, i) => 174.5 + i)
 
 type BPick = { kind: 'win'; side: 'home' | 'away' } | { kind: 'hcap'; side: 'home' | 'away'; line: number }
+  | { kind: 'sets'; ou: 'over' | 'under' } | { kind: 'total'; line: number; ou: 'over' | 'under' }
 
 function BasketSlip({ game, sites, registered, onBet }: {
   game: Game; sites: Site[]; registered: { league: string; name: string }[]
@@ -328,6 +341,7 @@ function BasketSlip({ game, sites, registered, onBet }: {
   const home = resolveTeamName(game.home, game.league, registered)
   const away = resolveTeamName(game.away, game.league, registered)
   const live = gameState(game) === 'live'
+  const volley = game.sport === 'volleyball'
   const orderedSites = [...sites].sort((a, b) => Number(b.active) - Number(a.active) || a.sort_order - b.sort_order)
 
   // 최신 승패 배당 + (없으면) 저장된 예측 마진
@@ -342,6 +356,10 @@ function BasketSlip({ game, sites, registered, onBet }: {
 
   // 정배 쪽과 기준점 유추
   const est = useMemo(() => {
+    if (volley) {
+      const favHome = ml ? ml.home <= ml.away : predMargin != null ? predMargin >= 0 : true
+      return { favHome, margin: 0, src: ml ? '승패 배당' : predMargin != null ? '예상' : '' }
+    }
     if (ml) {
       const ph = (1 / ml.home) / (1 / ml.home + 1 / ml.away)
       const favHome = ph >= 0.5
@@ -350,8 +368,8 @@ function BasketSlip({ game, sites, registered, onBet }: {
     }
     if (predMargin != null) return { favHome: predMargin >= 0, margin: Math.abs(predMargin), src: '예상 스코어' }
     return null
-  }, [ml, predMargin, game.league])
-  const lines = handicapLines(est?.margin ?? 4.5)
+  }, [ml, predMargin, game.league, volley])
+  const lines = volley ? VOLLEY_LINES : handicapLines(est?.margin ?? 4.5)
   const favSide: 'home' | 'away' = est ? (est.favHome ? 'home' : 'away') : 'home'
   const dogSide: 'home' | 'away' = favSide === 'home' ? 'away' : 'home'
 
@@ -371,9 +389,16 @@ function BasketSlip({ game, sites, registered, onBet }: {
 
   const teamOf = (side: 'home' | 'away') => (side === 'home' ? home : away)
   const sideKo = (side: 'home' | 'away') => (side === 'home' ? '홈' : '원정')
+  const vs = `${home} vs ${away}`
   const content = !pick ? '' : pick.kind === 'win'
     ? `${teamOf(pick.side)} ${sideKo(pick.side)} 승리`
-    : `${teamOf(pick.side)} ${sideKo(pick.side)} ${pick.line} ${pick.side === favSide ? '마핸' : '플핸'}`
+    : pick.kind === 'hcap'
+      ? volley
+        ? `${teamOf(pick.side)} ${sideKo(pick.side)} ${pick.side === favSide ? '-' : ''}${pick.line} H`
+        : `${teamOf(pick.side)} ${sideKo(pick.side)} ${pick.line} ${pick.side === favSide ? '마핸' : '플핸'}`
+      : pick.kind === 'sets'
+        ? `${vs} ${pick.ou === 'over' ? '3.5 세트 오버' : '4.5 세트 언더'}`
+        : `${vs} ${pick.line} ${pick.ou === 'over' ? '오버' : '언더'}`
   const choose = (p: BPick) => {
     setPick(p); setDone(null)
     // 승리팀은 최신 배당을 넣어 두고, 핸디캡은 배당 정보가 없어 비운다
@@ -400,16 +425,19 @@ function BasketSlip({ game, sites, registered, onBet }: {
   const label: React.CSSProperties = { fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', margin: '10px 0 4px' }
   const isWin = (side: 'home' | 'away') => pick?.kind === 'win' && pick.side === side
   const isH = (side: 'home' | 'away', line: number) => pick?.kind === 'hcap' && pick.side === side && pick.line === line
-  const hRow = (side: 'home' | 'away', sign: '-' | '+') => (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 4 }}>
-      <span style={{ width: 92, flexShrink: 0, fontSize: 11, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-        {teamOf(side)} <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>{sign === '-' ? '마핸' : '플핸'}</span>
+  // 핸디캡은 세로로 (사용자 요청): 정배 마핸 칸 | 역배 플핸 칸
+  const hCol = (side: 'home' | 'away', sign: '-' | '+') => (
+    <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <span style={{ fontSize: 11, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {teamOf(side)} <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>{sideKo(side)} · {sign === '-' ? '마핸' : '플핸'}</span>
       </span>
       {lines.map(l => (
-        <button key={l} type="button" style={{ ...chip(isH(side, l)), flex: 1, padding: '6px 0', fontFamily: 'var(--font-num)' }} onClick={() => choose({ kind: 'hcap', side, line: l })}>{sign}{l}</button>
+        <button key={l} type="button" style={{ ...chip(isH(side, l)), padding: '6px 0', fontFamily: 'var(--font-num)', textAlign: 'center' }} onClick={() => choose({ kind: 'hcap', side, line: l })}>{sign}{l}</button>
       ))}
     </div>
   )
+  const isSets = (ou: 'over' | 'under') => pick?.kind === 'sets' && pick.ou === ou
+  const isT = (line: number, ou: 'over' | 'under') => pick?.kind === 'total' && pick.line === line && pick.ou === ou
 
   return (
     <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: 12, background: 'var(--bg-elevated)' }}>
@@ -427,10 +455,31 @@ function BasketSlip({ game, sites, registered, onBet }: {
       </div>
 
       <div style={label}>
-        핸디캡 <span style={{ fontWeight: 400 }}>{est ? `(${est.src} 기준 기준점 약 ${est.margin}점 → ${lines[0]}~${lines[4]})` : '(배당 없음 — 기본 기준점)'}</span>
+        핸디캡 <span style={{ fontWeight: 400 }}>{volley ? (est?.src ? `(${est.src} 기준 정배 = ${teamOf(favSide)})` : '(배당 없음 — 홈을 정배로)')
+          : est ? `(${est.src} 기준 기준점 약 ${est.margin}점 → ${lines[0]}~${lines[lines.length - 1]})` : '(배당 없음 — 기본 기준점)'}</span>
       </div>
-      {hRow(favSide, '-')}
-      {hRow(dogSide, '+')}
+      <div style={{ display: 'flex', gap: 6 }}>
+        {hCol(favSide, '-')}
+        {hCol(dogSide, '+')}
+      </div>
+
+      {volley && <>
+        <div style={label}>세트 수</div>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <button type="button" style={{ ...chip(isSets('over')), flex: 1, padding: '7px 0' }} onClick={() => choose({ kind: 'sets', ou: 'over' })}>3.5 세트 오버</button>
+          <button type="button" style={{ ...chip(isSets('under')), flex: 1, padding: '7px 0' }} onClick={() => choose({ kind: 'sets', ou: 'under' })}>4.5 세트 언더</button>
+        </div>
+        <div style={label}>총득점 언오버</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 3, maxHeight: 260, overflowY: 'auto' }}>
+          {VOLLEY_TOTALS.map(l => (
+            <div key={l} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ width: 52, flexShrink: 0, fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-num)', textAlign: 'center' }}>{l}</span>
+              <button type="button" style={{ ...chip(isT(l, 'over')), flex: 1, padding: '5px 0' }} onClick={() => choose({ kind: 'total', line: l, ou: 'over' })}>오버</button>
+              <button type="button" style={{ ...chip(isT(l, 'under')), flex: 1, padding: '5px 0' }} onClick={() => choose({ kind: 'total', line: l, ou: 'under' })}>언더</button>
+            </div>
+          ))}
+        </div>
+      </>}
 
       <div style={label}>사이트</div>
       <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
@@ -443,7 +492,7 @@ function BasketSlip({ game, sites, registered, onBet }: {
 
       <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
         <div style={{ flex: 1 }}>
-          <div style={{ ...label, marginTop: 0 }}>배당{pick?.kind === 'hcap' ? ' (사이트 배당 입력)' : ''}</div>
+          <div style={{ ...label, marginTop: 0 }}>배당{pick && pick.kind !== 'win' ? ' (사이트 배당 입력)' : ''}</div>
           <input className="form-input" placeholder="배당 (185=1.85)" value={oddsRaw} inputMode="decimal"
             onChange={e => { const c = e.target.value.replace(/[^0-9.]/g, ''); setOddsRaw(/^\d{3}$/.test(c) ? (Number(c) / 100).toFixed(2) : c) }}
             onKeyDown={e => { if (e.key === 'Enter') submit() }} />
@@ -470,7 +519,7 @@ function BasketSlip({ game, sites, registered, onBet }: {
 
       <button type="button" className="btn btn-primary" disabled={!ready} onClick={submit}
         style={{ width: '100%', marginTop: 8, padding: '9px 0', fontWeight: 700, opacity: ready ? 1 : 0.5, display: 'flex', justifyContent: 'center' }}>
-        {busy ? '등록 중…' : !pick ? '승리팀이나 핸디캡을 고르세요' : !site ? '사이트를 고르세요' : !odds ? '배당을 넣으세요' : `${site.name}에 등록`}
+        {busy ? '등록 중…' : !pick ? (volley ? '베팅옵션을 고르세요' : '승리팀이나 핸디캡을 고르세요') : !site ? '사이트를 고르세요' : !odds ? '배당을 넣으세요' : `${site.name}에 등록`}
       </button>
       {done && <div style={{ fontSize: 11, color: 'var(--green)', marginTop: 6 }}>✓ {done}</div>}
     </div>
