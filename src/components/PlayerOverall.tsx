@@ -284,7 +284,7 @@ export default function PlayerOverall({ league, gameDate, home, away, left, odds
   }, [league, gameDate, home.name, away.name]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const newsAdj = Number(data?.news?.margin_adj ?? 0) || 0
-  const sim = useMemo(() => data ? simulate(data.code, data.home, data.away, ovr, newsAdj, data.cond) : null, [data, ovr, newsAdj])
+  const sim = useMemo(() => data && !data.code.startsWith('VLEAGUE') ? simulate(data.code, data.home, data.away, ovr, newsAdj, data.cond) : null, [data, ovr, newsAdj])
   const vsim = useMemo(() => data && data.code.startsWith('VLEAGUE') ? simulateVolleyGame(data.code, data.home, data.away, ovr, odds ?? null) : null, [data, ovr, odds?.home, odds?.away]) // eslint-disable-line react-hooks/exhaustive-deps
   const cycle = (p: PlayerOv) => setOvr(o => {
     const cur = o[p.id], n = { ...o }
