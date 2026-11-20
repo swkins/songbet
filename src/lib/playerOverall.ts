@@ -130,6 +130,7 @@ export const statusLabel = (p: number) => p >= 90 ? '출전' : p >= 70 ? '출전
 export interface GameOverall { code: string; home: TeamOv; away: TeamOv; checkedAt: string | null; news: GameNews | null; cond: { home: Condition; away: Condition } | null }
 export async function loadGameOverall(league: string, gameDate: string, home: ScheduleTeam, away: ScheduleTeam): Promise<GameOverall | null> {
   const code = OV_LEAGUE[league]; if (!code) return null
+  await loadModelParams()
   const d = await loadLeague(code)
   const vb = code.startsWith('VLEAGUE')
   const teams = [...new Set(d.cur.map(r => r.team).filter((x): x is string => !!x))]
@@ -251,7 +252,7 @@ export function teamStrength(players: PlayerOv[], overrides: Record<string, numb
   const prob = (p: PlayerOv) => (overrides[p.id] ?? p.avail.prob) / 100
   const full = rated.reduce((a, p) => a + wOf(p) * p.overall!, 0) / sw
   // 출전하면 개인 피로만큼 깎인 오버롤 (피로 감점 × 0.35), 빠지면 대체 선수 50
-  const eff = (p: PlayerOv) => p.overall! - 0.35 * (p.fatigue?.pen ?? 0)
+  const eff = (p: PlayerOv) => p.overall! - PARAMS.fatigueK * (p.fatigue?.pen ?? 0)
   const exp = rated.reduce((a, p) => a + wOf(p) * (eff(p) * prob(p) + 50 * (1 - prob(p))), 0) / sw
   return { full: Math.round(full * 10) / 10, exp: Math.round(exp * 10) / 10 }
 }
@@ -260,26 +261,52 @@ export function teamStrength(players: PlayerOv[], overrides: Record<string, numb
 // 마진 평균 = 득실 마진 50% + 오버롤 차 50% + 결장 반영(오버롤 손실 전부) + 홈 이점 + 뉴스 보정 + 컨디션 차(fatigue.ts)
 //  득실 마진 = (홈 득점 + 원정 실점)/2 − (원정 득점 + 홈 실점)/2 (이번 시즌), 오버롤 1점 = k점
 // 총점 = 두 팀 득실 평균 합. 마진·총점을 정규분포로 2만 번 뽑는다.
-export const SIM: Record<string, { sd: number; sdT: number; hca: number; k: number; avg: number }> = {
-  NBA: { sd: 13.5, sdT: 18, hca: 2.5, k: 1.0, avg: 113 },
-  KBL: { sd: 11, sdT: 14, hca: 2, k: 0.8, avg: 80 },
-  WKBL: { sd: 10, sdT: 12, hca: 2, k: 0.7, avg: 65 },
+// 가중치는 Supabase model_params(key 'sim')에 두고 매일 검토 보고서에서 승인하면 바뀐다 — 없으면 아래 기본값.
+export interface LeagueParams { sd: number; sdT: number; hca: number; k: number; avg: number; wScore: number; wOv: number; condK: number }
+export interface ModelParams { leagues: Record<string, LeagueParams>; fatigueK: number }
+export const DEFAULT_PARAMS: ModelParams = {
+  leagues: {
+    NBA: { sd: 13.5, sdT: 18, hca: 2.5, k: 1.0, avg: 113, wScore: 0.5, wOv: 0.5, condK: COND_K.NBA },
+    KBL: { sd: 11, sdT: 14, hca: 2, k: 0.8, avg: 80, wScore: 0.5, wOv: 0.5, condK: COND_K.KBL },
+    WKBL: { sd: 10, sdT: 12, hca: 2, k: 0.7, avg: 65, wScore: 0.5, wOv: 0.5, condK: COND_K.WKBL },
+  },
+  fatigueK: 0.35,
 }
-export interface SimResult { home: number; away: number; total: number; margin: number; homeWin: number; p10: number; p90: number; parts: { scoreMargin: number; ovMargin: number; injury: number; hca: number; news: number; cond: number } }
+let PARAMS: ModelParams = DEFAULT_PARAMS
+let paramsAt = 0
+export const getParams = () => PARAMS
+export async function loadModelParams(force = false): Promise<ModelParams> {
+  if (!force && Date.now() - paramsAt < 10 * 60000) return PARAMS
+  try {
+    const { data } = await supabase.from('model_params').select('value').eq('key', 'sim').maybeSingle()
+    const v = (data?.value ?? {}) as Partial<ModelParams>
+    const leagues: Record<string, LeagueParams> = {}
+    for (const [lg, d] of Object.entries(DEFAULT_PARAMS.leagues)) leagues[lg] = { ...d, ...(v.leagues?.[lg] ?? {}) }
+    PARAMS = { leagues, fatigueK: v.fatigueK ?? DEFAULT_PARAMS.fatigueK }
+    paramsAt = Date.now()
+  } catch { /* 기본값 */ }
+  return PARAMS
+}
+export interface SimResult { home: number; away: number; total: number; margin: number; homeWin: number; p10: number; p90: number
+  parts: { scoreMargin: number; ovMargin: number; injury: number; hca: number; news: number; cond: number }
+  // 가중치 빼기 전 값 — 예측 저장 후 검토에서 가중치를 바꿔 다시 계산해 보는 데 쓴다
+  raw: { scoreMargin: number; ovDiff: number; injDiff: number; condDiff: number; hca: number; news: number; T: number } }
 function randn() { let u = 0, v = 0; while (!u) u = Math.random(); while (!v) v = Math.random(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v) }
 export function simulate(code: string, home: TeamOv, away: TeamOv, overrides: Record<string, number>, newsAdj = 0, cond: { home: Condition; away: Condition } | null = null, n = 20000): SimResult | null {
-  const c = SIM[code]; if (!c) return null
+  const c = PARAMS.leagues[code]; if (!c) return null
   const H = teamStrength(home.players, overrides), A = teamStrength(away.players, overrides)
   if (H.full == null || A.full == null || H.exp == null || A.exp == null) return null
   const ok = (t: TeamStats | null) => t && t.n >= 3 ? t : { n: 0, pf: c.avg, pa: c.avg }
   const hs = ok(home.stats), as = ok(away.stats)
   const hPts = (hs.pf + as.pa) / 2, aPts = (as.pf + hs.pa) / 2
   const scoreMargin = hPts - aPts
-  const ovMargin = c.k * (H.full - A.full)
-  const injury = c.k * ((H.exp - H.full) - (A.exp - A.full))
-  // 컨디션: 1%p 차이 × COND_K (NBA 0.17점)
-  const condAdj = cond ? (COND_K[code] ?? 0.15) * (cond.home.pct - cond.away.pct) : 0
-  const mu = 0.5 * scoreMargin + 0.5 * ovMargin + injury + c.hca + newsAdj + condAdj
+  const ovDiff = H.full - A.full, injDiff = (H.exp - H.full) - (A.exp - A.full)
+  const ovMargin = c.k * ovDiff
+  const injury = c.k * injDiff
+  // 컨디션: 1%p 차이 × condK (NBA 0.17점)
+  const condDiff = cond ? cond.home.pct - cond.away.pct : 0
+  const condAdj = c.condK * condDiff
+  const mu = c.wScore * scoreMargin + c.wOv * ovMargin + injury + c.hca + newsAdj + condAdj
   const T = hPts + aPts
   const ms: number[] = []; let win = 0, sumH = 0, sumA = 0
   for (let i = 0; i < n; i++) {
@@ -291,5 +318,6 @@ export function simulate(code: string, home: TeamOv, away: TeamOv, overrides: Re
   const r1 = (x: number) => Math.round(x * 10) / 10
   return { home: Math.round(sumH / n), away: Math.round(sumA / n), total: Math.round(T), margin: r1(mu), homeWin: r1(win / n * 100),
     p10: r1(ms[Math.floor(n * 0.1)]), p90: r1(ms[Math.floor(n * 0.9)]),
-    parts: { scoreMargin: r1(scoreMargin), ovMargin: r1(ovMargin), injury: r1(injury), hca: c.hca, news: newsAdj, cond: r1(condAdj) } }
+    parts: { scoreMargin: r1(scoreMargin), ovMargin: r1(ovMargin), injury: r1(injury), hca: c.hca, news: newsAdj, cond: r1(condAdj) },
+    raw: { scoreMargin: r1(scoreMargin), ovDiff: r1(ovDiff), injDiff: r1(injDiff), condDiff, hca: c.hca, news: newsAdj, T: r1(T) } }
 }

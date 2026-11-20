@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import dayjs from 'dayjs'
 import UpdateStatus from '../components/UpdateStatus'
 import PlayerOverall from '../components/PlayerOverall'
-import { Activity } from 'lucide-react'
+import { Activity, ClipboardCheck } from 'lucide-react'
+import ModelReport, { loadPredictions, PredBadge, type Prediction } from '../components/ModelReport'
 import OddsHistory, { Arrow } from '../components/OddsHistory'
 import { loadOdds, oddsTrend, type OddsSnap } from '../lib/odds'
 import OverallAnalysisView, { loadOverallAnalyses, findAnalysis, type OverallAnalysis } from '../components/OverallAnalysisView'
@@ -38,6 +39,8 @@ export default function Schedule() {
   const [analyses, setAnalyses] = useState<OverallAnalysis[]>([])
   const [odds, setOdds] = useState<Record<string, OddsSnap[]>>({})
   const [showStatus, setShowStatus] = useState(false)
+  const [showReport, setShowReport] = useState(false)
+  const [preds, setPreds] = useState<Record<string, Prediction>>({})
   const [narrow, setNarrow] = useState(() => window.innerWidth < 800)
 
   useEffect(() => {
@@ -50,8 +53,8 @@ export default function Schedule() {
     setLoading(true)
     setSelId(null)
     const since = dayjs().subtract(1, 'day').format('YYYY-MM-DD')
-    Promise.all([loadSchedules(sport), loadOverallAnalyses(since).catch(() => []), loadOdds(since).catch(() => ({}))])
-      .then(([r, oa, od]) => { setRows(r); setAnalyses(oa); setOdds(od); setLoading(false) })
+    Promise.all([loadSchedules(sport), loadOverallAnalyses(since).catch(() => []), loadOdds(since).catch(() => ({})), loadPredictions(since).catch(() => [])])
+      .then(([r, oa, od, pr]) => { setRows(r); setAnalyses(oa); setOdds(od); setPreds(Object.fromEntries(pr.map(p => [p.game_id, p]))); setLoading(false) })
   }, [sport])
 
   const sportDef = SPORTS.find(s => s.id === sport)!
@@ -116,6 +119,10 @@ export default function Schedule() {
             </div>
             {teamLine(g.home, hs, st === 'ended' && hs > as, true)}
             {teamLine(g.away, as, st === 'ended' && as > hs, false)}
+            {/* 경기 전 예측 (snapshot-predictions) + 끝나면 적중/미적중 */}
+            {preds[g.id] && (
+              <div style={{ marginTop: 5, paddingTop: 4, borderTop: '1px dashed var(--border)', fontSize: 10 }}><PredBadge p={preds[g.id]} /></div>
+            )}
             {(() => {
               const oa = findAnalysis(analyses, g)
               if (!oa) return null
@@ -139,12 +146,16 @@ export default function Schedule() {
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12, borderBottom: '1px solid var(--border)', paddingBottom: 12 }}>
         {SPORTS.map(s => <button key={s.id} style={btn(sport === s.id)} onClick={() => setSport(s.id)}>{s.label}</button>)}
         {lastFetch && <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-muted)' }}>일정 업데이트 {dayjs(lastFetch).format('M/D HH:mm')}</span>}
-        <button onClick={() => setShowStatus(true)} style={{ ...btn(false), marginLeft: lastFetch ? 0 : 'auto', display: 'flex', alignItems: 'center', gap: 5 }}>
+        <button onClick={() => setShowReport(true)} style={{ ...btn(false), marginLeft: lastFetch ? 0 : 'auto', display: 'flex', alignItems: 'center', gap: 5 }}>
+          <ClipboardCheck size={13} /> 예측 보고서
+        </button>
+        <button onClick={() => setShowStatus(true)} style={{ ...btn(false), display: 'flex', alignItems: 'center', gap: 5 }}>
           <Activity size={13} /> 업데이트 현황
         </button>
       </div>
 
       {showStatus && <UpdateStatus onClose={() => setShowStatus(false)} />}
+      {showReport && <ModelReport onClose={() => setShowReport(false)} />}
       <div style={{ display: 'flex', flexDirection: narrow ? 'column' : 'row', gap: 16, alignItems: 'flex-start' }}>
         <div style={{ flex: narrow ? 'none' : 2, width: narrow ? '100%' : undefined, minWidth: 0, maxHeight: narrow ? 360 : 'calc(100vh - 180px)', overflowY: 'auto' }}>
           {list}
