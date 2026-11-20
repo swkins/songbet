@@ -48,7 +48,7 @@ export const tierOf = (ov: number | null | undefined) => (ov == null ? null : TI
 
 // 출전 확률 색 (초록 → 빨강)
 export function availColor(p: number): string {
-  return p >= 90 ? '#00E87A' : p >= 70 ? '#A3E635' : p >= 40 ? '#FACC15' : p > 0 ? '#FF4D6D' : '#B3001B'
+  return p >= 90 ? '#00E87A' : p >= 70 ? '#A3E635' : p >= 40 ? '#FACC15' : p > 0 ? '#FF4D6D' : '#FF3B3B'
 }
 
 export function seasonOf(d: string) { const y = +d.slice(0, 4), m = +d.slice(5, 7); const s = m >= 8 ? y : y - 1; return `${s}-${String(s + 1).slice(2)}` }
