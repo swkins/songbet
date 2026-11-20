@@ -185,8 +185,9 @@ function GameAnalysis({ g, analysis, odds }: { g: Item; analysis: OverallAnalysi
         </div>
         {side(g.away, '원정')}
       </div>
-      {odds?.length ? <OddsHistory list={odds} homeName={koName(g.home.name)} awayName={koName(g.away.name)} /> : null}
-      <PlayerOverall league={g.league} gameDate={g.date} home={g.home} away={g.away} />
+      {/* 좌: 배당 변동 + 예상 스코어 / 우: 선수 오버롤·출전 확률 / 아래: 뉴스 */}
+      <PlayerOverall league={g.league} gameDate={g.date} home={g.home} away={g.away}
+        left={odds?.length ? <OddsHistory compact list={odds} homeName={koName(g.home.name)} awayName={koName(g.away.name)} /> : null} />
       {analysis ? <OverallAnalysisView a={analysis} />
         : null}
     </div>

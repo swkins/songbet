@@ -32,7 +32,7 @@ function AvailCell({ p, ov, onCycle }: { p: PlayerOv; ov?: number; onCycle: () =
 function TeamTable({ title, t, ovr, onCycle }: { title: string; t: TeamOv; ovr: Record<string, number>; onCycle: (p: PlayerOv) => void }) {
   const st = teamStrength(t.players, ovr)
   return (
-    <div style={{ ...box, flex: '1 1 320px', minWidth: 0 }}>
+    <div style={{ ...box, flex: '1 1 280px', minWidth: 0 }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>
         <span style={{ fontSize: 12, fontWeight: 800 }}>{title}</span>
         {st.full != null && (
@@ -90,7 +90,8 @@ function TeamTable({ title, t, ovr, onCycle }: { title: string; t: TeamOv; ovr: 
   )
 }
 
-export default function PlayerOverall({ league, gameDate, home, away }: { league: string; gameDate: string; home: ScheduleTeam; away: ScheduleTeam }) {
+// 배치: 좌(좁게) = left(배당 변동) + 예상 스코어 · 우(넓게) = 선수 오버롤·출전 확률 · 아래 = 뉴스
+export default function PlayerOverall({ league, gameDate, home, away, left }: { league: string; gameDate: string; home: ScheduleTeam; away: ScheduleTeam; left?: React.ReactNode }) {
   const [data, setData] = useState<GameOverall | null | undefined>(undefined)
   const [err, setErr] = useState<string | null>(null)
   const [ovr, setOvr] = useState<Record<string, number>>({})   // 화면에서 바꿔 본 출전 확률
@@ -109,63 +110,75 @@ export default function PlayerOverall({ league, gameDate, home, away }: { league
     return n
   })
 
-  if (err) return <div style={{ fontSize: 12, color: 'var(--red)', marginTop: 12 }}>선수 오버롤을 못 불러왔어요: {err}</div>
-  if (data === undefined) return <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 12 }}>선수 오버롤 계산 중…</div>
-  if (!data) return null
+  if (err || !data) return (
+    <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8, maxWidth: 420 }}>
+      {left}
+      {err ? <div style={{ fontSize: 12, color: 'var(--red)' }}>선수 오버롤을 못 불러왔어요: {err}</div>
+        : data === undefined ? <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>선수 오버롤 계산 중…</div> : null}
+    </div>
+  )
   const H = teamStrength(data.home.players, ovr), A = teamStrength(data.away.players, ovr)
   const diff = H.exp != null && A.exp != null ? Math.round((H.exp - A.exp) * 10) / 10 : null
   const signed = (v: number) => `${v > 0 ? '+' : ''}${v}`
   const hName = koName(home.name), aName = koName(away.name)
   const changed = Object.keys(ovr).length
   return (
-    <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
-      {/* 예상 스코어 — 선수 오버롤·출전 확률·뉴스 보정으로 2만 번 시뮬레이션. 출전 칸을 누르면 바로 다시 계산 */}
-      {sim && (
-        <div style={{ ...box, borderColor: 'var(--gold-border)' }}>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
-            <span style={{ fontSize: 13, fontWeight: 800 }}>예상 스코어</span>
-            <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>오버롤·출전 확률·이번 시즌 득실로 2만 번 시뮬레이션{changed ? ` · 가정 ${changed}명 적용 중` : ''}</span>
-            {changed > 0 && <button type="button" onClick={() => setOvr({})} style={{ marginLeft: 'auto', fontSize: 10, background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-secondary)', cursor: 'pointer', padding: '1px 6px' }}>가정 지우기</button>}
-          </div>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            {[
-              ['스코어 (홈-원정)', `${sim.home} - ${sim.away}`, `${hName} - ${aName}`],
-              ['홈 승률', `${sim.homeWin}%`, `원정 ${Math.round((100 - sim.homeWin) * 10) / 10}%`],
-              ['예상 마진 (홈)', signed(sim.margin), `80% 구간 ${signed(sim.p10)} ~ ${signed(sim.p90)}`],
-              ['예상 총점', String(sim.total), '두 팀 이번 시즌 득실 기준'],
-            ].map(([k, v, sub]) => (
-              <div key={k} style={{ flex: '1 1 120px', textAlign: 'center', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '6px 4px', background: 'var(--bg-card)' }}>
-                <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{k}</div>
-                <div style={{ fontSize: 19, fontWeight: 800, fontFamily: 'var(--font-num)' }}>{v}</div>
-                <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{sub}</div>
+    <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+        {/* 좌: 배당 변동 + 예상 스코어 */}
+        <div style={{ flex: '1 1 300px', maxWidth: 420, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {left}
+          {/* 예상 스코어 — 선수 오버롤·출전 확률·뉴스 보정으로 2만 번 시뮬레이션. 출전 칸을 누르면 바로 다시 계산 */}
+          {sim && (
+            <div style={{ ...box, borderColor: 'var(--gold-border)' }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
+                <span style={{ fontSize: 13, fontWeight: 800 }}>예상 스코어</span>
+                <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>오버롤·출전 확률·이번 시즌 득실로 2만 번 시뮬레이션{changed ? ` · 가정 ${changed}명 적용 중` : ''}</span>
+                {changed > 0 && <button type="button" onClick={() => setOvr({})} style={{ marginLeft: 'auto', fontSize: 10, background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-secondary)', cursor: 'pointer', padding: '1px 6px' }}>가정 지우기</button>}
               </div>
-            ))}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                {[
+                  ['스코어 (홈-원정)', `${sim.home} - ${sim.away}`, `${hName} - ${aName}`],
+                  ['홈 승률', `${sim.homeWin}%`, `원정 ${Math.round((100 - sim.homeWin) * 10) / 10}%`],
+                  ['예상 마진 (홈)', signed(sim.margin), `80% 구간 ${signed(sim.p10)} ~ ${signed(sim.p90)}`],
+                  ['예상 총점', String(sim.total), '두 팀 이번 시즌 득실 기준'],
+                ].map(([k, v, sub]) => (
+                  <div key={k} style={{ textAlign: 'center', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '6px 4px', background: 'var(--bg-card)' }}>
+                    <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{k}</div>
+                    <div style={{ fontSize: 18, fontWeight: 800, fontFamily: 'var(--font-num)' }}>{v}</div>
+                    <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{sub}</div>
+                  </div>
+                ))}
+              </div>
+              <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 6, lineHeight: 1.6 }}>
+                마진 = 득실 마진 {signed(sim.parts.scoreMargin)} × 0.5 + 오버롤 차 {signed(sim.parts.ovMargin)} × 0.5 + 결장 반영 {signed(sim.parts.injury)} + 홈 {signed(sim.parts.hca)}
+                {sim.parts.news ? <> + 뉴스 보정 {signed(sim.parts.news)}{data.news?.adj_note ? ` (${data.news.adj_note})` : ''}</> : null}
+                {' '}· 선수 출전 칸을 누르면 결장/출전으로 바꿔 다시 계산
+              </div>
+            </div>
+          )}
+          {!sim && data.code.startsWith('VLEAGUE') && <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>배구는 예상 스코어 시뮬레이션 준비 중 — 선수 오버롤만 표시</div>}
+        </div>
+        {/* 우: 선수 오버롤 · 출전 확률 */}
+        <div style={{ flex: '3 1 560px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 13, fontWeight: 800 }}>선수 오버롤 · 출전 확률</span>
+            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+              체급 순 · {data.checkedAt ? `뉴스 확인 ${dayjs(data.checkedAt).format('M/D HH:mm')}` : '뉴스 확인 전'}
+              {diff != null && <> · 결장 반영 팀 오버롤 차이 <b style={{ color: diff >= 0 ? 'var(--gold)' : 'var(--blue)' }}>{diff >= 0 ? `홈 +${diff}` : `원정 +${-diff}`}</b></>}
+            </span>
           </div>
-          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 6, lineHeight: 1.6 }}>
-            마진 = 득실 마진 {signed(sim.parts.scoreMargin)} × 0.5 + 오버롤 차 {signed(sim.parts.ovMargin)} × 0.5 + 결장 반영 {signed(sim.parts.injury)} + 홈 {signed(sim.parts.hca)}
-            {sim.parts.news ? <> + 뉴스 보정 {signed(sim.parts.news)}{data.news?.adj_note ? ` (${data.news.adj_note})` : ''}</> : null}
-            {' '}· 선수 출전 칸을 누르면 결장/출전으로 바꿔 다시 계산
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+            <TeamTable title={`홈 · ${hName}`} t={data.home} ovr={ovr} onCycle={cycle} />
+            <TeamTable title={`원정 · ${aName}`} t={data.away} ovr={ovr} onCycle={cycle} />
+          </div>
+          <div style={{ fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.7 }}>
+            오버롤 = 체급 × 0.7 + 최근 5경기 폼 × 0.3 (체급 = 이번 시즌 + 지난 시즌, 경기가 쌓일수록 이번 시즌 비중↑) ·{' '}
+            {TIERS.map(t => <span key={t.name} style={{ color: t.color, marginRight: 6 }}>{t.name} {t.min >= 0 ? `${t.min}+` : '~59'}</span>)}
+            <br />출전: <span style={{ color: availColor(95) }}>● 90%↑</span> <span style={{ color: availColor(80) }}>● 70~89</span> <span style={{ color: availColor(50) }}>● 40~69</span> <span style={{ color: availColor(20) }}>● 1~39</span> <span style={{ color: availColor(0) }}>● 결장</span>
+            {' '}· 확정/추정 = Claude가 뉴스·ESPN 명단을 읽고 판단 · ↩ 복귀·⏱ 출전 제한 = 경기 기록 · 팀 오버롤 = 출전시간 × 이번 시즌 출전 비중 가중, 결장 반영 = 결장 확률만큼 대체 선수(50)로
           </div>
         </div>
-      )}
-      {!sim && data.code.startsWith('VLEAGUE') && <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>배구는 예상 스코어 시뮬레이션 준비 중 — 선수 오버롤만 표시</div>}
-
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
-        <span style={{ fontSize: 13, fontWeight: 800 }}>선수 오버롤 · 출전 확률</span>
-        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-          체급 순 · {data.checkedAt ? `뉴스 확인 ${dayjs(data.checkedAt).format('M/D HH:mm')}` : '뉴스 확인 전'}
-          {diff != null && <> · 결장 반영 팀 오버롤 차이 <b style={{ color: diff >= 0 ? 'var(--gold)' : 'var(--blue)' }}>{diff >= 0 ? `홈 +${diff}` : `원정 +${-diff}`}</b></>}
-        </span>
-      </div>
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-        <TeamTable title={`홈 · ${hName}`} t={data.home} ovr={ovr} onCycle={cycle} />
-        <TeamTable title={`원정 · ${aName}`} t={data.away} ovr={ovr} onCycle={cycle} />
-      </div>
-      <div style={{ fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.7 }}>
-        오버롤 = 체급 × 0.7 + 최근 5경기 폼 × 0.3 (체급 = 이번 시즌 + 지난 시즌, 경기가 쌓일수록 이번 시즌 비중↑) ·{' '}
-        {TIERS.map(t => <span key={t.name} style={{ color: t.color, marginRight: 6 }}>{t.name} {t.min >= 0 ? `${t.min}+` : '~59'}</span>)}
-        <br />출전: <span style={{ color: availColor(95) }}>● 90%↑</span> <span style={{ color: availColor(80) }}>● 70~89</span> <span style={{ color: availColor(50) }}>● 40~69</span> <span style={{ color: availColor(20) }}>● 1~39</span> <span style={{ color: availColor(0) }}>● 결장</span>
-        {' '}· 확정/추정 = Claude가 뉴스·ESPN 명단을 읽고 판단 · ↩ 복귀·⏱ 출전 제한 = 경기 기록 · 팀 오버롤 = 출전시간 × 이번 시즌 출전 비중 가중, 결장 반영 = 결장 확률만큼 대체 선수(50)로
       </div>
 
       {/* 뉴스 — 경기 관련 기사 요약 (맨 아래) */}

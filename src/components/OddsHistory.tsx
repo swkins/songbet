@@ -9,7 +9,7 @@ export function Arrow({ d }: { d: number }) {
   return <span style={{ fontSize: 9, marginLeft: 2, color: d < 0 ? 'var(--green)' : 'var(--red)' }}>{d < 0 ? '▼' : '▲'}</span>
 }
 
-export default function OddsHistory({ list, homeName, awayName }: { list: OddsSnap[]; homeName: string; awayName: string }) {
+export default function OddsHistory({ list, homeName, awayName, compact }: { list: OddsSnap[]; homeName: string; awayName: string; compact?: boolean }) {
   const last = list[list.length - 1]
   const hasOpen = last.open_home != null
   const rows = [...list].reverse()
@@ -19,16 +19,16 @@ export default function OddsHistory({ list, homeName, awayName }: { list: OddsSn
     <td style={{ ...td, fontWeight: 700 }}>{v?.toFixed(2) ?? '–'}{v != null && prev != null && <Arrow d={+(v - prev).toFixed(2)} />}</td>
   )
   return (
-    <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '10px 12px', background: 'var(--bg-elevated)', marginTop: 12 }}>
+    <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '10px 12px', background: 'var(--bg-elevated)', marginTop: compact ? 0 : 12 }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>
         <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)' }}>승패 배당 변동</span>
-        <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{SRC[last.source] ?? last.source}{last.books ? ` (${last.books}곳)` : ''} · 바뀐 때만 기록 · 해외 기준이라 사이트 배당과 다를 수 있음</span>
+        <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{SRC[last.source] ?? last.source}{last.books ? ` (${last.books}곳)` : ''}{compact ? '' : ' · 바뀐 때만 기록 · 해외 기준이라 사이트 배당과 다를 수 있음'}</span>
       </div>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
         <thead><tr>
           <th style={{ ...th, textAlign: 'left' }}>시각</th>
-          <th style={th}>홈 · {homeName}</th><th style={th}>원정 · {awayName}</th>
-          {last.home_tickets != null && <th style={th}>홈 티켓%</th>}
+          <th style={th}>{compact ? homeName : `홈 · ${homeName}`}</th><th style={th}>{compact ? awayName : `원정 · ${awayName}`}</th>
+          {last.home_tickets != null && <th style={th}>{compact ? '홈%' : '홈 티켓%'}</th>}
         </tr></thead>
         <tbody>
           {rows.map((r, i) => {
@@ -51,7 +51,7 @@ export default function OddsHistory({ list, homeName, awayName }: { list: OddsSn
           )}
         </tbody>
       </table>
-      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4 }}>▼ 배당 내려감(그쪽으로 돈이 몰림) · ▲ 올라감</div>
+      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4 }}>▼ 내려감(돈 몰림) · ▲ 올라감{compact ? ' · 바뀐 때만 기록, 해외 기준' : ''}</div>
     </div>
   )
 }
