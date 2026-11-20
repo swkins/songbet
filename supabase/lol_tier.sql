@@ -151,3 +151,9 @@ $$;
 -- v_lol_player_tier: ind = (comp + 상대 강도 − 리그 세트 가중 평균) × games/(games+30) (국제전 +15·상대 강도 0), g = 리그 수준 + ind,
 --   가중 2026 1 · 2025 0.35 · 2024 0.1 · 국제전 ×1.5 · 하위 리그 ×1/3, prior (리그 수준 − 0.3) × 80세트, low_sample n < 100, tier = 62 + 16σ.
 -- (마이그레이션 lol_player_tier_v7_sos_shrink, 뷰 v_lol_team_sos는 execute_sql로 만듦)
+
+-- 속도 (2026-11-20): v_lol_team_power(팀 이름 정규식 매칭)·v_lol_team_sos를 행마다 다시 계산해 19초 → 시간 초과로 체급이 '–'.
+-- 구체화 뷰 mv_lol_team_power·mv_lol_team_sos로 두고 v_lol_player_tier가 그걸 읽음 (0.2초).
+-- create materialized view if not exists public.mv_lol_team_power as select * from public.v_lol_team_power;
+-- create materialized view if not exists public.mv_lol_team_sos as select * from public.v_lol_team_sos;
+-- refresh_lol_tier() = mv_lol_season_comp → mv_lol_team_power → mv_lol_team_sos 순서로 새로 고침.

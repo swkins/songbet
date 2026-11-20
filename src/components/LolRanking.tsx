@@ -46,7 +46,8 @@ export default function LolRanking() {
         for (const r of raw ?? []) lgMax.set(r.league, Math.max(lgMax.get(r.league) ?? 0, r.games))
         const data = (raw ?? []).map((r: any) => ({ ...r, regular: r.games >= Math.max(5, (lgMax.get(r.league) ?? 0) * 0.25), composite: 0, base: 0, role_rank: 0 }))
         // 체급 v2 (여러 시즌 + 국제전 + 리그 보정 — v_lol_player_tier)를 선수 키(Leaguepedia 링크 또는 이름)로 붙인다
-        supabase.from('v_lol_player_tier').select('pkey, tier, tier_now, seasons, zs_now, low_sample').limit(5000).then(({ data: tiers }) => {
+        supabase.from('v_lol_player_tier').select('pkey, tier, tier_now, seasons, zs_now, low_sample').limit(5000).then(({ data: tiers, error: tErr }) => {
+          if (tErr) setErr('체급 불러오기 실패: ' + tErr.message)
           const tm = new Map((tiers ?? []).map((t: any) => [t.pkey, t]))
           setRows((data ?? []).map((r: any) => {
             const o: any = { ...r }
