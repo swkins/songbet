@@ -60,15 +60,31 @@ with base as (
   from q join comp c using (season, league, pkey)
   left join kz k using (season)
   left join public.lol_league_strength s on s.season = q.season and s.league = q.league
+), gpr as (
+  -- 팀 전력 (사용자 요청 — 하위 팀끼리만 싸운 선수가 높게 나오는 문제): Riot GPR 팀 점수, 시즌 마지막 기록
+  select distinct on (season, public.lol_team_key(team)) season, public.lol_team_key(team) k, points from public.lol_team_gpr order by season, public.lol_team_key(team), snapshot desc
+), tg as (
+  select dt.season, dt.league, dt.team,
+         (select g.points from gpr g where g.season = dt.season and public.lol_team_match(g.k, public.lol_team_key(dt.team)) order by length(g.k) desc limit 1) pts
+  from (select distinct season, league, team from q where league <> 'INTL' and team is not null) dt
+), tgl as (
+  select season, league, avg(pts) avgpts from tg where pts is not null group by 1, 2
+), dom2 as (
+  -- 리그 안 팀 전력 차(GPR 점수 − 리그 팀 평균, Elo → logit) × Kz × 0.8 을 더한다 — 강팀 상대로 낸 기록일수록 높게
+  select d.*, coalesce(0.8 * coalesce(k.kz, .3) * (t.pts - l.avgpts) * ln(10) / 400, 0) as tadj
+  from dom d left join kz k using (season)
+  left join tg t on t.season = d.season and t.league = d.league and t.team = d.team
+  left join tgl l on l.season = d.season and l.league = d.league
 ), intl_anchor as (
   -- 국제전 참가 선수들의 같은 해 리그 보정 점수(경기 가중) 평균 − 국제전 합성 평균
-  select i.season, sum(d.gcomp * i.games) / sum(i.games) - sum(i.comp * i.games) / sum(i.games) a
-  from dom i join dom d on d.season = i.season and d.pkey = i.pkey and d.league <> 'INTL' and d.gcomp is not null
+  select i.season, sum((d.gcomp + d.tadj) * i.games) / sum(i.games) - sum(i.comp * i.games) / sum(i.games) a
+  from dom i join dom2 d on d.season = i.season and d.pkey = i.pkey and d.league <> 'INTL' and d.gcomp is not null
   where i.league = 'INTL' group by i.season
 )
 select d.season, d.league, d.pkey, d.player, d.team, d.role, d.games, d.regular, round(d.comp::numeric, 3) comp, d.zs,
-       round((case when d.league = 'INTL' then d.comp + a.a else d.gcomp end)::numeric, 3) gcomp
-from dom d left join intl_anchor a on a.season = d.season and d.league = 'INTL';
+       round((case when d.league = 'INTL' then d.comp + a.a else d.gcomp + d.tadj end)::numeric, 3) gcomp,
+       round(d.tadj::numeric, 3) tadj
+from dom2 d left join intl_anchor a on a.season = d.season and d.league = 'INTL';
 grant select on public.v_lol_season_comp to anon, authenticated;
 
 create or replace view public.v_lol_player_tier as
@@ -107,3 +123,9 @@ create or replace function public.refresh_lol_tier() returns void language sql s
 $$;
 -- (v_lol_player_tier는 위 정의에서 v_lol_season_comp 대신 mv_lol_season_comp를 읽도록 바꿔 적용함)
 -- 리그 보정 추정 (GPR 없음): LCK CL 2024·2025·2026 = LCK − 2.0 logit, 2025 LCS(LTA 북부) −2.7 · CBLOL(LTA 남부) −3.8 (2025 GPR에 LTA 지역 점수 없음)
+
+-- ── v3 (사용자 요청 2026-11-20): 팀 전력 · 최근 가중 · 적은 표본 · 눈금 ──
+-- v_lol_season_comp: dom2에서 팀 전력 tadj = 0.8 × Kz × (GPR 팀 점수 − 리그 팀 평균) × ln10/400 를 gcomp에 더함 (lol_team_gpr 시즌 마지막 기록,
+--   팀 이름은 public.lol_team_key(소문자·악센트·esports/gaming/team/kia 등 뗌) + public.lol_team_match(같음·앞·뒤 일치, 스폰서 이름 대비)). 결과 칸 tadj 추가.
+-- v_lol_player_tier: 2026 ×1 · 2025 ×0.4 · 2024 ×0.15 (국제전 ×1.5), prior = 리그 주전 평균 − 0.3σ, 40세트만큼 당김, low_sample = 유효 세트 < 60,
+--   tier = 62 + 14σ (1~99), tier_now = 2026 리그 기록만 같은 보정. (실제 적용 SQL은 마이그레이션 lol_season_comp_team_adj · lol_player_tier_v3b)
