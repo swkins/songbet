@@ -65,8 +65,8 @@ export function resolveTeamName(t: ScheduleTeam, league: string, registered: { l
 }
 
 /** 오늘부터의 일정 (모든 종목) */
-export async function loadSchedules(sport?: string): Promise<ScheduleRow[]> {
-  let q = supabase.from('game_schedules').select('sport, league, game_date, games, fetched_at').gte('game_date', dayjs().format('YYYY-MM-DD')).order('game_date')
+export async function loadSchedules(sport?: string, from?: string): Promise<ScheduleRow[]> {
+  let q = supabase.from('game_schedules').select('sport, league, game_date, games, fetched_at').gte('game_date', from ?? dayjs().format('YYYY-MM-DD')).order('game_date')
   if (sport) q = q.eq('sport', sport)
   const { data } = await q
   return (data ?? []) as ScheduleRow[]

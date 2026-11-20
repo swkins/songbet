@@ -12,7 +12,7 @@ import { loadSchedules, gameState, koName, type ScheduleGame, type ScheduleTeam,
 // '분석' 탭 — 종목별 다음 경기 일정.
 // 일정은 Supabase 함수 update-schedule이 ESPN·KBL·WKBL·KOVO에서 받아 game_schedules(sport, league, game_date=한국 날짜)에 넣는다.
 // 화면은 읽기만 한다. 종목을 늘리려면 SPORTS에 추가하고 함수에도 리그를 넣는다.
-// 레이아웃: 좌 일정(오늘·내일 한 목록, 종료 경기는 흐리게) 2 : 우 분석(누른 경기) 8. 좁은 화면은 위아래로.
+// 레이아웃: 좌 일정(오늘·내일 한 목록 — 경기 전만, 시작·종료 경기는 맨 위 접힌 '지난 경기'(지난 하루)) 2 : 우 분석(누른 경기) 8. 좁은 화면은 위아래로.
 
 const SPORTS: { id: string; label: string; leagues: string[] }[] = [
   { id: 'basketball', label: '🏀 농구', leagues: ['KBL', 'WKBL', 'NBA'] },
@@ -42,6 +42,9 @@ export default function Schedule() {
   const [showReport, setShowReport] = useState(false)
   const [preds, setPreds] = useState<Record<string, Prediction>>({})
   const [narrow, setNarrow] = useState(() => window.innerWidth < 800)
+  const [showPast, setShowPast] = useState(false)       // 지난 경기(시작했거나 끝난 경기, 지난 하루) — 맨 위에 접어 둠
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 60000); return () => clearInterval(t) }, [])   // 시작한 경기가 1분 안에 지난 경기로 넘어가게
 
   useEffect(() => {
     const on = () => setNarrow(window.innerWidth < 800)
@@ -53,7 +56,7 @@ export default function Schedule() {
     setLoading(true)
     setSelId(null)
     const since = dayjs().subtract(1, 'day').format('YYYY-MM-DD')
-    Promise.all([loadSchedules(sport), loadOverallAnalyses(since).catch(() => []), loadOdds(since).catch(() => ({})), loadPredictions(since).catch(() => [])])
+    Promise.all([loadSchedules(sport, since), loadOverallAnalyses(since).catch(() => []), loadOdds(since).catch(() => ({})), loadPredictions(since).catch(() => [])])
       .then(([r, oa, od, pr]) => { setRows(r); setAnalyses(oa); setOdds(od); setPreds(Object.fromEntries(pr.map(p => [p.game_id, p]))); setLoading(false) })
   }, [sport])
 
@@ -76,12 +79,12 @@ export default function Schedule() {
   })
   const muted: React.CSSProperties = { color: 'var(--text-muted)', fontSize: 13 }
 
+  // 경기 전만 목록에, 시작했거나 끝난 경기는 '지난 경기'로 (사용자 요청) — 지난 하루치만
+  const upcoming = items.filter(g => gameState(g, now) === 'pre')
+  const past = items.filter(g => gameState(g, now) !== 'pre' && Date.parse(g.start) >= now - 24 * 3600000)
   let prevDate = ''
-  const list = loading ? <div style={muted}>불러오는 중…</div>
-    : sportDef.leagues.length === 0 ? <div style={muted}>아직 일정 연결 전입니다.</div>
-    : items.length === 0 ? <div style={muted}>받아온 일정이 없습니다.</div>
-    : items.map(g => {
-      const st = gameState(g)
+  const card = (g: Item) => {
+      const st = gameState(g, now)
       const showScore = st !== 'pre' && g.home.score != null && g.away.score != null
       const hs = Number(g.home.score), as = Number(g.away.score)
       const header = g.date !== prevDate ? (prevDate = g.date, (
@@ -137,7 +140,23 @@ export default function Schedule() {
           </div>
         </div>
       )
-    })
+    }
+  const pastBox = past.length > 0 && (
+    <div style={{ marginBottom: 6 }}>
+      <button type="button" onClick={() => setShowPast(o => !o)} style={{ ...btn(showPast), width: '100%', display: 'flex', justifyContent: 'space-between', padding: '6px 10px', fontSize: 11 }}>
+        <span>{showPast ? '▾' : '▸'} 지난 경기 <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>(시작·종료, 지난 하루)</span></span>
+        <span>{past.length}{past.some(g => gameState(g, now) === 'live') ? ` · 경기중 ${past.filter(g => gameState(g, now) === 'live').length}` : ''}</span>
+      </button>
+      {showPast && <div style={{ marginTop: 4 }}>{(prevDate = '', past.map(card))}</div>}
+    </div>
+  )
+  const list = loading ? <div style={muted}>불러오는 중…</div>
+    : sportDef.leagues.length === 0 ? <div style={muted}>아직 일정 연결 전입니다.</div>
+    : items.length === 0 ? <div style={muted}>받아온 일정이 없습니다.</div>
+    : <>
+      {pastBox}
+      {(prevDate = '', upcoming.length ? upcoming.map(card) : <div style={{ ...muted, padding: 6 }}>남은 경기가 없습니다.</div>)}
+    </>
 
   return (
     <div className="page">
