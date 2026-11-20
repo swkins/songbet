@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import dayjs from 'dayjs'
 import UpdateStatus from '../components/UpdateStatus'
+import LolRanking from '../components/LolRanking'
 import PlayerOverall from '../components/PlayerOverall'
 import { Activity, ClipboardCheck } from 'lucide-react'
 import ModelReport, { loadPredictions, PredBadge, type Prediction } from '../components/ModelReport'
@@ -179,6 +180,8 @@ export default function Schedule({ onGoBet }: { onGoBet?: (t: { sport: string; l
 
       {showStatus && <UpdateStatus onClose={() => setShowStatus(false)} />}
       {showReport && <ModelReport onClose={() => setShowReport(false)} />}
+      {/* LOL: 일정 연결 전이라 선수 체급 · 라인별 순위 (사용자 요청) */}
+      {sport === 'esports' ? <LolRanking /> : (
       <div style={{ display: 'flex', flexDirection: narrow ? 'column' : 'row', gap: 16, alignItems: 'flex-start' }}>
         <div style={{ flex: narrow ? 'none' : 2, width: narrow ? '100%' : undefined, minWidth: 0, maxHeight: narrow ? 360 : 'calc(100vh - 180px)', overflowY: 'auto' }}>
           {list}
@@ -187,6 +190,7 @@ export default function Schedule({ onGoBet }: { onGoBet?: (t: { sport: string; l
           {sel ? <GameAnalysis onGoBet={onGoBet} g={sel} analysis={findAnalysis(analyses, sel)} odds={odds[sel.id]} /> : <div style={{ ...muted, padding: 24, textAlign: 'center' }}>왼쪽에서 경기를 누르면 여기에 분석이 나옵니다.</div>}
         </div>
       </div>
+      )}
     </div>
   )
 }
