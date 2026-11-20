@@ -46,7 +46,8 @@ async function snapshot(leagues: string[], from: number, to: number, save: boole
         const ratings = ([['home', d.home], ['away', d.away]] as const).flatMap(([side, t]) => t.players.map(x => ({
           league: d.code, player_id: x.id, game_date: r.game_date, team: t.team, base: x.base, form: x.form, overall: x.overall,
           stamina: staminaOf(x, d.cond ? d.cond[side] : null), saved_at: new Date().toISOString() })))
-        if (ratings.length) await supabase.from('player_ratings').upsert(ratings)
+        const uniq = [...new Map(ratings.map(x => [x.player_id, x])).values()]
+        if (uniq.length) { const { error: e2 } = await supabase.from('player_ratings').upsert(uniq); if (e2) out.push({ game: g.id, ratingsError: e2.message }) }
       }
     } catch (e) { out.push({ game: g.id, error: String(e) }) }
   }

@@ -179,7 +179,7 @@ export async function loadGameOverall(league: string, gameDate: string, home: Sc
     const top = [...roster].sort((x, y) => vb ? (y.gmsc ?? 0) * y.gp - (x.gmsc ?? 0) * x.gp : (y.min ?? 0) * y.gp - (x.min ?? 0) * x.gp).slice(0, 10)
     const extra: SeasonRow[] = []
     const addExtra = (id: string | null, name: string) => {
-      if (top.some(p => p.player_id === id || norm(p.player_name) === norm(name))) return
+      if ([...top, ...extra].some(p => p.player_id === id || norm(p.player_name) === norm(name))) return   // 부상 명단·출전 확률 양쪽에 있는 선수 두 번 넣지 않기
       const inRoster = roster.find(r => r.player_id === id || norm(r.player_name) === norm(name))
       if (inRoster) { extra.push(inRoster); return }
       const pb = (id && prevById.get(id)) || prevByName.get(norm(name))
