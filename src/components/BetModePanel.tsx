@@ -10,11 +10,13 @@ import { supabase } from '../lib/supabase'
 // 종목 → (그 아래) 리그 → 경기 목록 → 베팅옵션(팀·옵션·사이트·배당·금액) 순으로 오른쪽으로 펼쳐진다.
 // 등록하면 베팅추가와 똑같이 "팀 홈/원정 옵션" 문구로 저장 (onBet = Dashboard submitBet).
 
+// 종목 순서 (사용자 요청): 축구 · 야구 · 농구 · 배구 · LOL
 const SPORT_DEF: { id: string; label: string; icon: string }[] = [
-  { id: 'basketball', label: '농구', icon: '🏀' },
-  { id: 'volleyball', label: '배구', icon: '🏐' },
   { id: 'soccer', label: '축구', icon: '⚽' },
   { id: 'baseball', label: '야구', icon: '⚾' },
+  { id: 'basketball', label: '농구', icon: '🏀' },
+  { id: 'volleyball', label: '배구', icon: '🏐' },
+  { id: 'esports', label: 'LOL', icon: '🎮' },
 ]
 const KO_DAY = '일월화수목금토'
 const when = (iso: string) => {

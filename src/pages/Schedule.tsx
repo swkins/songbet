@@ -14,12 +14,15 @@ import { loadSchedules, gameState, koName, type ScheduleGame, type ScheduleTeam,
 // 화면은 읽기만 한다. 종목을 늘리려면 SPORTS에 추가하고 함수에도 리그를 넣는다.
 // 레이아웃: 좌 일정(오늘·내일 한 목록 — 경기 전만, 시작·종료 경기는 맨 위 접힌 '지난 경기'(지난 하루)) 2 : 우 분석(누른 경기) 8. 좁은 화면은 위아래로.
 
-const SPORTS: { id: string; label: string; leagues: string[] }[] = [
-  { id: 'basketball', label: '🏀 농구', leagues: ['KBL', 'WKBL', 'NBA'] },
-  { id: 'volleyball', label: '🏐 배구', leagues: ['V리그 남자', 'V리그 여자'] },
+// 종목 순서 (사용자 요청): 전체 · 축구 · 야구 · 농구 · 배구 · LOL
+const SPORT_LIST: { id: string; label: string; leagues: string[] }[] = [
   { id: 'soccer', label: '⚽ 축구', leagues: [] },
   { id: 'baseball', label: '⚾ 야구', leagues: [] },
+  { id: 'basketball', label: '🏀 농구', leagues: ['KBL', 'WKBL', 'NBA'] },
+  { id: 'volleyball', label: '🏐 배구', leagues: ['V리그 남자', 'V리그 여자'] },
+  { id: 'esports', label: '🎮 LOL', leagues: [] },
 ]
+const SPORTS = [{ id: 'all', label: '전체', leagues: SPORT_LIST.flatMap(s => s.leagues) }, ...SPORT_LIST]
 
 interface Item extends ScheduleGame { league: string; date: string; fetchedAt: string }
 type Team = ScheduleTeam
@@ -32,7 +35,7 @@ const dateLabel = (d: string) => {
 }
 
 export default function Schedule() {
-  const [sport, setSport] = useState('basketball')
+  const [sport, setSport] = useState('all')
   const [rows, setRows] = useState<ScheduleRow[]>([])
   const [selId, setSelId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -56,7 +59,7 @@ export default function Schedule() {
     setLoading(true)
     setSelId(null)
     const since = dayjs().subtract(1, 'day').format('YYYY-MM-DD')
-    Promise.all([loadSchedules(sport, since), loadOverallAnalyses(since).catch(() => []), loadOdds(since).catch(() => ({})), loadPredictions(since).catch(() => [])])
+    Promise.all([loadSchedules(sport === 'all' ? undefined : sport, since), loadOverallAnalyses(since).catch(() => []), loadOdds(since).catch(() => ({})), loadPredictions(since).catch(() => [])])
       .then(([r, oa, od, pr]) => { setRows(r); setAnalyses(oa); setOdds(od); setPreds(Object.fromEntries(pr.map(p => [p.game_id, p]))); setLoading(false) })
   }, [sport])
 
