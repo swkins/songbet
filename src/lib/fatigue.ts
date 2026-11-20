@@ -25,7 +25,14 @@ function km(a: [number, number, number], b: [number, number, number]): number {
 }
 const dayDiff = (a: string, b: string) => Math.round((Date.parse(b) - Date.parse(a)) / 86400000)
 
-export interface PastGame { game_date: string; is_home: boolean | null; opp: string | null }
+export interface PastGame { game_date: string; is_home: boolean | null; opp: string | null; game_id?: string; team_min?: number | null; team_score?: number | null; opp_score?: number | null }
+
+const REG_MIN: Record<string, number> = { NBA: 48, KBL: 40, WKBL: 40 }
+/** 팀 출전시간 합계로 연장 횟수 (1OT = 5분 × 5명 = 25분) */
+export function otCount(league: string, teamMin?: number | null): number {
+  const reg = REG_MIN[league]; if (!reg || !teamMin) return 0
+  return Math.max(0, Math.round((teamMin / 5 - reg) / 5))
+}
 export interface Condition {
   pct: number                       // 40~100
   items: { text: string; pts: number }[]   // 감점 이유
@@ -61,6 +68,13 @@ export function teamCondition(league: string, team: string, isHome: boolean, hos
     }
   }
 
+  // 2b) 최근 연장: 전날 1OT당 −3 · 2일 전 −2 · 3일 전 −1
+  for (const g of games) {
+    const ago = dayDiff(g.game_date, gameDate), ot = otCount(league, g.team_min)
+    if (ago > 3 || !ot) continue
+    add(`${ago === 1 ? '전날' : `${ago}일 전`} ${ot > 1 ? `${ot}차 ` : ''}연장`, -ot * (ago === 1 ? 3 : ago === 2 ? 2 : 1))
+  }
+
   // 3) 일정 밀도 (오늘 포함): 4일 3경기 −6 · 5일 3경기 −4 · 6일 4경기 −8 · 7일 4경기 −6 · 7일 5경기 −10 — 가장 큰 것 하나
   const within = (n: number) => 1 + games.filter(g => dayDiff(g.game_date, gameDate) < n).length
   const dens: [number, number, number][] = [[7, 5, -10], [6, 4, -8], [4, 3, -6], [7, 4, -6], [5, 3, -4]]
@@ -92,3 +106,33 @@ export function conditionColor(p: number): string {
   return p >= 95 ? '#00E87A' : p >= 85 ? '#A3E635' : p >= 75 ? '#FACC15' : p >= 60 ? '#FF8C42' : '#FF4D6D'
 }
 export const conditionLabel = (p: number) => p >= 95 ? '좋음' : p >= 85 ? '보통' : p >= 75 ? '피로' : p >= 60 ? '피로 누적' : '피로 경고'
+
+// ─── 선수 피로도 (출전시간 부담) ─────
+// 팀 컨디션(일정·이동) 위에 선수 개인 감점: 직전 경기 많이 뛴 정도, 최근 7일 누적 출전시간. 대승·대패로 로테이션 돌린 경기는 표시만.
+// 화면 % = 팀 컨디션 − 개인 감점, 75% 아래면 '누적 경고'. 시뮬레이션은 개인 감점 × 0.35만큼 그 선수 오버롤을 깎는다.
+export interface PlayerFatigue { pen: number; items: { text: string; pts: number }[]; note: string | null }
+export function playerFatigue(league: string, seasonMin: number | null, gameDate: string,
+  teamGames: PastGame[], mins: Map<string, number | null>): PlayerFatigue {
+  const items: { text: string; pts: number }[] = []
+  let note: string | null = null
+  const nba = league === 'NBA'
+  const games = teamGames.filter(g => g.game_date < gameDate).sort((a, b) => b.game_date.localeCompare(a.game_date))
+  const sMin = seasonMin ?? 20
+  const last = games[0]
+  if (last && last.game_id) {
+    const ago = dayDiff(last.game_date, gameDate), m = mins.get(last.game_id)
+    if (m != null && ago <= 2) {
+      const thr = Math.max(sMin + 4, nba ? 34 : 30)
+      const ot = otCount(league, last.team_min)
+      if (m > thr) items.push({ text: `${ago === 1 ? '전날' : '2일 전'} ${Math.round(m)}분${ot ? ` (연장)` : ''}`, pts: -Math.round(Math.min(8, (m - thr) * (ago === 1 ? 1 : 0.5)) * 10) / 10 })
+      const margin = last.team_score != null && last.opp_score != null ? last.team_score - last.opp_score : null
+      if (margin != null && Math.abs(margin) >= 20 && m < sMin - 5) note = `${margin > 0 ? '대승' : '대패'}(${margin > 0 ? '+' : ''}${margin}) 로테이션 — 직전 ${Math.round(m)}분 (평소 ${Math.round(sMin)}분)`
+    }
+  }
+  // 최근 7일 누적 (오늘 전)
+  const wk = games.filter(g => dayDiff(g.game_date, gameDate) <= 7 && g.game_id)
+  const load = wk.reduce((a, g) => a + (mins.get(g.game_id!) ?? 0), 0)
+  const lim = nba ? 110 : 95
+  if (wk.length >= 3 && load > lim) items.push({ text: `7일 ${Math.round(load)}분 (${wk.length}경기)`, pts: -Math.round(Math.min(6, (load - lim) / 6) * 10) / 10 })
+  return { pen: -items.reduce((a, x) => a + x.pts, 0), items, note }
+}

@@ -30,6 +30,21 @@ function AvailCell({ p, ov, onCycle }: { p: PlayerOv; ov?: number; onCycle: () =
   )
 }
 
+// 선수 체력 % = 팀 컨디션 − 개인 피로(직전 경기·7일 출전시간). 75% 아래 '누적 경고'
+function Stamina({ p, cond }: { p: PlayerOv; cond?: Condition }) {
+  if (!cond && !p.fatigue) return <span style={{ color: 'var(--text-muted)', fontSize: 10 }}>–</span>
+  const pct = Math.max(30, Math.round((cond?.pct ?? 100) - (p.fatigue?.pen ?? 0)))
+  const col = conditionColor(pct), warn = pct < 75
+  const why = [...(cond?.items ?? []).map(i => `팀: ${i.text} ${i.pts}`), ...(p.fatigue?.items ?? []).map(i => `개인: ${i.text} ${i.pts}`)]
+  return (
+    <span title={why.length ? why.join('\n') : '감점 없음'} style={{ cursor: 'help' }}>
+      <span style={{ color: col, fontWeight: 800, fontSize: 11, fontFamily: 'var(--font-num)' }}>{pct}%</span>
+      {warn && <div style={{ fontSize: 9, fontWeight: 800, color: '#FF4D6D' }}>⚠ 누적</div>}
+      {!warn && (p.fatigue?.pen ?? 0) > 0 && <div style={{ fontSize: 9, color: 'var(--text-muted)' }}>개인 −{Math.round(p.fatigue!.pen)}</div>}
+    </span>
+  )
+}
+
 // 팀 이름 옆 컨디션 % (마우스 올리면 이유)
 function CondBadge({ c }: { c: Condition }) {
   const col = conditionColor(c.pct)
@@ -66,7 +81,7 @@ function ConditionBox({ home, away, hName, aName }: { home: Condition; away: Con
     <div style={box}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 6 }}>
         <span style={{ fontSize: 12, fontWeight: 800 }}>팀 컨디션</span>
-        <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>100% = 2일+ 휴식 · 백투백·이동·일정 밀도·원정 연전 감점</span>
+        <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>100% = 2일+ 휴식 · 백투백·연장·이동·일정 밀도·원정 연전 감점</span>
       </div>
       {row(`홈 · ${hName}`, home)}
       {row(`원정 · ${aName}`, away)}
@@ -90,7 +105,7 @@ function TeamTable({ title, t, ovr, onCycle, cond }: { title: string; t: TeamOv;
       {!t.team ? <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>이 팀 선수 기록을 아직 못 찾았어요</div> : (
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead><tr>
-            <th style={th}>출전</th><th style={th}>선수</th>
+            <th style={th}>출전</th><th style={th}>선수</th><th style={{ ...th, textAlign: 'right' }} title="팀 컨디션 − 개인 출전시간 부담">체력</th>
             <th style={{ ...th, textAlign: 'right' }}>체급</th><th style={{ ...th, textAlign: 'right' }}>폼</th><th style={{ ...th, textAlign: 'right' }}>오버롤</th>
           </tr></thead>
           <tbody>{t.players.map(p => {
@@ -113,6 +128,7 @@ function TeamTable({ title, t, ovr, onCycle, cond }: { title: string; t: TeamOv;
                     {a.limited && <span style={{ fontSize: 10, fontWeight: 700, color: '#FACC15' }}>⏱ 출전 제한 가능</span>}
                   </div>
                   {a.ret && <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{a.ret}</div>}
+                  {p.fatigue?.note && <div style={{ fontSize: 10, color: 'var(--blue)' }}>🔄 {p.fatigue.note}</div>}
                   {a.reason && <div style={{ fontSize: 10, color: 'var(--text-secondary)', marginTop: 1 }}>{a.reason}</div>}
                   {a.source && (a.source.title || a.source.url) && (
                     <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>
@@ -121,6 +137,7 @@ function TeamTable({ title, t, ovr, onCycle, cond }: { title: string; t: TeamOv;
                     </div>
                   )}
                 </td>
+                <td style={{ ...td, textAlign: 'right', whiteSpace: 'nowrap' }}><Stamina p={p} cond={cond} /></td>
                 <td style={{ ...td, textAlign: 'right', color: 'var(--text-secondary)', fontFamily: 'var(--font-num)' }} title={p.baseNote}>{p.base ?? '–'}</td>
                 <td style={{ ...td, textAlign: 'right', fontFamily: 'var(--font-num)', color: p.form == null || p.base == null ? 'var(--text-muted)' : p.form > p.base + 2 ? 'var(--green)' : p.form < p.base - 2 ? 'var(--red)' : 'var(--text-secondary)' }}>{p.form ?? '–'}</td>
                 <td style={{ ...td, textAlign: 'right', whiteSpace: 'nowrap' }}>
@@ -197,7 +214,7 @@ export default function PlayerOverall({ league, gameDate, home, away, left }: { 
                 ))}
               </div>
               <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 6, lineHeight: 1.6 }}>
-                마진 = 득실 마진 {signed(sim.parts.scoreMargin)} × 0.5 + 오버롤 차 {signed(sim.parts.ovMargin)} × 0.5 + 결장 반영 {signed(sim.parts.injury)} + 홈 {signed(sim.parts.hca)}{sim.parts.cond ? <> + 컨디션 차 {signed(sim.parts.cond)}</> : null}
+                마진 = 득실 마진 {signed(sim.parts.scoreMargin)} × 0.5 + 오버롤 차 {signed(sim.parts.ovMargin)} × 0.5 + 결장·개인 피로 {signed(sim.parts.injury)} + 홈 {signed(sim.parts.hca)}{sim.parts.cond ? <> + 컨디션 차 {signed(sim.parts.cond)}</> : null}
                 {sim.parts.news ? <> + 뉴스 보정 {signed(sim.parts.news)}{data.news?.adj_note ? ` (${data.news.adj_note})` : ''}</> : null}
                 {' '}· 선수 출전 칸을 누르면 결장/출전으로 바꿔 다시 계산
               </div>
@@ -223,7 +240,7 @@ export default function PlayerOverall({ league, gameDate, home, away, left }: { 
             오버롤 = 체급 × 0.7 + 최근 5경기 폼 × 0.3 (체급 = 이번 시즌 + 지난 시즌, 경기가 쌓일수록 이번 시즌 비중↑) ·{' '}
             {TIERS.map(t => <span key={t.name} style={{ color: t.color, marginRight: 6 }}>{t.name} {t.min >= 0 ? `${t.min}+` : '~59'}</span>)}
             <br />출전: <span style={{ color: availColor(95) }}>● 90%↑</span> <span style={{ color: availColor(80) }}>● 70~89</span> <span style={{ color: availColor(50) }}>● 40~69</span> <span style={{ color: availColor(20) }}>● 1~39</span> <span style={{ color: availColor(0) }}>● 결장</span>
-            {' '}· 확정/추정 = Claude가 뉴스·ESPN 명단을 읽고 판단 · ↩ 복귀·⏱ 출전 제한 = 경기 기록 · 팀 오버롤 = 출전시간 × 이번 시즌 출전 비중 가중, 결장 반영 = 결장 확률만큼 대체 선수(50)로
+            {' '}· 확정/추정 = Claude가 뉴스·ESPN 명단을 읽고 판단 · ↩ 복귀·⏱ 출전 제한 = 경기 기록 · 체력 = 팀 컨디션 − 개인 출전시간 부담(직전 경기·7일 누적), 75% 미만 ⚠ 누적 경고 · 🔄 대승·대패 로테이션 · 팀 오버롤 = 출전시간 × 이번 시즌 출전 비중 가중, 결장 반영 = 결장 확률만큼 대체 선수(50)로
           </div>
         </div>
       </div>

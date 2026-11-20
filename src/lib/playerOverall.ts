@@ -2,7 +2,7 @@ import dayjs from 'dayjs'
 import { supabase } from './supabase'
 import { koName, type ScheduleTeam } from './gameSchedule'
 import { NBA_NAMES_KO } from '../data/nbaNamesKo'
-import { teamCondition, COND_K, type Condition, type PastGame } from './fatigue'
+import { teamCondition, playerFatigue, COND_K, type Condition, type PastGame, type PlayerFatigue } from './fatigue'
 
 // ─── 선수 오버롤 + 출전 확률 (분석 탭 오른쪽 칸) ─────
 // 체급 = 이번 시즌 × w + 지난 시즌(player_base, 없으면 Claude 조사 manual_base) × (1 − w), w = 이번 시즌 경기 수 ÷ (경기 수 + 15)
@@ -26,6 +26,7 @@ export interface PlayerOv {
   share: number             // 이번 시즌 팀 경기 중 뛴 비율 (팀 전력 가중 — 시즌 내내 빠진 선수는 팀 득실에 이미 반영돼 있어 0)
   base: number | null; form: number | null; overall: number | null
   baseNote: string          // 체급 근거 (이번 시즌 n경기 · 지난 시즌 …)
+  fatigue: PlayerFatigue | null   // 개인 피로 (출전시간 부담)
   avail: Avail
 }
 export interface TeamOv { team: string | null; players: PlayerOv[]; full: number | null; exp: number | null; stats: TeamStats | null }
@@ -140,7 +141,7 @@ export async function loadGameOverall(league: string, gameDate: string, home: Sc
     supabase.from('player_status').select('*').eq('league', code).eq('game_date', gameDate),
     code === 'NBA' && names.length ? supabase.from('nba_injuries').select('*').in('team', names) : Promise.resolve({ data: [] }),
     supabase.from('game_news').select('*').eq('league', code).eq('game_date', gameDate),
-    names.length && !vb ? supabase.from('v_team_games').select('team,game_date,is_home,opp').eq('league', code).in('team', names)
+    names.length && !vb ? supabase.from('v_team_games').select('team,game_id,game_date,is_home,opp,team_min,team_score,opp_score').eq('league', code).in('team', names)
       .gte('game_date', dayjs(gameDate).subtract(10, 'day').format('YYYY-MM-DD')).lt('game_date', gameDate) : Promise.resolve({ data: [] }),
   ])
   // 팀 컨디션 % (백투백·이동 거리·일정 밀도·원정 연전)
@@ -228,7 +229,10 @@ export async function loadGameOverall(league: string, gameDate: string, home: Sc
           source: ns.source_url || ns.source_title ? { title: ns.source_title, url: ns.source_url } : avail.source, checkedAt: ns.checked_at }
       }
       const share = stats?.n ? Math.min(1, n / stats.n) : vb ? 1 : 0
-      return { id: r.player_id, name: d.names[r.player_name] ?? r.player_name, nameEn: r.player_name, gp: n, share, min: c?.min ?? pb?.min ?? null, base, form, overall, baseNote, avail }
+      // 개인 피로: 직전 경기·최근 7일 출전시간 (뛴 경기만 — 결장 선수는 계산 안 함)
+      const pm = played.get(r.player_id)
+      const fatigue = !vb && pm && pm.size ? playerFatigue(code, c?.min ?? null, gameDate, pastRows.filter(x => x.team === team), pm) : null
+      return { id: r.player_id, name: d.names[r.player_name] ?? r.player_name, nameEn: r.player_name, gp: n, share, min: c?.min ?? pb?.min ?? null, base, form, overall, baseNote, avail, fatigue }
     }).sort((x, y) => (y.base ?? -1) - (x.base ?? -1) || (y.overall ?? -1) - (x.overall ?? -1))   // 체급 순 — 핵심 선수가 빠졌는지 바로 보이게
 
     const { full, exp } = teamStrength(players, {}, vb)
@@ -237,7 +241,7 @@ export async function loadGameOverall(league: string, gameDate: string, home: Sc
   return { code, home: build(home, hName), away: build(away, aName), checkedAt, news, cond }
 }
 
-/** 팀 오버롤: 출전시간 × 이번 시즌 출전 비중 가중 평균 (full = 다 뛸 때, exp = 출전 확률 반영 — 빠지는 만큼 대체 선수 50점).
+/** 팀 오버롤: 출전시간 × 이번 시즌 출전 비중 가중 평균 (full = 다 뛸 때, exp = 출전 확률·개인 피로 반영 — 빠지는 만큼 대체 선수 50점).
  *  overrides = 화면에서 바꾼 출전 확률 (선수 id → 0~100) */
 export function teamStrength(players: PlayerOv[], overrides: Record<string, number>, vb = false): { full: number | null; exp: number | null } {
   const wOf = (p: PlayerOv) => (vb ? 1 : Math.max(5, p.min ?? 10)) * (vb ? 1 : p.share)
@@ -246,7 +250,9 @@ export function teamStrength(players: PlayerOv[], overrides: Record<string, numb
   if (!sw) return { full: null, exp: null }
   const prob = (p: PlayerOv) => (overrides[p.id] ?? p.avail.prob) / 100
   const full = rated.reduce((a, p) => a + wOf(p) * p.overall!, 0) / sw
-  const exp = rated.reduce((a, p) => a + wOf(p) * (p.overall! * prob(p) + 50 * (1 - prob(p))), 0) / sw
+  // 출전하면 개인 피로만큼 깎인 오버롤 (피로 감점 × 0.35), 빠지면 대체 선수 50
+  const eff = (p: PlayerOv) => p.overall! - 0.35 * (p.fatigue?.pen ?? 0)
+  const exp = rated.reduce((a, p) => a + wOf(p) * (eff(p) * prob(p) + 50 * (1 - prob(p))), 0) / sw
   return { full: Math.round(full * 10) / 10, exp: Math.round(exp * 10) / 10 }
 }
 
