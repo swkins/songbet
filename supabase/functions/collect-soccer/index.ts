@@ -5,6 +5,7 @@
 // 출처: ESPN scoreboard (NBA 일정과 같은 API). 한 번 부르면 일정과 DraftKings 배당(오픈·현재)이 같이 온다.
 //  - 날짜 범위(dates=A-B)는 400 → UTC 날짜 하루씩, 사이에 1.5~4초 쉼. 한국 하루 = UTC 전날 15시~당일 15시라 UTC 3일치(어제·오늘·내일).
 //  - 응답이 gzip이면 Deno fetch가 알아서 푼다.
+// + 핸디 배당: Action Network 북메이커 주력 핸디 평균 → soccer_lines (룰북 베팅 찾기용)
 // 저장: game_schedules(sport soccer, league = 리그 관리 이름, 팀 이름 = 리그 관리 등록 한글 이름, full = ESPN 영어 이름)
 //       odds_snapshots(home·draw·away, open_*, 바뀌었을 때만) · odds_fetch_log(매번)
 import { createClient } from 'npm:@supabase/supabase-js@2.45.0'
@@ -14,6 +15,8 @@ const KST = 9 * 3600000
 const kstDate = (ms: number) => new Date(ms + KST).toISOString().slice(0, 10)
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 
+// Action Network 리그 이름 (핸디 배당 — 룰북 베팅 찾기용)
+const AN_LEAGUE: Record<string, string> = { '잉글랜드 1부': 'epl', '스페인 1부': 'laliga', '이탈리아 1부': 'seriea', '독일 1부': 'bundesliga', '프랑스 1부': 'ligue1' }
 const CODE: Record<string, string> = { '잉글랜드 1부': 'eng.1', '스페인 1부': 'esp.1', '이탈리아 1부': 'ita.1', '독일 1부': 'ger.1', '프랑스 1부': 'fra.1' }
 // ESPN 영어 이름 → 리그 관리에 등록된 한글 이름 (2026-27 시즌, 등록 이름 그대로 — 오타 포함)
 const KO: Record<string, string> = {
@@ -114,5 +117,39 @@ Deno.serve(async (req) => {
       open_home: o.oh, open_away: o.oa, open_draw: o.od, books: 1, match_name: `${o.game.home.full} - ${o.game.away.full}` })
     if (!error) changed++
   }
-  return log('ok', { games: rows.reduce((s, r) => s + r.games.length, 0), counts: Object.fromEntries(rows.map(r => [r.game_date, r.games.length])), odds: odds.length, changed, unmatched: [...unknown] })
+  // 핸디 배당: Action Network (미국 동부 날짜, 한 번에 그날 전 리그) — 북메이커별 주력 핸디(±0.5·±1.5·±2.5)를 기준점별 평균 → soccer_lines
+  let lines = 0, anMatched = 0
+  try {
+    const pre = rows.flatMap(r => r.games).filter(g => !g.status)
+    const usDates = [...new Set(pre.map(g => new Date(Date.parse(g.start) - 5 * 3600000).toISOString().slice(0, 10).replaceAll('-', '')))]
+    const tok = (s: string) => (s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length >= 4 && !['club', 'city'].includes(w))
+    for (const [i, d] of usDates.entries()) {
+      await sleep(i ? 2000 + Math.random() * 2000 : 1000)
+      const r = await fetch(`https://api.actionnetwork.com/web/v2/scoreboard/soccer?bookIds=15,30,79,2988,75,123,71,68,69&periods=event&date=${d}`,
+        { headers: { ...UA, Origin: 'https://www.actionnetwork.com', Referer: 'https://www.actionnetwork.com/' } })
+      if (!r.ok) continue
+      for (const ag of (await r.json()).games ?? []) {
+        if (ag.league_name !== AN_LEAGUE[league]) continue
+        const team = (id: unknown) => (ag.teams ?? []).find((t: any) => String(t.id) === String(id))?.full_name ?? ''
+        const ah = tok(team(ag.home_team_id)), aa = tok(team(ag.away_team_id))
+        const g = pre.find(x => Math.abs(Date.parse(x.start) - Date.parse(ag.start_time)) < 20 * 60000
+          && (tok(x.home.full ?? '').some(w => ah.includes(w)) || tok(x.away.full ?? '').some(w => aa.includes(w))))
+        if (!g) continue
+        anMatched++
+        const acc = new Map<string, { side: string; line: number; sum: number; n: number }>()
+        for (const [book, m] of Object.entries<any>(ag.markets ?? {})) {
+          if (book === '30') continue   // 30 = 오픈 배당
+          for (const sp of m?.event?.spread ?? []) {
+            const o = dec(sp.odds); if (!o || sp.value == null) continue
+            const k = `${sp.side}|${sp.value}`; const a = acc.get(k) ?? { side: sp.side, line: Number(sp.value), sum: 0, n: 0 }
+            a.sum += o; a.n++; acc.set(k, a)
+          }
+        }
+        const up = [...acc.values()].map(a => ({ game_id: g.id, league, side: a.side, line: a.line, odds: Math.round(a.sum / a.n * 100) / 100, books: a.n, source: 'actionnetwork', fetched_at: new Date().toISOString() }))
+        if (up.length) { const { error } = await db.from('soccer_lines').upsert(up); if (!error) lines += up.length }
+      }
+    }
+  } catch { /* 핸디는 없어도 일정·승무패는 저장됨 */ }
+
+  return log('ok', { anMatched, lines, games: rows.reduce((s, r) => s + r.games.length, 0), counts: Object.fromEntries(rows.map(r => [r.game_date, r.games.length])), odds: odds.length, changed, unmatched: [...unknown] })
 })

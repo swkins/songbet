@@ -27,7 +27,9 @@ function parseOdds(raw: string): number { const n = Number(raw); return Number.i
 
 type Pick = 'home' | 'away' | 'game'
 /** 분석 탭 '베팅하기' → 이 경기 베팅슬립을 바로 연다 (at = 누른 시각, 같은 경기를 다시 눌러도 다시 열리게) */
-export interface BetTarget { sport: string; league: string; gameId: string; at?: number }
+export interface BetTarget { sport: string; league: string; gameId: string; at?: number; preset?: BetPreset }
+/** 룰북 베팅 찾기에서 넘어올 때 슬립을 미리 채운다 (대상 홈/원정, 옵션 문구 '승리'·'0.5 H'·'-1.5 H' 등, 배당) */
+export interface BetPreset { side: 'home' | 'away'; opt: string; odds: number | null }
 interface Game extends ScheduleGame { sport: string; league: string }
 
 export default function BetModePanel({ target, onTargetDone, sites, betOptionsBySport, numericBetOptionsBySport, teamsBySport, onBet, renderAddForm }: {
@@ -54,11 +56,12 @@ export default function BetModePanel({ target, onTargetDone, sites, betOptionsBy
   useEffect(() => { loadSchedules().then(r => { setRows(r); setLoading(false) }).catch(() => setLoading(false)) }, [])
   // 분석 탭에서 넘어온 경기: 일정을 다 불러온 뒤 종목·리그·경기를 골라 베팅슬립을 연다
   const [targetMsg, setTargetMsg] = useState<string | null>(null)
+  const [preset, setPreset] = useState<{ gameId: string; p: BetPreset } | null>(null)
   useEffect(() => {
     if (!target || loading) return
     const g = rows.flatMap(r => r.games.map(x => ({ ...x, sport: r.sport, league: r.league }))).find(x => x.id === target.gameId)
     setSport(target.sport); setLeague(target.league); setAddSiteId(null); setAddOpen(false)
-    if (g && gameState(g) !== 'ended') { setGameId(g.id); setTargetMsg(null) }
+    if (g && gameState(g) !== 'ended') { setGameId(g.id); setTargetMsg(null); setPreset(target.preset ? { gameId: g.id, p: target.preset } : null) }
     else { setGameId(null); setTargetMsg(g ? '이미 끝난 경기라 베팅슬립을 열 수 없어요' : '그 경기를 일정에서 못 찾았어요') }
     onTargetDone?.()
   }, [target?.gameId, target?.at, loading]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -187,7 +190,7 @@ export default function BetModePanel({ target, onTargetDone, sites, betOptionsBy
               : !game ? <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: 6 }}>경기를 고르면 여기서 베팅합니다</div>
               : game.sport === 'basketball' || game.sport === 'volleyball'
                 ? <BasketSlip key={game.id} game={game} sites={sites} registered={teamsBySport[game.sport] ?? []} onBet={onBet} />
-                : <BetSlip key={game.id} game={game} sites={sites}
+                : <BetSlip key={game.id + (preset?.gameId === game.id ? '-p' : '')} preset={preset?.gameId === game.id ? preset.p : undefined} game={game} sites={sites}
                   options={betOptionsBySport[game.sport] ?? []} numeric={numericBetOptionsBySport[game.sport] ?? []}
                   registered={teamsBySport[game.sport] ?? []} onBet={onBet} />}
           </div>
@@ -197,8 +200,8 @@ export default function BetModePanel({ target, onTargetDone, sites, betOptionsBy
   )
 }
 
-function BetSlip({ game, sites, options, numeric, registered, onBet }: {
-  game: Game; sites: Site[]; options: string[]; numeric: string[]
+function BetSlip({ game, sites, options, numeric, registered, onBet, preset }: {
+  game: Game; sites: Site[]; options: string[]; numeric: string[]; preset?: BetPreset
   registered: { league: string; name: string }[]
   onBet: (site: Site, sport: string, content: string, odds: number, stake: number, isLive: boolean, league: string) => Promise<boolean>
 }) {
@@ -207,13 +210,13 @@ function BetSlip({ game, sites, options, numeric, registered, onBet }: {
   const live = gameState(game) === 'live'
   const orderedSites = [...sites].sort((a, b) => Number(b.active) - Number(a.active) || a.sort_order - b.sort_order)
 
-  const [pick, setPick] = useState<Pick>('home')
-  const [opt, setOpt] = useState<string>('승리')
+  const [pick, setPick] = useState<Pick>(preset?.side ?? 'home')
+  const [opt, setOpt] = useState<string>(preset?.opt ?? '승리')
   const [numVal, setNumVal] = useState('')
   const [siteId, setSiteId] = useState<string>(orderedSites[0]?.id ?? '')
   const site = sites.find(s => s.id === siteId) ?? null
   const isusd = site?.currency === 'usd'
-  const [oddsRaw, setOddsRaw] = useState('')
+  const [oddsRaw, setOddsRaw] = useState(preset?.odds ? preset.odds.toFixed(2) : '')
   const [amount, setAmount] = useState('')
   const [isLive, setIsLive] = useState(live)
   const [busy, setBusy] = useState(false)

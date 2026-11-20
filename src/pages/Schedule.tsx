@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import dayjs from 'dayjs'
 import UpdateStatus from '../components/UpdateStatus'
 import LolRanking from '../components/LolRanking'
+import SoccerRulebook from '../components/SoccerRulebook'
+import type { BetPreset } from '../components/BetModePanel'
 import PlayerOverall from '../components/PlayerOverall'
 import { Activity, ClipboardCheck } from 'lucide-react'
 import ModelReport, { loadPredictions, PredBadge, type Prediction } from '../components/ModelReport'
@@ -35,7 +37,7 @@ const dateLabel = (d: string) => {
   return `${mdDay(d)}${d === t ? ' · 오늘' : d === tm ? ' · 내일' : ''}`
 }
 
-export default function Schedule({ onGoBet }: { onGoBet?: (t: { sport: string; league: string; gameId: string }) => void } = {}) {
+export default function Schedule({ onGoBet }: { onGoBet?: (t: { sport: string; league: string; gameId: string; preset?: BetPreset }) => void } = {}) {
   const [sport, setSport] = useState('all')
   const [rows, setRows] = useState<ScheduleRow[]>([])
   const [selId, setSelId] = useState<string | null>(null)
@@ -46,6 +48,7 @@ export default function Schedule({ onGoBet }: { onGoBet?: (t: { sport: string; l
   const [showReport, setShowReport] = useState(false)
   const [preds, setPreds] = useState<Record<string, Prediction>>({})
   const [narrow, setNarrow] = useState(() => window.innerWidth < 800)
+  const [showRulebook, setShowRulebook] = useState(false)   // 축구 룰북 베팅 찾기 (사용자 요청)
   const [showPast, setShowPast] = useState(false)       // 지난 경기(시작했거나 끝난 경기, 지난 하루) — 맨 위에 접어 둠
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 60000); return () => clearInterval(t) }, [])   // 시작한 경기가 1분 안에 지난 경기로 넘어가게
@@ -170,6 +173,9 @@ export default function Schedule({ onGoBet }: { onGoBet?: (t: { sport: string; l
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12, borderBottom: '1px solid var(--border)', paddingBottom: 12 }}>
         {SPORTS.map(s => <button key={s.id} style={btn(sport === s.id)} onClick={() => setSport(s.id)}>{s.label}</button>)}
         {lastFetch && <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-muted)' }}>일정 업데이트 {dayjs(lastFetch).format('M/D HH:mm')}</span>}
+        {(sport === 'soccer' || sport === 'all') && (
+          <button onClick={() => setShowRulebook(v => !v)} style={{ ...btn(showRulebook), marginLeft: lastFetch ? 0 : 'auto' }}>📋 룰북 베팅 찾기</button>
+        )}
         <button onClick={() => setShowReport(true)} style={{ ...btn(false), marginLeft: lastFetch ? 0 : 'auto', display: 'flex', alignItems: 'center', gap: 5 }}>
           <ClipboardCheck size={13} /> 예측 보고서
         </button>
@@ -181,7 +187,7 @@ export default function Schedule({ onGoBet }: { onGoBet?: (t: { sport: string; l
       {showStatus && <UpdateStatus onClose={() => setShowStatus(false)} />}
       {showReport && <ModelReport onClose={() => setShowReport(false)} />}
       {/* LOL: 일정 연결 전이라 선수 체급 · 라인별 순위 (사용자 요청) */}
-      {sport === 'esports' ? <LolRanking /> : (
+      {sport === 'esports' ? <LolRanking /> : showRulebook && (sport === 'soccer' || sport === 'all') ? <SoccerRulebook onGoBet={onGoBet} /> : (
       <div style={{ display: 'flex', flexDirection: narrow ? 'column' : 'row', gap: 16, alignItems: 'flex-start' }}>
         <div style={{ flex: narrow ? 'none' : 2, width: narrow ? '100%' : undefined, minWidth: 0, maxHeight: narrow ? 360 : 'calc(100vh - 180px)', overflowY: 'auto' }}>
           {list}
