@@ -136,3 +136,8 @@ $$;
 -- v_lol_player_tier: 시즌 점수 g = team_z + 0.55 × comp(리그·포지션 안 개인 z, 국제전은 국제전 안 z) → 가중 평균(2026 1 · 2025 0.4 · 2024 0.15, 국제전 ×1.5)
 --   → (raw·n + (지금 team_z − 0.165)·40)/(n+40) → tier = 62 + 9.5σ (1~99). gcomp_now = 2026 g, team_z_now 칸 추가.
 -- (실제 적용 SQL은 마이그레이션 lol_team_power_and_tier_v4)
+
+-- ── v5 (사용자 요청 2026-11-20 — 같은 리그 안에서는 팀 점수 빼고 오로지 실력) ──
+-- v_lol_player_tier: 시즌 점수 g = 리그 수준(lg_z = 그 시즌 그 리그 v_lol_team_power.team_z 평균) + comp(개인 z)
+--   국제전 행의 리그 수준 = 그 해 그 선수 소속 리그, prior = 리그 수준 − 0.3 (40세트), tier = 62 + 13σ. 칸 이름 team_z_now = 지금 리그 수준.
+-- (실제 적용 SQL은 마이그레이션 lol_player_tier_v5_skill_only)

@@ -137,7 +137,7 @@ export default function LolRanking() {
                     <span style={{ fontSize: 10, color: 'var(--text-muted)', marginLeft: 4 }}>{r.country}</span>
                     <div style={{ fontSize: 10, color: 'var(--text-secondary)' }}>{isAll && <b style={{ color: 'var(--gold)', marginRight: 4 }}>{r.league}</b>}{r.team ?? '—'}</div>
                   </td>
-                  <td style={{ ...td }} title={(r.seasons ?? []).map(x => `${x.season} ${x.league === 'INTL' ? '국제전' : x.league}${x.team ? ` ${x.team}` : ''} ${x.games}세트 → ${Math.round(62 + 9.5 * x.g)} (팀 ${x.team_z != null ? (x.team_z > 0 ? '+' : '') + Number(x.team_z).toFixed(1) : '?'}σ · 개인 ${x.ind != null ? (x.ind > 0 ? '+' : '') + Number(x.ind).toFixed(1) : '?'}σ)`).join('\n') || '기록 없음'}>
+                  <td style={{ ...td }} title={(r.seasons ?? []).map(x => `${x.season} ${x.league === 'INTL' ? '국제전' : x.league}${x.team ? ` ${x.team}` : ''} ${x.games}세트 → ${Math.round(62 + 13 * x.g)} (리그 수준 ${x.team_z != null ? (x.team_z > 0 ? '+' : '') + Number(x.team_z).toFixed(1) : '?'}σ · 개인 ${x.ind != null ? (x.ind > 0 ? '+' : '') + Number(x.ind).toFixed(1) : '?'}σ)`).join('\n') || '기록 없음'}>
                     {r.tier != null ? <span style={{ fontSize: 15, fontWeight: 800, color: t.color }}>{r.tier}</span> : <span style={{ color: 'var(--text-muted)' }}>–</span>}
                     {r.low_sample && <div style={{ fontSize: 9, color: 'var(--orange)' }} title="여러 시즌 합쳐 유효 세트가 60 미만 — 리그 주전 평균보다 조금 낮은 쪽으로 당겨 계산">표본 적음</div>}
                   </td>
@@ -166,9 +166,9 @@ export default function LolRanking() {
         </table>
       </div>
       <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 8, lineHeight: 1.7 }}>
-        체급 = 팀 세계 위치(Riot GPR 팀 점수를 주요 6개 리그 팀 안에서 표준화 — LCK 하위 팀 ≈ 다른 리그 상·중위 팀) + 0.55 × 개인 실력(같은 시즌·리그·포지션 주전급 대비 지표 표준점수를 포지션별 가중치로, 국제전은 국제전 참가자 대비)
-        → 2026 ×1 · 2025 ×0.4 · 2024 ×0.15, 국제전 세트 ×1.5 → 세트 적으면 '지금 팀 위치 − 개인 0.3σ' 쪽으로 40세트만큼 (유효 60세트 미만 '표본 적음') → 62 + 9.5σ (90+ 전설은 라인마다 0~2명).
-        GPR 없는 팀은 리그 평균 + 팀 승률로 추정, LCK CL은 LCK 평균 − 300. 개인 지표 가중치(킬관여·퍼블관여·피해%·골드%는 승리와 상관이 없어 뺌):
+        체급 = 리그 수준(그 시즌 그 리그 팀들의 세계 위치 평균, Riot GPR — 같은 리그 선수는 모두 같은 값) + 개인 실력(같은 시즌·리그·포지션 주전급 대비 지표 표준점수를 포지션별 가중치로, 국제전은 국제전 참가자 대비) — 같은 리그 안 순위는 오로지 실력
+        → 2026 ×1 · 2025 ×0.4 · 2024 ×0.15, 국제전 세트 ×1.5 → 세트 적으면 '리그 수준 − 0.3σ' 쪽으로 40세트만큼 (유효 60세트 미만 '표본 적음') → 62 + 13σ.
+        LCK CL은 GPR이 없어 LCK − 300으로 추정. 개인 지표 가중치(킬관여·퍼블관여·피해%·골드%는 승리와 상관이 없어 뺌):
         탑 GD@15 28 · XPD 20 · CSD 10 · 솔로킬 10 · DPM 10 · 데스 8 · KDA 8 / 정글 GD 18 · XPD 16 · CSD 12 · CSM 8 · 데스 12 · DPM 10 · KDA 10 · 솔로킬 4 · 시야 4 /
         미드 GD 26 · XPD 18 · DPM 14 · CSD 10 · KDA 10 · 솔로킬 8 · 데스 8 / 원딜 GD 26 · XPD 16 · DPM 14 · CSD 12 · 데스 10 · KDA 10 · CSM 4 · 와드제거 2 /
         서폿 GD 18 · 데스 16 · XPD 14 · 어시 12 · KDA 10 · 시야 10 · DPM 8 · 와드제거 6 (모두 승률 6). LPL은 CSD·XPD·솔로킬이 없어 있는 지표로만.
