@@ -68,6 +68,10 @@
   - 출전 확률 우선순위: Claude 판단(`player_status`) > ESPN 명단(`nba_injuries`) > 경기 기록(주전급 최근 2경기+ 결장 → 40% · 결장 후 복귀 1~4경기째 → 85% '↩ 복귀', 최근 출전시간이 시즌의 75% 미만이면 '⏱ 출전 제한 가능').
   - ESPN 부상 명단: Supabase 함수 `collect-injuries` + pg_cron `collect-injuries`(UTC 5·8·11시 33분 = 14:33·17:33·20:33 KST) — 매번 통째로 바꾸고, 같은 함수가 `player_status`(경기 이틀 지나면)·`news_check_log`(14일) 정리 (사용자 요청: 누적 안 함).
   - **Claude 예약 작업 (Sonnet, 사용자 요청 — 사용량 최소)**: 출전확률-NBA 매일 14:41·17:41·20:41 (다음 날 NBA, 사용자가 22시에 베팅해서 21시까지만) · 출전확률-국내-평일 월~금 11:43·14:43·17:43 · 출전확률-국내-주말 토·일 8:47·11:47 (그날 국내). 뉴스 + ESPN 명단을 읽고 최종 판단해 `player_status`에 저장, 경기 없으면 바로 끝. 지시문은 `scripts/news_check_prompt.md` (바꾸면 예약 작업 prompt도). 예약 작업은 MCP 연결 없이 만들어져서 Supabase 연결을 claude.ai 예약 작업 화면에서 붙여야 저장된다. WebSearch(미국 검색)는 국내 최신 기사를 잘 못 찾는다 (2026-11-20 1회 실행: NBA 40명 저장, 국내 새 기사 없음).
+  - NBA 선수 이름은 한국어 (사용자 요청): 앱에 넣은 표 `src/data/nbaNamesKo.ts`(2026-11-20 약 490명, 사용량 없음) + 새 선수는 Supabase `player_names`(league, name_en, name_ko — 표보다 먼저 씀, NBA 예약 작업이 저장한 선수 이름을 넣음). 마우스를 올리면 영어 이름.
+  - 선수 목록은 체급 순 (사용자 요청 — 핵심 선수가 빠졌는지 바로 보이게). 팀 오버롤은 출전시간 × 이번 시즌 출전 비중(시즌 내내 빠진 선수는 0 — 팀 득실에 이미 반영)으로 가중.
+  - **예상 스코어** (사용자 요청, 농구만): `simulate` — 마진 = 이번 시즌 득실 마진(`v_team_games`) × 0.5 + 오버롤 차 × k × 0.5 + 결장 반영(출전 확률로 깎인 오버롤 × k 전부) + 홈 이점 + 뉴스 보정(`game_news.margin_adj`), 총점 = 두 팀 득실 평균, 정규분포 2만 번 (NBA σ 13.5·k 1.0·홈 2.5, KBL σ 11·k 0.8, WKBL σ 10·k 0.7 — 백테스트 전 값). 출전 칸을 누르면 결장/출전 가정으로 바로 다시 계산. 배구는 아직 없음.
+  - **경기 뉴스 요약** (`game_news`: league 코드, game_date, home, away, summary, items, margin_adj, adj_note) — 선수 오버롤 아래 맨 밑. 2026-11-20 1회 수집 (NBA 11/21 9경기·WKBL·V리그 3경기). WebSearch standard는 지난 기사만 나오고 extended라야 당일 기사가 나왔다.
   - 업데이트 현황은 rpc `analysis_update_status_v2` (기존 + ESPN 명단·Claude 확인 기록·출전 확률·체급).
 - 이 컨테이너에서는 ESPN·supabase.co로 직접 못 나가서 MCP(deploy_edge_function, execute_sql)로만 다룬다.
 - **Supabase MCP에 지우기(delete·drop·unschedule)가 든 SQL을 보내면 확인 질문이 오는데 사용자 앱에 안 떠서 1분 뒤 시간 초과**된다. 지우지 않는 방식(update로 고치기, `create ... if not exists`, `cron.schedule` 같은 이름 덮어쓰기)으로 하고, 꼭 지워야 하면 사용자에게 Supabase 대시보드 SQL Editor에서 실행할 SQL을 준다. 주석에도 그 단어를 넣지 않는다. 진행상황은 한국어로 알린다 (사용자 요청).

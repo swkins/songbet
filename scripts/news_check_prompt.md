@@ -52,5 +52,6 @@ on conflict (league, game_date, team, player_name) do update set player_id = exc
   confirmed = excluded.confirmed, reason = excluded.reason, source_title = excluded.source_title, source_url = excluded.source_url, checked_at = now();
 insert into news_check_log(task, games, players, note) values ('{TASK}', <경기 수>, <저장한 선수 수>, '<20자 이내 요약>');
 ```
+NBA만: 저장한 선수 이름의 한국어 표기도 같이 넣는다 (이미 있으면 그대로): `insert into player_names (league, name_en, name_ko) values ('NBA', '<영어 이름>', '<국내 매체 표기>'), ... on conflict do nothing;`
 
 7. 마지막 답은 두 줄 이내: 경기 수, 저장한 선수 수, 결장 확정 선수 이름.
