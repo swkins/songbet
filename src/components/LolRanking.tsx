@@ -13,7 +13,7 @@ interface Row {
   kp: number | null; dmg_pct: number | null; gold_pct: number | null; vs_pct: number | null; dpm: number | null; vspm: number | null; wcpm: number | null
   gd15: number | null; csd15: number | null; xpd15: number | null; fb: number | null; fb_victim: number | null; solo_kills: number | null; pentas: number | null
   composite: number; base: number; role_rank: number; league_offset: number | null; league_gpr: number | null; global_base: number | null;
-  lp_link: string | null; tier: number | null; tier_now: number | null; seasons: { season: string; league: string; games: number; g: number; team: string | null; team_z?: number; ind?: number }[] | null; zs_now: Record<string, number> | null; low_sample: boolean; tournaments: Record<string, number> | null; updated_at: string
+  lp_link: string | null; tier: number | null; tier_now: number | null; seasons: { season: string; league: string; games: number; g: number; team: string | null; team_z?: number; ind?: number; sos?: number }[] | null; zs_now: Record<string, number> | null; low_sample: boolean; tournaments: Record<string, number> | null; updated_at: string
 }
 const LEAGUE_ORDER = ['LCK', 'LPL', 'LEC', 'LCS', 'LCP', 'LCK CL', 'CBLOL']
 const ROLES: [string, string][] = [['Top', '탑'], ['Jungle', '정글'], ['Mid', '미드'], ['Bot', '원딜'], ['Support', '서폿']]
@@ -137,7 +137,7 @@ export default function LolRanking() {
                     <span style={{ fontSize: 10, color: 'var(--text-muted)', marginLeft: 4 }}>{r.country}</span>
                     <div style={{ fontSize: 10, color: 'var(--text-secondary)' }}>{isAll && <b style={{ color: 'var(--gold)', marginRight: 4 }}>{r.league}</b>}{r.team ?? '—'}</div>
                   </td>
-                  <td style={{ ...td }} title={(r.seasons ?? []).map(x => `${x.season} ${x.league === 'INTL' ? '국제전' : x.league}${x.team ? ` ${x.team}` : ''} ${x.games}세트 → ${Math.round(62 + 13 * x.g)} (리그 수준 ${x.team_z != null ? (x.team_z > 0 ? '+' : '') + Number(x.team_z).toFixed(1) : '?'}σ · 개인 ${x.ind != null ? (x.ind > 0 ? '+' : '') + Number(x.ind).toFixed(1) : '?'}σ)`).join('\n') || '기록 없음'}>
+                  <td style={{ ...td }} title={(r.seasons ?? []).map(x => `${x.season} ${x.league === 'INTL' ? '국제전' : x.league}${x.team ? ` ${x.team}` : ''} ${x.games}세트 → ${Math.round(62 + 16 * x.g)}${x.sos ? ` · 상대 강도 ${x.sos > 0 ? '+' : ''}${Number(x.sos).toFixed(2)}σ` : ''} (리그 수준 ${x.team_z != null ? (x.team_z > 0 ? '+' : '') + Number(x.team_z).toFixed(1) : '?'}σ · 개인 ${x.ind != null ? (x.ind > 0 ? '+' : '') + Number(x.ind).toFixed(1) : '?'}σ)`).join('\n') || '기록 없음'}>
                     {r.tier != null ? <span style={{ fontSize: 15, fontWeight: 800, color: t.color }}>{r.tier}</span> : <span style={{ color: 'var(--text-muted)' }}>–</span>}
                     {r.low_sample && <div style={{ fontSize: 9, color: 'var(--orange)' }} title="여러 시즌 합쳐 유효 세트가 60 미만 — 리그 주전 평균보다 조금 낮은 쪽으로 당겨 계산">표본 적음</div>}
                   </td>
@@ -166,8 +166,10 @@ export default function LolRanking() {
         </table>
       </div>
       <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 8, lineHeight: 1.7 }}>
-        체급 = 리그 수준(그 시즌 그 리그 팀들의 세계 위치 평균, Riot GPR — 같은 리그 선수는 모두 같은 값) + 개인 실력(같은 시즌·리그·포지션 주전급 대비 지표 표준점수를 포지션별 가중치로, 국제전은 국제전 참가자 대비) — 같은 리그 안 순위는 오로지 실력
-        → 2026 ×1 · 2025 ×0.35 · 2024 ×0.1, 국제전 세트 ×1.5, 지금 리그에서 80세트 이상 뛰었으면 그보다 낮은 리그(LCK CL 등) 시절은 ×1/3 → 세트 적으면 '리그 수준 − 0.3σ' 쪽으로 40세트만큼 (유효 60세트 미만 '표본 적음') → 62 + 13σ.
+        체급 = 리그 수준(그 시즌 그 리그 팀들의 세계 위치 평균, Riot GPR — 같은 리그 선수는 모두 같은 값) + 개인 실력(같은 시즌·리그·포지션 주전급 대비 지표 표준점수를 포지션별 가중치로, 국제전은 국제전 참가자 대비)
+        + 상대 강도(그 팀이 실제로 상대한 팀들의 세계 위치 − 골고루 붙었을 때 기대값: LCK 레전드/라이즈·LPL 그룹 등, 모든 리그) — 같은 리그 안 순위는 실력 + 상대 강도
+        → 시즌마다 개인 실력 × 세트/(세트+30) (적은 세트는 평균 쪽) → 2026 ×1 · 2025 ×0.35 · 2024 ×0.1, 국제전 세트 ×1.5, 지금 리그에서 80세트 이상이면 낮은 리그(LCK CL 등) 시절 ×1/3
+        → '리그 수준 − 0.3σ' 쪽으로 80세트만큼 (유효 100세트 미만 '표본 적음') → 62 + 16σ.
         LCK CL은 GPR이 없어 LCK − 300으로 추정. 개인 지표 가중치(킬관여·퍼블관여·피해%·골드%는 승리와 상관이 없어 뺌):
         탑 GD@15 28 · XPD 20 · CSD 10 · 솔로킬 10 · DPM 10 · 데스 8 · KDA 8 / 정글 GD 18 · XPD 16 · CSD 12 · CSM 8 · 데스 12 · DPM 10 · KDA 10 · 솔로킬 4 · 시야 4 /
         미드 GD 26 · XPD 18 · DPM 14 · CSD 10 · KDA 10 · 솔로킬 8 · 데스 8 / 원딜 GD 26 · XPD 16 · DPM 14 · CSD 12 · 데스 10 · KDA 10 · CSM 4 · 와드제거 2 /

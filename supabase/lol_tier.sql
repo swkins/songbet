@@ -144,3 +144,10 @@ $$;
 
 -- ── v6 (사용자 요청 2026-11-20 — 최근이 가장 중요, 하위 리그 출신 보정) ──
 -- 시즌 가중 2026 ×1 · 2025 ×0.35 · 2024 ×0.1, 지금 리그(latest) 세트 합 ≥ 80이면 리그 수준이 0.5σ 이상 낮은 리그 시즌은 ×1/3. (마이그레이션 lol_player_tier_v6_promoted)
+
+-- ── v7 (사용자 요청 2026-11-20 — 상대 강도·적은 세트) ──
+-- lol_matchups(season, league, team1, team2, games): Leaguepedia ScoreboardGames 팀 쌍별 세트 수 (public.lol_matchup_step, pg_cron lol-matchups 1분에 하나)
+-- v_lol_team_sos: 팀 상대 평균 team_z − (리그 팀 team_z 합 − 자기) / (팀 수 − 1)
+-- v_lol_player_tier: ind = (comp + 상대 강도 − 리그 세트 가중 평균) × games/(games+30) (국제전 +15·상대 강도 0), g = 리그 수준 + ind,
+--   가중 2026 1 · 2025 0.35 · 2024 0.1 · 국제전 ×1.5 · 하위 리그 ×1/3, prior (리그 수준 − 0.3) × 80세트, low_sample n < 100, tier = 62 + 16σ.
+-- (마이그레이션 lol_player_tier_v7_sos_shrink, 뷰 v_lol_team_sos는 execute_sql로 만듦)
