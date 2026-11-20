@@ -141,3 +141,6 @@ $$;
 -- v_lol_player_tier: 시즌 점수 g = 리그 수준(lg_z = 그 시즌 그 리그 v_lol_team_power.team_z 평균) + comp(개인 z)
 --   국제전 행의 리그 수준 = 그 해 그 선수 소속 리그, prior = 리그 수준 − 0.3 (40세트), tier = 62 + 13σ. 칸 이름 team_z_now = 지금 리그 수준.
 -- (실제 적용 SQL은 마이그레이션 lol_player_tier_v5_skill_only)
+
+-- ── v6 (사용자 요청 2026-11-20 — 최근이 가장 중요, 하위 리그 출신 보정) ──
+-- 시즌 가중 2026 ×1 · 2025 ×0.35 · 2024 ×0.1, 지금 리그(latest) 세트 합 ≥ 80이면 리그 수준이 0.5σ 이상 낮은 리그 시즌은 ×1/3. (마이그레이션 lol_player_tier_v6_promoted)
