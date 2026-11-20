@@ -97,3 +97,13 @@ from latest l join agg a using (pkey)
 left join prior p on p.season = l.last_season and p.league = l.league
 left join public.v_lol_season_comp cur on cur.pkey = l.pkey and cur.season = l.last_season and cur.league = l.league;
 grant select on public.v_lol_player_tier to anon, authenticated;
+
+-- ── 속도: 시즌별 점수는 5초 걸려서 미리 계산해 둔다 (mv_lol_season_comp), v_lol_player_tier는 그걸 읽는다 ──
+-- 기록을 새로 받거나 공식을 바꾸면 select public.refresh_lol_tier(); (pg_cron 'lol-tier-refresh' 매일 05:17 KST)
+create materialized view if not exists public.mv_lol_season_comp as select * from public.v_lol_season_comp;
+create index if not exists mv_lol_season_comp_pkey on public.mv_lol_season_comp (pkey, season, league);
+create or replace function public.refresh_lol_tier() returns void language sql security definer set search_path = public as $$
+  refresh materialized view public.mv_lol_season_comp
+$$;
+-- (v_lol_player_tier는 위 정의에서 v_lol_season_comp 대신 mv_lol_season_comp를 읽도록 바꿔 적용함)
+-- 리그 보정 추정 (GPR 없음): LCK CL 2024·2025·2026 = LCK − 2.0 logit, 2025 LCS(LTA 북부) −2.7 · CBLOL(LTA 남부) −3.8 (2025 GPR에 LTA 지역 점수 없음)
