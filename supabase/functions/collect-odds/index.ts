@@ -49,6 +49,12 @@ Deno.serve(async (req) => {
   const games: Game[] = (rows ?? []).flatMap((r: any) => (r.games ?? []).map((g: any) => ({ id: g.id, start: g.start, home: g.home?.full || g.home?.name, away: g.away?.full || g.away?.name, date: r.game_date })))
     .filter(g => Date.parse(g.start) + 3 * 3600000 > Date.now())
   if (!games.length) return log('skipped', { message: '오늘·내일 남은 경기 없음' })
+  // V리그: 365Scores(collect-365, Bet365)가 먼저 — 최근 3시간 안에 남은 경기 배당을 다 받았으면 BetExplorer는 안 부른다 (2026-11-22 사용자 요청, BetExplorer = 백업)
+  if (league.startsWith('V리그')) {
+    const { data: l3 } = await db.from('odds_fetch_log').select('note').eq('league', league).eq('status', 'ok').gte('fetched_at', new Date(Date.now() - 3 * 3600000).toISOString()).order('fetched_at', { ascending: false }).limit(20)
+    const last365 = (l3 ?? []).find((x: any) => x.note?.src === '365')
+    if (last365 && Number(last365.note?.odds ?? 0) >= games.length) return log('skipped', { message: '365Scores 배당 있음 — BetExplorer 안 부름' })
+  }
 
   const found: Odds[] = []; const unmatched: string[] = []; const lines: Line[] = []
   try {

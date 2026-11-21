@@ -28,7 +28,8 @@ const SPORT_LIST: { id: string; label: string; leagues: string[] }[] = [
     '네이션스 리그', '국제 친선 경기']) },   // 대표팀 A매치만 (클럽 친선은 뺌)
   { id: 'baseball', label: '⚾ 야구', leagues: [] },
   { id: 'basketball', label: '🏀 농구', leagues: sortLeagues('basketball', ['KBL', 'WKBL', 'NBA']) },
-  { id: 'volleyball', label: '🏐 배구', leagues: ['V리그 남자', 'V리그 여자'] },
+  // 배구: V리그(KOVO) + 해외(365Scores — collect-365)
+  { id: 'volleyball', label: '🏐 배구', leagues: sortLeagues('volleyball', ['V리그 남자', 'V리그 여자', '이탈리아 남자', '이탈리아 여자', '폴란드 남자', '폴란드 여자', '터키 남자', '터키 여자', '브라질 남자', '브라질 여자', '체코 남자', '벨기에 여자']) },
   { id: 'esports', label: '🎮 LOL', leagues: [] },
 ]
 const SPORTS = [{ id: 'all', label: '전체', leagues: SPORT_LIST.flatMap(s => s.leagues) }, ...SPORT_LIST]
