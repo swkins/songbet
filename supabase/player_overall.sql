@@ -59,6 +59,10 @@ select league, season, game_id, game_date, team, player_id, player_name, minutes
           + 0.5*coalesce(reb,0) + 0.7*coalesce(ast,0) + coalesce(stl,0) + 0.7*coalesce(blk,0) - coalesce(tov,0) end as gmsc
 from public.player_game_stats;
 
+-- V리그 스냅샷 시즌: 5~9월(비시즌)에 받은 누적은 끝난 시즌 것 (2026-11-21 — 시즌마다 최종 누적을 남겨 지난 시즌 체급으로 씀)
+create or replace function public.vb_season(d date) returns text language sql immutable as $$
+  select case when extract(month from d) between 5 and 9 then public.season_of((d - interval '6 months')::date) else public.season_of(d) end $$;
+
 -- 선수 시즌 평균: 농구 = 경기 기록, 배구 = KOVO 시즌 누적 최신 스냅샷
 create or replace view public.v_player_season with (security_invoker = on) as
 select league, season, player_id,
@@ -68,9 +72,10 @@ select league, season, player_id,
 from public.v_player_games where league not like 'VLEAGUE%'
 group by league, season, player_id
 union all
-select case when gender = 'MALE' then 'VLEAGUE_M' else 'VLEAGUE_W' end, public.season_of(snapshot_date), player_code, player_name,
+select case when gender = 'MALE' then 'VLEAGUE_M' else 'VLEAGUE_W' end, public.vb_season(snapshot_date), player_code, player_name,
   team_name, game_count, null, round(public.vb_value(stats) / nullif(game_count, 0), 2), snapshot_date
-from (select distinct on (player_code) * from public.kovo_player_snapshots order by player_code, snapshot_date desc) k;
+from (select distinct on (player_code, public.vb_season(snapshot_date)) * from public.kovo_player_snapshots
+      order by player_code, public.vb_season(snapshot_date), snapshot_date desc) k;
 
 -- 최근폼: 이번 시즌 최근 5경기 (최근일수록 크게 5·4·3·2·1)
 create or replace view public.v_player_recent with (security_invoker = on) as

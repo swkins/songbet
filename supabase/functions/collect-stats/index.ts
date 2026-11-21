@@ -5,7 +5,7 @@
 //              · V리그(KOVO 선수 시즌 누적 스냅샷 → 전날 차이로 경기 기록). pg_cron 매일 새벽 3~4시 KST(랜덤 분).
 //  이미 넣은 경기는 건너뛴다. 한 번에 max경기까지만(기본 40) — 시즌 첫 수집은 여러 번 불러 채운다(응답 remaining).
 //  지난 시즌 받기(체급용, 한 번): { group: "domestic", from: "2025-10-01", wkblPrev: true, skipKovo: true }
-//  보관: 선수 경기 기록은 지우지 않는다 (2026-11-21 사용자 — 기록을 쌓는다, 정리는 supabase/cleanup.sql), KOVO 스냅샷은 14일.
+//  보관: 선수 경기 기록은 지우지 않는다 (2026-11-21 사용자 — 기록을 쌓는다, 정리는 supabase/cleanup.sql), KOVO 스냅샷은 14일 지난 날짜별 사본만 정리하고 시즌 최종 누적은 남김.
 //  KBL 선수 구분(playerFlag 0 국내 · 1 외국인 · 2 아시아쿼터) → extra.kind + player_kinds (용병 체급 출발점 — src/lib/playerOverall.ts)
 import { createClient } from 'npm:@supabase/supabase-js@2.45.0'
 
@@ -216,7 +216,7 @@ async function kovo(db: ReturnType<typeof sb>) {
       fgm: null, fga: null, tpm: null, tpa: null, ftm: null, fta: null, plus_minus: null, extra: { ...d, from_snapshot: p.snapshot_date } })
   }
   await insert(db, rows)
-  await db.from('kovo_player_snapshots').delete().lt('snapshot_date', addDays(today, -14))
+  // 지난 스냅샷 정리는 cleanup_daily가 한다 (시즌마다 마지막 스냅샷 = 그 시즌 최종 누적은 남김)
   return { league: 'VLEAGUE', snapshots: snaps.length, rows: rows.length }
 }
 

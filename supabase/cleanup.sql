@@ -13,7 +13,11 @@ begin
   delete from public.game_schedules where game_date < current_date - 7;                      get diagnostics n = row_count; r := r || jsonb_build_object('game_schedules', n);
   delete from public.kovo_roster_req where at < now() - interval '3 days';                   get diagnostics n = row_count; r := r || jsonb_build_object('kovo_roster_req', n);
   delete from public.vb_games_req where at < now() - interval '3 days';                      get diagnostics n = row_count; r := r || jsonb_build_object('vb_games_req', n);
-  delete from public.kovo_player_snapshots where snapshot_date < current_date - 14;          get diagnostics n = row_count; r := r || jsonb_build_object('kovo_snapshots', n);
+  -- KOVO 누적 스냅샷: 14일 지난 것 중 같은 선수·같은 시즌에 더 새 스냅샷이 있는 것만 (시즌 최종 누적은 지난 시즌 체급용으로 남김)
+  delete from public.kovo_player_snapshots s where s.snapshot_date < current_date - 14
+    and exists (select 1 from public.kovo_player_snapshots t where t.player_code = s.player_code
+                and public.vb_season(t.snapshot_date) = public.vb_season(s.snapshot_date) and t.snapshot_date > s.snapshot_date);
+                                                                                              get diagnostics n = row_count; r := r || jsonb_build_object('kovo_snapshots', n);
   delete from public.news_check_log where ran_at < now() - interval '14 days';               get diagnostics n = row_count; r := r || jsonb_build_object('news_check_log', n);
   delete from public.player_status where game_date < current_date - 2;                       get diagnostics n = row_count; r := r || jsonb_build_object('player_status', n);
   delete from public.game_news where game_date < current_date - 30;                          get diagnostics n = row_count; r := r || jsonb_build_object('game_news', n);
