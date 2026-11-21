@@ -7,8 +7,8 @@ alter table public.odds_snapshots add column if not exists draw_odds numeric;
 alter table public.odds_snapshots add column if not exists open_draw numeric;
 
 insert into public.odds_jobs (league, job) values
-  ('잉글랜드 1부', 'collect-soccer-epl'), ('스페인 1부', 'collect-soccer-laliga'), ('이탈리아 1부', 'collect-soccer-seriea'),
-  ('독일 1부', 'collect-soccer-bundesliga'), ('프랑스 1부', 'collect-soccer-ligue1')
+  ('프리미어리그', 'collect-soccer-epl'), ('라리가', 'collect-soccer-laliga'), ('세리에A', 'collect-soccer-seriea'),
+  ('분데스리가', 'collect-soccer-bundesliga'), ('리그1', 'collect-soccer-ligue1')
 on conflict (league) do nothing;
 
 create or replace function public.run_collect_soccer(p_league text) returns void
@@ -58,26 +58,26 @@ begin
 end $$;
 
 -- ── 2026-11-21 리그 확장 (사용자 요청: 리그 관리의 축구 리그 중 일정 받을 수 있는 리그 전부, 스위스·아일랜드·체코·핀란드는 뺌) ──
--- ESPN 25개 + K리그 1·2부(K리그 API) + 일본 2부(J리그 데이터 사이트). K리그·J2 배당은 BetExplorer.
+-- ESPN 25개 + K리그 1·2부(K리그 API) + J리그2(J리그 데이터 사이트). K리그·J2 배당은 BetExplorer.
 -- 리그가 많아져서 "3분 안에 다른 작업이 돌았으면 미룸"을 출처별로 나눔:
 --  BetExplorer 쓰는 작업(국내 농구·배구 배당 + K리그·J2)끼리만 3분, ESPN 축구끼리는 1분 (3~10분 / 1~4분 미룸).
 --  주기: 5대 리그 40~100분, 나머지 60~120분, 오늘·내일 경기 없으면 150~240분 / 나머지 180~300분, 차단이면 90~120분.
 insert into public.odds_jobs (league, job) values
-  ('잉글랜드 2부','collect-soccer-eng2'),('잉글랜드 3부','collect-soccer-eng3'),('스페인 2부','collect-soccer-esp2'),('이탈리아 2부','collect-soccer-ita2'),
-  ('독일 2부','collect-soccer-ger2'),('프랑스 2부','collect-soccer-fra2'),('네덜란드','collect-soccer-ned'),('포르투갈 1부','collect-soccer-por'),
+  ('챔피언쉽','collect-soccer-eng2'),('잉글랜드 리그1','collect-soccer-eng3'),('라리가2','collect-soccer-esp2'),('세리에B','collect-soccer-ita2'),
+  ('분데스리가2','collect-soccer-ger2'),('리그2','collect-soccer-fra2'),('네덜란드','collect-soccer-ned'),('포르투갈 1부','collect-soccer-por'),
   ('벨기에','collect-soccer-bel'),('터키','collect-soccer-tur'),('그리스','collect-soccer-gre'),('덴마크','collect-soccer-den'),('오스트리아','collect-soccer-aut'),
   ('스코틀랜드','collect-soccer-sco'),('스웨덴','collect-soccer-swe'),('미국','collect-soccer-usa'),('멕시코','collect-soccer-mex'),('브라질','collect-soccer-bra'),
-  ('아르헨티나','collect-soccer-arg'),('일본 1부','collect-soccer-jpn1'),('호주','collect-soccer-aus'),('중국','collect-soccer-chn'),
+  ('아르헨티나','collect-soccer-arg'),('J리그1','collect-soccer-jpn1'),('호주','collect-soccer-aus'),('중국','collect-soccer-chn'),
   ('네이션스 리그','collect-soccer-nations'),('국제 친선 경기','collect-soccer-intl'),('친선경기','collect-soccer-club'),
-  ('대한민국 1부','collect-soccer-kor1'),('대한민국 2부','collect-soccer-kor2'),('일본 2부','collect-soccer-jpn2')
+  ('K리그1','collect-soccer-kor1'),('K리그2','collect-soccer-kor2'),('J리그2','collect-soccer-jpn2')
 on conflict (league) do nothing;
 
 create or replace function public.run_collect_soccer(p_league text) returns void
 language plpgsql security definer set search_path = public, cron, net as $$
 declare
   j public.odds_jobs; mins int; nxt timestamptz; u timestamp; busy boolean; blocked boolean; has_games boolean;
-  bx_set text[] := array['KBL','WKBL','V리그 남자','V리그 여자','대한민국 1부','대한민국 2부','일본 2부'];
-  top5 boolean := p_league in ('잉글랜드 1부','스페인 1부','이탈리아 1부','독일 1부','프랑스 1부');
+  bx_set text[] := array['KBL','WKBL','V리그 남자','V리그 여자','K리그1','K리그2','J리그2'];
+  top5 boolean := p_league in ('프리미어리그','라리가','세리에A','분데스리가','리그1');
   is_bx boolean := p_league = any(bx_set);
 begin
   perform pg_sleep(5 + random() * 20);
@@ -120,7 +120,7 @@ declare
   j public.odds_jobs; mins int; nxt timestamptz; u timestamp; busy boolean; blocked boolean;
 begin
   select * into j from public.odds_jobs where league = p_league;
-  busy := p_league <> 'NBA' and exists (select 1 from public.odds_jobs where league = any(array['KBL','WKBL','V리그 남자','V리그 여자','대한민국 1부','대한민국 2부','일본 2부'])
+  busy := p_league <> 'NBA' and exists (select 1 from public.odds_jobs where league = any(array['KBL','WKBL','V리그 남자','V리그 여자','K리그1','K리그2','J리그2'])
                                           and league <> p_league and last_request_at > now() - interval '3 minutes');
   if busy then
     mins := 3 + floor(random() * 8)::int;
@@ -145,7 +145,7 @@ do $$
 declare r record; i int := 0; u timestamp;
 begin
   for r in select * from public.odds_jobs where job like 'collect-soccer-%'
-           and league not in ('잉글랜드 1부','스페인 1부','이탈리아 1부','독일 1부','프랑스 1부') order by random() loop
+           and league not in ('프리미어리그','라리가','세리에A','분데스리가','리그1') order by random() loop
     u := (now() + make_interval(mins => 60 + i * 3 + floor(random() * 3)::int)) at time zone 'UTC';
     perform cron.schedule(r.job, extract(minute from u)::int || ' ' || extract(hour from u)::int || ' * * *', format('select public.run_collect_soccer(%L)', r.league));
     update public.odds_jobs set next_at = (u at time zone 'UTC') where league = r.league;

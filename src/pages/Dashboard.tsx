@@ -14,7 +14,7 @@ const BetAnalysisPanel = lazy(() => import('../components/BetAnalysisPanel'))
 const ANALYSIS_IN_DASHBOARD = false
 import RulebookNotes from './RulebookNotes'
 import BetModePanel, { type BetTarget } from '../components/BetModePanel'
-import { loadSchedules, upcomingForBet, type BetPickGame } from '../lib/gameSchedule'
+import { loadSchedules, upcomingForBet, leagueNameCompare, type BetPickGame } from '../lib/gameSchedule'
 import dayjs from 'dayjs'
 import isoWeek from 'dayjs/plugin/isoWeek'
 dayjs.extend(isoWeek)
@@ -1218,7 +1218,7 @@ function InlineBetEditForm({ bet, site, onClose, onSave, baseballOverrides, socc
   // 빈칸에서 더블클릭하면 등록된 리그 전체를 드롭다운으로 보여준다 (가나다순)
   const leagueInputSuggestions = !sportLeagueNames ? [] : trimmedLeagueInput
     ? sportLeagueNames.filter(lg => lg.toLowerCase().includes(trimmedLeagueInput.toLowerCase()) && lg !== trimmedLeagueInput).slice(0, 8)
-    : leagueShowAll ? [...sportLeagueNames].sort((a, b) => a.localeCompare(b, 'ko')) : []
+    : leagueShowAll ? [...sportLeagueNames].sort(leagueNameCompare) : []
   function onLeagueInputKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if (!leagueSuggestOpen || leagueInputSuggestions.length === 0) return
     if (e.key === 'ArrowDown') { e.preventDefault(); setLeagueHighlight(i => Math.min(i + 1, leagueInputSuggestions.length - 1)) }
@@ -1554,7 +1554,7 @@ function LeagueManageModal({ sport, leagues, favoriteLeagues, teams, onClose, on
   const sortedLeagues = [...leagues].sort((a, b) => {
     const fa = favoriteLeagues.includes(a), fb = favoriteLeagues.includes(b)
     if (fa !== fb) return fa ? -1 : 1
-    return a.localeCompare(b, 'ko')
+    return leagueNameCompare(a, b)
   })
   const [selectedLeague, setSelectedLeague] = useState<string | null>(sortedLeagues[0] ?? null)
   const [newLeague, setNewLeague] = useState('')
@@ -1733,7 +1733,7 @@ function LeagueOnlyManageModal({ sportLabel, leagues, onClose, onAddLeague, onRe
     if (!confirm(`"${name}" 리그를 삭제할까요? 이 리그로 저장된 베팅의 리그 정보도 함께 지워집니다.`)) return
     await onDeleteLeague(name)
   }
-  const sorted = [...leagues].sort((a, b) => a.localeCompare(b, 'ko'))
+  const sorted = [...leagues].sort(leagueNameCompare)
   // 좌측 리그 목록에서 고른 리그 — 우측에 그 리그의 팀을 나열 (선택이 없거나 삭제/이름변경된 경우 첫 리그)
   const selected = openLeague && sorted.includes(openLeague) ? openLeague : (sorted[0] ?? null)
   const selectedTeams = selected ? teams.filter(t => t.league === selected).sort((a, b) => a.name.localeCompare(b.name, 'ko')) : []
@@ -2427,7 +2427,7 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, betOptionStakesBySpor
   // 빈칸에서 더블클릭하면 등록된 리그 전체를 드롭다운으로 보여준다 (가나다순)
   const leagueInputSuggestions = !sportLeagueNames ? [] : trimmedLeagueInput
     ? sportLeagueNames.filter(lg => lg.toLowerCase().includes(trimmedLeagueInput.toLowerCase()) && lg !== trimmedLeagueInput).slice(0, 8)
-    : leagueShowAll ? [...sportLeagueNames].sort((a, b) => a.localeCompare(b, 'ko')) : []
+    : leagueShowAll ? [...sportLeagueNames].sort(leagueNameCompare) : []
   // 다른 종목 팀을 골라 종목이 바뀐 경우엔 그 팀의 리그를 넣는다 (종목이 바뀌면 리그칸을 비우므로 여기서 채운다)
   const pendingLeagueRef = useRef('')
   useEffect(() => { setLeagueInput(pendingLeagueRef.current); pendingLeagueRef.current = ''; setLeagueSuggestOpen(false); setLeagueShowAll(false); setLeagueHighlight(-1); setLeagueOnlyMgmtOpen(false) }, [sport])

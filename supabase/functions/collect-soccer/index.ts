@@ -1,5 +1,5 @@
 // 축구 일정 + 승무패 배당 (사용자 요청 — 5대 리그로 시작, 2026-11-21 리그 관리의 나머지 리그도 연결. 배당은 일반 승무패만).
-// body: { league: 리그 관리 이름 } — ESPN(아래 ESPN 표) · K리그 1·2부(K리그 공식 API) · 일본 2부(J리그 공식 데이터 사이트)
+// body: { league: 리그 관리 이름 } — ESPN(아래 ESPN 표) · K리그 1·2부(K리그 공식 API) · J리그2(J리그 공식 데이터 사이트)
 // 리그마다 pg_cron 작업이 따로 부른다 (public.run_collect_soccer — supabase/cron_soccer.sql).
 // 출처:
 //  - ESPN scoreboard: 한 번 부르면 일정과 DraftKings 배당(오픈·현재)이 같이 온다.
@@ -19,17 +19,17 @@ const kstDate = (ms: number) => new Date(ms + KST).toISOString().slice(0, 10)
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 
 // Action Network 리그 이름 (핸디 배당 — 룰북 베팅 찾기용)
-const AN_LEAGUE: Record<string, string> = { '잉글랜드 1부': 'epl', '스페인 1부': 'laliga', '이탈리아 1부': 'seriea', '독일 1부': 'bundesliga', '프랑스 1부': 'ligue1', '미국': 'mls' }
+const AN_LEAGUE: Record<string, string> = { '프리미어리그': 'epl', '라리가': 'laliga', '세리에A': 'seriea', '분데스리가': 'bundesliga', '리그1': 'ligue1', '미국': 'mls' }
 const CODE: Record<string, string> = {
-  '잉글랜드 1부': 'eng.1', '스페인 1부': 'esp.1', '이탈리아 1부': 'ita.1', '독일 1부': 'ger.1', '프랑스 1부': 'fra.1',
-  '잉글랜드 2부': 'eng.2', '잉글랜드 3부': 'eng.3', '스페인 2부': 'esp.2', '이탈리아 2부': 'ita.2', '독일 2부': 'ger.2', '프랑스 2부': 'fra.2',
+  '프리미어리그': 'eng.1', '라리가': 'esp.1', '세리에A': 'ita.1', '분데스리가': 'ger.1', '리그1': 'fra.1',
+  '챔피언쉽': 'eng.2', '잉글랜드 리그1': 'eng.3', '라리가2': 'esp.2', '세리에B': 'ita.2', '분데스리가2': 'ger.2', '리그2': 'fra.2',
   '네덜란드': 'ned.1', '포르투갈 1부': 'por.1', '벨기에': 'bel.1', '터키': 'tur.1', '그리스': 'gre.1', '덴마크': 'den.1', '오스트리아': 'aut.1', '스코틀랜드': 'sco.1', '스웨덴': 'swe.1',
-  '미국': 'usa.1', '멕시코': 'mex.1', '브라질': 'bra.1', '아르헨티나': 'arg.1', '일본 1부': 'jpn.1', '호주': 'aus.1', '중국': 'chn.1',
+  '미국': 'usa.1', '멕시코': 'mex.1', '브라질': 'bra.1', '아르헨티나': 'arg.1', 'J리그1': 'jpn.1', '호주': 'aus.1', '중국': 'chn.1',
   '네이션스 리그': 'uefa.nations', '국제 친선 경기': 'fifa.friendly',   // A매치(국가대표)만 — 클럽 친선(club.friendly)은 사용자 요청으로 뺌
 }
 // ESPN에 없는 리그 (스위스·아일랜드·체코·핀란드는 사용자 요청으로 뺌)
-const KLEAGUE: Record<string, string> = { '대한민국 1부': '1', '대한민국 2부': '2' }
-const BX: Record<string, string> = { '대한민국 1부': 'south-korea/k-league-1', '대한민국 2부': 'south-korea/k-league-2', '일본 2부': 'japan/j2-league' }
+const KLEAGUE: Record<string, string> = { 'K리그1': '1', 'K리그2': '2' }
+const BX: Record<string, string> = { 'K리그1': 'south-korea/k-league-1', 'K리그2': 'south-korea/k-league-2', 'J리그2': 'japan/j2-league' }
 // ESPN 영어 이름 → 리그 관리에 등록된 한글 이름 (2026-27 시즌, 등록 이름 그대로 — 오타 포함)
 const KO: Record<string, string> = {
   // 잉글랜드
@@ -74,7 +74,7 @@ Deno.serve(async (req) => {
   const league: string = body.league
   const db = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
   const log = async (status: string, note: Record<string, unknown>) => { await db.from('odds_fetch_log').insert({ league, status, note }); return new Response(JSON.stringify({ league, status, ...note }), { headers: { 'Content-Type': 'application/json' } }) }
-  if (!CODE[league] && !KLEAGUE[league] && league !== '일본 2부') return log('error', { message: 'unknown league' })
+  if (!CODE[league] && !KLEAGUE[league] && league !== 'J리그2') return log('error', { message: 'unknown league' })
 
   // 팀 이름 표
   const { data: nm } = await db.from('soccer_team_names').select('league, src, ko')

@@ -7,7 +7,7 @@ import { loadRules, saveRule, loadLines, judge, BET_LABEL, type SoccerRule, type
 // ─── 축구 룰북 베팅 찾기 (사용자 요청 — 5대 리그, 룰북 조건에 맞는 경기만 쭉, 안 되는 건 패스) ─────
 // 승무패 = ESPN·DraftKings 최신(odds_snapshots), 핸디 = Action Network 평균(soccer_lines) 또는 포아송 추정.
 // 룰은 Supabase soccer_rules — 아래 '룰 고치기'에서 바꾼다.
-const LEAGUES = ['잉글랜드 1부', '스페인 1부', '이탈리아 1부', '독일 1부', '프랑스 1부']
+const LEAGUES = ['프리미어리그', '라리가', '세리에A', '분데스리가', '리그1']
 export interface RulebookBet { sport: string; league: string; gameId: string; preset: { side: 'home' | 'away'; opt: string; odds: number | null } }
 
 export default function SoccerRulebook({ onGoBet }: { onGoBet?: (t: RulebookBet) => void }) {

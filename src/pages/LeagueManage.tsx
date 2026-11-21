@@ -1,3 +1,4 @@
+import { leagueNameCompare } from '../lib/gameSchedule'
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { Plus, Trash2, Check, X, Pencil, Star } from 'lucide-react'
@@ -100,7 +101,7 @@ export default function LeagueManage({ sport }: { sport: StructuredSport }) {
 
   const sortedLeagues = [...leagues].sort((a, b) => {
     if (a.is_favorite !== b.is_favorite) return a.is_favorite ? -1 : 1
-    return a.name.localeCompare(b.name, 'ko')
+    return leagueNameCompare(a.name, b.name)
   })
 
   return (
