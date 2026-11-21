@@ -10,6 +10,7 @@ alter table public.bets add column if not exists auto_score text;       -- '홈-
 alter table public.bets add column if not exists auto_game_id text;
 alter table public.bets add column if not exists auto_at timestamptz;
 alter table public.bets add column if not exists auto_note text;        -- 경기 못 찾음 / 이름 애매 / 옵션 모름
+alter table public.bets add column if not exists auto_game jsonb;       -- 맞춘 경기 {home, away, start, status, hs, as} — 진행중 베팅 리그 옆 '홈 vs 원정 · 시각/점수' (2026-11-22 사용자 요청)
 
 create table if not exists public.nba_team_ko (en text primary key, short text not null, full_name text not null);
 insert into public.nba_team_ko (en, short, full_name) values
@@ -57,7 +58,7 @@ language plpgsql security definer set search_path to 'public' as $$
 declare
   r record; m text[]; side text; opt text; ta text; tb text; line numeric; ou text; sets boolean;
   best_score int; best_game jsonb; best_date date; hs numeric; as_ numeric; st text;
-  v numeric; res text; n int := 0; dur interval;
+  v numeric; res text; n int := 0; dur interval; gj jsonb;
 begin
   for r in select id, sport, league, match, bet_date, created_at from public.bets
            where result = 'pending' and parlay_group is null and coalesce(is_hidden, false) = false
@@ -103,6 +104,14 @@ begin
       continue;
     end if;
 
+    -- 맞춘 경기 정보 (화면 표시용 — 경기 전·중·끝 모두, NBA는 한글 짧은 이름)
+    gj := jsonb_build_object(
+      'home', coalesce((select k.short from public.nba_team_ko k where r.league = 'NBA' and k.en = best_game->'home'->>'name'), best_game->'home'->>'name'),
+      'away', coalesce((select k.short from public.nba_team_ko k where r.league = 'NBA' and k.en = best_game->'away'->>'name'), best_game->'away'->>'name'),
+      'start', best_game->>'start', 'status', best_game->>'status',
+      'hs', best_game->'home'->>'score', 'as', best_game->'away'->>'score');
+    update public.bets set auto_game = gj where id = r.id and auto_game is distinct from gj;
+
     -- 최종 점수 (종료된 경기만)
     st := best_game->>'status'; hs := null; as_ := null;
     -- 연기·중단·취소는 판정 안 함 (2026-11-22 위트레흐트 0:0 중단이 '적중'으로 나왔다)
@@ -124,6 +133,10 @@ begin
        where id = r.id and (auto_note is distinct from '경기 전·경기중' or auto_result is not null);
       continue;
     end if;
+
+    -- 최종 점수가 나왔으면 화면 표시에도 (WKBL은 일정에 점수가 없다)
+    gj := gj || jsonb_build_object('hs', hs::int, 'as', as_::int, 'final', true);
+    update public.bets set auto_game = gj where id = r.id and auto_game is distinct from gj;
 
     -- 판정 (라이브도 최종 점수 전체로)
     v := null;

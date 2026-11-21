@@ -3098,10 +3098,10 @@ export default function Dashboard({ betTarget, onBetTargetDone }: { betTarget?: 
   // 자동 판정(DB auto_grade_bets, 30분마다)을 5분마다 받아 대기 중 베팅에 붙인다 — 최종 처리는 [확인]
   useEffect(() => {
     const t = setInterval(async () => {
-      const { data } = await supabase.from('bets').select('id, auto_result, auto_score, auto_note').eq('result', 'pending').eq('is_hidden', false)
+      const { data } = await supabase.from('bets').select('id, auto_result, auto_score, auto_note, auto_game').eq('result', 'pending').eq('is_hidden', false)
       if (!data) return
       const m = new Map(data.map(d => [d.id as string, d]))
-      setBets(p => p.map(b => { const d = m.get(b.id); return d && (d.auto_result !== b.auto_result || d.auto_score !== b.auto_score || d.auto_note !== b.auto_note) ? { ...b, ...d } as Bet : b }))
+      setBets(p => p.map(b => { const d = m.get(b.id); return d && (d.auto_result !== b.auto_result || d.auto_score !== b.auto_score || d.auto_note !== b.auto_note || JSON.stringify(d.auto_game ?? null) !== JSON.stringify(b.auto_game ?? null)) ? { ...b, ...d } as Bet : b }))
     }, 5 * 60 * 1000)
     return () => clearInterval(t)
   }, [])
@@ -4013,6 +4013,22 @@ export default function Dashboard({ betTarget, onBetTargetDone }: { betTarget?: 
 
   // 사이트 한 곳의 베팅 목록(베팅추가·게임 롤링·카지노·진행 중·완료) — 좌우·상하 모드 사이트 카드와 베팅 모드 '진행 중 베팅' 한 줄에서 같이 쓴다.
   // withAdd = 맨 위 베팅추가 버튼 (베팅 모드에선 빼고 베팅 모드 패널의 베팅추가로)
+  /* 자동 판정이 맞춘 경기 한 줄 — "뉴욕 vs 포틀랜드 · 09:30" / "경기중 60 : 59" / "102 : 98 종료" (사용자 요청 2026-11-22) */
+  const gameInfoLine = (b: Bet) => {
+    const g = b.auto_game
+    if (!g?.home || !g?.away) return null
+    const st = g.status ?? ''
+    const started = !!g.start && Date.parse(g.start) <= Date.now()
+    const final = g.final || st === '종료' || /^final/i.test(st)
+    const stopped = /연기|중단|취소|postpon|cancel|suspend|abandon/i.test(st)
+    const sc = g.hs != null && g.as != null && g.hs !== '' && g.as !== '' ? `${g.hs} : ${g.as}` : null
+    const tail = stopped ? <span style={{ color: 'var(--orange)', fontWeight: 700 }}>{st}{sc ? ` (${sc})` : ''}</span>
+      : final ? <span style={{ color: 'var(--text-secondary)', fontWeight: 700 }}>{sc ?? ''} 종료</span>
+      : started ? <span style={{ color: 'var(--gold)', fontWeight: 700 }}>● {sc ?? '경기중'}{st && !/^\d+\/\d+/.test(st) ? ` ${st}` : ''}</span>
+      : <span>{g.start ? dayjs(g.start).format('M/D HH:mm') : ''}</span>
+    return <span style={{ fontWeight: 500 }}>{g.home} vs {g.away} · {tail}</span>
+  }
+
   /* ── 베팅 모드의 베팅 현황 (2026-11-22 사용자 요청 — 사이트마다 칸을 나누지 말고 하나로):
      맨 위 = 사이트별 한 줄 요약(입금·남은 롤링·수익), 그 아래 = 모든 사이트의 진행중 베팅을 한 줄씩 (최근 것 위) */
   const renderCombinedStatus = () => {
@@ -4080,7 +4096,7 @@ export default function Dashboard({ betTarget, onBetTargetDone }: { betTarget?: 
                 <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={site.name}>{site.name}</span>
                 <span style={{ fontSize: 14, lineHeight: 1, textAlign: 'center' }}>{sportGlyph(b.sport) ?? SPORT_SHORT[b.sport] ?? '📋'}</span>
                 <span style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }} title={[b.league, ...legs.map(l => l.match)].filter(Boolean).join(' · ')}>
-                  {b.league && <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.league}{b.parlay_group ? ` · 조합 ${legs.length}폴` : ''}</span>}
+                  {(b.league || b.auto_game) && <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.league}{b.parlay_group ? ` · 조합 ${legs.length}폴` : ''}{!b.parlay_group && b.auto_game && <> · {gameInfoLine(b)}</>}</span>}
                   {legs.map(l => (
                     <span key={l.id} style={{ display: 'flex', minWidth: 0 }}>
                       <BetMatchLine sport={l.sport} match={l.match} fontSize={12} stacked={false} live={l.is_live} knownOptions={displayOptionsBySport[l.sport] ?? []} numericOptions={displayNumericBySport[l.sport] ?? []} />
@@ -4150,7 +4166,7 @@ export default function Dashboard({ betTarget, onBetTargetDone }: { betTarget?: 
                     <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={site.name}>{site.name}</span>
                     <span style={{ fontSize: 14, lineHeight: 1, textAlign: 'center' }}>{sportGlyph(b.sport) ?? SPORT_SHORT[b.sport] ?? '📋'}</span>
                     <span style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
-                      {b.league && <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.league}{b.parlay_group ? ` · 조합 ${legs.length}폴` : ''}</span>}
+                      {(b.league || b.auto_game) && <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.league}{b.parlay_group ? ` · 조합 ${legs.length}폴` : ''}{!b.parlay_group && b.auto_game && <> · {gameInfoLine(b)}</>}</span>}
                       {legs.map(l => (
                         <span key={l.id} style={{ display: 'flex', minWidth: 0 }}>
                           <BetMatchLine sport={l.sport} match={l.match} fontSize={12} stacked={false} live={l.is_live} teamColor={rc} knownOptions={displayOptionsBySport[l.sport] ?? []} numericOptions={displayNumericBySport[l.sport] ?? []} />

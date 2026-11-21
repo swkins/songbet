@@ -35,6 +35,7 @@ export interface Bet {
   auto_result?: 'win' | 'loss' | 'push' | null  // 자동 판정 (DB auto_grade_bets — 종료 경기 점수로), 최종 처리는 [확인]
   auto_score?: string | null    // 자동 판정에 쓴 최종 점수 '홈-원정' (배구는 세트)
   auto_note?: string | null     // 판정 못 한 이유 (경기 못 찾음 등)
+  auto_game?: { home?: string; away?: string; start?: string; status?: string | null; hs?: string | number | null; as?: string | number | null; final?: boolean } | null  // 자동 판정이 맞춘 경기 (진행중 베팅 리그 옆 표시)
 }
 export interface Todo {
   id: string; created_at: string; todo_date: string; content: string
