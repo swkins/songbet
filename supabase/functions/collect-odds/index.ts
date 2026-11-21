@@ -3,6 +3,7 @@
 // 리그마다 pg_cron 작업이 따로 30~120분 랜덤으로 부른다 (public.run_collect_odds — supabase/cron_collect.sql).
 //  - NBA: Action Network scoreboard (미국 날짜, 한 번에 전 경기, 9개 북 평균, book 30 = 오픈, 홈 티켓 %)
 //  - 국내: BetExplorer 리그 페이지 1번 (평균배당, 왼쪽 팀 = 홈). 몇 초 간격 여러 번이면 429 → 국내 리그끼리 3분 이상 띄움(SQL 쪽).
+//    429면 다른 지역(x-region)으로 자기 자신을 한 번 더 부른다. 부르는 시각은 경기 시간 기준(supabase/cron_collect_slots.sql).
 //  오늘·내일 끝나지 않은 경기가 없으면 요청하지 않는다.
 //  + NBA 핸디·언오버 기준점(2026-11-21 사용자 요청) → odds_lines: 북마다 주력 라인(대안 라인 제외)을 모아 가장 많은 라인(같으면 양쪽 배당이 더 비슷한 쪽),
 //    그 라인 북 평균 배당, book 30 = 오픈. 바뀌었을 때만 한 줄 (= 기준점 변경 히스토리). 예측·채점은 DB 트리거(supabase/nba_lines.sql).
@@ -97,7 +98,20 @@ Deno.serve(async (req) => {
       }
     } else {
       const res = await fetch(BE[league], { headers: { ...UA, 'Accept-Language': 'en' } })
-      if (res.status === 429) return log('blocked', { http: 429 })
+      if (res.status === 429 || body.test429 === 1) {
+        // 429면 다른 지역(다른 IP)에서 한 번만 더 (2026-11-22 — Supabase 서버 IP를 여럿이 같이 써서 간격과 상관없이 막힘)
+        const here = Deno.env.get('SB_REGION') ?? null
+        if (!body.retry) {
+          const regions = ['ap-northeast-2', 'ap-southeast-1', 'ap-northeast-1', 'ap-southeast-2'].filter(r => r !== here)
+          const rg = regions[Math.floor(Math.random() * regions.length)]
+          await db.from('odds_fetch_log').insert({ league, status: 'blocked', note: { http: 429, region: here, retry: rg } })
+          const r2 = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/collect-odds`, { method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'x-region': rg },
+            body: JSON.stringify({ league, retry: 1 }) })
+          return new Response(await r2.text(), { headers: { 'Content-Type': 'application/json' } })
+        }
+        return log('blocked', { http: 429, region: here, retried: true })
+      }
       if (!res.ok) return log('error', { http: res.status })
       const html = await res.text()
       for (const tr of html.split('<tr')) {
