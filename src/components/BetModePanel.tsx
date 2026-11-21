@@ -52,7 +52,7 @@ export default function BetModePanel({ target, onTargetDone, sites, betOptionsBy
   const [gameId, setGameId] = useState<string | null>(null)
   const [addOpen, setAddOpen] = useState(false)          // 베팅추가: 사이트 고르는 중
   const [addSiteId, setAddSiteId] = useState<string | null>(null)
-  const [showAnalysis, setShowAnalysis] = useState(false)   // 경기 목록에서 고른 경기 오른쪽 📊 '분석 보기' — 분석 탭 자료를 가운데 큰 창으로
+  const [showAnalysis, setShowAnalysis] = useState(false)   // 고른 경기를 한 번 더 누르면 분석 — 분석 탭 자료를 가운데 큰 창으로
   const addSite = sites.find(s => s.id === addSiteId) ?? null
   const orderedSites = [...sites].sort((a, b) => Number(b.active) - Number(a.active) || a.sort_order - b.sort_order)
 
@@ -108,7 +108,7 @@ export default function BetModePanel({ target, onTargetDone, sites, betOptionsBy
         {targetMsg && <span style={{ fontSize: 11, color: 'var(--red)', marginLeft: 'auto' }}>{targetMsg}</span>}
       </div>
       {loading ? <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>불러오는 중…</div> : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 10, alignItems: 'start' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 0.7fr) minmax(0, 1fr) minmax(0, 1.3fr)', gap: 10, alignItems: 'start' }}>
           {/* 1. 종목 → 리그 */}
           <div style={col}>
             <div style={head}>종목 · 리그</div>
@@ -181,29 +181,26 @@ export default function BetModePanel({ target, onTargetDone, sites, betOptionsBy
                     <div key={g.id}>
                       {header}
                       <div style={{ position: 'relative' }}>
-                      <button type="button" onClick={() => { setGameId(g.id); setAddSiteId(null) }} style={{ ...item(gameId === g.id), width: '100%', display: 'flex', flexDirection: 'column', gap: 2, paddingRight: gameId === g.id ? 40 : undefined }}>
+                      <button type="button" title={gameId === g.id ? '한 번 더 누르면 분석' : undefined}
+                        onClick={() => { if (gameId === g.id) { setShowAnalysis(true); return } setGameId(g.id); setAddSiteId(null) }}
+                        style={{ ...item(gameId === g.id), width: '100%', display: 'flex', flexDirection: 'column', gap: 2 }}>
                         <span style={{ fontSize: 10, fontWeight: 700, color: live ? 'var(--gold)' : 'var(--text-muted)', fontFamily: 'var(--font-num)' }}>{live ? '● 경기중' : d.format('HH:mm')}{!league && <span style={{ fontWeight: 600, fontFamily: 'var(--font-body)', marginLeft: 6 }}>{g.league}</span>}</span>
-                        {/* 위 = 홈, 아래 = 원정 — 이름 옆 현재 배당, 축구는 가운데 줄에 무배당 (1·X·2 순) */}
+                        {/* 위 = 홈, 아래 = 원정 — 이름 옆 현재 배당(맨 끝이 아니라 가장 긴 이름 뒤로 조금 띄워 한 줄로 맞춤), 축구는 가운데 줄에 무배당 (1·X·2 순) */}
                         {(() => {
                           const o = odds[g.id]
-                          const row = (name: string, v: number | null | undefined, small = false) => (
-                            <span style={{ display: 'flex', alignItems: 'baseline', gap: 6, minWidth: 0 }}>
-                              <span style={{ fontWeight: small ? 400 : 700, fontSize: small ? 10 : undefined, color: small ? 'var(--text-muted)' : undefined, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }}>{name}</span>
-                              {v != null && <span style={{ fontFamily: 'var(--font-num)', fontWeight: 700, fontSize: small ? 10 : 11, color: small ? 'var(--text-muted)' : 'var(--text-secondary)', flexShrink: 0 }}>{Number(v).toFixed(2)}</span>}
+                          const row = (name: string, v: number | null | undefined, small = false) => <>
+                            <span style={{ fontWeight: small ? 400 : 700, fontSize: small ? 10 : undefined, color: small ? 'var(--text-muted)' : undefined, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{name}</span>
+                            <span style={{ fontFamily: 'var(--font-num)', fontWeight: 700, fontSize: small ? 10 : 11, color: small ? 'var(--text-muted)' : 'var(--text-secondary)' }}>{v != null ? Number(v).toFixed(2) : ''}</span>
+                          </>
+                          return (
+                            <span style={{ display: 'grid', gridTemplateColumns: 'minmax(0, max-content) auto', columnGap: 14, rowGap: 2, justifyContent: 'start', alignItems: 'baseline', width: '100%' }}>
+                              {row(koName(g.home.name), o?.home_odds)}
+                              {g.sport === 'soccer' && o?.draw_odds != null && row('무', o.draw_odds, true)}
+                              {row(koName(g.away.name), o?.away_odds)}
                             </span>
                           )
-                          return <>
-                            {row(koName(g.home.name), o?.home_odds)}
-                            {g.sport === 'soccer' && o?.draw_odds != null && row('무', o.draw_odds, true)}
-                            {row(koName(g.away.name), o?.away_odds)}
-                          </>
                         })()}
                       </button>
-                      {/* 고른 경기만 오른쪽에 '분석 보기' 아이콘 (사용자 요청 — 베팅슬립이 아니라 경기 일정 쪽에) */}
-                      {gameId === g.id && (
-                        <button type="button" title="분석 보기" aria-label="분석 보기" onClick={() => setShowAnalysis(true)}
-                          style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', width: 30, height: 30, borderRadius: 'var(--radius-sm)', border: '1px solid var(--gold-border)', background: 'var(--bg-card)', color: 'var(--gold)', cursor: 'pointer', fontSize: 15, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}>📊</button>
-                      )}
                       </div>
                     </div>
                   )
