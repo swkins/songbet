@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import dayjs from 'dayjs'
 import { X, RefreshCw } from 'lucide-react'
 import { supabase } from '../lib/supabase'
+import DataSources from './DataSources'
 
 // ─── 분석 탭 '업데이트 현황' — Supabase가 자동으로 모으는 것들의 주기·마지막·다음 실행·결과 ─────
 // 데이터: rpc analysis_update_status (supabase/cron_collect.sql). pg_cron 작업 일정은 UTC '분 시 * * *'.
@@ -51,6 +52,7 @@ export default function UpdateStatus({ onClose }: { onClose: () => void }) {
   const [s, setS] = useState<Status | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [reloadKey, setReloadKey] = useState(0)
   const load = () => {
     setLoading(true)
     supabase.rpc('analysis_update_status_v2').then(({ data, error }) => {
@@ -94,17 +96,19 @@ export default function UpdateStatus({ onClose }: { onClose: () => void }) {
 
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 200, display: 'flex', justifyContent: 'center', alignItems: 'flex-start', padding: '40px 12px', overflowY: 'auto' }}>
-      <div onClick={e => e.stopPropagation()} className="card" style={{ width: '100%', maxWidth: 760, padding: '14px 16px' }}>
+      <div onClick={e => e.stopPropagation()} className="card" style={{ width: '100%', maxWidth: 900, padding: '14px 16px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
           <span style={{ fontSize: 16, fontWeight: 800 }}>업데이트 현황</span>
           <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Supabase가 자동으로 모으는 데이터 · 지금 {t(s?.now)}</span>
-          <button onClick={load} title="새로고침" style={{ marginLeft: 'auto', background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-secondary)', cursor: 'pointer', padding: '3px 8px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 11 }}>
+          <button onClick={() => { load(); setReloadKey(k => k + 1) }} title="새로고침" style={{ marginLeft: 'auto', background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-secondary)', cursor: 'pointer', padding: '3px 8px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 11 }}>
             <RefreshCw size={12} style={loading ? { animation: 'spin 1s linear infinite' } : undefined} /> 새로고침
           </button>
           <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer' }}><X size={18} /></button>
         </div>
         {err && <div style={{ fontSize: 12, color: 'var(--red)', marginBottom: 10 }}>{/analysis_update_status|function/i.test(err) ? 'Supabase 쪽 자동 수집 설정이 아직 반영되지 않았어요 (supabase/cron_collect.sql).' : `현황을 못 불러왔어요: ${err}`}</div>}
         {!s && !err && <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>불러오는 중…</div>}
+        {/* 출처별 신뢰도 그리드 — 맨 위 (2026-11-22 사용자 요청) */}
+        <DataSources reloadKey={reloadKey} />
         {s && <>
           {/* 경기 일정 */}
           <div style={box}>
