@@ -18,8 +18,7 @@ begin
   delete from public.player_status where game_date < current_date - 2;                       get diagnostics n = row_count; r := r || jsonb_build_object('player_status', n);
   delete from public.game_news where game_date < current_date - 30;                          get diagnostics n = row_count; r := r || jsonb_build_object('game_news', n);
   delete from public.player_ratings where game_date < current_date - 400;                    get diagnostics n = row_count; r := r || jsonb_build_object('player_ratings', n);
-  -- 선수 경기 기록: 지난 시즌까지 (그 전 시즌은 collect-stats가 이미 지우지만 혹시 남으면)
-  delete from public.player_game_stats where game_date < make_date(extract(year from current_date)::int - case when extract(month from current_date) >= 8 then 1 else 2 end, 8, 1); get diagnostics n = row_count; r := r || jsonb_build_object('player_game_stats', n);
+  -- 선수 경기 기록(player_game_stats)·배구 경기 결과(vb_games)·예측은 지우지 않는다 (사용자 — 배구 등 기록을 쌓고 싶다. 한 시즌 약 6~10MB)
   return r;
 end $$;
 revoke all on function public.cleanup_daily() from public, anon, authenticated;
