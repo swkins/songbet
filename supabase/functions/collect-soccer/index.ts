@@ -72,6 +72,16 @@ const dec = (s: unknown): number | null => {
   return +(n > 0 ? 1 + n / 100 : 1 + 100 / Math.abs(n)).toFixed(2)
 }
 
+// ESPN 'post'에는 연기·중단·취소도 들어 있다 (2026-11-22 위트레흐트 0:0 중단을 '종료'로 저장해 자동 판정이 적중으로 나왔다) — 정상 종료만 '종료'
+const postStatus = (t: any): string => {
+  const n = String(t?.name ?? '')
+  if (/POSTPON|DELAY/.test(n)) return '연기'
+  if (/ABANDON|SUSPEND/.test(n)) return '중단'
+  if (/CANCEL|FORFEIT/.test(n)) return '취소'
+  if (/FULL_TIME|FINAL/.test(n) || (t?.completed && !n)) return '종료'
+  return t?.shortDetail || n || '종료?'
+}
+
 interface Team { name?: string; full?: string | null; abbr?: string | null; record?: string | null; score?: string | number | null }
 interface Game { id: string; start: string; home: Team; away: Team; venue?: string | null; status?: string | null; note?: string | null }
 
@@ -124,7 +134,7 @@ Deno.serve(async (req) => {
         return { name: ko(en), full: en, abbr: t?.team?.abbreviation ?? null, record: t?.records?.[0]?.summary ?? null, score: state === 'pre' ? null : t?.score ?? null }
       }
       const g: Game = { id: `soc-${e.id}`, start: new Date(Date.parse(e.date)).toISOString(), home: side('home'), away: side('away'), venue: c?.venue?.fullName ?? null,
-        status: state === 'post' ? '종료' : state === 'in' ? (c?.status?.type?.shortDetail ?? '경기 중') : null }
+        status: state === 'post' ? postStatus(c?.status?.type ?? e.status?.type) : state === 'in' ? (c?.status?.type?.shortDetail ?? '경기 중') : null }
       byDate[date].push(g)
       const ml = c?.odds?.[0]?.moneyline
       if (state === 'pre' && ml) odds.push({ game: g, date, src: 'espn-draftkings',

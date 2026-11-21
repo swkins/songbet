@@ -23,7 +23,7 @@ import {
   RotateCcw, Settings, Flame, BookOpen, Rows3, Columns3, Target,
   CheckCircle, XCircle, Ban, MinusCircle, Gift, GripVertical, DollarSign,
   TrendingUp, TrendingDown, ArrowDownToLine, LogOut, Pencil,
-  ClipboardPaste, ChevronUp, ChevronDown, Star,
+  ClipboardPaste, ChevronUp, ChevronDown, Star, Ellipsis,
 } from 'lucide-react'
 
 // 리그 관리 시스템(팀 자동완성·리그 자동인식·리그 관리 모달) — 데이터/로직은 유지하되 화면에는 표출하지 않음
@@ -3012,6 +3012,13 @@ export default function Dashboard({ betTarget, onBetTargetDone }: { betTarget?: 
   const [openFormSiteId, setOpenFormSiteId] = useState<string | null>(null)
   const [openFormType, setOpenFormType] = useState<'sports' | 'game'>('sports')
   const [hoverBetId, setHoverBetId]     = useState<string | null>(null)
+  const [manualBetId, setManualBetId]   = useState<string | null>(null)   // 베팅 모드 합친 목록 — '수동처리' 펼친 베팅
+  useEffect(() => {
+    if (!manualBetId) return
+    const close = () => setManualBetId(null)
+    window.addEventListener('click', close)
+    return () => window.removeEventListener('click', close)
+  }, [manualBetId])
   const [expandedSettled, setExpandedSettled] = useState<Record<string, boolean>>({})
   const [inlineEditBetId, setInlineEditBetId] = useState<string | null>(null)
   // 다폴 진행중 개별 leg 적중 체크 상태 (leg bet id → checked). 하나라도 실패면 즉시 전체 실패 처리하므로 여기엔 "적중" 체크만 임시 보관한다.
@@ -3094,7 +3101,7 @@ export default function Dashboard({ betTarget, onBetTargetDone }: { betTarget?: 
       const { data } = await supabase.from('bets').select('id, auto_result, auto_score, auto_note').eq('result', 'pending').eq('is_hidden', false)
       if (!data) return
       const m = new Map(data.map(d => [d.id as string, d]))
-      setBets(p => p.map(b => { const d = m.get(b.id); return d && (d.auto_result !== b.auto_result || d.auto_score !== b.auto_score) ? { ...b, ...d } as Bet : b }))
+      setBets(p => p.map(b => { const d = m.get(b.id); return d && (d.auto_result !== b.auto_result || d.auto_score !== b.auto_score || d.auto_note !== b.auto_note) ? { ...b, ...d } as Bet : b }))
     }, 5 * 60 * 1000)
     return () => clearInterval(t)
   }, [])
@@ -4069,18 +4076,21 @@ export default function Dashboard({ betTarget, onBetTargetDone }: { betTarget?: 
             const odds = b.parlay_group ? legs.reduce((m, l) => m * l.odds, 1) : b.odds
             return (
               <div key={b.parlay_group ?? b.id} className={held ? heldEntryClass(b.result).trim() : undefined}
-                style={{ display: 'grid', gridTemplateColumns: '64px 18px minmax(0, 1fr) auto auto auto', columnGap: 8, alignItems: 'center', padding: '5px 2px', borderTop: '1px solid var(--border-light)', fontSize: 12 }}>
+                style={{ display: 'grid', gridTemplateColumns: '56px 18px minmax(0, 1fr) auto auto auto', columnGap: 8, alignItems: 'center', padding: '5px 2px', borderTop: '1px solid var(--border-light)', fontSize: 12, position: 'relative' }}>
                 <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={site.name}>{site.name}</span>
                 <span style={{ fontSize: 14, lineHeight: 1, textAlign: 'center' }}>{sportGlyph(b.sport) ?? SPORT_SHORT[b.sport] ?? '📋'}</span>
-                <span style={{ display: 'flex', alignItems: 'baseline', gap: 6, minWidth: 0, overflow: 'hidden', whiteSpace: 'nowrap' }}>
-                  {b.league && <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 700, flexShrink: 0 }}>{b.league}</span>}
-                  <span style={{ fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis' }} title={legs.map(l => l.match).join(' / ')}>
-                    {b.is_live && <span style={{ color: 'var(--red)', fontSize: 10, marginRight: 4 }}>LIVE</span>}{b.parlay_group ? `조합 ${legs.length}폴 · ` : ''}{legs.map(l => l.match).join(' / ')}
-                  </span>
+                <span style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }} title={[b.league, ...legs.map(l => l.match)].filter(Boolean).join(' · ')}>
+                  {b.league && <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.league}{b.parlay_group ? ` · 조합 ${legs.length}폴` : ''}</span>}
+                  {legs.map(l => (
+                    <span key={l.id} style={{ display: 'flex', minWidth: 0 }}>
+                      <BetMatchLine sport={l.sport} match={l.match} fontSize={12} stacked={false} live={l.is_live} knownOptions={displayOptionsBySport[l.sport] ?? []} numericOptions={displayNumericBySport[l.sport] ?? []} />
+                    </span>
+                  ))}
+                  {!held && !ar && b.auto_note?.includes('직접 확인') && <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--orange)' }}>⚠ {b.auto_note}</span>}
                 </span>
                 <span style={{ ...num, color: 'var(--gold)' }}>@{odds.toFixed(2)}</span>
                 <span style={{ ...num, color: isBigStake(b.stake, isusd) ? 'var(--orange)' : 'var(--text-secondary)' }}>{pfx}{b.stake.toLocaleString()}{sfx}</span>
-                <span style={{ display: 'flex', alignItems: 'center', gap: 3, justifyContent: 'flex-end', minWidth: 120 }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 3, justifyContent: 'flex-end' }}>
                   {held ? <>
                     <span style={{ ...num, fontSize: 11, color: b.result === 'win' ? 'var(--green)' : b.result === 'loss' ? 'var(--red)' : 'var(--blue)' }}>
                       {b.result === 'win' ? `+${pfx}${b.profit.toLocaleString()}${sfx}` : b.result === 'loss' ? `-${pfx}${b.stake.toLocaleString()}${sfx}` : 'PUSH'}
@@ -4092,11 +4102,22 @@ export default function Dashboard({ betTarget, onBetTargetDone }: { betTarget?: 
                         style={{ padding: '1px 6px', fontSize: 11, fontWeight: 700, color: arColor, border: `1px solid ${arColor}`, background: 'transparent', marginRight: 2 }}
                         onClick={() => applyResult(b, ar)}>{ar === 'win' ? '적중' : ar === 'loss' ? '실패' : '적특'} 확인</button>
                     )}
-                    {iconBtn('적중', 'var(--green)', () => applyResult(b, 'win'), <CheckCircle size={12} />)}
-                    {iconBtn('실패', 'var(--red)', () => applyResult(b, 'loss'), <XCircle size={12} />)}
-                    {iconBtn('적특', 'var(--blue)', () => { if (confirm('적특으로 처리하시겠습니까?')) applyResult(b, 'push') }, <MinusCircle size={12} />)}
-                    {!b.parlay_group && iconBtn('캐시아웃', 'var(--purple)', () => applyCashout(b), <DollarSign size={12} />)}
-                    {iconBtn('베팅취소', 'var(--text-muted)', () => applyResult(b, 'cancel'), <Ban size={12} />)}
+                    <button className="bet-action-btn" title="수동처리" onClick={e => { e.stopPropagation(); setManualBetId(manualBetId === b.id ? null : b.id) }}
+                      style={{ width: 22, height: 22, color: manualBetId === b.id ? 'var(--gold)' : 'var(--text-secondary)', borderColor: manualBetId === b.id ? 'var(--gold-border)' : 'var(--border)' }}><Ellipsis size={13} /></button>
+                    {manualBetId === b.id && (
+                      <span onClick={e => e.stopPropagation()} style={{ position: 'absolute', right: 0, top: 'calc(100% - 2px)', zIndex: 20, display: 'flex', gap: 4, padding: 5, background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 6, boxShadow: '0 4px 12px rgba(0,0,0,0.4)' }}>
+                        {([
+                          ['적중', 'var(--green)', <CheckCircle size={12} />, () => applyResult(b, 'win')],
+                          ['실패', 'var(--red)', <XCircle size={12} />, () => applyResult(b, 'loss')],
+                          ['적특', 'var(--blue)', <MinusCircle size={12} />, () => { if (confirm('적특으로 처리하시겠습니까?')) applyResult(b, 'push') }],
+                          ...(!b.parlay_group ? [['캐시아웃', 'var(--purple)', <DollarSign size={12} />, () => applyCashout(b)]] : []),
+                          ['베팅취소', 'var(--text-muted)', <Ban size={12} />, () => applyResult(b, 'cancel')],
+                        ] as [string, string, React.ReactNode, () => void][]).map(([label, color, icon, fn]) => (
+                          <button key={label} className="btn btn-xs" onClick={() => { setManualBetId(null); fn() }}
+                            style={{ display: 'flex', alignItems: 'center', gap: 3, padding: '2px 7px', fontSize: 11, fontWeight: 700, color, border: `1px solid ${color}`, background: 'transparent', whiteSpace: 'nowrap' }}>{icon}{label}</button>
+                        ))}
+                      </span>
+                    )}
                   </>}
                 </span>
               </div>

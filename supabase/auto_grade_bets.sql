@@ -55,9 +55,9 @@ $$;
 create or replace function public.auto_grade_bets() returns int
 language plpgsql security definer set search_path to 'public' as $$
 declare
-  r record; g record; m text[]; side text; opt text; ta text; tb text; line numeric; ou text; sets boolean;
+  r record; m text[]; side text; opt text; ta text; tb text; line numeric; ou text; sets boolean;
   best_score int; best_game jsonb; best_date date; hs numeric; as_ numeric; st text;
-  v numeric; res text; n int := 0;
+  v numeric; res text; n int := 0; dur interval;
 begin
   for r in select id, sport, league, match, bet_date, created_at from public.bets
            where result = 'pending' and parlay_group is null and coalesce(is_hidden, false) = false
@@ -105,14 +105,23 @@ begin
 
     -- 최종 점수 (종료된 경기만)
     st := best_game->>'status'; hs := null; as_ := null;
-    if st = '종료' or st ilike 'final%' then
+    -- 연기·중단·취소는 판정 안 함 (2026-11-22 위트레흐트 0:0 중단이 '적중'으로 나왔다)
+    if st in ('연기', '중단', '취소') or st ~* 'postpon|cancel|suspend|abandon|forfeit' then
+      update public.bets set auto_result = null, auto_score = null, auto_game_id = best_game->>'id', auto_note = '경기 ' || st || ' — 직접 확인'
+       where id = r.id and (auto_note is distinct from '경기 ' || st || ' — 직접 확인' or auto_result is not null);
+      continue;
+    end if;
+    -- '종료'라도 시작 후 경기 시간만큼 안 지났으면 기다림 (축구 100분·농구 110분·배구 60분)
+    dur := case r.sport when 'soccer' then interval '100 minutes' when 'basketball' then interval '110 minutes' else interval '60 minutes' end;
+    if (st = '종료' or st ilike 'final%') and (best_game->>'start')::timestamptz < now() - dur then
       hs := nullif(best_game->'home'->>'score', '')::numeric; as_ := nullif(best_game->'away'->>'score', '')::numeric;
     elsif r.league = 'WKBL' and st is null and (best_game->>'start')::timestamptz < now() - interval '3 hours' then
       select t.team_score, t.opp_score into hs, as_ from public.v_team_games t
        where t.league = 'WKBL' and t.game_date = best_date and t.team = best_game->'home'->>'name' limit 1;
     end if;
     if hs is null or as_ is null then
-      update public.bets set auto_game_id = best_game->>'id', auto_note = '경기 전·경기중' where id = r.id and auto_note is distinct from '경기 전·경기중';
+      update public.bets set auto_result = null, auto_score = null, auto_game_id = best_game->>'id', auto_note = '경기 전·경기중'
+       where id = r.id and (auto_note is distinct from '경기 전·경기중' or auto_result is not null);
       continue;
     end if;
 
