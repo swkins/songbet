@@ -152,3 +152,8 @@ begin
     i := i + 1;
   end loop;
 end $$;
+
+-- 2026-11-21 클럽 친선경기는 뺌 (사용자 요청 — A매치 국가대표 경기만). 타이머는 꺼 두고 저장된 일정은 비움.
+select cron.alter_job((select jobid from cron.job where jobname = 'collect-soccer-club'), active := false);
+update public.game_schedules set games = '[]'::jsonb where league = '친선경기';
+update public.odds_jobs set next_at = null where league = '친선경기';

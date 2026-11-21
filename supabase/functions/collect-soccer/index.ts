@@ -25,7 +25,7 @@ const CODE: Record<string, string> = {
   '잉글랜드 2부': 'eng.2', '잉글랜드 3부': 'eng.3', '스페인 2부': 'esp.2', '이탈리아 2부': 'ita.2', '독일 2부': 'ger.2', '프랑스 2부': 'fra.2',
   '네덜란드': 'ned.1', '포르투갈 1부': 'por.1', '벨기에': 'bel.1', '터키': 'tur.1', '그리스': 'gre.1', '덴마크': 'den.1', '오스트리아': 'aut.1', '스코틀랜드': 'sco.1', '스웨덴': 'swe.1',
   '미국': 'usa.1', '멕시코': 'mex.1', '브라질': 'bra.1', '아르헨티나': 'arg.1', '일본 1부': 'jpn.1', '호주': 'aus.1', '중국': 'chn.1',
-  '네이션스 리그': 'uefa.nations', '국제 친선 경기': 'fifa.friendly', '친선경기': 'club.friendly',
+  '네이션스 리그': 'uefa.nations', '국제 친선 경기': 'fifa.friendly',   // A매치(국가대표)만 — 클럽 친선(club.friendly)은 사용자 요청으로 뺌
 }
 // ESPN에 없는 리그 (스위스·아일랜드·체코·핀란드는 사용자 요청으로 뺌)
 const KLEAGUE: Record<string, string> = { '대한민국 1부': '1', '대한민국 2부': '2' }
