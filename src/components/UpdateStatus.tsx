@@ -3,6 +3,7 @@ import dayjs from 'dayjs'
 import { X, RefreshCw } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import DataSources from './DataSources'
+import LeagueCards from './LeagueCards'
 
 // ─── 분석 탭 '업데이트 현황' — Supabase가 자동으로 모으는 것들의 주기·마지막·다음 실행·결과 ─────
 // 데이터: rpc analysis_update_status (supabase/cron_collect.sql). pg_cron 작업 일정은 UTC '분 시 * * *'.
@@ -110,58 +111,9 @@ export default function UpdateStatus({ onClose }: { onClose: () => void }) {
         {/* 출처별 신뢰도 그리드 — 맨 위 (2026-11-22 사용자 요청) */}
         <DataSources reloadKey={reloadKey} />
         {s && <>
-          {/* 경기 일정 */}
-          <div style={box}>
-            {head('경기 일정', '약 1시간마다 (40~80분 랜덤)', 'NBA·KBL·WKBL·V리그 남·여 오늘·내일 경기 → 분석 탭 일정, 베팅추가 경기 목록 · 일주일 지난 일정은 자동 삭제')}
-            {jobLine(sched)}
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead><tr><th style={th}>리그</th><th style={th}>날짜별 경기 수</th><th style={th}>마지막 결과</th><th style={th}>받은 시각</th></tr></thead>
-              <tbody>{leagues.map(lg => {
-                const rs = s.schedules.filter(r => r.league === lg)
-                const res = s.schedule_last?.body?.find(b => b.league === lg)
-                return (
-                  <tr key={lg}>
-                    <td style={td}><b>{lg}</b></td>
-                    <td style={td}>{rs.map(r => `${dayjs(r.game_date).format('M/D')} ${r.games}경기`).join(' · ')}</td>
-                    <td style={td}>{res ? (res.error ? badge(false, '실패') : badge(true, '성공')) : '–'}{res?.error && <div style={{ fontSize: 10, color: 'var(--red)' }}>{res.error.slice(0, 80)}</div>}</td>
-                    <td style={{ ...td, color: 'var(--text-secondary)' }}>{t(rs[0]?.fetched_at)} <span style={{ color: 'var(--text-muted)' }}>{ago(rs[0]?.fetched_at)}</span></td>
-                  </tr>
-                )
-              })}</tbody>
-            </table>
-            {sched && sched.runs.length > 1 && (
-              <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 6 }}>최근 실행: {sched.runs.map(r => dayjs(r.start).format('HH:mm')).join(' · ')}</div>
-            )}
-          </div>
-
-          {/* 승패 배당 */}
-          <div style={box}>
-            {head('승패 배당', '리그마다 따로 30분~2시간 랜덤', 'NBA = Action Network(9개 북 평균·오픈·티켓%), 국내 = BetExplorer 평균배당 · 오늘·내일 경기 없으면 건너뜀 · 국내 리그끼리 3분 이상 띄움 · 바뀌었을 때만 저장, 7일 지나면 삭제')}
-            {!s.odds_jobs.length ? <div style={{ fontSize: 12, color: 'var(--orange)' }}>자동 실행이 아직 설정되지 않았어요</div> : (
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead><tr><th style={th}>리그</th><th style={th}>마지막 수집</th><th style={th}>결과</th><th style={th}>다음 예정</th><th style={th}>오늘~ 기록</th></tr></thead>
-                <tbody>{s.odds_jobs.map(o => {
-                  const n = o.last?.note ?? {}
-                  const st = o.last?.status
-                  const um = (n.unmatched as string[] | undefined) ?? []
-                  return (
-                    <tr key={o.league}>
-                      <td style={td}><b>{o.league}</b></td>
-                      <td style={td}>{t(o.last?.at ?? o.last_request_at)} <span style={{ color: 'var(--text-muted)' }}>{ago(o.last?.at ?? o.last_request_at)}</span></td>
-                      <td style={td}>
-                        {!st ? '–' : st === 'ok' ? <>{badge(true, '성공')} <span style={{ fontSize: 11 }}>경기 {String(n.matched ?? 0)}/{String(n.games ?? 0)} · 변동 {String(n.changed ?? 0)}</span></>
-                          : st === 'skipped' ? badge(null, '경기 없음') : st === 'blocked' ? badge(false, '차단(429)') : badge(false, '오류')}
-                        {um.length > 0 && <div style={{ fontSize: 10, color: 'var(--orange)' }}>짝 못 지음: {um.join(', ')}</div>}
-                        {o.deferred > 0 && <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>다른 리그와 겹쳐서 {o.deferred}번 미룸</div>}
-                      </td>
-                      <td style={td}>{t(o.next_at)} <span style={{ color: 'var(--text-muted)' }}>{until(o.next_at)}</span></td>
-                      <td style={td}>{o.snapshots}건</td>
-                    </tr>
-                  )
-                })}</tbody>
-              </table>
-            )}
-          </div>
+          {/* 경기 일정 · 배당 — 리그마다 카드 (2026-11-22 사용자 요청, 예전 표 두 개를 바꿈) */}
+          <LeagueCards reloadKey={reloadKey} />
+          <div style={{ fontSize: 10, color: 'var(--text-muted)', margin: '-4px 2px 10px' }}>NBA·KBL·WKBL·V리그 일정 함수 (40~80분 랜덤): {jobLine(sched)}</div>
 
           {/* 선수 기록 */}
           <div style={box}>

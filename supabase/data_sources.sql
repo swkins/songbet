@@ -110,3 +110,29 @@ begin
 end $$;
 
 grant execute on function public.data_sources_health() to anon, authenticated;
+
+-- 리그 카드 (2026-11-22 사용자 요청 — 경기 일정·배당을 리그마다 네모로): rpc league_status_cards()
+-- 리그마다: 종목, 어제·오늘·내일 경기 수, 일정 받은 시각, 배당 출처들(최근 3일), 마지막 배당 저장, 24시간 배당 저장 수, 마지막 수집 기록, 다음 예정
+create or replace function public.league_status_cards() returns jsonb
+language sql stable security definer set search_path to 'public' as $$
+  with today as (select (now() at time zone 'Asia/Seoul')::date d),
+  lg as (
+    select league from public.game_schedules, today where game_date between today.d - 1 and today.d + 1
+    union select league from public.odds_jobs union select league from public.collect_365_jobs
+  )
+  select coalesce(jsonb_agg(jsonb_build_object(
+    'league', lg.league,
+    'sport', coalesce((select sport from public.game_schedules s where s.league = lg.league order by game_date desc limit 1), (select sport from public.game_schedules s where s.league = lg.league limit 1)),
+    'yday', (select sum(jsonb_array_length(games)) from public.game_schedules s, today where s.league = lg.league and game_date = today.d - 1),
+    'today', (select sum(jsonb_array_length(games)) from public.game_schedules s, today where s.league = lg.league and game_date = today.d),
+    'tomorrow', (select sum(jsonb_array_length(games)) from public.game_schedules s, today where s.league = lg.league and game_date = today.d + 1),
+    'sched_at', (select max(fetched_at) from public.game_schedules s where s.league = lg.league),
+    'odds_sources', (select jsonb_agg(distinct source) from public.odds_snapshots o where o.league = lg.league and o.fetched_at > now() - interval '3 days'),
+    'odds_at', (select max(fetched_at) from public.odds_snapshots o where o.league = lg.league),
+    'odds_n24', (select count(*) from public.odds_snapshots o where o.league = lg.league and o.fetched_at > now() - interval '24 hours'),
+    'logs', (select jsonb_agg(jsonb_build_object('at', fetched_at, 'status', status, 'note', note) order by fetched_at desc)
+             from (select * from public.odds_fetch_log f where f.league = lg.league order by fetched_at desc limit 3) x),
+    'next_at', least((select next_at from public.odds_jobs j where j.league = lg.league), (select next_at from public.collect_365_jobs j where j.league = lg.league))
+  ) order by lg.league), '[]'::jsonb) from lg
+$$;
+grant execute on function public.league_status_cards() to anon, authenticated;

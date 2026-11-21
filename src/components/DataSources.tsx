@@ -47,6 +47,10 @@ function reliability(r: Row): { level: Level; warns: string[] } {
   return { level: 'high', warns }
 }
 
+// 출처 묶음 이름 ('ESPN · DraftKings'·'ESPN 박스스코어' → ESPN, '365Scores · Bet365' → 365Scores)
+const srcKey = (s: string) => s.startsWith('ESPN') ? 'ESPN' : s.startsWith('365Scores') ? '365Scores' : s
+const RANK: Record<Level, number> = { low: 0, mid: 1, wait: 2, idle: 3, high: 4 }
+
 export default function DataSources({ reloadKey }: { reloadKey: number }) {
   const [rows, setRows] = useState<Row[] | null>(null)
   const [err, setErr] = useState<string | null>(null)
@@ -56,53 +60,65 @@ export default function DataSources({ reloadKey }: { reloadKey: number }) {
     })
   }, [reloadKey])
 
-  const cols = '46px minmax(0, 1.1fr) minmax(0, 1.4fr) 64px 76px 92px 26px'
+  // 출처마다 한 줄 — 신뢰도는 그 출처에서 받는 것 중 가장 낮은 것(대기·경기 없음은 낮음으로 치지 않음), 기록은 같은 기록을 두 번 세지 않게
+  const groups = rows ? [...rows.reduce((m, r) => { const k = srcKey(r.source); m.set(k, [...(m.get(k) ?? []), r]); return m }, new Map<string, Row[]>())].map(([name, items]) => {
+    const rated = items.map(r => ({ r, ...reliability(r) }))
+    const level = rated.reduce<Level>((w, x) => (RANK[x.level] < RANK[w] ? x.level : w), 'high')
+    const uniq = [...new Map(items.filter(r => r.logs).map(r => [JSON.stringify(r.logs), r.logs!])).values()]
+    const sum = (k: keyof Logs) => uniq.reduce((n, l) => n + (Number(l[k]) || 0), 0)
+    const lastOk = items.map(r => r.last_ok ?? r.logs?.last_ok ?? null).filter(Boolean).sort().pop() ?? null
+    const domains = [...new Set(items.map(r => r.url.split('/')[0].split(' ')[0]))]
+    return { name, items: rated, level, ok: sum('ok24'), blocked: sum('blocked24'), error: sum('error24'), skipped: sum('skipped24'), hasLogs: uniq.length > 0, lastOk, domains }
+  }).sort((a, b) => RANK[a.level] - RANK[b.level] || a.name.localeCompare(b.name)) : []
+  const counts = groups.reduce((m, g) => ({ ...m, [g.level]: (m[g.level] ?? 0) + 1 }), {} as Record<string, number>)
+
+  const cols = 'minmax(120px, 1fr) 64px 70px 84px minmax(0, 3fr)'
   const head: React.CSSProperties = { fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', padding: '4px 6px', borderBottom: '1px solid var(--border)' }
-  const cell: React.CSSProperties = { fontSize: 12, padding: '5px 6px', borderBottom: '1px solid var(--border-light)', minWidth: 0, display: 'flex', alignItems: 'center' }
-  const counts = rows ? rows.map(reliability).reduce((m, x) => ({ ...m, [x.level]: (m[x.level] ?? 0) + 1 }), {} as Record<string, number>) : {}
+  const cell: React.CSSProperties = { fontSize: 12, padding: '6px', borderBottom: '1px solid var(--border-light)', minWidth: 0, display: 'flex', alignItems: 'center' }
+  const pill = (lv: Level) => <span style={{ fontSize: 10, fontWeight: 800, padding: '1px 7px', borderRadius: 8, color: LEVEL[lv].color, border: `1px solid ${LEVEL[lv].color}`, whiteSpace: 'nowrap' }}>{LEVEL[lv].label}</span>
 
   return (
     <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '12px 14px', background: 'var(--bg-elevated)', marginBottom: 10 }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
         <span style={{ fontSize: 14, fontWeight: 800 }}>데이터 출처 · 신뢰도</span>
-        {rows && (Object.keys(LEVEL) as Level[]).filter(k => counts[k]).map(k => (
+        {(Object.keys(LEVEL) as Level[]).filter(k => counts[k]).map(k => (
           <span key={k} style={{ fontSize: 11, fontWeight: 700, color: LEVEL[k].color }}>{LEVEL[k].label} {counts[k]}</span>
         ))}
-        <span style={{ fontSize: 10, color: 'var(--text-muted)', marginLeft: 'auto' }}>신뢰도 = 최근 24시간 성공률 · 마지막 성공 시각 · 직전 결과 — ⚠ 마우스를 올리면 설명</span>
+        <span style={{ fontSize: 10, color: 'var(--text-muted)', marginLeft: 'auto' }}>신뢰도 = 최근 24시간 성공률 · 마지막 성공 시각 · 직전 결과 — 받는 것 칸 ⚠ 마우스 = 설명</span>
       </div>
       {err && <div style={{ fontSize: 12, color: 'var(--red)' }}>출처 현황을 못 불러왔어요: {err}</div>}
       {!rows && !err && <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>불러오는 중…</div>}
       {rows && (
         <div style={{ display: 'grid', gridTemplateColumns: cols, overflowX: 'auto' }}>
-          {['종목', '데이터', '출처', '신뢰도', '마지막 성공', '24시간 성공·차단·오류', ''].map((h, i) => <div key={i} style={head}>{h}</div>)}
-          {rows.map((r, i) => {
-            const { level, warns } = reliability(r)
-            const lv = LEVEL[level]
-            const L = r.logs
-            const tip = [...warns.map(w => `⚠ ${w}`), r.note ? `ⓘ ${r.note}` : '', `주소: ${r.url}`, `보통 ${dur(r.every_min)}마다`].filter(Boolean).join('\n')
-            const warn = warns.length > 0
-            const bg = { background: lv.bg }
+          {['출처', '신뢰도', '마지막 성공', '24시간 성공·차단·오류', '이 출처에서 받는 것'].map((h, i) => <div key={i} style={head}>{h}</div>)}
+          {groups.map(g => {
+            const bg = { background: LEVEL[g.level].bg }
             return [
-              <div key={`${i}a`} style={{ ...cell, ...bg, color: 'var(--text-secondary)', fontWeight: 700 }}>{r.sport}</div>,
-              <div key={`${i}b`} style={{ ...cell, ...bg, fontWeight: 700 }}><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.kind}</span></div>,
-              <div key={`${i}c`} style={{ ...cell, ...bg, flexDirection: 'column', alignItems: 'flex-start', gap: 1 }} title={r.url}>
-                <span style={{ fontWeight: 700 }}>{r.source}</span>
-                <span style={{ fontSize: 9, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%' }}>{r.url}</span>
+              <div key={`${g.name}a`} style={{ ...cell, ...bg, flexDirection: 'column', alignItems: 'flex-start', gap: 1 }}>
+                <span style={{ fontWeight: 800 }}>{g.name}</span>
+                <span style={{ fontSize: 9, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%' }} title={g.domains.join('\n')}>{g.domains.join(' · ')}</span>
               </div>,
-              <div key={`${i}d`} style={{ ...cell, ...bg }}>
-                <span style={{ fontSize: 10, fontWeight: 800, padding: '1px 7px', borderRadius: 8, color: lv.color, border: `1px solid ${lv.color}`, whiteSpace: 'nowrap' }}>{lv.label}</span>
-              </div>,
-              <div key={`${i}e`} style={{ ...cell, ...bg, color: 'var(--text-secondary)' }} title={r.last_ok ? dayjs(r.last_ok).format('M/D HH:mm') : ''}>{ago(r.last_ok ?? L?.last_ok)}</div>,
-              <div key={`${i}f`} style={{ ...cell, ...bg, fontFamily: 'var(--font-num)', gap: 4 }}>
-                {L ? <>
-                  <span style={{ color: 'var(--green)' }}>{L.ok24 ?? 0}</span>·
-                  <span style={{ color: L.blocked24 ? 'var(--orange)' : 'var(--text-muted)' }}>{L.blocked24 ?? 0}</span>·
-                  <span style={{ color: L.error24 ? 'var(--red)' : 'var(--text-muted)' }}>{L.error24 ?? 0}</span>
-                  {!!L.skipped24 && <span style={{ fontSize: 10, color: 'var(--text-muted)' }} title="건너뜀 (경기 없음·365Scores 배당 있음 등)">+{L.skipped24}</span>}
+              <div key={`${g.name}b`} style={{ ...cell, ...bg }}>{pill(g.level)}</div>,
+              <div key={`${g.name}c`} style={{ ...cell, ...bg, color: 'var(--text-secondary)' }} title={g.lastOk ? dayjs(g.lastOk).format('M/D HH:mm') : ''}>{ago(g.lastOk)}</div>,
+              <div key={`${g.name}d`} style={{ ...cell, ...bg, fontFamily: 'var(--font-num)', gap: 4 }}>
+                {g.hasLogs ? <>
+                  <span style={{ color: 'var(--green)' }}>{g.ok}</span>·
+                  <span style={{ color: g.blocked ? 'var(--orange)' : 'var(--text-muted)' }}>{g.blocked}</span>·
+                  <span style={{ color: g.error ? 'var(--red)' : 'var(--text-muted)' }}>{g.error}</span>
+                  {!!g.skipped && <span style={{ fontSize: 10, color: 'var(--text-muted)' }} title="건너뜀 (경기 없음·365Scores 배당 있음 등)">+{g.skipped}</span>}
                 </> : <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>기록 없음</span>}
               </div>,
-              <div key={`${i}g`} style={{ ...cell, ...bg, justifyContent: 'center' }} title={tip}>
-                <span style={{ cursor: 'help', fontWeight: 900, fontSize: 13, color: warn ? (level === 'low' ? 'var(--red)' : 'var(--orange)') : 'var(--text-muted)' }}>{warn ? '⚠' : 'ⓘ'}</span>
+              <div key={`${g.name}e`} style={{ ...cell, ...bg, flexWrap: 'wrap', gap: 4 }}>
+                {g.items.map(({ r, level, warns }, i) => {
+                  const tip = [`${r.sport} ${r.kind} — ${LEVEL[level].label}`, ...warns.map(w => `⚠ ${w}`), r.note ? `ⓘ ${r.note}` : '', `주소: ${r.url}`, `보통 ${dur(r.every_min)}마다 · 마지막 성공 ${ago(r.last_ok ?? r.logs?.last_ok)}`].filter(Boolean).join('\n')
+                  const c = LEVEL[level].color
+                  return (
+                    <span key={i} title={tip} style={{ cursor: 'help', display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 11, padding: '2px 7px', borderRadius: 10, border: `1px solid ${c}`, color: level === 'high' ? 'var(--text-primary)' : c, background: level === 'low' ? 'rgba(248,113,113,0.08)' : 'transparent', whiteSpace: 'nowrap' }}>
+                      <span style={{ color: 'var(--text-muted)', fontSize: 10 }}>{r.sport}</span>{r.kind}
+                      {warns.length > 0 ? <b style={{ color: level === 'low' ? 'var(--red)' : 'var(--orange)' }}>⚠</b> : r.note ? <span style={{ color: 'var(--text-muted)' }}>ⓘ</span> : null}
+                    </span>
+                  )
+                })}
               </div>,
             ]
           })}
