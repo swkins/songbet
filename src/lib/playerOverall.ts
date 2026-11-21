@@ -34,7 +34,7 @@ export interface PlayerOv {
   kind?: string | null      // 배구 '외국인' · '아시아쿼터'
 }
 export interface TeamOv { team: string | null; players: PlayerOv[]; full: number | null; exp: number | null; stats: TeamStats | null }
-export interface TeamStats { n: number; pf: number; pa: number }
+export interface TeamStats { n: number; pf: number; pa: number; sw?: number; sl?: number }   // 농구 pf·pa = 경기당 득점·실점 / 배구 = 경기당 딴·잃은 세트, sw·sl = 시즌 세트 합
 export interface GameNews { summary: string | null; items: { title: string; url?: string }[] | null; margin_adj: number | null; adj_note: string | null; checked_at: string }
 
 export const OV_LEAGUE: Record<string, string> = { NBA: 'NBA', KBL: 'KBL', WKBL: 'WKBL', 'V리그 남자': 'VLEAGUE_M', 'V리그 여자': 'VLEAGUE_W' }
@@ -91,7 +91,9 @@ async function loadLeague(code: string): Promise<LeagueData> {
     supabase.from('player_base').select('player_id,player_name,team,gp,min,gmsc,manual_base,note').eq('league', code).eq('season', prevSeasonOf(cur)).limit(2000),
     supabase.from('v_player_recent').select('player_id,n,gmsc5,min5').eq('league', code).limit(2000),
     supabase.from('player_names').select('name_en,name_ko').eq('league', code),
-    code.startsWith('VLEAGUE') ? Promise.resolve({ data: [] }) : supabase.from('v_team_games').select('team,team_score,opp_score').eq('league', code).eq('season', cur).limit(3000),
+    // 배구: 경기 결과(세트 스코어) = vb_games (KOVO 시즌 일정, 매일 2번) → 팀별 세트 득실
+    code.startsWith('VLEAGUE') ? supabase.from('vb_games').select('home,away,home_sets,away_sets').eq('league', code).eq('season', cur).limit(1000).then(r => ({ ...r, data: ((r.data ?? []) as { home: string; away: string; home_sets: number; away_sets: number }[]).flatMap(g => [{ team: g.home, team_score: g.home_sets, opp_score: g.away_sets }, { team: g.away, team_score: g.away_sets, opp_score: g.home_sets }]) }))
+      : supabase.from('v_team_games').select('team,team_score,opp_score').eq('league', code).eq('season', cur).limit(3000),
     // 배구 포지션 (kovo_players — 매일 04시 KOVO 명단으로 갱신)
     code.startsWith('VLEAGUE') ? supabase.from('kovo_players').select('player_code,position,kind').eq('gender', code === 'VLEAGUE_M' ? 'MALE' : 'FEMALE').limit(1000) : Promise.resolve({ data: [] }),
   ])
@@ -105,7 +107,7 @@ async function loadLeague(code: string): Promise<LeagueData> {
     const t = teams.get(r.team) ?? { n: 0, pf: 0, pa: 0 }
     t.n++; t.pf += r.team_score; t.pa += r.opp_score; teams.set(r.team, t)
   }
-  teams.forEach(t => { t.pf /= t.n; t.pa /= t.n })
+  teams.forEach(t => { t.sw = t.pf; t.sl = t.pa; t.pf /= t.n; t.pa /= t.n })
   const fix = <T extends SeasonRow>(r: T): T => ({ ...r, min: num(r.min), gmsc: num(r.gmsc) })
   const curRows = ((a.data ?? []) as SeasonRow[]).map(fix)
   const prevRows = ((b.data ?? []) as BaseRow[]).map(fix)
@@ -341,8 +343,8 @@ export const DEFAULT_PARAMS: ModelParams = {
     KBL: { sd: 11, sdT: 14, hca: 2, k: 0.8, avg: 80, wScore: 0.5, wOv: 0.5, condK: COND_K.KBL },
     WKBL: { sd: 10, sdT: 12, hca: 2, k: 0.7, avg: 65, wScore: 0.5, wOv: 0.5, condK: COND_K.WKBL },
     // 배구: hca = 홈 이점(logit), k = 팀 오버롤 1점당 logit, wScore = 시장 배당 비중, wOv = 오버롤 모델 비중 (volleyPredict.ts)
-    VLEAGUE_M: { sd: 0, sdT: 0, hca: 0.15, k: 0.08, avg: 0, wScore: 0.7, wOv: 0.3, condK: 0 },
-    VLEAGUE_W: { sd: 0, sdT: 0, hca: 0.15, k: 0.08, avg: 0, wScore: 0.7, wOv: 0.3, condK: 0 },
+    VLEAGUE_M: { sd: 0, sdT: 0, hca: 0.15, k: 0.08, avg: 0, wScore: 0.5, wOv: 0.5, condK: 0 },   // 배구 wScore = 팀 세트 득실 비중, wOv = 오버롤 비중
+    VLEAGUE_W: { sd: 0, sdT: 0, hca: 0.15, k: 0.08, avg: 0, wScore: 0.5, wOv: 0.5, condK: 0 },
   },
   fatigueK: 0.35,
 }
@@ -402,7 +404,7 @@ export function simulateVolleyGame(code: string, home: TeamOv, away: TeamOv, ove
   const H = teamStrength(home.players, overrides, true), A = teamStrength(away.players, overrides, true)
   if (H.exp == null || A.exp == null) return null
   const diff = Math.round((H.exp - A.exp) * 10) / 10
-  const r = predictVolley(code, diff, p, odds)
+  const r = predictVolley(code, diff, p, odds, { home: home.stats, away: away.stats })
   return r ? { ...r, diff } : null
 }
 

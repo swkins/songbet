@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { atsPick, ouPick, fmtLine, type OddsLine } from '../lib/odds'
+import { atsPick, ouPick, fmtLine, recOf, REC_RULE, type OddsLine } from '../lib/odds'
 import dayjs from 'dayjs'
 import { koName, type ScheduleTeam } from '../lib/gameSchedule'
 import { conditionColor, conditionLabel, type Condition } from '../lib/fatigue'
@@ -82,7 +82,7 @@ function SetCountOdds({ v }: { v: VolleyResult }) {
 }
 
 // 배구 예상: 세트 스코어 분포 (volleyPredict.ts)
-function VolleyBox({ v, hName, aName, changed, onReset }: { v: VolleyResult & { diff: number }; hName: string; aName: string; changed: number; onReset: () => void }) {
+function VolleyBox({ v, hName, aName, changed, onReset, odds }: { v: VolleyResult & { diff: number }; hName: string; aName: string; changed: number; onReset: () => void; odds?: { home: number; away: number } | null }) {
   const max = Math.max(...SET_SCORES.map(k => v.dist[k]))
   // 2만 번 시뮬레이션 (사용자 요청): 예상 총득점·득점·기준점별 오버 % (최다 세트 스코어 칸은 아래 분포와 겹쳐서 뺐다 — 사용자 요청)
   const sim = useMemo(() => simulateVolley(v.dist), [v.dist])
@@ -97,7 +97,7 @@ function VolleyBox({ v, hName, aName, changed, onReset }: { v: VolleyResult & { 
     <div style={{ ...box, borderColor: 'var(--gold-border)' }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
         <span style={{ fontSize: 13, fontWeight: 800 }}>예상 스코어</span>
-        <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{v.marketHome != null ? '배당 70% + 오버롤 30%' : '오버롤만 (배당 없음)'}{changed ? ` · 가정 ${changed}명` : ''}</span>
+        <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>우리 모델 (팀 세트 득실 + 포지션별 오버롤, 배당 안 섞음){changed ? ` · 가정 ${changed}명` : ''}</span>
         {changed > 0 && <button type="button" onClick={onReset} style={{ marginLeft: 'auto', fontSize: 10, background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-secondary)', cursor: 'pointer', padding: '1px 6px' }}>가정 지우기</button>}
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6, marginBottom: 6 }}>
@@ -134,10 +134,12 @@ function VolleyBox({ v, hName, aName, changed, onReset }: { v: VolleyResult & { 
           )
         })}
       </div>
+      {/* 배당 비교 · 추천 (사용자 요청 — 모델 확률 vs 지금 승패 배당) */}
+      {odds && <MoneylineBox p={v.homeWin / 100} odds={odds} market={v.marketHome} hName={hName} aName={aName} />}
       {/* 세트 수 확률 → 배당 기준 (롤링용: 조금 손해여도 갈 만한 배당부터) */}
       <SetCountOdds v={v} />
       <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4, lineHeight: 1.6 }}>
-        오버롤 모델 홈 {v.modelHome}% (팀 오버롤 차 {v.diff > 0 ? '+' : ''}{v.diff}){v.marketHome != null ? ` · 시장 홈 ${v.marketHome}%` : ''} → 세트 분포는 과거 V리그 5시즌 곡선 · 점수는 랠리 모델 2만 번(홈 랠리 {Math.round(sim.rally * 1000) / 10}%, 실제 득점으로 검증 전 — 칸 = 총득점 기준점별 오버 %) · 선수 출전 칸을 누르면 다시 계산
+        홈 승률 {v.homeWin}% = 팀 세트 득실{v.teamHome != null ? ` ${v.teamHome}%` : ' (기록 없음)'} · 포지션별 오버롤 {v.modelHome}% (팀 오버롤 차 {v.diff > 0 ? '+' : ''}{v.diff}){v.marketHome != null ? ` · 시장 ${v.marketHome}% (비교만)` : ''} → 세트 분포는 과거 V리그 5시즌 곡선 · 점수는 랠리 모델 2만 번(홈 랠리 {Math.round(sim.rally * 1000) / 10}%, 실제 득점으로 검증 전 — 칸 = 총득점 기준점별 오버 %) · 선수 출전 칸을 누르면 다시 계산
       </div>
     </div>
   )
@@ -364,7 +366,7 @@ export default function PlayerOverall({ league, gameDate, home, away, left, odds
             </div>
           )}
           {data.cond && <ConditionBox home={data.cond.home} away={data.cond.away} hName={hName} aName={aName} />}
-          {vsim && <VolleyBox v={vsim} hName={hName} aName={aName} changed={changed} onReset={() => setOvr({})} />}
+          {vsim && <VolleyBox v={vsim} hName={hName} aName={aName} changed={changed} onReset={() => setOvr({})} odds={odds} />}
         </div>
         {/* 우: 선수 오버롤 · 출전 확률 */}
         <div style={{ flex: '3 1 560px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -423,15 +425,41 @@ function LinePickBox({ sim, lines, sd, sdT, hName, aName }: { sim: { margin: num
             {a.side === 'home' ? hName : aName} {a.kind}{a.kind !== '0' ? ` ${Math.abs(sp.line)}` : ''} <span style={{ color: strong(a.prob), fontFamily: 'var(--font-num)' }}>{a.prob}%</span>
           </div>
           <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>예상 마진 {sim.margin > 0 ? '+' : ''}{sim.margin} vs 기준점 → 기준점보다 {Math.abs(a.edge)}점 {a.edge >= 0 ? '홈 쪽' : '원정 쪽'}</div>
+          {(() => { const od = a.side === 'home' ? sp.home_odds : sp.away_odds, oo = a.side === 'home' ? sp.away_odds : sp.home_odds; const r = recOf(a.prob / 100, od, oo); if (!r || !od) return null
+            return <div style={{ fontSize: 11, marginTop: 2 }} title={`추천 확률 = 시장 ${r.market}% + ${REC_RULE.shrink} × (모델 ${a.prob}% − 시장)`}>배당 {od.toFixed(2)} · 추천 확률 {r.prob}% · 기대수익 <b style={{ color: r.ev >= 0 ? 'var(--green)' : 'var(--red)' }}>{r.ev > 0 ? '+' : ''}{r.ev}%</b>{r.rec && <RecTag />}</div> })()}
         </div>
       )}
       {tt && o && (
         <div style={cell}>
           <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>언오버 기준점 {tt.line} <span style={{ fontFamily: 'var(--font-num)' }}>({tt.home_odds?.toFixed(2)} / {tt.away_odds?.toFixed(2)})</span></div>
           <div style={{ fontSize: 15, fontWeight: 800, marginTop: 2 }}>{o.side === 'over' ? '오버' : '언더'} <span style={{ color: strong(o.prob), fontFamily: 'var(--font-num)' }}>{o.prob}%</span></div>
-          <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>예상 총점 {sim.total} vs {tt.line} ({o.edge > 0 ? '+' : ''}{o.edge}) · 총점 모델은 아직 검증 전</div>
+          <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>예상 총점 {sim.total} vs {tt.line} ({o.edge > 0 ? '+' : ''}{o.edge}) · 총점 모델은 아직 검증 전 — 추천 안 함</div>
         </div>
       )}
+    </div>
+  )
+}
+
+const RecTag = () => <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 800, padding: '0 6px', borderRadius: 8, background: 'var(--green)', color: '#000' }}>추천</span>
+
+// 배구 승패: 모델 확률 vs 지금 배당 — 추천 확률 = 시장 + 0.5 × (모델 − 시장), 기대수익 +3%↑ & 배당 1.30~3.00 = 추천
+function MoneylineBox({ p, odds, hName, aName }: { p: number; odds: { home: number; away: number }; market: number | null; hName: string; aName: string }) {
+  const rows: [string, number, number, number][] = [[hName, p, odds.home, odds.away], [aName, 1 - p, odds.away, odds.home]]
+  const td: React.CSSProperties = { padding: '3px 6px', borderBottom: '1px solid var(--border)', fontFamily: 'var(--font-num)', textAlign: 'right' }
+  return (
+    <div style={{ marginTop: 8, border: '1px solid var(--gold-border)', borderRadius: 'var(--radius-sm)', padding: '6px 8px', background: 'var(--bg-card)' }}>
+      <div style={{ fontSize: 11, fontWeight: 700, marginBottom: 4 }}>승패 배당 비교 <span style={{ fontSize: 10, fontWeight: 400, color: 'var(--text-muted)' }}>추천 확률 = 시장 + {REC_RULE.shrink} × (모델 − 시장) · 추천 = 기대수익 +3%↑ · 배당 1.30~3.00</span></div>
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+        <thead><tr>{['', '모델', '시장', '추천 확률', '배당', '기대수익', ''].map((h, i) => <th key={i} style={{ ...td, fontFamily: 'var(--font-body)', color: 'var(--text-muted)', fontWeight: 600, fontSize: 10, textAlign: i ? 'right' : 'left' }}>{h}</th>)}</tr></thead>
+        <tbody>{rows.map(([n, q, od, oo]) => { const r = recOf(q, od, oo); if (!r) return null; return (
+          <tr key={n}>
+            <td style={{ ...td, textAlign: 'left', fontFamily: 'var(--font-body)', fontWeight: 700 }}>{n}</td>
+            <td style={td}>{Math.round(q * 1000) / 10}%</td><td style={{ ...td, color: 'var(--text-muted)' }}>{r.market}%</td><td style={td}>{r.prob}%</td>
+            <td style={td}>{od.toFixed(2)}</td>
+            <td style={{ ...td, fontWeight: 800, color: r.ev >= 0 ? 'var(--green)' : 'var(--red)' }}>{r.ev > 0 ? '+' : ''}{r.ev}%</td>
+            <td style={td}>{r.rec ? <RecTag /> : null}</td>
+          </tr>) })}</tbody>
+      </table>
     </div>
   )
 }

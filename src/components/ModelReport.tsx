@@ -20,6 +20,9 @@ export interface Prediction {
   close_spread?: number | null; close_total?: number | null
   ats_pick?: 'home' | 'away' | null; ats_prob?: number | null; ou_pick?: 'over' | 'under' | null; ou_prob?: number | null
   ats_hit?: boolean | null; ats_push?: boolean | null; ats_close_hit?: boolean | null; ou_hit?: boolean | null; ou_close_hit?: boolean | null
+  // 추천 (DB 트리거 predictions_rec — NBA 핸디 · 배구 승패, 추천 확률 = 시장 + 0.5 × (모델 − 시장), 기대수익 +3%↑ & 배당 1.30~3.00)
+  rec_market?: 'ats' | 'ml' | null; rec_side?: 'home' | 'away' | null; rec_odds?: number | null; rec_prob?: number | null; rec_ev?: number | null
+  rec?: boolean | null; rec_hit?: boolean | null; rec_profit?: number | null
 }
 /** NBA는 핸디(기준점)가 주 지표 — 기준점이 있으면 핸디 적중, 없으면 승패 */
 const hasAts = (p: Prediction) => p.league === 'NBA' && p.spread_line != null && p.ats_pick != null
@@ -104,6 +107,8 @@ export default function ModelReport({ onClose }: { onClose: () => void }) {
       return {
         aN: at.length, aHit: at.filter(p => p.ats_hit).length, oN: ou.length, oHit: ou.filter(p => p.ou_hit).length,
         cN: atc.length, cHit: atc.filter(p => p.ats_close_hit).length,
+        ...(() => { const r = xs.filter(p => p.rec && p.rec_profit != null); const prof = r.reduce((a, p) => a + Number(p.rec_profit), 0)
+          return { rN: r.length, rHit: r.filter(p => p.rec_hit).length, rRoi: r.length ? Math.round(prof / r.length * 1000) / 10 : null } })(),
         lg, n: xs.length, hit: xs.filter(p => p.win_hit).length,
         mHit: mk.filter(p => p.market_hit).length, mN: mk.length,
         mae: avg(xs.map(p => Math.abs(Number(p.margin_err)))), tae: avg(xs.map(p => Math.abs(Number(p.total_err)))),
@@ -143,7 +148,7 @@ export default function ModelReport({ onClose }: { onClose: () => void }) {
       <div onClick={e => e.stopPropagation()} className="card" style={{ width: '100%', maxWidth: 980, padding: '14px 16px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
           <span style={{ fontSize: 16, fontWeight: 800 }}>예측 보고서</span>
-          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>NBA 적중 = 기준점 핸디(마핸/플핸) — 손익분기 약 52.4% · 국내·배구는 아직 승패 (기준점 출처 없음)</span>
+          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>NBA 적중 = 기준점 핸디(마핸/플핸, 손익분기 약 52.4%) · 배구 = 우리 모델 승패 · 추천 = 기대수익 +3%↑ (시장 + 0.5 × (모델 − 시장)) · 수익률 = 추천에 1씩 걸었을 때</span>
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
             {[3, 7, 30].map(d => (
               <button key={d} onClick={() => setDays(d)} style={{ fontSize: 11, padding: '3px 8px', borderRadius: 4, cursor: 'pointer', border: `1px solid ${days === d ? 'var(--gold-border)' : 'var(--border)'}`, background: days === d ? 'var(--gold-bg)' : 'none', color: days === d ? 'var(--gold)' : 'var(--text-secondary)' }}>{d}일</button>
@@ -162,7 +167,7 @@ export default function ModelReport({ onClose }: { onClose: () => void }) {
             <div style={h}>최근 {days}일 성적</div>
             {!graded.length ? <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>아직 채점된 경기가 없어요 (예측은 NBA 21:30 · 국내 경기 시작 전에 저장되고, 끝나면 채점)</div> : (
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead><tr><th style={th}>리그</th><th style={th}>경기</th><th style={th}>핸디 적중 (기준점)</th><th style={th}>핸디 · 마감 기준점</th><th style={th}>언오버 적중</th><th style={th}>승패 적중 (참고)</th><th style={th}>시장 정배 적중</th><th style={th}>마진 오차 평균 (배구 세트)</th><th style={th}>5점 안</th><th style={th}>총점 오차 평균</th></tr></thead>
+                <thead><tr><th style={th}>리그</th><th style={th}>경기</th><th style={th}>핸디 적중 (기준점)</th><th style={th}>핸디 · 마감 기준점</th><th style={th}>언오버 적중</th><th style={th}>추천 적중 · 수익률</th><th style={th}>승패 적중 (참고)</th><th style={th}>시장 정배 적중</th><th style={th}>마진 오차 평균 (배구 세트)</th><th style={th}>5점 안</th><th style={th}>총점 오차 평균</th></tr></thead>
                 <tbody>{summary.map(s => (
                   <tr key={s.lg}>
                     <td style={{ ...td, fontWeight: 700 }}>{LG[s.lg] ?? s.lg}</td><td style={td}>{s.n}</td>
@@ -170,6 +175,7 @@ export default function ModelReport({ onClose }: { onClose: () => void }) {
                     <td style={{ ...td, fontWeight: 800, color: s.aN ? (s.aHit / s.aN > 0.524 ? 'var(--green)' : 'var(--red)') : 'var(--text-muted)' }}>{s.aN ? `${s.aHit}/${s.aN} (${pct(s.aHit, s.aN)})` : '–'}</td>
                     <td style={{ ...td, color: 'var(--text-secondary)' }}>{s.cN ? `${s.cHit}/${s.cN} (${pct(s.cHit, s.cN)})` : '–'}</td>
                     <td style={{ ...td, fontWeight: 700, color: s.oN ? (s.oHit / s.oN > 0.524 ? 'var(--green)' : 'var(--red)') : 'var(--text-muted)' }}>{s.oN ? `${s.oHit}/${s.oN} (${pct(s.oHit, s.oN)})` : '–'}</td>
+                    <td style={{ ...td, fontWeight: 800, color: s.rRoi == null ? 'var(--text-muted)' : s.rRoi > 0 ? 'var(--green)' : 'var(--red)' }}>{s.rN ? `${s.rHit}/${s.rN} · ${s.rRoi! > 0 ? '+' : ''}${s.rRoi}%` : '–'}</td>
                     <td style={{ ...td, color: 'var(--text-secondary)' }}>{s.hit}/{s.n} ({pct(s.hit, s.n)})</td>
                     <td style={{ ...td, color: 'var(--text-secondary)' }}>{s.mN ? `${s.mHit}/${s.mN} (${pct(s.mHit, s.mN)})` : '–'}</td>
                     <td style={td}>{s.lg === '전체' ? '–' : s.mae ?? '–'}{s.lg !== '전체' && isVb(s.lg) ? '세트' : s.lg === '전체' ? '' : '점'}</td><td style={td}>{s.lg === '전체' || isVb(s.lg) ? '–' : pct(s.near, s.n)}</td><td style={td}>{s.lg === '전체' ? '–' : s.tae ?? '–'}{s.lg !== '전체' && isVb(s.lg) ? '세트' : s.lg === '전체' ? '' : '점'}</td>
@@ -226,7 +232,7 @@ export default function ModelReport({ onClose }: { onClose: () => void }) {
                       return [a.length ? `핸디 ${a.filter(p => p.ats_hit).length}/${a.length}` : null, o.length ? `언오버 ${o.filter(p => p.ou_hit).length}/${o.length}` : null, `승패 ${g.filter(p => p.win_hit).length}/${g.length}`].filter(Boolean).join(' · ') })() : '결과 전'}
                   </div>
                   <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                    <thead><tr><th style={th}>리그</th><th style={th}>경기 (홈 - 원정)</th><th style={th}>예상</th><th style={th}>실제</th><th style={th}>마진 예상 / 실제</th><th style={th}>오차</th><th style={th}>핸디 기준점 · 픽</th><th style={th}>언오버 · 픽</th><th style={th}>결과</th><th style={th}>시장 정배</th></tr></thead>
+                    <thead><tr><th style={th}>리그</th><th style={th}>경기 (홈 - 원정)</th><th style={th}>예상</th><th style={th}>실제</th><th style={th}>마진 예상 / 실제</th><th style={th}>오차</th><th style={th}>핸디 기준점 · 픽</th><th style={th}>언오버 · 픽</th><th style={th}>추천</th><th style={th}>결과</th><th style={th}>시장 정배</th></tr></thead>
                     <tbody>{list.map(p => {
                       const actual = p.result_home != null ? p.result_home - (p.result_away ?? 0) : null
                       return (
@@ -244,6 +250,10 @@ export default function ModelReport({ onClose }: { onClose: () => void }) {
                           <td style={{ ...td, fontSize: 11 }}>{p.total_line != null && p.ou_pick ? <>
                             <div style={{ fontWeight: 700 }}>{p.ou_pick === 'over' ? '오버' : '언더'} {p.total_line} <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>{p.ou_prob}%</span></div>
                             <div style={{ fontSize: 10 }}>{p.ou_hit == null ? '' : p.ou_hit ? <span style={{ color: 'var(--green)' }}>✓ 적중</span> : <span style={{ color: 'var(--red)' }}>✗ 미적중</span>}</div>
+                          </> : <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>–</span>}</td>
+                          <td style={{ ...td, fontSize: 11 }}>{p.rec_market ? <>
+                            <div style={{ fontWeight: 700, color: p.rec ? 'var(--green)' : 'var(--text-muted)' }}>{p.rec ? '추천' : '패스'} <span style={{ fontWeight: 400 }}>{p.rec_market === 'ml' ? `${name(p.league, p.rec_side === 'home' ? p.home : p.away)} 승` : ''} @{Number(p.rec_odds).toFixed(2)}</span></div>
+                            <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>추천 확률 {p.rec_prob}% · 기대 {Number(p.rec_ev) > 0 ? '+' : ''}{p.rec_ev}%{p.rec && p.rec_profit != null ? ` · ${Number(p.rec_profit) > 0 ? '+' : ''}${p.rec_profit}` : ''}</div>
                           </> : <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>–</span>}</td>
                           <td style={td}>{p.result_home != null ? <><HitTag hit={mainHit(p)} push={!!p.ats_push && hasAts(p)} />{hasAts(p) && <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 2 }}>승패 {p.win_hit ? '✓' : '✗'}</div>}</> : <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>대기</span>}</td>
                           <td style={td}>{p.market_hit == null ? <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>–</span> : <span style={{ fontSize: 10, color: p.market_hit ? 'var(--green)' : 'var(--red)' }}>{p.market_hit ? '✓' : '✗'} {Number(p.odds_home) < Number(p.odds_away) ? '홈' : '원정'} {Math.min(Number(p.odds_home), Number(p.odds_away)).toFixed(2)}</span>}</td>

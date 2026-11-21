@@ -1,9 +1,12 @@
 // ─── 배구 예측 (V리그 남·여) — 세트 스코어 분포 ─────
-// 1) 승률: 선수 오버롤 팀 전력 차 → 로지스틱 (홈 이점 포함), 배당이 있으면 시장 승률과 섞는다 (기본 시장 0.7 : 모델 0.3, logit 기준).
+// 1) 홈 승률 = 우리 모델만 (2026-11-21 사용자 요청 — 배당은 섞지 않고 비교용. 처음엔 빗나가도 예측 보고서로 조금씩 고친다):
+//    logit 홈 승률 = 홈 이점 hca + wScore × 팀 세트 득실 logit + wOv × k × 선수 오버롤(포지션 슬롯) 차
+//    팀 세트 득실: 이번 시즌 딴 세트 비율을 (딴+3)/(전체+6)로 평균 쪽으로 당겨 logit → 두 팀 차 = 세트 1개 이길 확률 →
+//      5세트 3선승으로 경기 승률 (p³·(1 + 3q + 6q²)). 경기 결과 = vb_games (KOVO 시즌 일정).
 // 2) 세트 스코어: 과거 V리그 경기(남 630·여 615, 2021-22~2025-26, 시즌 가중)로 맞춘 곡선 —
 //    "정배 승률(logit) → 정배 세트차 ≥ c" 로지스틱 5개(c = +3·+2·+1·−1·−2), 홈정배/원정정배 따로 (oddsCurve와 같은 방식).
 //    여기 넣는 정배 승률은 위 1)의 값 — 시장 배당이 그 경기에서 했던 역할을 우리 승률이 대신한다.
-// 가중치: model_params leagues.VLEAGUE_M/W — hca = 홈 이점(logit), k = 오버롤 1점당 logit, wScore = 시장 비중, wOv = 모델 비중.
+// 가중치: model_params leagues.VLEAGUE_M/W — hca = 홈 이점(logit), k = 오버롤 1점당 logit, wScore = 팀 세트 득실 비중, wOv = 오버롤 비중 (처음 0.5 : 0.5, 검증 전).
 const sig = (z: number) => 1 / (1 + Math.exp(-z))
 const logit = (p: number) => Math.log(p / (1 - p))
 
@@ -47,13 +50,24 @@ export interface VolleyResult {
   over35: number             // 4세트 이상 %
   full: number               // 5세트 %
   modelHome: number          // 오버롤 모델만의 홈 승률 %
-  marketHome: number | null  // 시장(마진 뺀) 홈 승률 %
+  marketHome: number | null  // 시장(마진 뺀) 홈 승률 % — 비교용
+  teamHome?: number | null   // 팀 세트 득실만의 홈 승률 % (홈 이점 포함)
 }
 
-export function predictVolley(code: string, diff: number, p: { hca: number; k: number; wScore: number; wOv: number }, odds: { home: number; away: number } | null): VolleyResult | null {
-  const lm = p.hca + p.k * diff
-  const pm = odds && odds.home > 1 && odds.away > 1 ? (1 / odds.home) / (1 / odds.home + 1 / odds.away) : null
-  const l = pm == null ? lm : (p.wScore * logit(pm) + p.wOv * lm) / (p.wScore + p.wOv)
+/** 팀 세트 득실 → logit 경기 승률 (두 팀 세트 기록이 있을 때) */
+export function teamSetLogit(home?: { sw?: number; sl?: number } | null, away?: { sw?: number; sl?: number } | null): number | null {
+  if (!home?.sw && !home?.sl || !away?.sw && !away?.sl) return null
+  const r = (t: { sw?: number; sl?: number }) => logit(((t.sw ?? 0) + 3) / ((t.sw ?? 0) + (t.sl ?? 0) + 6))
+  const p = sig(r(home!) - r(away!)), q = 1 - p
+  const m = p ** 3 * (1 + 3 * q + 6 * q * q)
+  return logit(Math.min(0.99, Math.max(0.01, m)))
+}
+export function predictVolley(code: string, diff: number, p: { hca: number; k: number; wScore: number; wOv: number }, odds: { home: number; away: number } | null,
+  team?: { home?: { sw?: number; sl?: number } | null; away?: { sw?: number; sl?: number } | null }): VolleyResult | null {
+  const lt = teamSetLogit(team?.home, team?.away)
+  const lm = p.hca + p.k * diff                                  // 오버롤만 (비교 표시용)
+  const l = p.hca + p.wOv * p.k * diff + p.wScore * (lt ?? 0)    // 우리 모델
+  const pm = odds && odds.home > 1 && odds.away > 1 ? (1 / odds.home) / (1 / odds.home + 1 / odds.away) : null   // 시장 (비교용, 섞지 않음)
   const dist = setDistribution(code, sig(l)); if (!dist) return null
   const r1 = (v: number) => Math.round(v * 1000) / 10
   const best = SET_SCORES.reduce((a, b) => (dist[b] > dist[a] ? b : a))
@@ -61,7 +75,7 @@ export function predictVolley(code: string, diff: number, p: { hca: number; k: n
   const expDiff = SET_SCORES.reduce((a, k) => a + DIFF[k] * dist[k], 0)
   const expSets = 3 * (dist['3-0'] + dist['0-3']) + 4 * (dist['3-1'] + dist['1-3']) + 5 * (dist['3-2'] + dist['2-3'])
   return { homeWin: r1(homeWin), dist, best, expDiff: Math.round(expDiff * 100) / 100, expSets: Math.round(expSets * 100) / 100,
-    over35: r1(1 - dist['3-0'] - dist['0-3']), full: r1(dist['3-2'] + dist['2-3']), modelHome: r1(sig(lm)), marketHome: pm == null ? null : r1(pm) }
+    over35: r1(1 - dist['3-0'] - dist['0-3']), full: r1(dist['3-2'] + dist['2-3']), modelHome: r1(sig(lm)), marketHome: pm == null ? null : r1(pm), teamHome: lt == null ? null : r1(sig(lt + p.hca)) }
 }
 
 // ─── 2만 번 시뮬레이션 (사용자 요청 — 가장 많이 나온 세트 스코어 + 예상 총득점) ─────

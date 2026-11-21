@@ -127,3 +127,49 @@ begin
 end $$;
 revoke all on function public.regrade_predictions() from public, anon, authenticated;
 select cron.schedule('regrade-predictions', '40 * * * *', 'select public.regrade_predictions()');
+
+-- 추천 (2026-11-21 사용자 요청 — 내 모델 확률을 지금 배당과 비교해 갈 만한 것만): 추천 확률 = 시장(양쪽 배당 마진 뺀) + 0.5 × (모델 − 시장)
+--  (검증 전 모델을 그대로 믿으면 다 추천돼서 반만 믿음 — src/lib/odds.ts REC_RULE.shrink와 같이 바꾼다), 기대수익 = 추천 확률 × 배당 − 1 ≥ +3% & 배당 1.30 이상 3.00 미만.
+--  NBA = 핸디 픽(ats_prob, 그 쪽 기준점 배당) / 배구 = 승패(home_win vs odds_home·odds_away, 큰 쪽). 언오버는 모델 검증 전이라 추천 안 함.
+--  rec_hit = 적중, rec_profit = 1단위 걸었을 때 손익(적중 배당−1 / 미적중 −1 / 적특 0).
+alter table public.predictions add column if not exists rec_market text;   -- 'ats' · 'ml'
+alter table public.predictions add column if not exists rec_side text;
+alter table public.predictions add column if not exists rec_odds numeric;
+alter table public.predictions add column if not exists rec_prob numeric;
+alter table public.predictions add column if not exists rec_ev numeric;     -- %
+alter table public.predictions add column if not exists rec boolean;        -- 추천 기준 통과
+alter table public.predictions add column if not exists rec_hit boolean;
+alter table public.predictions add column if not exists rec_profit numeric;
+
+create or replace function public.predictions_rec() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare p numeric; o numeric; oo numeric; q numeric; pr numeric; ph numeric; qh numeric; prh numeric; pra numeric; k numeric := 0.5;
+begin
+  new.rec_market := null; new.rec_side := null; new.rec_odds := null; new.rec_prob := null; new.rec_ev := null; new.rec := null;
+  if new.league = 'NBA' and new.ats_pick is not null and new.ats_prob is not null and new.spread_home_odds > 1 and new.spread_away_odds > 1 then
+    p := new.ats_prob / 100;
+    o := case when new.ats_pick = 'home' then new.spread_home_odds else new.spread_away_odds end;
+    oo := case when new.ats_pick = 'home' then new.spread_away_odds else new.spread_home_odds end;
+    q := (1 / o) / (1 / o + 1 / oo); pr := q + k * (p - q);
+    new.rec_market := 'ats'; new.rec_side := new.ats_pick; new.rec_odds := o; new.rec_prob := round(pr * 100, 1); new.rec_ev := round((pr * o - 1) * 100, 1);
+  elsif new.league like 'VLEAGUE%' and new.home_win is not null and new.odds_home > 1 and new.odds_away > 1 then
+    ph := new.home_win / 100; qh := (1 / new.odds_home) / (1 / new.odds_home + 1 / new.odds_away);
+    prh := qh + k * (ph - qh); pra := 1 - prh;
+    new.rec_market := 'ml';
+    if prh * new.odds_home >= pra * new.odds_away then new.rec_side := 'home'; new.rec_odds := new.odds_home; new.rec_prob := round(prh * 100, 1); new.rec_ev := round((prh * new.odds_home - 1) * 100, 1);
+    else new.rec_side := 'away'; new.rec_odds := new.odds_away; new.rec_prob := round(pra * 100, 1); new.rec_ev := round((pra * new.odds_away - 1) * 100, 1); end if;
+  end if;
+  if new.rec_market is not null then
+    new.rec := new.rec_ev >= 3 and new.rec_odds >= 1.3 and new.rec_odds < 3.0;
+  end if;
+  new.rec_hit := null; new.rec_profit := null;
+  if new.rec_market is not null and new.result_home is not null and new.result_away is not null then
+    if new.rec_market = 'ats' then new.rec_hit := new.ats_hit;
+    else new.rec_hit := (new.result_home > new.result_away) = (new.rec_side = 'home'); end if;
+    new.rec_profit := case when new.rec_hit is null then 0 when new.rec_hit then round(new.rec_odds - 1, 2) else -1 end;
+  end if;
+  return new;
+end $$;
+-- 트리거 이름 순서: predictions_lines(핸디) → predictions_rec(추천)
+create or replace trigger predictions_rec before insert or update on public.predictions
+  for each row execute function public.predictions_rec();

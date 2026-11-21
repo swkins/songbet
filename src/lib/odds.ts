@@ -66,3 +66,17 @@ export function ouPick(total: number, line: number, sdT = 18) {
 }
 /** 홈 기준점 표기: -12.5 → '홈 -12.5', 3.5 → '홈 +3.5' */
 export const fmtLine = (v: number) => `${v > 0 ? '+' : ''}${v}`
+
+// ─── 추천 (사용자 요청 2026-11-21 — 내 모델 확률을 지금 배당과 비교해 갈 만한 것만) ─────
+// 추천 확률 = 시장 확률(양쪽 배당 마진 뺀 값) + REC_SHRINK × (모델 확률 − 시장 확률) — 검증 전 모델을 그대로 믿으면 다 추천이 돼서 반만 믿는다.
+// 기대수익 = 추천 확률 × 배당 − 1. 추천 = +3% 이상 & 배당 1.30 이상 3.00 미만 (모든 종목 공통 배당 범위 — 사용자 규칙).
+// DB 트리거(predictions_rec)도 같은 식으로 rec_* 칸에 저장·채점 — 바꾸면 둘 다 바꾼다.
+export const REC_RULE = { minEv: 0.03, minOdds: 1.3, maxOdds: 3.0, shrink: 0.5 }
+/** 모델 확률 p, 이 쪽 배당 o, 반대쪽 배당 oo → 추천 확률·기대수익(%)·추천 여부 */
+export function recOf(p: number, o: number | null | undefined, oo: number | null | undefined) {
+  if (!o || !oo || o <= 1 || oo <= 1) return null
+  const q = (1 / o) / (1 / o + 1 / oo)
+  const pr = q + REC_RULE.shrink * (p - q)
+  const ev = pr * o - 1
+  return { market: Math.round(q * 1000) / 10, prob: Math.round(pr * 1000) / 10, ev: Math.round(ev * 1000) / 10, rec: o >= REC_RULE.minOdds && o < REC_RULE.maxOdds && ev >= REC_RULE.minEv }
+}
