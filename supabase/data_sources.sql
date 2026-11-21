@@ -28,7 +28,6 @@ language plpgsql stable security definer set search_path to 'public', 'cron' as 
 declare
   today date := (now() at time zone 'Asia/Seoul')::date;
   espn_soccer text[] := array(select league from public.odds_jobs where job like 'collect-soccer-%' and league not in ('K리그1', 'K리그2', 'J리그2'));
-  vb365 text[] := array['이탈리아 남자','이탈리아 여자','폴란드 남자','폴란드 여자','터키 남자','터키 여자','브라질 남자','브라질 여자','체코 남자','벨기에 여자'];
   rows jsonb := '[]'::jsonb;
   sched_runs jsonb;
 begin
@@ -58,9 +57,6 @@ begin
        '일정에 점수가 없다 — 최종 점수는 다음 날 새벽 선수 기록(v_team_games)에서. 365Scores에도 없어 백업 없음.'),
     (16, '배구', '일정·결과', 'KOVO 공식', 'kovo.co.kr API', 90,
        (select max(f) from sch where league in ('V리그 남자','V리그 여자')), sched_runs, (select sum(up) from sch where league in ('V리그 남자','V리그 여자'))::int, null),
-    (17, '배구', '일정·결과', '365Scores', 'webws.365scores.com/web/games/current', 60,
-       (select max(f) from sch where league = any(vb365)), public.ds_log(vb365, '365'), (select sum(up) from sch where league = any(vb365))::int,
-       '해외 10개 리그. 공식 공개 API가 아니라 앱이 쓰는 주소 — 예고 없이 바뀌거나 막힐 수 있다. 팀 이름은 영어(이탈리아만 한글 연결).'),
     -- 배당
     (20, '축구', '승무패 배당', 'ESPN · DraftKings', 'ESPN scoreboard 안 odds', 120,
        (select max(fetched_at) from public.odds_snapshots where source = 'espn-draftkings'), public.ds_log(espn_soccer), (select sum(up) from sch where league = any(espn_soccer))::int,
@@ -83,8 +79,6 @@ begin
     (26, '배구', 'V리그 승패 배당 (백업)', 'BetExplorer', 'betexplorer.com/volleyball/south-korea', 75,
        (select max(fetched_at) from public.odds_snapshots where source = 'betexplorer' and league like 'V리그%'), public.ds_log(array['V리그 남자','V리그 여자'], 'non365'), null,
        '365Scores에 배당이 있으면 건너뜀(skipped). 429 차단이 잦다.'),
-    (27, '배구', '해외 승패 배당', '365Scores · Bet365', 'webws.365scores.com', 60,
-       (select max(fetched_at) from public.odds_snapshots where source = '365-bet365' and league <> all(array['V리그 남자','V리그 여자'])), public.ds_log(vb365, '365'), (select sum(up) from sch where league = any(vb365))::int, null),
     -- 선수·부상·뉴스
     (30, '농구', 'NBA 선수 기록', 'ESPN 박스스코어', 'site.api.espn.com/…/summary', 1440,
        (select max(created_at) from public.player_game_stats where league = 'NBA'), null, null, '매일 18~19시(KST) 한 번.'),

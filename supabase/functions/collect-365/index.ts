@@ -1,7 +1,7 @@
 // 365Scores 배구 일정·결과·배당 (2026-11-22 사용자 요청 — BetExplorer보다 365Scores를 먼저)
 //  - V리그 남·여: 일정·결과는 KOVO 그대로(경기 id·선수 기록·예측이 이어지게), 배당만 365Scores(Bet365 승패, 오픈 포함) → KOVO 경기에 시작 시각(±40분)으로 맞춤.
 //    collect-odds(BetExplorer)는 최근 3시간 안에 365Scores가 남은 경기 배당을 다 받았으면 건너뛴다 (백업).
-//  - 해외 배구(이탈리아·폴란드·터키·브라질 남·여, 체코 남자, 벨기에 여자): 일정·결과·배당 모두 365Scores → game_schedules (id '365-경기id').
+//  - (해외 배구 일정·결과·배당은 2026-11-22 사용자 요청으로 뺐다 — own: true 리그는 일정·결과도 365Scores → game_schedules id '365-경기id')
 // 출처: webws.365scores.com/web/games/current/?competitions=<id> (그 리그 앞뒤 경기 약 15~20개, userCountryId=1이어야 배당이 붙음 — 한국·미국은 배당 없음).
 //   공식 공개 API가 아니라 앱이 쓰는 주소 — 막히면 odds_fetch_log status blocked/error. 리그 사이 1~2.5초 쉼.
 // 팀 이름: DB sports_team_names(sport, league, src = 365 영어 이름, ko = 리그 관리 등록 이름) → 없으면 영어 이름에서 ' (W)'만 뗀 것.
@@ -15,13 +15,10 @@ const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 const SRC = '365-bet365'
 
 // own = 일정·결과도 365Scores로 (false = V리그: 배당만)
+// 2026-11-22 사용자 요청으로 해외 배구(이탈리아·폴란드·터키·브라질·체코·벨기에)는 뺐다 — 다시 넣으려면 own: true 줄을 더하면 된다
+//  (id: 이탈리아 남 5723·여 5729, 폴란드 남 5772·여 8093, 터키 남 5766·여 7897, 브라질 남 5710·여 5711, 체코 남 5757, 벨기에 여 8301)
 const LEAGUES: { league: string; comp: number; own: boolean }[] = [
   { league: 'V리그 남자', comp: 8344, own: false }, { league: 'V리그 여자', comp: 8343, own: false },
-  { league: '이탈리아 남자', comp: 5723, own: true }, { league: '이탈리아 여자', comp: 5729, own: true },
-  { league: '폴란드 남자', comp: 5772, own: true }, { league: '폴란드 여자', comp: 8093, own: true },
-  { league: '터키 남자', comp: 5766, own: true }, { league: '터키 여자', comp: 7897, own: true },
-  { league: '브라질 남자', comp: 5710, own: true }, { league: '브라질 여자', comp: 5711, own: true },
-  { league: '체코 남자', comp: 5757, own: true }, { league: '벨기에 여자', comp: 8301, own: true },
 ]
 
 const statusOf = (g: any): string | null => {
