@@ -3088,6 +3088,16 @@ export default function Dashboard({ betTarget, onBetTargetDone }: { betTarget?: 
     const data = await fetchAllRows<Bet>((from, to) => supabase.from('bets').select('*').eq('is_hidden', false).order('bet_date', { ascending: true }).order('created_at', { ascending: true }).order('id').range(from, to))
     if (data) setBets(data)
   }
+  // 자동 판정(DB auto_grade_bets, 30분마다)을 5분마다 받아 대기 중 베팅에 붙인다 — 최종 처리는 [확인]
+  useEffect(() => {
+    const t = setInterval(async () => {
+      const { data } = await supabase.from('bets').select('id, auto_result, auto_score, auto_note').eq('result', 'pending').eq('is_hidden', false)
+      if (!data) return
+      const m = new Map(data.map(d => [d.id as string, d]))
+      setBets(p => p.map(b => { const d = m.get(b.id); return d && (d.auto_result !== b.auto_result || d.auto_score !== b.auto_score) ? { ...b, ...d } as Bet : b }))
+    }, 5 * 60 * 1000)
+    return () => clearInterval(t)
+  }, [])
   async function loadBetOptions() {
     const { data } = await supabase.from('bet_options').select('*').order('sport').order('sort_order').order('created_at')
     if (data) {
@@ -4194,6 +4204,19 @@ export default function Dashboard({ betTarget, onBetTargetDone }: { betTarget?: 
                                     <div style={{ paddingLeft: 26, marginTop: 4 }}>
                                       <BetOddsStakeLine odds={bet.odds} stake={bet.stake} prefix={pfx} suffix={sfx} big={isBigStake(bet.stake, isusd)} mock={bet.is_mock} />
                                     </div>
+                                    {bet.result === 'pending' && bet.auto_result && (() => {
+                                      const ar = bet.auto_result
+                                      const c = ar === 'win' ? 'var(--green)' : ar === 'loss' ? 'var(--red)' : 'var(--blue)'
+                                      return (
+                                        <div style={{ paddingLeft: 26, marginTop: 4, display: 'flex', alignItems: 'center', gap: 6, fontSize: 11 }}>
+                                          <span style={{ color: c, fontWeight: 700 }}>자동: {ar === 'win' ? '적중' : ar === 'loss' ? '실패' : '적특'}</span>
+                                          {bet.auto_score && <span style={{ color: 'var(--text-muted)' }}>({bet.auto_score.replace('-', ' : ')} 종료)</span>}
+                                          <button className="btn btn-xs" title="자동 판정대로 최종 처리"
+                                            style={{ marginLeft: 'auto', padding: '1px 8px', fontSize: 11, fontWeight: 700, color: c, border: `1px solid ${c}`, background: 'transparent' }}
+                                            onClick={e => { e.stopPropagation(); applyResult(bet, ar) }}>확인</button>
+                                        </div>
+                                      )
+                                    })()}
                                   </div>
                                   {/* 결과 처리 버튼 — hover 시 우측 상단에 2x3 그리드로 살짝 겹쳐서 표시 (내용 레이아웃엔 영향 없음).
                                       이미 결과 처리되어 1시간 보류 중인 경우엔 재처리 버튼 대신 되돌리기만 제공 */}

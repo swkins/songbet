@@ -32,6 +32,9 @@ export interface Bet {
   stats_excluded: boolean       // 통계에서 제외(통계 페이지 "최근 합류" 목록에서 삭제) — 베팅 자체는 남아 잔액/결산엔 그대로 반영
   bet_option: string | null     // 통계에서 베팅옵션별 성적을 낼 때 문구 패턴매칭 대신 수동으로 지정한 옵션 라벨 ("기타" 재지정용)
   is_mock: boolean              // 모의베팅 — 만원 기준, 잔액·롤링 미반영, 통계 "모의" 탭에서만 집계
+  auto_result?: 'win' | 'loss' | 'push' | null  // 자동 판정 (DB auto_grade_bets — 종료 경기 점수로), 최종 처리는 [확인]
+  auto_score?: string | null    // 자동 판정에 쓴 최종 점수 '홈-원정' (배구는 세트)
+  auto_note?: string | null     // 판정 못 한 이유 (경기 못 찾음 등)
 }
 export interface Todo {
   id: string; created_at: string; todo_date: string; content: string
