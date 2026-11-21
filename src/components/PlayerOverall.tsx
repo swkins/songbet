@@ -301,7 +301,7 @@ function TeamTable({ title, t, ovr, onCycle, cond }: { title: string; t: TeamOv;
 }
 
 // 배치 (사용자 요청 2026-11-21): 맨 위 뉴스 → 예상 스코어(가로로 길게) → 아래 좌(좁게) = left(배당 변동) + 팀 컨디션 · 우(넓게) = 선수 오버롤·출전 확률
-export default function PlayerOverall({ league, gameDate, home, away, left, odds, lines }: { league: string; gameDate: string; home: ScheduleTeam; away: ScheduleTeam; left?: React.ReactNode; odds?: { home: number; away: number } | null; lines?: { spread: OddsLine | null; total: OddsLine | null } | null }) {
+export default function PlayerOverall({ league, gameDate, home, away, left, odds, lines, afterScore }: { league: string; gameDate: string; home: ScheduleTeam; away: ScheduleTeam; left?: React.ReactNode; afterScore?: React.ReactNode; odds?: { home: number; away: number } | null; lines?: { spread: OddsLine | null; total: OddsLine | null } | null }) {
   const [data, setData] = useState<GameOverall | null | undefined>(undefined)
   const [err, setErr] = useState<string | null>(null)
   const [ovr, setOvr] = useState<Record<string, number>>({})   // 화면에서 바꿔 본 출전 확률
@@ -395,6 +395,7 @@ export default function PlayerOverall({ league, gameDate, home, away, left, odds
         </div>
       )}
       {vsim && <VolleyBox v={vsim} hName={hName} aName={aName} changed={changed} onReset={() => setOvr({})} odds={odds} />}
+      {afterScore}
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-start' }}>
         {/* 좌: 배당 변동 · 팀 컨디션 */}
         <div style={{ flex: '1 1 300px', maxWidth: 420, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>

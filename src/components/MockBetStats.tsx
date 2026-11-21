@@ -109,3 +109,66 @@ export default function MockBetStats() {
     </div>
   )
 }
+
+// ─── 분석 화면 (NBA 경기 하나): 이 경기에 걸린 모의베팅 — 방법별 22시·직전 픽, 그 방법 누적 적중률, 핸디·언오버 방법들이 어느 쪽에 몰렸나 ─────
+interface GameBet extends Bet { strategy: string; market: 'spread' | 'total' }
+export function MockBetsForGame({ gameId }: { gameId: string }) {
+  const [bets, setBets] = useState<GameBet[] | null>(null)
+  const [stats, setStats] = useState<Stat[]>([])
+  const [open, setOpen] = useState(true)
+  useEffect(() => {
+    setBets(null)
+    Promise.all([
+      supabase.from('mock_bets').select('id,game_date,home,away,timing,side,line,odds,hit,push,profit,result_home,result_away,strategy,market').eq('game_id', gameId),
+      supabase.from('v_mock_bet_stats').select('*'),
+    ]).then(([b, s]) => { setBets((b.data ?? []) as GameBet[]); setStats((s.data ?? []) as Stat[]) })
+  }, [gameId])
+  const box: React.CSSProperties = { border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '10px 12px', background: 'var(--bg-elevated)' }
+  const th: React.CSSProperties = { textAlign: 'left', fontWeight: 600, color: 'var(--text-muted)', padding: '3px 6px', fontSize: 10, borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }
+  const td: React.CSSProperties = { padding: '4px 6px', borderBottom: '1px solid var(--border)', fontSize: 11, verticalAlign: 'top' }
+  if (bets == null) return null
+  const keys = [...new Set(bets.map(b => b.strategy))]
+  const info = (k: string) => stats.find(s => s.strategy === k)
+  const rec = (k: string) => { const xs = stats.filter(s => s.strategy === k); const n = xs.reduce((a, s) => a + s.n, 0), h = xs.reduce((a, s) => a + s.hits, 0); return { n, h } }
+  const rows = keys.map(k => ({ k, label: info(k)?.label ?? k, market: bets.find(b => b.strategy === k)!.market, sort: info(k)?.sort ?? 999,
+    pre: bets.find(b => b.strategy === k && b.timing === 'pre22'), close: bets.find(b => b.strategy === k && b.timing === 'close') }))
+    .sort((a, b) => a.sort - b.sort)
+  // 쏠림: 최신 시점(직전 있으면 직전, 없으면 22시) 기준 방법 수
+  const latest = rows.map(r => r.close ?? r.pre).filter((x): x is GameBet => !!x)
+  const cnt = (m: string, side: string) => latest.filter(b => b.market === m && b.side === side).length
+  const one = latest[0]
+  const pickCell = (b?: GameBet) => !b ? <td style={{ ...td, color: 'var(--text-muted)' }}>–</td> : (
+    <td style={td}>
+      <span style={{ fontWeight: 700 }}>{sideText(b)}</span> <span style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-num)' }}>@{Number(b.odds).toFixed(2)}</span>
+      {b.result_home != null && <span style={{ marginLeft: 4, fontWeight: 700, color: b.push ? 'var(--text-muted)' : b.hit ? 'var(--green)' : 'var(--red)' }}>{b.push ? '적특' : b.hit ? '✓' : '✗'}</span>}
+    </td>)
+  return (
+    <div style={{ ...box, borderColor: 'var(--blue-border)' }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap', cursor: 'pointer' }} onClick={() => setOpen(o => !o)}>
+        <span style={{ fontSize: 13, fontWeight: 800 }}>모의베팅 {open ? '▾' : '▸'}</span>
+        <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>방법 38개 중 조건이 맞은 {keys.length}개 · 21:45(22시 기준)·경기 시작 30분 전(직전)에 자동으로 걸고 끝나면 채점 · 누적 = 그 방법 전체 경기 성적</span>
+      </div>
+      {!bets.length ? <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6 }}>아직 안 걸었어요 — 매일 21:45에 다음 날 NBA 경기에 자동으로 걸어요</div> : <>
+        {one && (
+          <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', fontSize: 12, margin: '6px 0 4px' }}>
+            <span>핸디: <b>{koName(one.home)} 쪽 {cnt('spread', 'home')}개</b> · <b>{koName(one.away)} 쪽 {cnt('spread', 'away')}개</b></span>
+            <span>언오버: <b>오버 {cnt('total', 'over')}개</b> · <b>언더 {cnt('total', 'under')}개</b></span>
+            <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>('전 경기 홈/원정·오버/언더'처럼 양쪽 다 거는 비교용 방법 포함 — 쏠림은 참고만)</span>
+          </div>
+        )}
+        {open && (
+          <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: 4 }}>
+            <thead><tr><th style={th}>방법</th><th style={th}>시장</th><th style={th}>22시 픽</th><th style={th}>직전 픽</th><th style={th}>이 방법 누적</th></tr></thead>
+            <tbody>{rows.map(r => { const { n, h } = rec(r.k); return (
+              <tr key={r.k}>
+                <td style={{ ...td, fontWeight: 600 }}>{r.label}</td>
+                <td style={{ ...td, color: 'var(--text-muted)' }}>{r.market === 'spread' ? '핸디' : '언오버'}</td>
+                {pickCell(r.pre)}{pickCell(r.close)}
+                <td style={{ ...td, color: color(h, n), fontWeight: 700 }}>{n ? `${h}/${n} (${pctTxt(h, n)})` : '–'}</td>
+              </tr>) })}</tbody>
+          </table>
+        )}
+      </>}
+    </div>
+  )
+}

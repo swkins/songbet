@@ -1,5 +1,6 @@
 import dayjs from 'dayjs'
 import PlayerOverall from './PlayerOverall'
+import { MockBetsForGame } from './MockBetStats'
 import OddsHistory, { LineHistory } from './OddsHistory'
 import OverallAnalysisView, { type OverallAnalysis } from './OverallAnalysisView'
 import { gameState, koName, type ScheduleGame, type ScheduleTeam } from '../lib/gameSchedule'
@@ -50,6 +51,8 @@ export default function GameAnalysis({ g, analysis, odds, lines, onGoBet }: { g:
           {odds?.length ? <OddsHistory compact list={odds} homeName={koName(g.home.name)} awayName={koName(g.away.name)} /> : null}
           {lines?.length ? <LineHistory list={lines} homeName={koName(g.home.name)} awayName={koName(g.away.name)} /> : null}
         </> : null}
+        // NBA: 이 경기 모의베팅 (방법별 픽) — 예상 스코어 바로 아래 (사용자 요청)
+        afterScore={g.league === 'NBA' ? <MockBetsForGame gameId={g.id} /> : null}
         lines={lines?.length ? { spread: lastLine(lines, 'spread'), total: lastLine(lines, 'total') } : null}
         odds={(() => { const l = odds?.[odds.length - 1]; return l?.home_odds && l?.away_odds ? { home: Number(l.home_odds), away: Number(l.away_odds) } : null })()} />
       {analysis ? <OverallAnalysisView a={analysis} />
