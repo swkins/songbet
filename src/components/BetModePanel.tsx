@@ -51,7 +51,7 @@ export default function BetModePanel({ target, onTargetDone, sites, betOptionsBy
   const [gameId, setGameId] = useState<string | null>(null)
   const [addOpen, setAddOpen] = useState(false)          // 베팅추가: 사이트 고르는 중
   const [addSiteId, setAddSiteId] = useState<string | null>(null)
-  const [showAnalysis, setShowAnalysis] = useState(false)   // 베팅슬립 '분석 보기' — 분석 탭 자료를 가운데 큰 창으로
+  const [showAnalysis, setShowAnalysis] = useState(false)   // 경기 목록에서 고른 경기 오른쪽 📊 '분석 보기' — 분석 탭 자료를 가운데 큰 창으로
   const addSite = sites.find(s => s.id === addSiteId) ?? null
   const orderedSites = [...sites].sort((a, b) => Number(b.active) - Number(a.active) || a.sort_order - b.sort_order)
 
@@ -173,12 +173,19 @@ export default function BetModePanel({ target, onTargetDone, sites, betOptionsBy
                   return (
                     <div key={g.id}>
                       {header}
-                      <button type="button" onClick={() => { setGameId(g.id); setAddSiteId(null) }} style={{ ...item(gameId === g.id), width: '100%', display: 'flex', flexDirection: 'column', gap: 2 }}>
+                      <div style={{ position: 'relative' }}>
+                      <button type="button" onClick={() => { setGameId(g.id); setAddSiteId(null) }} style={{ ...item(gameId === g.id), width: '100%', display: 'flex', flexDirection: 'column', gap: 2, paddingRight: gameId === g.id ? 40 : undefined }}>
                         <span style={{ fontSize: 10, fontWeight: 700, color: live ? 'var(--gold)' : 'var(--text-muted)', fontFamily: 'var(--font-num)' }}>{live ? '● 경기중' : d.format('HH:mm')}{!league && <span style={{ fontWeight: 600, fontFamily: 'var(--font-body)', marginLeft: 6 }}>{g.league}</span>}</span>
                         {/* 위 = 홈, 아래 = 원정 */}
                         <span style={{ fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{koName(g.home.name)}</span>
                         <span style={{ fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{koName(g.away.name)}</span>
                       </button>
+                      {/* 고른 경기만 오른쪽에 '분석 보기' 아이콘 (사용자 요청 — 베팅슬립이 아니라 경기 일정 쪽에) */}
+                      {gameId === g.id && (
+                        <button type="button" title="분석 보기" aria-label="분석 보기" onClick={() => setShowAnalysis(true)}
+                          style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', width: 30, height: 30, borderRadius: 'var(--radius-sm)', border: '1px solid var(--gold-border)', background: 'var(--bg-card)', color: 'var(--gold)', cursor: 'pointer', fontSize: 15, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}>📊</button>
+                      )}
+                      </div>
                     </div>
                   )
                 })
@@ -189,10 +196,6 @@ export default function BetModePanel({ target, onTargetDone, sites, betOptionsBy
           <div style={{ minWidth: 0 }}>
             <div style={{ ...head, display: 'flex', alignItems: 'center', gap: 6 }}>
               <span>{addSite ? `베팅추가 · ${addSite.name}` : '베팅슬립'}</span>
-              {!addSite && game && (
-                <button type="button" onClick={() => setShowAnalysis(true)}
-                  style={{ marginLeft: 'auto', fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--gold-border)', background: 'var(--gold-bg)', color: 'var(--gold)', cursor: 'pointer', fontFamily: 'var(--font-body)' }}>📊 분석 보기</button>
-              )}
             </div>
             {showAnalysis && game && <GameAnalysisModal g={game} onClose={() => setShowAnalysis(false)} />}
             {addSite && renderAddForm ? renderAddForm(addSite, () => setAddSiteId(null))
