@@ -5,7 +5,8 @@
 //              · V리그(KOVO 선수 시즌 누적 스냅샷 → 전날 차이로 경기 기록). pg_cron 매일 새벽 3~4시 KST(랜덤 분).
 //  이미 넣은 경기는 건너뛴다. 한 번에 max경기까지만(기본 40) — 시즌 첫 수집은 여러 번 불러 채운다(응답 remaining).
 //  지난 시즌 받기(체급용, 한 번): { group: "domestic", from: "2025-10-01", wkblPrev: true, skipKovo: true }
-//  보관: 지난 시즌까지만 (그 전 시즌은 지움), KOVO 스냅샷은 14일.
+//  보관: 선수 경기 기록은 지우지 않는다 (2026-11-21 사용자 — 기록을 쌓는다, 정리는 supabase/cleanup.sql), KOVO 스냅샷은 14일.
+//  KBL 선수 구분(playerFlag 0 국내 · 1 외국인 · 2 아시아쿼터) → extra.kind + player_kinds (용병 체급 출발점 — src/lib/playerOverall.ts)
 import { createClient } from 'npm:@supabase/supabase-js@2.45.0'
 
 const UA = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36' }
@@ -88,6 +89,7 @@ async function nba(db: ReturnType<typeof sb>, from: string, max: number) {
 }
 
 // ── KBL ──
+const KIND: Record<string, string> = { '1': '외국인', '2': '아시아쿼터' }
 const KBL_H = { ...UA, Channel: 'WEB', TeamCode: 'XX', Referer: 'https://www.kbl.or.kr/', Origin: 'https://www.kbl.or.kr' }
 async function kbl(db: ReturnType<typeof sb>, from: string, max: number) {
   const today = kstDate(Date.now()), have = await existingIds(db, 'KBL', from)
@@ -108,12 +110,15 @@ async function kbl(db: ReturnType<typeof sb>, from: string, max: number) {
         player_id: String(pl.pcode), player_name: pl.pname, pos: pl.pos ?? null, starter: null,
         minutes: (rc.playMin ?? 0) + (rc.playSec ?? 0) / 60, pts: rc.score ?? null, reb: rc.rb ?? null, ast: rc.ast ?? null, stl: rc.stl ?? null, blk: rc.bs ?? null, tov: rc.to ?? null,
         fgm: rc.fgt ?? null, fga: rc.fgtA ?? null, tpm: rc.threep ?? null, tpa: rc.threepA ?? null, ftm: rc.ft ?? null, fta: rc.ftA ?? null, plus_minus: rc.marginCn ?? null,
-        extra: { team_score: home ? g.scoreH : g.scoreA, opp_score: home ? g.scoreA : g.scoreH, per: rc.per, netrtg: rc.netrtg, usg: rc.usgRt, foreign: pl.playerFlag === '1' || undefined },
+        extra: { team_score: home ? g.scoreH : g.scoreA, opp_score: home ? g.scoreA : g.scoreH, per: rc.per, netrtg: rc.netrtg, usg: rc.usgRt, foreign: pl.playerFlag === '1' || undefined, kind: KIND[String(pl.playerFlag)] },
       })
     }
     done++
   }
   await insert(db, rows)
+  // 선수 구분 (외국인·아시아쿼터만 — 국내는 표에 없으면 국내)
+  const kinds = [...new Map(rows.filter(r => (r.extra as any)?.kind).map(r => [r.player_id, { league: 'KBL', player_id: r.player_id, player_name: r.player_name, kind: (r.extra as any).kind, team: r.team, updated_at: new Date().toISOString() }])).values()]
+  if (kinds.length) await db.from('player_kinds').upsert(kinds)
   return { league: 'KBL', games: done, rows: rows.length, remaining: Math.max(0, games.length - done) }
 }
 
@@ -225,8 +230,5 @@ Deno.serve(async (req) => {
        ...(body.skipKovo ? [] : [['VLEAGUE', () => kovo(db)] as [string, () => Promise<unknown>]])]
   const out: unknown[] = []
   for (const [name, fn] of jobs) { try { out.push(await fn()) } catch (e) { out.push({ league: name, error: String(e) }) } }
-  // 보관: 지난 시즌까지만
-  const cur = seasonOf(kstDate(Date.now())); const prevSeason = `${+cur.slice(0, 4) - 1}-${cur.slice(2, 4)}`
-  await db.from('player_game_stats').delete().lt('season', prevSeason)
   return new Response(JSON.stringify(out), { headers: { 'Content-Type': 'application/json' } })
 })

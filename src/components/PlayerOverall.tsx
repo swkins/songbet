@@ -259,6 +259,12 @@ function TeamTable({ title, t, ovr, onCycle, cond }: { title: string; t: TeamOv;
                     {p.pos && <span title={VB_POS_KO[p.pos] ?? p.pos} style={{ fontSize: 9, fontWeight: 800, padding: '0 4px', borderRadius: 3, border: '1px solid var(--border)', color: 'var(--text-secondary)', fontFamily: 'var(--font-num)' }}>{p.pos}</span>}
                     <span title={`${p.nameEn !== p.name ? p.nameEn + ' · ' : ''}${p.pos ? (VB_POS_KO[p.pos] ?? p.pos) + ' · ' : ''}${p.baseNote}`} style={{ fontWeight: 700 }}>{p.name}</span>
                     {p.kind && <span style={{ fontSize: 9, color: 'var(--gold)' }}>{p.kind === '외국인' ? '외' : '아쿼'}</span>}
+                    {p.newcomer && p.newcomer.w < 0.67 && (
+                      <span title={`이 리그 지난 시즌 기록 없음 — ${p.newcomer.kind ? `${p.newcomer.kind} 평균` : '같은 리그 선수 평균'} ${p.newcomer.prior}에서 출발, 실제 기록 비중 ${Math.round(p.newcomer.w * 100)}% (KBL 측정: 용병은 6경기·국내 신인은 3경기분 평균을 섞을 때 가장 정확)`}
+                        style={{ fontSize: 9, fontWeight: 700, padding: '0 5px', borderRadius: 8, border: '1px solid var(--blue)', color: 'var(--blue)' }}>
+                        {p.newcomer.kind ? '새 용병' : '새 선수'} {p.newcomer.n}경기째{p.newcomer.w < 0.5 ? ' · 판단 중' : ''}
+                      </span>
+                    )}
                     {p.min != null && p.gp > 0 && <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{Math.round(p.min)}분</span>}
                     {(a.origin !== 'none' || a.label !== '출전') && (
                       <span style={{ fontSize: 10, fontWeight: 700, padding: '0 5px', borderRadius: 8, border: `1px solid ${availColor(a.prob)}`, color: availColor(a.prob) }}>

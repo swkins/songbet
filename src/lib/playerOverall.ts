@@ -31,7 +31,8 @@ export interface PlayerOv {
   prev?: { date: string; base: number | null; form: number | null; overall: number | null; stamina: number | null } | null  // 지난 경기 때 수치 (player_ratings)
   avail: Avail
   pos?: string | null       // 배구 포지션 (KOVO 명단: S 세터 · OH 아웃사이드 히터 · OP 아포짓 · MB 미들 블로커 · L 리베로)
-  kind?: string | null      // 배구 '외국인' · '아시아쿼터'
+  kind?: string | null      // '외국인' · '아시아쿼터' (KBL·WKBL = player_kinds, 배구 = KOVO 명단) — 없으면 국내
+  newcomer?: { kind: string | null; n: number; prior: number; w: number } | null   // 이 리그 지난 시즌 기록이 없는 선수: 출발점(같은 구분 평균)과 실제 기록 비중
 }
 export interface TeamOv { team: string | null; players: PlayerOv[]; full: number | null; exp: number | null; stats: TeamStats | null }
 export interface TeamStats { n: number; pf: number; pa: number; sw?: number; sl?: number }   // 농구 pf·pa = 경기당 득점·실점 / 배구 = 경기당 딴·잃은 세트, sw·sl = 시즌 세트 합
@@ -77,7 +78,7 @@ interface BaseRow extends SeasonRow { manual_base: number | null; note: string |
 interface RecentRow { player_id: string; n: number; gmsc5: number | null; min5: number | null }
 interface StatusRow { team: string; player_name: string; player_id: string | null; play_prob: number | null; status: string | null; confirmed: boolean | null; reason: string | null; source_title: string | null; source_url: string | null; checked_at: string }
 interface InjRow { player_id: string; player_name: string; team: string; status: string | null; short_comment: string | null; return_date: string | null; fetched_at: string }
-interface LeagueData { cur: SeasonRow[]; prev: BaseRow[]; recent: Map<string, RecentRow>; poolCur: number[]; poolPrev: number[]; names: Record<string, string>; teams: Map<string, TeamStats>; pos: Map<string, { position: string | null; kind: string | null }>; at: number }
+interface LeagueData { cur: SeasonRow[]; prev: BaseRow[]; recent: Map<string, RecentRow>; poolCur: number[]; poolPrev: number[]; names: Record<string, string>; teams: Map<string, TeamStats>; pos: Map<string, { position: string | null; kind: string | null }>; kinds: Map<string, string>; prior: Map<string, number>; at: number }
 
 const cache = new Map<string, LeagueData>()
 const num = (v: unknown) => (v == null ? null : Number(v))
@@ -86,7 +87,7 @@ async function loadLeague(code: string): Promise<LeagueData> {
   const hit = cache.get(code)
   if (hit && Date.now() - hit.at < 10 * 60000) return hit
   const cur = seasonOf(dayjs().format('YYYY-MM-DD'))
-  const [a, b, c, nm, tg, kp] = await Promise.all([
+  const [a, b, c, nm, tg, kp, pk] = await Promise.all([
     supabase.from('v_player_season').select('player_id,player_name,team,gp,min,gmsc').eq('league', code).eq('season', cur).limit(2000),
     supabase.from('player_base').select('player_id,player_name,team,gp,min,gmsc,manual_base,note').eq('league', code).eq('season', prevSeasonOf(cur)).limit(2000),
     supabase.from('v_player_recent').select('player_id,n,gmsc5,min5').eq('league', code).limit(2000),
@@ -96,6 +97,8 @@ async function loadLeague(code: string): Promise<LeagueData> {
       : supabase.from('v_team_games').select('team,team_score,opp_score').eq('league', code).eq('season', cur).limit(3000),
     // 배구 포지션 (kovo_players — 매일 04시 KOVO 명단으로 갱신)
     code.startsWith('VLEAGUE') ? supabase.from('kovo_players').select('player_code,position,kind').eq('gender', code === 'VLEAGUE_M' ? 'MALE' : 'FEMALE').limit(1000) : Promise.resolve({ data: [] }),
+    // 외국인·아시아쿼터 (KBL = 공식 기록 playerFlag, WKBL = 아시아쿼터 명단) — 배구는 위 kovo_players.kind
+    code === 'KBL' || code === 'WKBL' ? supabase.from('player_kinds').select('player_id,kind').eq('league', code).limit(1000) : Promise.resolve({ data: [] }),
   ])
   const pos = new Map(((kp.data ?? []) as { player_code: string; position: string | null; kind: string | null }[]).map(r => [r.player_code, { position: r.position, kind: r.kind }]))
   // 한국어 이름: 앱에 넣어 둔 표(NBA) + Supabase player_names(새 선수) — 표에 없으면 원래 이름
@@ -115,7 +118,21 @@ async function loadLeague(code: string): Promise<LeagueData> {
   const poolCur = curRows.filter(r => r.gmsc != null && r.gp >= 3 && (vb || (r.min ?? 0) >= 12)).map(r => r.gmsc!).sort((x, y) => y - x)
   const poolPrev = prevRows.filter(r => r.gmsc != null && r.gp >= (vb ? 5 : 15) && (vb || (r.min ?? 0) >= 12)).map(r => r.gmsc!).sort((x, y) => y - x)
   const recent = new Map(((c.data ?? []) as RecentRow[]).map(r => [r.player_id, { ...r, gmsc5: num(r.gmsc5), min5: num(r.min5) }]))
-  const d = { cur: curRows, prev: prevRows, recent, poolCur, poolPrev, names, teams, pos, at: Date.now() }
+  const kinds = new Map<string, string>(vb ? [...pos.entries()].filter(([, v]) => v.kind).map(([id, v]) => [id, v.kind!])
+    : ((pk.data ?? []) as { player_id: string; kind: string }[]).map(r => [r.player_id, r.kind]))
+  // 새 선수 출발점 = 같은 구분(외국인·아시아쿼터·국내)의 이번 시즌 5경기+ 선수 체급 평균 (배구 외국인은 포지션별) — 없으면 지난 시즌 같은 구분, 그것도 없으면 기본값
+  const prior = new Map<string, number>()
+  const groups = new Map<string, number[]>()
+  const keyOf = (id: string) => { const k = kinds.get(id) ?? '국내'; const ps = vb ? pos.get(id)?.position : null; return { k, kp: ps && k !== '국내' ? `${k}|${ps}` : null } }
+  for (const r of curRows) if (r.gmsc != null && r.gp >= 5 && (vb || (r.min ?? 0) >= 12)) {
+    const { k, kp } = keyOf(r.player_id); const sc = score(r.gmsc, poolCur)
+    ;[k, kp].filter((x): x is string => !!x).forEach(x => groups.set(x, [...(groups.get(x) ?? []), sc]))
+  }
+  for (const r of prevRows) if (r.gmsc != null && r.gp >= 15 && (vb || (r.min ?? 0) >= 12)) {
+    const { k } = keyOf(r.player_id); const x = `prev|${k}`; groups.set(x, [...(groups.get(x) ?? []), score(r.gmsc, poolPrev)])
+  }
+  groups.forEach((v, k) => { if (v.length >= 3) prior.set(k, Math.round(v.reduce((a, b) => a + b, 0) / v.length)) })
+  const d = { cur: curRows, prev: prevRows, recent, poolCur, poolPrev, names, teams, pos, kinds, prior, at: Date.now() }
   cache.set(code, d)
   return d
 }
@@ -210,13 +227,26 @@ export async function loadGameOverall(league: string, gameDate: string, home: Sc
       const curScore = c?.gmsc != null && c.gp > 0 ? score(c.gmsc, d.poolCur) : null
       const lastScore = pb?.manual_base != null ? pb.manual_base : pb?.gmsc != null && pb.gp > 0 ? score(pb.gmsc, d.poolPrev) : null
       const n = c?.gp ?? 0
+      const kind = d.kinds.get(r.player_id) ?? null
+      // 이 리그 지난 시즌 기록이 없는 선수(새 용병·신인): 같은 구분 평균에서 출발해 경기마다 실제 쪽으로 (사용자 요청 2026-11-21)
+      //  KBL 2025-26 측정: 새 용병은 평균 6경기분을 섞을 때(1경기 오차 4.7 → 3.0), 국내 신인은 3경기분일 때 가장 정확 — 배구도 일단 같은 값
+      let newcomer: PlayerOv['newcomer'] = null
+      if (lastScore == null) {
+        const ps = vb ? d.pos.get(r.player_id)?.position : null
+        const k = kind ?? '국내'
+        const pr = (ps && kind ? d.prior.get(`${k}|${ps}`) : undefined) ?? d.prior.get(k) ?? d.prior.get(`prev|${k}`) ?? (kind === '외국인' ? 80 : kind ? 68 : 55)
+        const kk = kind ? 6 : 3, ne = curScore == null ? 0 : n
+        newcomer = { kind, n: ne, prior: pr, w: Math.round(ne / (ne + kk) * 100) / 100 }
+      }
       const w = lastScore == null ? 1 : curScore == null ? 0 : n / (n + 15)
-      const base = curScore == null && lastScore == null ? null : Math.round((curScore ?? 0) * w + (lastScore ?? 0) * (1 - w))
+      const base = newcomer ? (newcomer.n ? Math.round(((curScore ?? 0) * newcomer.n + newcomer.prior * (kind ? 6 : 3)) / (newcomer.n + (kind ? 6 : 3))) : newcomer.prior)
+        : curScore == null && lastScore == null ? null : Math.round((curScore ?? 0) * w + (lastScore ?? 0) * (1 - w))
       const rc = d.recent.get(r.player_id)
       const form = rc && rc.n >= 2 && rc.gmsc5 != null ? Math.round(score(rc.gmsc5, d.poolCur)) : null
       const overall = base == null ? null : form == null ? base : Math.round(base * 0.7 + form * 0.3)
       const baseNote = [n ? `이번 시즌 ${n}경기` : null, pb ? (pb.manual_base != null ? `조사 체급 ${pb.manual_base}${pb.note ? ` (${pb.note})` : ''}` : `지난 시즌 ${pb.gp}경기`) : null,
-        lastScore != null && curScore != null ? `이번 시즌 비중 ${Math.round(w * 100)}%` : null].filter(Boolean).join(' · ')
+        lastScore != null && curScore != null ? `이번 시즌 비중 ${Math.round(w * 100)}%` : null,
+        newcomer ? `${newcomer.kind ? `새 ${newcomer.kind}` : '이 리그 새 선수'} — ${newcomer.kind ? `${newcomer.kind} 평균` : '같은 리그 선수 평균'} ${newcomer.prior}에서 출발, 실제 기록 비중 ${Math.round(newcomer.w * 100)}%` : null].filter(Boolean).join(' · ')
 
       // 출전 확률
       let avail: Avail = { prob: 100, label: '출전', origin: 'none' }
@@ -253,7 +283,7 @@ export async function loadGameOverall(league: string, gameDate: string, home: Sc
       const pm = played.get(r.player_id)
       const fatigue = !vb && pm && pm.size ? playerFatigue(code, c?.min ?? null, gameDate, pastRows.filter(x => x.team === team), pm) : null
       const pp = vb ? d.pos.get(r.player_id) : undefined
-      return { id: r.player_id, name: d.names[r.player_name] ?? r.player_name, nameEn: r.player_name, gp: n, share, min: c?.min ?? pb?.min ?? null, base, form, overall, baseNote, avail, fatigue, pos: pp?.position ?? null, kind: pp?.kind ?? null }
+      return { id: r.player_id, name: d.names[r.player_name] ?? r.player_name, nameEn: r.player_name, gp: n, share, min: c?.min ?? pb?.min ?? null, base, form, overall, baseNote, avail, fatigue, pos: pp?.position ?? null, kind, newcomer }
     }).sort((x, y) => (y.base ?? -1) - (x.base ?? -1) || (y.overall ?? -1) - (x.overall ?? -1))   // 체급 순 — 핵심 선수가 빠졌는지 바로 보이게
 
     const { full, exp } = teamStrength(players, {}, vb)
