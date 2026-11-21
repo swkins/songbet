@@ -380,7 +380,7 @@ export interface LeagueParams { sd: number; sdT: number; hca: number; k: number;
 interface TeamGameRow { team: string; opp: string; game_date: string; is_home: boolean; team_score: number | null; opp_score: number | null }
 /** NBA 팀 레이팅: 지난 시즌 끝 값(NBA_PRIOR) × carry에서 시작해 이번 시즌 경기 순서대로 오차 × rk만큼 고친다 (최근 경기일수록 비중 큼) */
 export function nbaRatings(rows: TeamGameRow[], c: LeagueParams): Map<string, TeamRating> {
-  const carry = c.carry ?? 0.8, k = c.rk ?? 0.05, kt = c.rkt ?? 0.05, early = c.early ?? 2, hca = c.hca
+  const carry = c.carry ?? 0, k = c.rk ?? 0.05, kt = c.rkt ?? 0.05, early = c.early ?? 4, hca = c.hca
   const R = new Map<string, number>(), O = new Map<string, number>(), D = new Map<string, number>(), N = new Map<string, number>()
   for (const [t, [r, o, d]] of Object.entries(NBA_PRIOR)) { R.set(t, r * carry); O.set(t, o * carry); D.set(t, d * carry) }
   let avg = NBA_PRIOR_AVG_TOTAL
@@ -404,7 +404,7 @@ export function nbaRatings(rows: TeamGameRow[], c: LeagueParams): Map<string, Te
 export interface ModelParams { leagues: Record<string, LeagueParams>; fatigueK: number }
 export const DEFAULT_PARAMS: ModelParams = {
   leagues: {
-    NBA: { sd: 13.5, sdT: 18, hca: 2.5, k: 1.0, avg: 113, wScore: 0.5, wOv: 0, condK: COND_K.NBA, rk: 0.05, rkt: 0.05, carry: 0.8, early: 2, wMarket: 0.8 },
+    NBA: { sd: 13.5, sdT: 18, hca: 2.5, k: 1.0, avg: 113, wScore: 0.5, wOv: 0, condK: COND_K.NBA, rk: 0.05, rkt: 0.05, carry: 0, early: 4, wMarket: 0.8 },   // carry 0 = 지난 시즌 팀 레이팅 안 씀 (사용자 요청 2026-11-21 — 선수가 다 바뀜)
     KBL: { sd: 11, sdT: 14, hca: 2, k: 0.8, avg: 80, wScore: 0.5, wOv: 0.5, condK: COND_K.KBL },
     WKBL: { sd: 10, sdT: 12, hca: 2, k: 0.7, avg: 65, wScore: 0.5, wOv: 0.5, condK: COND_K.WKBL },
     // 배구: hca = 홈 이점(logit), k = 팀 오버롤 1점당 logit, wScore = 시장 배당 비중, wOv = 오버롤 모델 비중 (volleyPredict.ts)

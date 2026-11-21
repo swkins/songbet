@@ -385,7 +385,7 @@ export default function PlayerOverall({ league, gameDate, home, away, left, odds
               : <>마진 = 우리 모델 {signed(sim.parts.model)} (기준점 없음)</>}
             {' '}· 우리 모델 = 팀 레이팅 차 {signed(sim.parts.rating ?? 0)} + 홈 {signed(sim.parts.hca)} + 결장·개인 피로 {signed(sim.parts.injury)}{sim.parts.cond ? <> + 컨디션 차 {signed(sim.parts.cond)}</> : null}
             {sim.parts.news ? <> + 뉴스 보정 {signed(sim.parts.news)}{data.news?.adj_note ? ` (${data.news.adj_note})` : ''}</> : null}
-            {' '}· 팀 레이팅 = 지난 시즌 끝 × 0.8에서 시작해 이번 시즌 경기마다 상대 보정해 고침 · 선수 출전 칸을 누르면 결장/출전으로 바꿔 다시 계산
+            {' '}· 팀 레이팅 = 이번 시즌 경기만으로 상대 보정해 고침 (지난 시즌 값 안 씀) · 선수 출전 칸을 누르면 결장/출전으로 바꿔 다시 계산
           </div>) : (
           <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 6, lineHeight: 1.6 }}>
             마진 = 득실 마진 {signed(sim.parts.scoreMargin)} × {getParams().leagues[data.code]?.wScore} + 오버롤 차 {signed(sim.parts.ovMargin)} × {getParams().leagues[data.code]?.wOv} + 결장·개인 피로 {signed(sim.parts.injury)} + 홈 {signed(sim.parts.hca)}{sim.parts.cond ? <> + 컨디션 차 {signed(sim.parts.cond)}</> : null}
