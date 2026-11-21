@@ -4,6 +4,8 @@
 //  - NBA: Action Network scoreboard (미국 날짜, 한 번에 전 경기, 9개 북 평균, book 30 = 오픈, 홈 티켓 %)
 //  - 국내: BetExplorer 리그 페이지 1번 (평균배당, 왼쪽 팀 = 홈). 몇 초 간격 여러 번이면 429 → 국내 리그끼리 3분 이상 띄움(SQL 쪽).
 //  오늘·내일 끝나지 않은 경기가 없으면 요청하지 않는다.
+//  + NBA 핸디·언오버 기준점(2026-11-21 사용자 요청) → odds_lines: 북마다 주력 라인(대안 라인 제외)을 모아 가장 많은 라인(같으면 양쪽 배당이 더 비슷한 쪽),
+//    그 라인 북 평균 배당, book 30 = 오픈. 바뀌었을 때만 한 줄 (= 기준점 변경 히스토리). 예측·채점은 DB 트리거(supabase/nba_lines.sql).
 import { createClient } from 'npm:@supabase/supabase-js@2.45.0'
 
 const UA = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36' }
@@ -29,6 +31,7 @@ const dec = (am: number) => +(am > 0 ? 1 + am / 100 : 1 + 100 / Math.abs(am)).to
 const lastWord = (s: string) => (s ?? '').trim().split(/\s+/).pop()?.toLowerCase() ?? ''
 
 interface Game { id: string; start: string; home: string; away: string; date: string }
+interface Line { game: Game; market: 'spread' | 'total'; line: number; h: number; a: number; open: number | null; oh: number | null; oa: number | null; books: number }
 interface Odds { game: Game; home: number; away: number; openH?: number | null; openA?: number | null; tix?: number | null; books?: number; name: string }
 
 Deno.serve(async (req) => {
@@ -46,7 +49,7 @@ Deno.serve(async (req) => {
     .filter(g => Date.parse(g.start) + 3 * 3600000 > Date.now())
   if (!games.length) return log('skipped', { message: '오늘·내일 남은 경기 없음' })
 
-  const found: Odds[] = []; const unmatched: string[] = []
+  const found: Odds[] = []; const unmatched: string[] = []; const lines: Line[] = []
   try {
     if (league === 'NBA') {
       // Action Network은 미국 동부 날짜 — 경기 시작 시각 -5시간
@@ -72,6 +75,24 @@ Deno.serve(async (req) => {
           if (!hs.length) continue
           const avg = (v: number[]) => +(v.reduce((s, x) => s + x, 0) / v.length).toFixed(2)
           found.push({ game: g, home: avg(hs), away: avg(as), openH: oh, openA: oa, tix, books, name: `${a} @ ${h}` })
+          // 기준점: spread(홈 라인) · total
+          for (const market of ['spread', 'total'] as const) {
+            const [sa, sb] = market === 'spread' ? ['home', 'away'] : ['over', 'under']
+            const per: { v: number; h: number; a: number }[] = []; let open: { v: number; h: number; a: number } | null = null
+            for (const [book, m] of Object.entries<any>(gm.markets ?? {})) {
+              const xs: any[] = (m?.event?.[market] ?? []).filter((o: any) => !o.is_alt_market)
+              const A = xs.find(o => o.side === sa), B = xs.find(o => o.side === sb)
+              if (!A || !B || A.value == null || A.odds == null || B.odds == null) continue
+              const row = { v: Number(A.value), h: dec(A.odds), a: dec(B.odds) }
+              if (book === '30') open = row; else per.push(row)
+            }
+            if (!per.length) continue
+            const by = new Map<number, { h: number; a: number }[]>()
+            per.forEach(r => by.set(r.v, [...(by.get(r.v) ?? []), r]))
+            const [v, rs] = [...by.entries()].sort((x, y) => y[1].length - x[1].length
+              || Math.abs(avg(x[1].map(r => r.h)) - avg(x[1].map(r => r.a))) - Math.abs(avg(y[1].map(r => r.h)) - avg(y[1].map(r => r.a))))[0]
+            lines.push({ game: g, market, line: v, h: avg(rs.map(r => r.h)), a: avg(rs.map(r => r.a)), open: open?.v ?? null, oh: open?.h ?? null, oa: open?.a ?? null, books: rs.length })
+          }
         }
       }
     } else {
@@ -105,8 +126,18 @@ Deno.serve(async (req) => {
       home_odds: o.home, away_odds: o.away, open_home: o.openH ?? null, open_away: o.openA ?? null, home_tickets: o.tix ?? null, books: o.books ?? null, match_name: o.name })
     if (!error) changed++
   }
+  // 기준점: 라인이나 배당이 바뀐 것만 (변경 히스토리)
+  let lineChanged = 0
+  for (const l of lines) {
+    const { data: prev } = await db.from('odds_lines').select('line, home_odds, away_odds').eq('game_id', l.game.id).eq('market', l.market).order('fetched_at', { ascending: false }).limit(1)
+    const p = prev?.[0]
+    if (p && Number(p.line) === l.line && Number(p.home_odds) === l.h && Number(p.away_odds) === l.a) continue
+    const { error } = await db.from('odds_lines').insert({ league, game_date: l.game.date, game_id: l.game.id, market: l.market, line: l.line, home_odds: l.h, away_odds: l.a,
+      open_line: l.open, open_home: l.oh, open_away: l.oa, books: l.books, source: 'actionnetwork' })
+    if (!error) lineChanged++
+  }
   // 보관: 경기 7일 지난 배당, 7일 지난 로그
   await db.from('odds_snapshots').delete().lt('game_date', kstDate(Date.now() - 7 * 86400000))
   await db.from('odds_fetch_log').delete().lt('fetched_at', new Date(Date.now() - 7 * 86400000).toISOString())
-  return log('ok', { games: games.length, matched: found.length, changed, unmatched })
+  return log('ok', { games: games.length, matched: found.length, changed, lines: lines.length, lineChanged, unmatched })
 })

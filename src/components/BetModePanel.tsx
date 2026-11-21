@@ -335,7 +335,7 @@ function BetSlip({ game, sites, options, numeric, registered, onBet, preset }: {
 // 승리팀: 홈/원정 중 하나 (최신 승패 배당 — 분석 탭과 같은 odds_snapshots)
 // 핸디캡: 승패 배당으로 기준점을 대충 유추해 정배 마핸 / 역배 플핸 0.5 단위 다섯 개 (정수 기준점은 적특이 생겨서 안 씀).
 //  기준점 ≈ σ × 정규분포 역함수(마진 뺀 정배 승률), σ = 리그 점수차 퍼짐 (NBA 13.5·KBL 11·WKBL 10) — 예: 1.47/2.45 → 약 4.3 → 2.5~6.5
-//  배당이 없으면 저장된 예측 마진(predictions)으로, 그것도 없으면 2.5~6.5. 오버·언더는 넣지 않는다.
+//  NBA는 실제 핸디 기준점(odds_lines)이 있으면 그 근처 일곱 개. 배당이 없으면 저장된 예측 마진(predictions)으로, 그것도 없으면 2.5~6.5. 오버·언더는 넣지 않는다.
 const SIGMA: Record<string, number> = { NBA: 13.5, KBL: 11, WKBL: 10 }
 function invNorm(p: number): number {
   // Acklam 근사
@@ -376,7 +376,10 @@ function BasketSlip({ game, sites, registered, onBet }: {
   // 최신 승패 배당 + (없으면) 저장된 예측 마진
   const [ml, setMl] = useState<{ home: number; away: number } | null>(null)
   const [predMargin, setPredMargin] = useState<number | null>(null)
+  const [spread, setSpread] = useState<number | null>(null)   // NBA 실제 핸디 기준점 (odds_lines, 홈 기준)
   useEffect(() => {
+    supabase.from('odds_lines').select('line').eq('game_id', game.id).eq('market', 'spread').order('fetched_at', { ascending: false }).limit(1)
+      .then(({ data }) => { const l = data?.[0]?.line; if (l != null) setSpread(Number(l)) })
     supabase.from('odds_snapshots').select('home_odds,away_odds').eq('game_id', game.id).order('fetched_at', { ascending: false }).limit(1)
       .then(({ data }) => { const r = data?.[0]; if (r?.home_odds && r?.away_odds) setMl({ home: Number(r.home_odds), away: Number(r.away_odds) }) })
     supabase.from('predictions').select('margin').eq('game_id', game.id).limit(1)
@@ -389,6 +392,8 @@ function BasketSlip({ game, sites, registered, onBet }: {
       const favHome = ml ? ml.home <= ml.away : predMargin != null ? predMargin >= 0 : true
       return { favHome, margin: 0, src: ml ? '승패 배당' : predMargin != null ? '예상' : '' }
     }
+    // NBA: 실제 기준점이 있으면 그 근처 (사용자 요청 2026-11-21) — 홈 -12.5면 홈 정배 12.5
+    if (spread != null && spread !== 0) return { favHome: spread < 0, margin: Math.abs(spread), src: `기준점 홈 ${spread > 0 ? '+' : ''}${spread}` }
     if (ml) {
       const ph = (1 / ml.home) / (1 / ml.home + 1 / ml.away)
       const favHome = ph >= 0.5
@@ -397,7 +402,7 @@ function BasketSlip({ game, sites, registered, onBet }: {
     }
     if (predMargin != null) return { favHome: predMargin >= 0, margin: Math.abs(predMargin), src: '예상 스코어' }
     return null
-  }, [ml, predMargin, game.league, volley])
+  }, [ml, predMargin, spread, game.league, volley])
   const lines = volley ? VOLLEY_LINES : handicapLines(est?.margin ?? 4.5)
   const favSide: 'home' | 'away' = est ? (est.favHome ? 'home' : 'away') : 'home'
   const dogSide: 'home' | 'away' = favSide === 'home' ? 'away' : 'home'

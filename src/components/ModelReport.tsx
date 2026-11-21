@@ -15,6 +15,21 @@ export interface Prediction {
   odds_home: number | null; odds_away: number | null
   result_home: number | null; result_away: number | null; win_hit: boolean | null; market_hit: boolean | null
   margin_err: number | null; total_err: number | null
+  // NBA 기준점 (DB 트리거 predictions_lines — 예측 저장 시각 기준점, 없으면 마감 기준점)
+  spread_line?: number | null; spread_home_odds?: number | null; spread_away_odds?: number | null; total_line?: number | null; line_src?: string | null
+  close_spread?: number | null; close_total?: number | null
+  ats_pick?: 'home' | 'away' | null; ats_prob?: number | null; ou_pick?: 'over' | 'under' | null; ou_prob?: number | null
+  ats_hit?: boolean | null; ats_push?: boolean | null; ats_close_hit?: boolean | null; ou_hit?: boolean | null; ou_close_hit?: boolean | null
+}
+/** NBA는 핸디(기준점)가 주 지표 — 기준점이 있으면 핸디 적중, 없으면 승패 */
+const hasAts = (p: Prediction) => p.league === 'NBA' && p.spread_line != null && p.ats_pick != null
+const mainHit = (p: Prediction) => hasAts(p) ? (p.ats_push ? null : p.ats_hit ?? null) : p.win_hit
+/** 핸디 픽 문구: 홈 -12.5 기준에서 홈 쪽 = 홈 마핸 12.5, 원정 쪽 = 원정 플핸 12.5 */
+export function atsLabel(p: Prediction, name: (n: string) => string) {
+  if (p.spread_line == null || !p.ats_pick) return null
+  const l = Number(p.spread_line), homeSide = p.ats_pick === 'home'
+  const kind = l === 0 ? '0' : (homeSide === (l < 0) ? '마핸' : '플핸')
+  return `${name(homeSide ? p.home : p.away)} ${kind}${l ? ` ${Math.abs(l)}` : ''}`
 }
 interface Proposal { league: string | null; param: string; from: number; to: number; reason?: string; evidence?: string }
 interface Review { id: number; created_at: string; review_date: string; summary: string | null; stats: Record<string, unknown> | null; proposals: Proposal[] | null; status: string; decided_at: string | null }
@@ -36,11 +51,13 @@ export function PredBadge({ p }: { p: Prediction }) {
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
       {/* 배구는 세트 스코어 하나를 예상으로 내세우지 않고 홈 승률만 (분포는 오른쪽 칸) */}
       <span style={{ color: 'var(--text-muted)' }}>{p.league.startsWith('VLEAGUE') ? `예측 홈 승 ${p.home_win}%` : `예측 ${p.pred_home}-${p.pred_away}`}</span>
-      {done && <HitTag hit={p.win_hit} />}
+      {p.league === 'NBA' && p.spread_line != null && <span style={{ color: 'var(--text-muted)' }}>· {atsLabel(p, koName)}</span>}
+      {done && <HitTag hit={mainHit(p)} push={!!p.ats_push && hasAts(p)} />}
     </span>
   )
 }
-function HitTag({ hit, small }: { hit: boolean | null; small?: boolean }) {
+function HitTag({ hit, small, push }: { hit: boolean | null; small?: boolean; push?: boolean }) {
+  if (push) return <span style={{ fontSize: small ? 9 : 10, fontWeight: 800, padding: '0 6px', borderRadius: 8, border: '1px solid var(--text-muted)', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>적특</span>
   if (hit == null) return <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>–</span>
   const c = hit ? 'var(--green)' : 'var(--red)'
   return <span style={{ fontSize: small ? 9 : 10, fontWeight: 800, padding: '0 6px', borderRadius: 8, border: `1px solid ${c}`, color: c, whiteSpace: 'nowrap' }}>{hit ? '✓ 적중' : '✗ 미적중'}</span>
@@ -82,7 +99,11 @@ export default function ModelReport({ onClose }: { onClose: () => void }) {
     return ['전체', ...leagues].map(lg => {
       const xs = lg === '전체' ? graded : graded.filter(p => p.league === lg)
       const mk = xs.filter(p => p.market_hit != null)
+      const at = xs.filter(p => hasAts(p) && p.ats_hit != null), ou = xs.filter(p => p.league === 'NBA' && p.ou_hit != null)
+      const atc = xs.filter(p => p.league === 'NBA' && p.ats_close_hit != null)
       return {
+        aN: at.length, aHit: at.filter(p => p.ats_hit).length, oN: ou.length, oHit: ou.filter(p => p.ou_hit).length,
+        cN: atc.length, cHit: atc.filter(p => p.ats_close_hit).length,
         lg, n: xs.length, hit: xs.filter(p => p.win_hit).length,
         mHit: mk.filter(p => p.market_hit).length, mN: mk.length,
         mae: avg(xs.map(p => Math.abs(Number(p.margin_err)))), tae: avg(xs.map(p => Math.abs(Number(p.total_err)))),
@@ -122,7 +143,7 @@ export default function ModelReport({ onClose }: { onClose: () => void }) {
       <div onClick={e => e.stopPropagation()} className="card" style={{ width: '100%', maxWidth: 980, padding: '14px 16px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
           <span style={{ fontSize: 16, fontWeight: 800 }}>예측 보고서</span>
-          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>경기 전 예상 스코어 vs 결과 · 적중 = 예상한 승리팀이 이김</span>
+          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>NBA 적중 = 기준점 핸디(마핸/플핸) — 손익분기 약 52.4% · 국내·배구는 아직 승패 (기준점 출처 없음)</span>
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
             {[3, 7, 30].map(d => (
               <button key={d} onClick={() => setDays(d)} style={{ fontSize: 11, padding: '3px 8px', borderRadius: 4, cursor: 'pointer', border: `1px solid ${days === d ? 'var(--gold-border)' : 'var(--border)'}`, background: days === d ? 'var(--gold-bg)' : 'none', color: days === d ? 'var(--gold)' : 'var(--text-secondary)' }}>{d}일</button>
@@ -141,11 +162,15 @@ export default function ModelReport({ onClose }: { onClose: () => void }) {
             <div style={h}>최근 {days}일 성적</div>
             {!graded.length ? <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>아직 채점된 경기가 없어요 (예측은 NBA 21:30 · 국내 경기 시작 전에 저장되고, 끝나면 채점)</div> : (
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead><tr><th style={th}>리그</th><th style={th}>경기</th><th style={th}>승패 적중</th><th style={th}>시장 정배 적중</th><th style={th}>마진 오차 평균 (배구 세트)</th><th style={th}>5점 안</th><th style={th}>총점 오차 평균</th></tr></thead>
+                <thead><tr><th style={th}>리그</th><th style={th}>경기</th><th style={th}>핸디 적중 (기준점)</th><th style={th}>핸디 · 마감 기준점</th><th style={th}>언오버 적중</th><th style={th}>승패 적중 (참고)</th><th style={th}>시장 정배 적중</th><th style={th}>마진 오차 평균 (배구 세트)</th><th style={th}>5점 안</th><th style={th}>총점 오차 평균</th></tr></thead>
                 <tbody>{summary.map(s => (
                   <tr key={s.lg}>
                     <td style={{ ...td, fontWeight: 700 }}>{LG[s.lg] ?? s.lg}</td><td style={td}>{s.n}</td>
-                    <td style={{ ...td, fontWeight: 800, color: s.n && s.hit / s.n >= (s.mN ? s.mHit / s.mN : 0) ? 'var(--green)' : 'var(--text-primary)' }}>{s.hit}/{s.n} ({pct(s.hit, s.n)})</td>
+                    {/* 핸디 손익분기 ≈ 52.4% (배당 1.91) — 넘으면 초록 */}
+                    <td style={{ ...td, fontWeight: 800, color: s.aN ? (s.aHit / s.aN > 0.524 ? 'var(--green)' : 'var(--red)') : 'var(--text-muted)' }}>{s.aN ? `${s.aHit}/${s.aN} (${pct(s.aHit, s.aN)})` : '–'}</td>
+                    <td style={{ ...td, color: 'var(--text-secondary)' }}>{s.cN ? `${s.cHit}/${s.cN} (${pct(s.cHit, s.cN)})` : '–'}</td>
+                    <td style={{ ...td, fontWeight: 700, color: s.oN ? (s.oHit / s.oN > 0.524 ? 'var(--green)' : 'var(--red)') : 'var(--text-muted)' }}>{s.oN ? `${s.oHit}/${s.oN} (${pct(s.oHit, s.oN)})` : '–'}</td>
+                    <td style={{ ...td, color: 'var(--text-secondary)' }}>{s.hit}/{s.n} ({pct(s.hit, s.n)})</td>
                     <td style={{ ...td, color: 'var(--text-secondary)' }}>{s.mN ? `${s.mHit}/${s.mN} (${pct(s.mHit, s.mN)})` : '–'}</td>
                     <td style={td}>{s.lg === '전체' ? '–' : s.mae ?? '–'}{s.lg !== '전체' && isVb(s.lg) ? '세트' : s.lg === '전체' ? '' : '점'}</td><td style={td}>{s.lg === '전체' || isVb(s.lg) ? '–' : pct(s.near, s.n)}</td><td style={td}>{s.lg === '전체' ? '–' : s.tae ?? '–'}{s.lg !== '전체' && isVb(s.lg) ? '세트' : s.lg === '전체' ? '' : '점'}</td>
                   </tr>
@@ -197,10 +222,11 @@ export default function ModelReport({ onClose }: { onClose: () => void }) {
               return (
                 <div key={date} style={{ marginBottom: 10 }}>
                   <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-secondary)', margin: '4px 0' }}>
-                    {dayjs(date).format('M/D (dd)')} · {g.length ? `적중 ${g.filter(p => p.win_hit).length}/${g.length}` : '결과 전'}
+                    {dayjs(date).format('M/D (dd)')} · {g.length ? (() => { const a = g.filter(p => hasAts(p) && p.ats_hit != null); const o = g.filter(p => p.ou_hit != null)
+                      return [a.length ? `핸디 ${a.filter(p => p.ats_hit).length}/${a.length}` : null, o.length ? `언오버 ${o.filter(p => p.ou_hit).length}/${o.length}` : null, `승패 ${g.filter(p => p.win_hit).length}/${g.length}`].filter(Boolean).join(' · ') })() : '결과 전'}
                   </div>
                   <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                    <thead><tr><th style={th}>리그</th><th style={th}>경기 (홈 - 원정)</th><th style={th}>예상</th><th style={th}>실제</th><th style={th}>마진 예상 / 실제</th><th style={th}>오차</th><th style={th}>결과</th><th style={th}>시장 정배</th></tr></thead>
+                    <thead><tr><th style={th}>리그</th><th style={th}>경기 (홈 - 원정)</th><th style={th}>예상</th><th style={th}>실제</th><th style={th}>마진 예상 / 실제</th><th style={th}>오차</th><th style={th}>핸디 기준점 · 픽</th><th style={th}>언오버 · 픽</th><th style={th}>결과</th><th style={th}>시장 정배</th></tr></thead>
                     <tbody>{list.map(p => {
                       const actual = p.result_home != null ? p.result_home - (p.result_away ?? 0) : null
                       return (
@@ -211,7 +237,15 @@ export default function ModelReport({ onClose }: { onClose: () => void }) {
                           <td style={{ ...td, fontFamily: 'var(--font-num)', fontWeight: 700 }}>{p.result_home != null ? `${p.result_home}-${p.result_away}` : '–'}</td>
                           <td style={{ ...td, fontFamily: 'var(--font-num)' }}>{signed(p.margin)} / {signed(actual)}</td>
                           <td style={{ ...td, fontFamily: 'var(--font-num)', color: p.margin_err == null ? undefined : Math.abs(p.margin_err) <= (isVb(p.league) ? 0.6 : 5) ? 'var(--green)' : Math.abs(p.margin_err) >= (isVb(p.league) ? 2 : 15) ? 'var(--red)' : undefined }}>{p.margin_err == null ? '–' : `${Math.abs(p.margin_err)}${isVb(p.league) ? '세트' : '점'}`}</td>
-                          <td style={td}>{p.result_home != null ? <HitTag hit={p.win_hit} /> : <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>대기</span>}</td>
+                          <td style={{ ...td, fontSize: 11 }}>{p.spread_line != null ? <>
+                            <div style={{ fontWeight: 700 }}>{atsLabel(p, n => name(p.league, n))} <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>{p.ats_prob}%</span></div>
+                            <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>홈 {Number(p.spread_line) > 0 ? '+' : ''}{p.spread_line}{p.line_src === 'close' ? ' (마감 — 예측 땐 없음)' : ''}{p.close_spread != null && p.line_src !== 'close' && Number(p.close_spread) !== Number(p.spread_line) ? ` → 마감 ${Number(p.close_spread) > 0 ? '+' : ''}${p.close_spread}` : ''}</div>
+                          </> : <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>–</span>}</td>
+                          <td style={{ ...td, fontSize: 11 }}>{p.total_line != null && p.ou_pick ? <>
+                            <div style={{ fontWeight: 700 }}>{p.ou_pick === 'over' ? '오버' : '언더'} {p.total_line} <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>{p.ou_prob}%</span></div>
+                            <div style={{ fontSize: 10 }}>{p.ou_hit == null ? '' : p.ou_hit ? <span style={{ color: 'var(--green)' }}>✓ 적중</span> : <span style={{ color: 'var(--red)' }}>✗ 미적중</span>}</div>
+                          </> : <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>–</span>}</td>
+                          <td style={td}>{p.result_home != null ? <><HitTag hit={mainHit(p)} push={!!p.ats_push && hasAts(p)} />{hasAts(p) && <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 2 }}>승패 {p.win_hit ? '✓' : '✗'}</div>}</> : <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>대기</span>}</td>
                           <td style={td}>{p.market_hit == null ? <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>–</span> : <span style={{ fontSize: 10, color: p.market_hit ? 'var(--green)' : 'var(--red)' }}>{p.market_hit ? '✓' : '✗'} {Number(p.odds_home) < Number(p.odds_away) ? '홈' : '원정'} {Math.min(Number(p.odds_home), Number(p.odds_away)).toFixed(2)}</span>}</td>
                         </tr>
                       )

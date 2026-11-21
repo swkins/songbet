@@ -28,3 +28,41 @@ export function oddsTrend(list: OddsSnap[] | undefined) {
   const baseH = last.open_home ?? first.home_odds, baseA = last.open_away ?? first.away_odds
   return { last, baseH, baseA, dH: last.home_odds != null && baseH != null ? +(last.home_odds - baseH).toFixed(2) : 0, dA: last.away_odds != null && baseA != null ? +(last.away_odds - baseA).toFixed(2) : 0 }
 }
+
+// ─── NBA 핸디·언오버 기준점 (odds_lines — collect-odds가 바뀐 때만 한 줄, 사용자 요청 2026-11-21) ─────
+// spread: line = 홈 기준점(예 -12.5 = 홈 마핸 12.5), home/away_odds = 그 라인 양쪽 배당 / total: line = 총점, home = 오버, away = 언더
+export interface OddsLine {
+  id: number; fetched_at: string; league: string; game_date: string; game_id: string; market: 'spread' | 'total'
+  line: number; home_odds: number | null; away_odds: number | null; open_line: number | null; open_home: number | null; open_away: number | null; books: number | null; source: string | null
+}
+const lineRow = (r: OddsLine): OddsLine => ({ ...r, line: Number(r.line), home_odds: num(r.home_odds), away_odds: num(r.away_odds), open_line: num(r.open_line), open_home: num(r.open_home), open_away: num(r.open_away) })
+/** fromDate(KST) 이후 경기의 기준점 기록 → 경기 id별, 오래된 것부터 */
+export async function loadLines(fromDate: string): Promise<Record<string, OddsLine[]>> {
+  const { data } = await supabase.from('odds_lines').select('*').gte('game_date', fromDate).order('fetched_at')
+  const out: Record<string, OddsLine[]> = {}
+  for (const r of (data ?? []) as OddsLine[]) (out[r.game_id] ??= []).push(lineRow(r))
+  return out
+}
+export async function loadGameLines(gameId: string): Promise<OddsLine[]> {
+  const { data } = await supabase.from('odds_lines').select('*').eq('game_id', gameId).order('fetched_at')
+  return ((data ?? []) as OddsLine[]).map(lineRow)
+}
+export const lastLine = (list: OddsLine[] | undefined, market: 'spread' | 'total') => [...(list ?? [])].reverse().find(l => l.market === market) ?? null
+
+// 정규분포 누적 근사 (DB 트리거 phi_approx와 같은 식)
+const phi = (x: number) => 1 / (1 + Math.exp(-1.702 * x))
+/** 예상 마진(홈) vs 홈 기준점 → 마핸/플핸 픽과 커버 확률 (DB predictions_lines 트리거와 같은 계산) */
+export function atsPick(margin: number, line: number, sd = 13.5) {
+  const p = phi((margin + line) / sd)
+  const home = margin + line >= 0
+  // 홈이 정배(line < 0)면 홈 쪽 = 마핸, 원정 쪽 = 플핸. line > 0이면 반대. line 0이면 둘 다 0 핸디
+  const homeMinus = line < 0
+  const kind = line === 0 ? '0' : (home === homeMinus ? '마핸' : '플핸')
+  return { side: home ? 'home' as const : 'away' as const, kind, prob: Math.round(Math.max(p, 1 - p) * 1000) / 10, edge: Math.round((margin + line) * 10) / 10 }
+}
+export function ouPick(total: number, line: number, sdT = 18) {
+  const p = phi((total - line) / sdT)
+  return { side: total >= line ? 'over' as const : 'under' as const, prob: Math.round(Math.max(p, 1 - p) * 1000) / 10, edge: Math.round((total - line) * 10) / 10 }
+}
+/** 홈 기준점 표기: -12.5 → '홈 -12.5', 3.5 → '홈 +3.5' */
+export const fmtLine = (v: number) => `${v > 0 ? '+' : ''}${v}`

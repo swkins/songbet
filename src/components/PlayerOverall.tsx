@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { atsPick, ouPick, fmtLine, type OddsLine } from '../lib/odds'
 import dayjs from 'dayjs'
 import { koName, type ScheduleTeam } from '../lib/gameSchedule'
 import { conditionColor, conditionLabel, type Condition } from '../lib/fatigue'
@@ -274,7 +275,7 @@ function TeamTable({ title, t, ovr, onCycle, cond }: { title: string; t: TeamOv;
 }
 
 // 배치: 좌(좁게) = left(배당 변동) + 예상 스코어 · 우(넓게) = 선수 오버롤·출전 확률 · 아래 = 뉴스
-export default function PlayerOverall({ league, gameDate, home, away, left, odds }: { league: string; gameDate: string; home: ScheduleTeam; away: ScheduleTeam; left?: React.ReactNode; odds?: { home: number; away: number } | null }) {
+export default function PlayerOverall({ league, gameDate, home, away, left, odds, lines }: { league: string; gameDate: string; home: ScheduleTeam; away: ScheduleTeam; left?: React.ReactNode; odds?: { home: number; away: number } | null; lines?: { spread: OddsLine | null; total: OddsLine | null } | null }) {
   const [data, setData] = useState<GameOverall | null | undefined>(undefined)
   const [err, setErr] = useState<string | null>(null)
   const [ovr, setOvr] = useState<Record<string, number>>({})   // 화면에서 바꿔 본 출전 확률
@@ -334,6 +335,8 @@ export default function PlayerOverall({ league, gameDate, home, away, left, odds
                   </div>
                 ))}
               </div>
+              {/* 기준점 대비 마핸/플핸 · 오버/언더 (NBA, 사용자 요청 — 승패가 아니라 기준점을 맞혀야 한다) */}
+              {lines && (lines.spread || lines.total) && <LinePickBox sim={sim} lines={lines} sd={getParams().leagues[data.code]?.sd ?? 13.5} sdT={getParams().leagues[data.code]?.sdT ?? 18} hName={hName} aName={aName} />}
               <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 6, lineHeight: 1.6 }}>
                 마진 = 득실 마진 {signed(sim.parts.scoreMargin)} × {getParams().leagues[data.code]?.wScore} + 오버롤 차 {signed(sim.parts.ovMargin)} × {getParams().leagues[data.code]?.wOv} + 결장·개인 피로 {signed(sim.parts.injury)} + 홈 {signed(sim.parts.hca)}{sim.parts.cond ? <> + 컨디션 차 {signed(sim.parts.cond)}</> : null}
                 {sim.parts.news ? <> + 뉴스 보정 {signed(sim.parts.news)}{data.news?.adj_note ? ` (${data.news.adj_note})` : ''}</> : null}
@@ -381,6 +384,35 @@ export default function PlayerOverall({ league, gameDate, home, away, left, odds
           )}
         </>}
       </div>
+    </div>
+  )
+}
+
+// 현재 기준점으로 마핸/플핸 · 오버/언더 (예상 마진·총점은 위 시뮬레이션 — 출전 가정을 바꾸면 같이 바뀐다)
+function LinePickBox({ sim, lines, sd, sdT, hName, aName }: { sim: { margin: number; total: number }; lines: { spread: OddsLine | null; total: OddsLine | null }; sd: number; sdT: number; hName: string; aName: string }) {
+  const sp = lines.spread, tt = lines.total
+  const a = sp ? atsPick(sim.margin, sp.line, sd) : null
+  const o = tt ? ouPick(sim.total, tt.line, sdT) : null
+  const cell: React.CSSProperties = { flex: 1, minWidth: 0, border: '1px solid var(--gold-border)', borderRadius: 'var(--radius-sm)', padding: '6px 8px', background: 'var(--bg-card)' }
+  const strong = (p: number) => p >= 60 ? 'var(--green)' : p >= 55 ? 'var(--gold)' : 'var(--text-secondary)'
+  return (
+    <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+      {sp && a && (
+        <div style={cell}>
+          <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>핸디 기준점 · 홈 {fmtLine(sp.line)} <span style={{ fontFamily: 'var(--font-num)' }}>({sp.home_odds?.toFixed(2)} / {sp.away_odds?.toFixed(2)})</span></div>
+          <div style={{ fontSize: 15, fontWeight: 800, marginTop: 2 }}>
+            {a.side === 'home' ? hName : aName} {a.kind}{a.kind !== '0' ? ` ${Math.abs(sp.line)}` : ''} <span style={{ color: strong(a.prob), fontFamily: 'var(--font-num)' }}>{a.prob}%</span>
+          </div>
+          <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>예상 마진 {sim.margin > 0 ? '+' : ''}{sim.margin} vs 기준점 → 기준점보다 {Math.abs(a.edge)}점 {a.edge >= 0 ? '홈 쪽' : '원정 쪽'}</div>
+        </div>
+      )}
+      {tt && o && (
+        <div style={cell}>
+          <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>언오버 기준점 {tt.line} <span style={{ fontFamily: 'var(--font-num)' }}>({tt.home_odds?.toFixed(2)} / {tt.away_odds?.toFixed(2)})</span></div>
+          <div style={{ fontSize: 15, fontWeight: 800, marginTop: 2 }}>{o.side === 'over' ? '오버' : '언더'} <span style={{ color: strong(o.prob), fontFamily: 'var(--font-num)' }}>{o.prob}%</span></div>
+          <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>예상 총점 {sim.total} vs {tt.line} ({o.edge > 0 ? '+' : ''}{o.edge}) · 총점 모델은 아직 검증 전</div>
+        </div>
+      )}
     </div>
   )
 }

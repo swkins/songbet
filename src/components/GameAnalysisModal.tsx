@@ -3,7 +3,7 @@ import { X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { OV_LEAGUE } from '../lib/playerOverall'
 import { koName } from '../lib/gameSchedule'
-import type { OddsSnap } from '../lib/odds'
+import { loadGameLines, type OddsSnap, type OddsLine } from '../lib/odds'
 import { findAnalysis, type OverallAnalysis } from './OverallAnalysisView'
 import GameAnalysis, { type AnalysisGame } from './GameAnalysis'
 
@@ -14,12 +14,14 @@ const num = (v: unknown) => (v == null ? null : Number(v))
 export default function GameAnalysisModal({ g, onClose }: { g: AnalysisGame; onClose: () => void }) {
   const [odds, setOdds] = useState<OddsSnap[] | null>(null)
   const [analysis, setAnalysis] = useState<OverallAnalysis | null>(null)
+  const [lines, setLines] = useState<OddsLine[]>([])
   useEffect(() => {
     const on = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
     window.addEventListener('keydown', on)
     return () => window.removeEventListener('keydown', on)
   }, [onClose])
   useEffect(() => {
+    loadGameLines(g.id).then(setLines).catch(() => {})
     Promise.all([
       supabase.from('odds_snapshots').select('*').eq('game_id', g.id).order('fetched_at'),
       supabase.from('overall_analyses').select('*').eq('game_date', g.date),
@@ -29,7 +31,7 @@ export default function GameAnalysisModal({ g, onClose }: { g: AnalysisGame; onC
     }).catch(() => setOdds([]))
   }, [g.id, g.date]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const none = odds != null && !OV_LEAGUE[g.league] && !odds.length && !analysis
+  const none = odds != null && !OV_LEAGUE[g.league] && !odds.length && !lines.length && !analysis
   return (
     <div className="modal-overlay" onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}>
       <div className="modal" style={{ maxWidth: 1280, width: '96vw', maxHeight: '94vh' }}>
@@ -39,7 +41,7 @@ export default function GameAnalysisModal({ g, onClose }: { g: AnalysisGame; onC
         </div>
         {odds == null ? <div style={{ fontSize: 13, color: 'var(--text-muted)', padding: 24, textAlign: 'center' }}>불러오는 중…</div>
           : none ? <div style={{ fontSize: 14, color: 'var(--text-muted)', padding: '48px 24px', textAlign: 'center' }}>분석 자료가 없습니다.</div>
-          : <GameAnalysis g={g} analysis={analysis} odds={odds} />}
+          : <GameAnalysis g={g} analysis={analysis} odds={odds} lines={lines} />}
       </div>
     </div>
   )

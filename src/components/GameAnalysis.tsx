@@ -1,9 +1,9 @@
 import dayjs from 'dayjs'
 import PlayerOverall from './PlayerOverall'
-import OddsHistory from './OddsHistory'
+import OddsHistory, { LineHistory } from './OddsHistory'
 import OverallAnalysisView, { type OverallAnalysis } from './OverallAnalysisView'
 import { gameState, koName, type ScheduleGame, type ScheduleTeam } from '../lib/gameSchedule'
-import type { OddsSnap } from '../lib/odds'
+import { lastLine, type OddsSnap, type OddsLine } from '../lib/odds'
 
 // 경기 분석 화면 — 분석 탭 오른쪽 칸과 대시보드 베팅슬립 '분석 보기' 창(GameAnalysisModal)이 같이 쓴다.
 export interface AnalysisGame extends ScheduleGame { sport: string; league: string; date: string }
@@ -12,7 +12,7 @@ const KO_DAY = '일월화수목금토'
 const mdDay = (d: string) => `${dayjs(d).format('M/D')} (${KO_DAY[dayjs(d).day()]})`
 
 // 오른쪽 분석 칸 — 경기 정보 · 승패 배당 변동 · 선수 오버롤·출전 확률(PlayerOverall) · 오버롤 분석(있으면)
-export default function GameAnalysis({ g, analysis, odds, onGoBet }: { g: AnalysisGame; analysis: OverallAnalysis | null; odds?: OddsSnap[]; onGoBet?: (t: { sport: string; league: string; gameId: string }) => void }) {
+export default function GameAnalysis({ g, analysis, odds, lines, onGoBet }: { g: AnalysisGame; analysis: OverallAnalysis | null; odds?: OddsSnap[]; lines?: OddsLine[]; onGoBet?: (t: { sport: string; league: string; gameId: string }) => void }) {
   const st = gameState(g)
   const showScore = st !== 'pre' && g.home.score != null && g.away.score != null
   const side = (t: Team, label: string) => (
@@ -46,7 +46,11 @@ export default function GameAnalysis({ g, analysis, odds, onGoBet }: { g: Analys
       </div>
       {/* 좌: 배당 변동 + 예상 스코어 / 우: 선수 오버롤·출전 확률 / 아래: 뉴스 */}
       <PlayerOverall league={g.league} gameDate={g.date} home={g.home} away={g.away}
-        left={odds?.length ? <OddsHistory compact list={odds} homeName={koName(g.home.name)} awayName={koName(g.away.name)} /> : null}
+        left={odds?.length || lines?.length ? <>
+          {odds?.length ? <OddsHistory compact list={odds} homeName={koName(g.home.name)} awayName={koName(g.away.name)} /> : null}
+          {lines?.length ? <LineHistory list={lines} homeName={koName(g.home.name)} awayName={koName(g.away.name)} /> : null}
+        </> : null}
+        lines={lines?.length ? { spread: lastLine(lines, 'spread'), total: lastLine(lines, 'total') } : null}
         odds={(() => { const l = odds?.[odds.length - 1]; return l?.home_odds && l?.away_odds ? { home: Number(l.home_odds), away: Number(l.away_odds) } : null })()} />
       {analysis ? <OverallAnalysisView a={analysis} />
         : null}

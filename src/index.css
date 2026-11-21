@@ -600,9 +600,7 @@ tr:hover td { background: var(--bg-hover); }
 }
 
 /* ── 대시보드 "베팅" 모드: 베팅 모드 패널(종목·리그 → 경기 → 베팅슬립) 좌 5 / 베팅 현황(사이트 카드) 우 5 ── */
-.dashboard-betmode { width: 100%; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
-/* 베팅 모드 위 사이트 현황: 카드를 가로로 여러 장 (작게) */
-.dashboard-betmode .mining-cards { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+.dashboard-betmode { width: 100%; min-width: 0; }
 @media (min-width: 901px) {
   .dashboard-main.betmode .dashboard-betmode { flex: 5 1 0; min-width: 520px; width: auto; }
   .dashboard-main.betmode .dashboard-bets { flex: 5 1 0; min-width: 0; width: auto; }

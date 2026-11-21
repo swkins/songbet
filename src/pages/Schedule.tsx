@@ -8,7 +8,7 @@ import GameAnalysis from '../components/GameAnalysis'
 import { Activity, ClipboardCheck } from 'lucide-react'
 import ModelReport, { loadPredictions, PredBadge, type Prediction } from '../components/ModelReport'
 import { Arrow } from '../components/OddsHistory'
-import { loadOdds, oddsTrend, type OddsSnap } from '../lib/odds'
+import { loadOdds, loadLines, oddsTrend, type OddsSnap, type OddsLine } from '../lib/odds'
 import { loadOverallAnalyses, findAnalysis, type OverallAnalysis } from '../components/OverallAnalysisView'
 import { loadSchedules, gameState, koName, sortLeagues, type ScheduleGame, type ScheduleTeam, type ScheduleRow } from '../lib/gameSchedule'
 
@@ -50,6 +50,7 @@ export default function Schedule({ onGoBet }: { onGoBet?: (t: { sport: string; l
   const [loading, setLoading] = useState(true)
   const [analyses, setAnalyses] = useState<OverallAnalysis[]>([])
   const [odds, setOdds] = useState<Record<string, OddsSnap[]>>({})
+  const [lines, setLines] = useState<Record<string, OddsLine[]>>({})   // NBA 기준점
   const [showStatus, setShowStatus] = useState(false)
   const [showReport, setShowReport] = useState(false)
   const [preds, setPreds] = useState<Record<string, Prediction>>({})
@@ -69,6 +70,7 @@ export default function Schedule({ onGoBet }: { onGoBet?: (t: { sport: string; l
     setLoading(true)
     setSelId(null)
     const since = dayjs().subtract(1, 'day').format('YYYY-MM-DD')
+    loadLines(since).then(setLines).catch(() => {})
     Promise.all([loadSchedules(sport === 'all' ? undefined : sport, since), loadOverallAnalyses(since).catch(() => []), loadOdds(since).catch(() => ({})), loadPredictions(since).catch(() => [])])
       .then(([r, oa, od, pr]) => { setRows(r); setAnalyses(oa); setOdds(od); setPreds(Object.fromEntries(pr.map(p => [p.game_id, p]))); setLoading(false) })
   }, [sport])
@@ -199,7 +201,7 @@ export default function Schedule({ onGoBet }: { onGoBet?: (t: { sport: string; l
           {list}
         </div>
         <div className="card" style={{ flex: narrow ? 'none' : 8, width: narrow ? '100%' : undefined, minWidth: 0, minHeight: 320 }}>
-          {sel ? <GameAnalysis onGoBet={onGoBet} g={sel} analysis={findAnalysis(analyses, sel)} odds={odds[sel.id]} /> : <div style={{ ...muted, padding: 24, textAlign: 'center' }}>왼쪽에서 경기를 누르면 여기에 분석이 나옵니다.</div>}
+          {sel ? <GameAnalysis onGoBet={onGoBet} g={sel} analysis={findAnalysis(analyses, sel)} odds={odds[sel.id]} lines={lines[sel.id]} /> : <div style={{ ...muted, padding: 24, textAlign: 'center' }}>왼쪽에서 경기를 누르면 여기에 분석이 나옵니다.</div>}
         </div>
       </div>
       )}
