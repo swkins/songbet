@@ -19,7 +19,13 @@ import { loadSchedules, gameState, koName, type ScheduleGame, type ScheduleTeam,
 
 // 종목 순서 (사용자 요청): 전체 · 축구 · 야구 · 농구 · 배구 · LOL
 const SPORT_LIST: { id: string; label: string; leagues: string[] }[] = [
-  { id: 'soccer', label: '⚽ 축구', leagues: ['잉글랜드 1부', '스페인 1부', '이탈리아 1부', '독일 1부', '프랑스 1부'] },
+  // 축구: 5대 리그 → K리그·J리그 → 유럽 2부 → 유럽 기타 → 아메리카·아시아 → 대표팀·친선 (collect-soccer가 받는 리그, 2026-11-21 사용자 요청으로 확장)
+  { id: 'soccer', label: '⚽ 축구', leagues: ['잉글랜드 1부', '스페인 1부', '이탈리아 1부', '독일 1부', '프랑스 1부',
+    '대한민국 1부', '대한민국 2부', '일본 1부', '일본 2부',
+    '잉글랜드 2부', '잉글랜드 3부', '스페인 2부', '이탈리아 2부', '독일 2부', '프랑스 2부',
+    '네덜란드', '포르투갈 1부', '벨기에', '터키', '그리스', '덴마크', '오스트리아', '스코틀랜드', '스웨덴',
+    '미국', '멕시코', '브라질', '아르헨티나', '중국', '호주',
+    '네이션스 리그', '국제 친선 경기', '친선경기'] },
   { id: 'baseball', label: '⚾ 야구', leagues: [] },
   { id: 'basketball', label: '🏀 농구', leagues: ['KBL', 'WKBL', 'NBA'] },
   { id: 'volleyball', label: '🏐 배구', leagues: ['V리그 남자', 'V리그 여자'] },

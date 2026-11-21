@@ -1,13 +1,16 @@
-// 축구 5대 리그 일정 + 승무패 배당 (사용자 요청 — 5대 리그만, 배당은 일반 승무패만).
-// body: { league: '잉글랜드 1부' | '스페인 1부' | '이탈리아 1부' | '독일 1부' | '프랑스 1부' }
-// 리그마다 pg_cron 작업이 따로 부른다 (public.run_collect_soccer — supabase/cron_soccer.sql):
-//  다른 리그 배당·축구 작업이나 일정 업데이트가 3분 안에 돌았으면 3~10분 미루고, 보통 40~100분 뒤, 오늘·내일 경기가 없으면 2.5~4시간 뒤.
-// 출처: ESPN scoreboard (NBA 일정과 같은 API). 한 번 부르면 일정과 DraftKings 배당(오픈·현재)이 같이 온다.
-//  - 날짜 범위(dates=A-B)는 400 → UTC 날짜 하루씩, 사이에 1.5~4초 쉼. 한국 하루 = UTC 전날 15시~당일 15시라 UTC 3일치(어제·오늘·내일).
-//  - 응답이 gzip이면 Deno fetch가 알아서 푼다.
-// + 핸디 배당: Action Network 북메이커 주력 핸디 평균 → soccer_lines (룰북 베팅 찾기용)
-// 저장: game_schedules(sport soccer, league = 리그 관리 이름, 팀 이름 = 리그 관리 등록 한글 이름, full = ESPN 영어 이름)
-//       odds_snapshots(home·draw·away, open_*, 바뀌었을 때만) · odds_fetch_log(매번)
+// 축구 일정 + 승무패 배당 (사용자 요청 — 5대 리그로 시작, 2026-11-21 리그 관리의 나머지 리그도 연결. 배당은 일반 승무패만).
+// body: { league: 리그 관리 이름 } — ESPN(아래 ESPN 표) · K리그 1·2부(K리그 공식 API) · 일본 2부(J리그 공식 데이터 사이트)
+// 리그마다 pg_cron 작업이 따로 부른다 (public.run_collect_soccer — supabase/cron_soccer.sql).
+// 출처:
+//  - ESPN scoreboard: 한 번 부르면 일정과 DraftKings 배당(오픈·현재)이 같이 온다.
+//    날짜 범위(dates=A-B)는 400 → UTC 날짜 하루씩, 사이에 1.5~4초 쉼. 한국 하루 = UTC 전날 15시~당일 15시라 UTC 3일치(어제·오늘·내일).
+//  - K리그: POST https://www.kleague.com/getScheduleList.do {leagueId:'1'|'2', year, month:'09'(두 자리)} — 한국 시간, 한글 이름, 팀 코드(K01…), gameStatus 'FE'·endYn 'Y' = 종료.
+//  - J2: https://data.j-league.or.jp/SFMS01/search (HTML 표, 일본 시간 = 한국 시간, 팀은 jleague.jp/club/<코드>/ 링크).
+//  - K리그·J2 승무패 배당 = BetExplorer 리그 fixtures 페이지 (data-odd 1·X·2). 연달아 부르면 429 → 함수당 한 번, cron이 BetExplorer 작업끼리 3분 띄움.
+// 팀 이름 = 리그 관리 등록 한글 이름: DB soccer_team_names(league, src, ko) — league 칸이 그 리그면 그 리그 것, 없으면 아무 리그(친선경기용), 그다음 아래 KO 표.
+//   src = ESPN 영어 이름 · 'kl:K21'(K리그 팀 코드) · 'jl:sapporo'(J리그 코드) · 'bx:Daejeon'(BetExplorer 이름 앞부분 — 가장 긴 것). 못 찾으면 영어 이름 그대로 + 로그 unmatched.
+// + 핸디 배당: Action Network 북메이커 주력 핸디 평균 → soccer_lines (룰북 베팅 찾기용, 5대 리그·MLS)
+// 저장: game_schedules(sport soccer, league = 리그 관리 이름, full = 원래 이름) · odds_snapshots(home·draw·away, 바뀌었을 때만) · odds_fetch_log(매번)
 import { createClient } from 'npm:@supabase/supabase-js@2.45.0'
 
 const UA = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36', Accept: 'application/json' }
@@ -16,8 +19,17 @@ const kstDate = (ms: number) => new Date(ms + KST).toISOString().slice(0, 10)
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 
 // Action Network 리그 이름 (핸디 배당 — 룰북 베팅 찾기용)
-const AN_LEAGUE: Record<string, string> = { '잉글랜드 1부': 'epl', '스페인 1부': 'laliga', '이탈리아 1부': 'seriea', '독일 1부': 'bundesliga', '프랑스 1부': 'ligue1' }
-const CODE: Record<string, string> = { '잉글랜드 1부': 'eng.1', '스페인 1부': 'esp.1', '이탈리아 1부': 'ita.1', '독일 1부': 'ger.1', '프랑스 1부': 'fra.1' }
+const AN_LEAGUE: Record<string, string> = { '잉글랜드 1부': 'epl', '스페인 1부': 'laliga', '이탈리아 1부': 'seriea', '독일 1부': 'bundesliga', '프랑스 1부': 'ligue1', '미국': 'mls' }
+const CODE: Record<string, string> = {
+  '잉글랜드 1부': 'eng.1', '스페인 1부': 'esp.1', '이탈리아 1부': 'ita.1', '독일 1부': 'ger.1', '프랑스 1부': 'fra.1',
+  '잉글랜드 2부': 'eng.2', '잉글랜드 3부': 'eng.3', '스페인 2부': 'esp.2', '이탈리아 2부': 'ita.2', '독일 2부': 'ger.2', '프랑스 2부': 'fra.2',
+  '네덜란드': 'ned.1', '포르투갈 1부': 'por.1', '벨기에': 'bel.1', '터키': 'tur.1', '그리스': 'gre.1', '덴마크': 'den.1', '오스트리아': 'aut.1', '스코틀랜드': 'sco.1', '스웨덴': 'swe.1',
+  '미국': 'usa.1', '멕시코': 'mex.1', '브라질': 'bra.1', '아르헨티나': 'arg.1', '일본 1부': 'jpn.1', '호주': 'aus.1', '중국': 'chn.1',
+  '네이션스 리그': 'uefa.nations', '국제 친선 경기': 'fifa.friendly', '친선경기': 'club.friendly',
+}
+// ESPN에 없는 리그 (스위스·아일랜드·체코·핀란드는 사용자 요청으로 뺌)
+const KLEAGUE: Record<string, string> = { '대한민국 1부': '1', '대한민국 2부': '2' }
+const BX: Record<string, string> = { '대한민국 1부': 'south-korea/k-league-1', '대한민국 2부': 'south-korea/k-league-2', '일본 2부': 'japan/j2-league' }
 // ESPN 영어 이름 → 리그 관리에 등록된 한글 이름 (2026-27 시즌, 등록 이름 그대로 — 오타 포함)
 const KO: Record<string, string> = {
   // 잉글랜드
@@ -62,44 +74,130 @@ Deno.serve(async (req) => {
   const league: string = body.league
   const db = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
   const log = async (status: string, note: Record<string, unknown>) => { await db.from('odds_fetch_log').insert({ league, status, note }); return new Response(JSON.stringify({ league, status, ...note }), { headers: { 'Content-Type': 'application/json' } }) }
-  const code = CODE[league]
-  if (!code) return log('error', { message: 'unknown league' })
+  if (!CODE[league] && !KLEAGUE[league] && league !== '일본 2부') return log('error', { message: 'unknown league' })
+
+  // 팀 이름 표
+  const { data: nm } = await db.from('soccer_team_names').select('league, src, ko')
+  const mine = new Map<string, string>(), any = new Map<string, string>()
+  for (const r of nm ?? []) { if (r.league === league) mine.set(r.src, r.ko); else if (!any.has(r.src)) any.set(r.src, r.ko) }
+  const unknown = new Set<string>()
+  const ko = (src: string, show = src): string => {
+    const v = mine.get(src) ?? KO[src] ?? any.get(src)
+    if (!v) unknown.add(show)
+    return v ?? show
+  }
 
   const today = kstDate(Date.now()), tomorrow = kstDate(Date.now() + 86400000)
-  const utcDays = [-1, 0, 1].map(d => new Date(Date.now() + d * 86400000).toISOString().slice(0, 10).replaceAll('-', ''))
-  const events: any[] = []
-  try {
-    for (const [i, d] of utcDays.entries()) {
-      if (i) await sleep(1500 + Math.random() * 2500)
-      const res = await fetch(`https://site.api.espn.com/apis/site/v2/sports/soccer/${code}/scoreboard?dates=${d}`, { headers: UA })
-      if (res.status === 429 || res.status === 403) return log('blocked', { http: res.status, date: d })
-      if (!res.ok) return log('error', { http: res.status, date: d })
-      events.push(...((await res.json()).events ?? []))
-    }
-  } catch (e) { return log('error', { message: String(e) }) }
-
   const byDate: Record<string, Game[]> = { [today]: [], [tomorrow]: [] }
-  const odds: { game: Game; date: string; state: string; h: number | null; d: number | null; a: number | null; oh: number | null; od: number | null; oa: number | null }[] = []
-  const unknown = new Set<string>(), seen = new Set<string>()
-  for (const e of events) {
-    const date = kstDate(Date.parse(e.date))
-    if (!byDate[date] || seen.has(String(e.id))) continue
-    seen.add(String(e.id))
-    const c = e.competitions?.[0]
-    const state: string = c?.status?.type?.state ?? e.status?.type?.state ?? 'pre'   // pre · in · post
-    const side = (s: string): Team => {
-      const t = c?.competitors?.find((x: any) => x.homeAway === s)
-      const en: string = t?.team?.displayName ?? '?'
-      if (!KO[en]) unknown.add(en)
-      return { name: KO[en] ?? en, full: en, abbr: t?.team?.abbreviation ?? null, record: t?.records?.[0]?.summary ?? null, score: state === 'pre' ? null : t?.score ?? null }
+  const odds: { game: Game; date: string; h: number | null; d: number | null; a: number | null; oh: number | null; od: number | null; oa: number | null; src: string }[] = []
+
+  if (CODE[league]) {
+    const code = CODE[league]
+    const utcDays = [-1, 0, 1].map(d => new Date(Date.now() + d * 86400000).toISOString().slice(0, 10).replaceAll('-', ''))
+    const events: any[] = []
+    try {
+      for (const [i, d] of utcDays.entries()) {
+        if (i) await sleep(1500 + Math.random() * 2500)
+        const res = await fetch(`https://site.api.espn.com/apis/site/v2/sports/soccer/${code}/scoreboard?dates=${d}`, { headers: UA })
+        if (res.status === 429 || res.status === 403) return log('blocked', { http: res.status, date: d })
+        if (!res.ok) return log('error', { http: res.status, date: d })
+        events.push(...((await res.json()).events ?? []))
+      }
+    } catch (e) { return log('error', { message: String(e) }) }
+    const seen = new Set<string>()
+    for (const e of events) {
+      const date = kstDate(Date.parse(e.date))
+      if (!byDate[date] || seen.has(String(e.id))) continue
+      seen.add(String(e.id))
+      const c = e.competitions?.[0]
+      const state: string = c?.status?.type?.state ?? e.status?.type?.state ?? 'pre'   // pre · in · post
+      const side = (s: string): Team => {
+        const t = c?.competitors?.find((x: any) => x.homeAway === s)
+        const en: string = t?.team?.displayName ?? '?'
+        return { name: ko(en), full: en, abbr: t?.team?.abbreviation ?? null, record: t?.records?.[0]?.summary ?? null, score: state === 'pre' ? null : t?.score ?? null }
+      }
+      const g: Game = { id: `soc-${e.id}`, start: new Date(Date.parse(e.date)).toISOString(), home: side('home'), away: side('away'), venue: c?.venue?.fullName ?? null,
+        status: state === 'post' ? '종료' : state === 'in' ? (c?.status?.type?.shortDetail ?? '경기 중') : null }
+      byDate[date].push(g)
+      const ml = c?.odds?.[0]?.moneyline
+      if (state === 'pre' && ml) odds.push({ game: g, date, src: 'espn-draftkings',
+        h: dec(ml.home?.close?.odds), d: dec(ml.draw?.close?.odds), a: dec(ml.away?.close?.odds),
+        oh: dec(ml.home?.open?.odds), od: dec(ml.draw?.open?.odds), oa: dec(ml.away?.open?.odds) })
     }
-    const g: Game = { id: `soc-${e.id}`, start: new Date(Date.parse(e.date)).toISOString(), home: side('home'), away: side('away'), venue: c?.venue?.fullName ?? null,
-      status: state === 'post' ? '종료' : state === 'in' ? (c?.status?.type?.shortDetail ?? '경기 중') : null }
-    byDate[date].push(g)
-    const ml = c?.odds?.[0]?.moneyline
-    if (state === 'pre' && ml) odds.push({ game: g, date, state,
-      h: dec(ml.home?.close?.odds), d: dec(ml.draw?.close?.odds), a: dec(ml.away?.close?.odds),
-      oh: dec(ml.home?.open?.odds), od: dec(ml.draw?.open?.odds), oa: dec(ml.away?.open?.odds) })
+  } else if (KLEAGUE[league]) {
+    // K리그 공식 API — 오늘·내일이 걸친 달(한두 번)
+    const months = [...new Set([today, tomorrow].map(d => d.slice(0, 7)))]
+    try {
+      for (const [i, ym] of months.entries()) {
+        if (i) await sleep(1500 + Math.random() * 2000)
+        const res = await fetch('https://www.kleague.com/getScheduleList.do', { method: 'POST', headers: { ...UA, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ leagueId: KLEAGUE[league], year: ym.slice(0, 4), month: ym.slice(5, 7) }) })
+        if (res.status === 429 || res.status === 403) return log('blocked', { http: res.status })
+        if (!res.ok) return log('error', { http: res.status })
+        for (const x of (await res.json())?.data?.scheduleList ?? []) {
+          const date = String(x.gameDate ?? '').replaceAll('.', '-')
+          if (!byDate[date]) continue
+          const ended = x.endYn === 'Y' || x.gameStatus === 'FE'
+          const start = new Date(`${date}T${/^\d\d:\d\d$/.test(x.gameTime ?? '') ? x.gameTime : '00:00'}:00+09:00`).toISOString()
+          const started = ended || Date.now() >= Date.parse(start)
+          const side = (id: string, short: string, goal: unknown): Team => ({ name: ko(`kl:${id}`, short), full: short, abbr: id, score: started ? (goal as number) ?? null : null })
+          byDate[date].push({ id: `kl${KLEAGUE[league]}-${x.year}-${x.gameId}`, start, home: side(x.homeTeam, x.homeTeamName, x.homeGoal), away: side(x.awayTeam, x.awayTeamName, x.awayGoal),
+            venue: x.fieldNameFull ?? x.fieldName ?? null, status: ended ? '종료' : null, note: x.codeName || null })
+        }
+      }
+    } catch (e) { return log('error', { message: String(e) }) }
+  } else {
+    // J2 — J리그 공식 데이터 사이트 (시즌 전체 표, 2026/27 시즌 = competition_years 2026)
+    const year = Number(today.slice(5, 7)) >= 7 ? today.slice(0, 4) : String(Number(today.slice(0, 4)) - 1)
+    try {
+      const res = await fetch(`https://data.j-league.or.jp/SFMS01/search?competition_years=${year}&competition_frame_ids=2`, { headers: { ...UA, Accept: 'text/html' } })
+      if (res.status === 429 || res.status === 403) return log('blocked', { http: res.status })
+      if (!res.ok) return log('error', { http: res.status })
+      const html = await res.text()
+      const txt = (s: string) => s.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim()
+      for (const tr of html.split('<tr').slice(1)) {
+        const tds = [...tr.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map(m => m[1])
+        const di = tds.findIndex(t => /^\d\d\/\d\d\/\d\d/.test(txt(t)))
+        if (di < 0 || tds.length < di + 5) continue
+        const [yy, mm, dd] = txt(tds[di]).slice(0, 8).split('/')
+        const date = `20${yy}-${mm}-${dd}`
+        if (!byDate[date]) continue
+        const time = txt(tds[di + 1]).match(/\d{1,2}:\d\d/)?.[0] ?? '00:00'
+        const club = (t: string) => ({ code: t.match(/\/club\/([a-z0-9]+)\//)?.[1] ?? '', jp: txt(t) })
+        const H = club(tds[di + 2]), A = club(tds[di + 4])
+        const sc = txt(tds[di + 3]).match(/(\d+)\s*-\s*(\d+)/)
+        const start = new Date(`${date}T${time.padStart(5, '0')}:00+09:00`).toISOString()
+        byDate[date].push({ id: `jl2-${date}-${H.code || H.jp}`, start,
+          home: { name: ko(`jl:${H.code}`, H.jp), full: H.jp, abbr: H.code || null, score: sc ? sc[1] : null },
+          away: { name: ko(`jl:${A.code}`, A.jp), full: A.jp, abbr: A.code || null, score: sc ? sc[2] : null },
+          venue: txt(tds[di + 5] ?? '') || null, status: sc ? '종료' : null })
+      }
+    } catch (e) { return log('error', { message: String(e) }) }
+  }
+
+  // K리그·J2 승무패: BetExplorer fixtures (1·X·2). 이름은 'bx:' 앞부분이 가장 길게 맞는 것
+  if (BX[league]) {
+    try {
+      await sleep(1500 + Math.random() * 2500)
+      const res = await fetch(`https://www.betexplorer.com/football/${BX[league]}/fixtures/`, { headers: { ...UA, Accept: 'text/html', 'Accept-Language': 'en' } })
+      if (res.status === 429) unknown.add('BetExplorer 429')
+      else if (res.ok) {
+        const html = await res.text()
+        const keys = [...new Set([...mine.keys(), ...any.keys()])].filter(k => k.startsWith('bx:')).map(k => k.slice(3)).sort((a, b) => b.length - a.length)
+        const bx = (n: string) => { const k = keys.find(k => n.toLowerCase().startsWith(k.toLowerCase())); return k ? (mine.get(`bx:${k}`) ?? any.get(`bx:${k}`)) : undefined }
+        const pre = Object.entries(byDate).flatMap(([date, gs]) => gs.filter(g => !g.status).map(g => ({ g, date })))
+        for (const tr of html.split('<tr').slice(1)) {
+          if (!tr.includes('data-odd=')) continue
+          const m = tr.match(/class="in-match"><span>([^<]+)<\/span>\s*-\s*<span>([^<]+)<\/span>/); if (!m) continue
+          const o = [...tr.matchAll(/data-odd="([0-9.]+)"/g)].map(x => +x[1]); if (o.length < 3) continue
+          const kh = bx(m[1].trim()), ka = bx(m[2].trim())
+          if (!kh) unknown.add(`bx:${m[1].trim()}`)
+          if (!ka) unknown.add(`bx:${m[2].trim()}`)
+          const hit = kh && ka ? pre.find(x => x.g.home.name === kh && x.g.away.name === ka) : undefined
+          if (hit) odds.push({ game: hit.g, date: hit.date, src: 'betexplorer', h: o[0], d: o[1], a: o[2], oh: null, od: null, oa: null })
+        }
+      }
+    } catch { /* 배당은 없어도 일정은 저장 */ }
   }
 
   const rows = Object.entries(byDate).map(([game_date, games]) => ({ sport: 'soccer', league, game_date, games: games.sort((a, b) => a.start.localeCompare(b.start)), fetched_at: new Date().toISOString() }))
@@ -113,13 +211,13 @@ Deno.serve(async (req) => {
     const { data: prev } = await db.from('odds_snapshots').select('home_odds, away_odds, draw_odds').eq('game_id', o.game.id).order('fetched_at', { ascending: false }).limit(1)
     const p = prev?.[0]
     if (p && Number(p.home_odds) === o.h && Number(p.away_odds) === o.a && Number(p.draw_odds) === (o.d ?? 0)) continue
-    const { error } = await db.from('odds_snapshots').insert({ league, game_date: o.date, game_id: o.game.id, source: 'espn-draftkings', home_odds: o.h, away_odds: o.a, draw_odds: o.d,
+    const { error } = await db.from('odds_snapshots').insert({ league, game_date: o.date, game_id: o.game.id, source: o.src, home_odds: o.h, away_odds: o.a, draw_odds: o.d,
       open_home: o.oh, open_away: o.oa, open_draw: o.od, books: 1, match_name: `${o.game.home.full} - ${o.game.away.full}` })
     if (!error) changed++
   }
   // 핸디 배당: Action Network (미국 동부 날짜, 한 번에 그날 전 리그) — 북메이커별 주력 핸디(±0.5·±1.5·±2.5)를 기준점별 평균 → soccer_lines
   let lines = 0, anMatched = 0
-  try {
+  if (AN_LEAGUE[league]) try {
     const pre = rows.flatMap(r => r.games).filter(g => !g.status)
     const usDates = [...new Set(pre.map(g => new Date(Date.parse(g.start) - 5 * 3600000).toISOString().slice(0, 10).replaceAll('-', '')))]
     const tok = (s: string) => (s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length >= 4 && !['club', 'city'].includes(w))

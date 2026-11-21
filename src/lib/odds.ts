@@ -1,5 +1,5 @@
 // ─── 승패 배당 시간대별 기록 (Supabase odds_snapshots) — 분석 탭 일정 옆·오른쪽 변동표 ─────
-// NBA = Action Network 9개 북 평균(오픈·홈 티켓% 포함), 국내 = BetExplorer 평균배당, 축구 5대 리그 = ESPN · DraftKings 승무패(오픈 포함). 홈/원정은 일정 기준.
+// NBA = Action Network 9개 북 평균(오픈·홈 티켓% 포함), 국내 = BetExplorer 평균배당, 축구 = ESPN · DraftKings 승무패(오픈 포함), K리그·J2 = BetExplorer 승무패. 홈/원정은 일정 기준.
 import { supabase } from './supabase'
 
 export interface OddsSnap {
