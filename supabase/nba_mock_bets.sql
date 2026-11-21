@@ -105,7 +105,7 @@ declare
   s public.odds_lines; t public.odds_lines; pr public.predictions; tk numeric; hc jsonb; ac jsonb; ctx jsonb;
   l numeric; mvv numeric; tl numeric; tmv numeric; fav text; dog text; rd int; hr int; ar int; hb boolean; ab boolean;
   edge numeric; tedge numeric; mside text; tside text; apr boolean; n0 int; n1 int;
-  ho numeric; ao numeric; oo numeric; uo numeric;
+  ho numeric; ao numeric; oo numeric; uo numeric; cd numeric; ck numeric; fedge numeric; cavg numeric;
 begin
   select count(*) into n0 from public.mock_bets where game_id = p_gid and timing = p_timing;
   select * into s from public.odds_lines where game_id = p_gid and market = 'spread' and fetched_at <= p_asof order by fetched_at desc limit 1;
@@ -127,6 +127,11 @@ begin
   ctx := jsonb_build_object('asof', p_asof, 'line', l, 'open', s.open_line, 'move', mvv, 'total', tl, 'open_total', t.open_line, 'tmove', tmv,
     'tickets_home', tk, 'home', hc, 'away', ac, 'model_margin', coalesce((pr.raw->>'modelMargin')::numeric, pr.margin), 'model_total', coalesce((pr.raw->>'modelTotal')::numeric, pr.total));
 
+  -- 피로·백투백 과하게 (2026-11-21 사용자 요청): 팀 컨디션 차(홈−원정 %p) · 평균
+  cd := (pr.cond->'home'->>'pct')::numeric - (pr.cond->'away'->>'pct')::numeric;
+  cavg := ((pr.cond->'home'->>'pct')::numeric + (pr.cond->'away'->>'pct')::numeric) / 2;
+  ck := coalesce((pr.params->>'condK')::numeric, 0.17);
+  fedge := case when edge is not null and cd is not null then edge + 2 * ck * cd end;
   if l is not null then
     perform public.mock_add(p_gid, d, p_start, p_home, p_away, p_timing, 'home_all', 'spread', 'home', l, ho, ctx);
     perform public.mock_add(p_gid, d, p_start, p_home, p_away, p_timing, 'away_all', 'spread', 'away', l, ao, ctx);
@@ -162,6 +167,13 @@ begin
       perform public.mock_add(p_gid, d, p_start, p_home, p_away, p_timing, 'model_move', 'spread', case when mvv <> 0 and (edge > 0) = (mvv < 0) then mside end, l, case mside when 'home' then ho else ao end, ctx);
       perform public.mock_add(p_gid, d, p_start, p_home, p_away, p_timing, 'model_rest', 'spread', case when rd <> 0 and (edge > 0) = (rd > 0) then mside end, l, case mside when 'home' then ho else ao end, ctx);
     end if;
+    if fedge is not null then
+      perform public.mock_add(p_gid, d, p_start, p_home, p_away, p_timing, 'fat_model3', 'spread', case when fedge >= 0 then 'home' else 'away' end, l, case when fedge >= 0 then ho else ao end, ctx);
+    end if;
+    if cd is not null then
+      perform public.mock_add(p_gid, d, p_start, p_home, p_away, p_timing, 'fat_rested8', 'spread', case when cd >= 8 then 'home' when cd <= -8 then 'away' end, l, case when cd > 0 then ho else ao end, ctx);
+      perform public.mock_add(p_gid, d, p_start, p_home, p_away, p_timing, 'fat_tired8', 'spread', case when cd >= 8 then 'away' when cd <= -8 then 'home' end, l, case when cd > 0 then ao else ho end, ctx);
+    end if;
     perform public.mock_add(p_gid, d, p_start, p_home, p_away, p_timing, 'april_fav', 'spread', case when apr then fav end, l, case fav when 'home' then ho else ao end, ctx);
   end if;
 
@@ -180,6 +192,7 @@ begin
     end if;
     perform public.mock_add(p_gid, d, p_start, p_home, p_away, p_timing, 'big_spread_over', 'total', case when abs(l) >= 10 then 'over' end, tl, oo, ctx);
     perform public.mock_add(p_gid, d, p_start, p_home, p_away, p_timing, 'b2b_under', 'total', case when hb or ab then 'under' end, tl, uo, ctx);
+    perform public.mock_add(p_gid, d, p_start, p_home, p_away, p_timing, 'fat_under90', 'total', case when cavg < 90 then 'under' end, tl, uo, ctx);
     perform public.mock_add(p_gid, d, p_start, p_home, p_away, p_timing, 'april_over', 'total', case when apr then 'over' end, tl, oo, ctx);
   end if;
   select count(*) into n1 from public.mock_bets where game_id = p_gid and timing = p_timing;
@@ -266,3 +279,11 @@ begin
 end $$;
 revoke all on function public.run_collect_odds_nba_pre() from public, anon, authenticated;
 select cron.schedule('collect-odds-nba-pre', '15 12 * * *', 'select public.run_collect_odds_nba_pre()');
+
+-- 피로·백투백 과하게 (2026-11-21 사용자 요청) — 위 mock_place_game에 같이 들어 있음
+insert into public.mock_strategies (key, label, market, source, note, sort) values
+ ('fat_model3','우리 모델 + 피로·백투백 3배','spread','모델 (피로 과하게)','팀 컨디션 차 × 0.17 → × 0.51',65),
+ ('fat_rested8','컨디션 8%p+ 좋은 팀','spread','피로 (과하게)','백투백·이동·일정 밀도·연장 합친 팀 컨디션',66),
+ ('fat_tired8','컨디션 8%p+ 나쁜 팀','spread','비교용','시장이 피로를 과하게 본다면 (2025-26 원정 백투백 −1.5점)',67),
+ ('fat_under90','두 팀 컨디션 평균 90% 미만 → 언더','total','피로 (과하게)','',133)
+on conflict (key) do update set label=excluded.label, market=excluded.market, source=excluded.source, note=excluded.note, sort=excluded.sort;

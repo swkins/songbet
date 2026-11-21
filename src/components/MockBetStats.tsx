@@ -113,7 +113,7 @@ export default function MockBetStats() {
 // ─── 분석 화면 (NBA 경기 하나): 이 경기에 걸린 모의베팅 — 방법별 22시·직전 픽, 그 방법 누적 적중률, 핸디·언오버 방법들이 어느 쪽에 몰렸나 ─────
 interface GameBet extends Bet { strategy: string; market: 'spread' | 'total' }
 // 양쪽 다 거는 기본 방법·'반대로' 비교용 방법 — 쏠림 요약에서는 뺀다
-const COMPARE = new Set(['home_all', 'away_all', 'fav_all', 'dog_all', 'over_all', 'under_all', 'model_fade3', 'model_ou_fade5', 'pub60_follow', 'move_fade1', 'tmove_fade2'])
+const COMPARE = new Set(['home_all', 'away_all', 'fav_all', 'dog_all', 'over_all', 'under_all', 'model_fade3', 'model_ou_fade5', 'pub60_follow', 'move_fade1', 'tmove_fade2', 'fat_tired8'])
 export function MockBetsForGame({ gameId }: { gameId: string }) {
   const [bets, setBets] = useState<GameBet[] | null>(null)
   const [stats, setStats] = useState<Stat[]>([])
@@ -159,7 +159,7 @@ export function MockBetsForGame({ gameId }: { gameId: string }) {
         </>}
       </div>
       {open && bets.length > 0 && <>
-        <div style={{ fontSize: 10, color: 'var(--text-muted)', margin: '6px 0 2px' }}>방법 38개 중 조건이 맞은 {keys.length}개 · 21:45(22시 기준)·경기 시작 30분 전(직전)에 자동으로 걸고 끝나면 채점 · 누적 = 그 방법 전체 경기 성적</div>
+        <div style={{ fontSize: 10, color: 'var(--text-muted)', margin: '6px 0 2px' }}>방법 42개 중 조건이 맞은 {keys.length}개 · 21:45(22시 기준)·경기 시작 30분 전(직전)에 자동으로 걸고 끝나면 채점 · 누적 = 그 방법 전체 경기 성적</div>
         {one && (
           <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', fontSize: 12, margin: '4px 0' }}>
             <span>핸디: <b>{koName(one.home)} 쪽 {cnt('spread', 'home', true)}개</b> · <b>{koName(one.away)} 쪽 {cnt('spread', 'away', true)}개</b></span>
