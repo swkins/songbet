@@ -118,13 +118,14 @@ begin
   ho := s.home_odds; ao := s.away_odds; oo := t.home_odds; uo := t.away_odds;
   fav := case when l < 0 then 'home' when l > 0 then 'away' end; dog := case fav when 'home' then 'away' when 'away' then 'home' end;
   hr := (hc->>'rest')::int; ar := (ac->>'rest')::int; rd := hr - ar; hb := hr = 0; ab := ar = 0;
-  edge := case when pr.margin is not null and l is not null then pr.margin + l end;     -- + = 홈 쪽
-  tedge := case when pr.total is not null and tl is not null then pr.total - tl end;   -- + = 오버 쪽
+  -- 모델 계열은 시장을 섞기 전 순수 모델 값 (2026-11-21부터 예측 = 시장 80% + 모델 20% → raw.modelMargin·modelTotal), 없으면 예전 예측 값
+  edge := case when coalesce((pr.raw->>'modelMargin')::numeric, pr.margin) is not null and l is not null then coalesce((pr.raw->>'modelMargin')::numeric, pr.margin) + l end;     -- + = 홈 쪽
+  tedge := case when coalesce((pr.raw->>'modelTotal')::numeric, pr.total) is not null and tl is not null then coalesce((pr.raw->>'modelTotal')::numeric, pr.total) - tl end;   -- + = 오버 쪽
   mside := case when edge >= 0 then 'home' when edge < 0 then 'away' end;
   tside := case when tedge >= 0 then 'over' when tedge < 0 then 'under' end;
   apr := extract(month from d) = 4;
   ctx := jsonb_build_object('asof', p_asof, 'line', l, 'open', s.open_line, 'move', mvv, 'total', tl, 'open_total', t.open_line, 'tmove', tmv,
-    'tickets_home', tk, 'home', hc, 'away', ac, 'model_margin', pr.margin, 'model_total', pr.total);
+    'tickets_home', tk, 'home', hc, 'away', ac, 'model_margin', coalesce((pr.raw->>'modelMargin')::numeric, pr.margin), 'model_total', coalesce((pr.raw->>'modelTotal')::numeric, pr.total));
 
   if l is not null then
     perform public.mock_add(p_gid, d, p_start, p_home, p_away, p_timing, 'home_all', 'spread', 'home', l, ho, ctx);

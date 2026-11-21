@@ -1,0 +1,36 @@
+// NBA 팀 레이팅 시작값 = 2025-26 시즌 끝 (scripts/nba_score_model.py 같은 방식, 사용자 시트 'NBA 백테스트 데이터' 2025-26 1,231경기)
+// [득실 레이팅 R, 공격 O, 수비 D] — 새 시즌은 × carry(0.8)로 시작. 다음 시즌엔 2026-27 끝 값으로 바꾼다.
+export const NBA_PRIOR_SEASON = '2025-26'
+export const NBA_PRIOR_AVG_TOTAL = 233.7
+export const NBA_PRIOR: Record<string, [number, number, number]> = {
+  'Atlanta Hawks': [3.55, 4.36, -1.13],
+  'Boston Celtics': [7.75, 0.37, -9.39],
+  'Brooklyn Nets': [-11.22, -12.13, 1.94],
+  'Charlotte Hornets': [6.77, 1.32, -8.05],
+  'Chicago Bulls': [-5.97, 0.16, 8.41],
+  'Cleveland Cavaliers': [3.5, 3.16, -0.07],
+  'Dallas Mavericks': [-5.58, 0.85, 7.35],
+  'Denver Nuggets': [5.63, 9.55, 2.12],
+  'Detroit Pistons': [7.94, 3.32, -6.47],
+  'Golden State Warriors': [-2.21, -2.8, 1.63],
+  'Houston Rockets': [4.3, -0.11, -4.98],
+  'Indiana Pacers': [-6.52, 0.15, 6.1],
+  'LA Clippers': [1.55, -0.89, -2.7],
+  'Los Angeles Lakers': [2.39, 0.48, -2.71],
+  'Memphis Grizzlies': [-8.71, -2.65, 10.63],
+  'Miami Heat': [1.68, 7.21, 5.94],
+  'Milwaukee Bucks': [-7.26, -5.82, 3.93],
+  'Minnesota Timberwolves': [2.49, 1.83, -0.67],
+  'New Orleans Pelicans': [-3.19, 1.87, 5.02],
+  'New York Knicks': [6.31, -0.44, -7.98],
+  'Oklahoma City Thunder': [9.6, 3.35, -6.8],
+  'Orlando Magic': [0.36, 1.26, 0.32],
+  'Philadelphia 76ers': [-0.13, -0.44, -0.67],
+  'Phoenix Suns': [1.45, -3.54, -5.3],
+  'Portland Trail Blazers': [1.2, -1.39, -4.26],
+  'Sacramento Kings': [-8.58, -3.17, 6.0],
+  'San Antonio Spurs': [9.18, 6.31, -4.55],
+  'Toronto Raptors': [3.46, 0.44, -4.67],
+  'Utah Jazz': [-8.03, 1.6, 11.19],
+  'Washington Wizards': [-11.71, -2.3, 11.73],
+}

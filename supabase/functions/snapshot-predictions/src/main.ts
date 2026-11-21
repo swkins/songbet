@@ -33,7 +33,13 @@ async function snapshot(leagues: string[], from: number, to: number, save: boole
           parts: { dist: v.dist, over35: v.over35, full: v.full }, raw: { diff: v.diff, modelHome: v.modelHome, marketHome: v.marketHome }, cond: null }
         out.push({ game: `${base.away} @ ${base.home}`, pred: v.best, homeWin: v.homeWin })
       } else {
-        const sim = simulate(d.code, d.home, d.away, {}, Number(d.news?.margin_adj ?? 0) || 0, d.cond)
+        // NBA: 그 시각 시장 기준점(odds_lines 마지막 줄)을 같이 넣는다 — 예상 = 시장 80% + 우리 모델 20% (2026-11-21)
+        const mk: { spread: number | null; total: number | null } = { spread: null, total: null }
+        if (d.code === 'NBA') {
+          const { data: ls } = await supabase.from('odds_lines').select('market,line').eq('game_id', g.id).order('fetched_at', { ascending: false }).limit(10)
+          for (const x of (ls ?? []) as { market: string; line: number }[]) { if (x.market === 'spread' && mk.spread == null) mk.spread = Number(x.line); if (x.market === 'total' && mk.total == null) mk.total = Number(x.line) }
+        }
+        const sim = simulate(d.code, d.home, d.away, {}, Number(d.news?.margin_adj ?? 0) || 0, d.cond, 20000, mk)
         if (!sim) { out.push({ game: g.id, skip: 'no sim' }); continue }
         row = { ...base, pred_home: sim.home, pred_away: sim.away, margin: sim.margin, home_win: sim.homeWin, total: sim.total, p10: sim.p10, p90: sim.p90,
           parts: sim.parts, raw: sim.raw,
