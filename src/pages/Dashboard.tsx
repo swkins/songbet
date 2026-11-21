@@ -4034,7 +4034,9 @@ export default function Dashboard({ betTarget, onBetTargetDone }: { betTarget?: 
   const renderCombinedStatus = () => {
     const rows = sites.map(site => ({ site, pending: displayPendingBySite(site.id) }))
     const all = rows.flatMap(r => r.pending.map(b => ({ b, site: r.site })))
-      .sort((x, y) => y.b.created_at.localeCompare(x.b.created_at))
+      // 결과 처리한(1시간 보류) 베팅은 진행중 베팅 아래로 — 진행중과 섞이지 않게
+      .sort((x, y) => (x.b.result === 'pending' ? 0 : 1) - (y.b.result === 'pending' ? 0 : 1) || y.b.created_at.localeCompare(x.b.created_at))
+    const firstHeld = all.find(x => x.b.result !== 'pending')
     const seenGroups = new Set<string>()
     const num: CSSProperties = { fontFamily: 'var(--font-num)', fontWeight: 700, whiteSpace: 'nowrap' }
     const iconBtn = (title: string, color: string, onClick: () => void, icon: React.ReactNode) => (
@@ -4091,7 +4093,14 @@ export default function Dashboard({ betTarget, onBetTargetDone }: { betTarget?: 
             const arColor = ar === 'win' ? 'var(--green)' : ar === 'loss' ? 'var(--red)' : 'var(--blue)'
             const odds = b.parlay_group ? legs.reduce((m, l) => m * l.odds, 1) : b.odds
             return (
-              <div key={b.parlay_group ?? b.id} className={held ? heldEntryClass(b.result).trim() : undefined}
+              <Fragment key={b.parlay_group ?? b.id}>
+              {firstHeld && firstHeld.b === b && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, margin: '6px 0 2px', fontSize: 10, fontWeight: 800, color: 'var(--text-muted)' }}>
+                  <CheckCircle size={11} /> 처리 확인함 · 1시간 뒤 완료 목록으로
+                  <span style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+                </div>
+              )}
+              <div className={held ? `combo-held${heldEntryClass(b.result)}` : undefined}
                 style={{ display: 'grid', gridTemplateColumns: '56px 18px minmax(0, 1fr) auto auto auto', columnGap: 8, alignItems: 'center', padding: '5px 2px', borderTop: '1px solid var(--border-light)', fontSize: 12, position: 'relative' }}>
                 <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={site.name}>{site.name}</span>
                 <span style={{ fontSize: 14, lineHeight: 1, textAlign: 'center' }}>{sportGlyph(b.sport) ?? SPORT_SHORT[b.sport] ?? '📋'}</span>
@@ -4137,6 +4146,7 @@ export default function Dashboard({ betTarget, onBetTargetDone }: { betTarget?: 
                   </>}
                 </span>
               </div>
+              </Fragment>
             )
           })}
         </div>
