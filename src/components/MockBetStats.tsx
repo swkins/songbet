@@ -63,7 +63,7 @@ export default function MockBetStats() {
     <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '12px 14px', background: 'var(--bg-elevated)', marginBottom: 10 }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>
         <span style={{ fontSize: 14, fontWeight: 800 }}>NBA 모의베팅 · 방법별 적중률</span>
-        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>모든 경기에 방법마다 자동으로 모의 베팅 → 끝나면 채점 · 22시 = 21:45 기준점 · 직전 = 시작 30분 전 · 손익분기 52.4% · 수익률 = 1씩 걸었을 때 · 표본 100건 전엔 참고만</span>
+        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>모든 경기에 방법마다 자동으로 모의 베팅 → 끝나면 채점 · 22시 = 21:45 기준점 (내가 거는 시간, 21:15에 배당 새로 받음) · 직전 = 시작 30분 전 (비교용 — 22시보다 좋으면 늦게 걸수록 유리) · 손익분기 52.4% · 수익률 = 1씩 걸었을 때 · 표본 100건 전엔 참고만</span>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
           {([['all', '전체'], ['spread', '핸디'], ['total', '언오버']] as const).map(([k, t]) => (
             <button key={k} onClick={() => setMkt(k)} style={{ fontSize: 11, padding: '2px 8px', borderRadius: 4, cursor: 'pointer', border: `1px solid ${mkt === k ? 'var(--gold-border)' : 'var(--border)'}`, background: mkt === k ? 'var(--gold-bg)' : 'none', color: mkt === k ? 'var(--gold)' : 'var(--text-secondary)' }}>{t}</button>
@@ -72,7 +72,7 @@ export default function MockBetStats() {
       </div>
       {loading ? <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>불러오는 중…</div> : !rows.length ? <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>아직 모의베팅이 없어요 (매일 21:45와 경기 시작 30분 전에 자동으로 걸어요)</div> : (
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead><tr><th style={th}>방법</th><th style={th}>시장</th><th style={th}>22시 기준</th><th style={th}>경기 직전</th><th style={th}>최근 7일</th><th style={th}>백테스트 근거</th></tr></thead>
+          <thead><tr><th style={th}>방법</th><th style={th}>시장</th><th style={th}>22시 기준 (실제)</th><th style={th}>경기 직전 (비교)</th><th style={th}>최근 7일</th><th style={th}>백테스트 근거</th></tr></thead>
           <tbody>{rows.map(r => {
             const n7 = (r.pre?.n7 ?? 0) + (r.close?.n7 ?? 0), h7 = (r.pre?.hits7 ?? 0) + (r.close?.hits7 ?? 0)
             return [

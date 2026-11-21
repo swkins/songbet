@@ -253,3 +253,16 @@ select cron.schedule('mock-nba-grade', '45 * * * *', 'select public.grade_nba_mo
 
 -- 대중 % 방법 설명 (승패 티켓이라 정배 쏠림)
 update public.mock_strategies set note = '대중 % = 승패 티켓 % (정배에 90%+ 쏠려 사실상 역배) — 핸디 티켓 %는 아직 안 받음' where key in ('pub65_fade','pub65a_home_fixed','rlm60','pub60_follow');
+
+-- 사용자는 전날 21~22시 KST에 건다 (NBA는 다음 날 아침 시작) → 그 직전 기준점을 꼭 받아 둔다:
+-- 21:15 KST collect-odds NBA 고정 한 번 (랜덤 타이머 collect-odds-nba와 별개) → 21:30 예측 → 21:45 모의베팅(pre22)
+create or replace function public.run_collect_odds_nba_pre() returns void
+language plpgsql security definer set search_path = public, net as $$
+begin
+  perform net.http_post(
+    url := 'https://rgxjwfsmevfwmivsziyq.supabase.co/functions/v1/collect-odds',
+    headers := (select jsonb_build_object('Content-Type','application/json','Authorization', substring(pg_get_functiondef('public.run_collect_odds(text)'::regprocedure) from '"Authorization":"(Bearer [^"]+)"'))),
+    body := jsonb_build_object('league', 'NBA'), timeout_milliseconds := 60000);
+end $$;
+revoke all on function public.run_collect_odds_nba_pre() from public, anon, authenticated;
+select cron.schedule('collect-odds-nba-pre', '15 12 * * *', 'select public.run_collect_odds_nba_pre()');
