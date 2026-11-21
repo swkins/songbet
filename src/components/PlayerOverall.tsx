@@ -4,7 +4,7 @@ import dayjs from 'dayjs'
 import { koName, type ScheduleTeam } from '../lib/gameSchedule'
 import { conditionColor, conditionLabel, type Condition } from '../lib/fatigue'
 import { SET_SCORES, simulateVolley, type VolleyResult } from '../lib/volleyPredict'
-import { staminaOf, simulateVolleyGame, getParams, loadGameOverall, tierOf, availColor, TIERS, teamStrength, simulate, statusLabel, type TeamOv, type PlayerOv, type GameOverall } from '../lib/playerOverall'
+import { staminaOf, simulateVolleyGame, getParams, loadGameOverall, tierOf, availColor, TIERS, teamStrength, volleyLineup, VB_POS_KO, simulate, statusLabel, type TeamOv, type PlayerOv, type GameOverall } from '../lib/playerOverall'
 
 // ─── 분석 탭 오른쪽 칸: 양 팀 핵심·주전 선수 오버롤 + 출전 확률 ─────
 // 출전 색: 초록(90%↑) · 연두(70~89) · 노랑(40~69) · 빨강(1~39) · 결장 = 빨간 바탕 "0%" 칩 (이름은 취소선 없이 그대로)
@@ -211,7 +211,10 @@ function ConditionBox({ home, away, hName, aName }: { home: Condition; away: Con
 }
 
 function TeamTable({ title, t, ovr, onCycle, cond }: { title: string; t: TeamOv; ovr: Record<string, number>; onCycle: (p: PlayerOv) => void; cond?: Condition }) {
-  const st = teamStrength(t.players, ovr)
+  const vb = t.players.some(p => p.pos)   // 배구: 포지션별 주전 슬롯으로 팀 전력
+  const st = teamStrength(t.players, ovr, vb)
+  const lu = vb ? volleyLineup(t.players, ovr) : null
+  const weak = lu ? lu.slots.reduce((m, s) => (s.exp < m.exp ? s : m), lu.slots[0]) : null
   return (
     <div style={{ ...box, flex: '1 1 280px', minWidth: 0 }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>
@@ -223,6 +226,19 @@ function TeamTable({ title, t, ovr, onCycle, cond }: { title: string; t: TeamOv;
           </span>
         )}
       </div>
+      {/* 배구 포지션별 주전 (사용자 요청 — 같은 포지션 몰림은 의미 없고 약한 포지션이 있으면 감점) */}
+      {lu && (
+        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 6, alignItems: 'stretch' }}>
+          {lu.slots.map(sl => (
+            <div key={sl.pos} title={sl.names.join(' · ') || '선수 없음'} style={{ flex: '1 1 0', minWidth: 58, textAlign: 'center', border: `1px solid ${sl === weak ? 'var(--red)' : 'var(--border)'}`, borderRadius: 'var(--radius-sm)', padding: '3px 2px', background: 'var(--bg-card)' }}>
+              <div style={{ fontSize: 9, color: sl === weak ? 'var(--red)' : 'var(--text-muted)' }}>{sl.label}{sl === weak ? ' · 약점' : ''}</div>
+              <div style={{ fontSize: 13, fontWeight: 800 }}><Ov v={Math.round(sl.exp)} size={13} /></div>
+              <div style={{ fontSize: 9, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sl.names.join('·') || '–'}</div>
+            </div>
+          ))}
+          <div style={{ fontSize: 10, color: 'var(--text-muted)', alignSelf: 'center', whiteSpace: 'nowrap' }}>균형 감점 −{lu.penExp}</div>
+        </div>
+      )}
       {!t.team ? <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>이 팀 선수 기록을 아직 못 찾았어요</div> : (
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead><tr>
@@ -238,7 +254,9 @@ function TeamTable({ title, t, ovr, onCycle, cond }: { title: string; t: TeamOv;
                 <td style={td}><AvailCell p={p} ov={ov} onCycle={() => onCycle(p)} /></td>
                 <td style={td}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
-                    <span title={`${p.nameEn !== p.name ? p.nameEn + ' · ' : ''}${p.baseNote}`} style={{ fontWeight: 700 }}>{p.name}</span>
+                    {p.pos && <span title={VB_POS_KO[p.pos] ?? p.pos} style={{ fontSize: 9, fontWeight: 800, padding: '0 4px', borderRadius: 3, border: '1px solid var(--border)', color: 'var(--text-secondary)', fontFamily: 'var(--font-num)' }}>{p.pos}</span>}
+                    <span title={`${p.nameEn !== p.name ? p.nameEn + ' · ' : ''}${p.pos ? (VB_POS_KO[p.pos] ?? p.pos) + ' · ' : ''}${p.baseNote}`} style={{ fontWeight: 700 }}>{p.name}</span>
+                    {p.kind && <span style={{ fontSize: 9, color: 'var(--gold)' }}>{p.kind === '외국인' ? '외' : '아쿼'}</span>}
                     {p.min != null && p.gp > 0 && <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{Math.round(p.min)}분</span>}
                     {(a.origin !== 'none' || a.label !== '출전') && (
                       <span style={{ fontSize: 10, fontWeight: 700, padding: '0 5px', borderRadius: 8, border: `1px solid ${availColor(a.prob)}`, color: availColor(a.prob) }}>
@@ -302,7 +320,8 @@ export default function PlayerOverall({ league, gameDate, home, away, left, odds
         : data === undefined ? <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>선수 오버롤 계산 중…</div> : null}
     </div>
   )
-  const H = teamStrength(data.home.players, ovr), A = teamStrength(data.away.players, ovr)
+  const vbG = data.code.startsWith('VLEAGUE')
+  const H = teamStrength(data.home.players, ovr, vbG), A = teamStrength(data.away.players, ovr, vbG)
   const diff = H.exp != null && A.exp != null ? Math.round((H.exp - A.exp) * 10) / 10 : null
   const signed = (v: number) => `${v > 0 ? '+' : ''}${v}`
   const hName = koName(home.name), aName = koName(away.name)

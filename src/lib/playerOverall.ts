@@ -30,6 +30,8 @@ export interface PlayerOv {
   fatigue: PlayerFatigue | null   // 개인 피로 (출전시간 부담)
   prev?: { date: string; base: number | null; form: number | null; overall: number | null; stamina: number | null } | null  // 지난 경기 때 수치 (player_ratings)
   avail: Avail
+  pos?: string | null       // 배구 포지션 (KOVO 명단: S 세터 · OH 아웃사이드 히터 · OP 아포짓 · MB 미들 블로커 · L 리베로)
+  kind?: string | null      // 배구 '외국인' · '아시아쿼터'
 }
 export interface TeamOv { team: string | null; players: PlayerOv[]; full: number | null; exp: number | null; stats: TeamStats | null }
 export interface TeamStats { n: number; pf: number; pa: number }
@@ -75,7 +77,7 @@ interface BaseRow extends SeasonRow { manual_base: number | null; note: string |
 interface RecentRow { player_id: string; n: number; gmsc5: number | null; min5: number | null }
 interface StatusRow { team: string; player_name: string; player_id: string | null; play_prob: number | null; status: string | null; confirmed: boolean | null; reason: string | null; source_title: string | null; source_url: string | null; checked_at: string }
 interface InjRow { player_id: string; player_name: string; team: string; status: string | null; short_comment: string | null; return_date: string | null; fetched_at: string }
-interface LeagueData { cur: SeasonRow[]; prev: BaseRow[]; recent: Map<string, RecentRow>; poolCur: number[]; poolPrev: number[]; names: Record<string, string>; teams: Map<string, TeamStats>; at: number }
+interface LeagueData { cur: SeasonRow[]; prev: BaseRow[]; recent: Map<string, RecentRow>; poolCur: number[]; poolPrev: number[]; names: Record<string, string>; teams: Map<string, TeamStats>; pos: Map<string, { position: string | null; kind: string | null }>; at: number }
 
 const cache = new Map<string, LeagueData>()
 const num = (v: unknown) => (v == null ? null : Number(v))
@@ -84,13 +86,16 @@ async function loadLeague(code: string): Promise<LeagueData> {
   const hit = cache.get(code)
   if (hit && Date.now() - hit.at < 10 * 60000) return hit
   const cur = seasonOf(dayjs().format('YYYY-MM-DD'))
-  const [a, b, c, nm, tg] = await Promise.all([
+  const [a, b, c, nm, tg, kp] = await Promise.all([
     supabase.from('v_player_season').select('player_id,player_name,team,gp,min,gmsc').eq('league', code).eq('season', cur).limit(2000),
     supabase.from('player_base').select('player_id,player_name,team,gp,min,gmsc,manual_base,note').eq('league', code).eq('season', prevSeasonOf(cur)).limit(2000),
     supabase.from('v_player_recent').select('player_id,n,gmsc5,min5').eq('league', code).limit(2000),
     supabase.from('player_names').select('name_en,name_ko').eq('league', code),
     code.startsWith('VLEAGUE') ? Promise.resolve({ data: [] }) : supabase.from('v_team_games').select('team,team_score,opp_score').eq('league', code).eq('season', cur).limit(3000),
+    // 배구 포지션 (kovo_players — 매일 04시 KOVO 명단으로 갱신)
+    code.startsWith('VLEAGUE') ? supabase.from('kovo_players').select('player_code,position,kind').eq('gender', code === 'VLEAGUE_M' ? 'MALE' : 'FEMALE').limit(1000) : Promise.resolve({ data: [] }),
   ])
+  const pos = new Map(((kp.data ?? []) as { player_code: string; position: string | null; kind: string | null }[]).map(r => [r.player_code, { position: r.position, kind: r.kind }]))
   // 한국어 이름: 앱에 넣어 둔 표(NBA) + Supabase player_names(새 선수) — 표에 없으면 원래 이름
   const names: Record<string, string> = { ...(code === 'NBA' ? NBA_NAMES_KO : {}) }
   ;((nm.data ?? []) as { name_en: string; name_ko: string }[]).forEach(r => { names[r.name_en] = r.name_ko })
@@ -108,7 +113,7 @@ async function loadLeague(code: string): Promise<LeagueData> {
   const poolCur = curRows.filter(r => r.gmsc != null && r.gp >= 3 && (vb || (r.min ?? 0) >= 12)).map(r => r.gmsc!).sort((x, y) => y - x)
   const poolPrev = prevRows.filter(r => r.gmsc != null && r.gp >= (vb ? 5 : 15) && (vb || (r.min ?? 0) >= 12)).map(r => r.gmsc!).sort((x, y) => y - x)
   const recent = new Map(((c.data ?? []) as RecentRow[]).map(r => [r.player_id, { ...r, gmsc5: num(r.gmsc5), min5: num(r.min5) }]))
-  const d = { cur: curRows, prev: prevRows, recent, poolCur, poolPrev, names, teams, at: Date.now() }
+  const d = { cur: curRows, prev: prevRows, recent, poolCur, poolPrev, names, teams, pos, at: Date.now() }
   cache.set(code, d)
   return d
 }
@@ -140,7 +145,7 @@ export async function loadGameOverall(league: string, gameDate: string, home: Sc
   const names = [hName, aName].filter((x): x is string => !!x)
   const cur = seasonOf(gameDate)
   const [g, st, inj, nw, tg] = await Promise.all([
-    names.length && !vb ? supabase.from('player_game_stats').select('game_id,game_date,team,player_id,minutes').eq('league', code).eq('season', cur).in('team', names).gte('game_date', dayjs(gameDate).subtract(45, 'day').format('YYYY-MM-DD')).limit(3000) : Promise.resolve({ data: [] }),
+    names.length ? supabase.from('player_game_stats').select('game_id,game_date,team,player_id,minutes').eq('league', code).eq('season', cur).in('team', names).gte('game_date', dayjs(gameDate).subtract(45, 'day').format('YYYY-MM-DD')).limit(3000) : Promise.resolve({ data: [] }),
     supabase.from('player_status').select('*').eq('league', code).eq('game_date', gameDate),
     code === 'NBA' && names.length ? supabase.from('nba_injuries').select('*').in('team', names) : Promise.resolve({ data: [] }),
     supabase.from('game_news').select('*').eq('league', code).eq('game_date', gameDate),
@@ -176,7 +181,15 @@ export async function loadGameOverall(league: string, gameDate: string, home: Sc
     const prevById = new Map(d.prev.map(r => [r.player_id, r]))
     const prevByName = new Map(d.prev.map(r => [norm(r.player_name), r]))
     // 명단: 이번 시즌 출전시간(배구는 기여도) 상위 10명 + 출전 확률이 있는 선수
-    const top = [...roster].sort((x, y) => vb ? (y.gmsc ?? 0) * y.gp - (x.gmsc ?? 0) * x.gp : (y.min ?? 0) * y.gp - (x.min ?? 0) * x.gp).slice(0, 10)
+    const byUse = [...roster].sort((x, y) => vb ? (y.gmsc ?? 0) * y.gp - (x.gmsc ?? 0) * x.gp : (y.min ?? 0) * y.gp - (x.min ?? 0) * x.gp)
+    // 배구: 포지션마다 주전·백업 후보가 빠지지 않게 (세터·리베로는 기여도 합이 작아 상위 10명에서 잘 빠진다) — 포지션별 몇 명씩 먼저, 나머지는 기여도 순으로 12명
+    const top = vb ? (() => {
+      const want: Record<string, number> = { S: 2, OP: 2, OH: 3, MB: 3, L: 2 }
+      const pick: SeasonRow[] = []
+      for (const [ps, k] of Object.entries(want)) pick.push(...byUse.filter(r => d.pos.get(r.player_id)?.position === ps).slice(0, k))
+      for (const r of byUse) { if (pick.length >= 12) break; if (!pick.includes(r)) pick.push(r) }
+      return pick
+    })() : byUse.slice(0, 10)
     const extra: SeasonRow[] = []
     const addExtra = (id: string | null, name: string) => {
       if ([...top, ...extra].some(p => p.player_id === id || norm(p.player_name) === norm(name))) return   // 부상 명단·출전 확률 양쪽에 있는 선수 두 번 넣지 않기
@@ -206,12 +219,14 @@ export async function loadGameOverall(league: string, gameDate: string, home: Sc
       // 출전 확률
       let avail: Avail = { prob: 100, label: '출전', origin: 'none' }
       // 경기 기록: 최근 결장 · 복귀
-      if (!vb && tGames.length) {
+      //  배구(사용자 요청 — 공식 부상 리포트가 없음): KOVO 누적 기록 차이로 만든 경기 기록에서, 팀이 뛴 경기에 그 선수 기록이 안 늘었으면 결장
+      if (tGames.length) {
         const pm = played.get(r.player_id) ?? new Map()
         let k = 0; while (k < tGames.length && pm.has(tGames[k])) k++
         let m = 0; while (k + m < tGames.length && !pm.has(tGames[k + m])) m++
         const seasonMin = c?.min ?? pb?.min ?? null
-        if (k === 0 && m >= 2 && (seasonMin ?? 0) >= 15) {
+        const regular = vb ? (c?.gp ?? 0) >= 3 : (seasonMin ?? 0) >= 15
+        if (k === 0 && m >= 2 && regular) {
           avail = { prob: 40, label: '불투명', origin: 'box', reason: `기록상 최근 ${m}경기 결장 (뉴스 확인 전)` }
         } else if (k > 0 && k <= 4 && m >= 2) {
           const recentMins = tGames.slice(0, k).map(id => pm.get(id)).filter((x): x is number => x != null)
@@ -235,7 +250,8 @@ export async function loadGameOverall(league: string, gameDate: string, home: Sc
       // 개인 피로: 직전 경기·최근 7일 출전시간 (뛴 경기만 — 결장 선수는 계산 안 함)
       const pm = played.get(r.player_id)
       const fatigue = !vb && pm && pm.size ? playerFatigue(code, c?.min ?? null, gameDate, pastRows.filter(x => x.team === team), pm) : null
-      return { id: r.player_id, name: d.names[r.player_name] ?? r.player_name, nameEn: r.player_name, gp: n, share, min: c?.min ?? pb?.min ?? null, base, form, overall, baseNote, avail, fatigue }
+      const pp = vb ? d.pos.get(r.player_id) : undefined
+      return { id: r.player_id, name: d.names[r.player_name] ?? r.player_name, nameEn: r.player_name, gp: n, share, min: c?.min ?? pb?.min ?? null, base, form, overall, baseNote, avail, fatigue, pos: pp?.position ?? null, kind: pp?.kind ?? null }
     }).sort((x, y) => (y.base ?? -1) - (x.base ?? -1) || (y.overall ?? -1) - (x.overall ?? -1))   // 체급 순 — 핵심 선수가 빠졌는지 바로 보이게
 
     const { full, exp } = teamStrength(players, {}, vb)
@@ -256,7 +272,8 @@ export async function loadGameOverall(league: string, gameDate: string, home: Sc
 /** 팀 오버롤: 출전시간 × 이번 시즌 출전 비중 가중 평균 (full = 다 뛸 때, exp = 출전 확률·개인 피로 반영 — 빠지는 만큼 대체 선수 50점).
  *  overrides = 화면에서 바꾼 출전 확률 (선수 id → 0~100) */
 export function teamStrength(players: PlayerOv[], overrides: Record<string, number>, vb = false): { full: number | null; exp: number | null } {
-  // 배구: 체급 순 상위 7명(주전) 1, 나머지 0.3 / 농구: 출전시간 × 이번 시즌 출전 비중
+  if (vb) { const l = volleyLineup(players, overrides); if (l) return { full: l.full, exp: l.exp } }
+  // 배구(포지션 모를 때): 체급 순 상위 7명(주전) 1, 나머지 0.3 / 농구: 출전시간 × 이번 시즌 출전 비중
   const vbW = new Map(players.filter(p => p.overall != null).map((p, i) => [p.id, i < 7 ? 1 : 0.3]))
   const wOf = (p: PlayerOv) => vb ? (vbW.get(p.id) ?? 0) : Math.max(5, p.min ?? 10) * p.share
   const rated = players.filter(p => p.overall != null && wOf(p) > 0)
@@ -268,6 +285,47 @@ export function teamStrength(players: PlayerOv[], overrides: Record<string, numb
   const eff = (p: PlayerOv) => p.overall! - PARAMS.fatigueK * (p.fatigue?.pen ?? 0)
   const exp = rated.reduce((a, p) => a + wOf(p) * (eff(p) * prob(p) + 50 * (1 - prob(p))), 0) / sw
   return { full: Math.round(full * 10) / 10, exp: Math.round(exp * 10) / 10 }
+}
+
+// ─── 배구 팀 전력 = 포지션별 주전 슬롯 (사용자 요청 2026-11-21) ─────
+// 같은 포지션에 잘하는 선수가 둘이어도 코트엔 정해진 수만 선다 → 포지션마다 주전 슬롯(세터 1·아포짓 1·아웃사이드 2·미들 2·리베로 1)을
+// 그 포지션 오버롤 높은 순으로 채운다. 출전 확률이 있으면 '앞 선수가 빠지면 다음 선수' 순서로 기대값, 다 빠지면 대체 50.
+// 팀 점수 = 슬롯 가중 평균(세터·아포짓 1.25, 아웃사이드 1, 미들 0.8, 리베로 0.6) − 균형 감점 0.5 × (평균보다 낮은 슬롯이 모자란 만큼의 가중 평균)
+//  → 아포짓이 전설이어도 세터가 일반이면 감점. 가중치·감점은 처음 정한 값 (검증 전).
+export const VB_SLOTS: { pos: string; label: string; n: number; w: number }[] = [
+  { pos: 'S', label: '세터', n: 1, w: 1.25 }, { pos: 'OP', label: '아포짓', n: 1, w: 1.25 }, { pos: 'OH', label: '아웃사이드', n: 2, w: 1.0 },
+  { pos: 'MB', label: '미들', n: 2, w: 0.8 }, { pos: 'L', label: '리베로', n: 1, w: 0.6 },
+]
+export const VB_POS_KO: Record<string, string> = { S: '세터', OP: '아포짓', OH: '아웃사이드', MB: '미들', L: '리베로' }
+const VB_BALANCE = 0.5
+export interface VolleySlot { pos: string; label: string; w: number; names: string[]; full: number; exp: number }
+export function volleyLineup(players: PlayerOv[], overrides: Record<string, number>): { full: number; exp: number; slots: VolleySlot[]; penFull: number; penExp: number } | null {
+  if (!players.some(p => p.pos)) return null
+  const slots: VolleySlot[] = []
+  for (const sl of VB_SLOTS) {
+    const cand = players.filter(p => p.pos === sl.pos && p.overall != null).sort((a, b) => b.overall! - a.overall!)
+    // 주전 n자리 기대값: 후보를 순서대로, 지금까지 채운 자리 수 분포를 따라가며 출전하면 다음 자리를 채운다
+    const fill = (prob: (p: PlayerOv) => number) => {
+      let dist: number[] = Array.from({ length: sl.n + 1 }, (_, i) => (i === 0 ? 1 : 0)); let sum = 0
+      for (const p of cand) {
+        const q = prob(p), nd = dist.slice()
+        for (let k = 0; k < sl.n; k++) { const add = dist[k] * q; sum += add * p.overall!; nd[k] -= add; nd[k + 1] += add }
+        dist = nd
+      }
+      const empty = dist.reduce((a, x, k) => a + x * (sl.n - k), 0)   // 못 채운 자리 = 대체 선수 50
+      return (sum + empty * 50) / sl.n
+    }
+    const full = fill(() => 1), exp = fill(p => (overrides[p.id] ?? p.avail.prob) / 100)
+    slots.push({ pos: sl.pos, label: sl.label, w: sl.w * sl.n, names: cand.slice(0, sl.n).map(p => p.name), full: Math.round(full * 10) / 10, exp: Math.round(exp * 10) / 10 })
+  }
+  const score = (key: 'full' | 'exp') => {
+    const sw = slots.reduce((a, s) => a + s.w, 0)
+    const mean = slots.reduce((a, s) => a + s.w * s[key], 0) / sw
+    const pen = VB_BALANCE * slots.reduce((a, s) => a + s.w * Math.max(0, mean - s[key]), 0) / sw
+    return { v: Math.round((mean - pen) * 10) / 10, pen: Math.round(pen * 10) / 10 }
+  }
+  const f = score('full'), e = score('exp')
+  return { full: f.v, exp: e.v, slots, penFull: f.pen, penExp: e.pen }
 }
 
 // ─── 예상 스코어 시뮬레이션 (농구) ─────
