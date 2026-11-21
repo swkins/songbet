@@ -5,6 +5,7 @@ import { applyNumericTemplate } from '../lib/betOptions'
 import type { Site } from '../types'
 import { supabase } from '../lib/supabase'
 import GameAnalysisModal from './GameAnalysisModal'
+import { loadOdds, type OddsSnap } from '../lib/odds'
 
 // ─── 대시보드 '베팅' 모드 (초안) ──────────────────────────────────
 // 가져온 경기 일정(game_schedules)을 보고 바로 베팅한다.
@@ -56,6 +57,12 @@ export default function BetModePanel({ target, onTargetDone, sites, betOptionsBy
   const orderedSites = [...sites].sort((a, b) => Number(b.active) - Number(a.active) || a.sort_order - b.sort_order)
 
   useEffect(() => { loadSchedules().then(r => { setRows(r); setLoading(false) }).catch(() => setLoading(false)) }, [])
+  // 경기 목록 팀 이름 옆 현재 배당 (사용자 요청 — 최신 odds_snapshots, 축구는 무배당도) · 5분마다 다시
+  const [odds, setOdds] = useState<Record<string, OddsSnap>>({})
+  useEffect(() => {
+    const load = () => loadOdds(dayjs().subtract(1, 'day').format('YYYY-MM-DD')).then(m => setOdds(Object.fromEntries(Object.entries(m).map(([k, v]) => [k, v[v.length - 1]])))).catch(() => {})
+    load(); const t = setInterval(load, 5 * 60000); return () => clearInterval(t)
+  }, [])
   // 분석 탭에서 넘어온 경기: 일정을 다 불러온 뒤 종목·리그·경기를 골라 베팅슬립을 연다
   const [targetMsg, setTargetMsg] = useState<string | null>(null)
   const [preset, setPreset] = useState<{ gameId: string; p: BetPreset } | null>(null)
@@ -176,9 +183,21 @@ export default function BetModePanel({ target, onTargetDone, sites, betOptionsBy
                       <div style={{ position: 'relative' }}>
                       <button type="button" onClick={() => { setGameId(g.id); setAddSiteId(null) }} style={{ ...item(gameId === g.id), width: '100%', display: 'flex', flexDirection: 'column', gap: 2, paddingRight: gameId === g.id ? 40 : undefined }}>
                         <span style={{ fontSize: 10, fontWeight: 700, color: live ? 'var(--gold)' : 'var(--text-muted)', fontFamily: 'var(--font-num)' }}>{live ? '● 경기중' : d.format('HH:mm')}{!league && <span style={{ fontWeight: 600, fontFamily: 'var(--font-body)', marginLeft: 6 }}>{g.league}</span>}</span>
-                        {/* 위 = 홈, 아래 = 원정 */}
-                        <span style={{ fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{koName(g.home.name)}</span>
-                        <span style={{ fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{koName(g.away.name)}</span>
+                        {/* 위 = 홈, 아래 = 원정 — 이름 옆 현재 배당, 축구는 가운데 줄에 무배당 (1·X·2 순) */}
+                        {(() => {
+                          const o = odds[g.id]
+                          const row = (name: string, v: number | null | undefined, small = false) => (
+                            <span style={{ display: 'flex', alignItems: 'baseline', gap: 6, minWidth: 0 }}>
+                              <span style={{ fontWeight: small ? 400 : 700, fontSize: small ? 10 : undefined, color: small ? 'var(--text-muted)' : undefined, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }}>{name}</span>
+                              {v != null && <span style={{ fontFamily: 'var(--font-num)', fontWeight: 700, fontSize: small ? 10 : 11, color: small ? 'var(--text-muted)' : 'var(--text-secondary)', flexShrink: 0 }}>{Number(v).toFixed(2)}</span>}
+                            </span>
+                          )
+                          return <>
+                            {row(koName(g.home.name), o?.home_odds)}
+                            {g.sport === 'soccer' && o?.draw_odds != null && row('무', o.draw_odds, true)}
+                            {row(koName(g.away.name), o?.away_odds)}
+                          </>
+                        })()}
                       </button>
                       {/* 고른 경기만 오른쪽에 '분석 보기' 아이콘 (사용자 요청 — 베팅슬립이 아니라 경기 일정 쪽에) */}
                       {gameId === g.id && (

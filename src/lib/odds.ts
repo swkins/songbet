@@ -11,9 +11,15 @@ export interface OddsSnap {
 
 /** fromDate(KST) 이후 경기의 배당 기록 → 경기 id별, 오래된 것부터 */
 export async function loadOdds(fromDate: string): Promise<Record<string, OddsSnap[]>> {
-  const { data } = await supabase.from('odds_snapshots').select('*').gte('game_date', fromDate).order('fetched_at')
+  // 한 번에 1,000줄까지만 와서(축구 리그가 늘어 하루치가 1,000줄 가까이) 나눠 받는다 — 안 그러면 최신 배당이 잘린다
+  const data: OddsSnap[] = []
+  for (let i = 0; i < 20000; i += 1000) {
+    const { data: page } = await supabase.from('odds_snapshots').select('*').gte('game_date', fromDate).order('fetched_at').order('id').range(i, i + 999)
+    data.push(...((page ?? []) as OddsSnap[]))
+    if (!page || page.length < 1000) break
+  }
   const out: Record<string, OddsSnap[]> = {}
-  for (const r of (data ?? []) as OddsSnap[]) {
+  for (const r of data) {
     const s = { ...r, home_odds: num(r.home_odds), away_odds: num(r.away_odds), open_home: num(r.open_home), open_away: num(r.open_away), draw_odds: num(r.draw_odds), open_draw: num(r.open_draw), home_tickets: num(r.home_tickets) }
     ;(out[r.game_id] ??= []).push(s)
   }

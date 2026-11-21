@@ -1,6 +1,6 @@
 import dayjs from 'dayjs'
 import { supabase } from './supabase'
-import { koName, type ScheduleTeam } from './gameSchedule'
+import { koName, type ScheduleTeam, type ScheduleGame } from './gameSchedule'
 import { NBA_NAMES_KO } from '../data/nbaNamesKo'
 import { predictVolley, type VolleyResult } from './volleyPredict'
 import { NBA_PRIOR, NBA_PRIOR_AVG_TOTAL } from '../data/nbaRatingPrior'
@@ -170,16 +170,28 @@ export async function loadGameOverall(league: string, gameDate: string, home: Sc
   const hName = matchTeam(home, teams), aName = matchTeam(away, teams)
   const names = [hName, aName].filter((x): x is string => !!x)
   const cur = seasonOf(gameDate)
-  const [g, st, inj, nw, tg] = await Promise.all([
+  const [g, st, inj, nw, tg, sch] = await Promise.all([
     names.length ? supabase.from('player_game_stats').select('game_id,game_date,team,player_id,minutes').eq('league', code).eq('season', cur).in('team', names).gte('game_date', dayjs(gameDate).subtract(45, 'day').format('YYYY-MM-DD')).limit(3000) : Promise.resolve({ data: [] }),
     supabase.from('player_status').select('*').eq('league', code).eq('game_date', gameDate),
     code === 'NBA' && names.length ? supabase.from('nba_injuries').select('*').in('team', names) : Promise.resolve({ data: [] }),
     supabase.from('game_news').select('*').eq('league', code).eq('game_date', gameDate),
     names.length && !vb ? supabase.from('v_team_games').select('team,game_id,game_date,is_home,opp,team_min,team_score,opp_score').eq('league', code).in('team', names)
       .gte('game_date', dayjs(gameDate).subtract(10, 'day').format('YYYY-MM-DD')).lt('game_date', gameDate) : Promise.resolve({ data: [] }),
+    // 일정 (2026-11-21 — 선수 기록은 다음 날 새벽에 들어와서, 어제 한 경기가 v_team_games에 아직 없으면 백투백을 못 잡았다: KB스타즈 토·일)
+    names.length && !vb ? supabase.from('game_schedules').select('game_date,games').eq('league', league)
+      .gte('game_date', dayjs(gameDate).subtract(10, 'day').format('YYYY-MM-DD')).lt('game_date', gameDate) : Promise.resolve({ data: [] }),
   ])
-  // 팀 컨디션 % (백투백·이동 거리·일정 밀도·원정 연전)
+  // 팀 컨디션 % (백투백·이동 거리·일정 밀도·원정 연전) — 경기 기록 + 기록이 아직 없는 날은 일정으로 채움 (연장은 기록이 있어야 앎)
   const pastRows = (tg.data ?? []) as (PastGame & { team: string })[]
+  for (const r of (sch.data ?? []) as { game_date: string; games: ScheduleGame[] }[]) for (const x of r.games ?? []) {
+    if (x.status && /취소|연기|postpon|cancel/i.test(x.status)) continue
+    for (const [me, op, home] of [[x.home, x.away, true], [x.away, x.home, false]] as const) {
+      const t = matchTeam(me, names); if (!t) continue
+      if (pastRows.some(p => p.team === t && p.game_date === r.game_date)) continue
+      const sc = (v: unknown) => v == null || v === '' || isNaN(Number(v)) ? null : Number(v)
+      pastRows.push({ team: t, game_date: r.game_date, is_home: home, opp: matchTeam(op, teams) ?? op.name ?? null, game_id: x.id, team_min: null, team_score: sc(me.score), opp_score: sc(op.score) })
+    }
+  }
   const cond = hName && aName && !vb ? {
     home: teamCondition(code, hName, true, hName, gameDate, pastRows.filter(r => r.team === hName)),
     away: teamCondition(code, aName, false, hName, gameDate, pastRows.filter(r => r.team === aName)),
