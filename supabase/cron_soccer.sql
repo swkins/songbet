@@ -64,8 +64,8 @@ end $$;
 --  주기: 5대 리그 40~100분, 나머지 60~120분, 오늘·내일 경기 없으면 150~240분 / 나머지 180~300분, 차단이면 90~120분.
 insert into public.odds_jobs (league, job) values
   ('챔피언쉽','collect-soccer-eng2'),('잉글랜드 리그1','collect-soccer-eng3'),('라리가2','collect-soccer-esp2'),('세리에B','collect-soccer-ita2'),
-  ('분데스리가2','collect-soccer-ger2'),('리그2','collect-soccer-fra2'),('네덜란드','collect-soccer-ned'),('포르투갈 1부','collect-soccer-por'),
-  ('벨기에','collect-soccer-bel'),('터키','collect-soccer-tur'),('그리스','collect-soccer-gre'),('덴마크','collect-soccer-den'),('오스트리아','collect-soccer-aut'),
+  ('분데스리가2','collect-soccer-ger2'),('리그2','collect-soccer-fra2'),('에레디비시','collect-soccer-ned'),('프리메이라리가','collect-soccer-por'),
+  ('쥬필러리그','collect-soccer-bel'),('터키','collect-soccer-tur'),('그리스','collect-soccer-gre'),('덴마크','collect-soccer-den'),('오스트리아','collect-soccer-aut'),
   ('스코틀랜드','collect-soccer-sco'),('스웨덴','collect-soccer-swe'),('미국','collect-soccer-usa'),('멕시코','collect-soccer-mex'),('브라질','collect-soccer-bra'),
   ('아르헨티나','collect-soccer-arg'),('J리그1','collect-soccer-jpn1'),('호주','collect-soccer-aus'),('중국','collect-soccer-chn'),
   ('네이션스 리그','collect-soccer-nations'),('국제 친선 경기','collect-soccer-intl'),('친선경기','collect-soccer-club'),

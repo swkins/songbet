@@ -408,7 +408,6 @@ function BasketSlip({ game, sites, registered, onBet }: {
   }, [ml, predMargin, spread, game.league, volley])
   const lines = volley ? VOLLEY_LINES : handicapLines(est?.margin ?? 4.5)
   const favSide: 'home' | 'away' = est ? (est.favHome ? 'home' : 'away') : 'home'
-  const dogSide: 'home' | 'away' = favSide === 'home' ? 'away' : 'home'
 
   const [pick, setPick] = useState<BPick | null>(null)
   const [siteId, setSiteId] = useState<string>(orderedSites[0]?.id ?? '')
@@ -462,7 +461,7 @@ function BasketSlip({ game, sites, registered, onBet }: {
   const label: React.CSSProperties = { fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', margin: '10px 0 4px' }
   const isWin = (side: 'home' | 'away') => pick?.kind === 'win' && pick.side === side
   const isH = (side: 'home' | 'away', line: number) => pick?.kind === 'hcap' && pick.side === side && pick.line === line
-  // 핸디캡은 세로로 (사용자 요청): 정배 마핸 칸 | 역배 플핸 칸
+  // 핸디캡은 세로로 (사용자 요청): 홈 칸 | 원정 칸 — 정배 쪽이 마핸(-), 역배 쪽이 플핸(+)
   const hCol = (side: 'home' | 'away', sign: '-' | '+') => (
     <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
       <span style={{ fontSize: 11, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -495,9 +494,10 @@ function BasketSlip({ game, sites, registered, onBet }: {
         핸디캡 <span style={{ fontWeight: 400 }}>{volley ? (est?.src ? `(${est.src} 기준 정배 = ${teamOf(favSide)})` : '(배당 없음 — 홈을 정배로)')
           : est ? `(${est.src} 기준 기준점 약 ${est.margin}점 → ${lines[0]}~${lines[lines.length - 1]})` : '(배당 없음 — 기본 기준점)'}</span>
       </div>
+      {/* 좌 = 홈, 우 = 원정 (사용자 요청 2026-11-21 — 정배/역배 순이 아니라 홈/원정 순, 마핸·플핸은 각 칸 제목에) */}
       <div style={{ display: 'flex', gap: 6 }}>
-        {hCol(favSide, '-')}
-        {hCol(dogSide, '+')}
+        {hCol('home', favSide === 'home' ? '-' : '+')}
+        {hCol('away', favSide === 'away' ? '-' : '+')}
       </div>
 
       {volley && <>

@@ -89,12 +89,16 @@ export function upcomingForBet(rows: ScheduleRow[], registered: { league: string
 // 리그 순서 (사용자 요청): 축구는 5대 리그를 맨 위(이 순서), 그다음 K리그·J리그, 농구는 NBA를 맨 위, 나머지는 가나다순 — 분석 탭·베팅 모드 공용
 // 축구 리그 이름 (2026-11-21 사용자 요청으로 바꿈): 잉글랜드 1부 → 프리미어리그 … 일본 2부 → J리그2, 잉글랜드 3부 → 잉글랜드 리그1
 const TOP_LEAGUES: Record<string, string[]> = {
-  soccer: ['프리미어리그', '라리가', '세리에A', '분데스리가', '리그1', 'K리그1', 'K리그2', 'J리그1', 'J리그2'],
+  // 5대 리그 → 프리메이라리가·쥬필러리그·에레디비시 → 2부 리그 → K리그·J리그 → 나머지 가나다순 (사용자 요청 2026-11-21)
+  soccer: ['프리미어리그', '라리가', '세리에A', '분데스리가', '리그1', '프리메이라리가', '쥬필러리그', '에레디비시',
+    '챔피언쉽', '라리가2', '세리에B', '분데스리가2', '리그2', '잉글랜드 리그1', 'K리그1', 'K리그2', 'J리그1', 'J리그2'],
   basketball: ['NBA'],
 }
-/** 리그 이름 가나다순 — K리그·J리그(영문 시작)는 맨 위 (사용자 요청 2026-11-21, 'ko' 정렬은 영문을 맨 뒤로 보내서) */
+/** 리그 이름 순서 — 축구는 TOP_LEAGUES 순서 먼저, 그다음 K리그·J리그(영문 시작 — 'ko' 정렬은 영문을 맨 뒤로 보내서), 나머지 가나다순 (사용자 요청 2026-11-21) */
 export function leagueNameCompare(a: string, b: string): number {
-  const r = (x: string) => x.startsWith('K리그') ? 0 : x.startsWith('J리그') ? 1 : 2
+  // 축구 리그는 분석 탭과 같은 순서(TOP_LEAGUES.soccer), 그 밖은 K리그·J리그 먼저 → 가나다순
+  const top = TOP_LEAGUES.soccer
+  const r = (x: string) => { const i = top.indexOf(x); return i >= 0 ? i : top.length + (x.startsWith('K리그') ? 0 : x.startsWith('J리그') ? 1 : 2) }
   return r(a) - r(b) || a.localeCompare(b, 'ko')
 }
 export function sortLeagues(sport: string, leagues: string[]): string[] {
