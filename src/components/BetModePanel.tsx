@@ -4,6 +4,7 @@ import { loadSchedules, gameState, resolveTeamName, koName, type ScheduleRow, ty
 import { applyNumericTemplate } from '../lib/betOptions'
 import type { Site } from '../types'
 import { supabase } from '../lib/supabase'
+import GameAnalysisModal from './GameAnalysisModal'
 
 // ─── 대시보드 '베팅' 모드 (초안) ──────────────────────────────────
 // 가져온 경기 일정(game_schedules)을 보고 바로 베팅한다.
@@ -30,7 +31,7 @@ type Pick = 'home' | 'away' | 'game'
 export interface BetTarget { sport: string; league: string; gameId: string; at?: number; preset?: BetPreset }
 /** 룰북 베팅 찾기에서 넘어올 때 슬립을 미리 채운다 (대상 홈/원정, 옵션 문구 '승리'·'0.5 H'·'-1.5 H' 등, 배당) */
 export interface BetPreset { side: 'home' | 'away'; opt: string; odds: number | null }
-interface Game extends ScheduleGame { sport: string; league: string }
+interface Game extends ScheduleGame { sport: string; league: string; date: string }
 
 export default function BetModePanel({ target, onTargetDone, sites, betOptionsBySport, numericBetOptionsBySport, teamsBySport, onBet, renderAddForm }: {
   target?: BetTarget | null
@@ -50,6 +51,7 @@ export default function BetModePanel({ target, onTargetDone, sites, betOptionsBy
   const [gameId, setGameId] = useState<string | null>(null)
   const [addOpen, setAddOpen] = useState(false)          // 베팅추가: 사이트 고르는 중
   const [addSiteId, setAddSiteId] = useState<string | null>(null)
+  const [showAnalysis, setShowAnalysis] = useState(false)   // 베팅슬립 '분석 보기' — 분석 탭 자료를 가운데 큰 창으로
   const addSite = sites.find(s => s.id === addSiteId) ?? null
   const orderedSites = [...sites].sort((a, b) => Number(b.active) - Number(a.active) || a.sort_order - b.sort_order)
 
@@ -59,7 +61,7 @@ export default function BetModePanel({ target, onTargetDone, sites, betOptionsBy
   const [preset, setPreset] = useState<{ gameId: string; p: BetPreset } | null>(null)
   useEffect(() => {
     if (!target || loading) return
-    const g = rows.flatMap(r => r.games.map(x => ({ ...x, sport: r.sport, league: r.league }))).find(x => x.id === target.gameId)
+    const g = rows.flatMap(r => r.games.map(x => ({ ...x, sport: r.sport, league: r.league, date: r.game_date }))).find(x => x.id === target.gameId)
     setSport(target.sport); setLeague(target.league); setAddSiteId(null); setAddOpen(false)
     if (g && gameState(g) !== 'ended') { setGameId(g.id); setTargetMsg(null); setPreset(target.preset ? { gameId: g.id, p: target.preset } : null) }
     else { setGameId(null); setTargetMsg(g ? '이미 끝난 경기라 베팅슬립을 열 수 없어요' : '그 경기를 일정에서 못 찾았어요') }
@@ -69,7 +71,7 @@ export default function BetModePanel({ target, onTargetDone, sites, betOptionsBy
   // 끝나지 않은 경기만
   const games: Game[] = useMemo(() => {
     const now = Date.now()
-    return rows.flatMap(r => r.games.map(g => ({ ...g, sport: r.sport, league: r.league })))
+    return rows.flatMap(r => r.games.map(g => ({ ...g, sport: r.sport, league: r.league, date: r.game_date })))
       .filter(g => gameState(g, now) !== 'ended')
       .sort((a, b) => a.start.localeCompare(b.start))
   }, [rows])
@@ -185,7 +187,14 @@ export default function BetModePanel({ target, onTargetDone, sites, betOptionsBy
 
           {/* 3. 베팅옵션 */}
           <div style={{ minWidth: 0 }}>
-            <div style={head}>{addSite ? `베팅추가 · ${addSite.name}` : '베팅슬립'}</div>
+            <div style={{ ...head, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span>{addSite ? `베팅추가 · ${addSite.name}` : '베팅슬립'}</span>
+              {!addSite && game && (
+                <button type="button" onClick={() => setShowAnalysis(true)}
+                  style={{ marginLeft: 'auto', fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--gold-border)', background: 'var(--gold-bg)', color: 'var(--gold)', cursor: 'pointer', fontFamily: 'var(--font-body)' }}>📊 분석 보기</button>
+              )}
+            </div>
+            {showAnalysis && game && <GameAnalysisModal g={game} onClose={() => setShowAnalysis(false)} />}
             {addSite && renderAddForm ? renderAddForm(addSite, () => setAddSiteId(null))
               : !game ? <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: 6 }}>경기를 고르면 여기서 베팅합니다</div>
               : game.sport === 'basketball' || game.sport === 'volleyball'
