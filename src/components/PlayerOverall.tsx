@@ -300,7 +300,7 @@ function TeamTable({ title, t, ovr, onCycle, cond }: { title: string; t: TeamOv;
   )
 }
 
-// 배치: 좌(좁게) = left(배당 변동) + 예상 스코어 · 우(넓게) = 선수 오버롤·출전 확률 · 아래 = 뉴스
+// 배치 (사용자 요청 2026-11-21): 맨 위 뉴스 → 예상 스코어(가로로 길게) → 아래 좌(좁게) = left(배당 변동) + 팀 컨디션 · 우(넓게) = 선수 오버롤·출전 확률
 export default function PlayerOverall({ league, gameDate, home, away, left, odds, lines }: { league: string; gameDate: string; home: ScheduleTeam; away: ScheduleTeam; left?: React.ReactNode; odds?: { home: number; away: number } | null; lines?: { spread: OddsLine | null; total: OddsLine | null } | null }) {
   const [data, setData] = useState<GameOverall | null | undefined>(undefined)
   const [err, setErr] = useState<string | null>(null)
@@ -338,52 +338,68 @@ export default function PlayerOverall({ league, gameDate, home, away, left, odds
   const changed = Object.keys(ovr).length
   return (
     <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-        {/* 좌: 배당 변동 + 예상 스코어 */}
-        <div style={{ flex: '1 1 300px', maxWidth: 420, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {left}
-          {/* 예상 스코어 — 선수 오버롤·출전 확률·뉴스 보정으로 2만 번 시뮬레이션. 출전 칸을 누르면 바로 다시 계산 */}
-          {sim && (
-            <div style={{ ...box, borderColor: 'var(--gold-border)' }}>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
-                <span style={{ fontSize: 13, fontWeight: 800 }}>예상 스코어</span>
-                <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>오버롤·출전 확률·이번 시즌 득실로 2만 번 시뮬레이션{changed ? ` · 가정 ${changed}명 적용 중` : ''}</span>
-                {changed > 0 && <button type="button" onClick={() => setOvr({})} style={{ marginLeft: 'auto', fontSize: 10, background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-secondary)', cursor: 'pointer', padding: '1px 6px' }}>가정 지우기</button>}
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
-                {[
-                  ['스코어 (홈-원정)', `${sim.home} - ${sim.away}`, `${hName} - ${aName}`],
-                  ['홈 승률', `${sim.homeWin}%`, `원정 ${Math.round((100 - sim.homeWin) * 10) / 10}%`],
-                  ['예상 마진 (홈)', signed(sim.margin), `80% 구간 ${signed(sim.p10)} ~ ${signed(sim.p90)}`],
-                  ['예상 총점', String(sim.total), sim.parts.model != null ? (sim.parts.marketTotal != null ? `시장 ${sim.parts.marketTotal} · 모델 ${sim.parts.modelTotal}` : `모델 ${sim.parts.modelTotal} (기준점 없음)`) : '두 팀 이번 시즌 득실 기준'],
-                ].map(([k, v, sub]) => (
-                  <div key={k} style={{ textAlign: 'center', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '6px 4px', background: 'var(--bg-card)' }}>
-                    <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{k}</div>
-                    <div style={{ fontSize: 18, fontWeight: 800, fontFamily: 'var(--font-num)' }}>{v}</div>
-                    <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{sub}</div>
-                  </div>
-                ))}
-              </div>
-              {/* 기준점 대비 마핸/플핸 · 오버/언더 (NBA, 사용자 요청 — 승패가 아니라 기준점을 맞혀야 한다) */}
-              {lines && (lines.spread || lines.total) && <LinePickBox sim={sim} lines={lines} sd={getParams().leagues[data.code]?.sd ?? 13.5} sdT={getParams().leagues[data.code]?.sdT ?? 18} hName={hName} aName={aName} />}
-              {sim.parts.model != null ? (
-              <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 6, lineHeight: 1.6 }}>
-                {sim.parts.market != null
-                  ? <>마진 = 시장 {signed(sim.parts.market)} × {sim.parts.wMarket} + 우리 모델 {signed(sim.parts.model)} × {Math.round((1 - (sim.parts.wMarket ?? 0.8)) * 10) / 10}</>
-                  : <>마진 = 우리 모델 {signed(sim.parts.model)} (기준점 없음)</>}
-                {' '}· 우리 모델 = 팀 레이팅 차 {signed(sim.parts.rating ?? 0)} + 홈 {signed(sim.parts.hca)} + 결장·개인 피로 {signed(sim.parts.injury)}{sim.parts.cond ? <> + 컨디션 차 {signed(sim.parts.cond)}</> : null}
-                {sim.parts.news ? <> + 뉴스 보정 {signed(sim.parts.news)}{data.news?.adj_note ? ` (${data.news.adj_note})` : ''}</> : null}
-                {' '}· 팀 레이팅 = 지난 시즌 끝 × 0.8에서 시작해 이번 시즌 경기마다 상대 보정해 고침 · 선수 출전 칸을 누르면 결장/출전으로 바꿔 다시 계산
-              </div>) : (
-              <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 6, lineHeight: 1.6 }}>
-                마진 = 득실 마진 {signed(sim.parts.scoreMargin)} × {getParams().leagues[data.code]?.wScore} + 오버롤 차 {signed(sim.parts.ovMargin)} × {getParams().leagues[data.code]?.wOv} + 결장·개인 피로 {signed(sim.parts.injury)} + 홈 {signed(sim.parts.hca)}{sim.parts.cond ? <> + 컨디션 차 {signed(sim.parts.cond)}</> : null}
-                {sim.parts.news ? <> + 뉴스 보정 {signed(sim.parts.news)}{data.news?.adj_note ? ` (${data.news.adj_note})` : ''}</> : null}
-                {' '}· 선수 출전 칸을 누르면 결장/출전으로 바꿔 다시 계산
-              </div>)}
+      {/* 뉴스 — 경기 관련 기사 요약 (맨 위, 사용자 요청) */}
+      <div style={box}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 4 }}>
+          <span style={{ fontSize: 12, fontWeight: 800 }}>뉴스</span>
+          {data.news && <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{dayjs(data.news.checked_at).format('M/D HH:mm')} 확인</span>}
+        </div>
+        {!data.news ? <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>이 경기 기사 요약이 아직 없어요</div> : <>
+          <div style={{ fontSize: 12, lineHeight: 1.6 }}>{data.news.summary}</div>
+          {(data.news.items?.length ?? 0) > 0 && (
+            <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4, lineHeight: 1.7 }}>
+              {data.news.items!.map((it, i) => <span key={i}>{i > 0 && ' · '}{it.url ? <a href={it.url} target="_blank" rel="noreferrer" style={{ color: 'var(--text-muted)' }}>{it.title}</a> : it.title}</span>)}
             </div>
           )}
+        </>}
+      </div>
+      {/* 예상 스코어 — 가로로 길게 (사용자 요청) */}
+      {/* 예상 스코어 — 선수 오버롤·출전 확률·뉴스 보정으로 2만 번 시뮬레이션. 출전 칸을 누르면 바로 다시 계산 */}
+      {sim && (
+        <div style={{ ...box, borderColor: 'var(--gold-border)' }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
+            <span style={{ fontSize: 13, fontWeight: 800 }}>예상 스코어</span>
+            <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>오버롤·출전 확률·이번 시즌 득실로 2만 번 시뮬레이션{changed ? ` · 가정 ${changed}명 적용 중` : ''}</span>
+            {changed > 0 && <button type="button" onClick={() => setOvr({})} style={{ marginLeft: 'auto', fontSize: 10, background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-secondary)', cursor: 'pointer', padding: '1px 6px' }}>가정 지우기</button>}
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 6 }}>
+            {[
+              ['스코어 (홈-원정)', `${sim.home} - ${sim.away}`, `${hName} - ${aName}`],
+              ['홈 승률', `${sim.homeWin}%`, `원정 ${Math.round((100 - sim.homeWin) * 10) / 10}%`],
+              ['예상 마진 (홈)', signed(sim.margin), `80% 구간 ${signed(sim.p10)} ~ ${signed(sim.p90)}`],
+              ['예상 총점', String(sim.total), sim.parts.model != null ? (sim.parts.marketTotal != null ? `시장 ${sim.parts.marketTotal} · 모델 ${sim.parts.modelTotal}` : `모델 ${sim.parts.modelTotal} (기준점 없음)`) : '두 팀 이번 시즌 득실 기준'],
+            ].map(([k, v, sub]) => (
+              <div key={k} style={{ textAlign: 'center', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '6px 4px', background: 'var(--bg-card)' }}>
+                <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{k}</div>
+                <div style={{ fontSize: 18, fontWeight: 800, fontFamily: 'var(--font-num)' }}>{v}</div>
+                <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{sub}</div>
+              </div>
+            ))}
+          </div>
+          {/* 기준점 대비 마핸/플핸 · 오버/언더 (NBA, 사용자 요청 — 승패가 아니라 기준점을 맞혀야 한다) */}
+          {lines && (lines.spread || lines.total) && <LinePickBox sim={sim} lines={lines} sd={getParams().leagues[data.code]?.sd ?? 13.5} sdT={getParams().leagues[data.code]?.sdT ?? 18} hName={hName} aName={aName} />}
+          {sim.parts.model != null ? (
+          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 6, lineHeight: 1.6 }}>
+            {sim.parts.market != null
+              ? <>마진 = 시장 {signed(sim.parts.market)} × {sim.parts.wMarket} + 우리 모델 {signed(sim.parts.model)} × {Math.round((1 - (sim.parts.wMarket ?? 0.8)) * 10) / 10}</>
+              : <>마진 = 우리 모델 {signed(sim.parts.model)} (기준점 없음)</>}
+            {' '}· 우리 모델 = 팀 레이팅 차 {signed(sim.parts.rating ?? 0)} + 홈 {signed(sim.parts.hca)} + 결장·개인 피로 {signed(sim.parts.injury)}{sim.parts.cond ? <> + 컨디션 차 {signed(sim.parts.cond)}</> : null}
+            {sim.parts.news ? <> + 뉴스 보정 {signed(sim.parts.news)}{data.news?.adj_note ? ` (${data.news.adj_note})` : ''}</> : null}
+            {' '}· 팀 레이팅 = 지난 시즌 끝 × 0.8에서 시작해 이번 시즌 경기마다 상대 보정해 고침 · 선수 출전 칸을 누르면 결장/출전으로 바꿔 다시 계산
+          </div>) : (
+          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 6, lineHeight: 1.6 }}>
+            마진 = 득실 마진 {signed(sim.parts.scoreMargin)} × {getParams().leagues[data.code]?.wScore} + 오버롤 차 {signed(sim.parts.ovMargin)} × {getParams().leagues[data.code]?.wOv} + 결장·개인 피로 {signed(sim.parts.injury)} + 홈 {signed(sim.parts.hca)}{sim.parts.cond ? <> + 컨디션 차 {signed(sim.parts.cond)}</> : null}
+            {sim.parts.news ? <> + 뉴스 보정 {signed(sim.parts.news)}{data.news?.adj_note ? ` (${data.news.adj_note})` : ''}</> : null}
+            {' '}· 선수 출전 칸을 누르면 결장/출전으로 바꿔 다시 계산
+          </div>)}
+        </div>
+      )}
+      {vsim && <VolleyBox v={vsim} hName={hName} aName={aName} changed={changed} onReset={() => setOvr({})} odds={odds} />}
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+        {/* 좌: 배당 변동 · 팀 컨디션 */}
+        <div style={{ flex: '1 1 300px', maxWidth: 420, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {left}
           {data.cond && <ConditionBox home={data.cond.home} away={data.cond.away} hName={hName} aName={aName} />}
-          {vsim && <VolleyBox v={vsim} hName={hName} aName={aName} changed={changed} onReset={() => setOvr({})} odds={odds} />}
         </div>
         {/* 우: 선수 오버롤 · 출전 확률 */}
         <div style={{ flex: '3 1 560px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -407,21 +423,6 @@ export default function PlayerOverall({ league, gameDate, home, away, left, odds
         </div>
       </div>
 
-      {/* 뉴스 — 경기 관련 기사 요약 (맨 아래) */}
-      <div style={box}>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 4 }}>
-          <span style={{ fontSize: 12, fontWeight: 800 }}>뉴스</span>
-          {data.news && <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{dayjs(data.news.checked_at).format('M/D HH:mm')} 확인</span>}
-        </div>
-        {!data.news ? <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>이 경기 기사 요약이 아직 없어요</div> : <>
-          <div style={{ fontSize: 12, lineHeight: 1.6 }}>{data.news.summary}</div>
-          {(data.news.items?.length ?? 0) > 0 && (
-            <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4, lineHeight: 1.7 }}>
-              {data.news.items!.map((it, i) => <span key={i}>{i > 0 && ' · '}{it.url ? <a href={it.url} target="_blank" rel="noreferrer" style={{ color: 'var(--text-muted)' }}>{it.title}</a> : it.title}</span>)}
-            </div>
-          )}
-        </>}
-      </div>
     </div>
   )
 }
