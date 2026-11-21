@@ -24,8 +24,8 @@ const ALIAS: Record<string, [RegExp, string][]> = {
   WKBL: [[/s-birds|shinhan/i, '신한'], [/kb stars/i, 'KB'], [/hana/i, '하나'], [/woori/i, '우리'], [/samsung|blue minx/i, '삼성'], [/bnk/i, 'BNK']],
   'V리그 남자': [[/blue fangs|samsung/i, '삼성화재'], [/woori/i, '우리카드'], [/korean air|jumbos/i, '대한항공'], [/hyundai|skywalkers/i, '현대캐피탈'],
                 [/\bkb\b|insurance/i, 'KB'], [/\bok\b|savings|financial/i, 'OK'], [/kepco|vixtorm/i, '한국전력']],
-  'V리그 여자': [[/soop/i, 'SOOP'], [/hillstate|hyundai/i, '현대건설'], [/ibk|altos/i, 'IBK'], [/red sparks|jung ?kwan ?jang/i, '정관장'],
-                [/pink spiders|heungkuk/i, '흥국'], [/gs caltex|kixx/i, 'GS'], [/expressway|hi-?pass/i, '도로공사'], [/pepper/i, '페퍼']],
+  'V리그 여자': [[/soop/i, 'SOOP'], [/hillstate|hyundai/i, '현대건설'], [/ibk|altos/i, 'IBK'], [/red sparks|jung ?kwan ?jang|jkj|daejeon/i, '정관장'],
+                [/pink spiders|he?ungkuk/i, '흥국'], [/gs caltex|kixx/i, 'GS'], [/expressway|hi-?pass/i, '도로공사'], [/pepper/i, '페퍼']],
 }
 const dec = (am: number) => +(am > 0 ? 1 + am / 100 : 1 + 100 / Math.abs(am)).toFixed(2)
 const lastWord = (s: string) => (s ?? '').trim().split(/\s+/).pop()?.toLowerCase() ?? ''
