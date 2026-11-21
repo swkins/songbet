@@ -85,3 +85,14 @@ export function upcomingForBet(rows: ScheduleRow[], registered: { league: string
     })
     .sort((a, b) => a.start.localeCompare(b.start))
 }
+
+// 리그 순서 (사용자 요청): 축구는 5대 리그를 맨 위(이 순서), 농구는 NBA를 맨 위, 나머지는 가나다순 — 분석 탭·베팅 모드 공용
+const TOP_LEAGUES: Record<string, string[]> = {
+  soccer: ['잉글랜드 1부', '스페인 1부', '이탈리아 1부', '독일 1부', '프랑스 1부'],
+  basketball: ['NBA'],
+}
+export function sortLeagues(sport: string, leagues: string[]): string[] {
+  const top = TOP_LEAGUES[sport] ?? []
+  const rank = (l: string) => { const i = top.indexOf(l); return i < 0 ? top.length : i }
+  return [...leagues].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b, 'ko'))
+}

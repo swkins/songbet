@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import dayjs from 'dayjs'
-import { loadSchedules, gameState, resolveTeamName, koName, type ScheduleRow, type ScheduleGame } from '../lib/gameSchedule'
+import { loadSchedules, gameState, resolveTeamName, koName, sortLeagues, type ScheduleRow, type ScheduleGame } from '../lib/gameSchedule'
 import { applyNumericTemplate } from '../lib/betOptions'
 import type { Site } from '../types'
 import { supabase } from '../lib/supabase'
@@ -78,7 +78,7 @@ export default function BetModePanel({ target, onTargetDone, sites, betOptionsBy
   const leaguesOf = (sp: string) => {
     const m = new Map<string, number>()
     games.filter(g => g.sport === sp).forEach(g => m.set(g.league, (m.get(g.league) ?? 0) + 1))
-    return [...m.entries()]
+    return sortLeagues(sp, [...m.keys()]).map(l => [l, m.get(l)!] as [string, number])   // 축구 5대 리그·농구 NBA 맨 위, 나머지 가나다순
   }
   // 리그를 안 고르면 그 종목 전체 (사용자 요청)
   const leagueGames = games.filter(g => g.sport === sport && (!league || g.league === league))

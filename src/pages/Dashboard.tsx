@@ -4337,6 +4337,8 @@ export default function Dashboard({ betTarget, onBetTargetDone }: { betTarget?: 
         {/* ── 베팅 모드 (좌측) — 종목 → 리그 → 경기 → 베팅옵션. 사이트 현황 대신 이 자리를 쓰고 베팅 현황은 우측으로 */}
         {betMode && (
           <div className="dashboard-betmode">
+            {/* 사이트 현황 — 베팅 모드에서도 맨 위에 작게 (사용자 요청, 상하 모드와 같은 compact) */}
+            <MiningWidget compact />
             <BetModePanel target={betTarget ?? null} onTargetDone={onBetTargetDone} sites={sites} betOptionsBySport={betOptionsBySport} numericBetOptionsBySport={numericBetOptionsBySport}
               teamsBySport={{ soccer: soccerTeams, baseball: baseballTeams, basketball: basketballTeams, volleyball: volleyballTeams }}
               onBet={(site, sp, ct, od, amt, lv, lg) => submitBet(site, sp, ct, od, amt, lv, lg)}
