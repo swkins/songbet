@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import dayjs from 'dayjs'
-import { loadSchedules, gameState, resolveTeamName, koName, sortLeagues, type ScheduleRow, type ScheduleGame } from '../lib/gameSchedule'
+import { loadSchedules, gameState, resolveTeamName, koName, leagueLabel, sortLeagues, type ScheduleRow, type ScheduleGame } from '../lib/gameSchedule'
 import { applyNumericTemplate } from '../lib/betOptions'
 import type { Site } from '../types'
 import { supabase } from '../lib/supabase'
@@ -108,7 +108,7 @@ export default function BetModePanel({ target, onTargetDone, sites, betOptionsBy
         {targetMsg && <span style={{ fontSize: 11, color: 'var(--red)', marginLeft: 'auto' }}>{targetMsg}</span>}
       </div>
       {loading ? <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>불러오는 중…</div> : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 0.7fr) minmax(0, 1fr) minmax(0, 1.3fr)', gap: 10, alignItems: 'start' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 0.8fr) minmax(0, 0.8fr) minmax(0, 1.4fr)', gap: 10, alignItems: 'start' }}>
           {/* 1. 종목 → 리그 */}
           <div style={col}>
             <div style={head}>종목 · 리그</div>
@@ -131,7 +131,7 @@ export default function BetModePanel({ target, onTargetDone, sites, betOptionsBy
                   {open && lgs.map(([lg, n]) => (
                     <button key={lg} type="button" onClick={() => { setLeague(lg); setGameId(null); setAddSiteId(null) }}
                       style={{ ...item(league === lg), marginLeft: 10, fontSize: 11, display: 'flex', justifyContent: 'space-between' }}>
-                      <span>{lg}</span><span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{n}</span>
+                      <span>{leagueLabel(lg)}</span><span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{n}</span>
                     </button>
                   ))}
                 </div>
@@ -184,16 +184,16 @@ export default function BetModePanel({ target, onTargetDone, sites, betOptionsBy
                       <button type="button" title={gameId === g.id ? '한 번 더 누르면 분석' : undefined}
                         onClick={() => { if (gameId === g.id) { setShowAnalysis(true); return } setGameId(g.id); setAddSiteId(null) }}
                         style={{ ...item(gameId === g.id), width: '100%', display: 'flex', flexDirection: 'column', gap: 2 }}>
-                        <span style={{ fontSize: 10, fontWeight: 700, color: live ? 'var(--gold)' : 'var(--text-muted)', fontFamily: 'var(--font-num)' }}>{live ? '● 경기중' : d.format('HH:mm')}{!league && <span style={{ fontWeight: 600, fontFamily: 'var(--font-body)', marginLeft: 6 }}>{g.league}</span>}</span>
-                        {/* 위 = 홈, 아래 = 원정 — 이름 옆 현재 배당(맨 끝이 아니라 가장 긴 이름 뒤로 조금 띄워 한 줄로 맞춤), 축구는 가운데 줄에 무배당 (1·X·2 순) */}
+                        <span style={{ fontSize: 10, fontWeight: 700, color: live ? 'var(--gold)' : 'var(--text-muted)', fontFamily: 'var(--font-num)' }}>{live ? '● 경기중' : d.format('HH:mm')}{!league && <span style={{ fontWeight: 600, fontFamily: 'var(--font-body)', marginLeft: 6 }}>{leagueLabel(g.league)}</span>}</span>
+                        {/* 위 = 홈, 아래 = 원정 — 현재 배당은 오른쪽 고정 칸(끝에서 10px 띄움, 이름 길이와 상관없이 같은 자리), 축구는 가운데 줄에 무배당 (1·X·2 순) */}
                         {(() => {
                           const o = odds[g.id]
                           const row = (name: string, v: number | null | undefined, small = false) => <>
                             <span style={{ fontWeight: small ? 400 : 700, fontSize: small ? 10 : undefined, color: small ? 'var(--text-muted)' : undefined, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{name}</span>
-                            <span style={{ fontFamily: 'var(--font-num)', fontWeight: 700, fontSize: small ? 10 : 11, color: small ? 'var(--text-muted)' : 'var(--text-secondary)' }}>{v != null ? Number(v).toFixed(2) : ''}</span>
+                            <span style={{ fontFamily: 'var(--font-num)', fontWeight: 700, fontSize: small ? 10 : 11, color: small ? 'var(--text-muted)' : 'var(--text-secondary)', textAlign: 'right' }}>{v != null ? Number(v).toFixed(2) : ''}</span>
                           </>
                           return (
-                            <span style={{ display: 'grid', gridTemplateColumns: 'minmax(0, max-content) auto', columnGap: 14, rowGap: 2, justifyContent: 'start', alignItems: 'baseline', width: '100%' }}>
+                            <span style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 40px', columnGap: 10, rowGap: 2, alignItems: 'baseline', width: '100%', paddingRight: 10, boxSizing: 'border-box' }}>
                               {row(koName(g.home.name), o?.home_odds)}
                               {g.sport === 'soccer' && o?.draw_odds != null && row('무', o.draw_odds, true)}
                               {row(koName(g.away.name), o?.away_odds)}
