@@ -4124,6 +4124,54 @@ export default function Dashboard({ betTarget, onBetTargetDone }: { betTarget?: 
             )
           })}
         </div>
+        {/* 완료된 목록 — 사이트 칸 모드와 같이 다음 마감 처리 때 사라짐, 누르면 펼침 */}
+        {(() => {
+          const done = sites.flatMap(site => displaySettledBySite(site.id).map(b => ({ b, site })))
+            .sort((x, y) => (y.b.result_at ?? y.b.created_at).localeCompare(x.b.result_at ?? x.b.created_at))
+          if (!done.length) return null
+          const open = !!expandedSettled['__all']
+          const seen = new Set<string>()
+          return (
+            <div className="card" style={{ padding: '6px 10px' }}>
+              <div onClick={() => setExpandedSettled(p => ({ ...p, __all: !p.__all }))}
+                style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', fontSize: 11, fontWeight: 800, color: 'var(--text-muted)', userSelect: 'none' }}>
+                {open ? <ChevronUp size={12} /> : <ChevronDown size={12} />} 완료된 목록 {done.length}건
+                <span style={{ marginLeft: 'auto', fontFamily: 'var(--font-num)', fontWeight: 700 }}>
+                  적중 {done.filter(x => x.b.result === 'win').length} · 실패 {done.filter(x => x.b.result === 'loss').length}
+                </span>
+              </div>
+              {open && done.map(({ b, site }) => {
+                if (b.parlay_group) { if (seen.has(b.parlay_group)) return null; seen.add(b.parlay_group) }
+                const legs = b.parlay_group ? done.filter(x => x.b.parlay_group === b.parlay_group).map(x => x.b).sort((p, q) => p.parlay_leg - q.parlay_leg) : [b]
+                const isusd = site.currency === 'usd'; const pfx = isusd ? '$' : ''; const sfx = isusd ? '' : '원'
+                const rc = b.result === 'win' ? 'var(--green)' : b.result === 'loss' ? 'var(--red)' : 'var(--blue)'
+                return (
+                  <div key={b.parlay_group ?? b.id} style={{ display: 'grid', gridTemplateColumns: '56px 18px minmax(0, 1fr) auto auto auto', columnGap: 8, alignItems: 'center', padding: '4px 2px', borderTop: '1px solid var(--border-light)', fontSize: 12, opacity: 0.8 }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={site.name}>{site.name}</span>
+                    <span style={{ fontSize: 14, lineHeight: 1, textAlign: 'center' }}>{sportGlyph(b.sport) ?? SPORT_SHORT[b.sport] ?? '📋'}</span>
+                    <span style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
+                      {b.league && <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.league}{b.parlay_group ? ` · 조합 ${legs.length}폴` : ''}</span>}
+                      {legs.map(l => (
+                        <span key={l.id} style={{ display: 'flex', minWidth: 0 }}>
+                          <BetMatchLine sport={l.sport} match={l.match} fontSize={12} stacked={false} live={l.is_live} teamColor={rc} knownOptions={displayOptionsBySport[l.sport] ?? []} numericOptions={displayNumericBySport[l.sport] ?? []} />
+                        </span>
+                      ))}
+                    </span>
+                    <span style={{ fontFamily: 'var(--font-num)', fontWeight: 700, color: 'var(--text-muted)' }}>@{(b.parlay_group ? legs.reduce((m, l) => m * l.odds, 1) : b.odds).toFixed(2)}</span>
+                    <span style={{ fontFamily: 'var(--font-num)', fontWeight: 700, color: 'var(--text-muted)' }}>{pfx}{b.stake.toLocaleString()}{sfx}</span>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 3, justifyContent: 'flex-end' }}>
+                      <span style={{ fontFamily: 'var(--font-num)', fontWeight: 700, fontSize: 11, color: rc }}>
+                        {b.cashout_amount != null ? `캐시아웃 ${pfx}${b.cashout_amount.toLocaleString()}${sfx}` : b.result === 'win' ? `+${pfx}${b.profit.toLocaleString()}${sfx}` : b.result === 'loss' ? `-${pfx}${b.stake.toLocaleString()}${sfx}` : 'PUSH'}
+                      </span>
+                      <button className="bet-action-btn" title="되돌리기" onClick={() => b.parlay_group ? applyParlayRevert(legs) : applyResult(b, 'revert')}
+                        style={{ width: 20, height: 20, color: 'var(--text-secondary)', borderColor: 'var(--border)' }}><RotateCcw size={11} /></button>
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
+          )
+        })()}
       </div>
     )
   }
