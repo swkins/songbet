@@ -3,6 +3,7 @@ import dayjs from 'dayjs'
 import { X, RefreshCw } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { koName } from '../lib/gameSchedule'
+import MockBetStats from './MockBetStats'
 
 // ─── 분석 탭 '예측 보고서' — 경기 전 예측(predictions) vs 결과, Claude 매일 검토(model_reviews), 가중치(model_params) ─────
 // 예측은 Supabase 함수 snapshot-predictions가 NBA 21:30 KST·국내 시작 30~90분 전에 저장하고 끝나면 채점한다.
@@ -184,6 +185,9 @@ export default function ModelReport({ onClose }: { onClose: () => void }) {
               </table>
             )}
           </div>
+
+          {/* NBA 모의베팅 — 방법별 (supabase/nba_mock_bets.sql) */}
+          <MockBetStats />
 
           {/* Claude 검토 */}
           <div style={box}>
