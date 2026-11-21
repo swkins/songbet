@@ -106,4 +106,5 @@
   - 출처 조사(2026-11-20): gol.gg ✅(가장 상세, 가끔 끊김) · LoL Esports 공식 API ✅(일정, x-api-key 공개값) · 공식 livestats 피드 ✅(세트 10초 장면) · Leaguepedia ✅ · Oracle's Elixir·Sheep Esports ❌(봇 차단) · OP.GG e스포츠 API 못 찾음 · BetExplorer LoL 429.
 - 이 컨테이너에서는 ESPN·supabase.co로 직접 못 나가서 MCP(deploy_edge_function, execute_sql)로만 다룬다.
 - **Supabase MCP에 지우기(delete·drop·unschedule)가 든 SQL을 보내면 확인 질문이 오는데 사용자 앱에 안 떠서 1분 뒤 시간 초과**된다. 지우지 않는 방식(update로 고치기, `create ... if not exists`, `cron.schedule` 같은 이름 덮어쓰기)으로 하고, 꼭 지워야 하면 사용자에게 Supabase 대시보드 SQL Editor에서 실행할 SQL을 준다. 주석에도 그 단어를 넣지 않는다. 진행상황은 한국어로 알린다 (사용자 요청).
+- **용량·자동 정리** (2026-11-21 점검): 무료 플랜 — DB 32MB / 500MB (가장 큰 것 player_game_stats 6.6MB, 시즌 끝 약 25~30MB 예상), 활성 cron 56개, Supabase 함수 호출 하루 약 550번(축구 32·배당 5·예측·일정) = 월 약 1.7만 / 50만. 자동 정리 = `public.cleanup_daily()` 매일 04:47 KST (SQL `supabase/cleanup.sql`, 지우는 SQL이라 사용자가 SQL Editor에서 실행): cron 기록·배당 로그 7일, 승패 배당 14일, 기준점 30일, 축구 핸디 14일, 일정 7일, KOVO 요청·스냅샷, 뉴스 확인 기록 14일, 출전 판단 경기 2일 뒤, 뉴스 30일, 선수 수치 400일, 선수 경기 기록 지난 시즌까지. 예측·채점·베팅은 안 지움. 무료 프로젝트는 일주일 접속이 없으면 일시정지될 수 있다.
 - 2026-11-18 첫 수집: 선수 기록 NBA 205경기·KBL 74·WKBL 14 (V리그는 선수 238명 시즌 누적부터), 자동 타이머 8개(일정 1·배당 5·선수 기록 2) 등록.
