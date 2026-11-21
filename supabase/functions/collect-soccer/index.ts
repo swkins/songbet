@@ -6,7 +6,9 @@
 //    날짜 범위(dates=A-B)는 400 → UTC 날짜 하루씩, 사이에 1.5~4초 쉼. 한국 하루 = UTC 전날 15시~당일 15시라 UTC 3일치(어제·오늘·내일).
 //  - K리그: POST https://www.kleague.com/getScheduleList.do {leagueId:'1'|'2', year, month:'09'(두 자리)} — 한국 시간, 한글 이름, 팀 코드(K01…), gameStatus 'FE'·endYn 'Y' = 종료.
 //  - J2: https://data.j-league.or.jp/SFMS01/search (HTML 표, 일본 시간 = 한국 시간, 팀은 jleague.jp/club/<코드>/ 링크).
-//  - K리그·J2 승무패 배당 = BetExplorer 리그 fixtures 페이지 (data-odd 1·X·2). 연달아 부르면 429 → 함수당 한 번, cron이 BetExplorer 작업끼리 3분 띄움.
+//  - K리그·J2 승무패·핸디 배당 = 피나클 (2026-11-22 사용자 요청 — BetExplorer 429 때문에): guest.api.arcadia.pinnacle.com 리그 matchups + markets/straight
+//    (사이트에 공개로 들어 있는 x-api-key — 바뀌면 PIN_KEY 고침). 핸디(±0.25~±2.5, 대안 라인 포함)는 soccer_lines(source pinnacle).
+//    피나클에서 한 경기도 못 맞추면 백업으로 BetExplorer fixtures (data-odd 1·X·2, 연달아 부르면 429).
 // 팀 이름 = 리그 관리 등록 한글 이름: DB soccer_team_names(league, src, ko) — league 칸이 그 리그면 그 리그 것, 없으면 아무 리그(친선경기용), 그다음 아래 KO 표.
 //   src = ESPN 영어 이름 · 'kl:K21'(K리그 팀 코드) · 'jl:sapporo'(J리그 코드) · 'bx:Daejeon'(BetExplorer 이름 앞부분 — 가장 긴 것). 못 찾으면 영어 이름 그대로 + 로그 unmatched.
 // + 핸디 배당: Action Network 북메이커 주력 핸디 평균 → soccer_lines (룰북 베팅 찾기용, 5대 리그·MLS)
@@ -29,6 +31,11 @@ const CODE: Record<string, string> = {
 }
 // ESPN에 없는 리그 (스위스·아일랜드·체코·핀란드는 사용자 요청으로 뺌)
 const KLEAGUE: Record<string, string> = { 'K리그1': '1', 'K리그2': '2' }
+// 피나클 리그 id (못 찾으면 이름으로 다시 찾음)
+const PIN: Record<string, [number, RegExp]> = { 'K리그1': [207551, /^Korea Republic - K League 1$/], 'K리그2': [207552, /^Korea Republic - K League 2$/], 'J리그2': [2159, /^Japan - J2 League$/] }
+const PIN_KEY = 'CmX2KcMrXuFmNg6YFbmTxE0y9CIrOi0R'
+const PIN_URL = 'https://guest.api.arcadia.pinnacle.com/0.1'
+const pinDec = (p: number) => Math.round((p > 0 ? 1 + p / 100 : 1 + 100 / -p) * 1000) / 1000
 const BX: Record<string, string> = { 'K리그1': 'south-korea/k-league-1', 'K리그2': 'south-korea/k-league-2', 'J리그2': 'japan/j2-league' }
 // ESPN 영어 이름 → 리그 관리에 등록된 한글 이름 (2026-27 시즌, 등록 이름 그대로 — 오타 포함)
 const KO: Record<string, string> = {
@@ -175,22 +182,65 @@ Deno.serve(async (req) => {
     } catch (e) { return log('error', { message: String(e) }) }
   }
 
-  // K리그·J2 승무패: BetExplorer fixtures (1·X·2). 이름은 'bx:' 앞부분이 가장 길게 맞는 것
-  if (BX[league]) {
+  // K리그·J2 이름: soccer_team_names 'pn:'(피나클)·'bx:'(BetExplorer) 앞부분이 가장 길게 맞는 것 (피나클 이름은 BetExplorer 이름과 앞부분이 같다)
+  const nameKeys = (pfx: string) => [...new Set([...mine.keys(), ...any.keys()])].filter(k => k.startsWith(pfx)).map(k => k.slice(pfx.length)).sort((a, b) => b.length - a.length)
+  const byPrefix = (n: string) => {
+    for (const pfx of ['pn:', 'bx:']) { const k = nameKeys(pfx).find(k => n.toLowerCase().startsWith(k.toLowerCase())); if (k) return mine.get(pfx + k) ?? any.get(pfx + k) }
+    return undefined
+  }
+  const preGames = () => Object.entries(byDate).flatMap(([date, gs]) => gs.filter(g => !g.status).map(g => ({ g, date })))
+  let pinMatched = 0, pinLines = 0
+  if (PIN[league]) {
+    try {
+      const H = { 'User-Agent': UA['User-Agent'], Accept: 'application/json', 'x-api-key': PIN_KEY, Referer: 'https://www.pinnacle.com/', Origin: 'https://www.pinnacle.com' }
+      let [id] = PIN[league]
+      let mres = await fetch(`${PIN_URL}/leagues/${id}/matchups`, { headers: H })
+      if (!mres.ok) {
+        const ls = await (await fetch(`${PIN_URL}/sports/29/leagues?all=false`, { headers: H })).json()
+        const L = (ls as any[]).find(x => PIN[league][1].test(x.name))
+        if (L) { id = L.id; mres = await fetch(`${PIN_URL}/leagues/${id}/matchups`, { headers: H }) }
+      }
+      if (!mres.ok) unknown.add(`Pinnacle ${mres.status}`)
+      else {
+        const mus: any[] = await mres.json()
+        const mks: any[] = await (await fetch(`${PIN_URL}/leagues/${id}/markets/straight`, { headers: H })).json()
+        const pre = preGames(); const lineRows: any[] = []
+        for (const m of mus) {
+          if (m.parentId || m.participants?.length !== 2) continue
+          const ph = m.participants.find((p: any) => p.alignment === 'home'), pa = m.participants.find((p: any) => p.alignment === 'away'); if (!ph || !pa) continue
+          const kh = byPrefix(ph.name), ka = byPrefix(pa.name)
+          if (!kh) unknown.add(`pn:${ph.name}`)
+          if (!ka) unknown.add(`pn:${pa.name}`)
+          const t = Date.parse(m.startTime)
+          const hit = pre.find(x => Math.abs(Date.parse(x.g.start) - t) < 30 * 60000 && ((kh && x.g.home.name === kh) || (ka && x.g.away.name === ka)))
+          if (!hit) continue
+          const ms = mks.filter(x => x.matchupId === m.id && x.period === 0)
+          const ml = ms.find(x => x.type === 'moneyline')
+          const pr = (d: string) => { const p = ml?.prices?.find((x: any) => x.designation === d); return p ? pinDec(p.price) : null }
+          if (ml && pr('home') && pr('away')) { odds.push({ game: hit.g, date: hit.date, src: 'pinnacle', h: pr('home'), d: pr('draw'), a: pr('away'), oh: null, od: null, oa: null }); pinMatched++ }
+          for (const sp of ms.filter(x => x.type === 'spread'))
+            for (const p of sp.prices ?? []) if (p.points != null) lineRows.push({ game_id: hit.g.id, league, side: p.designation, line: Number(p.points), odds: pinDec(p.price), books: 1, source: 'pinnacle', fetched_at: new Date().toISOString() })
+        }
+        const uniq = [...new Map(lineRows.map(r => [`${r.game_id}|${r.side}|${r.line}`, r])).values()]
+        if (uniq.length) { const { error } = await db.from('soccer_lines').upsert(uniq); if (!error) pinLines = uniq.length }
+      }
+    } catch (e) { unknown.add(`Pinnacle ${String(e).slice(0, 80)}`) }
+  }
+
+  // 백업: 피나클에서 한 경기도 못 맞췄을 때만 BetExplorer fixtures (1·X·2)
+  if (BX[league] && pinMatched === 0 && preGames().length) {
     try {
       await sleep(1500 + Math.random() * 2500)
       const res = await fetch(`https://www.betexplorer.com/football/${BX[league]}/fixtures/`, { headers: { ...UA, Accept: 'text/html', 'Accept-Language': 'en' } })
       if (res.status === 429) unknown.add('BetExplorer 429')
       else if (res.ok) {
         const html = await res.text()
-        const keys = [...new Set([...mine.keys(), ...any.keys()])].filter(k => k.startsWith('bx:')).map(k => k.slice(3)).sort((a, b) => b.length - a.length)
-        const bx = (n: string) => { const k = keys.find(k => n.toLowerCase().startsWith(k.toLowerCase())); return k ? (mine.get(`bx:${k}`) ?? any.get(`bx:${k}`)) : undefined }
-        const pre = Object.entries(byDate).flatMap(([date, gs]) => gs.filter(g => !g.status).map(g => ({ g, date })))
+        const pre = preGames()
         for (const tr of html.split('<tr').slice(1)) {
           if (!tr.includes('data-odd=')) continue
           const m = tr.match(/class="in-match"><span>([^<]+)<\/span>\s*-\s*<span>([^<]+)<\/span>/); if (!m) continue
           const o = [...tr.matchAll(/data-odd="([0-9.]+)"/g)].map(x => +x[1]); if (o.length < 3) continue
-          const kh = bx(m[1].trim()), ka = bx(m[2].trim())
+          const kh = byPrefix(m[1].trim()), ka = byPrefix(m[2].trim())
           if (!kh) unknown.add(`bx:${m[1].trim()}`)
           if (!ka) unknown.add(`bx:${m[2].trim()}`)
           const hit = kh && ka ? pre.find(x => x.g.home.name === kh && x.g.away.name === ka) : undefined
@@ -249,5 +299,5 @@ Deno.serve(async (req) => {
     }
   } catch { /* 핸디는 없어도 일정·승무패는 저장됨 */ }
 
-  return log('ok', { anMatched, lines, games: rows.reduce((s, r) => s + r.games.length, 0), counts: Object.fromEntries(rows.map(r => [r.game_date, r.games.length])), odds: odds.length, changed, unmatched: [...unknown] })
+  return log('ok', { pinMatched, pinLines, anMatched, lines, games: rows.reduce((s, r) => s + r.games.length, 0), counts: Object.fromEntries(rows.map(r => [r.game_date, r.games.length])), odds: odds.length, changed, unmatched: [...unknown] })
 })
