@@ -112,10 +112,12 @@ export default function MockBetStats() {
 
 // ─── 분석 화면 (NBA 경기 하나): 이 경기에 걸린 모의베팅 — 방법별 22시·직전 픽, 그 방법 누적 적중률, 핸디·언오버 방법들이 어느 쪽에 몰렸나 ─────
 interface GameBet extends Bet { strategy: string; market: 'spread' | 'total' }
+// 양쪽 다 거는 기본 방법·'반대로' 비교용 방법 — 쏠림 요약에서는 뺀다
+const COMPARE = new Set(['home_all', 'away_all', 'fav_all', 'dog_all', 'over_all', 'under_all', 'model_fade3', 'model_ou_fade5', 'pub60_follow', 'move_fade1', 'tmove_fade2'])
 export function MockBetsForGame({ gameId }: { gameId: string }) {
   const [bets, setBets] = useState<GameBet[] | null>(null)
   const [stats, setStats] = useState<Stat[]>([])
-  const [open, setOpen] = useState(true)
+  const [open, setOpen] = useState(false)   // 기본은 한 줄 요약만, 누르면 방법별 표 (사용자 요청)
   useEffect(() => {
     setBets(null)
     Promise.all([
@@ -133,10 +135,12 @@ export function MockBetsForGame({ gameId }: { gameId: string }) {
   const rows = keys.map(k => ({ k, label: info(k)?.label ?? k, market: bets.find(b => b.strategy === k)!.market, sort: info(k)?.sort ?? 999,
     pre: bets.find(b => b.strategy === k && b.timing === 'pre22'), close: bets.find(b => b.strategy === k && b.timing === 'close') }))
     .sort((a, b) => a.sort - b.sort)
-  // 쏠림: 최신 시점(직전 있으면 직전, 없으면 22시) 기준 방법 수
+  // 쏠림: 최신 시점(직전 있으면 직전, 없으면 22시) 기준 방법 수 — 요약은 비교용 방법 빼고
   const latest = rows.map(r => r.close ?? r.pre).filter((x): x is GameBet => !!x)
-  const cnt = (m: string, side: string) => latest.filter(b => b.market === m && b.side === side).length
+  const cnt = (m: string, side: string, all = false) => latest.filter(b => b.market === m && b.side === side && (all || !COMPARE.has(b.strategy))).length
   const one = latest[0]
+  const graded = latest.filter(b => !COMPARE.has(b.strategy) && b.result_home != null && !b.push)
+  const gHit = graded.filter(b => b.hit).length
   const pickCell = (b?: GameBet) => !b ? <td style={{ ...td, color: 'var(--text-muted)' }}>–</td> : (
     <td style={td}>
       <span style={{ fontWeight: 700 }}>{sideText(b)}</span> <span style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-num)' }}>@{Number(b.odds).toFixed(2)}</span>
@@ -144,15 +148,22 @@ export function MockBetsForGame({ gameId }: { gameId: string }) {
     </td>)
   return (
     <div style={{ ...box, borderColor: 'var(--blue-border)' }}>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap', cursor: 'pointer' }} onClick={() => setOpen(o => !o)}>
+      {/* 한 줄 요약 (누르면 펼침) */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', cursor: 'pointer', fontSize: 12 }} onClick={() => setOpen(o => !o)}>
         <span style={{ fontSize: 13, fontWeight: 800 }}>모의베팅 {open ? '▾' : '▸'}</span>
-        <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>방법 38개 중 조건이 맞은 {keys.length}개 · 21:45(22시 기준)·경기 시작 30분 전(직전)에 자동으로 걸고 끝나면 채점 · 누적 = 그 방법 전체 경기 성적</span>
+        {!bets.length ? <span style={{ color: 'var(--text-muted)' }}>아직 안 걸었어요 (매일 21:45에 자동)</span> : one && <>
+          <span>핸디 <b>{koName(one.home)} {cnt('spread', 'home')}</b> : <b>{koName(one.away)} {cnt('spread', 'away')}</b></span>
+          <span>언오버 <b>오버 {cnt('total', 'over')}</b> : <b>언더 {cnt('total', 'under')}</b></span>
+          {graded.length > 0 && <span style={{ fontWeight: 700, color: gHit / graded.length > 0.524 ? 'var(--green)' : 'var(--red)' }}>결과 {gHit}/{graded.length} 적중</span>}
+          <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>방법 수 (비교용 빼고)</span>
+        </>}
       </div>
-      {!bets.length ? <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6 }}>아직 안 걸었어요 — 매일 21:45에 다음 날 NBA 경기에 자동으로 걸어요</div> : <>
+      {open && bets.length > 0 && <>
+        <div style={{ fontSize: 10, color: 'var(--text-muted)', margin: '6px 0 2px' }}>방법 38개 중 조건이 맞은 {keys.length}개 · 21:45(22시 기준)·경기 시작 30분 전(직전)에 자동으로 걸고 끝나면 채점 · 누적 = 그 방법 전체 경기 성적</div>
         {one && (
-          <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', fontSize: 12, margin: '6px 0 4px' }}>
-            <span>핸디: <b>{koName(one.home)} 쪽 {cnt('spread', 'home')}개</b> · <b>{koName(one.away)} 쪽 {cnt('spread', 'away')}개</b></span>
-            <span>언오버: <b>오버 {cnt('total', 'over')}개</b> · <b>언더 {cnt('total', 'under')}개</b></span>
+          <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', fontSize: 12, margin: '4px 0' }}>
+            <span>핸디: <b>{koName(one.home)} 쪽 {cnt('spread', 'home', true)}개</b> · <b>{koName(one.away)} 쪽 {cnt('spread', 'away', true)}개</b></span>
+            <span>언오버: <b>오버 {cnt('total', 'over', true)}개</b> · <b>언더 {cnt('total', 'under', true)}개</b></span>
             <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>('전 경기 홈/원정·오버/언더'처럼 양쪽 다 거는 비교용 방법 포함 — 쏠림은 참고만)</span>
           </div>
         )}
