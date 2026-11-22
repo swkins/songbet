@@ -170,7 +170,7 @@ export async function loadGameOverall(league: string, gameDate: string, home: Sc
   const hName = matchTeam(home, teams), aName = matchTeam(away, teams)
   const names = [hName, aName].filter((x): x is string => !!x)
   const cur = seasonOf(gameDate)
-  const [g, st, inj, nw, tg, sch] = await Promise.all([
+  const [g, st, inj, nw, tg, sch, lo] = await Promise.all([
     names.length ? supabase.from('player_game_stats').select('game_id,game_date,team,player_id,minutes').eq('league', code).eq('season', cur).in('team', names).gte('game_date', dayjs(gameDate).subtract(45, 'day').format('YYYY-MM-DD')).limit(3000) : Promise.resolve({ data: [] }),
     supabase.from('player_status').select('*').eq('league', code).eq('game_date', gameDate),
     code === 'NBA' && names.length ? supabase.from('nba_injuries').select('*').in('team', names) : Promise.resolve({ data: [] }),
@@ -180,6 +180,8 @@ export async function loadGameOverall(league: string, gameDate: string, home: Sc
     // 일정 (2026-11-21 — 선수 기록은 다음 날 새벽에 들어와서, 어제 한 경기가 v_team_games에 아직 없으면 백투백을 못 잡았다: KB스타즈 토·일)
     names.length && !vb ? supabase.from('game_schedules').select('game_date,games').eq('league', league)
       .gte('game_date', dayjs(gameDate).subtract(10, 'day').format('YYYY-MM-DD')).lt('game_date', gameDate) : Promise.resolve({ data: [] }),
+    // 장기 결장 (2026-11-22 — 아라우조 무릎 수술·결별이 안 잡혔다: 날짜별 판단만 있어서 예약 작업이 안 돌면 비었다) — 기간 안이면 매 경기 적용
+    supabase.from('player_long_out').select('*').eq('league', code).lte('from_date', gameDate).or(`until_date.is.null,until_date.gte.${gameDate}`),
   ])
   // 팀 컨디션 % (백투백·이동 거리·일정 밀도·원정 연전) — 경기 기록 + 기록이 아직 없는 날은 일정으로 채움 (연장은 기록이 있어야 앎)
   const pastRows = (tg.data ?? []) as (PastGame & { team: string })[]
@@ -201,6 +203,12 @@ export async function loadGameOverall(league: string, gameDate: string, home: Sc
   const news = newsRows.find(n => same(n.home, home) && same(n.away, away)) ?? null
   const games = (g.data ?? []) as { game_id: string; game_date: string; team: string; player_id: string; minutes: number | null }[]
   const status = (st.data ?? []) as StatusRow[]
+  // 그 경기 날짜 판단(player_status)이 있으면 그게 먼저, 없으면 장기 결장
+  for (const r of (lo.data ?? []) as (StatusRow & { updated_at: string; play_prob: number })[]) {
+    if (status.some(s => norm(s.team) === norm(r.team) && norm(s.player_name) === norm(r.player_name))) continue
+    status.push({ team: r.team, player_name: r.player_name, player_id: r.player_id, play_prob: r.play_prob ?? 0, status: r.status ?? '결장', confirmed: r.confirmed ?? true,
+      reason: r.reason, source_title: r.source_title, source_url: r.source_url, checked_at: r.updated_at })
+  }
   const injuries = (inj.data ?? []) as InjRow[]
   const checkedAt = status.reduce<string | null>((m, s) => (!m || s.checked_at > m ? s.checked_at : m), null)
 
@@ -277,7 +285,11 @@ export async function loadGameOverall(league: string, gameDate: string, home: Sc
         let m = 0; while (k + m < tGames.length && !pm.has(tGames[k + m])) m++
         const seasonMin = c?.min ?? pb?.min ?? null
         const regular = vb ? (c?.gp ?? 0) >= 3 : (seasonMin ?? 0) >= 15
-        if (k === 0 && m >= 2 && regular) {
+        // 배구: 경기별 기록은 2026-11-18부터라 앞 경기 결장을 못 본다 → 팀 경기 수 − 선수 출전 수로 보충 (마지막 팀 경기도 빠졌을 때만)
+        const short = vb && stats?.n && c ? stats.n - c.gp : 0
+        if (vb && k === 0 && m < 2 && m >= 1 && short >= 2 && regular) {
+          avail = { prob: 40, label: '불투명', origin: 'box', reason: `기록상 최근 경기 결장 · 시즌 ${stats!.n}경기 중 ${c!.gp}경기 출전 (뉴스 확인 전)` }
+        } else if (k === 0 && m >= 2 && regular) {
           avail = { prob: 40, label: '불투명', origin: 'box', reason: `기록상 최근 ${m}경기 결장 (뉴스 확인 전)` }
         } else if (k > 0 && k <= 4 && m >= 2) {
           const recentMins = tGames.slice(0, k).map(id => pm.get(id)).filter((x): x is number => x != null)
