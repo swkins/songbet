@@ -4091,7 +4091,8 @@ export default function Dashboard({ betTarget, onBetTargetDone }: { betTarget?: 
             const arColor = ar === 'win' ? 'var(--green)' : ar === 'loss' ? 'var(--red)' : 'var(--blue)'
             const odds = b.parlay_group ? legs.reduce((m, l) => m * l.odds, 1) : b.odds
             return (
-              <div key={b.parlay_group ?? b.id} className={held ? heldEntryClass(b.result).trim() : undefined}
+              <Fragment key={b.parlay_group ?? b.id}>
+              <div className={held ? `combo-held${heldEntryClass(b.result)}` : undefined}
                 style={{ display: 'grid', gridTemplateColumns: '56px 18px minmax(0, 1fr) auto auto auto', columnGap: 8, alignItems: 'center', padding: '5px 2px', borderTop: '1px solid var(--border-light)', fontSize: 12, position: 'relative' }}>
                 <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={site.name}>{site.name}</span>
                 <span style={{ fontSize: 14, lineHeight: 1, textAlign: 'center' }}>{sportGlyph(b.sport) ?? SPORT_SHORT[b.sport] ?? '📋'}</span>
@@ -4137,6 +4138,7 @@ export default function Dashboard({ betTarget, onBetTargetDone }: { betTarget?: 
                   </>}
                 </span>
               </div>
+              </Fragment>
             )
           })}
         </div>
