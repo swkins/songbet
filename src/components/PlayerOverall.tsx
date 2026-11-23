@@ -359,7 +359,7 @@ export default function PlayerOverall({ league, gameDate, home, away, left, odds
         <div style={{ ...box, borderColor: 'var(--gold-border)' }}>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
             <span style={{ fontSize: 13, fontWeight: 800 }}>예상 스코어</span>
-            <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>오버롤·출전 확률·이번 시즌 득실로 2만 번 시뮬레이션{changed ? ` · 가정 ${changed}명 적용 중` : ''}</span>
+            <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{sim.parts.market != null ? `시장 기준점 ${Math.round((sim.parts.wMarket ?? 0.8) * 100)}% + 우리 모델 ${Math.round((1 - (sim.parts.wMarket ?? 0.8)) * 100)}% (기준점 근처에 나오는 게 정상 — 우리 모델 단독 마진 ${signed(sim.parts.model ?? 0)})` : '오버롤·출전 확률·이번 시즌 득실로 2만 번 시뮬레이션'}{changed ? ` · 가정 ${changed}명 적용 중` : ''}</span>
             {changed > 0 && <button type="button" onClick={() => setOvr({})} style={{ marginLeft: 'auto', fontSize: 10, background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-secondary)', cursor: 'pointer', padding: '1px 6px' }}>가정 지우기</button>}
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 6 }}>
@@ -428,6 +428,8 @@ export default function PlayerOverall({ league, gameDate, home, away, left, odds
   )
 }
 
+// 핸디 픽 손익분기 (배당 1.91 기준) — 예상 마진이 기준점과 거의 같으면 50%대 초반이라 픽이 아니라 패스로 보인다 (2026-11-23 사용자 지적)
+const BREAKEVEN = 52.4
 // 현재 기준점으로 마핸/플핸 · 오버/언더 (예상 마진·총점은 위 시뮬레이션 — 출전 가정을 바꾸면 같이 바뀐다)
 function LinePickBox({ sim, lines, sd, sdT, hName, aName }: { sim: { margin: number; total: number }; lines: { spread: OddsLine | null; total: OddsLine | null }; sd: number; sdT: number; hName: string; aName: string }) {
   const sp = lines.spread, tt = lines.total
@@ -441,7 +443,9 @@ function LinePickBox({ sim, lines, sd, sdT, hName, aName }: { sim: { margin: num
         <div style={cell}>
           <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>핸디 기준점 · 홈 {fmtLine(sp.line)} <span style={{ fontFamily: 'var(--font-num)' }}>({sp.home_odds?.toFixed(2)} / {sp.away_odds?.toFixed(2)})</span></div>
           <div style={{ fontSize: 15, fontWeight: 800, marginTop: 2 }}>
-            {a.side === 'home' ? hName : aName} {a.kind}{a.kind !== '0' ? ` ${Math.abs(sp.line)}` : ''} <span style={{ color: strong(a.prob), fontFamily: 'var(--font-num)' }}>{a.prob}%</span>
+            {a.prob < BREAKEVEN
+              ? <span style={{ color: 'var(--text-muted)' }}>패스 <span style={{ fontSize: 11, fontWeight: 600 }}>· 기울기 {a.side === 'home' ? hName : aName} {a.kind}{a.kind !== '0' ? ` ${Math.abs(sp.line)}` : ''} {a.prob}% (손익분기 {BREAKEVEN}% 미만)</span></span>
+              : <>{a.side === 'home' ? hName : aName} {a.kind}{a.kind !== '0' ? ` ${Math.abs(sp.line)}` : ''} <span style={{ color: strong(a.prob), fontFamily: 'var(--font-num)' }}>{a.prob}%</span></>}
           </div>
           <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>예상 마진 {sim.margin > 0 ? '+' : ''}{sim.margin} vs 기준점 → 기준점보다 {Math.abs(a.edge)}점 {a.edge >= 0 ? '홈 쪽' : '원정 쪽'}</div>
           {(() => { const od = a.side === 'home' ? sp.home_odds : sp.away_odds, oo = a.side === 'home' ? sp.away_odds : sp.home_odds; const r = recOf(a.prob / 100, od, oo); if (!r || !od) return null
@@ -451,7 +455,7 @@ function LinePickBox({ sim, lines, sd, sdT, hName, aName }: { sim: { margin: num
       {tt && o && (
         <div style={cell}>
           <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>언오버 기준점 {tt.line} <span style={{ fontFamily: 'var(--font-num)' }}>({tt.home_odds?.toFixed(2)} / {tt.away_odds?.toFixed(2)})</span></div>
-          <div style={{ fontSize: 15, fontWeight: 800, marginTop: 2 }}>{o.side === 'over' ? '오버' : '언더'} <span style={{ color: strong(o.prob), fontFamily: 'var(--font-num)' }}>{o.prob}%</span></div>
+          <div style={{ fontSize: 15, fontWeight: 800, marginTop: 2 }}>{o.prob < BREAKEVEN ? <span style={{ color: 'var(--text-muted)' }}>패스 <span style={{ fontSize: 11, fontWeight: 600 }}>· 기울기 {o.side === 'over' ? '오버' : '언더'} {o.prob}%</span></span> : <>{o.side === 'over' ? '오버' : '언더'} <span style={{ color: strong(o.prob), fontFamily: 'var(--font-num)' }}>{o.prob}%</span></>}</div>
           <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>예상 총점 {sim.total} vs {tt.line} ({o.edge > 0 ? '+' : ''}{o.edge}) · 총점 모델은 아직 검증 전 — 추천 안 함</div>
         </div>
       )}

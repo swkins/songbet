@@ -500,7 +500,9 @@ export function simulate(code: string, home: TeamOv, away: TeamOv, overrides: Re
   }
   ms.sort((x, y) => x - y)
   const r1 = (x: number) => Math.round(x * 10) / 10
-  return { home: Math.round(sumH / n), away: Math.round(sumA / n), total: Math.round(T), margin: r1(mu), homeWin: r1(win / n * 100),
+  // 표시 스코어의 점수차 = 예상 마진을 반올림한 값 (홈·원정을 따로 반올림하면 마진 -3.4가 114-118 '4점차'로 보여 +3.5 픽과 어긋났다 — 2026-11-23 사용자 지적)
+  const dR = Math.round(mu), hR = Math.round((sumH + sumA) / n / 2 + dR / 2)
+  return { home: hR, away: hR - dR, total: Math.round(T), margin: r1(mu), homeWin: r1(win / n * 100),
     p10: r1(ms[Math.floor(n * 0.1)]), p90: r1(ms[Math.floor(n * 0.9)]),
     parts: { scoreMargin: r1(scoreMargin), ovMargin: r1(ovMargin), injury: r1(injury), hca: c.hca, news: newsAdj, cond: r1(condAdj), ...extra },
     raw: { scoreMargin: r1(scoreMargin), ovDiff: r1(ovDiff), injDiff: r1(injDiff), condDiff, hca: c.hca, news: newsAdj, T: r1(T), ...rawX } }
