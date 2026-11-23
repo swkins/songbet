@@ -428,7 +428,7 @@ export function nbaRatings(rows: TeamGameRow[], c: LeagueParams): Map<string, Te
 export interface ModelParams { leagues: Record<string, LeagueParams>; fatigueK: number }
 export const DEFAULT_PARAMS: ModelParams = {
   leagues: {
-    NBA: { sd: 13.5, sdT: 18, hca: 2.5, k: 1.0, avg: 113, wScore: 0.5, wOv: 0, condK: COND_K.NBA, rk: 0.05, rkt: 0.05, carry: 0, early: 4, wMarket: 0.8 },   // carry 0 = 지난 시즌 팀 레이팅 안 씀 (사용자 요청 2026-11-21 — 선수가 다 바뀜)
+    NBA: { sd: 13.5, sdT: 18, hca: 2.5, k: 1.0, avg: 113, wScore: 0.5, wOv: 0, condK: COND_K.NBA, rk: 0.05, rkt: 0.05, carry: 0, early: 4, wMarket: 0 },   // wMarket 0 = 시장 기준점을 예상 스코어에 안 섞음 (사용자 요청 2026-11-23 — 우리 모델만)   // carry 0 = 지난 시즌 팀 레이팅 안 씀 (사용자 요청 2026-11-21 — 선수가 다 바뀜)
     KBL: { sd: 11, sdT: 14, hca: 2, k: 0.8, avg: 80, wScore: 0.5, wOv: 0.5, condK: COND_K.KBL },
     WKBL: { sd: 10, sdT: 12, hca: 2, k: 0.7, avg: 65, wScore: 0.5, wOv: 0.5, condK: COND_K.WKBL },
     // 배구: hca = 홈 이점(logit), k = 팀 오버롤 1점당 logit, wScore = 시장 배당 비중, wOv = 오버롤 모델 비중 (volleyPredict.ts)
@@ -484,7 +484,7 @@ export function simulate(code: string, home: TeamOv, away: TeamOv, overrides: Re
     const rating = hr.r - ar.r
     const model = c.hca + rating + c.wOv * ovMargin + injury + condAdj + newsAdj
     const modelT = hr.avgT + hr.o + ar.d + ar.o + hr.d
-    const w = c.wMarket ?? 0.8
+    const w = c.wMarket ?? 0
     const mkt = market?.spread != null ? -Number(market.spread) : null, mktT = market?.total != null ? Number(market.total) : null
     mu = mkt != null ? mkt + (1 - w) * (model - mkt) : model
     T = mktT != null ? mktT + (1 - w) * (modelT - mktT) : modelT

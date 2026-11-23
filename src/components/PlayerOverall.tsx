@@ -359,7 +359,7 @@ export default function PlayerOverall({ league, gameDate, home, away, left, odds
         <div style={{ ...box, borderColor: 'var(--gold-border)' }}>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
             <span style={{ fontSize: 13, fontWeight: 800 }}>예상 스코어</span>
-            <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{sim.parts.market != null ? `시장 기준점 ${Math.round((sim.parts.wMarket ?? 0.8) * 100)}% + 우리 모델 ${Math.round((1 - (sim.parts.wMarket ?? 0.8)) * 100)}% (기준점 근처에 나오는 게 정상 — 우리 모델 단독 마진 ${signed(sim.parts.model ?? 0)})` : '오버롤·출전 확률·이번 시즌 득실로 2만 번 시뮬레이션'}{changed ? ` · 가정 ${changed}명 적용 중` : ''}</span>
+            <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{sim.parts.market != null && (sim.parts.wMarket ?? 0) > 0 ? `시장 기준점 ${Math.round((sim.parts.wMarket ?? 0.8) * 100)}% + 우리 모델 ${Math.round((1 - (sim.parts.wMarket ?? 0.8)) * 100)}% (기준점 근처에 나오는 게 정상 — 우리 모델 단독 마진 ${signed(sim.parts.model ?? 0)})` : (sim.parts.model != null ? `우리 모델만 (시장 기준점 안 섞음)${sim.parts.market != null ? ` · 참고: 기준점 마진 ${signed(sim.parts.market)}` : ''}` : '오버롤·출전 확률·이번 시즌 득실로 2만 번 시뮬레이션')}{changed ? ` · 가정 ${changed}명 적용 중` : ''}</span>
             {changed > 0 && <button type="button" onClick={() => setOvr({})} style={{ marginLeft: 'auto', fontSize: 10, background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-secondary)', cursor: 'pointer', padding: '1px 6px' }}>가정 지우기</button>}
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 6 }}>
@@ -367,7 +367,7 @@ export default function PlayerOverall({ league, gameDate, home, away, left, odds
               ['스코어 (홈-원정)', `${sim.home} - ${sim.away}`, `${hName} - ${aName}`],
               ['홈 승률', `${sim.homeWin}%`, `원정 ${Math.round((100 - sim.homeWin) * 10) / 10}%`],
               ['예상 마진 (홈)', signed(sim.margin), `80% 구간 ${signed(sim.p10)} ~ ${signed(sim.p90)}`],
-              ['예상 총점', String(sim.total), sim.parts.model != null ? (sim.parts.marketTotal != null ? `시장 ${sim.parts.marketTotal} · 모델 ${sim.parts.modelTotal}` : `모델 ${sim.parts.modelTotal} (기준점 없음)`) : '두 팀 이번 시즌 득실 기준'],
+              ['예상 총점', String(sim.total), sim.parts.model != null ? (sim.parts.marketTotal != null && (sim.parts.wMarket ?? 0) > 0 ? `시장 ${sim.parts.marketTotal} · 모델 ${sim.parts.modelTotal}` : `우리 모델${sim.parts.marketTotal != null ? ` · 참고 기준점 ${sim.parts.marketTotal}` : ''}`) : '두 팀 이번 시즌 득실 기준'],
             ].map(([k, v, sub]) => (
               <div key={k} style={{ textAlign: 'center', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '6px 4px', background: 'var(--bg-card)' }}>
                 <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{k}</div>
@@ -380,9 +380,9 @@ export default function PlayerOverall({ league, gameDate, home, away, left, odds
           {lines && (lines.spread || lines.total) && <LinePickBox sim={sim} lines={lines} sd={getParams().leagues[data.code]?.sd ?? 13.5} sdT={getParams().leagues[data.code]?.sdT ?? 18} hName={hName} aName={aName} />}
           {sim.parts.model != null ? (
           <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 6, lineHeight: 1.6 }}>
-            {sim.parts.market != null
+            {sim.parts.market != null && (sim.parts.wMarket ?? 0) > 0
               ? <>마진 = 시장 {signed(sim.parts.market)} × {sim.parts.wMarket} + 우리 모델 {signed(sim.parts.model)} × {Math.round((1 - (sim.parts.wMarket ?? 0.8)) * 10) / 10}</>
-              : <>마진 = 우리 모델 {signed(sim.parts.model)} (기준점 없음)</>}
+              : <>마진 = 우리 모델 {signed(sim.parts.model)}</>}
             {' '}· 우리 모델 = 팀 레이팅 차 {signed(sim.parts.rating ?? 0)} + 홈 {signed(sim.parts.hca)} + 결장·개인 피로 {signed(sim.parts.injury)}{sim.parts.cond ? <> + 컨디션 차 {signed(sim.parts.cond)}</> : null}
             {sim.parts.news ? <> + 뉴스 보정 {signed(sim.parts.news)}{data.news?.adj_note ? ` (${data.news.adj_note})` : ''}</> : null}
             {' '}· 팀 레이팅 = 이번 시즌 경기만으로 상대 보정해 고침 (지난 시즌 값 안 씀) · 선수 출전 칸을 누르면 결장/출전으로 바꿔 다시 계산
