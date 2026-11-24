@@ -24,6 +24,8 @@ export interface MiningCashout {
   perf_site_ids: string[]    // 실적현황 대상 베팅사이트 id 목록
   perf_period: '2w' | '1m' | null // 목표 날짜로부터 얼마나 이전 시기까지의 실적을 볼지
   perf_amount: number        // 실적 목표 금액
+  cash_enabled: boolean      // 현금교환을 쓰는 사이트인지 (2026-11-24 사용자 요청 — 사이트 추가 때 체크, 안 쓰면 실적현황만)
+  perf_week_amount: number   // 이번 주(월~일) 실적 목표 — 0이면 목표 없이 금액만
 }
 
 
@@ -96,7 +98,18 @@ export function useMiningData() {
 
   const knownSites = useMemo(() => Array.from(new Set(history.map(h => h.site_name))), [history])
 
-  async function addEntry(name: string, start: number, target: number): Promise<'ok' | 'duplicate' | 'error'> {
+  /** 사이트 설정 줄(mining_cashouts) 한 번에 고치기 — 없으면 만든다 */
+  async function upsertCashout(siteName: string, payload: Record<string, unknown>) {
+    const existing = cashouts.find(c => c.site_name === siteName)
+    const { data } = existing
+      ? await supabase.from('mining_cashouts').update(payload).eq('id', existing.id).select().single()
+      : await supabase.from('mining_cashouts').insert({ site_name: siteName, ...payload }).select().single()
+    if (data) setCashouts(prev => existing ? prev.map(c => c.id === (data as MiningCashout).id ? (data as MiningCashout) : c) : [...prev, data as MiningCashout])
+  }
+  async function setCashEnabled(siteName: string, enabled: boolean) { await upsertCashout(siteName, { cash_enabled: enabled }) }
+  async function setPerfWeek(siteName: string, amount: number) { await upsertCashout(siteName, { perf_week_amount: amount }) }
+
+  async function addEntry(name: string, start: number, target: number, cashEnabled = true): Promise<'ok' | 'duplicate' | 'error'> {
     const maxOrder = entries.reduce((a, e) => Math.max(a, e.sort_order), 0)
     const { data, error } = await supabase
       .from('mining_entries')
@@ -112,6 +125,7 @@ export function useMiningData() {
     if (!error && data) {
       setEntries(prev => [...prev, data as MiningEntry])
       setHistory(prev => [data as MiningEntry, ...prev])
+      await upsertCashout(name, { cash_enabled: cashEnabled })
       return 'ok'
     }
     if (error?.code === '23505') return 'duplicate'
@@ -166,7 +180,7 @@ export function useMiningData() {
   }
 
   /** 실적현황 목표 설정: 베팅사이트 목록 + 기간(목표 날짜로부터 얼마나 이전까지) + 목표 금액. */
-  async function setPerfGoal(siteName: string, siteIds: string[], period: '2w' | '1m', amount: number) {
+  async function setPerfGoal(siteName: string, siteIds: string[], period: '2w' | '1m' | null, amount: number) {
     const existing = cashoutFor(siteName)
     const payload = { site_name: siteName, perf_site_ids: siteIds, perf_period: period, perf_amount: amount }
     const { data } = existing
@@ -213,5 +227,5 @@ export function useMiningData() {
     })
   }
 
-  return { today, entries, history, loading, knownSites, addEntry, updateField, deleteEntry, cashouts, cashoutFor, setCashGoal, setAutoSet2w, setPerfGoal, doCashout }
+  return { today, entries, history, loading, knownSites, addEntry, updateField, deleteEntry, cashouts, cashoutFor, setCashGoal, setAutoSet2w, setPerfGoal, doCashout, setCashEnabled, setPerfWeek }
 }
