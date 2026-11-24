@@ -71,15 +71,16 @@ export function predictVolley(code: string, diff: number, p: { hca: number; k: n
   const dist = setDistribution(code, sig(l)); if (!dist) return null
   const r1 = (v: number) => Math.round(v * 1000) / 10
   const homeWin = dist['3-0'] + dist['3-1'] + dist['3-2']
-  // 예상 세트 스코어 = 세트차의 중앙값 (2026-11-24 사용자 지적 — 승률 55~60%인데 3:0이 나왔다).
-  //  예전엔 이길 쪽 안에서 가장 확률 높은 스코어를 골랐는데, 과거 V리그 곡선상 승률 50~65%에선 3-0·3-1이 18~23%로 거의 같아
-  //  조금만 앞서도 3-0이 뽑혔다(3-0 = 큰 차이로 읽힘). 중앙값 = '이 정도 이상으로 이길 확률이 50%↑인 가장 큰 차이' →
-  //  3-0은 정배 승률 약 80~90%↑, 3-1은 약 62~67%↑, 그 아래 앞서는 쪽은 3-2 (남·여, 홈/원정정배마다 조금 다름).
-  //  이길 쪽은 늘 홈 승률 50% 기준과 같다 (P(세트차 ≥ +1) = 홈 승률).
+  // 예상 세트 스코어 = 이길 쪽 + 세트 수 중앙값 (2026-11-24 사용자 지적 두 번):
+  //  ① 이길 쪽 안에서 가장 유력한 스코어 → 승률 55~60%에도 3:0 (3-0·3-1이 거의 같아서)
+  //  ② 세트차 중앙값 → 3:2가 나오는데 옆 칸 4.5 언더(5세트 안 감)는 68% — 서로 모순
+  //  지금: 이길 쪽 = 홈 승률 50% 기준, 세트 수 = 양쪽 합친 세트 수 분포의 중앙값 (3세트 = 3:0+0:3, 4세트 = 3:1+1:3, 5세트 = 3:2+2:3).
+  //  그래서 3.5 오버 ≥ 50%면 4세트 이상, 4.5 언더 ≥ 50%면 4세트 이하 — 옆 칸과 늘 맞는다.
+  //  3:0은 셧아웃(양쪽) 확률이 50%↑일 때만(정배 승률 약 85~90%↑), 5세트는 풀세트 확률이 50%를 넘어야 해서 거의 안 나온다.
   const homeSide = homeWin >= 0.5
-  const ladder: SetScore[] = homeSide ? ['3-0', '3-1', '3-2'] : ['0-3', '1-3', '2-3']
-  let acc = 0, best: SetScore = ladder[2]
-  for (const k of ladder) { acc += dist[k]; if (acc >= 0.5) { best = k; break } }
+  const p3 = dist['3-0'] + dist['0-3'], p4 = dist['3-1'] + dist['1-3']
+  const sets = p3 >= 0.5 ? 3 : p3 + p4 >= 0.5 ? 4 : 5
+  const best = (homeSide ? `3-${sets - 3}` : `${sets - 3}-3`) as SetScore
   const expDiff = SET_SCORES.reduce((a, k) => a + DIFF[k] * dist[k], 0)
   const expSets = 3 * (dist['3-0'] + dist['0-3']) + 4 * (dist['3-1'] + dist['1-3']) + 5 * (dist['3-2'] + dist['2-3'])
   return { homeWin: r1(homeWin), dist, best, expDiff: Math.round(expDiff * 100) / 100, expSets: Math.round(expSets * 100) / 100,
