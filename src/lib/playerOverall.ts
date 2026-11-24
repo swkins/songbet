@@ -237,12 +237,18 @@ export async function loadGameOverall(league: string, gameDate: string, home: Sc
       return pick
     })() : byUse.slice(0, 10)
     const extra: SeasonRow[] = []
+    const stubIds = new Set<string>()
     const addExtra = (id: string | null, name: string) => {
       if ([...top, ...extra].some(p => p.player_id === id || norm(p.player_name) === norm(name))) return   // 부상 명단·출전 확률 양쪽에 있는 선수 두 번 넣지 않기
       const inRoster = roster.find(r => r.player_id === id || norm(r.player_name) === norm(name))
       if (inRoster) { extra.push(inRoster); return }
       const pb = (id && prevById.get(id)) || prevByName.get(norm(name))
-      if (pb && (pb.manual_base != null || (pb.min ?? 0) >= 15 || vb)) extra.push({ ...pb, gp: 0, min: pb.min, gmsc: null, team })
+      if (pb && (pb.manual_base != null || (pb.min ?? 0) >= 15 || vb)) { extra.push({ ...pb, gp: 0, min: pb.min, gmsc: null, team }); return }
+      // 이번 시즌·지난 시즌 기록이 없어도 결장·출전 판단이 있는 선수는 목록에 보인다 (사용자 요청 2026-11-24 — 부키리치처럼 시즌 내내 못 뛴 선수가
+      //  아예 안 보이면 있었는지도 모른다). 기록이 없으니 체급·오버롤은 비우고 팀 전력에는 안 넣는다 (팀 기록에 이미 그 선수 없는 경기력이 들어 있음).
+      const sid = id ?? `name:${name}`
+      stubIds.add(sid)
+      extra.push({ player_id: sid, player_name: name, team, gp: 0, min: null, gmsc: null })
     }
     tStatus.forEach(s => addExtra(s.player_id, s.player_name))
     tInj.forEach(i => addExtra(i.player_id, i.player_name))
@@ -258,7 +264,7 @@ export async function loadGameOverall(league: string, gameDate: string, home: Sc
       // 이 리그 지난 시즌 기록이 없는 선수(새 용병·신인): 같은 구분 평균에서 출발해 경기마다 실제 쪽으로 (사용자 요청 2026-11-21)
       //  KBL 2025-26 측정: 새 용병은 평균 6경기분을 섞을 때(1경기 오차 4.7 → 3.0), 국내 신인은 3경기분일 때 가장 정확 — 배구도 일단 같은 값
       let newcomer: PlayerOv['newcomer'] = null
-      if (lastScore == null) {
+      if (lastScore == null && !stubIds.has(r.player_id)) {
         const ps = vb ? d.pos.get(r.player_id)?.position : null
         const k = kind ?? '국내'
         const pr = (ps && kind ? d.prior.get(`${k}|${ps}`) : undefined) ?? d.prior.get(k) ?? d.prior.get(`prev|${k}`) ?? (kind === '외국인' ? 80 : kind ? 68 : 55)
@@ -271,7 +277,7 @@ export async function loadGameOverall(league: string, gameDate: string, home: Sc
       const rc = d.recent.get(r.player_id)
       const form = rc && rc.n >= 2 && rc.gmsc5 != null ? Math.round(score(rc.gmsc5, d.poolCur)) : null
       const overall = base == null ? null : form == null ? base : Math.round(base * 0.7 + form * 0.3)
-      const baseNote = [n ? `이번 시즌 ${n}경기` : null, pb ? (pb.manual_base != null ? `조사 체급 ${pb.manual_base}${pb.note ? ` (${pb.note})` : ''}` : `지난 시즌 ${pb.gp}경기`) : null,
+      const baseNote = stubIds.has(r.player_id) ? '이번 시즌 출전 기록 없음 — 팀 전력에는 안 넣음 (팀 기록에 이미 이 선수 없는 경기력이 반영)' : [n ? `이번 시즌 ${n}경기` : null, pb ? (pb.manual_base != null ? `조사 체급 ${pb.manual_base}${pb.note ? ` (${pb.note})` : ''}` : `지난 시즌 ${pb.gp}경기`) : null,
         lastScore != null && curScore != null ? `이번 시즌 비중 ${Math.round(w * 100)}%` : null,
         newcomer ? `${newcomer.kind ? `새 ${newcomer.kind}` : '이 리그 새 선수'} — ${newcomer.kind ? `${newcomer.kind} 평균` : '같은 리그 선수 평균'} ${newcomer.prior}에서 출발, 실제 기록 비중 ${Math.round(newcomer.w * 100)}%` : null].filter(Boolean).join(' · ')
 
