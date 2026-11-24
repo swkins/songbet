@@ -82,6 +82,16 @@ function SetCountOdds({ v }: { v: VolleyResult }) {
 }
 
 // 배구 예상: 세트 스코어 분포 (volleyPredict.ts)
+// 용병 표시 (사용자 요청 2026-11-24 — 외국인·아시아쿼터는 국내 선수와 한눈에 다르게): 칩 + 줄 왼쪽 색 막대 + 옅은 배경
+const KIND_STYLE: Record<string, { color: string; row: string; label: string; title: string }> = {
+  '외국인': { color: '#FF9F1C', row: 'rgba(255,159,28,0.07)', label: '외국인', title: '외국인 선수 (용병)' },
+  '아시아쿼터': { color: '#2EC4B6', row: 'rgba(46,196,182,0.07)', label: '아쿼', title: '아시아쿼터 선수' },
+}
+function KindChip({ kind }: { kind: string }) {
+  const k = KIND_STYLE[kind]; if (!k) return null
+  return <span title={k.title} style={{ fontSize: 9, fontWeight: 800, padding: '0 5px', borderRadius: 3, background: k.color, color: '#111', lineHeight: '14px' }}>{k.label}</span>
+}
+
 function VolleyBox({ v, hName, aName, changed, onReset, odds }: { v: VolleyResult & { diff: number }; hName: string; aName: string; changed: number; onReset: () => void; odds?: { home: number; away: number } | null }) {
   const max = Math.max(...SET_SCORES.map(k => v.dist[k]))
   // 2만 번 시뮬레이션 (사용자 요청): 예상 총득점·득점·기준점별 오버 % (최다 세트 스코어 칸은 아래 분포와 겹쳐서 뺐다 — 사용자 요청)
@@ -252,13 +262,13 @@ function TeamTable({ title, t, ovr, onCycle, cond }: { title: string; t: TeamOv;
             const a = ov != null ? { ...p.avail, prob: ov, label: `${statusLabel(ov)} (가정)`, origin: 'none' as const } : p.avail, out = a.prob === 0
             const tier = tierOf(p.overall)
             return (
-              <tr key={p.id} style={{ background: out ? 'rgba(255,59,59,0.08)' : undefined }}>
-                <td style={td}><AvailCell p={p} ov={ov} onCycle={() => onCycle(p)} /></td>
+              <tr key={p.id} style={{ background: out ? 'rgba(255,59,59,0.08)' : p.kind ? KIND_STYLE[p.kind]?.row : undefined }}>
+                <td style={{ ...td, boxShadow: p.kind ? `inset 3px 0 0 ${KIND_STYLE[p.kind]?.color ?? 'var(--gold)'}` : undefined }}><AvailCell p={p} ov={ov} onCycle={() => onCycle(p)} /></td>
                 <td style={td}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
                     {p.pos && <span title={VB_POS_KO[p.pos] ?? p.pos} style={{ fontSize: 9, fontWeight: 800, padding: '0 4px', borderRadius: 3, border: '1px solid var(--border)', color: 'var(--text-secondary)', fontFamily: 'var(--font-num)' }}>{p.pos}</span>}
                     <span title={`${p.nameEn !== p.name ? p.nameEn + ' · ' : ''}${p.pos ? (VB_POS_KO[p.pos] ?? p.pos) + ' · ' : ''}${p.baseNote}`} style={{ fontWeight: 700 }}>{p.name}</span>
-                    {p.kind && <span style={{ fontSize: 9, color: 'var(--gold)' }}>{p.kind === '외국인' ? '외' : '아쿼'}</span>}
+                    {p.kind && <KindChip kind={p.kind} />}
                     {p.newcomer && p.newcomer.w < 0.67 && (
                       <span title={`이 리그 지난 시즌 기록 없음 — ${p.newcomer.kind ? `${p.newcomer.kind} 평균` : '같은 리그 선수 평균'} ${p.newcomer.prior}에서 출발, 실제 기록 비중 ${Math.round(p.newcomer.w * 100)}% (KBL 측정: 용병은 6경기·국내 신인은 3경기분 평균을 섞을 때 가장 정확)`}
                         style={{ fontSize: 9, fontWeight: 700, padding: '0 5px', borderRadius: 8, border: '1px solid var(--blue)', color: 'var(--blue)' }}>
