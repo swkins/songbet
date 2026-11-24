@@ -164,3 +164,9 @@ insert into public.odds_jobs (league, job) values ('챔피언스리그','collect
 select cron.schedule(j, '0 0 1 1 *', format('select public.run_collect_soccer(%L)', l)) from (values ('collect-soccer-ucl','챔피언스리그'),('collect-soccer-uel','유로파리그'),('collect-soccer-uecl','컨퍼런스리그')) v(j,l);
 -- 그다음 alter_job으로 첫 실행을 45~60분 뒤로 (그 뒤는 run_collect_soccer가 60~120분 랜덤으로 다시 잡음)
 -- 다른 리그 팀(챔스·유로파·컨퍼런스에만 나오는 팀) 한글 이름 37개는 soccer_team_names league '' 로 넣음
+
+-- ── 2026-11-24 AFC 클럽 대회 (사용자 요청): ESPN afc.champions(엘리트)·afc.cup(챔피언스리그 2) ──
+insert into soccer_leagues (name) select x from unnest(array['아시아 챔피언스리그','아시아 챔피언스리그2']) x where not exists (select 1 from soccer_leagues where name = x);
+insert into public.odds_jobs (league, job) values ('아시아 챔피언스리그','collect-soccer-acl'),('아시아 챔피언스리그2','collect-soccer-acl2') on conflict (league) do nothing;
+select cron.schedule(j, '0 0 1 1 *', format('select public.run_collect_soccer(%L)', l)) from (values ('collect-soccer-acl','아시아 챔피언스리그'),('collect-soccer-acl2','아시아 챔피언스리그2')) v(j,l);
+-- 그다음 alter_job으로 첫 실행을 50분 뒤로. K리그 팀 ESPN 영어 이름(Jeonbuk Hyundai Motors 등)·중동·동남아 팀 50개는 soccer_team_names league '' 로 넣음
