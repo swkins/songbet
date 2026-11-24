@@ -616,3 +616,14 @@ tr:hover td { background: var(--bg-hover); }
   .dashboard-main.betmode .dashboard-betmode-side { flex: 0 0 285px; width: 285px; }
   .dashboard-main.betmode .dashboard-betmode-side .mining-cards { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* 베팅 모드 패널 칸 — PC: 종목·리그 | 경기 일정 | 베팅슬립 (0.65 : 0.9 : 1.2) */
+.betmode-grid { display: grid; grid-template-columns: minmax(0, 0.65fr) minmax(0, 0.9fr) minmax(0, 1.2fr); gap: 10px; align-items: start; }
+/* 모바일 (2026-11-24 사용자 요청 — 세 칸이면 팀 이름이 잘린다): 종목·리그 → 아래 경기 일정 → 아래 베팅슬립. PC는 그대로 */
+@media (max-width: 700px) {
+  .betmode-grid { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+  .betmode-grid .betmode-col { max-height: none !important; overflow: visible !important; }
+  .betmode-grid .bm-col-league .bm-sport { display: grid !important; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .betmode-grid .bm-col-league .bm-sport > :first-child { grid-column: 1 / -1; }
+  .betmode-grid .bm-col-league .bm-sport > button:not(:first-child) { margin-left: 0 !important; }
+}

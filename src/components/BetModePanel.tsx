@@ -92,6 +92,11 @@ export default function BetModePanel({ target, onTargetDone, sites, betOptionsBy
   const leagueGames = games.filter(g => g.sport === sport && (!league || g.league === league))
   const game = games.find(g => g.id === gameId) ?? null
 
+  // 모바일(위아래 배치)에서 경기를 고르면 아래 베팅슬립으로 내려간다
+  const slipRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if ((gameId || addSiteId) && window.matchMedia('(max-width: 700px)').matches) slipRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [gameId, addSiteId])
   const col: React.CSSProperties = { minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4, overflowY: 'auto', maxHeight: 'calc(100vh - 170px)' }
   const head: React.CSSProperties = { fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', padding: '0 2px 4px' }
   const item = (active: boolean, dim = false): React.CSSProperties => ({
@@ -109,15 +114,16 @@ export default function BetModePanel({ target, onTargetDone, sites, betOptionsBy
         {targetMsg && <span style={{ fontSize: 11, color: 'var(--red)', marginLeft: 'auto' }}>{targetMsg}</span>}
       </div>
       {loading ? <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>불러오는 중…</div> : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 0.65fr) minmax(0, 0.9fr) minmax(0, 1.2fr)', gap: 10, alignItems: 'start' }}>
+        // 칸 비율은 index.css .betmode-grid (PC 0.65 : 0.9 : 1.2, 모바일 700px 이하는 위아래 — 2026-11-24 사용자 요청)
+        <div className="betmode-grid">
           {/* 1. 종목 → 리그 */}
-          <div style={col}>
+          <div style={col} className="betmode-col bm-col-league">
             <div style={head}>종목 · 리그</div>
             {SPORT_DEF.map(s => {
               const lgs = leaguesOf(s.id)
               const open = sport === s.id
               return (
-                <div key={s.id} style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                <div key={s.id} className="bm-sport" style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                   <button type="button" disabled={!lgs.length} onClick={() => { setSport(open ? null : s.id); setLeague(null); setGameId(null); setAddSiteId(null) }}
                     style={{ ...item(open, !lgs.length), fontWeight: 700, display: 'flex', justifyContent: 'space-between' }}>
                     <span>{s.icon} {s.label}</span>
@@ -158,7 +164,7 @@ export default function BetModePanel({ target, onTargetDone, sites, betOptionsBy
           </div>
 
           {/* 2. 경기 목록 */}
-          <div style={col}>
+          <div style={col} className="betmode-col">
             <div style={head}>{league ? `${league} 경기` : sport ? `${SPORT_DEF.find(s => s.id === sport)?.label ?? ''} 전체 경기` : '경기'}</div>
             {!sport ? <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: 6 }}>왼쪽에서 종목이나 리그를 고르세요</div>
               : (() => {
@@ -213,7 +219,7 @@ export default function BetModePanel({ target, onTargetDone, sites, betOptionsBy
           </div>
 
           {/* 3. 베팅옵션 */}
-          <div style={{ minWidth: 0 }}>
+          <div style={{ minWidth: 0 }} ref={slipRef}>
             <div style={{ ...head, display: 'flex', alignItems: 'center', gap: 6 }}>
               <span>{addSite ? `베팅추가 · ${addSite.name}` : '베팅슬립'}</span>
             </div>
