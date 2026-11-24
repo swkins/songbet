@@ -35,9 +35,11 @@ export interface BetTarget { sport: string; league: string; gameId: string; at?:
 export interface BetPreset { side: 'home' | 'away'; opt: string; odds: number | null }
 interface Game extends ScheduleGame { sport: string; league: string; date: string }
 
-export default function BetModePanel({ pendingBets = [], target, onTargetDone, sites, betOptionsBySport, numericBetOptionsBySport, teamsBySport, onBet, renderAddForm }: {
+export default function BetModePanel({ pendingBets = [], lastSiteId = null, target, onTargetDone, sites, betOptionsBySport, numericBetOptionsBySport, teamsBySport, onBet, renderAddForm }: {
   /** 진행중(결과 처리 전) 베팅 — 일정 경기에 '베팅함' 도장 (사용자 요청 2026-11-24) */
   pendingBets?: Bet[]
+  /** 가장 최근에 베팅한 사이트 — 베팅슬립 사이트 기본 선택 (사용자 요청 2026-11-24) */
+  lastSiteId?: string | null
   target?: BetTarget | null
   onTargetDone?: () => void
   sites: Site[]
@@ -261,8 +263,8 @@ export default function BetModePanel({ pendingBets = [], target, onTargetDone, s
             {addSite && renderAddForm ? renderAddForm(addSite, () => setAddSiteId(null))
               : !game ? <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: 6 }}>경기를 고르면 여기서 베팅합니다</div>
               : game.sport === 'basketball' || game.sport === 'volleyball'
-                ? <BasketSlip key={game.id} game={game} sites={sites} registered={teamsBySport[game.sport] ?? []} onBet={onBet} />
-                : <BetSlip key={game.id + (preset?.gameId === game.id ? '-p' : '')} preset={preset?.gameId === game.id ? preset.p : undefined} game={game} sites={sites}
+                ? <BasketSlip key={game.id} game={game} sites={sites} lastSiteId={lastSiteId} registered={teamsBySport[game.sport] ?? []} onBet={onBet} />
+                : <BetSlip key={game.id + (preset?.gameId === game.id ? '-p' : '')} preset={preset?.gameId === game.id ? preset.p : undefined} game={game} sites={sites} lastSiteId={lastSiteId}
                   options={betOptionsBySport[game.sport] ?? []} numeric={numericBetOptionsBySport[game.sport] ?? []}
                   registered={teamsBySport[game.sport] ?? []} onBet={onBet} />}
           </div>
@@ -272,8 +274,8 @@ export default function BetModePanel({ pendingBets = [], target, onTargetDone, s
   )
 }
 
-function BetSlip({ game, sites, options, numeric, registered, onBet, preset }: {
-  game: Game; sites: Site[]; options: string[]; numeric: string[]; preset?: BetPreset
+function BetSlip({ game, sites, lastSiteId, options, numeric, registered, onBet, preset }: {
+  game: Game; sites: Site[]; lastSiteId?: string | null; options: string[]; numeric: string[]; preset?: BetPreset
   registered: { league: string; name: string }[]
   onBet: (site: Site, sport: string, content: string, odds: number, stake: number, isLive: boolean, league: string) => Promise<boolean>
 }) {
@@ -285,7 +287,7 @@ function BetSlip({ game, sites, options, numeric, registered, onBet, preset }: {
   const [pick, setPick] = useState<Pick>(preset?.side ?? 'home')
   const [opt, setOpt] = useState<string>(preset?.opt ?? '승리')
   const [numVal, setNumVal] = useState('')
-  const [siteId, setSiteId] = useState<string>(orderedSites[0]?.id ?? '')
+  const [siteId, setSiteId] = useState<string>((lastSiteId && sites.some(x => x.id === lastSiteId) ? lastSiteId : orderedSites[0]?.id) ?? '')
   const site = sites.find(s => s.id === siteId) ?? null
   const isusd = site?.currency === 'usd'
   // 배당은 미리 채우지 않는다 (사용자 요청 2026-11-21 — 사이트 배당을 직접), 옵션을 고르면 배당 칸으로 커서
@@ -434,8 +436,8 @@ const VOLLEY_TOTALS = Array.from({ length: 13 }, (_, i) => 174.5 + i)
 type BPick = { kind: 'win'; side: 'home' | 'away' } | { kind: 'hcap'; side: 'home' | 'away'; line: number }
   | { kind: 'sets'; ou: 'over' | 'under' } | { kind: 'total'; line: number; ou: 'over' | 'under' }
 
-function BasketSlip({ game, sites, registered, onBet }: {
-  game: Game; sites: Site[]; registered: { league: string; name: string }[]
+function BasketSlip({ game, sites, lastSiteId, registered, onBet }: {
+  game: Game; sites: Site[]; lastSiteId?: string | null; registered: { league: string; name: string }[]
   onBet: (site: Site, sport: string, content: string, odds: number, stake: number, isLive: boolean, league: string) => Promise<boolean>
 }) {
   const home = resolveTeamName(game.home, game.league, registered)
@@ -478,7 +480,7 @@ function BasketSlip({ game, sites, registered, onBet }: {
   const favSide: 'home' | 'away' = est ? (est.favHome ? 'home' : 'away') : 'home'
 
   const [pick, setPick] = useState<BPick | null>(null)
-  const [siteId, setSiteId] = useState<string>(orderedSites[0]?.id ?? '')
+  const [siteId, setSiteId] = useState<string>((lastSiteId && sites.some(x => x.id === lastSiteId) ? lastSiteId : orderedSites[0]?.id) ?? '')
   const site = sites.find(s => s.id === siteId) ?? null
   const isusd = site?.currency === 'usd'
   const [oddsRaw, setOddsRaw] = useState('')

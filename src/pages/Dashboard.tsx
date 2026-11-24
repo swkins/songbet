@@ -4549,7 +4549,7 @@ export default function Dashboard({ betTarget, onBetTargetDone, layoutMode = 'si
         )}
         {betMode && (
           <div className="dashboard-betmode">
-            <BetModePanel pendingBets={bets.filter(b => b.result === 'pending')} target={betTarget ?? null} onTargetDone={onBetTargetDone} sites={sites} betOptionsBySport={betOptionsBySport} numericBetOptionsBySport={numericBetOptionsBySport}
+            <BetModePanel pendingBets={bets.filter(b => b.result === 'pending')} lastSiteId={bets.reduce<Bet | null>((a, b) => b.site_id && b.sport !== 'casino' && (!a || b.created_at > a.created_at) ? b : a, null)?.site_id ?? null} target={betTarget ?? null} onTargetDone={onBetTargetDone} sites={sites} betOptionsBySport={betOptionsBySport} numericBetOptionsBySport={numericBetOptionsBySport}
               teamsBySport={{ soccer: soccerTeams, baseball: baseballTeams, basketball: basketballTeams, volleyball: volleyballTeams }}
               onBet={(site, sp, ct, od, amt, lv, lg) => submitBet(site, sp, ct, od, amt, lv, lg)}
               renderAddForm={(site, onClose) => (
