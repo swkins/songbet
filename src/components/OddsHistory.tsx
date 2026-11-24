@@ -20,7 +20,9 @@ export default function OddsHistory({ list, homeName, awayName, compact }: { lis
   const td: React.CSSProperties = { textAlign: 'right', padding: '4px 6px', borderBottom: '1px solid var(--border)', fontFamily: 'var(--font-num)' }
   const cell = (v: number | null, prev: number | null | undefined) => {
     const d = v != null && prev != null ? +(v - prev).toFixed(2) : 0
-    return <td style={{ ...td, fontWeight: 700, color: trendColor(d) }}>{v?.toFixed(2) ?? '–'}<Arrow d={d} /></td>
+    // 같은 시각에 다른 배당만 바뀌었으면 이 칸은 '−' (그대로) — 사용자 요청 2026-11-24
+    const same = v != null && prev != null && !d
+    return <td style={{ ...td, fontWeight: 700, color: same ? 'var(--text-muted)' : trendColor(d) }}>{v?.toFixed(2) ?? '–'}{same ? <span style={{ fontSize: 9, marginLeft: 2 }}>−</span> : <Arrow d={d} />}</td>
   }
   return (
     <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '10px 12px', background: 'var(--bg-elevated)', marginTop: compact ? 0 : 12 }}>
@@ -56,7 +58,7 @@ export default function OddsHistory({ list, homeName, awayName, compact }: { lis
           )}
         </tbody>
       </table>
-      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4 }}><span style={{ color: 'var(--red)' }}>▼ 떨어짐(돈 몰림)</span> · <span style={{ color: 'var(--green)' }}>▲ 오름</span> (바로 전 기록 대비){compact ? ' · 바뀐 때만 기록, 해외 기준' : ''}</div>
+      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4 }}><span style={{ color: 'var(--red)' }}>▼ 떨어짐(돈 몰림)</span> · <span style={{ color: 'var(--green)' }}>▲ 오름</span> · − 그대로 (바로 전 기록 대비){compact ? ' · 바뀐 때만 기록, 해외 기준' : ''}</div>
     </div>
   )
 }
