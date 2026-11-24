@@ -4546,15 +4546,15 @@ export default function Dashboard({ betTarget, onBetTargetDone }: { betTarget?: 
       <div className={`dashboard-main${stacked ? ' stacked' : ''}${betMode ? ' betmode' : ''}`} style={{ '--mining-n': !stacked && sidePanel === 'analysis' ? 1.2 : 1, '--bet-n': colCount } as React.CSSProperties}>
 
         {/* ── 베팅 모드 (좌측) — 종목 → 리그 → 경기 → 베팅옵션. 사이트 현황 대신 이 자리를 쓰고 베팅 현황은 우측으로 */}
+        {/* ── 베팅 모드 좌측: 사이트 현황 + 일별 손익을 한 칸에 세로로 (2026-11-24 사용자 요청 — 사이트 현황 | 베팅 패널 | 베팅 현황) */}
+        {betMode && (
+          <div className="dashboard-betmode-side">
+            <MiningWidget compact />
+            <DailyPnLWidget usdKrwRate={usdKrwRate} refreshKey={(() => { const st = bets.filter(b => b.result !== 'pending'); return `${st.length}:${st.reduce((a, b) => a + b.profit, 0)}` })()} />
+          </div>
+        )}
         {betMode && (
           <div className="dashboard-betmode">
-            {/* 상하 모드의 사이트 현황 · 일별 손익을 베팅 패널 위에 (2026-11-24 사용자 요청 — 우측 베팅 현황은 그대로) */}
-            <div className="betmode-top">
-              <div style={{ minWidth: 0 }}><MiningWidget compact /></div>
-              <div className="dashboard-pnl-slot">
-                <DailyPnLWidget compact usdKrwRate={usdKrwRate} refreshKey={(() => { const st = bets.filter(b => b.result !== 'pending'); return `${st.length}:${st.reduce((a, b) => a + b.profit, 0)}` })()} />
-              </div>
-            </div>
             <BetModePanel target={betTarget ?? null} onTargetDone={onBetTargetDone} sites={sites} betOptionsBySport={betOptionsBySport} numericBetOptionsBySport={numericBetOptionsBySport}
               teamsBySport={{ soccer: soccerTeams, baseball: baseballTeams, basketball: basketballTeams, volleyball: volleyballTeams }}
               onBet={(site, sp, ct, od, amt, lv, lg) => submitBet(site, sp, ct, od, amt, lv, lg)}
