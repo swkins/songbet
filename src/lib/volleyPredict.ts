@@ -119,6 +119,7 @@ export interface VolleySim {
   homePts: number; awayPts: number              // 평균 득점
   total: number; median: number; lo: number; hi: number   // 총득점 평균·중앙값·가운데 80% 범위
   overs: { line: number; over: number }[]       // 총득점 기준점별 오버 %
+  overAll: { line: number; over: number }[]     // 140.5~220.5 모든 .5 기준점 오버 % (포인트 오버·언더 별점 구간용)
   rally: number                                 // 홈 랠리 확률
 }
 
@@ -159,10 +160,12 @@ export function simulateVolley(dist: Record<SetScore, number>, n = 20000, seed =
   const q = (p: number) => totals[Math.min(n - 1, Math.floor(p * n))]
   const r1 = (v: number) => Math.round(v * 10) / 10
   const scores = SET_SCORES.map(score => ({ score, pct: r1(((count[score] ?? 0) / n) * 100) })).sort((x, y) => y.pct - x.pct)
-  const overs = VOLLEY_TOTAL_LINES.map(line => {
+  const overOf = (line: number) => {
     let lo = 0, hi = n; while (lo < hi) { const m = (lo + hi) >> 1; if (totals[m] > line) hi = m; else lo = m + 1 }
     return { line, over: r1(((n - lo) / n) * 100) }
-  })
+  }
+  const overs = VOLLEY_TOTAL_LINES.map(overOf)
+  const overAll = Array.from({ length: 81 }, (_, i) => overOf(140.5 + i))
   return { n, scores, best: scores[0].score, bestPct: scores[0].pct, homePts: r1(sh / n), awayPts: r1(sa / n),
-    total: r1((sh + sa) / n), median: q(0.5), lo: q(0.1), hi: q(0.9), overs, rally: Math.round(r * 1000) / 1000 }
+    total: r1((sh + sa) / n), median: q(0.5), lo: q(0.1), hi: q(0.9), overs, overAll, rally: Math.round(r * 1000) / 1000 }
 }

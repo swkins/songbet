@@ -1,9 +1,9 @@
-import { Fragment, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { atsPick, ouPick, fmtLine, recOf, REC_RULE, type OddsLine } from '../lib/odds'
 import dayjs from 'dayjs'
 import { koName, type ScheduleTeam } from '../lib/gameSchedule'
 import { conditionColor, conditionLabel, type Condition } from '../lib/fatigue'
-import { SET_SCORES, simulateVolley, type VolleyResult } from '../lib/volleyPredict'
+import { SET_SCORES, simulateVolley, type VolleyResult, type VolleySim } from '../lib/volleyPredict'
 import { staminaOf, simulateVolleyGame, getParams, loadGameOverall, tierOf, availColor, TIERS, teamStrength, volleyLineup, VB_POS_KO, simulate, statusLabel, type TeamOv, type PlayerOv, type GameOverall } from '../lib/playerOverall'
 
 // ─── 분석 탭 오른쪽 칸: 양 팀 핵심·주전 선수 오버롤 + 출전 확률 ─────
@@ -81,6 +81,64 @@ function SetCountOdds({ v }: { v: VolleyResult }) {
   )
 }
 
+// 베팅 구간 (사용자 요청 2026-11-24 — 주력 3.5 오버·4.5 언더·포인트 오버·언더를 별 세 단계 + 패스로 바로)
+//  세트: 확률 p → ★★★ 기대수익 +3%↑(1.03/p) · ★★ 본전↑(1/p) · ★ 기대 손해 5% 이내(0.95/p, 롤링용) · 그 아래 패스 — 1.30 미만 배당은 늘 패스
+//  포인트(총득점): 배당 PTS_ODDS(보통 1.85) 가정, 같은 기준으로 필요한 확률 → 그 확률이 되는 기준점 (오버 = 이하일 때, 언더 = 이상일 때)
+const STAR_EV: [string, number][] = [['★★★', 0.03], ['★★', 0], ['★', -0.05]]
+const MIN_ODDS = 1.3, PTS_ODDS = 1.85
+function BetZones({ v, sim }: { v: VolleyResult; sim: VolleySim }) {
+  const d = v.dist
+  const setRows: [string, number][] = [['3.5 오버', 1 - d['3-0'] - d['0-3']], ['4.5 언더', 1 - d['3-2'] - d['2-3']]]
+  const oddsAt = (p: number, ev: number) => Math.max(MIN_ODDS, (1 + ev) / p)
+  // 포인트: 오버 확률 p_over(line)는 기준점이 낮을수록 큼 → 오버는 "line 이하", 언더는 "line 이상"
+  const need = (ev: number) => (1 + ev) / PTS_ODDS
+  const overMax = (ev: number) => [...sim.overAll].reverse().find(o => o.over / 100 >= need(ev))?.line ?? null
+  const underMin = (ev: number) => sim.overAll.find(o => 1 - o.over / 100 >= need(ev))?.line ?? null
+  const th: React.CSSProperties = { textAlign: 'center', fontWeight: 700, padding: '3px 4px', fontSize: 10, borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }
+  const td: React.CSSProperties = { textAlign: 'center', padding: '4px 4px', borderBottom: '1px solid var(--border)', fontSize: 12, fontFamily: 'var(--font-num)', fontWeight: 700, whiteSpace: 'nowrap' }
+  const starColor = ['#FACC15', '#FDE68A', 'var(--text-secondary)']
+  const ln = (x: number | null) => x == null ? '–' : x.toFixed(1)
+  return (
+    <div style={{ marginTop: 8 }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <thead><tr>
+          <th style={{ ...th, textAlign: 'left', color: 'var(--text-muted)' }}>베팅 구간</th><th style={{ ...th, color: 'var(--text-muted)' }}>확률</th>
+          {STAR_EV.map(([s], i) => <th key={s} style={{ ...th, color: starColor[i] }}>{s}</th>)}
+          <th style={{ ...th, color: 'var(--red)' }}>패스</th>
+        </tr></thead>
+        <tbody>
+          {setRows.map(([k, p]) => {
+            const lv = STAR_EV.map(([, ev]) => oddsAt(p, ev))
+            return (
+              <tr key={k}>
+                <td style={{ ...td, textAlign: 'left', fontFamily: 'var(--font-body)' }}>{k}<span style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 400 }}> 배당</span></td>
+                <td style={td}>{Math.round(p * 1000) / 10}%</td>
+                {lv.map((o, i) => <td key={i} style={{ ...td, color: starColor[i] }}>{o.toFixed(2)}↑</td>)}
+                <td style={{ ...td, color: 'var(--red)' }}>{lv[2].toFixed(2)} 미만</td>
+              </tr>
+            )
+          })}
+          {([['포인트 오버', 'over'], ['포인트 언더', 'under']] as const).map(([k, side]) => {
+            const lv = STAR_EV.map(([, ev]) => side === 'over' ? overMax(ev) : underMin(ev))
+            const mark = side === 'over' ? '↓' : '↑'
+            return (
+              <tr key={k}>
+                <td style={{ ...td, textAlign: 'left', fontFamily: 'var(--font-body)' }}>{k}<span style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 400 }}> 기준점</span></td>
+                <td style={{ ...td, fontSize: 10, color: 'var(--text-muted)', fontWeight: 400 }}>중앙 {sim.median}</td>
+                {lv.map((x, i) => <td key={i} style={{ ...td, color: starColor[i] }}>{ln(x)}{x != null ? mark : ''}</td>)}
+                <td style={{ ...td, color: 'var(--red)' }}>{lv[2] == null ? '전부' : side === 'over' ? `${ln(lv[2])} 초과` : `${ln(lv[2])} 미만`}</td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 3, lineHeight: 1.5 }}>
+        세트: 사이트 배당이 ★★★ 이상 = 기대수익 +3%↑ · ★★ = 본전↑ · ★ = 기대 손해 5% 이내(롤링용) · 1.30 미만은 패스. 포인트: 배당 {PTS_ODDS} 가정 — 오버는 기준점이 그 값 <b>이하</b>(↓), 언더는 <b>이상</b>(↑)이면 그 별. 총득점은 랠리 시뮬레이션이라 실제 V리그 득점으로 검증 전 — 금액은 작게.
+      </div>
+    </div>
+  )
+}
+
 // 배구 예상: 세트 스코어 분포 (volleyPredict.ts)
 // 용병 표시 (사용자 요청 2026-11-24 — 외국인·아시아쿼터는 국내 선수와 한눈에 다르게): 칩 + 줄 왼쪽 색 막대 + 옅은 배경
 const KIND_STYLE: Record<string, { color: string; row: string; label: string; title: string }> = {
@@ -118,11 +176,9 @@ function VolleyBox({ v, hName, aName, changed, onReset, odds }: { v: VolleyResul
         {/* 늘 하나로 정함 (사용자 요청 2026-11-24 — '접전' 표시 뺌): 이길 쪽(승률 50% 기준) 안에서 가장 확률 높은 세트 스코어 */}
         {tile('예상 세트 스코어', v.best.replace('-', ' : '), `${hName} : ${aName} · ${pct(v.dist[v.best])}%`)}
         {tile('홈 승률', `${v.homeWin}%`, `원정 ${Math.round((100 - v.homeWin) * 10) / 10}%`)}
-        {/* 주력 베팅 3.5 오버·4.5 언더 (사용자 요청 2026-11-24): 확률 + 갈 만한 배당 = 기대 손해 5% 이내(0.95/p, 롤링용), 1.30 미만이면 1.30 */}
-        {([['3.5 오버 (4세트↑)', v.over35], ['4.5 언더 (5세트 X)', Math.round((100 - v.full) * 10) / 10]] as const).map(([k, p]) => {
-          const go = Math.max(1.3, 0.95 / (p / 100))
-          return <Fragment key={k}>{tile(k, `${p}%`, <span title={`본전 배당 ${(100 / p).toFixed(2)} · 기대 손해 5% 이내 = ${(0.95 / (p / 100)).toFixed(2)} (1.30 미만이면 1.30)`}>갈 만한 배당 <b style={{ color: '#FACC15', fontSize: 11 }}>{go.toFixed(2)}↑</b></span>)}</Fragment>
-        })}
+        {/* 주력 베팅 3.5 오버·4.5 언더 (사용자 요청 2026-11-24) — 배당 구간(별점)은 아래 '베팅 구간' 표 */}
+        {tile('3.5 오버 (4세트↑)', `${v.over35}%`, `본전 배당 ${(100 / v.over35).toFixed(2)}`)}
+        {tile('4.5 언더 (5세트 X)', `${pct(1 - v.dist['3-2'] - v.dist['2-3'])}%`, `본전 배당 ${(100 / (100 - v.full)).toFixed(2)}`)}
         {tile('예상 총득점', `${sim.median}`, `180.5 오버 ${sim.overs.find(o => o.line === 180.5)?.over ?? '-'}%`)}
       </div>
       {/* 세트 스코어 분포 — 한 줄 막대 (홈 승 금색 · 원정 승 파랑) */}
@@ -139,6 +195,7 @@ function VolleyBox({ v, hName, aName, changed, onReset, odds }: { v: VolleyResul
           )
         })}
       </div>
+      <BetZones v={v} sim={sim} />
       {open && (
         <div style={{ marginTop: 8 }}>
           <div style={{ fontSize: 11, fontWeight: 700, marginBottom: 3 }}>총득점 기준점별 오버 % <span style={{ fontWeight: 400, fontSize: 10, color: 'var(--text-muted)' }}>평균 {sim.total} · 80% 범위 {sim.lo}~{sim.hi} · 기대 세트차 {v.expDiff > 0 ? '+' : ''}{v.expDiff}</span></div>
