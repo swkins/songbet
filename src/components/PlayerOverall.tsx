@@ -173,8 +173,9 @@ function VolleyBox({ v, hName, aName, changed, onReset, odds }: { v: VolleyResul
         <button type="button" onClick={toggle} style={{ marginLeft: 'auto', fontSize: 10, background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-secondary)', cursor: 'pointer', padding: '1px 8px' }}>{open ? '접기 ▲' : '자세히 ▼'}</button>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: 5 }}>
-        {/* 늘 하나로 정함 (사용자 요청 2026-11-24 — '접전' 표시 뺌): 이길 쪽(승률 50% 기준) 안에서 가장 확률 높은 세트 스코어 */}
-        {tile('예상 세트 스코어', v.best.replace('-', ' : '), `${hName} : ${aName} · ${pct(v.dist[v.best])}%`)}
+        {/* 늘 하나로 정함 (사용자 요청 2026-11-24 — '접전' 표시 뺌): 세트차 중앙값 — 그 차이 이상으로 이길 확률이 50%↑인 스코어
+            (3:0은 정배 승률 약 80~90%↑일 때만). 아래 숫자 = 그 스코어 이상으로 이길 확률 (예 3:1 → 3:0 + 3:1) */}
+        {tile('예상 세트 스코어', v.best.replace('-', ' : '), `${hName} : ${aName} · 이 차이↑ ${pct((v.best.startsWith('3') ? (['3-0', '3-1', '3-2'] as const) : (['0-3', '1-3', '2-3'] as const)).slice(0, (v.best.startsWith('3') ? ['3-0', '3-1', '3-2'] : ['0-3', '1-3', '2-3']).indexOf(v.best) + 1).reduce((a, k) => a + v.dist[k], 0))}%`)}
         {tile('홈 승률', `${v.homeWin}%`, `원정 ${Math.round((100 - v.homeWin) * 10) / 10}%`)}
         {/* 주력 베팅 3.5 오버·4.5 언더 (사용자 요청 2026-11-24) — 배당 구간(별점)은 아래 '베팅 구간' 표 */}
         {tile('3.5 오버 (4세트↑)', `${v.over35}%`, `본전 배당 ${(100 / v.over35).toFixed(2)}`)}

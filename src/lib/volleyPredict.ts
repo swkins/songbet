@@ -71,9 +71,15 @@ export function predictVolley(code: string, diff: number, p: { hca: number; k: n
   const dist = setDistribution(code, sig(l)); if (!dist) return null
   const r1 = (v: number) => Math.round(v * 1000) / 10
   const homeWin = dist['3-0'] + dist['3-1'] + dist['3-2']
-  // 예상 세트 스코어 = 이길 쪽(홈 승률 50% 기준) 안에서 가장 유력한 스코어 — 전체 최다로 고르면 홈 승률 52%인데 1-3처럼 어긋났다 (2026-11-24)
-  const side = SET_SCORES.filter(k => k.startsWith('3') === (homeWin >= 0.5))
-  const best = side.reduce((a, b) => (dist[b] > dist[a] ? b : a))
+  // 예상 세트 스코어 = 세트차의 중앙값 (2026-11-24 사용자 지적 — 승률 55~60%인데 3:0이 나왔다).
+  //  예전엔 이길 쪽 안에서 가장 확률 높은 스코어를 골랐는데, 과거 V리그 곡선상 승률 50~65%에선 3-0·3-1이 18~23%로 거의 같아
+  //  조금만 앞서도 3-0이 뽑혔다(3-0 = 큰 차이로 읽힘). 중앙값 = '이 정도 이상으로 이길 확률이 50%↑인 가장 큰 차이' →
+  //  3-0은 정배 승률 약 80~90%↑, 3-1은 약 62~67%↑, 그 아래 앞서는 쪽은 3-2 (남·여, 홈/원정정배마다 조금 다름).
+  //  이길 쪽은 늘 홈 승률 50% 기준과 같다 (P(세트차 ≥ +1) = 홈 승률).
+  const homeSide = homeWin >= 0.5
+  const ladder: SetScore[] = homeSide ? ['3-0', '3-1', '3-2'] : ['0-3', '1-3', '2-3']
+  let acc = 0, best: SetScore = ladder[2]
+  for (const k of ladder) { acc += dist[k]; if (acc >= 0.5) { best = k; break } }
   const expDiff = SET_SCORES.reduce((a, k) => a + DIFF[k] * dist[k], 0)
   const expSets = 3 * (dist['3-0'] + dist['0-3']) + 4 * (dist['3-1'] + dist['1-3']) + 5 * (dist['3-2'] + dist['2-3'])
   return { homeWin: r1(homeWin), dist, best, expDiff: Math.round(expDiff * 100) / 100, expSets: Math.round(expSets * 100) / 100,
