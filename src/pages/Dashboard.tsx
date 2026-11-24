@@ -3077,15 +3077,28 @@ export default function Dashboard({ betTarget, onBetTargetDone, layoutMode = 'si
     if (data) setBets(data)
   }
   // 자동 판정(DB auto_grade_bets, 30분마다)을 5분마다 받아 대기 중 베팅에 붙인다 — 최종 처리는 [확인]
+  async function refreshAuto() {
+    const { data } = await supabase.from('bets').select('id, auto_result, auto_score, auto_note, auto_game').eq('result', 'pending').eq('is_hidden', false)
+    if (!data) return
+    const m = new Map(data.map(d => [d.id as string, d]))
+    setBets(p => p.map(b => { const d = m.get(b.id); return d && (d.auto_result !== b.auto_result || d.auto_score !== b.auto_score || d.auto_note !== b.auto_note || JSON.stringify(d.auto_game ?? null) !== JSON.stringify(b.auto_game ?? null)) ? { ...b, ...d } as Bet : b }))
+  }
   useEffect(() => {
-    const t = setInterval(async () => {
-      const { data } = await supabase.from('bets').select('id, auto_result, auto_score, auto_note, auto_game').eq('result', 'pending').eq('is_hidden', false)
-      if (!data) return
-      const m = new Map(data.map(d => [d.id as string, d]))
-      setBets(p => p.map(b => { const d = m.get(b.id); return d && (d.auto_result !== b.auto_result || d.auto_score !== b.auto_score || d.auto_note !== b.auto_note || JSON.stringify(d.auto_game ?? null) !== JSON.stringify(b.auto_game ?? null)) ? { ...b, ...d } as Bet : b }))
-    }, 5 * 60 * 1000)
+    const t = setInterval(refreshAuto, 5 * 60 * 1000)
     return () => clearInterval(t)
   }, [])
+  // 새 베팅은 경기가 아직 안 붙어 있다 (자동 판정은 30분마다) → 경기 안 붙은 대기 베팅이 보이면 바로 한 번 돌려 '홈 vs 원정 · 시각'을 붙인다
+  // (2026-11-24 사용자 요청 — 축구도 NBA처럼 리그 옆에 누구 대 누구, 1분에 한 번까지)
+  const autoKickRef = useRef(0)
+  const needGame = bets.filter(b => b.result === 'pending' && !b.parlay_group && !b.auto_game && !b.auto_note && ['soccer', 'basketball', 'volleyball'].includes(b.sport)).map(b => b.id).join(',')
+  useEffect(() => {
+    if (!needGame) return
+    const kick = () => { autoKickRef.current = Date.now(); supabase.rpc('auto_grade_bets').then(() => refreshAuto(), () => {}) }
+    const wait = 60_000 - (Date.now() - autoKickRef.current)
+    if (wait <= 0) { kick(); return }
+    const t = setTimeout(kick, wait)
+    return () => clearTimeout(t)
+  }, [needGame]) // eslint-disable-line react-hooks/exhaustive-deps
   async function loadBetOptions() {
     const { data } = await supabase.from('bet_options').select('*').order('sport').order('sort_order').order('created_at')
     if (data) {
