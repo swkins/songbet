@@ -93,64 +93,66 @@ function KindChip({ kind }: { kind: string }) {
 }
 
 function VolleyBox({ v, hName, aName, changed, onReset, odds }: { v: VolleyResult & { diff: number }; hName: string; aName: string; changed: number; onReset: () => void; odds?: { home: number; away: number } | null }) {
+  // 간략 레이아웃 (사용자 요청 2026-11-24 — 상자가 너무 커서 아래 선수 오버롤을 보기 힘들었다): 한 줄 요약 칸 + 세트 스코어 막대 한 줄, 나머지는 '자세히'로 접음
   const max = Math.max(...SET_SCORES.map(k => v.dist[k]))
-  // 2만 번 시뮬레이션 (사용자 요청): 예상 총득점·득점·기준점별 오버 % (최다 세트 스코어 칸은 아래 분포와 겹쳐서 뺐다 — 사용자 요청)
   const sim = useMemo(() => simulateVolley(v.dist), [v.dist])
+  const [open, setOpen] = useState(() => { try { return localStorage.getItem('songbet_volley_detail') === '1' } catch { return false } })
+  const toggle = () => setOpen(o => { try { localStorage.setItem('songbet_volley_detail', o ? '0' : '1') } catch { /* 저장 안 돼도 됨 */ } return !o })
+  const pct = (x: number) => Math.round(x * 1000) / 10
   const tile = (k: string, val: string, sub: string) => (
-    <div style={{ textAlign: 'center', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '6px 4px', background: 'var(--bg-card)' }}>
+    <div style={{ textAlign: 'center', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '4px 4px', background: 'var(--bg-card)' }}>
       <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{k}</div>
-      <div style={{ fontSize: 18, fontWeight: 800, fontFamily: 'var(--font-num)' }}>{val}</div>
-      <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{sub}</div>
+      <div style={{ fontSize: 16, fontWeight: 800, fontFamily: 'var(--font-num)', lineHeight: 1.3 }}>{val}</div>
+      <div style={{ fontSize: 9, color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{sub}</div>
     </div>
   )
   return (
-    <div style={{ ...box, borderColor: 'var(--gold-border)' }}>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
+    <div style={{ ...box, borderColor: 'var(--gold-border)', padding: '8px 10px' }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap', marginBottom: 5 }}>
         <span style={{ fontSize: 13, fontWeight: 800 }}>예상 스코어</span>
-        <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>우리 모델만 (팀 세트 득실 + 포지션별 오버롤 + 결장 — 배당·배당 흐름 안 씀){changed ? ` · 가정 ${changed}명` : ''}</span>
-        {changed > 0 && <button type="button" onClick={onReset} style={{ marginLeft: 'auto', fontSize: 10, background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-secondary)', cursor: 'pointer', padding: '1px 6px' }}>가정 지우기</button>}
+        <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>우리 모델만 (배당 안 씀){changed ? ` · 가정 ${changed}명` : ''}</span>
+        {changed > 0 && <button type="button" onClick={onReset} style={{ fontSize: 10, background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-secondary)', cursor: 'pointer', padding: '1px 6px' }}>가정 지우기</button>}
+        <button type="button" onClick={toggle} style={{ marginLeft: 'auto', fontSize: 10, background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-secondary)', cursor: 'pointer', padding: '1px 8px' }}>{open ? '접기 ▲' : '자세히 ▼'}</button>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6, marginBottom: 6 }}>
-        {tile('예상 세트 스코어 (홈-원정)', v.best.replace('-', ' : '), `${hName} : ${aName} · ${Math.round(v.dist[v.best] * 1000) / 10}%`)}
-        {tile('예상 총득점', `${sim.median}`, `평균 ${sim.total} · 80% 범위 ${sim.lo}~${sim.hi}`)}
-        {tile('총득점 오버 확률', `${sim.overs.find(o => o.line === 180.5)?.over ?? '-'}%`, '180.5 기준')}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: 5 }}>
+        {tile('예상 세트 스코어', v.best.replace('-', ' : '), `${hName} : ${aName} · ${pct(v.dist[v.best])}%`)}
+        {tile('홈 승률', `${v.homeWin}%`, `원정 ${Math.round((100 - v.homeWin) * 10) / 10}%`)}
+        {tile('4세트 이상', `${v.over35}%`, `풀세트 ${v.full}% · 셧아웃 ${pct(v.dist['3-0'] + v.dist['0-3'])}%`)}
+        {tile('예상 총득점', `${sim.median}`, `180.5 오버 ${sim.overs.find(o => o.line === 180.5)?.over ?? '-'}%`)}
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(76px, 1fr))', gap: 3, marginBottom: 8 }}>
-        {sim.overs.map(o => (
-          <div key={o.line} title={`총득점 ${o.line} 오버 ${o.over}% · 언더 ${Math.round((100 - o.over) * 10) / 10}%`}
-            style={{ fontSize: 10, fontFamily: 'var(--font-num)', border: '1px solid var(--border)', borderRadius: 4, padding: '2px 4px', display: 'flex', justifyContent: 'space-between',
-              color: o.over >= 55 ? 'var(--green)' : o.over <= 45 ? 'var(--blue)' : 'var(--text-secondary)' }}>
-            <span>{o.line}</span><b>{o.over}%</b>
-          </div>
-        ))}
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
-        {tile('홈 승률', `${v.homeWin}%`, `${hName} · 원정 ${Math.round((100 - v.homeWin) * 10) / 10}%`)}
-        {tile('기대 세트차 (홈)', `${v.expDiff > 0 ? '+' : ''}${v.expDiff}`, `기대 ${v.expSets}세트`)}
-        {tile('4세트 이상', `${v.over35}%`, `풀세트 ${v.full}%`)}
-        {tile('셧아웃 (3-0·0-3)', `${Math.round((v.dist['3-0'] + v.dist['0-3']) * 1000) / 10}%`, `홈 3-0 ${Math.round(v.dist['3-0'] * 100)}% · 원정 3-0 ${Math.round(v.dist['0-3'] * 100)}%`)}
-      </div>
-      <div style={{ marginTop: 8 }}>
+      {/* 세트 스코어 분포 — 한 줄 막대 (홈 승 금색 · 원정 승 파랑) */}
+      <div style={{ display: 'flex', gap: 3, marginTop: 6 }}>
         {SET_SCORES.map(k => {
           const pv = v.dist[k], homeWin = k.startsWith('3')
           return (
-            <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, marginBottom: 3 }}>
-              <span style={{ width: 30, fontFamily: 'var(--font-num)' }}>{k}</span>
-              <div style={{ flex: 1, height: 10, background: 'var(--bg-card)', borderRadius: 3, overflow: 'hidden' }}>
-                <div style={{ width: `${(pv / max) * 100}%`, height: '100%', background: homeWin ? 'var(--gold)' : 'var(--blue)', opacity: 0.85 }} />
+            <div key={k} title={`${k} ${pct(pv)}%`} style={{ flex: 1, minWidth: 0, textAlign: 'center' }}>
+              <div style={{ height: 22, display: 'flex', alignItems: 'flex-end', background: 'var(--bg-card)', borderRadius: 3, overflow: 'hidden' }}>
+                <div style={{ width: '100%', height: `${(pv / max) * 100}%`, background: homeWin ? 'var(--gold)' : 'var(--blue)', opacity: k === v.best ? 1 : 0.55 }} />
               </div>
-              <span style={{ width: 40, textAlign: 'right', fontFamily: 'var(--font-num)' }}>{Math.round(pv * 1000) / 10}%</span>
+              <div style={{ fontSize: 9, fontFamily: 'var(--font-num)', color: k === v.best ? 'var(--text-primary)' : 'var(--text-muted)', fontWeight: k === v.best ? 800 : 400 }}>{k} {Math.round(pv * 100)}%</div>
             </div>
           )
         })}
       </div>
-      {/* 배당 비교 · 추천 (사용자 요청 — 모델 확률 vs 지금 승패 배당) */}
-      {odds && <MoneylineBox p={v.homeWin / 100} odds={odds} market={v.marketHome} hName={hName} aName={aName} />}
-      {/* 세트 수 확률 → 배당 기준 (롤링용: 조금 손해여도 갈 만한 배당부터) */}
-      <SetCountOdds v={v} />
-      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4, lineHeight: 1.6 }}>
-        홈 승률 {v.homeWin}% = 팀 세트 득실{v.teamHome != null ? ` ${v.teamHome}%` : ' (기록 없음)'} · 포지션별 오버롤 {v.modelHome}% (팀 오버롤 차 {v.diff > 0 ? '+' : ''}{v.diff}){v.marketHome != null ? ` · 시장 ${v.marketHome}% (비교만)` : ''} → 세트 분포는 과거 V리그 5시즌 곡선 · 점수는 랠리 모델 2만 번(홈 랠리 {Math.round(sim.rally * 1000) / 10}%, 실제 득점으로 검증 전 — 칸 = 총득점 기준점별 오버 %) · 선수 출전 칸을 누르면 다시 계산
-      </div>
+      {open && (
+        <div style={{ marginTop: 8 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, marginBottom: 3 }}>총득점 기준점별 오버 % <span style={{ fontWeight: 400, fontSize: 10, color: 'var(--text-muted)' }}>평균 {sim.total} · 80% 범위 {sim.lo}~{sim.hi} · 기대 세트차 {v.expDiff > 0 ? '+' : ''}{v.expDiff}</span></div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(76px, 1fr))', gap: 3, marginBottom: 8 }}>
+            {sim.overs.map(o => (
+              <div key={o.line} title={`총득점 ${o.line} 오버 ${o.over}% · 언더 ${Math.round((100 - o.over) * 10) / 10}%`}
+                style={{ fontSize: 10, fontFamily: 'var(--font-num)', border: '1px solid var(--border)', borderRadius: 4, padding: '2px 4px', display: 'flex', justifyContent: 'space-between',
+                  color: o.over >= 55 ? 'var(--green)' : o.over <= 45 ? 'var(--blue)' : 'var(--text-secondary)' }}>
+                <span>{o.line}</span><b>{o.over}%</b>
+              </div>
+            ))}
+          </div>
+          {odds && <MoneylineBox p={v.homeWin / 100} odds={odds} market={v.marketHome} hName={hName} aName={aName} />}
+          <SetCountOdds v={v} />
+          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4, lineHeight: 1.6 }}>
+            홈 승률 {v.homeWin}% = 팀 세트 득실{v.teamHome != null ? ` ${v.teamHome}%` : ' (기록 없음)'} · 포지션별 오버롤 {v.modelHome}% (팀 오버롤 차 {v.diff > 0 ? '+' : ''}{v.diff}){v.marketHome != null ? ` · 시장 ${v.marketHome}% (비교만)` : ''} → 세트 분포는 과거 V리그 5시즌 곡선 · 점수는 랠리 모델 2만 번(홈 랠리 {Math.round(sim.rally * 1000) / 10}%, 실제 득점으로 검증 전) · 선수 출전 칸을 누르면 다시 계산
+          </div>
+        </div>
+      )}
     </div>
   )
 }
