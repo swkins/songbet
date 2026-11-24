@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import { atsPick, ouPick, fmtLine, recOf, REC_RULE, type OddsLine } from '../lib/odds'
 import dayjs from 'dayjs'
 import { koName, type ScheduleTeam } from '../lib/gameSchedule'
@@ -99,7 +99,7 @@ function VolleyBox({ v, hName, aName, changed, onReset, odds }: { v: VolleyResul
   const [open, setOpen] = useState(() => { try { return localStorage.getItem('songbet_volley_detail') === '1' } catch { return false } })
   const toggle = () => setOpen(o => { try { localStorage.setItem('songbet_volley_detail', o ? '0' : '1') } catch { /* 저장 안 돼도 됨 */ } return !o })
   const pct = (x: number) => Math.round(x * 1000) / 10
-  const tile = (k: string, val: string, sub: string) => (
+  const tile = (k: string, val: string, sub: React.ReactNode) => (
     <div style={{ textAlign: 'center', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '4px 4px', background: 'var(--bg-card)' }}>
       <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{k}</div>
       <div style={{ fontSize: 16, fontWeight: 800, fontFamily: 'var(--font-num)', lineHeight: 1.3 }}>{val}</div>
@@ -118,7 +118,11 @@ function VolleyBox({ v, hName, aName, changed, onReset, odds }: { v: VolleyResul
         {/* 늘 하나로 정함 (사용자 요청 2026-11-24 — '접전' 표시 뺌): 이길 쪽(승률 50% 기준) 안에서 가장 확률 높은 세트 스코어 */}
         {tile('예상 세트 스코어', v.best.replace('-', ' : '), `${hName} : ${aName} · ${pct(v.dist[v.best])}%`)}
         {tile('홈 승률', `${v.homeWin}%`, `원정 ${Math.round((100 - v.homeWin) * 10) / 10}%`)}
-        {tile('4세트 이상', `${v.over35}%`, `풀세트 ${v.full}% · 셧아웃 ${pct(v.dist['3-0'] + v.dist['0-3'])}%`)}
+        {/* 주력 베팅 3.5 오버·4.5 언더 (사용자 요청 2026-11-24): 확률 + 갈 만한 배당 = 기대 손해 5% 이내(0.95/p, 롤링용), 1.30 미만이면 1.30 */}
+        {([['3.5 오버 (4세트↑)', v.over35], ['4.5 언더 (5세트 X)', Math.round((100 - v.full) * 10) / 10]] as const).map(([k, p]) => {
+          const go = Math.max(1.3, 0.95 / (p / 100))
+          return <Fragment key={k}>{tile(k, `${p}%`, <span title={`본전 배당 ${(100 / p).toFixed(2)} · 기대 손해 5% 이내 = ${(0.95 / (p / 100)).toFixed(2)} (1.30 미만이면 1.30)`}>갈 만한 배당 <b style={{ color: '#FACC15', fontSize: 11 }}>{go.toFixed(2)}↑</b></span>)}</Fragment>
+        })}
         {tile('예상 총득점', `${sim.median}`, `180.5 오버 ${sim.overs.find(o => o.line === 180.5)?.over ?? '-'}%`)}
       </div>
       {/* 세트 스코어 분포 — 한 줄 막대 (홈 승 금색 · 원정 승 파랑) */}
