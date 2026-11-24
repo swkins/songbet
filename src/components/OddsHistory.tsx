@@ -4,9 +4,11 @@ import { fmtLine, type OddsSnap, type OddsLine } from '../lib/odds'
 // 오른쪽 분석 칸 — 승패 배당 시간대별 변동표 (바뀐 기록만 쌓임)
 const SRC: Record<string, string> = { actionnetwork: 'Action Network 9개 북 평균', betexplorer: 'BetExplorer 평균배당', 'espn-draftkings': 'ESPN · DraftKings' }
 
+// 배당 변동 색 (사용자 요청 2026-11-24): 떨어지면 빨강 ▼ · 오르면 초록 ▲ — 숫자도 같은 색
+export const trendColor = (d: number | null | undefined) => !d ? undefined : d < 0 ? 'var(--red)' : 'var(--green)'
 export function Arrow({ d }: { d: number }) {
   if (!d) return null
-  return <span style={{ fontSize: 9, marginLeft: 2, color: d < 0 ? 'var(--green)' : 'var(--red)' }}>{d < 0 ? '▼' : '▲'}</span>
+  return <span style={{ fontSize: 9, marginLeft: 2, color: trendColor(d) }}>{d < 0 ? '▼' : '▲'}</span>
 }
 
 export default function OddsHistory({ list, homeName, awayName, compact }: { list: OddsSnap[]; homeName: string; awayName: string; compact?: boolean }) {
@@ -16,9 +18,10 @@ export default function OddsHistory({ list, homeName, awayName, compact }: { lis
   const rows = [...list].reverse()
   const th: React.CSSProperties = { textAlign: 'right', fontWeight: 600, color: 'var(--text-muted)', padding: '3px 6px', fontSize: 10, borderBottom: '1px solid var(--border)' }
   const td: React.CSSProperties = { textAlign: 'right', padding: '4px 6px', borderBottom: '1px solid var(--border)', fontFamily: 'var(--font-num)' }
-  const cell = (v: number | null, prev: number | null | undefined) => (
-    <td style={{ ...td, fontWeight: 700 }}>{v?.toFixed(2) ?? '–'}{v != null && prev != null && <Arrow d={+(v - prev).toFixed(2)} />}</td>
-  )
+  const cell = (v: number | null, prev: number | null | undefined) => {
+    const d = v != null && prev != null ? +(v - prev).toFixed(2) : 0
+    return <td style={{ ...td, fontWeight: 700, color: trendColor(d) }}>{v?.toFixed(2) ?? '–'}<Arrow d={d} /></td>
+  }
   return (
     <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '10px 12px', background: 'var(--bg-elevated)', marginTop: compact ? 0 : 12 }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>
@@ -53,7 +56,7 @@ export default function OddsHistory({ list, homeName, awayName, compact }: { lis
           )}
         </tbody>
       </table>
-      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4 }}>▼ 내려감(돈 몰림) · ▲ 올라감{compact ? ' · 바뀐 때만 기록, 해외 기준' : ''}</div>
+      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4 }}><span style={{ color: 'var(--red)' }}>▼ 떨어짐(돈 몰림)</span> · <span style={{ color: 'var(--green)' }}>▲ 오름</span> (바로 전 기록 대비){compact ? ' · 바뀐 때만 기록, 해외 기준' : ''}</div>
     </div>
   )
 }

@@ -5,7 +5,8 @@ import { applyNumericTemplate } from '../lib/betOptions'
 import type { Site } from '../types'
 import { supabase } from '../lib/supabase'
 import GameAnalysisModal from './GameAnalysisModal'
-import { loadOdds, type OddsSnap } from '../lib/odds'
+import { loadOdds, oddsTrend, type OddsSnap } from '../lib/odds'
+import { Arrow, trendColor } from './OddsHistory'
 
 // ─── 대시보드 '베팅' 모드 (초안) ──────────────────────────────────
 // 가져온 경기 일정(game_schedules)을 보고 바로 베팅한다.
@@ -58,9 +59,9 @@ export default function BetModePanel({ target, onTargetDone, sites, betOptionsBy
 
   useEffect(() => { loadSchedules().then(r => { setRows(r); setLoading(false) }).catch(() => setLoading(false)) }, [])
   // 경기 목록 팀 이름 옆 현재 배당 (사용자 요청 — 최신 odds_snapshots, 축구는 무배당도) · 5분마다 다시
-  const [odds, setOdds] = useState<Record<string, OddsSnap>>({})
+  const [odds, setOdds] = useState<Record<string, OddsSnap & { first: OddsSnap }>>({})
   useEffect(() => {
-    const load = () => loadOdds(dayjs().subtract(1, 'day').format('YYYY-MM-DD')).then(m => setOdds(Object.fromEntries(Object.entries(m).map(([k, v]) => [k, v[v.length - 1]])))).catch(() => {})
+    const load = () => loadOdds(dayjs().subtract(1, 'day').format('YYYY-MM-DD')).then(m => setOdds(Object.fromEntries(Object.entries(m).map(([k, v]) => [k, { ...v[v.length - 1], first: v[0] }])))).catch(() => {})
     load(); const t = setInterval(load, 5 * 60000); return () => clearInterval(t)
   }, [])
   // 분석 탭에서 넘어온 경기: 일정을 다 불러온 뒤 종목·리그·경기를 골라 베팅슬립을 연다
@@ -188,15 +189,18 @@ export default function BetModePanel({ target, onTargetDone, sites, betOptionsBy
                         {/* 위 = 홈, 아래 = 원정 — 현재 배당은 오른쪽 고정 칸(끝에서 10px 띄움, 이름 길이와 상관없이 같은 자리), 축구는 가운데 줄에 무배당 (1·X·2 순) */}
                         {(() => {
                           const o = odds[g.id]
-                          const row = (name: string, v: number | null | undefined, small = false) => <>
+                          // 배당 옆 ▲▼ = 오픈(없으면 첫 기록) 대비 — 떨어지면 빨강 · 오르면 초록 (사용자 요청 2026-11-24)
+                          const tr = o ? oddsTrend([o.first, o]) : null
+                          const dDraw = o?.draw_odds != null ? +(o.draw_odds - (o.open_draw ?? o.first.draw_odds ?? o.draw_odds)).toFixed(2) : 0
+                          const row = (name: string, v: number | null | undefined, d: number, small = false) => <>
                             <span style={{ fontWeight: small ? 400 : 700, fontSize: small ? 10 : undefined, color: small ? 'var(--text-muted)' : undefined, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{name}</span>
-                            <span style={{ fontFamily: 'var(--font-num)', fontWeight: 700, fontSize: small ? 10 : 11, color: small ? 'var(--text-muted)' : 'var(--text-secondary)', textAlign: 'right' }}>{v != null ? Number(v).toFixed(2) : ''}</span>
+                            <span style={{ fontFamily: 'var(--font-num)', fontWeight: 700, fontSize: small ? 10 : 11, color: trendColor(d) ?? (small ? 'var(--text-muted)' : 'var(--text-secondary)'), textAlign: 'right', whiteSpace: 'nowrap' }}>{v != null ? <>{Number(v).toFixed(2)}<Arrow d={d} /></> : ''}</span>
                           </>
                           return (
-                            <span style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 40px', columnGap: 10, rowGap: 2, alignItems: 'baseline', width: '100%', paddingRight: 10, boxSizing: 'border-box' }}>
-                              {row(koName(g.home.name), o?.home_odds)}
-                              {g.sport === 'soccer' && o?.draw_odds != null && row('무', o.draw_odds, true)}
-                              {row(koName(g.away.name), o?.away_odds)}
+                            <span style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 48px', columnGap: 8, rowGap: 2, alignItems: 'baseline', width: '100%', paddingRight: 10, boxSizing: 'border-box' }}>
+                              {row(koName(g.home.name), o?.home_odds, tr?.dH ?? 0)}
+                              {g.sport === 'soccer' && o?.draw_odds != null && row('무', o.draw_odds, dDraw, true)}
+                              {row(koName(g.away.name), o?.away_odds, tr?.dA ?? 0)}
                             </span>
                           )
                         })()}

@@ -7,7 +7,7 @@ import type { BetPreset } from '../components/BetModePanel'
 import GameAnalysis from '../components/GameAnalysis'
 import { Activity, ClipboardCheck } from 'lucide-react'
 import ModelReport, { loadPredictions, PredBadge, type Prediction } from '../components/ModelReport'
-import { Arrow } from '../components/OddsHistory'
+import { Arrow, trendColor } from '../components/OddsHistory'
 import { loadOdds, loadLines, oddsTrend, type OddsSnap, type OddsLine } from '../lib/odds'
 import { loadOverallAnalyses, findAnalysis, type OverallAnalysis } from '../components/OverallAnalysisView'
 import { loadSchedules, gameState, koName, sortLeagues, type ScheduleGame, type ScheduleTeam, type ScheduleRow } from '../lib/gameSchedule'
@@ -113,7 +113,7 @@ export default function Schedule({ onGoBet }: { onGoBet?: (t: { sport: string; l
           {home && <span style={{ fontSize: 9, color: 'var(--text-muted)', flexShrink: 0 }}>홈</span>}
           {/* 승패 배당 (오픈·첫 기록 대비 ▲▼) — 점수가 있으면 점수 앞에 */}
           {tr && (home ? tr.last.home_odds : tr.last.away_odds) != null && (
-            <span style={{ marginLeft: 'auto', flexShrink: 0, fontSize: 11, fontFamily: 'var(--font-num)', color: 'var(--text-secondary)', fontWeight: 600 }}>
+            <span style={{ marginLeft: 'auto', flexShrink: 0, fontSize: 11, fontFamily: 'var(--font-num)', color: trendColor(home ? tr.dH : tr.dA) ?? 'var(--text-secondary)', fontWeight: 600 }}>
               {(home ? tr.last.home_odds : tr.last.away_odds)!.toFixed(2)}<Arrow d={home ? tr.dH : tr.dA} />
             </span>
           )}
