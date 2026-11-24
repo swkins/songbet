@@ -72,10 +72,18 @@ select league, season, player_id,
 from public.v_player_games where league not like 'VLEAGUE%'
 group by league, season, player_id
 union all
-select case when gender = 'MALE' then 'VLEAGUE_M' else 'VLEAGUE_W' end, public.vb_season(snapshot_date), player_code, player_name,
+select k.lg, k.season, player_code, player_name,
   team_name, game_count, null, round(public.vb_value(stats) / nullif(game_count, 0), 2), snapshot_date
-from (select distinct on (player_code, public.vb_season(snapshot_date)) * from public.kovo_player_snapshots
-      order by player_code, public.vb_season(snapshot_date), snapshot_date desc) k;
+from (select distinct on (player_code, public.vb_season(snapshot_date)) *, public.vb_season(snapshot_date) as season,
+        case when gender = 'MALE' then 'VLEAGUE_M' else 'VLEAGUE_W' end as lg
+      from public.kovo_player_snapshots
+      order by player_code, public.vb_season(snapshot_date), snapshot_date desc) k
+-- KOVO는 이번 시즌 기록이 없는 선수에게 예전 시즌 누적을 준다 (2026-11-24 — 부키리치 2026-27 0경기인데 2024-25 30경기가 들어왔다):
+-- 그 시즌 팀 경기 수(vb_games)보다 많이 뛴 기록은 버린다 (스냅샷이 경기 결과보다 먼저 들어올 수 있어 +1까지 허용)
+left join (select league, season, team, count(*) n from (
+             select league, season, home as team from public.vb_games union all select league, season, away from public.vb_games) g
+           group by 1, 2, 3) tg on tg.league = k.lg and tg.season = k.season and tg.team = k.team_name
+where tg.n is null or k.game_count <= tg.n + 1;
 
 -- 최근폼: 이번 시즌 최근 5경기 (최근일수록 크게 5·4·3·2·1)
 create or replace view public.v_player_recent with (security_invoker = on) as
