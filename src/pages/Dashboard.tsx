@@ -4074,8 +4074,8 @@ export default function Dashboard({ betTarget, onBetTargetDone, layoutMode = 'si
           </div>
         </div>
         {/* 진행중 베팅 — 한 줄씩 */}
-        <div className="card" style={{ padding: '6px 10px' }}>
-          <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-secondary)', marginBottom: 4 }}>진행중 베팅 {all.filter(x => x.b.result === 'pending').length}건</div>
+        <div className="card combo-pending" style={{ padding: '6px 10px' }}>
+          <div className="combo-pending-title" style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-secondary)', marginBottom: 4 }}>진행중 베팅 {all.filter(x => x.b.result === 'pending').length}건</div>
           {all.length === 0 && <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '6px 0' }}>진행중인 베팅이 없습니다</div>}
           {all.map(({ b, site }) => {
             if (b.parlay_group) { if (seenGroups.has(b.parlay_group)) return null; seenGroups.add(b.parlay_group) }
@@ -4087,11 +4087,11 @@ export default function Dashboard({ betTarget, onBetTargetDone, layoutMode = 'si
             const odds = b.parlay_group ? legs.reduce((m, l) => m * l.odds, 1) : b.odds
             return (
               <Fragment key={b.parlay_group ?? b.id}>
-              <div className={held ? `combo-held${heldEntryClass(b.result)}` : undefined}
+              <div className={`combo-row${held ? ` combo-held${heldEntryClass(b.result)}` : ''}`}
                 style={{ display: 'grid', gridTemplateColumns: '56px 18px minmax(0, 1fr) auto auto auto', columnGap: 8, alignItems: 'center', padding: '5px 2px', borderTop: '1px solid var(--border-light)', fontSize: 12, position: 'relative' }}>
-                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={site.name}>{site.name}</span>
-                <span style={{ fontSize: 14, lineHeight: 1, textAlign: 'center' }}>{sportGlyph(b.sport) ?? SPORT_SHORT[b.sport] ?? '📋'}</span>
-                <span style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }} title={[b.league, ...legs.map(l => l.match)].filter(Boolean).join(' · ')}>
+                <span className="cr-site" style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={site.name}>{site.name}</span>
+                <span className="cr-sport" style={{ fontSize: 14, lineHeight: 1, textAlign: 'center' }}>{sportGlyph(b.sport) ?? SPORT_SHORT[b.sport] ?? '📋'}</span>
+                <span className="cr-match" style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }} title={[b.league, ...legs.map(l => l.match)].filter(Boolean).join(' · ')}>
                   {(b.league || b.auto_game) && <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.league}{b.parlay_group ? ` · 조합 ${legs.length}폴` : ''}{!b.parlay_group && b.auto_game && <> · {gameInfoLine(b)}</>}</span>}
                   {legs.map(l => (
                     <span key={l.id} style={{ display: 'flex', minWidth: 0 }}>
@@ -4100,9 +4100,9 @@ export default function Dashboard({ betTarget, onBetTargetDone, layoutMode = 'si
                   ))}
                   {!held && !ar && b.auto_note?.includes('직접 확인') && <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--orange)' }}>⚠ {b.auto_note}</span>}
                 </span>
-                <span style={{ ...num, color: 'var(--gold)' }}>@{odds.toFixed(2)}</span>
-                <span style={{ ...num, color: isBigStake(b.stake, isusd) ? 'var(--orange)' : 'var(--text-secondary)' }}>{pfx}{b.stake.toLocaleString()}{sfx}</span>
-                <span style={{ display: 'flex', alignItems: 'center', gap: 3, justifyContent: 'flex-end' }}>
+                <span className="cr-odds" style={{ ...num, color: 'var(--gold)' }}>@{odds.toFixed(2)}</span>
+                <span className="cr-stake" style={{ ...num, color: isBigStake(b.stake, isusd) ? 'var(--orange)' : 'var(--text-secondary)' }}>{pfx}{b.stake.toLocaleString()}{sfx}</span>
+                <span className="cr-act" style={{ display: 'flex', alignItems: 'center', gap: 3, justifyContent: 'flex-end' }}>
                   {held ? <>
                     <span style={{ ...num, fontSize: 11, color: b.result === 'win' ? 'var(--green)' : b.result === 'loss' ? 'var(--red)' : 'var(--blue)' }}>
                       {b.result === 'win' ? `+${pfx}${b.profit.toLocaleString()}${sfx}` : b.result === 'loss' ? `-${pfx}${b.stake.toLocaleString()}${sfx}` : 'PUSH'}
@@ -4159,10 +4159,10 @@ export default function Dashboard({ betTarget, onBetTargetDone, layoutMode = 'si
                 const isusd = site.currency === 'usd'; const pfx = isusd ? '$' : ''; const sfx = isusd ? '' : '원'
                 const rc = b.result === 'win' ? 'var(--green)' : b.result === 'loss' ? 'var(--red)' : 'var(--blue)'
                 return (
-                  <div key={b.parlay_group ?? b.id} style={{ display: 'grid', gridTemplateColumns: '56px 18px minmax(0, 1fr) auto auto auto', columnGap: 8, alignItems: 'center', padding: '4px 2px', borderTop: '1px solid var(--border-light)', fontSize: 12, opacity: 0.8 }}>
-                    <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={site.name}>{site.name}</span>
-                    <span style={{ fontSize: 14, lineHeight: 1, textAlign: 'center' }}>{sportGlyph(b.sport) ?? SPORT_SHORT[b.sport] ?? '📋'}</span>
-                    <span style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
+                  <div key={b.parlay_group ?? b.id} className="combo-row" style={{ display: 'grid', gridTemplateColumns: '56px 18px minmax(0, 1fr) auto auto auto', columnGap: 8, alignItems: 'center', padding: '4px 2px', borderTop: '1px solid var(--border-light)', fontSize: 12, opacity: 0.8 }}>
+                    <span className="cr-site" style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={site.name}>{site.name}</span>
+                    <span className="cr-sport" style={{ fontSize: 14, lineHeight: 1, textAlign: 'center' }}>{sportGlyph(b.sport) ?? SPORT_SHORT[b.sport] ?? '📋'}</span>
+                    <span className="cr-match" style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
                       {(b.league || b.auto_game) && <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.league}{b.parlay_group ? ` · 조합 ${legs.length}폴` : ''}{!b.parlay_group && b.auto_game && <> · {gameInfoLine(b)}</>}</span>}
                       {legs.map(l => (
                         <span key={l.id} style={{ display: 'flex', minWidth: 0 }}>
@@ -4170,9 +4170,9 @@ export default function Dashboard({ betTarget, onBetTargetDone, layoutMode = 'si
                         </span>
                       ))}
                     </span>
-                    <span style={{ fontFamily: 'var(--font-num)', fontWeight: 700, color: 'var(--text-muted)' }}>@{(b.parlay_group ? legs.reduce((m, l) => m * l.odds, 1) : b.odds).toFixed(2)}</span>
-                    <span style={{ fontFamily: 'var(--font-num)', fontWeight: 700, color: 'var(--text-muted)' }}>{pfx}{b.stake.toLocaleString()}{sfx}</span>
-                    <span style={{ display: 'flex', alignItems: 'center', gap: 3, justifyContent: 'flex-end' }}>
+                    <span className="cr-odds" style={{ fontFamily: 'var(--font-num)', fontWeight: 700, color: 'var(--text-muted)' }}>@{(b.parlay_group ? legs.reduce((m, l) => m * l.odds, 1) : b.odds).toFixed(2)}</span>
+                    <span className="cr-stake" style={{ fontFamily: 'var(--font-num)', fontWeight: 700, color: 'var(--text-muted)' }}>{pfx}{b.stake.toLocaleString()}{sfx}</span>
+                    <span className="cr-act" style={{ display: 'flex', alignItems: 'center', gap: 3, justifyContent: 'flex-end' }}>
                       <span style={{ fontFamily: 'var(--font-num)', fontWeight: 700, fontSize: 11, color: rc }}>
                         {b.cashout_amount != null ? `캐시아웃 ${pfx}${b.cashout_amount.toLocaleString()}${sfx}` : b.result === 'win' ? `+${pfx}${b.profit.toLocaleString()}${sfx}` : b.result === 'loss' ? `-${pfx}${b.stake.toLocaleString()}${sfx}` : 'PUSH'}
                       </span>

@@ -627,3 +627,29 @@ tr:hover td { background: var(--bg-hover); }
   .betmode-grid .bm-col-league .bm-sport > :first-child { grid-column: 1 / -1; }
   .betmode-grid .bm-col-league .bm-sport > button:not(:first-child) { margin-left: 0 !important; }
 }
+
+/* ── 베팅 모드 모바일 (2026-11-24 사용자 요청 — 모바일에서 진행중 베팅이 잘 안 보였다. PC는 그대로) ──
+   ① 순서: 베팅 현황(진행중 베팅)을 맨 위로 → 베팅 패널 → 사이트 현황·일별 손익
+   ② 진행중·완료 한 줄을 두 줄로: [종목 · 사이트 · 배당 · 금액 · 처리] / [리그·팀·옵션 전체 폭], 글자 조금 크게, 줄마다 카드 */
+@media (max-width: 700px) {
+  .dashboard-main.betmode .dashboard-bets { order: 1; }
+  .dashboard-main.betmode .dashboard-betmode { order: 2; }
+  .dashboard-main.betmode .dashboard-betmode-side { order: 3; }
+  .combo-pending-title { font-size: 13px !important; color: var(--text-primary) !important; margin-bottom: 6px !important; }
+  .combo-row {
+    grid-template-columns: 20px minmax(0, 1fr) auto auto auto !important;
+    grid-template-areas: "sport site odds stake act" "match match match match match";
+    row-gap: 4px; column-gap: 8px !important;
+    padding: 8px 8px !important; margin-top: 6px;
+    border: 1px solid var(--border) !important; border-radius: var(--radius-sm);
+    background: var(--bg-elevated);
+  }
+  .combo-row .cr-sport { grid-area: sport; font-size: 16px !important; }
+  .combo-row .cr-site { grid-area: site; font-size: 12px !important; color: var(--text-primary) !important; }
+  .combo-row .cr-odds { grid-area: odds; font-size: 13px; }
+  .combo-row .cr-stake { grid-area: stake; font-size: 13px; }
+  .combo-row .cr-act { grid-area: act; }
+  .combo-row .cr-match { grid-area: match; padding-top: 4px; border-top: 1px dashed var(--border-light); }
+  .combo-row .cr-match > span:first-child { font-size: 11px !important; }
+  .combo-pending .combo-row .bet-action-btn { width: 28px !important; height: 28px !important; }
+}
