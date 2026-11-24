@@ -262,12 +262,14 @@ function BetSlip({ game, sites, options, numeric, registered, onBet, preset }: {
   const [isLive, setIsLive] = useState(live)
   const [busy, setBusy] = useState(false)
   const [done, setDone] = useState<string | null>(null)
-  useEffect(() => { setAmount(site ? String(site.default_stake > 0 ? site.default_stake : site.currency === 'usd' ? 5 : 10000) : '') }, [siteId]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setAmount(site ? String(site.default_stake > 0 ? site.default_stake : site.currency === 'usd' ? 5 : 10000) : ''); amtFresh.current = true }, [siteId]) // eslint-disable-line react-hooks/exhaustive-deps
+  // 금액 핫키 (사용자 요청 2026-11-24): 기본 금액 그대로일 때 처음 누르면 그 금액으로 바꾸고, 그다음부터 더한다
+  const amtFresh = useRef(true)
   // 화면에는 짧은 이름 (포틀랜드 트레일 블레이저스 → 포틀랜드), 저장 문구는 등록 이름 그대로
   const hShort = koName(game.home.name), aShort = koName(game.away.name)
   // 금액 핫키: 누를 때마다 더한다 (원 5,000·10,000·20,000 / 달러 5·10·20)
   const HOT = isusd ? [5, 10, 20] : [5000, 10000, 20000]
-  const addAmount = (v: number) => setAmount(a => String((Number(String(a).replace(/,/g, '')) || 0) + v))
+  const addAmount = (v: number) => { const fresh = amtFresh.current; amtFresh.current = false; setAmount(a => String(fresh ? v : (Number(String(a).replace(/,/g, '')) || 0) + v)) }
   const fmt = (raw: string) => { const [i, d] = raw.split('.'); return (i ? Number(i).toLocaleString() : '') + (d != null ? `.${d}` : '') }
 
   const isNumeric = numeric.includes(opt)
@@ -337,7 +339,7 @@ function BetSlip({ game, sites, options, numeric, registered, onBet, preset }: {
         </div>
         <div style={{ flex: 1 }}>
           <div style={{ ...label, marginTop: 0 }}>금액{isusd ? ' ($)' : ' (원)'}</div>
-          <input className="form-input" value={fmt(amount)} inputMode="numeric" onChange={e => setAmount(e.target.value.replace(/[^0-9.]/g, ''))}
+          <input className="form-input" value={fmt(amount)} inputMode="numeric" onChange={e => { amtFresh.current = false; setAmount(e.target.value.replace(/[^0-9.]/g, '')) }}
             onKeyDown={e => { if (e.key === 'Enter') submit() }} />
           <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
             {HOT.map(v => (
@@ -451,9 +453,11 @@ function BasketSlip({ game, sites, registered, onBet }: {
   const [isLive, setIsLive] = useState(live)
   const [busy, setBusy] = useState(false)
   const [done, setDone] = useState<string | null>(null)
-  useEffect(() => { setAmount(site ? String(site.default_stake > 0 ? site.default_stake : site.currency === 'usd' ? 5 : 10000) : '') }, [siteId]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setAmount(site ? String(site.default_stake > 0 ? site.default_stake : site.currency === 'usd' ? 5 : 10000) : ''); amtFresh.current = true }, [siteId]) // eslint-disable-line react-hooks/exhaustive-deps
+  // 금액 핫키 (사용자 요청 2026-11-24): 기본 금액 그대로일 때 처음 누르면 그 금액으로 바꾸고, 그다음부터 더한다
+  const amtFresh = useRef(true)
   const HOT = isusd ? [5, 10, 20] : [5000, 10000, 20000]
-  const addAmount = (v: number) => setAmount(a => String((Number(String(a).replace(/,/g, '')) || 0) + v))
+  const addAmount = (v: number) => { const fresh = amtFresh.current; amtFresh.current = false; setAmount(a => String(fresh ? v : (Number(String(a).replace(/,/g, '')) || 0) + v)) }
   const fmt = (raw: string) => { const [i, d] = raw.split('.'); return (i ? Number(i).toLocaleString() : '') + (d != null ? `.${d}` : '') }
 
   const teamOf = (side: 'home' | 'away') => (side === 'home' ? home : away)
@@ -570,7 +574,7 @@ function BasketSlip({ game, sites, registered, onBet }: {
         </div>
         <div style={{ flex: 1 }}>
           <div style={{ ...label, marginTop: 0 }}>금액{isusd ? ' ($)' : ' (원)'}</div>
-          <input className="form-input" value={fmt(amount)} inputMode="numeric" onChange={e => setAmount(e.target.value.replace(/[^0-9.]/g, ''))}
+          <input className="form-input" value={fmt(amount)} inputMode="numeric" onChange={e => { amtFresh.current = false; setAmount(e.target.value.replace(/[^0-9.]/g, '')) }}
             onKeyDown={e => { if (e.key === 'Enter') submit() }} />
           <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
             {HOT.map(v => <button key={v} type="button" onClick={() => addAmount(v)} style={{ ...chip(false), flex: 1, padding: '4px 0', fontFamily: 'var(--font-num)' }}>+{v.toLocaleString()}</button>)}
