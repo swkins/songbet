@@ -73,7 +73,10 @@ export function resolveTeamName(t: ScheduleTeam, league: string, registered: { l
     const top = scored.filter(x => x.s === best)
     if (best > 0 && top.length === 1) return top[0].r.name
   }
-  return names[0] ? (t.name && NBA[t.name]?.[1]) || t.full || t.name! : '?'
+  // 못 찾으면: NBA는 한글 표, 그 밖은 한글 이름 — full이 한글(KBL 정식 이름)이면 full, 아니면 name (축구 full은 ESPN 영어라
+  // 리그 관리에 팀이 없는 리그(챔스·아시아 챔스 등)에서 'Newcastle Jets'처럼 영어로 저장됐다 — 2026-11-24)
+  const hangul = (x?: string | null) => !!x && /[가-힣]/.test(x)
+  return names[0] ? (t.name && NBA[t.name]?.[1]) || (hangul(t.full) ? t.full! : t.name || t.full!) : '?'
 }
 
 /** 오늘부터의 일정 (모든 종목) */
