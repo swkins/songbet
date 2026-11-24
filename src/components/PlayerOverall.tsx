@@ -17,7 +17,7 @@ const td: React.CSSProperties = { padding: '4px 5px', borderBottom: '1px solid v
 function Ov({ v, size = 13 }: { v: number | null; size?: number }) {
   const t = tierOf(v)
   if (v == null || !t) return <span style={{ color: 'var(--text-muted)', fontSize: 10 }}>–</span>
-  return <span title={t.name} style={{ color: t.color, fontWeight: 800, fontSize: size, fontFamily: 'var(--font-num)' }}>{v}</span>
+  return <span style={{ color: t.color, fontWeight: 800, fontSize: size, fontFamily: 'var(--font-num)' }}>{v}</span>
 }
 
 // 출전 칸을 누르면 '만약' 출전 확률을 바꿔 본다: 원래 → 결장(0) → 출전(100) → 원래 — 예상 스코어가 바로 다시 계산된다
@@ -299,7 +299,6 @@ function TeamTable({ title, t, ovr, onCycle, cond }: { title: string; t: TeamOv;
                 <td style={{ ...td, textAlign: 'right', fontFamily: 'var(--font-num)', color: p.form == null || p.base == null ? 'var(--text-muted)' : p.form > p.base + 2 ? 'var(--green)' : p.form < p.base - 2 ? 'var(--red)' : 'var(--text-secondary)' }}>{p.form ?? '–'}<Delta now={p.form} prev={p.prev?.form} date={p.prev?.date} /></td>
                 <td style={{ ...td, textAlign: 'right', whiteSpace: 'nowrap' }}>
                   <Ov v={p.overall} /><Delta now={p.overall} prev={p.prev?.overall} date={p.prev?.date} />
-                  {tier && <div style={{ fontSize: 9, color: tier.color, opacity: 0.85 }}>{tier.name}</div>}
                 </td>
               </tr>
             )
@@ -432,7 +431,7 @@ export default function PlayerOverall({ league, gameDate, home, away, left, odds
           </div>
           <div style={{ fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.7 }}>
             오버롤 = 체급 × 0.7 + 최근 5경기 폼 × 0.3 (체급 = 이번 시즌 + 지난 시즌, 경기가 쌓일수록 이번 시즌 비중↑) ·{' '}
-            {TIERS.map(t => <span key={t.name} style={{ color: t.color, marginRight: 6 }}>{t.name} {t.min >= 0 ? `${t.min}+` : '~59'}</span>)}
+            {TIERS.map(t => <span key={t.name} style={{ color: t.color, marginRight: 6 }}>● {t.min >= 0 ? `${t.min}+` : '~59'}</span>)}
             <br />출전: <span style={{ color: availColor(95) }}>● 90%↑</span> <span style={{ color: availColor(80) }}>● 70~89</span> <span style={{ color: availColor(50) }}>● 40~69</span> <span style={{ color: availColor(20) }}>● 1~39</span> <span style={{ background: '#FF3B3B', color: '#fff', borderRadius: 4, padding: '0 4px', fontWeight: 700 }}>0%</span> 결장
             {' '}· 확정/추정 = Claude가 뉴스·ESPN 명단을 읽고 판단 · ↩ 복귀·⏱ 출전 제한 = 경기 기록 · 체력 = 팀 컨디션 − 개인 출전시간 부담(직전 경기·7일 누적), 75% 미만 ⚠ 누적 경고 · 🔄 대승·대패 로테이션 · 팀 오버롤 = 출전시간 × 이번 시즌 출전 비중 가중, 결장 반영 = 결장 확률만큼 대체 선수(50)로
           </div>

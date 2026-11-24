@@ -196,7 +196,7 @@ export default function OverallAnalysisView({ a }: { a: OverallAnalysis }) {
         {players(`홈 · ${homeShort}`, a.home_players)}
         {players(`원정 · ${awayShort}`, a.away_players)}
       </div>
-      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: -4 }}>오버롤 = 체급 × 0.7 + 폼 × 0.3 · 색 = 등급 (전설 주황 90+ · 영웅 보라 80~89 · 희귀 파랑 70~79 · 일반 흰색 60~69 · 하급 회색) · 폼 초록 = 시즌보다 좋음</div>
+      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: -4 }}>오버롤 = 체급 × 0.7 + 폼 × 0.3 · 색 = 주황 90+ · 보라 80~89 · 파랑 70~79 · 흰색 60~69 · 회색 59 이하 · 폼 초록 = 시즌보다 좋음</div>
 
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-start' }}>
         {/* 전력 비교 */}
