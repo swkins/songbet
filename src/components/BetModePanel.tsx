@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import dayjs from 'dayjs'
 import { loadSchedules, gameState, resolveTeamName, koName, leagueLabel, sortLeagues, type ScheduleRow, type ScheduleGame } from '../lib/gameSchedule'
 import { applyNumericTemplate } from '../lib/betOptions'
-import type { Site } from '../types'
+import type { Site, Bet } from '../types'
 import { supabase } from '../lib/supabase'
 import GameAnalysisModal from './GameAnalysisModal'
 import { loadOdds, oddsTrend, type OddsSnap } from '../lib/odds'
@@ -35,7 +35,9 @@ export interface BetTarget { sport: string; league: string; gameId: string; at?:
 export interface BetPreset { side: 'home' | 'away'; opt: string; odds: number | null }
 interface Game extends ScheduleGame { sport: string; league: string; date: string }
 
-export default function BetModePanel({ target, onTargetDone, sites, betOptionsBySport, numericBetOptionsBySport, teamsBySport, onBet, renderAddForm }: {
+export default function BetModePanel({ pendingBets = [], target, onTargetDone, sites, betOptionsBySport, numericBetOptionsBySport, teamsBySport, onBet, renderAddForm }: {
+  /** 진행중(결과 처리 전) 베팅 — 일정 경기에 '베팅함' 도장 (사용자 요청 2026-11-24) */
+  pendingBets?: Bet[]
   target?: BetTarget | null
   onTargetDone?: () => void
   sites: Site[]
@@ -92,6 +94,31 @@ export default function BetModePanel({ target, onTargetDone, sites, betOptionsBy
   const leagueGames = games.filter(g => g.sport === sport && (!league || g.league === league))
   const game = games.find(g => g.id === gameId) ?? null
 
+  // 진행중 베팅이 걸린 경기 (사용자 요청 2026-11-24 — 완료 처리 전까지 일정에서 '베팅함' 도장으로 구분):
+  // ① 자동 판정이 맞춘 경기 id(auto_game_id) ② 없으면 같은 종목·리그 + 베팅 문구에 그 경기 팀 이름(등록 이름) + 경기 시작 3일 전~시작 3시간 뒤에 넣은 베팅
+  const betsByGame = useMemo(() => {
+    const m = new Map<string, Bet[]>()
+    const nz = (x: string) => x.replace(/\s+/g, '').toLowerCase()
+    const list = pendingBets.filter(b => b.sport !== 'casino')
+    for (const g of games) {
+      const reg = teamsBySport[g.sport] ?? []
+      const names = [g.home, g.away].flatMap(t => [resolveTeamName(t, g.league, reg), koName(t.name), t.full ?? '', t.name ?? '']).map(x => nz(x ?? '')).filter(n => n.length >= 2)
+      const start = Date.parse(g.start)
+      const hit = list.filter(b => {
+        if (b.auto_game_id) return b.auto_game_id === g.id
+        if (b.sport !== g.sport || (b.league && b.league !== g.league)) return false
+        const t = Date.parse(b.created_at)
+        if (!(t >= start - 3 * 86400000 && t <= start + 3 * 3600000)) return false
+        const txt = nz(b.match ?? '')
+        return names.some(n => txt.includes(n))
+      })
+      if (hit.length) m.set(g.id, hit)
+    }
+    return m
+  }, [games, pendingBets, teamsBySport])
+  const betCount = (f: (g: Game) => boolean) => games.filter(g => f(g) && betsByGame.has(g.id)).length
+  const BetDot = ({ n }: { n: number }) => n ? <span title={`진행중 베팅이 있는 경기 ${n}`} style={{ fontSize: 9, fontWeight: 800, color: 'var(--green)', marginLeft: 4 }}>✓{n}</span> : null
+
   // 모바일(위아래 배치)에서 경기를 고르면 아래 베팅슬립으로 내려간다
   const slipRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -127,18 +154,18 @@ export default function BetModePanel({ target, onTargetDone, sites, betOptionsBy
                   <button type="button" disabled={!lgs.length} onClick={() => { setSport(open ? null : s.id); setLeague(null); setGameId(null); setAddSiteId(null) }}
                     style={{ ...item(open, !lgs.length), fontWeight: 700, display: 'flex', justifyContent: 'space-between' }}>
                     <span>{s.icon} {s.label}</span>
-                    <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{lgs.length ? lgs.reduce((a, [, n]) => a + n, 0) : '-'}</span>
+                    <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{lgs.length ? lgs.reduce((a, [, n]) => a + n, 0) : '-'}<BetDot n={betCount(g => g.sport === s.id)} /></span>
                   </button>
                   {open && lgs.length > 1 && (
                     <button type="button" onClick={() => { setLeague(null); setGameId(null); setAddSiteId(null) }}
                       style={{ ...item(league === null), marginLeft: 10, fontSize: 11, display: 'flex', justifyContent: 'space-between' }}>
-                      <span>전체</span><span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{lgs.reduce((a, [, n]) => a + n, 0)}</span>
+                      <span>전체</span><span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{lgs.reduce((a, [, n]) => a + n, 0)}<BetDot n={betCount(g => g.sport === s.id)} /></span>
                     </button>
                   )}
                   {open && lgs.map(([lg, n]) => (
                     <button key={lg} type="button" onClick={() => { setLeague(lg); setGameId(null); setAddSiteId(null) }}
                       style={{ ...item(league === lg), marginLeft: 10, fontSize: 11, display: 'flex', justifyContent: 'space-between' }}>
-                      <span>{leagueLabel(lg)}</span><span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{n}</span>
+                      <span>{leagueLabel(lg)}</span><span style={{ fontSize: 10, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{n}<BetDot n={betCount(g => g.sport === s.id && g.league === lg)} /></span>
                     </button>
                   ))}
                 </div>
@@ -184,14 +211,21 @@ export default function BetModePanel({ target, onTargetDone, sites, betOptionsBy
                       <span style={{ flex: 1, height: 1, background: 'var(--border)' }} />
                     </div>
                   )) : null
+                  const myBets = betsByGame.get(g.id)
+                  const sel = gameId === g.id
                   return (
                     <div key={g.id}>
                       {header}
                       <div style={{ position: 'relative' }}>
-                      <button type="button" title={gameId === g.id ? '한 번 더 누르면 분석' : undefined}
-                        onClick={() => { if (gameId === g.id) { setShowAnalysis(true); return } setGameId(g.id); setAddSiteId(null) }}
-                        style={{ ...item(gameId === g.id), width: '100%', display: 'flex', flexDirection: 'column', gap: 2 }}>
-                        <span style={{ fontSize: 10, fontWeight: 700, color: live ? 'var(--gold)' : 'var(--text-muted)', fontFamily: 'var(--font-num)' }}>{live ? '● 경기중' : d.format('HH:mm')}{!league && <span style={{ fontWeight: 600, fontFamily: 'var(--font-body)', marginLeft: 6 }}>{leagueLabel(g.league)}</span>}</span>
+                      <button type="button" title={[sel ? '한 번 더 누르면 분석' : '', ...(myBets ?? []).map(b => `베팅: ${b.match} @${b.odds} · ${b.stake.toLocaleString()}`)].filter(Boolean).join('\n') || undefined}
+                        onClick={() => { if (sel) { setShowAnalysis(true); return } setGameId(g.id); setAddSiteId(null) }}
+                        style={{ ...item(sel), width: '100%', display: 'flex', flexDirection: 'column', gap: 2,
+                          ...(myBets && !sel ? { borderColor: 'var(--green-border, var(--green))', background: 'var(--green-bg, var(--bg-elevated))', boxShadow: 'inset 3px 0 0 var(--green)' } : myBets ? { boxShadow: 'inset 3px 0 0 var(--green)' } : {}) }}>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: live ? 'var(--gold)' : 'var(--text-muted)', fontFamily: 'var(--font-num)', display: 'flex', alignItems: 'center', gap: 0, paddingRight: 10 }}>
+                          <span>{live ? '● 경기중' : d.format('HH:mm')}{!league && <span style={{ fontWeight: 600, fontFamily: 'var(--font-body)', marginLeft: 6 }}>{leagueLabel(g.league)}</span>}</span>
+                          {/* 진행중 베팅이 있는 경기 = '베팅함' 도장 (완료 처리하면 사라짐) */}
+                          {myBets && <span style={{ marginLeft: 'auto', fontFamily: 'var(--font-body)', fontSize: 9, fontWeight: 800, color: 'var(--green)', border: '1.5px solid var(--green)', borderRadius: 4, padding: '0 5px', transform: 'rotate(-6deg)', letterSpacing: 0.5, whiteSpace: 'nowrap' }}>✓ 베팅함{myBets.length > 1 ? ` ${myBets.length}` : ''}</span>}
+                        </span>
                         {/* 위 = 홈, 아래 = 원정 — 현재 배당은 오른쪽 고정 칸(끝에서 10px 띄움, 이름 길이와 상관없이 같은 자리), 축구는 가운데 줄에 무배당 (1·X·2 순) */}
                         {(() => {
                           const o = odds[g.id]

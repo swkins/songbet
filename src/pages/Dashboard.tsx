@@ -3078,10 +3078,10 @@ export default function Dashboard({ betTarget, onBetTargetDone, layoutMode = 'si
   }
   // 자동 판정(DB auto_grade_bets, 30분마다)을 5분마다 받아 대기 중 베팅에 붙인다 — 최종 처리는 [확인]
   async function refreshAuto() {
-    const { data } = await supabase.from('bets').select('id, auto_result, auto_score, auto_note, auto_game').eq('result', 'pending').eq('is_hidden', false)
+    const { data } = await supabase.from('bets').select('id, auto_result, auto_score, auto_note, auto_game, auto_game_id').eq('result', 'pending').eq('is_hidden', false)
     if (!data) return
     const m = new Map(data.map(d => [d.id as string, d]))
-    setBets(p => p.map(b => { const d = m.get(b.id); return d && (d.auto_result !== b.auto_result || d.auto_score !== b.auto_score || d.auto_note !== b.auto_note || JSON.stringify(d.auto_game ?? null) !== JSON.stringify(b.auto_game ?? null)) ? { ...b, ...d } as Bet : b }))
+    setBets(p => p.map(b => { const d = m.get(b.id); return d && (d.auto_result !== b.auto_result || d.auto_score !== b.auto_score || d.auto_note !== b.auto_note || JSON.stringify(d.auto_game ?? null) !== JSON.stringify(b.auto_game ?? null) || d.auto_game_id !== b.auto_game_id) ? { ...b, ...d } as Bet : b }))
   }
   useEffect(() => {
     const t = setInterval(refreshAuto, 5 * 60 * 1000)
@@ -4549,7 +4549,7 @@ export default function Dashboard({ betTarget, onBetTargetDone, layoutMode = 'si
         )}
         {betMode && (
           <div className="dashboard-betmode">
-            <BetModePanel target={betTarget ?? null} onTargetDone={onBetTargetDone} sites={sites} betOptionsBySport={betOptionsBySport} numericBetOptionsBySport={numericBetOptionsBySport}
+            <BetModePanel pendingBets={bets.filter(b => b.result === 'pending')} target={betTarget ?? null} onTargetDone={onBetTargetDone} sites={sites} betOptionsBySport={betOptionsBySport} numericBetOptionsBySport={numericBetOptionsBySport}
               teamsBySport={{ soccer: soccerTeams, baseball: baseballTeams, basketball: basketballTeams, volleyball: volleyballTeams }}
               onBet={(site, sp, ct, od, amt, lv, lg) => submitBet(site, sp, ct, od, amt, lv, lg)}
               renderAddForm={(site, onClose) => (
