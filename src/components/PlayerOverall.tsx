@@ -115,7 +115,10 @@ function VolleyBox({ v, hName, aName, changed, onReset, odds }: { v: VolleyResul
         <button type="button" onClick={toggle} style={{ marginLeft: 'auto', fontSize: 10, background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-secondary)', cursor: 'pointer', padding: '1px 8px' }}>{open ? '접기 ▲' : '자세히 ▼'}</button>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: 5 }}>
-        {tile('예상 세트 스코어', v.best.replace('-', ' : '), `${hName} : ${aName} · ${pct(v.dist[v.best])}%`)}
+        {Math.abs(v.homeWin - 50) < 5
+          // 승률 45~55%는 반반 — 한쪽 스코어만 크게 보이면 한쪽이 확실한 것처럼 보였다 (2026-11-24 사용자 질문: 49.7%인데 1:3)
+          ? tile('예상 세트 스코어', '접전', `${hName} 3:2 ${pct(v.dist['3-2'])}% · 2:3 ${pct(v.dist['2-3'])}% · 유력 ${v.best.replace('-', ':')}`)
+          : tile('예상 세트 스코어', v.best.replace('-', ' : '), `${hName} : ${aName} · ${pct(v.dist[v.best])}%`)}
         {tile('홈 승률', `${v.homeWin}%`, `원정 ${Math.round((100 - v.homeWin) * 10) / 10}%`)}
         {tile('4세트 이상', `${v.over35}%`, `풀세트 ${v.full}% · 셧아웃 ${pct(v.dist['3-0'] + v.dist['0-3'])}%`)}
         {tile('예상 총득점', `${sim.median}`, `180.5 오버 ${sim.overs.find(o => o.line === 180.5)?.over ?? '-'}%`)}
