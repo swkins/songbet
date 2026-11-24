@@ -108,7 +108,7 @@ export default function BetModePanel({ target, onTargetDone, sites, betOptionsBy
         {targetMsg && <span style={{ fontSize: 11, color: 'var(--red)', marginLeft: 'auto' }}>{targetMsg}</span>}
       </div>
       {loading ? <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>불러오는 중…</div> : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 0.8fr) minmax(0, 0.8fr) minmax(0, 1.4fr)', gap: 10, alignItems: 'start' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 0.65fr) minmax(0, 0.9fr) minmax(0, 1.2fr)', gap: 10, alignItems: 'start' }}>
           {/* 1. 종목 → 리그 */}
           <div style={col}>
             <div style={head}>종목 · 리그</div>
