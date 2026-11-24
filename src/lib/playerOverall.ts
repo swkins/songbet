@@ -114,8 +114,8 @@ async function loadLeague(code: string): Promise<LeagueData> {
     t.n++; t.pf += r.team_score; t.pa += r.opp_score; teams.set(r.team, t)
   }
   teams.forEach(t => { t.sw = t.pf; t.sl = t.pa; t.pf /= t.n; t.pa /= t.n })
-  if (code === 'NBA') {
-    const rt = nbaRatings((tg.data ?? []) as TeamGameRow[], PARAMS.leagues.NBA)
+  if (PARAMS.leagues[code]?.rk != null) {   // NBA·KBL·WKBL 팀 레이팅
+    const rt = nbaRatings((tg.data ?? []) as TeamGameRow[], PARAMS.leagues[code], code === 'NBA')
     rt.forEach((v, team) => { const t = teams.get(team); if (t) t.rt = v })
   }
   const fix = <T extends SeasonRow>(r: T): T => ({ ...r, min: num(r.min), gmsc: num(r.gmsc) })
@@ -403,13 +403,14 @@ export interface LeagueParams { sd: number; sdT: number; hca: number; k: number;
   rk?: number; rkt?: number; carry?: number; early?: number; wMarket?: number }
 interface TeamGameRow { team: string; opp: string; game_date: string; is_home: boolean; team_score: number | null; opp_score: number | null }
 /** NBA 팀 레이팅: 지난 시즌 끝 값(NBA_PRIOR) × carry에서 시작해 이번 시즌 경기 순서대로 오차 × rk만큼 고친다 (최근 경기일수록 비중 큼) */
-export function nbaRatings(rows: TeamGameRow[], c: LeagueParams): Map<string, TeamRating> {
+export function nbaRatings(rows: TeamGameRow[], c: LeagueParams, usePrior = true): Map<string, TeamRating> {
   const carry = c.carry ?? 0, k = c.rk ?? 0.05, kt = c.rkt ?? 0.05, early = c.early ?? 4, hca = c.hca
   const R = new Map<string, number>(), O = new Map<string, number>(), D = new Map<string, number>(), N = new Map<string, number>()
-  for (const [t, [r, o, d]] of Object.entries(NBA_PRIOR)) { R.set(t, r * carry); O.set(t, o * carry); D.set(t, d * carry) }
-  let avg = NBA_PRIOR_AVG_TOTAL
+  if (usePrior) for (const [t, [r, o, d]] of Object.entries(NBA_PRIOR)) { R.set(t, r * carry); O.set(t, o * carry); D.set(t, d * carry) }
   const g = (m: Map<string, number>, t: string) => m.get(t) ?? 0
   const games = rows.filter(r => r.is_home && r.team_score != null && r.opp_score != null).sort((a, b) => a.game_date.localeCompare(b.game_date) || a.team.localeCompare(b.team))
+  // 리그 평균 총점 출발값: NBA = 지난 시즌 값, KBL·WKBL = 이번 시즌 끝난 경기 평균 (없으면 avg × 2)
+  let avg = usePrior ? NBA_PRIOR_AVG_TOTAL : games.length ? games.reduce((a, x) => a + Number(x.team_score) + Number(x.opp_score), 0) / games.length : c.avg * 2
   for (const x of games) {
     const h = x.team, a = x.opp, hs = Number(x.team_score), as = Number(x.opp_score)
     const nMin = Math.min(g(N, h), g(N, a))
@@ -429,8 +430,9 @@ export interface ModelParams { leagues: Record<string, LeagueParams>; fatigueK: 
 export const DEFAULT_PARAMS: ModelParams = {
   leagues: {
     NBA: { sd: 13.5, sdT: 18, hca: 2.5, k: 1.0, avg: 113, wScore: 0.5, wOv: 0, condK: COND_K.NBA, rk: 0.05, rkt: 0.05, carry: 0, early: 4, wMarket: 0 },   // wMarket 0 = 시장 기준점을 예상 스코어에 안 섞음 (사용자 요청 2026-11-23 — 우리 모델만)   // carry 0 = 지난 시즌 팀 레이팅 안 씀 (사용자 요청 2026-11-21 — 선수가 다 바뀜)
-    KBL: { sd: 11, sdT: 14, hca: 2, k: 0.8, avg: 80, wScore: 0.5, wOv: 0.5, condK: COND_K.KBL },
-    WKBL: { sd: 10, sdT: 12, hca: 2, k: 0.7, avg: 65, wScore: 0.5, wOv: 0.5, condK: COND_K.WKBL },
+    // KBL·WKBL도 NBA처럼 팀 레이팅 + 결장·컨디션·뉴스 (사용자 요청 2026-11-24, 오버롤 차·시장 안 씀) — 2025-26 순차 백테스트 MAE KBL 9.43→9.30 · WKBL 9.46→9.41 (rk 0.05, early 0)
+    KBL: { sd: 11, sdT: 14, hca: 2, k: 0.8, avg: 80, wScore: 0.5, wOv: 0, condK: COND_K.KBL, rk: 0.05, rkt: 0.05, carry: 0, early: 0, wMarket: 0 },
+    WKBL: { sd: 10, sdT: 12, hca: 2, k: 0.7, avg: 65, wScore: 0.5, wOv: 0, condK: COND_K.WKBL, rk: 0.05, rkt: 0.05, carry: 0, early: 0, wMarket: 0 },
     // 배구: hca = 홈 이점(logit), k = 팀 오버롤 1점당 logit, wScore = 시장 배당 비중, wOv = 오버롤 모델 비중 (volleyPredict.ts)
     VLEAGUE_M: { sd: 0, sdT: 0, hca: 0.15, k: 0.08, avg: 0, wScore: 0.5, wOv: 0.5, condK: 0 },   // 배구 wScore = 팀 세트 득실 비중, wOv = 오버롤 비중
     VLEAGUE_W: { sd: 0, sdT: 0, hca: 0.15, k: 0.08, avg: 0, wScore: 0.5, wOv: 0.5, condK: 0 },

@@ -33,7 +33,7 @@ async function snapshot(leagues: string[], from: number, to: number, save: boole
           parts: { dist: v.dist, over35: v.over35, full: v.full }, raw: { diff: v.diff, modelHome: v.modelHome, marketHome: v.marketHome }, cond: null }
         out.push({ game: `${base.away} @ ${base.home}`, pred: v.best, homeWin: v.homeWin })
       } else {
-        // NBA: 그 시각 시장 기준점(odds_lines 마지막 줄)을 같이 넣는다 — 예상 = 시장 80% + 우리 모델 20% (2026-11-21)
+        // NBA: 그 시각 시장 기준점(odds_lines 마지막 줄)은 참고로만 같이 저장 — 예상은 우리 모델만 (wMarket 0, 2026-11-23)
         const mk: { spread: number | null; total: number | null } = { spread: null, total: null }
         if (d.code === 'NBA') {
           const { data: ls } = await supabase.from('odds_lines').select('market,line').eq('game_id', g.id).order('fetched_at', { ascending: false }).limit(10)
