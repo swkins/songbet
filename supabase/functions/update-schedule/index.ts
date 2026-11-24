@@ -5,7 +5,7 @@
 //
 // 출처 (네이버 스포츠는 Supabase 서버에서 응답이 없어 못 씀):
 //  - NBA: ESPN scoreboard (브라우저 UA 필수, 미국 날짜 하루씩 — KST 하루 = 미국 전날·당일), 막히면 NBA 공식 CDN
-//  - KBL: api.kbl.or.kr/match/list (헤더 Channel: WEB, TeamCode: XX 필수), EASL 등 다른 대회도 같이 옴 → 정규·PO만
+//  - KBL: api.kbl.or.kr/match/list (헤더 Channel: WEB, TeamCode: XX 필수), EASL·D리그·컵대회 등 다른 대회도 같이 옴 → 정규·PO만
 //  - WKBL: wkbl.or.kr/game/sch/inc_list_1_new.asp (HTML 목록). 사이트가 첫 팀에 'away' 클래스를 붙이지만
 //          경기장이 첫 팀 홈이라(예: 신한은행 인천도원) 첫 팀 = 홈으로 본다.
 //  - V리그 남·여: user-api.kovo.co.kr/mains/games/schedules?gender=MALE|FEMALE (오늘 앞뒤 며칠)
@@ -67,6 +67,8 @@ async function kbl(dates: string[]) {
   const out: Record<string, Game[]> = Object.fromEntries(dates.map(d => [d, []]))
   for (const g of list) {
     if (g.gameCode === '07' || g.seasonCategory === 'EA') continue // EASL 등 국제 대회 제외
+    // 정규시즌·플레이오프·챔피언결정전만 (2026-11-25 — D리그(2군) 경기가 KBL 일정으로 들어와 분석·배당이 붙었다; collect-stats와 같은 기준)
+    if (!(g.seasonCategoryName === '정규시즌' || /플레이오프|챔피언/.test(g.seasonCategoryName ?? ''))) continue
     const date = `${g.gameDate.slice(0, 4)}-${g.gameDate.slice(4, 6)}-${g.gameDate.slice(6, 8)}`
     if (!out[date]) continue
     out[date].push({
