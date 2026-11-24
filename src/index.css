@@ -608,7 +608,14 @@ tr:hover td { background: var(--bg-hover); }
 
 /* ── 대시보드 "베팅" 모드: 베팅 모드 패널(종목·리그 → 경기 → 베팅슬립) 좌 6.5 / 베팅 현황(하나로 합친 목록) 우 3.5 (2026-11-22 사용자 요청) ── */
 .dashboard-betmode { width: 100%; min-width: 0; }
+.betmode-top { display: flex; flex-direction: column; gap: 10px; margin-bottom: 10px; }
 @media (min-width: 901px) {
   .dashboard-main.betmode .dashboard-betmode { flex: 6.5 1 0; min-width: 640px; width: auto; }
   .dashboard-main.betmode .dashboard-bets { flex: 3.5 1 0; min-width: 380px; width: auto; }
+  /* 베팅 패널 위에 상하 모드와 같은 사이트 현황(채굴) · 일별 손익 한 줄 (2026-11-24 사용자 요청 — 베팅 현황(우)은 그대로) */
+  .betmode-top { display: flex; flex-direction: row; align-items: stretch; gap: 10px; margin-bottom: 10px; }
+  .betmode-top > :first-child { flex: 2 1 0; min-width: 0; }
+  .betmode-top > .dashboard-pnl-slot { flex: 1 1 0; min-width: 300px; position: relative; }
+  .betmode-top > .dashboard-pnl-slot > .card { position: absolute; inset: 0; overflow-y: auto; display: flex; flex-direction: column; }
+  .betmode-top .mining-cards { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
 }
