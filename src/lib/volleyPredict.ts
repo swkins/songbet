@@ -70,8 +70,10 @@ export function predictVolley(code: string, diff: number, p: { hca: number; k: n
   const pm = odds && odds.home > 1 && odds.away > 1 ? (1 / odds.home) / (1 / odds.home + 1 / odds.away) : null   // 시장 (비교용, 섞지 않음)
   const dist = setDistribution(code, sig(l)); if (!dist) return null
   const r1 = (v: number) => Math.round(v * 1000) / 10
-  const best = SET_SCORES.reduce((a, b) => (dist[b] > dist[a] ? b : a))
   const homeWin = dist['3-0'] + dist['3-1'] + dist['3-2']
+  // 예상 세트 스코어 = 이길 쪽(홈 승률 50% 기준) 안에서 가장 유력한 스코어 — 전체 최다로 고르면 홈 승률 52%인데 1-3처럼 어긋났다 (2026-11-24)
+  const side = SET_SCORES.filter(k => k.startsWith('3') === (homeWin >= 0.5))
+  const best = side.reduce((a, b) => (dist[b] > dist[a] ? b : a))
   const expDiff = SET_SCORES.reduce((a, k) => a + DIFF[k] * dist[k], 0)
   const expSets = 3 * (dist['3-0'] + dist['0-3']) + 4 * (dist['3-1'] + dist['1-3']) + 5 * (dist['3-2'] + dist['2-3'])
   return { homeWin: r1(homeWin), dist, best, expDiff: Math.round(expDiff * 100) / 100, expSets: Math.round(expSets * 100) / 100,

@@ -97,12 +97,12 @@ function VolleyBox({ v, hName, aName, changed, onReset, odds }: { v: VolleyResul
     <div style={{ ...box, borderColor: 'var(--gold-border)' }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
         <span style={{ fontSize: 13, fontWeight: 800 }}>예상 스코어</span>
-        <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>우리 모델 (팀 세트 득실 + 포지션별 오버롤, 배당 안 섞음){changed ? ` · 가정 ${changed}명` : ''}</span>
+        <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>우리 모델만 (팀 세트 득실 + 포지션별 오버롤 + 결장 — 배당·배당 흐름 안 씀){changed ? ` · 가정 ${changed}명` : ''}</span>
         {changed > 0 && <button type="button" onClick={onReset} style={{ marginLeft: 'auto', fontSize: 10, background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-secondary)', cursor: 'pointer', padding: '1px 6px' }}>가정 지우기</button>}
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6, marginBottom: 6 }}>
+        {tile('예상 세트 스코어 (홈-원정)', v.best.replace('-', ' : '), `${hName} : ${aName} · ${Math.round(v.dist[v.best] * 1000) / 10}%`)}
         {tile('예상 총득점', `${sim.median}`, `평균 ${sim.total} · 80% 범위 ${sim.lo}~${sim.hi}`)}
-        {tile('예상 득점', `${Math.round(sim.homePts)} : ${Math.round(sim.awayPts)}`, `${hName} : ${aName}`)}
         {tile('총득점 오버 확률', `${sim.overs.find(o => o.line === 180.5)?.over ?? '-'}%`, '180.5 기준')}
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(76px, 1fr))', gap: 3, marginBottom: 8 }}>
