@@ -4039,37 +4039,41 @@ export default function Dashboard({ betTarget, onBetTargetDone, layoutMode = 'si
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {/* 사이트 요약 — 사이트 하나에 한 줄 */}
         <div className="card" style={{ padding: '6px 10px' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1.6fr) minmax(0, 1fr) auto', columnGap: 10, rowGap: 4, alignItems: 'center', fontSize: 12 }}>
+          {/* 모바일(700px 이하)은 사이트마다 카드 두 줄 — index.css .ss-* (2026-11-24 사용자 요청), PC는 한 줄 표 그대로 (display: contents) */}
+          <div className="ss-grid" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1.6fr) minmax(0, 1fr) auto', columnGap: 10, rowGap: 4, alignItems: 'center', fontSize: 12 }}>
+            <div className="ss-head" style={{ display: 'contents' }}>
             <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 700 }}>사이트</span>
             <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 700, textAlign: 'right' }}>입금</span>
             <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 700 }}>남은 롤링</span>
             <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 700, textAlign: 'right' }}>수익</span>
             <span />
+            </div>
             {rows.map(({ site, pending }) => {
               const isusd = site.currency === 'usd'; const pfx = isusd ? '$' : ''; const sfx = isusd ? '' : '원'
               const dep = site.last_deposit ?? 0; const pct = depositPct(site); const rem = depositRemaining(site); const pnl = sitePnL(site)
               const n = pending.filter(b => b.result === 'pending').length
-              return <Fragment key={site.id}>
-                <span style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0 }}>
+              return <div key={site.id} className={`ss-row${site.active ? ' ss-active' : ''}`} style={{ display: 'contents' }}>
+                <span className="ss-name" style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0 }}>
                   {site.active && <span className="site-active-dot" />}
                   <span style={{ fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: site.active ? 'var(--text-primary)' : 'var(--text-secondary)' }}>{site.name}</span>
                   {isusd && <span style={{ fontSize: 9, color: 'var(--blue)', fontWeight: 700 }}>$</span>}
                   {n > 0 && <span style={{ fontSize: 10, color: 'var(--blue)', fontWeight: 700 }}>· {n}건</span>}
                 </span>
-                <span style={{ ...num, textAlign: 'right', color: dep > 0 ? 'var(--text-primary)' : 'var(--text-muted)' }}>{dep > 0 ? `${pfx}${dep.toLocaleString()}${sfx}` : '–'}</span>
-                <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                <span className="ss-dep" style={{ ...num, textAlign: 'right', color: dep > 0 ? 'var(--text-primary)' : 'var(--text-muted)' }}><span className="ss-lbl">입금 </span>{dep > 0 ? `${pfx}${dep.toLocaleString()}${sfx}` : '–'}</span>
+                <span className="ss-roll" style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                  <span className="ss-lbl">남은 롤링</span>
                   <span style={{ ...num, color: rem > 0 ? 'var(--gold)' : 'var(--green)' }}>{pfx}{rem.toLocaleString()}{sfx}</span>
                   <span className="deposit-progress-bar" style={{ flex: 1, margin: 0, minWidth: 30 }}><span className="deposit-progress-fill" style={{ display: 'block', width: `${Math.min(100, pct)}%` }} /></span>
                   <span style={{ fontSize: 10, fontWeight: 700, color: pct >= 100 ? 'var(--green)' : 'var(--orange)' }}>{pct.toFixed(0)}%</span>
                 </span>
-                <span style={{ ...num, textAlign: 'right' }} className={pnl == null ? undefined : pnl >= 0 ? 'profit-pos' : 'profit-neg'}>
+                <span style={{ ...num, textAlign: 'right' }} className={`ss-pnl${pnl == null ? '' : pnl >= 0 ? ' profit-pos' : ' profit-neg'}`}>
                   {pnl == null ? '–' : `${pnl >= 0 ? '+' : ''}${Math.round(isusd ? pnl * usdKrwRate : pnl).toLocaleString()}원`}
                 </span>
-                <span style={{ display: 'flex', gap: 4 }}>
+                <span className="ss-btn" style={{ display: 'flex', gap: 4 }}>
                   <button className={`site-icon-btn site-icon-deposit ${dep > 0 ? 'active' : ''}`} title="입금" style={{ width: 24, height: 24 }} onClick={() => setDepositSite(site)}><ArrowDownToLine size={13} /></button>
                   <button className="site-icon-btn site-icon-withdraw" title="출금" style={{ width: 24, height: 24 }} onClick={() => setWithdrawSite(site)}><LogOut size={13} /></button>
                 </span>
-              </Fragment>
+              </div>
             })}
           </div>
         </div>
