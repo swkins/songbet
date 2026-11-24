@@ -35,6 +35,7 @@ export interface PlayerOv {
   kind?: string | null      // '외국인' · '아시아쿼터' (KBL·WKBL = player_kinds, 배구 = KOVO 명단) — 없으면 국내
   newcomer?: { kind: string | null; n: number; prior: number; w: number } | null   // 이 리그 지난 시즌 기록이 없는 선수: 출발점(같은 구분 평균)과 실제 기록 비중
 }
+const kindRank = (k: string | null | undefined) => k === '외국인' ? 0 : k === '아시아쿼터' ? 1 : 2
 export interface TeamOv { team: string | null; players: PlayerOv[]; full: number | null; exp: number | null; stats: TeamStats | null }
 export interface TeamStats { n: number; pf: number; pa: number; sw?: number; sl?: number; rt?: TeamRating }
 /** NBA 팀 레이팅 (nbaRatings) — r = 득실(상대 보정), o = 공격(+ = 많이 넣음), d = 수비(+ = 많이 내줌), avgT = 리그 평균 총점 */
@@ -321,7 +322,8 @@ export async function loadGameOverall(league: string, gameDate: string, home: Sc
       const fatigue = !vb && pm && pm.size ? playerFatigue(code, c?.min ?? null, gameDate, pastRows.filter(x => x.team === team), pm) : null
       const pp = vb ? d.pos.get(r.player_id) : undefined
       return { id: r.player_id, name: d.names[r.player_name] ?? r.player_name, nameEn: r.player_name, gp: n, share, min: c?.min ?? pb?.min ?? null, base, form, overall, baseNote, avail, fatigue, pos: pp?.position ?? null, kind, newcomer }
-    }).sort((x, y) => (y.base ?? -1) - (x.base ?? -1) || (y.overall ?? -1) - (x.overall ?? -1))   // 체급 순 — 핵심 선수가 빠졌는지 바로 보이게
+    }).sort((x, y) => kindRank(x.kind) - kindRank(y.kind) || (y.base ?? -1) - (x.base ?? -1) || (y.overall ?? -1) - (x.overall ?? -1))
+    // 외국인 맨 위 → 아시아쿼터 → 국내 (사용자 요청 2026-11-24 — 결장이어도 같은 자리), 그 안에서는 체급 순 — 핵심 선수가 빠졌는지 바로 보이게
 
     const { full, exp } = teamStrength(players, {}, vb)
     return { team, players, full, exp, stats }
