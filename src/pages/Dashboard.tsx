@@ -737,11 +737,12 @@ function rollingTargetOf(site: Site): number {
   return ((site.last_deposit ?? 0) + (site.point_deposit ?? 0)) * (site.rolling_pct ?? 100) / 100
 }
 
-/** 롤링 진행률(%) — 소수점 한 자리까지 내림. 남은 롤링이 0 이하(롤링한 금액 ≥ 목표)일 때만 100%,
- *  그 전에는 아무리 가까워도 최대 99.9% (예전엔 반올림이라 783원 남아도 100%·롤링완료로 표시되던 문제) */
+/** 롤링 진행률(%) — 소수점 한 자리까지 내림. 남은 롤링이 0 이하(롤링한 금액 ≥ 목표)일 때만 100% 이상,
+ *  그 전에는 아무리 가까워도 최대 99.9% (예전엔 반올림이라 783원 남아도 100%·롤링완료로 표시되던 문제).
+ *  목표를 넘기면 넘긴 만큼 101%·110%처럼 그대로 보인다 (2026-11-24 사용자 요청 — 막대는 100%에서 멈춤) */
 function rollingProgress(done: number, target: number): number {
   if (target <= 0) return 0
-  if (done >= target) return 100
+  if (done >= target) return Math.max(100, Math.floor(done / target * 1000) / 10)
   return Math.min(99.9, Math.floor(done / target * 1000) / 10)
 }
 
