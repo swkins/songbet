@@ -427,7 +427,6 @@ export default function App() {
   function setWidth(w: string) {
     setMaxWidth(w)
     localStorage.setItem('sb_width', w)
-    setShowWidthMenu(false)
   }
 
   async function loadLogs() {
