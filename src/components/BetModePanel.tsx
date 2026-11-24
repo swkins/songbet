@@ -96,15 +96,16 @@ export default function BetModePanel({ pendingBets = [], lastSiteId = null, targ
   const leagueGames = games.filter(g => g.sport === sport && (!league || g.league === league))
   const game = games.find(g => g.id === gameId) ?? null
 
-  // 진행중 베팅이 걸린 경기 (사용자 요청 2026-11-24 — 완료 처리 전까지 일정에서 '베팅함' 도장으로 구분):
+  // 진행중 베팅이 걸린 경기 (사용자 요청 2026-11-24 — 완료 처리 전까지 일정에서 구분, 보라 '베팅중' 표시 — 적중/실패 색인 초록·빨강은 안 씀):
   // ① 자동 판정이 맞춘 경기 id(auto_game_id) ② 없으면 같은 종목·리그 + 베팅 문구에 그 경기 팀 이름(등록 이름) + 경기 시작 3일 전~시작 3시간 뒤에 넣은 베팅
   const betsByGame = useMemo(() => {
-    const m = new Map<string, Bet[]>()
+    const m = new Map<string, { bets: Bet[]; home: boolean; away: boolean }>()
     const nz = (x: string) => x.replace(/\s+/g, '').toLowerCase()
     const list = pendingBets.filter(b => b.sport !== 'casino')
     for (const g of games) {
       const reg = teamsBySport[g.sport] ?? []
-      const names = [g.home, g.away].flatMap(t => [resolveTeamName(t, g.league, reg), koName(t.name), t.full ?? '', t.name ?? '']).map(x => nz(x ?? '')).filter(n => n.length >= 2)
+      const side = (t: typeof g.home) => [resolveTeamName(t, g.league, reg), koName(t.name), t.full ?? '', t.name ?? ''].map(x => nz(x ?? '')).filter(n => n.length >= 2)
+      const hn = side(g.home), an = side(g.away), names = [...hn, ...an]
       const start = Date.parse(g.start)
       const hit = list.filter(b => {
         if (b.auto_game_id) return b.auto_game_id === g.id
@@ -114,12 +115,21 @@ export default function BetModePanel({ pendingBets = [], lastSiteId = null, targ
         const txt = nz(b.match ?? '')
         return names.some(n => txt.includes(n))
       })
-      if (hit.length) m.set(g.id, hit)
+      if (hit.length) {
+        // 어느 팀에 걸었는지 (A vs B 경기 전체 베팅은 둘 다 아님)
+        let home = false, away = false
+        for (const b of hit) {
+          const txt = nz(b.match ?? ''), h = hn.some(n => txt.includes(n)), a = an.some(n => txt.includes(n))
+          if (h && !a) home = true
+          if (a && !h) away = true
+        }
+        m.set(g.id, { bets: hit, home, away })
+      }
     }
     return m
   }, [games, pendingBets, teamsBySport])
   const betCount = (f: (g: Game) => boolean) => games.filter(g => f(g) && betsByGame.has(g.id)).length
-  const BetDot = ({ n }: { n: number }) => n ? <span title={`진행중 베팅이 있는 경기 ${n}`} style={{ fontSize: 9, fontWeight: 800, color: 'var(--green)', marginLeft: 4 }}>✓{n}</span> : null
+  const BetDot = ({ n }: { n: number }) => n ? <span title={`진행중 베팅이 있는 경기 ${n}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 9, fontWeight: 700, color: 'var(--purple)', marginLeft: 6 }}><span style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--purple)' }} />{n}</span> : null
 
   // 모바일(위아래 배치)에서 경기를 고르면 아래 베팅슬립으로 내려간다
   const slipRef = useRef<HTMLDivElement>(null)
@@ -213,7 +223,7 @@ export default function BetModePanel({ pendingBets = [], lastSiteId = null, targ
                       <span style={{ flex: 1, height: 1, background: 'var(--border)' }} />
                     </div>
                   )) : null
-                  const myBets = betsByGame.get(g.id)
+                  const mine = betsByGame.get(g.id), myBets = mine?.bets
                   const sel = gameId === g.id
                   return (
                     <div key={g.id}>
@@ -222,11 +232,11 @@ export default function BetModePanel({ pendingBets = [], lastSiteId = null, targ
                       <button type="button" title={[sel ? '한 번 더 누르면 분석' : '', ...(myBets ?? []).map(b => `베팅: ${b.match} @${b.odds} · ${b.stake.toLocaleString()}`)].filter(Boolean).join('\n') || undefined}
                         onClick={() => { if (sel) { setShowAnalysis(true); return } setGameId(g.id); setAddSiteId(null) }}
                         style={{ ...item(sel), width: '100%', display: 'flex', flexDirection: 'column', gap: 2,
-                          ...(myBets && !sel ? { borderColor: 'var(--green-border, var(--green))', background: 'var(--green-bg, var(--bg-elevated))', boxShadow: 'inset 3px 0 0 var(--green)' } : myBets ? { boxShadow: 'inset 3px 0 0 var(--green)' } : {}) }}>
+                          ...(myBets ? { boxShadow: 'inset 2px 0 0 var(--purple)', ...(sel ? {} : { borderColor: 'var(--purple-border)' }) } : {}) }}>
                         <span style={{ fontSize: 10, fontWeight: 700, color: live ? 'var(--gold)' : 'var(--text-muted)', fontFamily: 'var(--font-num)', display: 'flex', alignItems: 'center', gap: 0, paddingRight: 10 }}>
                           <span>{live ? '● 경기중' : d.format('HH:mm')}{!league && <span style={{ fontWeight: 600, fontFamily: 'var(--font-body)', marginLeft: 6 }}>{leagueLabel(g.league)}</span>}</span>
                           {/* 진행중 베팅이 있는 경기 = '베팅함' 도장 (완료 처리하면 사라짐) */}
-                          {myBets && <span style={{ marginLeft: 'auto', fontFamily: 'var(--font-body)', fontSize: 9, fontWeight: 800, color: 'var(--green)', border: '1.5px solid var(--green)', borderRadius: 4, padding: '0 5px', transform: 'rotate(-6deg)', letterSpacing: 0.5, whiteSpace: 'nowrap' }}>✓ 베팅함{myBets.length > 1 ? ` ${myBets.length}` : ''}</span>}
+                          {myBets && <span style={{ marginLeft: 'auto', fontFamily: 'var(--font-body)', fontSize: 9, fontWeight: 700, color: 'var(--purple)', background: 'var(--purple-bg)', border: '1px solid var(--purple-border)', borderRadius: 10, padding: '0 7px', lineHeight: '15px', whiteSpace: 'nowrap' }}>베팅중{myBets.length > 1 ? ` · ${myBets.length}` : ''}</span>}
                         </span>
                         {/* 위 = 홈, 아래 = 원정 — 현재 배당은 오른쪽 고정 칸(끝에서 10px 띄움, 이름 길이와 상관없이 같은 자리), 축구는 가운데 줄에 무배당 (1·X·2 순) */}
                         {(() => {
@@ -234,15 +244,16 @@ export default function BetModePanel({ pendingBets = [], lastSiteId = null, targ
                           // 배당 옆 ▲▼ = 오픈(없으면 첫 기록) 대비 — 떨어지면 빨강 · 오르면 초록 (사용자 요청 2026-11-24)
                           const tr = o ? oddsTrend([o.first, o]) : null
                           const dDraw = o?.draw_odds != null ? +(o.draw_odds - (o.open_draw ?? o.first.draw_odds ?? o.draw_odds)).toFixed(2) : 0
-                          const row = (name: string, v: number | null | undefined, d: number, small = false) => <>
-                            <span style={{ fontWeight: small ? 400 : 700, fontSize: small ? 10 : undefined, color: small ? 'var(--text-muted)' : undefined, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{name}</span>
+                          // 베팅한 팀 이름 앞에 보라 점 (경기 전체 베팅이면 점 없이 카드 표시만)
+                          const row = (name: string, v: number | null | undefined, d: number, small = false, picked = false) => <>
+                            <span style={{ fontWeight: small ? 400 : 700, fontSize: small ? 10 : undefined, color: small ? 'var(--text-muted)' : undefined, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{picked && <span style={{ display: 'inline-block', width: 5, height: 5, borderRadius: '50%', background: 'var(--purple)', marginRight: 5, verticalAlign: 'middle' }} />}{name}</span>
                             <span style={{ fontFamily: 'var(--font-num)', fontWeight: 700, fontSize: small ? 10 : 11, color: trendColor(d) ?? (small ? 'var(--text-muted)' : 'var(--text-secondary)'), textAlign: 'right', whiteSpace: 'nowrap' }}>{v != null ? <>{Number(v).toFixed(2)}<Arrow d={d} /></> : ''}</span>
                           </>
                           return (
                             <span style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 48px', columnGap: 8, rowGap: 2, alignItems: 'baseline', width: '100%', paddingRight: 10, boxSizing: 'border-box' }}>
-                              {row(koName(g.home.name), o?.home_odds, tr?.dH ?? 0)}
+                              {row(koName(g.home.name), o?.home_odds, tr?.dH ?? 0, false, !!mine?.home)}
                               {g.sport === 'soccer' && o?.draw_odds != null && row('무', o.draw_odds, dDraw, true)}
-                              {row(koName(g.away.name), o?.away_odds, tr?.dA ?? 0)}
+                              {row(koName(g.away.name), o?.away_odds, tr?.dA ?? 0, false, !!mine?.away)}
                             </span>
                           )
                         })()}
