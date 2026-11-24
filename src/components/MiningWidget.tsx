@@ -232,25 +232,33 @@ function TickGauge({ pct, color, markerPct, ticks = 14, c }: { pct: number; colo
 
 /** 실적 한 줄 (이번 주 / 기간) — 목표가 있으면 눈금 게이지, 없으면 금액만 */
 function PerfBlock({ title, range, progress, target, elapsed, days, c, ticks = 14 }: { title: string; range: string; progress: number; target: number; elapsed: number; days: number; c: boolean; ticks?: number }) {
+  // 줄마다 한 줄로 (사용자 요청 2026-11-24 — 좁은 칸에서 줄바꿈 없이): ① 이름·기간 | % ② 눈금 ③ 현재 / 목표 | 남음
   const has = target > 0
   const pctD = has ? Math.max(0, progress / target * 100) : 0
   const done = has && progress >= target, excess = has && progress > target
   const remain = target - progress
   const color = paceColorForRatio(paceRatio(progress, target, elapsed, days))
+  const row: React.CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 6, whiteSpace: 'nowrap' }
+  const ell: React.CSSProperties = { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }
+  const amount = (
+    <span style={{ ...ell, fontFamily: 'var(--font-num)', fontSize: c ? 11 : 12, color: 'var(--text-muted)' }}>
+      <b style={{ color: done ? 'var(--green)' : 'var(--gold)', fontSize: c ? 13 : 15 }}>{fmt(progress)}</b>{has ? <> / {fmt(target)}</> : null}
+    </span>
+  )
   return (
-    <div style={{ marginTop: c ? 3 : 6 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: c ? 2 : 4 }}>
-        <span style={{ fontSize: c ? 11 : 13, fontWeight: 700, color: 'var(--text-muted)' }}>{title} <span style={{ fontWeight: 500, fontSize: c ? 10 : 11 }}>{range}</span></span>
-        <span style={{ fontSize: c ? 11 : 12, color: 'var(--text-muted)' }}><b style={{ color: 'var(--gold)', fontFamily: 'var(--font-num)', fontSize: c ? 13 : 15 }}>{fmt(progress)}</b>{has ? ` / ${fmt(target)}` : ''}</span>
+    <div style={{ marginTop: c ? 4 : 7 }}>
+      <div style={{ ...row, marginBottom: c ? 3 : 4 }}>
+        <span style={{ ...ell, fontSize: c ? 11 : 13, fontWeight: 700, color: 'var(--text-muted)' }}>{title} <span style={{ fontWeight: 500, fontSize: c ? 10 : 11 }}>{range}</span></span>
+        {has ? <span style={{ fontSize: c ? 13 : 15, fontWeight: 800, fontFamily: 'var(--font-num)', color: done ? 'var(--green)' : 'var(--text-secondary)', flexShrink: 0 }}>{pctD.toFixed(0)}%</span> : amount}
       </div>
       {has && (
         <>
           <TickGauge pct={pctD} color={color} markerPct={(elapsed / days) * 100} ticks={ticks} c={c} />
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: c ? 2 : 4 }}>
-            <span style={{ fontSize: c ? 10 : 12, fontWeight: 600, color: 'var(--text-secondary)' }}>
-              {remain <= 0 ? (excess ? `목표 달성 (초과 ${fmt(-remain)})` : '목표 달성') : `남음 ${fmt(remain)}`}
+          <div style={{ ...row, marginTop: c ? 3 : 4 }}>
+            {amount}
+            <span style={{ fontSize: c ? 10 : 11, fontWeight: 600, fontFamily: 'var(--font-num)', color: excess ? 'var(--green)' : 'var(--text-secondary)', flexShrink: 0 }}>
+              {remain <= 0 ? (excess ? `초과 ${fmt(-remain)}` : '달성') : `남음 ${fmt(remain)}`}
             </span>
-            <span style={{ fontSize: c ? 13 : 16, fontWeight: 800, fontFamily: 'var(--font-num)', color: done ? 'var(--green)' : 'var(--text-secondary)' }}>{pctD.toFixed(0)}%</span>
           </div>
         </>
       )}
@@ -339,7 +347,7 @@ export default function MiningWidget({ tabs, compact = false }: { tabs?: ReactNo
             const start = co.perf_period === '2w' ? goal.subtract(14, 'day') : goal.subtract(1, 'month')
             const days = goal.diff(start, 'day')
             const el = Math.min(days, Math.max(0, dayjs().startOf('day').diff(start.startOf('day'), 'day')))
-            periodBlock = <PerfBlock title="기간 실적" range={`${start.format('MM.DD')}~${goal.format('MM.DD')}`} progress={p.period} target={co.perf_amount} elapsed={el} days={days} c={c} />
+            periodBlock = <PerfBlock title="기간" range={`${start.format('MM.DD')}~${goal.format('MM.DD')}`} progress={p.period} target={co.perf_amount} elapsed={el} days={days} c={c} />
           }
           const ptDone = cashOn && e.target_point > 0 && e.current_point >= e.target_point
           return (
@@ -361,7 +369,7 @@ export default function MiningWidget({ tabs, compact = false }: { tabs?: ReactNo
               ) : (
                 <>
                   {/* 현금교환 사이트는 이번 주 실적을 안 보인다 (사용자 요청 2026-11-24 — 기간 실적만) */}
-                  {!cashOn && <PerfBlock title="이번 주" range={`${wk.mon.format('MM.DD')}(월)~${wk.sun.format('MM.DD')}(일)`} progress={p?.week ?? 0} target={co?.perf_week_amount ?? 0} elapsed={wk.elapsed} days={7} ticks={7} c={c} />}
+                  {!cashOn && <PerfBlock title="이번 주" range={`${wk.mon.format('MM.DD')}~${wk.sun.format('MM.DD')}`} progress={p?.week ?? 0} target={co?.perf_week_amount ?? 0} elapsed={wk.elapsed} days={7} ticks={7} c={c} />}
                   {periodBlock}
                 </>
               )}
