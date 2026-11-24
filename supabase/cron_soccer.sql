@@ -157,3 +157,10 @@ end $$;
 select cron.alter_job((select jobid from cron.job where jobname = 'collect-soccer-club'), active := false);
 update public.game_schedules set games = '[]'::jsonb where league = '친선경기';
 update public.odds_jobs set next_at = null where league = '친선경기';
+
+-- ── 2026-11-24 UEFA 클럽 대회 (사용자 요청 — 챔스가 일정에 없었다): ESPN uefa.champions·uefa.europa·uefa.europa.conf, DraftKings 승무패 같이 옴 ──
+insert into soccer_leagues (name) select x from unnest(array['챔피언스리그','유로파리그','컨퍼런스리그']) x where not exists (select 1 from soccer_leagues where name = x);
+insert into public.odds_jobs (league, job) values ('챔피언스리그','collect-soccer-ucl'),('유로파리그','collect-soccer-uel'),('컨퍼런스리그','collect-soccer-uecl') on conflict (league) do nothing;
+select cron.schedule(j, '0 0 1 1 *', format('select public.run_collect_soccer(%L)', l)) from (values ('collect-soccer-ucl','챔피언스리그'),('collect-soccer-uel','유로파리그'),('collect-soccer-uecl','컨퍼런스리그')) v(j,l);
+-- 그다음 alter_job으로 첫 실행을 45~60분 뒤로 (그 뒤는 run_collect_soccer가 60~120분 랜덤으로 다시 잡음)
+-- 다른 리그 팀(챔스·유로파·컨퍼런스에만 나오는 팀) 한글 이름 37개는 soccer_team_names league '' 로 넣음
