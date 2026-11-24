@@ -1,3 +1,5 @@
+> **지금 예약 작업이 쓰는 지시문은 `scripts/news_check_domestic.md`(국내-평일·주말)·`scripts/news_check_nba.md`(NBA)** — 2026-11-24 경기 뉴스 요약(game_news) 저장 추가. 이 파일은 예전 공통 틀(참고용).
+
 # 출전 확률 뉴스 확인 — Claude 예약 작업 지시문 (Sonnet)
 
 예약 작업 세 개가 아래 지시문을 쓴다 (`{TASK}`만 다름). 바꾸면 예약 작업 prompt도 같이 바꾼다.
