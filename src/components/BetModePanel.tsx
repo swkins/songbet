@@ -324,7 +324,7 @@ function BetSlip({ game, sites, options, numeric, registered, onBet, preset }: {
       <div style={label}>사이트</div>
       <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
         {orderedSites.map(s => (
-          <button key={s.id} type="button" style={{ ...chip(siteId === s.id), opacity: s.active || siteId === s.id ? 1 : 0.6 }} onClick={() => setSiteId(s.id)}>
+          <button key={s.id} type="button" style={{ ...chip(siteId === s.id), opacity: s.active || siteId === s.id ? 1 : 0.6 }} onClick={() => { setSiteId(s.id); setTimeout(() => oddsRef.current?.focus(), 0) }}>
             {s.name}{s.currency === 'usd' ? ' $' : ''}
           </button>
         ))}
@@ -559,7 +559,7 @@ function BasketSlip({ game, sites, registered, onBet }: {
       <div style={label}>사이트</div>
       <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
         {orderedSites.map(s => (
-          <button key={s.id} type="button" style={{ ...chip(siteId === s.id), opacity: s.active || siteId === s.id ? 1 : 0.6 }} onClick={() => setSiteId(s.id)}>
+          <button key={s.id} type="button" style={{ ...chip(siteId === s.id), opacity: s.active || siteId === s.id ? 1 : 0.6 }} onClick={() => { setSiteId(s.id); setTimeout(() => oddsRef.current?.focus(), 0) }}>
             {s.name}{s.currency === 'usd' ? ' $' : ''}
           </button>
         ))}
