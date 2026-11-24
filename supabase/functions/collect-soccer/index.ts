@@ -107,7 +107,10 @@ Deno.serve(async (req) => {
   }
 
   const today = kstDate(Date.now()), tomorrow = kstDate(Date.now() + 86400000)
-  const byDate: Record<string, Game[]> = { [today]: [], [tomorrow]: [] }
+  // 어제(한국 날짜)도 받는다 (2026-11-25 — 밤 9시대 시작해 자정 넘어 끝나는 경기가 '72분' 경기중으로 멈춰 결과 판정이 안 됐다:
+  //  자정이 지나면 어제 줄을 더는 갱신하지 않았기 때문). 어제 줄은 통째로 덮지 않고 이미 저장된 경기만 새 값으로 바꾼다 (UTC 3일로는 어제 오전 경기가 빠져서).
+  const yesterday = kstDate(Date.now() - 86400000)
+  const byDate: Record<string, Game[]> = { [yesterday]: [], [today]: [], [tomorrow]: [] }
   const odds: { game: Game; date: string; h: number | null; d: number | null; a: number | null; oh: number | null; od: number | null; oa: number | null; src: string }[] = []
 
   if (CODE[league]) {
@@ -200,7 +203,7 @@ Deno.serve(async (req) => {
     for (const pfx of ['pn:', 'bx:']) { const k = nameKeys(pfx).find(k => n.toLowerCase().startsWith(k.toLowerCase())); if (k) return mine.get(pfx + k) ?? any.get(pfx + k) }
     return undefined
   }
-  const preGames = () => Object.entries(byDate).flatMap(([date, gs]) => gs.filter(g => !g.status).map(g => ({ g, date })))
+  const preGames = () => Object.entries(byDate).filter(([date]) => date !== yesterday).flatMap(([date, gs]) => gs.filter(g => !g.status).map(g => ({ g, date })))
   let pinMatched = 0, pinLines = 0
   if (PIN[league]) {
     try {
@@ -262,14 +265,24 @@ Deno.serve(async (req) => {
     } catch { /* 배당은 없어도 일정은 저장 */ }
   }
 
-  const rows = Object.entries(byDate).map(([game_date, games]) => ({ sport: 'soccer', league, game_date, games: games.sort((a, b) => a.start.localeCompare(b.start)), fetched_at: new Date().toISOString() }))
+  // 어제 줄: 저장된 경기 중 새로 받은 것만 바꿔 끼움 (없던 경기는 안 넣음, 어제 줄이 없으면 건너뜀)
+  const fresh = new Map(byDate[yesterday].map(g => [g.id, g]))
+  delete byDate[yesterday]
+  let yRow: { game_date: string; games: Game[] } | null = null
+  if (fresh.size) {
+    const { data: prevY } = await db.from('game_schedules').select('games').eq('sport', 'soccer').eq('league', league).eq('game_date', yesterday).maybeSingle()
+    const old: Game[] = prevY?.games ?? []
+    if (old.some(g => fresh.has(g.id))) yRow = { game_date: yesterday, games: old.map(g => fresh.get(g.id) ?? g) }
+  }
+  const rows = [...Object.entries(byDate).map(([game_date, games]) => ({ game_date, games })), ...(yRow ? [yRow] : [])]
+    .map(({ game_date, games }) => ({ sport: 'soccer', league, game_date, games: games.sort((a, b) => a.start.localeCompare(b.start)), fetched_at: new Date().toISOString() }))
   const { error: se } = await db.from('game_schedules').upsert(rows)
   if (se) return log('error', { message: `schedule ${se.message}` })
 
   // 배당: 바뀐 것만 저장
   let changed = 0
   for (const o of odds) {
-    if (!o.h || !o.a) continue
+    if (!o.h || !o.a || o.date === yesterday) continue
     const { data: prev } = await db.from('odds_snapshots').select('home_odds, away_odds, draw_odds').eq('game_id', o.game.id).order('fetched_at', { ascending: false }).limit(1)
     const p = prev?.[0]
     if (p && Number(p.home_odds) === o.h && Number(p.away_odds) === o.a && Number(p.draw_odds) === (o.d ?? 0)) continue
@@ -280,7 +293,7 @@ Deno.serve(async (req) => {
   // 핸디 배당: Action Network (미국 동부 날짜, 한 번에 그날 전 리그) — 북메이커별 주력 핸디(±0.5·±1.5·±2.5)를 기준점별 평균 → soccer_lines
   let lines = 0, anMatched = 0
   if (AN_LEAGUE[league]) try {
-    const pre = rows.flatMap(r => r.games).filter(g => !g.status)
+    const pre = rows.filter(r => r.game_date !== yesterday).flatMap(r => r.games).filter(g => !g.status)
     const usDates = [...new Set(pre.map(g => new Date(Date.parse(g.start) - 5 * 3600000).toISOString().slice(0, 10).replaceAll('-', '')))]
     const tok = (s: string) => (s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length >= 4 && !['club', 'city'].includes(w))
     for (const [i, d] of usDates.entries()) {
