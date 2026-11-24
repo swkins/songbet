@@ -148,8 +148,10 @@ function SiteSettingsModal({ entry, cashout, onClose, onSetCashEnabled, onSetGoa
                 </div>
               </>
             )}
-          <div style={labelSt}>이번 주 목표 (월~일, 없으면 비움)</div>
-          <input style={{ ...inputSt, marginBottom: 8, fontSize: 12, padding: '7px 9px' }} inputMode="numeric" placeholder="이번 주 목표 실적 (원)" value={numIn(weekAmount)} onChange={ev => onlyNum(ev.target.value, setWeekAmount)} />
+          {!cashOn && (<>
+            <div style={labelSt}>이번 주 목표 (월~일, 없으면 비움)</div>
+            <input style={{ ...inputSt, marginBottom: 8, fontSize: 12, padding: '7px 9px' }} inputMode="numeric" placeholder="이번 주 목표 실적 (원)" value={numIn(weekAmount)} onChange={ev => onlyNum(ev.target.value, setWeekAmount)} />
+          </>)}
           {cashOn && (
             <>
               <div style={labelSt}>현금교환 목표 날짜로부터 기간 목표</div>
@@ -234,8 +236,6 @@ function PerfBlock({ title, range, progress, target, elapsed, days, c, ticks = 1
   const pctD = has ? Math.max(0, progress / target * 100) : 0
   const done = has && progress >= target, excess = has && progress > target
   const remain = target - progress
-  const left = Math.max(0, days - elapsed)
-  const perDay = left > 0 ? Math.max(0, remain) / left : Math.max(0, remain)
   const color = paceColorForRatio(paceRatio(progress, target, elapsed, days))
   return (
     <div style={{ marginTop: c ? 3 : 6 }}>
@@ -248,7 +248,7 @@ function PerfBlock({ title, range, progress, target, elapsed, days, c, ticks = 1
           <TickGauge pct={pctD} color={color} markerPct={(elapsed / days) * 100} ticks={ticks} c={c} />
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: c ? 2 : 4 }}>
             <span style={{ fontSize: c ? 10 : 12, fontWeight: 600, color: 'var(--text-secondary)' }}>
-              {remain <= 0 ? (excess ? `목표 달성 (초과 ${fmt(-remain)})` : '목표 달성') : `남음 ${fmt(remain)} · 하루 ${fmt(perDay)} · ${left}일 남음`}
+              {remain <= 0 ? (excess ? `목표 달성 (초과 ${fmt(-remain)})` : '목표 달성') : `남음 ${fmt(remain)}`}
             </span>
             <span style={{ fontSize: c ? 13 : 16, fontWeight: 800, fontFamily: 'var(--font-num)', color: done ? 'var(--green)' : 'var(--text-secondary)' }}>{pctD.toFixed(0)}%</span>
           </div>
@@ -356,9 +356,12 @@ export default function MiningWidget({ tabs, compact = false }: { tabs?: ReactNo
               </div>
               {!hasSites ? (
                 <div style={{ fontSize: c ? 10 : 11, color: 'var(--text-muted)', marginTop: 4 }}>⚙ 설정에서 실적으로 셀 베팅사이트를 고르세요</div>
+              ) : cashOn && !periodBlock ? (
+                <div style={{ fontSize: c ? 10 : 11, color: 'var(--text-muted)', marginTop: 4 }}>⚙ 설정에서 목표 날짜·기간 목표를 정하면 기간 실적이 보여요</div>
               ) : (
                 <>
-                  <PerfBlock title="이번 주" range={`${wk.mon.format('MM.DD')}(월)~${wk.sun.format('MM.DD')}(일)`} progress={p?.week ?? 0} target={co?.perf_week_amount ?? 0} elapsed={wk.elapsed} days={7} ticks={7} c={c} />
+                  {/* 현금교환 사이트는 이번 주 실적을 안 보인다 (사용자 요청 2026-11-24 — 기간 실적만) */}
+                  {!cashOn && <PerfBlock title="이번 주" range={`${wk.mon.format('MM.DD')}(월)~${wk.sun.format('MM.DD')}(일)`} progress={p?.week ?? 0} target={co?.perf_week_amount ?? 0} elapsed={wk.elapsed} days={7} ticks={7} c={c} />}
                   {periodBlock}
                 </>
               )}
