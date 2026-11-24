@@ -4,6 +4,7 @@ import { X, RefreshCw } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import DataSources from './DataSources'
 import LeagueCards from './LeagueCards'
+import ClaudeTasks from './ClaudeTasks'
 
 // ─── 분석 탭 '업데이트 현황' — Supabase가 자동으로 모으는 것들의 주기·마지막·다음 실행·결과 ─────
 // 데이터: rpc analysis_update_status (supabase/cron_collect.sql). pg_cron 작업 일정은 UTC '분 시 * * *'.
@@ -108,6 +109,8 @@ export default function UpdateStatus({ onClose }: { onClose: () => void }) {
         </div>
         {err && <div style={{ fontSize: 12, color: 'var(--red)', marginBottom: 10 }}>{/analysis_update_status|function/i.test(err) ? 'Supabase 쪽 자동 수집 설정이 아직 반영되지 않았어요 (supabase/cron_collect.sql).' : `현황을 못 불러왔어요: ${err}`}</div>}
         {!s && !err && <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>불러오는 중…</div>}
+        {/* Claude 예약 작업 — 맨 위 (2026-11-24 사용자 요청) */}
+        <ClaudeTasks reloadKey={reloadKey} />
         {/* 출처별 신뢰도 그리드 — 맨 위 (2026-11-22 사용자 요청) */}
         <DataSources reloadKey={reloadKey} />
         {s && <>
@@ -138,7 +141,7 @@ export default function UpdateStatus({ onClose }: { onClose: () => void }) {
 
           {/* 출전 확률 (뉴스) */}
           <div style={box}>
-            {head('출전 확률 (결장·부상·복귀)', 'Claude 예약 작업 (Sonnet) · NBA 매일 15·18·21시 · 국내 평일 12·15·18시 · 주말 9·12시',
+            {head('출전 확률 (결장·부상·복귀)', 'Claude 예약 작업 (Sonnet) · NBA 매일 20:41 · 국내 평일 13:17 · 주말 8:23',
               'Claude가 뉴스 기사 + ESPN 부상 명단을 읽고 선수별 출전 확률을 최종 판단 → 분석 탭 선수 오버롤 옆 색 · 경기 날짜 이틀 지나면 자동 삭제 · 경기 없으면 바로 끝냄')}
             <div style={{ fontSize: 11, fontWeight: 700, marginBottom: 2 }}>ESPN 부상 명단 (Supabase, 14:33·17:33·20:33)</div>
             {jobLine(job('collect-injuries'))}
