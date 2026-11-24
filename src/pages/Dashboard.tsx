@@ -14,13 +14,14 @@ const BetAnalysisPanel = lazy(() => import('../components/BetAnalysisPanel'))
 const ANALYSIS_IN_DASHBOARD = false
 import RulebookNotes from './RulebookNotes'
 import BetModePanel, { type BetTarget } from '../components/BetModePanel'
+import type { LayoutMode } from '../App'
 import { loadSchedules, upcomingForBet, leagueNameCompare, type BetPickGame } from '../lib/gameSchedule'
 import dayjs from 'dayjs'
 import isoWeek from 'dayjs/plugin/isoWeek'
 dayjs.extend(isoWeek)
 import {
   Plus, Trash2, Check, X,
-  RotateCcw, Settings, Flame, BookOpen, Rows3, Columns3, Target,
+  RotateCcw, Settings, Flame, BookOpen,
   CheckCircle, XCircle, Ban, MinusCircle, Gift, GripVertical, DollarSign,
   TrendingUp, TrendingDown, ArrowDownToLine, LogOut, Pencil,
   ClipboardPaste, ChevronUp, ChevronDown, Star, Ellipsis,
@@ -2935,7 +2936,7 @@ function WeekMonthDeposit({ sites, cashflows, weekStart, weekEnd }: {
   )
 }
 
-export default function Dashboard({ betTarget, onBetTargetDone }: { betTarget?: BetTarget | null; onBetTargetDone?: () => void } = {}) {
+export default function Dashboard({ betTarget, onBetTargetDone, layoutMode = 'side', onLayoutMode }: { betTarget?: BetTarget | null; onBetTargetDone?: () => void; layoutMode?: LayoutMode; onLayoutMode?: (m: LayoutMode) => void } = {}) {
   const today = dayjs().format('YYYY-MM-DD')
 
   const [sites, setSites]     = useState<Site[]>([])
@@ -2953,10 +2954,7 @@ export default function Dashboard({ betTarget, onBetTargetDone }: { betTarget?: 
   const [showRulebook, setShowRulebook] = useState(false)
   // 대시보드 스타일: 'side'(사이트 현황 좌 / 베팅 현황 우) · 'stacked'(사이트 현황 위 / 베팅 현황 아래)
   // · 'bet'(베팅 모드 — 가져온 경기 일정으로 베팅하는 패널 좌 / 베팅 현황 우) — 이 기기에 기억
-  type LayoutMode = 'side' | 'stacked' | 'bet'
-  const [layoutMode, setLayoutMode] = useState<LayoutMode>(() => {
-    try { const v = localStorage.getItem('songbet_dashboard_layout'); return v === 'stacked' || v === 'bet' ? v : 'side' } catch { return 'side' }
-  })
+  // 화면 모드(좌우·상하·베팅)는 상단 '옵션'에서 고른다 (App이 가짐 — 2026-11-24 사용자 요청)
   // 사이트 현황 자리에 보여줄 것: 'site'(사이트 현황) · 'analysis'(베팅분석) — 이 기기에 기억
   const [sidePanelPick, setSidePanel] = useState<'site' | 'analysis'>(() => {
     try { return localStorage.getItem('songbet_dashboard_side_panel') === 'analysis' ? 'analysis' : 'site' } catch { return 'site' }
@@ -2987,26 +2985,9 @@ export default function Dashboard({ betTarget, onBetTargetDone }: { betTarget?: 
     <div className="card" style={{ padding: '10px 14px' }}>{title}<div style={{ color: 'var(--text-muted)', fontSize: 13, padding: '10px 0' }}>불러오는 중...</div></div>
   )
   const betMode = layoutMode === 'bet'
-  function pickLayoutMode(next: LayoutMode) {
-    setLayoutMode(next)
-    try { localStorage.setItem('songbet_dashboard_layout', next) } catch { /* 저장 못 해도 이번 화면에선 적용 */ }
-  }
+  const pickLayoutMode = (next: LayoutMode) => onLayoutMode?.(next)
   // 분석 탭 '베팅하기'로 왔으면 베팅 모드로 바꾸고 그 경기 베팅슬립을 연다 (BetModePanel target)
   useEffect(() => { if (betTarget && layoutMode !== 'bet') pickLayoutMode('bet') }, [betTarget]) // eslint-disable-line react-hooks/exhaustive-deps
-  // 베팅 현황 제목줄의 모드 버튼: 좌우 · 상하 · 베팅
-  const layoutSwitch = (small: boolean) => (
-    <div style={{ display: 'inline-flex', border: '1px solid var(--border)', borderRadius: 4, overflow: 'hidden' }}>
-      {([['side', '좌우', <Columns3 key="i" size={small ? 11 : 12} />, '사이트 현황 좌측 / 베팅 현황 우측'],
-         ['stacked', '상하', <Rows3 key="i" size={small ? 11 : 12} />, '사이트 현황을 위로, 베팅 현황을 아래로'],
-         ['bet', '베팅', <Target key="i" size={small ? 11 : 12} />, '베팅 모드 — 가져온 경기 일정에서 종목·리그·경기를 골라 베팅']] as const).map(([k, label, icon, title], i) => (
-        <button key={k} onClick={() => pickLayoutMode(k)} title={title} style={{
-          background: layoutMode === k ? 'var(--gold-bg)' : 'none', border: 'none', borderLeft: i ? '1px solid var(--border)' : 'none',
-          color: layoutMode === k ? 'var(--gold)' : 'var(--text-secondary)', cursor: 'pointer',
-          padding: small ? '3px 8px' : '4px 10px', display: 'flex', alignItems: 'center', gap: 4, fontSize: small ? 10 : 11, fontWeight: 700, fontFamily: 'var(--font-body)',
-        }}>{icon} {label}</button>
-      ))}
-    </div>
-  )
   const [depositSite, setDepositSite]   = useState<Site | null>(null)
   const [withdrawSite, setWithdrawSite] = useState<Site | null>(null)
   const [openFormSiteId, setOpenFormSiteId] = useState<string | null>(null)
@@ -4602,7 +4583,6 @@ export default function Dashboard({ betTarget, onBetTargetDone }: { betTarget?: 
               <div className="flex-between mb-10">
                 <span className="card-title" style={{ margin: 0 }}>베팅 현황</span>
                 <div style={{ display: 'flex', gap: 6 }}>
-                {layoutSwitch(true)}
                   <button onClick={openRulebook} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--gold)', cursor: 'pointer', padding: '3px 8px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-body)' }}>
                   <BookOpen size={11} /> 룰북
                 </button>
@@ -4619,8 +4599,6 @@ export default function Dashboard({ betTarget, onBetTargetDone }: { betTarget?: 
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: aggRollingTarget > 0 ? 6 : 12 }}>
                 <span className="card-title" style={{ margin: 0 }}>베팅 현황</span>
                 <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
-                  {layoutSwitch(false)}
-                  <span style={{ width: 1, height: 18, background: 'var(--border)' }} />
                   <button onClick={openRulebook} title="룰북" style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--gold)', cursor: 'pointer', padding: '4px 7px', display: 'flex', alignItems: 'center' }}>
                     <BookOpen size={13} />
                   </button>
