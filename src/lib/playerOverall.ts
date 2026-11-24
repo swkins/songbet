@@ -36,7 +36,7 @@ export interface PlayerOv {
   newcomer?: { kind: string | null; n: number; prior: number; w: number } | null   // 이 리그 지난 시즌 기록이 없는 선수: 출발점(같은 구분 평균)과 실제 기록 비중
 }
 const kindRank = (k: string | null | undefined) => k === '외국인' ? 0 : k === '아시아쿼터' ? 1 : 2
-export interface TeamOv { team: string | null; players: PlayerOv[]; full: number | null; exp: number | null; stats: TeamStats | null }
+export interface TeamOv { team: string | null; players: PlayerOv[]; full: number | null; exp: number | null; stats: TeamStats | null; gone?: string[] }
 export interface TeamStats { n: number; pf: number; pa: number; sw?: number; sl?: number; rt?: TeamRating }
 /** NBA 팀 레이팅 (nbaRatings) — r = 득실(상대 보정), o = 공격(+ = 많이 넣음), d = 수비(+ = 많이 내줌), avgT = 리그 평균 총점 */
 export interface TeamRating { r: number; o: number; d: number; n: number; avgT: number }   // 농구 pf·pa = 경기당 득점·실점 / 배구 = 경기당 딴·잃은 세트, sw·sl = 시즌 세트 합
@@ -77,7 +77,7 @@ function score(v: number, pool: number[]): number {
   return pctToScore(lo / pool.length)
 }
 
-interface SeasonRow { player_id: string; player_name: string; team: string | null; gp: number; min: number | null; gmsc: number | null }
+interface SeasonRow { player_id: string; player_name: string; team: string | null; gp: number; min: number | null; gmsc: number | null; last_date?: string | null }
 interface BaseRow extends SeasonRow { manual_base: number | null; note: string | null }
 interface RecentRow { player_id: string; n: number; gmsc5: number | null; min5: number | null }
 interface StatusRow { team: string; player_name: string; player_id: string | null; play_prob: number | null; status: string | null; confirmed: boolean | null; reason: string | null; source_title: string | null; source_url: string | null; checked_at: string }
@@ -92,7 +92,7 @@ async function loadLeague(code: string): Promise<LeagueData> {
   if (hit && Date.now() - hit.at < 10 * 60000) return hit
   const cur = seasonOf(dayjs().format('YYYY-MM-DD'))
   const [a, b, c, nm, tg, kp, pk] = await Promise.all([
-    supabase.from('v_player_season').select('player_id,player_name,team,gp,min,gmsc').eq('league', code).eq('season', cur).limit(2000),
+    supabase.from('v_player_season').select('player_id,player_name,team,gp,min,gmsc,last_date').eq('league', code).eq('season', cur).limit(2000),
     supabase.from('player_base').select('player_id,player_name,team,gp,min,gmsc,manual_base,note').eq('league', code).eq('season', prevSeasonOf(cur)).limit(2000),
     supabase.from('v_player_recent').select('player_id,n,gmsc5,min5').eq('league', code).limit(2000),
     supabase.from('player_names').select('name_en,name_ko').eq('league', code),
@@ -223,7 +223,16 @@ export async function loadGameOverall(league: string, gameDate: string, home: Sc
     const played = new Map<string, Map<string, number | null>>()
     games.filter(x => x.team === team).forEach(x => { if (!played.has(x.player_id)) played.set(x.player_id, new Map()); played.get(x.player_id)!.set(x.game_id, x.minutes == null ? null : Number(x.minutes)) })
 
-    const roster = d.cur.filter(r => r.team === team)
+    // 농구: 외국인은 2명·아시아쿼터는 1명만 등록 — 교체돼 떠난 선수도 이번 시즌 기록이 남아 3~4명으로 보였다 (2026-11-24 사용자 지적).
+    //  종류마다 가장 최근에 뛴 순서로 정원만 남기고 나머지는 '교체로 빠짐' (팀 전력·결장 감지에서도 뺀다 — 떠난 선수를 결장으로 보면 팀이 약하게 나왔다)
+    const allRoster = d.cur.filter(r => r.team === team)
+    const gone: string[] = []
+    if (!vb) for (const [kd, cap] of [['외국인', 2], ['아시아쿼터', 1]] as const) {
+      const ks = allRoster.filter(r => d.kinds.get(r.player_id) === kd)
+        .sort((x, y) => (y.last_date ?? '').localeCompare(x.last_date ?? '') || (y.min ?? 0) - (x.min ?? 0))
+      ks.slice(cap).forEach(r => gone.push(r.player_name))
+    }
+    const roster = allRoster.filter(r => !gone.includes(r.player_name))
     const rosterIds = new Set(roster.map(r => r.player_id))
     const prevById = new Map(d.prev.map(r => [r.player_id, r]))
     const prevByName = new Map(d.prev.map(r => [norm(r.player_name), r]))
@@ -237,6 +246,8 @@ export async function loadGameOverall(league: string, gameDate: string, home: Sc
       for (const r of byUse) { if (pick.length >= 12) break; if (!pick.includes(r)) pick.push(r) }
       return pick
     })() : byUse.slice(0, 10)
+    // 외국인·아시아쿼터는 출전시간이 적어도 늘 목록에 (사용자 요청 — 용병은 한눈에)
+    for (const r of byUse) if (d.kinds.get(r.player_id) && !top.includes(r)) top.push(r)
     const extra: SeasonRow[] = []
     const stubIds = new Set<string>()
     const addExtra = (id: string | null, name: string) => {
@@ -326,7 +337,7 @@ export async function loadGameOverall(league: string, gameDate: string, home: Sc
     // 외국인 맨 위 → 아시아쿼터 → 국내 (사용자 요청 2026-11-24 — 결장이어도 같은 자리), 그 안에서는 체급 순 — 핵심 선수가 빠졌는지 바로 보이게
 
     const { full, exp } = teamStrength(players, {}, vb)
-    return { team, players, full, exp, stats }
+    return { team, players, full, exp, stats, gone }
   }
   const H = build(home, hName), A = build(away, aName)
   // 지난 경기 때 수치 (예측 저장할 때 같이 저장된 player_ratings) — 화면에서 ▲▼ 변화 표시

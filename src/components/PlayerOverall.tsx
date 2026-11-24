@@ -306,6 +306,11 @@ function TeamTable({ title, t, ovr, onCycle, cond }: { title: string; t: TeamOv;
           })}</tbody>
         </table>
       )}
+      {t.gone && t.gone.length > 0 && (
+        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4 }} title="외국인 2명·아시아쿼터 1명 정원 — 가장 최근에 뛴 선수만 남기고, 교체로 빠진 선수는 팀 전력에서도 뺐다">
+          교체로 빠짐: {t.gone.join(' · ')}
+        </div>
+      )}
     </div>
   )
 }
