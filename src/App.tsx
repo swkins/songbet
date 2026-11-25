@@ -1,19 +1,31 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, lazy, Suspense } from 'react'
 import type { Tab, ActionLog, Todo } from './types'
+import type { BetTarget } from './components/BetModePanel'
 import Dashboard from './pages/Dashboard'
 import Settlement from './pages/Settlement'
 import Stats from './pages/Stats'
-import AnalysisHome from './pages/AnalysisHome'
+import Schedule from './pages/Schedule'
 import { supabase } from './lib/supabase'
 import { purgeOldLogs } from './lib/logger'
 import dayjs from 'dayjs'
-import { RotateCcw, ClipboardList, X, LayoutTemplate, Code2, Check, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Save, CheckSquare, Plus, Trash2, Settings, Pin, GripVertical, Percent } from 'lucide-react'
+// 베팅분석은 과거 경기 데이터가 커서 버튼을 처음 누를 때만 불러온다
+const BetAnalysisPanel = lazy(() => import('./components/BetAnalysisPanel'))
+// 베팅분석 버튼은 사용자 요청으로 뺐다 (코드·데이터는 남김) — 다시 보이려면 true
+const SHOW_ANALYSIS_BUTTON = false
+import { RotateCcw, ClipboardList, X, Code2, Check, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Save, CheckSquare, Plus, Trash2, Settings, Pin, GripVertical, Percent, BarChart3, SlidersHorizontal, Columns3, Rows3, Target } from 'lucide-react'
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'dashboard', label: '대시보드' },
   { id: 'stats', label: '통계' },
   { id: 'settlement', label: '결산' },
-  { id: 'analysis', label: '분석' },
+  { id: 'schedule', label: '분석' },
+]
+
+export type LayoutMode = 'side' | 'stacked' | 'bet'
+const LAYOUT_OPTIONS: { value: LayoutMode; label: string; icon: typeof Columns3; title: string }[] = [
+  { value: 'side', label: '좌우', icon: Columns3, title: '사이트 현황 좌측 / 베팅 현황 우측' },
+  { value: 'stacked', label: '상하', icon: Rows3, title: '사이트 현황을 위로, 베팅 현황을 아래로' },
+  { value: 'bet', label: '베팅', icon: Target, title: '베팅 모드 — 가져온 경기 일정에서 종목·리그·경기를 골라 베팅' },
 ]
 
 const WIDTH_OPTIONS: { label: string; value: string }[] = [
@@ -220,10 +232,15 @@ function TodoSettingsModal({ todo, onClose, onRename, onDaysChange, onToggleDate
 
 export default function App() {
   const [tab, setTab] = useState<Tab>('dashboard')
+  // 분석 탭 '베팅하기' → 대시보드 베팅 모드의 그 경기 베팅슬립 (사용자 요청)
+  const [betTarget, setBetTarget] = useState<BetTarget | null>(null)
   const [logs, setLogs] = useState<ActionLog[]>([])
   const [showLog, setShowLog] = useState(false)
   const [showTodo, setShowTodo] = useState(false)
   const [showMargin, setShowMargin] = useState(false)
+  // 베팅분석 창 (룰북처럼 모달) — 한 번 열면 닫아도 붙여 둬서 넣던 배당이 남는다
+  const [showAnalysis, setShowAnalysis] = useState(false)
+  const [analysisOpened, setAnalysisOpened] = useState(false)
   const [marginCount, setMarginCount] = useState<2 | 3>(2)
   const [marginOdds, setMarginOdds] = useState<string[]>(['', '', ''])
   const marginInputRefs = useRef<(HTMLInputElement | null)[]>([])
@@ -233,6 +250,14 @@ export default function App() {
   const [showInactiveTodos, setShowInactiveTodos] = useState(false)
   const [undoing, setUndoing] = useState<string | null>(null)
   const [maxWidth, setMaxWidth] = useState<string>(() => localStorage.getItem('sb_width') ?? '1920px')
+  // 대시보드 화면 모드 — 상단 '옵션'에서 고름, 이 기기에 기억
+  const [layoutMode, setLayoutMode] = useState<LayoutMode>(() => {
+    try { const v = localStorage.getItem('songbet_dashboard_layout'); return v === 'stacked' || v === 'bet' ? v : 'side' } catch { return 'side' }
+  })
+  function pickLayoutMode(next: LayoutMode) {
+    setLayoutMode(next)
+    try { localStorage.setItem('songbet_dashboard_layout', next) } catch { /* 저장 못 해도 이번 화면에선 적용 */ }
+  }
 
   // 코드 수정 패널
   const [showCode, setShowCode] = useState(false)
@@ -402,7 +427,6 @@ export default function App() {
   function setWidth(w: string) {
     setMaxWidth(w)
     localStorage.setItem('sb_width', w)
-    setShowWidthMenu(false)
   }
 
   async function loadLogs() {
@@ -528,6 +552,17 @@ export default function App() {
           </div>
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
 
+            {/* 베팅분석 버튼 — 대시보드에 넣지 않고 룰북처럼 모달 창으로 연다 */}
+            {SHOW_ANALYSIS_BUTTON && <button onClick={() => { setShowAnalysis(true); setAnalysisOpened(true) }} style={{
+              background: showAnalysis ? 'var(--gold-bg)' : 'transparent',
+              border: `1px solid ${showAnalysis ? 'var(--gold-border)' : 'var(--border)'}`,
+              borderRadius: 'var(--radius-sm)', color: showAnalysis ? 'var(--gold)' : 'var(--text-secondary)',
+              cursor: 'pointer', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 5,
+              fontSize: 11, fontWeight: 600, fontFamily: 'var(--font-body)', transition: 'all 0.15s',
+            }}>
+              <BarChart3 size={13} /><span className="nav-btn-label">베팅분석</span>
+            </button>}
+
             {/* 마진율 계산기 버튼 */}
             <button onClick={() => { if (!showMargin) setMarginOdds(['', '', '']); setShowMargin(p => !p) }} style={{
               background: showMargin ? 'var(--gold-bg)' : 'transparent',
@@ -560,38 +595,6 @@ export default function App() {
                 }}>{uncheckedCount}</span>
               )}
             </button>
-            <div style={{ position: 'relative' }}>
-              <button onClick={() => setShowWidthMenu(p => !p)} style={{
-                background: showWidthMenu ? 'var(--gold-bg)' : 'transparent',
-                border: `1px solid ${showWidthMenu ? 'var(--gold-border)' : 'var(--border)'}`,
-                borderRadius: 'var(--radius-sm)', color: showWidthMenu ? 'var(--gold)' : 'var(--text-secondary)',
-                cursor: 'pointer', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 5,
-                fontSize: 11, fontWeight: 600, fontFamily: 'var(--font-body)', transition: 'all 0.15s',
-              }}>
-                <LayoutTemplate size={13} /><span className="nav-btn-label">{currentLabel}</span>
-              </button>
-              {showWidthMenu && (
-                <>
-                  <div style={{ position: 'fixed', inset: 0, zIndex: 150 }} onClick={() => setShowWidthMenu(false)} />
-                  <div style={{ position: 'absolute', top: 32, right: 0, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', boxShadow: '0 8px 32px rgba(0,0,0,0.5)', zIndex: 160, overflow: 'hidden', minWidth: 110 }}>
-                    {WIDTH_OPTIONS.map(o => (
-                      <button key={o.value} onClick={() => setWidth(o.value)} style={{
-                        display: 'block', width: '100%', padding: '9px 14px', textAlign: 'left',
-                        background: maxWidth === o.value ? 'var(--gold-bg)' : 'none',
-                        border: 'none', borderBottom: '1px solid var(--border-light)',
-                        color: maxWidth === o.value ? 'var(--gold)' : 'var(--text-primary)',
-                        cursor: 'pointer', fontSize: 12, fontWeight: maxWidth === o.value ? 700 : 400,
-                        fontFamily: 'var(--font-body)',
-                      }}>
-                        {o.label}
-                        {maxWidth === o.value && <span style={{ marginLeft: 6, fontSize: 10 }}>✓</span>}
-                      </button>
-                    ))}
-                  </div>
-                </>
-              )}
-            </div>
-
             {/* 코드 수정 버튼 */}
             <button onClick={() => { setShowCode(p => !p); if (showLog) setShowLog(false); if (showTodo) setShowTodo(false) }} style={{
               background: showCode ? 'var(--cyan-bg)' : 'transparent',
@@ -613,16 +616,57 @@ export default function App() {
             }}>
               <ClipboardList size={13} /><span className="nav-btn-label">LOG</span>
             </button>
+
+            {/* 옵션 (사용자 요청 2026-11-24): 대시보드 화면 모드(좌우·상하·베팅) + 전체 크기를 한 곳에 */}
+            <div style={{ position: 'relative' }}>
+              <button onClick={() => setShowWidthMenu(p => !p)} title="화면 모드 · 크기" style={{
+                background: showWidthMenu ? 'var(--gold-bg)' : 'transparent',
+                border: `1px solid ${showWidthMenu ? 'var(--gold-border)' : 'var(--border)'}`,
+                borderRadius: 'var(--radius-sm)', color: showWidthMenu ? 'var(--gold)' : 'var(--text-secondary)',
+                cursor: 'pointer', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 5,
+                fontSize: 11, fontWeight: 600, fontFamily: 'var(--font-body)', transition: 'all 0.15s',
+              }}>
+                <SlidersHorizontal size={13} /><span className="nav-btn-label">{LAYOUT_OPTIONS.find(o => o.value === layoutMode)?.label} · {currentLabel}</span>
+              </button>
+              {showWidthMenu && (
+                <>
+                  <div style={{ position: 'fixed', inset: 0, zIndex: 150 }} onClick={() => setShowWidthMenu(false)} />
+                  <div style={{ position: 'absolute', top: 32, right: 0, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', boxShadow: '0 8px 32px rgba(0,0,0,0.5)', zIndex: 160, padding: 10, minWidth: 220 }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 5 }}>대시보드 모드</div>
+                    <div style={{ display: 'flex', border: '1px solid var(--border)', borderRadius: 4, overflow: 'hidden', marginBottom: 12 }}>
+                      {LAYOUT_OPTIONS.map((o, i) => (
+                        <button key={o.value} onClick={() => { pickLayoutMode(o.value); setTab('dashboard') }} title={o.title} style={{
+                          flex: 1, background: layoutMode === o.value ? 'var(--gold-bg)' : 'none', border: 'none', borderLeft: i ? '1px solid var(--border)' : 'none',
+                          color: layoutMode === o.value ? 'var(--gold)' : 'var(--text-secondary)', cursor: 'pointer',
+                          padding: '6px 8px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-body)',
+                        }}><o.icon size={12} /> {o.label}</button>
+                      ))}
+                    </div>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 5 }}>전체 크기</div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 4 }}>
+                      {WIDTH_OPTIONS.map(o => (
+                        <button key={o.value} onClick={() => setWidth(o.value)} style={{
+                          padding: '6px 4px', borderRadius: 4, cursor: 'pointer', fontSize: 12, fontFamily: 'var(--font-body)',
+                          border: `1px solid ${maxWidth === o.value ? 'var(--gold-border)' : 'var(--border)'}`,
+                          background: maxWidth === o.value ? 'var(--gold-bg)' : 'none',
+                          color: maxWidth === o.value ? 'var(--gold)' : 'var(--text-primary)', fontWeight: maxWidth === o.value ? 700 : 400,
+                        }}>{o.label}</button>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </div>
       </nav>
 
       <div style={{ flex: 1, display: 'flex', justifyContent: 'center' }}>
         <div style={{ width: '100%', maxWidth, minWidth: 0 }}>
-          {tab === 'dashboard' && <Dashboard />}
+          {tab === 'dashboard' && <Dashboard betTarget={betTarget} onBetTargetDone={() => setBetTarget(null)} layoutMode={layoutMode} onLayoutMode={pickLayoutMode} />}
           {tab === 'stats' && <Stats />}
           {tab === 'settlement' && <Settlement />}
-          {tab === 'analysis' && <AnalysisHome />}
+          {tab === 'schedule' && <Schedule onGoBet={t => { setBetTarget({ ...t, at: Date.now() }); setTab('dashboard') }} />}
         </div>
       </div>
 
@@ -773,6 +817,21 @@ export default function App() {
             </div>
           </div>
         </>
+      )}
+
+      
+      {/* 베팅분석 창 — 룰북과 같은 모달 */}
+      {analysisOpened && (
+        <div className="modal-overlay" style={{ display: showAnalysis ? undefined : 'none' }}>
+          <div style={{ width: '100%', maxWidth: 900, maxHeight: '92vh', overflowY: 'auto', borderRadius: 'var(--radius-lg)', boxShadow: '0 20px 60px rgba(0,0,0,0.7)' }}>
+            <Suspense fallback={<div className="card" style={{ padding: '10px 14px', color: 'var(--text-muted)', fontSize: 13 }}>불러오는 중...</div>}>
+              <BetAnalysisPanel active={showAnalysis} tabs={<>
+                <span className="card-title" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 6 }}><BarChart3 size={14} color="var(--gold)" /> 베팅분석</span>
+                <button onClick={() => setShowAnalysis(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex' }}><X size={16} /></button>
+              </>} />
+            </Suspense>
+          </div>
+        </div>
       )}
 
       {/* 마진율 계산기 패널 — 우측 패널들(메모장/코드수정/할일/LOG)과 독립적으로 열리며, 항상 그 왼쪽에 위치 */}

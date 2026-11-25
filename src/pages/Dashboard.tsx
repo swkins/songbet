@@ -1,5 +1,5 @@
-import { useEffect, useState, useRef, useMemo } from 'react'
-import { supabase } from '../lib/supabase'
+import { useEffect, useState, useRef, useMemo, lazy, Suspense, Fragment, type CSSProperties } from 'react'
+import { supabase, fetchAllRows } from '../lib/supabase'
 import { logAction } from '../lib/logger'
 import type { Bet, Site, Sport, Market, BetResult, GameRolling } from '../types'
 import { inferBaseballLeague, inferSoccerLeague, inferLeagueByKeyword, buildLeagueCandidates, suggestLeagueCandidates, koCompare, type LeagueOverride, type LeagueCandidate } from '../lib/league'
@@ -8,15 +8,23 @@ import { applyNumericTemplate, extractNumericTemplateValue, extractNumericTempla
 import { sportGlyph } from '../components/SportIcons'
 import MiningWidget from '../components/MiningWidget'
 import DailyPnLWidget from '../components/DailyPnLWidget'
+// 베팅분석은 과거 경기 데이터가 커서 처음 고를 때만 따로 불러온다
+const BetAnalysisPanel = lazy(() => import('../components/BetAnalysisPanel'))
+// 베팅분석은 대시보드에서 숨기고 상단 '베팅분석' 버튼(새 창)으로만 연다 (사용자 요청) — 대시보드에 다시 넣으려면 true
+const ANALYSIS_IN_DASHBOARD = false
+import RulebookNotes from './RulebookNotes'
+import BetModePanel, { type BetTarget } from '../components/BetModePanel'
+import type { LayoutMode } from '../App'
+import { loadSchedules, upcomingForBet, leagueNameCompare, type BetPickGame } from '../lib/gameSchedule'
 import dayjs from 'dayjs'
 import isoWeek from 'dayjs/plugin/isoWeek'
 dayjs.extend(isoWeek)
 import {
   Plus, Trash2, Check, X,
-  RotateCcw, Settings, Flame,
+  RotateCcw, Settings, Flame, BookOpen,
   CheckCircle, XCircle, Ban, MinusCircle, Gift, GripVertical, DollarSign,
   TrendingUp, TrendingDown, ArrowDownToLine, LogOut, Pencil,
-  ClipboardPaste, ChevronUp, ChevronDown, Star,
+  ClipboardPaste, ChevronUp, ChevronDown, Star, Ellipsis,
 } from 'lucide-react'
 
 // 리그 관리 시스템(팀 자동완성·리그 자동인식·리그 관리 모달) — 데이터/로직은 유지하되 화면에는 표출하지 않음
@@ -33,7 +41,7 @@ const SPORTS: { value: Sport; label: string }[] = [
 
 const SPORT_SHORT: Record<string, string> = {
   soccer: '⚽', baseball: '⚾', basketball: '🏀',
-  volleyball: '🏐', hockey: '🏒', esports: '🎮', other: '📋',
+  volleyball: '🏐', hockey: '🏒', esports: '🎮', other: '📋', casino: '🎰',
 }
 
 /* ── 다폴 진행중 개별 leg "적중" 임시 체크 상태를 새로고침해도 유지하기 위한 로컬 저장 ── */
@@ -94,7 +102,7 @@ function suggestLeague(sport: string, content: string, baseballOverrides: League
 }
 
 /* ── 경기 내용 입력창: 팀 이름 자동완성(제거됨) + 빈칸 클릭 시 "베팅관리"에서 체크한 빠른 선택 목록 ── */
-function TeamContentInput({ value, onChange, candidates, allBets: _allBets, placeholder, inputRef, autoFocus, onEnter, quickPicks, teams, onPickTeam }: {
+function TeamContentInput({ value, onChange, candidates, allBets: _allBets, placeholder, inputRef, autoFocus, onEnter, quickPicks, teams, onPickTeam, multiTeam, currentSport, games, onPickGame }: {
   value: string; onChange: (v: string) => void
   candidates: TeamCandidate[]; allBets: BetLite[]
   placeholder: string
@@ -102,9 +110,17 @@ function TeamContentInput({ value, onChange, candidates, allBets: _allBets, plac
   autoFocus?: boolean
   onEnter?: () => void
   quickPicks?: string[]
-  // 리그 관리에서 등록한 팀(이 종목 전체 리그) — 한 글자만 입력해도 포함하는 팀을 리그와 함께 추천하고, 고르면 onPickTeam으로 리그까지 넘긴다
-  teams?: { league: string; name: string }[]
-  onPickTeam?: (name: string, league: string) => void
+  // 리그 관리에서 등록한 팀(모든 종목 공용) — 한 글자만 입력해도 포함하는 팀을 리그와 함께 추천하고, 고르면 onPickTeam으로 리그·종목까지 넘긴다
+  teams?: { league: string; name: string; sport?: string }[]
+  onPickTeam?: (name: string, league: string, sport?: string) => void
+  // 지금 고른 종목 — 이 종목 팀을 먼저 보여주고, 다른 종목 팀은 종목 표시를 붙인다
+  currentSport?: string
+  // 팀 이름을 쓰고 스페이스 두 번(→ " vs " 자동) 또는 쉼표(,) 뒤에 한 글자만 더 쓰면 상대팀을 추천, 고르면 "팀A vs 팀B"로 채운다 (경기 자체 옵션 베팅용)
+  multiTeam?: boolean
+  // 경기 일정(끝나지 않은 경기) — 칸을 누르면 목록이 뜨고, 홈/원정/경기를 누르면 그 팀(또는 "A vs B")으로 채운다.
+  // 글자를 쓰면 그 글자가 들어간 팀의 경기만. onPickGame이 있으면 종목·리그·홈원정까지 넘긴다.
+  games?: BetPickGame[]
+  onPickGame?: (g: BetPickGame, which: 'home' | 'away' | 'both') => void
 }) {
   const [open, setOpen] = useState(false)
   const [hi, setHi] = useState(-1)
@@ -114,24 +130,44 @@ function TeamContentInput({ value, onChange, candidates, allBets: _allBets, plac
   void candidates
   // 빠른 선택 목록은 포커스만 줘도 뜨지 않고, 더블클릭하거나 글자를 입력했을 때만 보여준다.
   // 글자를 입력한 상태면 그 글자가 포함된 항목만 걸러서 보여준다.
-  const q = value.trim().toLowerCase()
+  // multiTeam이면 쉼표(또는 이미 들어간 " vs ") 뒤의 글자만 검색어로 쓰고, 고를 때 "첫팀 vs "를 앞에 붙인다
+  let teamPrefix = ''
+  let q = value.trim().toLowerCase()
+  if (multiTeam) {
+    const vsIdx = value.toLowerCase().lastIndexOf(' vs ')
+    const commaIdx = value.indexOf(',')
+    if (vsIdx >= 0) { teamPrefix = value.slice(0, vsIdx + 4); q = value.slice(vsIdx + 4).trim().toLowerCase() }
+    else if (commaIdx >= 0) { teamPrefix = `${value.slice(0, commaIdx).trim()} vs `; q = value.slice(commaIdx + 1).trim().toLowerCase() }
+  }
   const teamItems = teams?.length && q
     ? teams.filter(t => t.name.toLowerCase().includes(q))
-        .sort((a, b) => Number(!a.name.toLowerCase().startsWith(q)) - Number(!b.name.toLowerCase().startsWith(q)) || a.name.localeCompare(b.name, 'ko'))
+        .sort((a, b) => Number(!a.name.toLowerCase().startsWith(q)) - Number(!b.name.toLowerCase().startsWith(q))
+          || Number(!!currentSport && a.sport !== currentSport) - Number(!!currentSport && b.sport !== currentSport)
+          || a.name.localeCompare(b.name, 'ko'))
         .slice(0, 10)
     : []
   const quickItems: string[] = quickPicks?.length
     ? (value.trim() ? quickPicks.filter(q => q.includes(value.trim())) : quickPicks)
     : []
-  type Item = { key: string; label: string; league?: string }
+  type Item = { key: string; label: string; league?: string; sport?: string }
   const suggestions: Item[] = [
-    ...teamItems.map(t => ({ key: `t:${t.league}:${t.name}`, label: t.name, league: t.league })),
+    ...teamItems.map(t => ({ key: `t:${t.sport ?? ''}:${t.league}:${t.name}`, label: t.name, league: t.league, sport: t.sport })),
     ...quickItems.map(qp => ({ key: `q:${qp}`, label: qp })),
   ]
 
+  const gq = value.trim().toLowerCase()
+  const gameItems = (games ?? [])
+    .filter(g => !gq || g.home.toLowerCase().includes(gq) || g.away.toLowerCase().includes(gq) || g.league.toLowerCase().includes(gq))
+    .sort((a, b) => Number(!!currentSport && a.sport !== currentSport) - Number(!!currentSport && b.sport !== currentSport) || a.start.localeCompare(b.start))
+  function pickGame(g: BetPickGame, which: 'home' | 'away' | 'both') {
+    onChange(which === 'both' ? `${g.home} vs ${g.away}` : which === 'home' ? g.home : g.away)
+    onPickGame?.(g, which)
+    setOpen(false); setHi(-1)
+  }
+
   function pick(item: Item) {
-    onChange(item.label)
-    if (item.league !== undefined) onPickTeam?.(item.label, item.league)
+    onChange(teamPrefix && item.league !== undefined ? teamPrefix + item.label : item.label)
+    if (item.league !== undefined && !teamPrefix) onPickTeam?.(item.label, item.league, item.sport)
     setOpen(false); setHi(-1)
   }
 
@@ -139,8 +175,9 @@ function TeamContentInput({ value, onChange, candidates, allBets: _allBets, plac
     <div style={{ position: 'relative' }}>
       <input ref={ref} className="form-input inline-bet-input" placeholder={placeholder} value={value}
         autoFocus={autoFocus}
-        onChange={e => { onChange(e.target.value); setOpen(true); setHi(-1) }}
+        onChange={e => { onChange(multiTeam ? autoVs(value, e.target.value) : e.target.value); setOpen(true); setHi(-1) }}
         onDoubleClick={() => setOpen(true)}
+        onClick={() => { if (games?.length) setOpen(true) }}
         onBlur={() => setTimeout(() => setOpen(false), 150)}
         onKeyDown={e => {
           if (open && suggestions.length > 0) {
@@ -151,14 +188,15 @@ function TeamContentInput({ value, onChange, candidates, allBets: _allBets, plac
           }
           if (e.key === 'Enter') onEnter?.()
         }} />
-      {open && suggestions.length > 0 && (
-        <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 30, marginTop: 2, background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 6, maxHeight: 170, overflowY: 'auto', boxShadow: '0 4px 12px rgba(0,0,0,0.3)' }}>
+      {open && (suggestions.length > 0 || gameItems.length > 0) && (
+        <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 30, marginTop: 2, background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 6, maxHeight: gameItems.length ? 300 : 170, overflowY: 'auto', boxShadow: '0 4px 12px rgba(0,0,0,0.3)', minWidth: gameItems.length ? 300 : undefined }}>
+          {gameItems.length > 0 && <GamePickList games={gameItems} currentSport={currentSport} onPick={pickGame} />}
           {suggestions.map((s, i) => (
             <div key={s.key} onMouseDown={() => pick(s)} onMouseEnter={() => setHi(i)}
               style={{ padding: '6px 9px', fontSize: 11, cursor: 'pointer', fontWeight: i === hi ? 700 : 500, display: 'flex', justifyContent: 'space-between', gap: 8,
                 background: i === hi ? 'var(--gold-bg)' : 'transparent', color: i === hi ? 'var(--gold)' : 'var(--text-primary)' }}>
               <span>{s.label}</span>
-              {s.league && <span style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 600, flexShrink: 0 }}>{s.league}</span>}
+              {(s.league || (s.sport && s.sport !== currentSport)) && <span style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 600, flexShrink: 0 }}>{s.sport && s.sport !== currentSport ? `${SPORT_SHORT[s.sport] ?? ''} ${SPORTS.find(x => x.value === s.sport)?.label ?? s.sport} · ` : ''}{s.league}</span>}
             </div>
           ))}
         </div>
@@ -166,6 +204,64 @@ function TeamContentInput({ value, onChange, candidates, allBets: _allBets, plac
     </div>
   )
 }
+
+/** 베팅추가 팀 이름 칸 드롭다운의 경기 일정 목록 — 경기마다 [홈 팀] vs [원정 팀] [경기] 버튼 */
+function GamePickList({ games, currentSport, onPick }: { games: BetPickGame[]; currentSport?: string; onPick: (g: BetPickGame, which: 'home' | 'away' | 'both') => void }) {
+  const today = dayjs().format('YYYY-MM-DD')
+  const chip = (label: string, sub: string, onDown: () => void, grow = true): React.ReactNode => (
+    <button type="button" onMouseDown={e => { e.preventDefault(); onDown() }} style={{
+      flex: grow ? 1 : 'none', minWidth: 0, padding: '4px 6px', borderRadius: 4, cursor: 'pointer', fontFamily: 'var(--font-body)',
+      border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text-primary)', fontSize: 11, fontWeight: 700,
+      display: 'flex', alignItems: 'center', gap: 4, overflow: 'hidden',
+    }}
+      onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--gold-border)'; e.currentTarget.style.color = 'var(--gold)' }}
+      onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-primary)' }}>
+      {sub && <span style={{ fontSize: 9, fontWeight: 600, color: 'var(--text-muted)', flexShrink: 0 }}>{sub}</span>}
+      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
+    </button>
+  )
+  return (
+    <div style={{ borderBottom: '1px solid var(--border)' }}>
+      <div style={{ padding: '5px 9px 2px', fontSize: 9, fontWeight: 700, color: 'var(--text-muted)' }}>경기 일정 (종료 제외) — 팀을 누르면 홈/원정까지 채움</div>
+      {games.map(g => {
+        const d = dayjs(g.start)
+        return (
+          <div key={g.id} style={{ padding: '4px 8px 6px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 9, marginBottom: 3 }}>
+              <span style={{ fontWeight: 700, color: g.state === 'live' ? 'var(--gold)' : 'var(--text-secondary)' }}>
+                {d.format('YYYY-MM-DD') === today ? '' : `${d.format('M/D')} `}{d.format('HH:mm')}
+              </span>
+              <span style={{ color: 'var(--text-muted)' }}>{g.sport !== currentSport ? `${SPORT_SHORT[g.sport] ?? ''} ` : ''}{g.league}</span>
+              {g.state === 'live' && <span style={{ marginLeft: 'auto', color: 'var(--gold)', fontWeight: 700 }}>● 경기중</span>}
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              {chip(g.home, '홈', () => onPick(g, 'home'))}
+              <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>vs</span>
+              {chip(g.away, '원정', () => onPick(g, 'away'))}
+              {chip('경기', '', () => onPick(g, 'both'), false)}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+/** 팀 이름 칸(multiTeam): 첫 팀 뒤에 스페이스를 두 번 누르면 "팀A vs "로 바꿔 바로 다음 팀을 쓰게 한다.
+ *  아이폰 키보드는 스페이스 두 번을 ". "로 바꾸므로 그것도 같이 본다. 이미 vs가 있으면 그대로. */
+function autoVs(prev: string, next: string): string {
+  if (/ vs /i.test(next) || !next.trim()) return next
+  if (next.endsWith('  ')) return `${next.trimEnd()} vs `
+  if (next.endsWith('. ') && prev.endsWith(' ') && next.length === prev.length + 1) return `${next.slice(0, -2).trimEnd()} vs `
+  return next
+}
+/** 팀 이름 칸: 쉼표로 두 팀을 적으면("A, B") 경기 자체 옵션(2.5 오버 등) 베팅이므로 "A vs B"로 바꿔 저장 */
+function joinTeamsVs(text: string): string {
+  if (!text.includes(',')) return text.trim()
+  const parts = text.split(',').map(t => t.trim()).filter(Boolean)
+  return parts.length >= 2 ? parts.join(' vs ') : (parts[0] ?? '')
+}
+const TEAM_INPUT_PLACEHOLDER = '팀 이름 (두 팀이면 스페이스 두 번 → A vs B)'
 
 // 큰 금액 베팅 기준: 원화 3만원 이상, 달러 20달러 이상
 function isBigStake(stake: number, isusd: boolean): boolean {
@@ -198,11 +294,14 @@ function parseBetMatch(sport: string, match: string, knownOptions: string[] = []
     if (r.endsWith(' 홈')) { side = '홈'; r = r.slice(0, -2).trimEnd() }
     else if (r.endsWith(' 원정')) { side = '원정'; r = r.slice(0, -3).trimEnd() }
     let boTag: string | undefined
+    let setTag = ''
+    if (sport === 'esports') { const sm = r.match(/ (\d+세트)$/); if (sm) { setTag = sm[1] + ' '; r = r.slice(0, -sm[0].length).trimEnd() } }
     if (sport === 'esports' && !side) {
-      if (r.endsWith(' BO3')) { boTag = 'BO3'; r = r.slice(0, -4).trimEnd() }
+      if (r.endsWith(' BO1')) { boTag = 'BO1'; r = r.slice(0, -4).trimEnd() }
+      else if (r.endsWith(' BO3')) { boTag = 'BO3'; r = r.slice(0, -4).trimEnd() }
       else if (r.endsWith(' BO5')) { boTag = 'BO5'; r = r.slice(0, -4).trimEnd() }
     }
-    return { team: r || raw, side, boTag, optionLabel: numericOptionDisplay(tpl, v), optionText: text, accent: 'purple' }
+    return { team: r || raw, side, boTag, optionLabel: setTag + numericOptionDisplay(tpl, v), optionText: setTag + text, accent: 'purple' }
   }
   // 1) 등록된 베팅옵션 라벨을 뒤에서부터 벗겨낸다 (여러 개 중 가장 긴 것부터 매치해 오탐 최소화).
   //    베팅추가 화면에서 홈/원정·옵션을 고르면 "팀이름 홈 1.5 핸디"처럼 뒤에 그대로 합쳐져 저장되기 때문에,
@@ -213,28 +312,36 @@ function parseBetMatch(sport: string, match: string, knownOptions: string[] = []
     if (rest === opt) { knownOptionLabel = opt; rest = ''; break }
     if (rest.endsWith(' ' + opt)) { knownOptionLabel = opt; rest = rest.slice(0, -(opt.length + 1)); break }
   }
+  // 베팅옵션을 안 고르면 제출 시 "승리"가 자동으로 붙는다 — 그 종목에 "승리" 옵션이 등록 안 돼 있어도 승리로 알아본다
+  // (LOL "1세트 승리"도 아래 1b에서 세트 번호가 붙도록 먼저 벗긴다)
+  if (!knownOptionLabel && (rest === '승리' || rest.endsWith(' 승리'))) {
+    knownOptionLabel = '승리'; rest = rest === '승리' ? '' : rest.slice(0, -3).trimEnd()
+  }
+  // 1b) LOL 세트 옵션("… BO3 1세트 드래곤 4.5 오버")은 세트 번호까지 옵션 배지에 붙인다
+  if (sport === 'esports' && knownOptionLabel) {
+    const sm = rest.match(/ (\d+세트)$/)
+    if (sm) { knownOptionLabel = `${sm[1]} ${knownOptionLabel}`; rest = rest.slice(0, -sm[0].length).trimEnd() }
+  }
   // 2) 홈/원정을 벗겨낸다 (옵션이 없거나 옵션 뒤에 붙었어도 상관없이 남은 문자열 끝에서 찾는다)
   let side: '홈' | '원정' | undefined
   if (rest.endsWith(' 홈')) { side = '홈'; rest = rest.slice(0, -2).trimEnd() }
   else if (rest.endsWith(' 원정')) { side = '원정'; rest = rest.slice(0, -3).trimEnd() }
   else if (rest === '홈') { side = '홈'; rest = '' }
   else if (rest === '원정') { side = '원정'; rest = '' }
-  // 2b) LOL(esports)은 베팅추가에서 홈/원정 대신 BO3/BO5를 고르므로 그 접미어도 벗겨낸다(괄호 없는 새 포맷).
+  // 2b) LOL(esports)은 베팅추가에서 홈/원정 대신 BO1/BO3/BO5를 고르므로 그 접미어도 벗겨낸다(괄호 없는 새 포맷).
   let boSuffix: string | undefined
   if (sport === 'esports' && !side) {
-    if (rest.endsWith(' BO3')) { boSuffix = 'BO3'; rest = rest.slice(0, -4).trimEnd() }
+    if (rest.endsWith(' BO1')) { boSuffix = 'BO1'; rest = rest.slice(0, -4).trimEnd() }
+    else if (rest.endsWith(' BO3')) { boSuffix = 'BO3'; rest = rest.slice(0, -4).trimEnd() }
     else if (rest.endsWith(' BO5')) { boSuffix = 'BO5'; rest = rest.slice(0, -4).trimEnd() }
+    else if (rest === 'BO1') { boSuffix = 'BO1'; rest = '' }
     else if (rest === 'BO3') { boSuffix = 'BO3'; rest = '' }
     else if (rest === 'BO5') { boSuffix = 'BO5'; rest = '' }
   }
 
-  // 베팅옵션을 안 고르면 제출 시 "승리"가 자동으로 붙는다 — 그 종목에 "승리" 옵션이 등록 안 돼 있어도 승리로 알아본다
-  if (!knownOptionLabel && (rest === '승리' || rest.endsWith(' 승리'))) {
-    knownOptionLabel = '승리'; rest = rest === '승리' ? '' : rest.slice(0, -3).trimEnd()
-  }
 
   if (knownOptionLabel) {
-    return { team: (rest || raw).trim(), side, boTag: boSuffix, optionLabel: knownOptionLabel, accent: knownOptionLabel === '승리' ? 'gold' : 'purple' }
+    return { team: (rest || raw).trim(), side, boTag: boSuffix, optionLabel: knownOptionLabel, accent: /(^| )승리$/.test(knownOptionLabel) ? 'gold' : 'purple' }
   }
 
   // 3) 등록된 옵션이 아니면(과거 데이터 등) 기존 종목별 패턴(숫자 핸디캡/BO태그)으로 폴백
@@ -265,7 +372,7 @@ function parseBetMatch(sport: string, match: string, knownOptions: string[] = []
       if (setOver) return { team, side, boTag: bo, optionLabel: `${num} 세트오버`, accent: 'orange' }
       return { team, side, boTag: bo, optionLabel: `${num} 핸디`, accent: num.startsWith('-') ? 'red' : 'purple' }
     }
-    // 괄호 없는 새 포맷(BO3/BO5는 위 2b에서 이미 벗겨냄) — 팀 이름만 남았으면 승리, 아니면 원문 그대로
+    // 괄호 없는 새 포맷(BO1/BO3/BO5는 위 2b에서 이미 벗겨냄) — 팀 이름만 남았으면 승리, 아니면 원문 그대로
     if (boSuffix || side) return { team: s, side, boTag: boSuffix, optionLabel: '승리', accent: 'gold' }
     return null
   }
@@ -276,8 +383,55 @@ function parseBetMatch(sport: string, match: string, knownOptions: string[] = []
 
 // 베팅옵션 칩 한 줄 — 일반 옵션은 눌러서 단일선택(다시 누르면 해제), 세부 수치 입력 옵션은
 // 누르면 숫자 입력창이 뜨고 확정하면 "{값} {템플릿}" 형태로 합쳐진 라벨이 선택된다.
-function BetOptionChips({ options, numericOptions, selected, onSelect, onManage, oddsRef }: {
+// LOL 베팅옵션은 BO1/BO3/BO5별 목록(esports_bo1 / esports_bo3 / esports_bo5)과 세트 세부옵션(esports_set)으로 따로 관리한다.
+// 표시·통계용으로는 예전 'esports' 목록과 합쳐서 하나로 본다 ("1세트" 같은 세트 칩 자체는 옵션이 아니라 세부옵션을 여는 버튼이라 제외).
+const LOL_OPTION_KEYS = ['esports', 'esports_bo1', 'esports_bo3', 'esports_bo5', 'esports_set']
+const isLolSetChip = (label: string) => /^\d+세트$/.test(label)
+function mergeLolOptions(map: Record<string, string[]>): Record<string, string[]> {
+  const merged = Array.from(new Set(LOL_OPTION_KEYS.flatMap(k => map[k] ?? []))).filter(l => !isLolSetChip(l))
+  return { ...map, esports: merged }
+}
+
+/* LOL 베팅옵션 칩 — 위 줄은 BO1/BO3/BO5 옵션, "N세트" 칩을 누르면 아래 줄에 세트 세부옵션(드래곤 4.5 오버 등)이 열리고
+   세부옵션을 고르면 "1세트 드래곤 4.5 오버"처럼 세트와 합쳐진 라벨이 선택된다.
+   세부옵션 맨 앞에는 늘 "승리"가 있고, 세트만 고르고 세부옵션을 안 고르면 "1세트 승리"로 친다. */
+function LolOptionChips({ options, numericOptions, setOptions, numericSetOptions, selected, onSelect, onManage, onManageSet, oddsRef }: {
+  options: string[]; numericOptions: string[]; setOptions: string[]; numericSetOptions: string[]; selected: string[]
+  onSelect: (labels: string[]) => void
+  onManage: () => void; onManageSet: () => void
+  oddsRef: React.RefObject<HTMLInputElement>
+}) {
+  const selSet = selected[0]?.match(/^(\d+세트) (.+)$/)
+  const [openSet, setOpenSet] = useState<string | null>(selSet?.[1] ?? null)
+  const subOptions = ['승리', ...setOptions.filter(o => o !== '승리')]
+  return (
+    <>
+      <BetOptionChips options={options} numericOptions={numericOptions} selected={openSet ? [openSet] : selected}
+        onSelect={labels => {
+          const l = labels[0]
+          if (l && isLolSetChip(l)) { setOpenSet(l); onSelect([`${l} 승리`]) }
+          else { setOpenSet(null); onSelect(labels) }
+        }}
+        onManage={onManage} oddsRef={oddsRef} halfPoint />
+      {openSet && (
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6, paddingLeft: 8, borderLeft: '2px solid var(--gold-border)' }}>
+          <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--gold)', whiteSpace: 'nowrap', marginTop: 10 }}>{openSet}</span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <BetOptionChips options={subOptions} numericOptions={numericSetOptions}
+              selected={selSet && selSet[1] === openSet ? [selSet[2]] : ['승리']}
+              onSelect={labels => onSelect([`${openSet} ${labels[0] ?? '승리'}`])}
+              onManage={onManageSet} oddsRef={oddsRef} halfPoint />
+          </div>
+        </div>
+      )}
+    </>
+  )
+}
+
+function BetOptionChips({ options, numericOptions, selected, onSelect, onManage, oddsRef, halfPoint }: {
   options: string[]; numericOptions: string[]; selected: string[]
+  // 농구·배구·LOL: 적특 베팅은 안 하므로 정수만 쓰면 .5를 붙인다 (12 → 12.5, 235 언더 → 235.5 언더) — 사용자 요청
+  halfPoint?: boolean
   onSelect: (labels: string[]) => void
   onManage: () => void
   oddsRef: React.RefObject<HTMLInputElement>
@@ -287,7 +441,8 @@ function BetOptionChips({ options, numericOptions, selected, onSelect, onManage,
   const numericSet = new Set(numericOptions)
 
   function commitNumeric(template: string) {
-    const v = draft.trim()
+    let v = draft.trim()
+    if (halfPoint && /^[+-]?\d+$/.test(v)) v = `${v}.5`
     if (v && /^[+-]?\d+(\.\d+)?$/.test(v)) { onSelect([applyNumericTemplate(template, v)]); oddsRef.current?.focus() }
     setEditingTemplate(null)
   }
@@ -477,12 +632,12 @@ function BetBadgeRow({ sport, match, live, knownOptions = [], numericOptions = [
   )
 }
 
-// 진행중 베팅 전용 — 단폴: 팀 이름 + 홈/원정 + BO태그는 한 줄, 베팅옵션은 그 아래 줄로 분리(stacked=true, 기본값).
+// 진행중 베팅 전용 — 단폴: 팀 이름 + 홈/원정·BO태그(우측)는 한 줄, 베팅옵션은 그 아래 줄, 배당은 또 그 아래(stacked=true, 기본값).
 // 두폴(다리별): 한 줄에 다 표시(stacked=false) — 다리 수가 많아 세로로 길어지는 걸 막기 위함.
 // 베팅옵션도 홈/원정과 같은 뱃지(알약) 스타일로 표시 — 평문 글씨 대신 통일된 배지 톤을 유지한다.
 // "승리"(일반승/moneyline)도 다른 옵션과 똑같이 배지로 표시한다.
 // (배당·금액은 이 아래 별도 줄 — BetOddsStakeLine 참고)
-function BetMatchLine({ sport, match, fontSize = 15, teamColor, live, stacked = true, knownOptions = [], numericOptions = [] }: { sport: string; match: string; fontSize?: number; teamColor?: string; live?: boolean; stacked?: boolean; knownOptions?: string[]; numericOptions?: string[] }) {
+function BetMatchLine({ sport, match, fontSize = 13, teamColor, live, stacked = true, knownOptions = [], numericOptions = [] }: { sport: string; match: string; fontSize?: number; teamColor?: string; live?: boolean; stacked?: boolean; knownOptions?: string[]; numericOptions?: string[] }) {
   const parts = parseBetMatch(sport, match, knownOptions, numericOptions)
   const team = parts ? parts.team : match
   const showOption = !!parts
@@ -499,25 +654,32 @@ function BetMatchLine({ sport, match, fontSize = 15, teamColor, live, stacked = 
     )
   }
   return (
-    <span style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap', flex: 1, minWidth: 0 }}>
-      <span style={{ fontSize, fontWeight: 700, color: teamColor ?? 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{team}</span>
-      {parts?.side && <MatchBadge label={sideBadgeLabel(parts.side)} accent={parts.side === '홈' ? 'blue' : 'orange'} />}
-      {showOption && <MatchBadge label={parts.optionLabel} accent={parts.accent} />}
-      {parts?.boTag && <MatchBadge label={parts.boTag} accent="neutral" />}
-      {live && <MatchBadge label="LIVE" accent="red" />}
+    <span style={{ display: 'flex', flexDirection: 'column', gap: 3, flex: 1, minWidth: 0 }}>
+      <span style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
+        <span style={{ fontSize, fontWeight: 700, color: teamColor ?? 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{team}</span>
+        {parts?.side && <MatchBadge label={sideBadgeLabel(parts.side)} accent={parts.side === '홈' ? 'blue' : 'orange'} />}
+        {parts?.boTag && <MatchBadge label={parts.boTag} accent="neutral" />}
+        {live && <MatchBadge label="LIVE" accent="red" />}
+      </span>
+      {showOption && (
+        <span style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap', minWidth: 0 }}>
+          <MatchBadge label={parts.optionLabel} accent={parts.accent} />
+        </span>
+      )}
     </span>
   )
 }
 
 // 진행중 베팅 전용 — 배당은 좌측, 금액은 맨 우측 끝
-function BetOddsStakeLine({ odds, stake, prefix, suffix, big }: { odds: number; stake: number; prefix: string; suffix: string; big?: boolean }) {
+// mock: 모의베팅은 금액 대신 "모의"만 표시 (만원은 통계에서 손익 낼 때만 쓰는 가정값)
+function BetOddsStakeLine({ odds, stake, prefix, suffix, big, mock }: { odds: number; stake: number; prefix: string; suffix: string; big?: boolean; mock?: boolean }) {
   return (
     <span style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%' }}>
       <span style={{ fontFamily: 'var(--font-mono)', fontSize: 14, fontWeight: 700, color: 'var(--gold)', flexShrink: 0 }}>{odds.toFixed(2)}</span>
       <span style={{ flex: 1 }} />
       <span style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0, fontFamily: 'var(--font-mono)', fontSize: 13, color: 'var(--text-secondary)' }}>
-        {prefix}{stake.toLocaleString()}{suffix}
-        {big && <Flame size={13} style={{ color: 'var(--gold)', fill: 'var(--gold)', filter: 'drop-shadow(0 0 3px var(--gold))' }} />}
+        {mock ? <span style={{ color: 'var(--purple)', fontWeight: 800 }}>모의</span> : <>{prefix}{stake.toLocaleString()}{suffix}</>}
+        {big && !mock && <Flame size={13} style={{ color: 'var(--gold)', fill: 'var(--gold)', filter: 'drop-shadow(0 0 3px var(--gold))' }} />}
       </span>
     </span>
   )
@@ -567,6 +729,23 @@ async function getUsdKrwRate(): Promise<number> {
 
 
 /* ── 입금 모달 ── */
+/** 모의베팅은 실제 금액과 무관하게 항상 만원 걸었다고 보고 손익을 낸다 (잔액·롤링엔 반영 안 함) */
+const MOCK_STAKE = 10000
+
+/** 사이트의 목표 롤링 금액 — (입금 + 포인트) × 롤링 목표 % (기본 100%, 300%면 30만 입금 시 90만) */
+function rollingTargetOf(site: Site): number {
+  return ((site.last_deposit ?? 0) + (site.point_deposit ?? 0)) * (site.rolling_pct ?? 100) / 100
+}
+
+/** 롤링 진행률(%) — 소수점 한 자리까지 내림. 남은 롤링이 0 이하(롤링한 금액 ≥ 목표)일 때만 100% 이상,
+ *  그 전에는 아무리 가까워도 최대 99.9% (예전엔 반올림이라 783원 남아도 100%·롤링완료로 표시되던 문제).
+ *  목표를 넘기면 넘긴 만큼 101%·110%처럼 그대로 보인다 (2026-11-24 사용자 요청 — 막대는 100%에서 멈춤) */
+function rollingProgress(done: number, target: number): number {
+  if (target <= 0) return 0
+  if (done >= target) return Math.max(100, Math.floor(done / target * 1000) / 10)
+  return Math.min(99.9, Math.floor(done / target * 1000) / 10)
+}
+
 function DepositModal({ site, onClose, onDeposit, onPoint }: {
   site: Site; onClose: () => void
   onDeposit: (amount: number) => void; onPoint: (amount: number) => void
@@ -578,8 +757,8 @@ function DepositModal({ site, onClose, onDeposit, onPoint }: {
   const num = isusd ? parseFloat(amount) : Number(amount.replace(/,/g, ""))
   const isValid = !isNaN(num) && num > 0
   const dep = site.last_deposit ?? 0; const pt = site.point_deposit ?? 0
-  const tot = dep + pt; const done = site.deposit_bet_done ?? 0
-  const rem = Math.max(0, tot - done); const pct = tot > 0 ? Math.round(done / tot * 100) : 0
+  const tot = rollingTargetOf(site); const done = site.deposit_bet_done ?? 0
+  const rem = Math.max(0, tot - done); const pct = rollingProgress(done, tot)
   const unit = isusd ? '$' : '원'
 
   // 탭 변경 시 입력 필드에 자동 포커스 + 기존 값 초기화
@@ -645,7 +824,7 @@ function DepositModal({ site, onClose, onDeposit, onPoint }: {
               </div>
             </div>
             <div className="deposit-progress-bar"><div className="deposit-progress-fill" style={{ width: `${Math.min(100,pct)}%` }} /></div>
-            <div style={{ fontSize: 9, textAlign: 'right', marginTop: 2, color: pct >= 100 ? 'var(--green)' : 'var(--orange)', fontWeight: 700 }}>{pct}%</div>
+            <div style={{ fontSize: 9, textAlign: 'right', marginTop: 2, color: pct >= 100 ? 'var(--green)' : 'var(--orange)', fontWeight: 700 }}>{pct.toFixed(1)}%</div>
           </div>
         )}
 
@@ -807,9 +986,32 @@ function DefaultStakeInput({ site, onCommit }: { site: Site; onCommit: (site: Si
   )
 }
 
-function SiteMgrModal({ sites, onClose, onAdd, onDelete, onToggleCurrency, onReorder, onUpdateDefaultStake }: {
+function RollingPctInput({ value, onCommit, title }: { value: number; onCommit: (val: number) => void; title?: string }) {
+  const [val, setVal] = useState(String(value))
+  useEffect(() => { setVal(String(value)) }, [value])
+  function commit() {
+    const n = Number(val) || 0
+    if (n <= 0) { setVal(String(value)); return }
+    if (n !== value) onCommit(n)
+  }
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }} title={title ?? '롤링 목표 % — 입금(+포인트) 대비 롤링해야 하는 비율'}>
+      <input
+        type="text" inputMode="numeric" value={val}
+        onChange={e => { const v = e.target.value; if (v === '' || /^\d+$/.test(v)) setVal(v) }}
+        onBlur={commit}
+        onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+        style={{ width: 40, padding: '2px 5px', fontSize: 10, fontFamily: 'var(--font-mono)', textAlign: 'right', background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 4, color: value !== 100 ? 'var(--gold)' : 'var(--text-primary)' }}
+      />
+      <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>%</span>
+    </div>
+  )
+}
+
+function SiteMgrModal({ sites, onClose, onAdd, onDelete, onToggleCurrency, onReorder, onUpdateDefaultStake, onUpdateRollingPct }: {
   sites: Site[]; onClose: () => void
-  onAdd: (name: string, currency: 'krw' | 'usd') => void
+  onAdd: (name: string, currency: 'krw' | 'usd', rollingPct: number) => void
+  onUpdateRollingPct: (site: Site, val: number) => void
   onDelete: (id: string) => void
   onToggleCurrency: (site: Site) => void
   onReorder: (from: string, to: string) => void
@@ -817,6 +1019,14 @@ function SiteMgrModal({ sites, onClose, onAdd, onDelete, onToggleCurrency, onReo
 }) {
   const [newName, setNewName] = useState('')
   const [newCurrency, setNewCurrency] = useState<'krw' | 'usd'>('krw')
+  // 롤링 목표 % — 기본 100%. 300으로 두고 추가하면 30만 입금 시 목표 롤링이 90만이 된다
+  const [newRollingPct, setNewRollingPct] = useState('100')
+  const newRollingPctN = Number(newRollingPct) > 0 ? Number(newRollingPct) : 100
+  function add() {
+    if (!newName.trim()) return
+    onAdd(newName.trim(), newCurrency, newRollingPctN)
+    setNewName(''); setNewRollingPct('100')
+  }
   const dragId = { current: '' }; const overId = { current: '' }
 
   return (
@@ -830,6 +1040,7 @@ function SiteMgrModal({ sites, onClose, onAdd, onDelete, onToggleCurrency, onReo
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '2px 4px', fontSize: 9, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.6px' }}>
             <span style={{ flex: 1 }}>사이트</span>
             <span title="베팅추가 시 초기 베팅 금액 (0 = 기본값)" style={{ width: 70, textAlign: 'right', flexShrink: 0 }}>기본금액</span>
+            <span title="롤링 목표 % (입금 대비)" style={{ width: 52, textAlign: 'right', flexShrink: 0 }}>롤링목표</span>
             <span style={{ width: 56, textAlign: 'center', flexShrink: 0 }}>통화</span>
             <span style={{ width: 18, flexShrink: 0 }}></span>
           </div>
@@ -848,6 +1059,7 @@ function SiteMgrModal({ sites, onClose, onAdd, onDelete, onToggleCurrency, onReo
               <span style={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0, background: s.active ? 'var(--green)' : 'var(--border)', boxShadow: s.active ? '0 0 5px var(--green)' : 'none' }} />
               <span className="site-mgr-name">{s.name}</span>
               <DefaultStakeInput site={s} onCommit={onUpdateDefaultStake} />
+              <RollingPctInput value={s.rolling_pct ?? 100} onCommit={v => onUpdateRollingPct(s, v)} />
               <button onClick={() => onToggleCurrency(s)} title="KRW/USD" style={{ background: s.currency === 'usd' ? 'var(--blue-bg)' : 'var(--bg-elevated)', border: `1px solid ${s.currency === 'usd' ? 'var(--blue-border)' : 'var(--border)'}`, borderRadius: 4, color: s.currency === 'usd' ? 'var(--blue)' : 'var(--text-muted)', cursor: 'pointer', padding: '2px 7px', fontSize: 10, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 3, flexShrink: 0 }}>
                 {s.currency === 'usd' ? <><DollarSign size={10} /> USD</> : '₩ KRW'}
               </button>
@@ -857,12 +1069,24 @@ function SiteMgrModal({ sites, onClose, onAdd, onDelete, onToggleCurrency, onReo
         </div>
         <div style={{ borderTop: '1px solid var(--border)', paddingTop: 14 }}>
           <div style={{ display: 'flex', gap: 6 }}>
-            <input className="form-input" style={{ fontSize: 12 }} placeholder="사이트 이름" value={newName} onChange={e => setNewName(e.target.value)} onKeyDown={e => e.key === 'Enter' && newName.trim() && (onAdd(newName.trim(), newCurrency), setNewName(''))} autoFocus />
+            <input className="form-input" style={{ fontSize: 12 }} placeholder="사이트 이름" value={newName} onChange={e => setNewName(e.target.value)} onKeyDown={e => e.key === 'Enter' && add()} autoFocus />
+            <div title="롤링 목표 % (기본 100%) — 300%면 30만 입금 시 목표 롤링 90만" style={{ display: 'flex', alignItems: 'center', gap: 3, flexShrink: 0 }}>
+              <span style={{ fontSize: 10, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>롤링</span>
+              <input className="form-input" inputMode="numeric" style={{ fontSize: 12, width: 52, textAlign: 'right', padding: '0 6px' }} value={newRollingPct}
+                onChange={e => { const v = e.target.value; if (v === '' || /^\d+$/.test(v)) setNewRollingPct(v) }}
+                onKeyDown={e => e.key === 'Enter' && add()} />
+              <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>%</span>
+            </div>
             <button onClick={() => setNewCurrency(p => p === 'krw' ? 'usd' : 'krw')} style={{ background: newCurrency === 'usd' ? 'var(--blue-bg)' : 'var(--bg-elevated)', border: `1px solid ${newCurrency === 'usd' ? 'var(--blue-border)' : 'var(--border)'}`, borderRadius: 4, color: newCurrency === 'usd' ? 'var(--blue)' : 'var(--text-muted)', cursor: 'pointer', padding: '0 10px', fontSize: 11, fontWeight: 700, flexShrink: 0 }}>
               {newCurrency === 'usd' ? '$' : '₩'}
             </button>
-            <button className="btn btn-primary" onClick={() => { if (newName.trim()) { onAdd(newName.trim(), newCurrency); setNewName('') }}} style={{ flexShrink: 0 }}><Plus size={12} /> 추가</button>
+            <button className="btn btn-primary" onClick={add} style={{ flexShrink: 0 }}><Plus size={12} /> 추가</button>
           </div>
+          {newRollingPctN !== 100 && (
+            <div style={{ fontSize: 10, color: 'var(--gold)', marginTop: 6 }}>
+              롤링 목표 {newRollingPctN}% — 예: 30만 입금 시 목표 롤링 {(300000 * newRollingPctN / 100).toLocaleString()}원
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -996,7 +1220,7 @@ function InlineBetEditForm({ bet, site, onClose, onSave, baseballOverrides, socc
   // 빈칸에서 더블클릭하면 등록된 리그 전체를 드롭다운으로 보여준다 (가나다순)
   const leagueInputSuggestions = !sportLeagueNames ? [] : trimmedLeagueInput
     ? sportLeagueNames.filter(lg => lg.toLowerCase().includes(trimmedLeagueInput.toLowerCase()) && lg !== trimmedLeagueInput).slice(0, 8)
-    : leagueShowAll ? [...sportLeagueNames].sort((a, b) => a.localeCompare(b, 'ko')) : []
+    : leagueShowAll ? [...sportLeagueNames].sort(leagueNameCompare) : []
   function onLeagueInputKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if (!leagueSuggestOpen || leagueInputSuggestions.length === 0) return
     if (e.key === 'ArrowDown') { e.preventDefault(); setLeagueHighlight(i => Math.min(i + 1, leagueInputSuggestions.length - 1)) }
@@ -1022,9 +1246,12 @@ function InlineBetEditForm({ bet, site, onClose, onSave, baseballOverrides, socc
     soccer: onRenameSoccerTeam, baseball: onRenameBaseballTeam, basketball: onRenameBasketballTeam, volleyball: onRenameVolleyballTeam, esports: onRenameEsportsTeam,
   }
   const sportTeams = TEAMS_BY_SPORT[sport] ?? []
+  // 팀 이름 추천은 모든 종목 공용 — 다른 종목 팀을 고르면 그 종목으로 바꾼다
+  const allSportTeams = useMemo(() => Object.entries(TEAMS_BY_SPORT).flatMap(([sp, ts]) => (ts ?? []).map(t => ({ ...t, sport: sp }))), [soccerTeams, baseballTeams, basketballTeams, volleyballTeams, esportsTeams]) // eslint-disable-line react-hooks/exhaustive-deps
   // 자동으로 채운 리그를 기억 — 사용자가 직접 바꾼 리그는 덮어쓰지 않는다
   const autoLeagueRef = useRef('')
-  function pickTeamLeague(_name: string, league: string) {
+  function pickTeamLeague(_name: string, league: string, teamSport?: string) {
+    if (teamSport && teamSport !== sport) setSport(teamSport as typeof bet.sport)
     setLeagueInput(league); autoLeagueRef.current = league; setLeagueSuggestOpen(false)
   }
   const skipFirstTeamLeagueEffect = useRef(true)
@@ -1043,10 +1270,12 @@ function InlineBetEditForm({ bet, site, onClose, onSave, baseballOverrides, socc
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [content])
 
-  // LOL(esports)은 홈/원정 대신 BO3/BO5를 고른다 — 같은 버튼, 종목에 따라 순환 목록만 다름.
+  // LOL(esports)은 홈/원정 대신 BO1/BO3/BO5를 고른다 — 같은 버튼, 종목에 따라 순환 목록만 다름.
   function cycleSide() {
-    if (sport === 'esports') setSide(prev => prev === '' ? 'BO3' : prev === 'BO3' ? 'BO5' : '')
+    if (sport === 'esports') setSide(prev => prev === '' ? 'BO1' : prev === 'BO1' ? 'BO3' : prev === 'BO3' ? 'BO5' : '')
     else setSide(prev => prev === '' ? '홈' : prev === '홈' ? '원정' : '')
+    // 베팅옵션 칩처럼, 홈/원정(BO1/BO3/BO5)을 고르면 바로 배당을 입력할 수 있게 배당칸으로 커서 이동
+    oddsRef.current?.focus()
   }
   function handleOdds(raw: string) {
     const clean = raw.replace(/[^0-9.]/g, '')
@@ -1057,7 +1286,7 @@ function InlineBetEditForm({ bet, site, onClose, onSave, baseballOverrides, socc
     if (!content.trim() || oddsV <= 0 || stakeN <= 0) return
     setSubmitting(true)
     // 베팅옵션을 아무것도 안 골랐으면 "승리"로 처리
-    const finalContent = [content.trim(), side, ...(selectedOptions.length ? selectedOptions : ['승리'])].filter(Boolean).join(' ')
+    const finalContent = [joinTeamsVs(content), side, ...(selectedOptions.length ? selectedOptions : ['승리'])].filter(Boolean).join(' ')
     await onSave(sport, finalContent, oddsV, stakeN, isLive, trimmedLeagueInput)
     setSubmitting(false)
   }
@@ -1066,8 +1295,8 @@ function InlineBetEditForm({ bet, site, onClose, onSave, baseballOverrides, socc
       <SportButtonGroup value={sport} onChange={v => { setSport(v as typeof bet.sport); contentRef.current?.focus() }} />
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'stretch' }}>
         <div style={{ flex: '1 1 140px', minWidth: 0 }}>
-          <TeamContentInput inputRef={contentRef} placeholder="베팅 내용 (팀 이름만 입력, 홈/원정·옵션은 옆에서 선택)" value={content} onChange={setContent}
-            candidates={[]} allBets={allBetsHistory} autoFocus onEnter={submit} teams={sportTeams} onPickTeam={pickTeamLeague} />
+          <TeamContentInput inputRef={contentRef} placeholder={TEAM_INPUT_PLACEHOLDER} value={content} onChange={setContent}
+            candidates={[]} allBets={allBetsHistory} autoFocus onEnter={submit} teams={allSportTeams} onPickTeam={pickTeamLeague} currentSport={sport} multiTeam />
         </div>
         <button type="button" onClick={cycleSide} style={{
           flexShrink: 0, width: 46, borderRadius: 'var(--radius-sm)', cursor: 'pointer',
@@ -1119,8 +1348,17 @@ function InlineBetEditForm({ bet, site, onClose, onSave, baseballOverrides, socc
           onRenameTeam={RENAME_TEAM_BY_SPORT[sport]}
         />
       )}
-      <BetOptionChips options={betOptions} numericOptions={numericBetOptions} selected={selectedOptions}
-        onSelect={setSelectedOptions} onManage={() => setOptionsManagerOpen(true)} oddsRef={oddsRef} />
+      {sport === 'esports' ? (
+        // LOL은 베팅추가처럼 세트 칩 → 세트 세부옵션으로 고른다 (그래야 "1세트 32분 오버"를 고쳐도 세트가 안 빠진다)
+        <LolOptionChips key={side} options={/^BO\d$/.test(side) ? betOptionsBySport[`esports_${side.toLowerCase()}`] ?? [] : betOptions}
+          numericOptions={/^BO\d$/.test(side) ? numericBetOptionsBySport[`esports_${side.toLowerCase()}`] ?? [] : numericBetOptions}
+          setOptions={betOptionsBySport['esports_set'] ?? []} numericSetOptions={numericBetOptionsBySport['esports_set'] ?? []}
+          selected={selectedOptions} onSelect={setSelectedOptions}
+          onManage={() => setOptionsManagerOpen(true)} onManageSet={() => setOptionsManagerOpen(true)} oddsRef={oddsRef} />
+      ) : (
+        <BetOptionChips options={betOptions} numericOptions={numericBetOptions} selected={selectedOptions}
+          onSelect={setSelectedOptions} onManage={() => setOptionsManagerOpen(true)} oddsRef={oddsRef} halfPoint={sport === 'basketball' || sport === 'volleyball'} />
+      )}
       {optionsManagerOpen && (
         <BetOptionsManagerModal sportLabel={SPORTS.find(s => s.value === sport)?.label ?? sport} betOptions={betOptions} numericOptions={numericBetOptions} onClose={() => setOptionsManagerOpen(false)}
           onAddBetOption={(label, numeric) => onAddBetOption(sport, label, numeric)}
@@ -1190,7 +1428,7 @@ function InlineParlayEditForm({ groupBets, site, onClose, onSave, teamCandidates
   }
   async function submit() {
     if (!allFilled || oddsV <= 0 || stakeN <= 0) return
-    setSubmitting(true); await onSave(contents, oddsV, stakeN, contents.map(() => '')); setSubmitting(false)
+    setSubmitting(true); await onSave(contents.map(joinTeamsVs), oddsV, stakeN, contents.map(() => '')); setSubmitting(false)
   }
   return (
     <div className="inline-bet-form" style={{ borderColor: 'var(--gold-border)', background: 'var(--gold-bg)' }}>
@@ -1199,9 +1437,10 @@ function InlineParlayEditForm({ groupBets, site, onClose, onSave, teamCandidates
           <div style={{ ...labelSt, marginTop: i === 0 ? 0 : 4 }}>{LEG_MARKS[i] ?? i + 1}</div>
           <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <TeamContentInput placeholder={`경기 내용 ${LEG_MARKS[i] ?? i + 1}`} value={c}
+              <TeamContentInput placeholder={`팀 이름 ${LEG_MARKS[i] ?? i + 1} (두 팀이면 쉼표 ,)`} value={c}
                 onChange={v => setContents(p => p.map((pc, pi) => pi === i ? v : pc))}
-                candidates={registeredTeamCandidates} allBets={allBetsHistory} autoFocus={i === 0} onEnter={submit} />
+                candidates={registeredTeamCandidates} allBets={allBetsHistory} autoFocus={i === 0} onEnter={submit}
+                teams={registeredTeamCandidates.map(t => ({ league: '', name: t.name }))} multiTeam />
             </div>
             {i === contents.length - 1 && contents.length < MULTI_MAX_LEGS ? (
               <button type="button" onClick={addLeg} title="다리 추가" style={{
@@ -1317,7 +1556,7 @@ function LeagueManageModal({ sport, leagues, favoriteLeagues, teams, onClose, on
   const sortedLeagues = [...leagues].sort((a, b) => {
     const fa = favoriteLeagues.includes(a), fb = favoriteLeagues.includes(b)
     if (fa !== fb) return fa ? -1 : 1
-    return a.localeCompare(b, 'ko')
+    return leagueNameCompare(a, b)
   })
   const [selectedLeague, setSelectedLeague] = useState<string | null>(sortedLeagues[0] ?? null)
   const [newLeague, setNewLeague] = useState('')
@@ -1496,7 +1735,7 @@ function LeagueOnlyManageModal({ sportLabel, leagues, onClose, onAddLeague, onRe
     if (!confirm(`"${name}" 리그를 삭제할까요? 이 리그로 저장된 베팅의 리그 정보도 함께 지워집니다.`)) return
     await onDeleteLeague(name)
   }
-  const sorted = [...leagues].sort((a, b) => a.localeCompare(b, 'ko'))
+  const sorted = [...leagues].sort(leagueNameCompare)
   // 좌측 리그 목록에서 고른 리그 — 우측에 그 리그의 팀을 나열 (선택이 없거나 삭제/이름변경된 경우 첫 리그)
   const selected = openLeague && sorted.includes(openLeague) ? openLeague : (sorted[0] ?? null)
   const selectedTeams = selected ? teams.filter(t => t.league === selected).sort((a, b) => a.name.localeCompare(b.name, 'ko')) : []
@@ -1908,8 +2147,28 @@ function StructuredTeamPicker({ sport, leagues, favoriteLeagues, teams, allTeams
    칩에 x표시로 바로 삭제하면 잘못 눌러 지우기 쉬우므로, 추가/수정/삭제/순서변경은 이 모달 안에서만 한다.
    바깥을 눌러도 닫히지 않도록 overlay에 onClick을 달지 않는다 — 우측 상단 X 버튼으로만 닫는다.
    옵션은 종목(축구/야구/농구/배구/LOL/기타)별로 따로 관리된다. */
-function BetOptionsManagerModal({ sportLabel, betOptions, numericOptions, onClose, onAddBetOption, onDeleteBetOption, onEditBetOption, onReorderBetOption, onToggleNumericBetOption }: {
+/* 옵션별 기본 베팅금액 입력칸 — 비우면 설정 해제(사이트 기본금액 그대로), 포커스가 빠질 때 저장 */
+function OptionStakeInput({ value, onCommit }: { value: number | undefined; onCommit: (v: number | null) => void }) {
+  const [val, setVal] = useState(value ? String(value) : '')
+  useEffect(() => { setVal(value ? String(value) : '') }, [value])
+  function commit() {
+    const n = Number(val.replace(/,/g, '')) || 0
+    if ((n || undefined) !== value) onCommit(n > 0 ? n : null)
+  }
+  return (
+    <input type="text" inputMode="numeric" placeholder="기본금액" title="이 옵션을 고르면 베팅금액이 이 금액으로 바뀜 (비우면 사이트 기본금액)"
+      value={val ? Number(val).toLocaleString() : ''}
+      onChange={e => { const raw = e.target.value.replace(/,/g, ''); if (raw === '' || /^\d+$/.test(raw)) setVal(raw) }}
+      onBlur={commit} onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+      style={{ width: 74, flexShrink: 0, padding: '2px 5px', fontSize: 10, fontFamily: 'var(--font-mono)', textAlign: 'right', background: 'var(--bg-card)', border: `1px solid ${value ? 'var(--gold-border)' : 'var(--border)'}`, borderRadius: 4, color: value ? 'var(--gold)' : 'var(--text-primary)' }} />
+  )
+}
+
+function BetOptionsManagerModal({ sportLabel, betOptions, numericOptions, onClose, onAddBetOption, onDeleteBetOption, onEditBetOption, onReorderBetOption, onToggleNumericBetOption, optionStakes, onSetOptionStake }: {
   sportLabel: string; betOptions: string[]; numericOptions: string[]; onClose: () => void
+  // 옵션별 기본 베팅금액 (베팅추가에서 열었을 때만 표시)
+  optionStakes?: Record<string, number>
+  onSetOptionStake?: (label: string, stake: number | null) => Promise<void>
   onAddBetOption: (label: string, numeric: boolean) => Promise<void>
   onDeleteBetOption: (label: string) => Promise<void>
   onEditBetOption: (oldLabel: string, newLabel: string) => Promise<void>
@@ -1941,7 +2200,7 @@ function BetOptionsManagerModal({ sportLabel, betOptions, numericOptions, onClos
 
   return (
     <div className="modal-overlay">
-      <div className="modal" style={{ maxWidth: 340 }}>
+      <div className="modal" style={{ maxWidth: onSetOptionStake ? 420 : 340 }}>
         <div className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
           {sportLabel} 베팅옵션 관리
           <button onClick={onClose} style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex', padding: 2 }}><X size={15} /></button>
@@ -1960,7 +2219,7 @@ function BetOptionsManagerModal({ sportLabel, betOptions, numericOptions, onClos
             <Plus size={13} />
           </button>
         </div>
-        <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 8 }}>"수치입력"으로 만든 옵션은 예: "포인트 오버" + 185.5 입력 → "185.5 오버"로 저장됩니다.</div>
+        <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 8 }}>"수치입력"으로 만든 옵션은 예: "포인트 오버" + 185.5 입력 → "185.5 오버"로 저장됩니다.{onSetOptionStake && <><br />옵션 오른쪽 "기본금액"을 적어두면 그 옵션을 고를 때 베팅금액이 그 금액으로 바뀝니다 (비우면 사이트 기본금액).</>}</div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 3, overflowY: 'auto', maxHeight: 320 }}>
           {betOptions.length === 0 && <div style={{ fontSize: 10, color: 'var(--text-muted)', padding: '8px 0' }}>등록된 옵션 없음</div>}
           {betOptions.map((opt, i) => (
@@ -1979,6 +2238,7 @@ function BetOptionsManagerModal({ sportLabel, betOptions, numericOptions, onClos
               ) : (
                 <span style={{ flex: 1, fontSize: 11, fontWeight: 600 }}>{opt}</span>
               )}
+              {onSetOptionStake && <OptionStakeInput value={optionStakes?.[opt]} onCommit={v => onSetOptionStake(opt, v)} />}
               <button type="button" onClick={() => onToggleNumericBetOption(opt)} title="세부 수치 입력 옵션으로 전환/해제"
                 style={{ border: 'none', background: 'none', cursor: 'pointer', display: 'flex', padding: 1, flexShrink: 0, fontSize: 11, opacity: numericSet.has(opt) ? 1 : 0.3 }}>🔢</button>
               <button type="button" onClick={() => { setEditing(opt); setEditingValue(opt) }}
@@ -1993,10 +2253,12 @@ function BetOptionsManagerModal({ sportLabel, betOptions, numericOptions, onClos
   )
 }
 
-function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, baseballOverrides, soccerOverrides, basketballOverrides, volleyballOverrides, teamCandidates, allBetsHistory, leagueCandidates, soccerLeagues, baseballLeagues, basketballLeagues, volleyballLeagues, esportsLeagues, soccerFavoriteLeagues, baseballFavoriteLeagues, basketballFavoriteLeagues, volleyballFavoriteLeagues, esportsFavoriteLeagues, onToggleSoccerLeagueFavorite, onToggleBaseballLeagueFavorite, onToggleBasketballLeagueFavorite, onToggleVolleyballLeagueFavorite, onToggleEsportsLeagueFavorite, soccerTeams, baseballTeams, basketballTeams, volleyballTeams, esportsTeams, onAddSoccerLeague, onAddBaseballLeague, onAddBasketballLeague, onAddVolleyballLeague, onAddEsportsLeague, onRenameSoccerLeague, onDeleteSoccerLeague, onRenameBaseballLeague, onDeleteBaseballLeague, onRenameBasketballLeague, onDeleteBasketballLeague, onRenameVolleyballLeague, onDeleteVolleyballLeague, onRenameEsportsLeague, onDeleteEsportsLeague, onAddSoccerTeam, onAddBaseballTeam, onAddBasketballTeam, onAddVolleyballTeam, onAddEsportsTeam, onRenameSoccerTeam, onDeleteSoccerTeam, onRenameBaseballTeam, onDeleteBaseballTeam, onRenameBasketballTeam, onDeleteBasketballTeam, onRenameVolleyballTeam, onDeleteVolleyballTeam, onRenameEsportsTeam, onDeleteEsportsTeam, quickPicks, betOptionsBySport, numericBetOptionsBySport, onAddBetOption, onDeleteBetOption, onEditBetOption, onReorderBetOption, onToggleNumericBetOption }: {
+function SingleBetForm({ site, onClose, onBet, onMultiBet, betOptionStakesBySport, onSetBetOptionStake, defaultSport, baseballOverrides, soccerOverrides, basketballOverrides, volleyballOverrides, teamCandidates, allBetsHistory, leagueCandidates, soccerLeagues, baseballLeagues, basketballLeagues, volleyballLeagues, esportsLeagues, soccerFavoriteLeagues, baseballFavoriteLeagues, basketballFavoriteLeagues, volleyballFavoriteLeagues, esportsFavoriteLeagues, onToggleSoccerLeagueFavorite, onToggleBaseballLeagueFavorite, onToggleBasketballLeagueFavorite, onToggleVolleyballLeagueFavorite, onToggleEsportsLeagueFavorite, soccerTeams, baseballTeams, basketballTeams, volleyballTeams, esportsTeams, onAddSoccerLeague, onAddBaseballLeague, onAddBasketballLeague, onAddVolleyballLeague, onAddEsportsLeague, onRenameSoccerLeague, onDeleteSoccerLeague, onRenameBaseballLeague, onDeleteBaseballLeague, onRenameBasketballLeague, onDeleteBasketballLeague, onRenameVolleyballLeague, onDeleteVolleyballLeague, onRenameEsportsLeague, onDeleteEsportsLeague, onAddSoccerTeam, onAddBaseballTeam, onAddBasketballTeam, onAddVolleyballTeam, onAddEsportsTeam, onRenameSoccerTeam, onDeleteSoccerTeam, onRenameBaseballTeam, onDeleteBaseballTeam, onRenameBasketballTeam, onDeleteBasketballTeam, onRenameVolleyballTeam, onDeleteVolleyballTeam, onRenameEsportsTeam, onDeleteEsportsTeam, quickPicks, betOptionsBySport, numericBetOptionsBySport, onAddBetOption, onDeleteBetOption, onEditBetOption, onReorderBetOption, onToggleNumericBetOption }: {
   site: Site; onClose: () => void; defaultSport: string
-  onBet: (sport: string, content: string, odds: number, amount: number, isLive: boolean, league: string) => Promise<boolean>
+  onBet: (sport: string, content: string, odds: number, amount: number, isLive: boolean, league: string, isMock?: boolean) => Promise<boolean>
   onMultiBet: (sport: string, contents: string[], odds: number, amount: number, leagues: string[]) => Promise<boolean>
+  betOptionStakesBySport: Record<string, Record<string, number>>
+  onSetBetOptionStake: (sport: string, label: string, stake: number | null) => Promise<void>
   quickPicks: string[]
   betOptionsBySport: Record<string, string[]>
   numericBetOptionsBySport: Record<string, string[]>
@@ -2032,19 +2294,25 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
   const [content, setContent]   = useState('')
   // 홈/원정 — 베팅 내용 우측 토글. 없음 → 홈 → 원정 → 없음 순으로 클릭할 때마다 바뀌고,
   // 베팅 내용 텍스트에는 섞지 않고 버튼 자체에 "홈"/"원정"으로 표시만 한다. 제출할 때만 내용 뒤에 합쳐진다.
-  // LOL(esports)은 홈/원정 개념이 없으므로 같은 버튼이 BO3/BO5를 순환하도록 바뀐다.
+  // LOL(esports)은 홈/원정 개념이 없으므로 같은 버튼이 BO1/BO3/BO5를 순환하도록 바뀐다.
   const [side, setSide] = useState<string>('')
   function cycleSide() {
-    if (sport === 'esports') setSide(prev => prev === '' ? 'BO3' : prev === 'BO3' ? 'BO5' : '')
+    // LOL은 BO1/BO3/BO5마다 베팅옵션 목록이 달라서, 바꾸면 고른 옵션도 해제
+    if (sport === 'esports') { setSide(prev => prev === '' ? 'BO1' : prev === 'BO1' ? 'BO3' : prev === 'BO3' ? 'BO5' : ''); setSelectedOptions([]) }
     else setSide(prev => prev === '' ? '홈' : prev === '홈' ? '원정' : '')
+    // 베팅옵션 칩처럼, 홈/원정(BO1/BO3/BO5)을 고르면 바로 배당을 입력할 수 있게 배당칸으로 커서 이동
+    oddsRef.current?.focus()
   }
   // 베팅옵션 — 종목별로 따로 관리되는 자유 등록 옵션 목록(예: "1.5 핸디").
   // 칩을 클릭하면 선택(토글)될 뿐 베팅 내용 텍스트는 건드리지 않고, 베팅 내용 옆에 선택된 옵션이 따로 표시된다.
   // 추가/수정/삭제/순서변경은 실수로 지우는 걸 막기 위해 "옵션 관리" 모달에서만 가능.
   const [optionsManagerOpen, setOptionsManagerOpen] = useState(false)
   const [selectedOptions, setSelectedOptions] = useState<string[]>([])
-  const betOptions = betOptionsBySport[sport] ?? []
-  const numericBetOptions = numericBetOptionsBySport[sport] ?? []
+  // 옵션 목록 키 — LOL은 BO1/BO3/BO5를 골라야 그에 맞는 목록이 나오고(안 고르면 옵션 없음), 나머지 종목은 종목 그대로
+  const optKey: string | null = sport === 'esports' ? (side === 'BO1' ? 'esports_bo1' : side === 'BO3' ? 'esports_bo3' : side === 'BO5' ? 'esports_bo5' : null) : sport
+  const betOptions = optKey ? betOptionsBySport[optKey] ?? [] : []
+  const numericBetOptions = optKey ? numericBetOptionsBySport[optKey] ?? [] : []
+  const [lolSetManagerOpen, setLolSetManagerOpen] = useState(false)
   // 베팅 모드: 단폴 / 다폴. 다폴은 리그 없이 경기 내용 여러 개(최대 4개) + 배당/금액 공유.
   // 항상 단폴 기본 (다폴은 필요할 때만 수동으로 전환)
   const [mode, setMode] = useState<'single' | 'multi'>('single')
@@ -2056,7 +2324,40 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
   // 그 다음부터 누르면 기존 금액에 더해짐(직접 입력하거나 초기화해도 다시 "교체" 상태로 돌아감)
   const [amountEdited, setAmountEdited] = useState(false)
   const [isLive, setIsLive]     = useState(false)
+  // 모의베팅 — 롤링/잔액에 반영하지 않고 만원 걸었다고 가정해서 통계 "모의" 탭에만 집계
+  const [isMock, setIsMock]     = useState(false)
+  const mockOn = isMock && mode === 'single'
   const [submitting, setSubmitting] = useState(false)
+  // 옵션별 기본 베팅금액 — 그 옵션을 고르면 금액을 그 값으로 바꾸고, 기본금액이 없는 옵션으로 바꾸거나 선택을 풀면
+  // (옵션이 바꿔놓은 금액을 손대지 않은 경우에만) 사이트 기본금액으로 되돌린다. 원화 사이트에만 적용.
+  const optionStakeApplied = useRef<string | null>(null)
+  function stakeForOption(opt: string): number | undefined {
+    // LOL 세트 세부옵션("1세트 드래곤 4.5 오버")은 세트 세부옵션 목록에 적어둔 금액을 본다
+    const setM = sport === 'esports' ? opt.match(/^\d+세트 (.+)$/) : null
+    if (setM) {
+      const ss = betOptionStakesBySport['esports_set'] ?? {}
+      if (ss[setM[1]]) return ss[setM[1]]
+      const t = (numericBetOptionsBySport['esports_set'] ?? []).find(x => extractNumericTemplateValueFromText(x, setM[1]) !== null)
+      return t ? ss[t] : undefined
+    }
+    const stakes = optKey ? betOptionStakesBySport[optKey] ?? {} : {}
+    if (stakes[opt]) return stakes[opt]
+    // 수치입력 옵션은 "185.5 오버"처럼 값이 채워진 문구로 선택되므로 원래 템플릿을 찾아서 본다
+    const tpl = numericBetOptions.find(t => extractNumericTemplateValueFromText(t, opt) !== null)
+    return tpl ? stakes[tpl] : undefined
+  }
+  function selectOptions(opts: string[]) {
+    setSelectedOptions(opts)
+    if (isusd) return
+    const stake = opts[0] ? stakeForOption(opts[0]) : undefined
+    if (stake) {
+      setAmount(String(stake)); setAmountEdited(true)
+      optionStakeApplied.current = String(stake)
+    } else if (optionStakeApplied.current !== null) {
+      if (amount === optionStakeApplied.current) { setAmount(defaultAmount); setAmountEdited(false) }
+      optionStakeApplied.current = null
+    }
+  }
   const contentRef = useRef<HTMLInputElement>(null)
   const oddsRef = useRef<HTMLInputElement>(null)
   const oddsV = parseOdds(oddsRaw)
@@ -2128,8 +2429,10 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
   // 빈칸에서 더블클릭하면 등록된 리그 전체를 드롭다운으로 보여준다 (가나다순)
   const leagueInputSuggestions = !sportLeagueNames ? [] : trimmedLeagueInput
     ? sportLeagueNames.filter(lg => lg.toLowerCase().includes(trimmedLeagueInput.toLowerCase()) && lg !== trimmedLeagueInput).slice(0, 8)
-    : leagueShowAll ? [...sportLeagueNames].sort((a, b) => a.localeCompare(b, 'ko')) : []
-  useEffect(() => { setLeagueInput(''); setLeagueSuggestOpen(false); setLeagueShowAll(false); setLeagueHighlight(-1); setLeagueOnlyMgmtOpen(false) }, [sport])
+    : leagueShowAll ? [...sportLeagueNames].sort(leagueNameCompare) : []
+  // 다른 종목 팀을 골라 종목이 바뀐 경우엔 그 팀의 리그를 넣는다 (종목이 바뀌면 리그칸을 비우므로 여기서 채운다)
+  const pendingLeagueRef = useRef('')
+  useEffect(() => { setLeagueInput(pendingLeagueRef.current); pendingLeagueRef.current = ''; setLeagueSuggestOpen(false); setLeagueShowAll(false); setLeagueHighlight(-1); setLeagueOnlyMgmtOpen(false) }, [sport])
   function onLeagueInputKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if (!leagueSuggestOpen || leagueInputSuggestions.length === 0) return
     if (e.key === 'ArrowDown') { e.preventDefault(); setLeagueHighlight(i => Math.min(i + 1, leagueInputSuggestions.length - 1)) }
@@ -2155,15 +2458,20 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
     soccer: onRenameSoccerTeam, baseball: onRenameBaseballTeam, basketball: onRenameBasketballTeam, volleyball: onRenameVolleyballTeam, esports: onRenameEsportsTeam,
   }
   const sportTeams = TEAMS_BY_SPORT[sport] ?? []
+  // 팀 이름 추천은 모든 종목 공용 (단폴·다폴 모두) — 단폴에서 다른 종목 팀을 고르면 그 종목으로 바꾼다
+  const allSportTeams = useMemo(() => Object.entries(TEAMS_BY_SPORT).flatMap(([sp, ts]) => (ts ?? []).map(t => ({ ...t, sport: sp }))), [soccerTeams, baseballTeams, basketballTeams, volleyballTeams, esportsTeams]) // eslint-disable-line react-hooks/exhaustive-deps
   // 자동으로 채운 리그를 기억 — 사용자가 직접 바꾼 리그는 덮어쓰지 않는다
   const autoLeagueRef = useRef('')
-  function pickTeamLeague(_name: string, league: string) {
-    setLeagueInput(league); autoLeagueRef.current = league; setLeagueSuggestOpen(false)
+  function pickTeamLeague(_name: string, league: string, teamSport?: string) {
+    autoLeagueRef.current = league; setLeagueSuggestOpen(false)
+    if (teamSport && teamSport !== sport) { pendingLeagueRef.current = league; setSport(teamSport); return }
+    setLeagueInput(league)
   }
   const skipFirstTeamLeagueEffect = useRef(true)
   useEffect(() => {
     if (skipFirstTeamLeagueEffect.current) { skipFirstTeamLeagueEffect.current = false; return }
-    const name = content.trim()
+    // 두 팀("A, B" / "A vs B")이면 앞 팀 기준으로 리그를 찾는다
+    const name = content.split(/,| vs /)[0].trim()
     const matches = sportTeams.filter(t => t.name === name)
     if (matches.length === 0) return
     setLeagueInput(cur => {
@@ -2177,14 +2485,30 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
   }, [content])
 
   // 베팅옵션은 종목별로 따로 관리되므로, 종목을 바꾸면 이전 종목에서 선택했던 옵션/홈원정·BO값은 해제
-  useEffect(() => { setSelectedOptions([]); setSide('') }, [sport])
+  // (경기 일정에서 다른 종목 팀을 골라 종목이 바뀐 경우엔 고른 홈/원정을 넣는다)
+  const pendingSideRef = useRef('')
+  useEffect(() => { setSelectedOptions([]); setSide(pendingSideRef.current); pendingSideRef.current = '' }, [sport])
+
+  // 경기 일정 (끝나지 않은 경기) — 팀 이름 칸을 누르면 드롭다운으로 뜬다
+  const [scheduleRows, setScheduleRows] = useState<Awaited<ReturnType<typeof loadSchedules>>>([])
+  useEffect(() => { loadSchedules().then(setScheduleRows).catch(() => {}) }, [])
+  const pickGames = useMemo(() => upcomingForBet(scheduleRows, allSportTeams), [scheduleRows, allSportTeams])
+  function pickGame(g: BetPickGame, which: 'home' | 'away' | 'both') {
+    const sd = which === 'home' ? '홈' : which === 'away' ? '원정' : ''
+    autoLeagueRef.current = g.league; setLeagueSuggestOpen(false)
+    if (g.state === 'live') setIsLive(true)
+    if (g.sport !== sport) { pendingLeagueRef.current = g.league; pendingSideRef.current = sd; setSport(g.sport) }
+    else { setLeagueInput(g.league); setSide(sd) }
+    setTimeout(() => oddsRef.current?.focus(), 0)
+  }
 
   function handleOdds(raw: string) {
     const clean = raw.replace(/[^0-9.]/g, '')
     if (/^\d{3}$/.test(clean)) setOddsRaw((Number(clean) / 100).toFixed(2))
     else setOddsRaw(clean)
   }
-  const multiContents = [content, ...extraContents]
+  // 다폴 다리도 "A, B" → "A vs B"
+  const multiContents = [content, ...extraContents].map(joinTeamsVs)
   const multiFilled = multiContents.every(c => !!c)
 
   function addLeg() {
@@ -2195,21 +2519,22 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
   }
 
   async function submit() {
-    if (!content.trim() || oddsV <= 0 || stakeN <= 0) return
+    if (!content.trim() || oddsV <= 0 || (stakeN <= 0 && !mockOn)) return
     if (mode === 'multi' && !multiFilled) return
     setSubmitting(true)
     // 홈/원정, 베팅옵션은 입력창 텍스트에는 안 보이고 옆에 뱃지로만 표시되다가, 제출할 때 베팅 내용 뒤에 합쳐진다.
     // 베팅옵션을 아무것도 안 골랐으면 "승리"로 처리
-    const finalContent = mode === 'single' ? [content.trim(), side, ...(selectedOptions.length ? selectedOptions : ['승리'])].filter(Boolean).join(' ') : content
+    // 쉼표로 두 팀을 적었으면 "A vs B"로 ("T1, GEN" → "T1 vs GEN")
+    const teamText = joinTeamsVs(content)
+    const finalContent = mode === 'single' ? [teamText, side, ...(selectedOptions.length ? selectedOptions : ['승리'])].filter(Boolean).join(' ') : content
     const ok = mode === 'multi'
       ? await onMultiBet(sport, multiContents, oddsV, stakeN, multiContents.map(() => ''))
-      : await onBet(sport, finalContent, oddsV, stakeN, isLive, SHOW_LEAGUE_UI ? detectedLeague : trimmedLeagueInput)
+      : await onBet(sport, finalContent, oddsV, mockOn ? MOCK_STAKE : stakeN, isLive, SHOW_LEAGUE_UI ? detectedLeague : trimmedLeagueInput, mockOn)
     setSubmitting(false)
     if (ok) onClose()
   }
 
-  return (
-    <div className="inline-bet-form">
+  const modeTabs = (
       <div style={{ display: 'flex', gap: 4, marginBottom: 4 }}>
         <button type="button" onClick={() => setMode('single')} style={{
           flex: 1, padding: '6px 0', borderRadius: 'var(--radius-sm)', cursor: 'pointer',
@@ -2226,14 +2551,20 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
           color: mode === 'multi' ? 'var(--purple)' : 'var(--text-secondary)',
         }}>다폴</button>
       </div>
+  )
+
+  return (
+    <div className="inline-bet-form">
+      {modeTabs}
       {mode === 'single' && (
         <SportButtonGroup value={sport} onChange={v => { setSport(v); contentRef.current?.focus() }} />
       )}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'stretch' }}>
         <div style={{ flex: '1 1 140px', minWidth: 0 }}>
-          <TeamContentInput inputRef={contentRef} placeholder={mode === 'multi' ? `베팅 내용 ${LEG_MARKS[0]}` : '베팅 내용 (팀 이름만 입력, 홈/원정·옵션은 옆에서 선택)'} value={content} onChange={setContent}
+          <TeamContentInput inputRef={contentRef} placeholder={mode === 'multi' ? `팀 이름 ${LEG_MARKS[0]} (두 팀이면 쉼표 ,)` : TEAM_INPUT_PLACEHOLDER} value={content} onChange={setContent}
             candidates={[]} allBets={allBetsHistory} autoFocus onEnter={submit} quickPicks={mode === 'multi' ? quickPicks : undefined}
-            teams={mode === 'single' ? sportTeams : undefined} onPickTeam={pickTeamLeague} />
+            teams={allSportTeams} onPickTeam={mode === 'single' ? pickTeamLeague : undefined} currentSport={mode === 'single' ? sport : undefined} multiTeam
+            games={pickGames} onPickGame={mode === 'single' ? pickGame : undefined} />
         </div>
         {mode === 'single' && (
           <button type="button" onClick={cycleSide} style={{
@@ -2355,17 +2686,36 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
           onAddTeam={leagueBundle.addTeam} onRenameTeam={leagueBundle.renameTeam} onDeleteTeam={leagueBundle.deleteTeam}
         />
       )}
-      {mode === 'single' && (
-        <BetOptionChips options={betOptions} numericOptions={numericBetOptions} selected={selectedOptions}
-          onSelect={setSelectedOptions} onManage={() => setOptionsManagerOpen(true)} oddsRef={oddsRef} />
+      {mode === 'single' && sport === 'esports' && !optKey && (
+        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4 }}>BO1 / BO3 / BO5를 먼저 고르면 그에 맞는 베팅옵션이 나옵니다</div>
       )}
-      {optionsManagerOpen && (
-        <BetOptionsManagerModal sportLabel={SPORTS.find(s => s.value === sport)?.label ?? sport} betOptions={betOptions} numericOptions={numericBetOptions} onClose={() => setOptionsManagerOpen(false)}
-          onAddBetOption={(label, numeric) => onAddBetOption(sport, label, numeric)}
-          onDeleteBetOption={label => onDeleteBetOption(sport, label)}
-          onEditBetOption={(oldLabel, newLabel) => onEditBetOption(sport, oldLabel, newLabel)}
-          onReorderBetOption={(from, to) => onReorderBetOption(sport, from, to)}
-          onToggleNumericBetOption={label => onToggleNumericBetOption(sport, label)} />
+      {mode === 'single' && sport === 'esports' && optKey && (
+        <LolOptionChips key={optKey} options={betOptions} numericOptions={numericBetOptions}
+          setOptions={betOptionsBySport['esports_set'] ?? []} numericSetOptions={numericBetOptionsBySport['esports_set'] ?? []}
+          selected={selectedOptions} onSelect={selectOptions}
+          onManage={() => setOptionsManagerOpen(true)} onManageSet={() => setLolSetManagerOpen(true)} oddsRef={oddsRef} />
+      )}
+      {mode === 'single' && sport !== 'esports' && (
+        <BetOptionChips options={betOptions} numericOptions={numericBetOptions} selected={selectedOptions}
+          onSelect={selectOptions} onManage={() => setOptionsManagerOpen(true)} oddsRef={oddsRef} halfPoint={sport === 'basketball' || sport === 'volleyball'} />
+      )}
+      {optionsManagerOpen && optKey && (
+        <BetOptionsManagerModal sportLabel={sport === 'esports' ? `LOL ${side}` : SPORTS.find(s => s.value === sport)?.label ?? sport} betOptions={betOptions} numericOptions={numericBetOptions} onClose={() => setOptionsManagerOpen(false)}
+          onAddBetOption={(label, numeric) => onAddBetOption(optKey, label, numeric)}
+          onDeleteBetOption={label => onDeleteBetOption(optKey, label)}
+          onEditBetOption={(oldLabel, newLabel) => onEditBetOption(optKey, oldLabel, newLabel)}
+          onReorderBetOption={(from, to) => onReorderBetOption(optKey, from, to)}
+          onToggleNumericBetOption={label => onToggleNumericBetOption(optKey, label)}
+          optionStakes={betOptionStakesBySport[optKey] ?? {}} onSetOptionStake={(label, stake) => onSetBetOptionStake(optKey, label, stake)} />
+      )}
+      {lolSetManagerOpen && (
+        <BetOptionsManagerModal sportLabel="LOL 세트 세부" betOptions={betOptionsBySport['esports_set'] ?? []} numericOptions={numericBetOptionsBySport['esports_set'] ?? []} onClose={() => setLolSetManagerOpen(false)}
+          onAddBetOption={(label, numeric) => onAddBetOption('esports_set', label, numeric)}
+          onDeleteBetOption={label => onDeleteBetOption('esports_set', label)}
+          onEditBetOption={(oldLabel, newLabel) => onEditBetOption('esports_set', oldLabel, newLabel)}
+          onReorderBetOption={(from, to) => onReorderBetOption('esports_set', from, to)}
+          onToggleNumericBetOption={label => onToggleNumericBetOption('esports_set', label)}
+          optionStakes={betOptionStakesBySport['esports_set'] ?? {}} onSetOptionStake={(label, stake) => onSetBetOptionStake('esports_set', label, stake)} />
       )}
       {mode === 'single' && !isusd && trimmedContent && trimmedLeagueInput && oddsV > 0 && (side || selectedOptions.length > 0) && (
         <BetOptionHistoryHint
@@ -2376,9 +2726,9 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
       {mode === 'multi' && extraContents.map((c, i) => (
         <div key={i} style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <TeamContentInput placeholder={`베팅 내용 ${LEG_MARKS[i + 1] ?? i + 2}`} value={c}
+            <TeamContentInput placeholder={`팀 이름 ${LEG_MARKS[i + 1] ?? i + 2} (두 팀이면 쉼표 ,)`} value={c}
               onChange={v => setExtraContents(p => p.map((pc, pi) => pi === i ? v : pc))}
-              candidates={[]} allBets={allBetsHistory} onEnter={submit} quickPicks={quickPicks} />
+              candidates={[]} allBets={allBetsHistory} onEnter={submit} quickPicks={quickPicks} teams={allSportTeams} multiTeam />
           </div>
           {i === extraContents.length - 1 && extraContents.length + 1 < MULTI_MAX_LEGS ? (
             <button type="button" onClick={addLeg} title="다리 추가" style={{
@@ -2402,8 +2752,9 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
       {oddsV > 0 && <div style={{ fontSize: 9, color: 'var(--gold)', fontWeight: 700, textAlign: 'right' }}>→ {oddsV.toFixed(2)}</div>}
       <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
         <input className="form-input inline-bet-input stake-input" type="text" inputMode={isusd ? 'decimal' : 'numeric'} placeholder={`금액 (${unit})`}
-          value={isusd ? amount : (stakeN > 0 ? stakeN.toLocaleString() : amount)}
-          style={{ flex: 1, MozAppearance: 'textfield' } as React.CSSProperties}
+          value={mockOn ? `모의 ${MOCK_STAKE.toLocaleString()}원` : isusd ? amount : (stakeN > 0 ? stakeN.toLocaleString() : amount)}
+          disabled={mockOn}
+          style={{ flex: 1, MozAppearance: 'textfield', ...(mockOn ? { color: 'var(--purple)', fontWeight: 700 } : {}) } as React.CSSProperties}
           onChange={e => {
             setAmountEdited(true)
             if (isusd) {
@@ -2416,8 +2767,16 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
           }}
           onKeyDown={e => e.key === 'Enter' && submit()} />
         <button onClick={() => { setAmount(''); setAmountEdited(false) }} style={{ padding: '0 8px', height: 34, borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-body)', whiteSpace: 'nowrap', flexShrink: 0 }}>초기화</button>
+        {mode === 'single' && (
+          <button type="button" onClick={() => setIsMock(v => !v)} title={isMock ? '모의베팅 켜짐 — 롤링/잔액 미반영, 만원 기준으로 통계 모의 탭에만 집계' : '모의베팅으로 등록 (롤링/잔액 미반영)'} style={{
+            padding: '0 8px', height: 34, borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-body)', whiteSpace: 'nowrap', flexShrink: 0,
+            border: `1px solid ${isMock ? 'var(--purple-border)' : 'var(--border)'}`,
+            background: isMock ? 'var(--purple-bg)' : 'var(--bg-elevated)',
+            color: isMock ? 'var(--purple)' : 'var(--text-secondary)',
+          }}>모의베팅</button>
+        )}
       </div>
-      <div style={{ display: 'flex', gap: 4 }}>
+      {!mockOn && <div style={{ display: 'flex', gap: 4 }}>
         {hotkeys.map(hk => (
           <button key={hk} className="hotkey-btn" onClick={() => {
             if (!amountEdited) {
@@ -2431,8 +2790,14 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
             +{isusd ? `$${hk}` : `${hk.toLocaleString()}`}
           </button>
         ))}
-      </div>
-      {oddsV > 0 && stakeN > 0 && (
+      </div>}
+      {mockOn ? (
+        <div style={{ fontSize: 9, fontWeight: 700, display: 'flex', justifyContent: 'flex-end', gap: 8, flexWrap: 'wrap' }}>
+          <span style={{ color: 'var(--purple)' }}>모의 {MOCK_STAKE.toLocaleString()}원 기준</span>
+          {oddsV > 0 && <span style={{ color: 'var(--green)' }}>예상 수익 +{Math.round(MOCK_STAKE * (oddsV - 1)).toLocaleString()}원</span>}
+          <span style={{ color: 'var(--red)' }}>예상 손실 -{MOCK_STAKE.toLocaleString()}원</span>
+        </div>
+      ) : oddsV > 0 && stakeN > 0 && (
         <div style={{ fontSize: 9, color: 'var(--green)', fontWeight: 700, textAlign: 'right' }}>
           예상 +{isusd ? '$' : ''}{(isusd ? (stakeN * (oddsV - 1)).toFixed(2) : Math.round(stakeN * (oddsV - 1)).toLocaleString())}{isusd ? '' : '원'}
         </div>
@@ -2448,8 +2813,8 @@ function SingleBetForm({ site, onClose, onBet, onMultiBet, defaultSport, basebal
           </button>
         )}
         <button className="btn btn-primary" style={{ flex: 1, fontSize: 12, padding: '7px 0', justifyContent: 'center' }}
-          onClick={submit} disabled={!content || (mode === 'multi' && !multiFilled) || oddsV <= 0 || stakeN <= 0 || submitting}>
-          등록
+          onClick={submit} disabled={!content || (mode === 'multi' && !multiFilled) || oddsV <= 0 || (stakeN <= 0 && !mockOn) || submitting}>
+          {mockOn ? '모의 등록' : '등록'}
         </button>
         <button className="btn btn-ghost" style={{ padding: '7px 10px' }} onClick={onClose}><X size={12} /></button>
       </div>
@@ -2572,7 +2937,7 @@ function WeekMonthDeposit({ sites, cashflows, weekStart, weekEnd }: {
   )
 }
 
-export default function Dashboard() {
+export default function Dashboard({ betTarget, onBetTargetDone, layoutMode = 'side', onLayoutMode }: { betTarget?: BetTarget | null; onBetTargetDone?: () => void; layoutMode?: LayoutMode; onLayoutMode?: (m: LayoutMode) => void } = {}) {
   const today = dayjs().format('YYYY-MM-DD')
 
   const [sites, setSites]     = useState<Site[]>([])
@@ -2587,11 +2952,55 @@ export default function Dashboard() {
   const [gameRollings, setGameRollings] = useState<GameRolling[]>([])
 
   const [showSiteMgr, setShowSiteMgr]   = useState(false)
+  const [showRulebook, setShowRulebook] = useState(false)
+  // 대시보드 스타일: 'side'(사이트 현황 좌 / 베팅 현황 우) · 'stacked'(사이트 현황 위 / 베팅 현황 아래)
+  // · 'bet'(베팅 모드 — 가져온 경기 일정으로 베팅하는 패널 좌 / 베팅 현황 우) — 이 기기에 기억
+  // 화면 모드(좌우·상하·베팅)는 상단 '옵션'에서 고른다 (App이 가짐 — 2026-11-24 사용자 요청)
+  // 사이트 현황 자리에 보여줄 것: 'site'(사이트 현황) · 'analysis'(베팅분석) — 이 기기에 기억
+  const [sidePanelPick, setSidePanel] = useState<'site' | 'analysis'>(() => {
+    try { return localStorage.getItem('songbet_dashboard_side_panel') === 'analysis' ? 'analysis' : 'site' } catch { return 'site' }
+  })
+  const sidePanel = ANALYSIS_IN_DASHBOARD ? sidePanelPick : 'site'
+  // 베팅분석은 한 번 열면 계속 붙여 둔다 — 사이트 현황으로 갔다 와도 넣던 배당이 남게
+  const [analysisOpened, setAnalysisOpened] = useState(sidePanel === 'analysis')
+  function pickSidePanel(next: 'site' | 'analysis') {
+    setSidePanel(next)
+    if (next === 'analysis') setAnalysisOpened(true)
+    try { localStorage.setItem('songbet_dashboard_side_panel', next) } catch { /* 저장 못 해도 이번 화면에선 적용 */ }
+  }
+  const sidePanelTabs = (
+    <span style={{ display: 'inline-flex', gap: 4, verticalAlign: 'middle' }}>
+      {([['site', '사이트 현황'], ['analysis', '베팅분석']] as const).map(([k, label]) => (
+        <button key={k} onClick={() => pickSidePanel(k)} style={{
+          padding: '3px 10px', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 700, fontFamily: 'var(--font-body)', whiteSpace: 'nowrap',
+          border: `1px solid ${sidePanel === k ? 'var(--gold-border)' : 'var(--border)'}`,
+          background: sidePanel === k ? 'var(--gold-bg)' : 'transparent',
+          color: sidePanel === k ? 'var(--gold)' : 'var(--text-secondary)',
+        }}>{label}</button>
+      ))}
+    </span>
+  )
+  const stacked = layoutMode === 'stacked'
+  const analysisTitle = <span className="card-title" style={{ margin: 0 }}>베팅분석</span>
+  const analysisFallback = (title: React.ReactNode) => (
+    <div className="card" style={{ padding: '10px 14px' }}>{title}<div style={{ color: 'var(--text-muted)', fontSize: 13, padding: '10px 0' }}>불러오는 중...</div></div>
+  )
+  const betMode = layoutMode === 'bet'
+  const pickLayoutMode = (next: LayoutMode) => onLayoutMode?.(next)
+  // 분석 탭 '베팅하기'로 왔으면 베팅 모드로 바꾸고 그 경기 베팅슬립을 연다 (BetModePanel target)
+  useEffect(() => { if (betTarget && layoutMode !== 'bet') pickLayoutMode('bet') }, [betTarget]) // eslint-disable-line react-hooks/exhaustive-deps
   const [depositSite, setDepositSite]   = useState<Site | null>(null)
   const [withdrawSite, setWithdrawSite] = useState<Site | null>(null)
   const [openFormSiteId, setOpenFormSiteId] = useState<string | null>(null)
   const [openFormType, setOpenFormType] = useState<'sports' | 'game'>('sports')
   const [hoverBetId, setHoverBetId]     = useState<string | null>(null)
+  const [manualBetId, setManualBetId]   = useState<string | null>(null)   // 베팅 모드 합친 목록 — '수동처리' 펼친 베팅
+  useEffect(() => {
+    if (!manualBetId) return
+    const close = () => setManualBetId(null)
+    window.addEventListener('click', close)
+    return () => window.removeEventListener('click', close)
+  }, [manualBetId])
   const [expandedSettled, setExpandedSettled] = useState<Record<string, boolean>>({})
   const [inlineEditBetId, setInlineEditBetId] = useState<string | null>(null)
   // 다폴 진행중 개별 leg 적중 체크 상태 (leg bet id → checked). 하나라도 실패면 즉시 전체 실패 처리하므로 여기엔 "적중" 체크만 임시 보관한다.
@@ -2622,6 +3031,11 @@ export default function Dashboard() {
   const [betOptionsBySport, setBetOptionsBySport] = useState<Record<string, string[]>>({})
   // "세부 수치 입력" 옵션 — betOptionsBySport의 부분집합. 선택하면 숫자를 입력받아 "포인트" 자리에 채워넣는다.
   const [numericBetOptionsBySport, setNumericBetOptionsBySport] = useState<Record<string, string[]>>({})
+  // 옵션별 기본 베팅금액 (베팅옵션 관리에서 설정) — sport → label → 금액
+  const [betOptionStakesBySport, setBetOptionStakesBySport] = useState<Record<string, Record<string, number>>>({})
+  // 표시·수정용: LOL은 BO1/BO3/BO5/세트 세부옵션 목록까지 합친 목록으로 배지를 알아본다
+  const displayOptionsBySport = useMemo(() => mergeLolOptions(betOptionsBySport), [betOptionsBySport])
+  const displayNumericBySport = useMemo(() => mergeLolOptions(numericBetOptionsBySport), [numericBetOptionsBySport])
   // 축구/야구/농구/배구/LOL — 리그/팀 직접 등록 후 자동완성으로 선택하는 방식 (자유입력 대신)
   const [soccerLeagues, setSoccerLeagues] = useState<string[]>([])
   const [baseballLeagues, setBaseballLeagues] = useState<string[]>([])
@@ -2660,21 +3074,56 @@ export default function Dashboard() {
     if (data) setSites(data)
   }
   async function loadBets() {
-    const { data } = await supabase.from('bets').select('*').eq('is_hidden', false).order('bet_date', { ascending: true }).order('created_at', { ascending: true })
+    const data = await fetchAllRows<Bet>((from, to) => supabase.from('bets').select('*').eq('is_hidden', false).order('bet_date', { ascending: true }).order('created_at', { ascending: true }).order('id').range(from, to))
     if (data) setBets(data)
   }
+  // 자동 판정(DB auto_grade_bets, 30분마다)을 5분마다 받아 대기 중 베팅에 붙인다 — 최종 처리는 [확인]
+  async function refreshAuto() {
+    const { data } = await supabase.from('bets').select('id, auto_result, auto_score, auto_note, auto_game, auto_game_id').eq('result', 'pending').eq('is_hidden', false)
+    if (!data) return
+    const m = new Map(data.map(d => [d.id as string, d]))
+    setBets(p => p.map(b => { const d = m.get(b.id); return d && (d.auto_result !== b.auto_result || d.auto_score !== b.auto_score || d.auto_note !== b.auto_note || JSON.stringify(d.auto_game ?? null) !== JSON.stringify(b.auto_game ?? null) || d.auto_game_id !== b.auto_game_id) ? { ...b, ...d } as Bet : b }))
+  }
+  useEffect(() => {
+    const t = setInterval(refreshAuto, 5 * 60 * 1000)
+    return () => clearInterval(t)
+  }, [])
+  // 새 베팅은 경기가 아직 안 붙어 있다 (자동 판정은 30분마다) → 경기 안 붙은 대기 베팅이 보이면 바로 한 번 돌려 '홈 vs 원정 · 시각'을 붙인다
+  // (2026-11-24 사용자 요청 — 축구도 NBA처럼 리그 옆에 누구 대 누구, 1분에 한 번까지)
+  const autoKickRef = useRef(0)
+  const needGame = bets.filter(b => b.result === 'pending' && !b.parlay_group && !b.auto_game && !b.auto_note && ['soccer', 'basketball', 'volleyball'].includes(b.sport)).map(b => b.id).join(',')
+  useEffect(() => {
+    if (!needGame) return
+    const kick = () => { autoKickRef.current = Date.now(); supabase.rpc('auto_grade_bets').then(() => refreshAuto(), () => {}) }
+    const wait = 60_000 - (Date.now() - autoKickRef.current)
+    if (wait <= 0) { kick(); return }
+    const t = setTimeout(kick, wait)
+    return () => clearTimeout(t)
+  }, [needGame]) // eslint-disable-line react-hooks/exhaustive-deps
   async function loadBetOptions() {
     const { data } = await supabase.from('bet_options').select('*').order('sport').order('sort_order').order('created_at')
     if (data) {
       const grouped: Record<string, string[]> = {}
       const numericGrouped: Record<string, string[]> = {}
+      const stakes: Record<string, Record<string, number>> = {}
       for (const d of data) {
         (grouped[d.sport] ??= []).push(d.label)
         if (d.numeric_input) (numericGrouped[d.sport] ??= []).push(d.label)
+        if (Number(d.default_stake) > 0) (stakes[d.sport] ??= {})[d.label] = Number(d.default_stake)
       }
       setBetOptionsBySport(grouped)
       setNumericBetOptionsBySport(numericGrouped)
+      setBetOptionStakesBySport(stakes)
     }
+  }
+  async function setBetOptionStake(sport: string, label: string, stake: number | null) {
+    const { error } = await supabase.from('bet_options').update({ default_stake: stake }).eq('sport', sport).eq('label', label)
+    if (error) { alert('기본금액 저장 실패: ' + error.message); return }
+    setBetOptionStakesBySport(p => {
+      const next = { ...(p[sport] ?? {}) }
+      if (stake) next[label] = stake; else delete next[label]
+      return { ...p, [sport]: next }
+    })
   }
   async function addBetOption(sport: string, label: string, numeric: boolean) {
     if (betOptionsBySport[sport]?.includes(label)) return
@@ -2698,6 +3147,11 @@ export default function Dashboard() {
     if (!error) {
       setBetOptionsBySport(p => ({ ...p, [sport]: (p[sport] ?? []).map(o => o === oldLabel ? newLabel : o) }))
       setNumericBetOptionsBySport(p => ({ ...p, [sport]: (p[sport] ?? []).map(o => o === oldLabel ? newLabel : o) }))
+      setBetOptionStakesBySport(p => {
+        const cur = p[sport]; if (!cur || !(oldLabel in cur)) return p
+        const next = { ...cur, [newLabel]: cur[oldLabel] }; delete next[oldLabel]
+        return { ...p, [sport]: next }
+      })
     }
   }
   async function reorderBetOption(sport: string, fromIndex: number, toIndex: number) {
@@ -2734,8 +3188,8 @@ export default function Dashboard() {
     if (vb) setVolleyballOverrides(vb as LeagueOverride[])
   }
   async function loadAllBetsHistory() {
-    const { data } = await supabase.from('bets').select('sport, match, result, profit, stake, odds, bet_date, created_at, league').order('bet_date', { ascending: false }).limit(5000)
-    if (data) setAllBetsHistory(data as BetLite[])
+    const data = await fetchAllRows<BetLite>((from, to) => supabase.from('bets').select('sport, match, result, profit, stake, odds, bet_date, created_at, league').neq('sport', 'casino').eq('is_mock', false).order('bet_date', { ascending: false }).order('id').range(from, to))
+    if (data) setAllBetsHistory(data)
   }
   // 축구/야구/농구/LOL — 등록된 리그/팀 목록 로드 (베팅추가에서 자유입력 대신 드롭다운으로 선택)
   async function loadSportTeamData() {
@@ -2756,11 +3210,13 @@ export default function Dashboard() {
     if (kl) { setBasketballLeagues(kl.map(r => r.name)); setBasketballFavoriteLeagues(kl.filter(r => r.is_favorite).map(r => r.name)) }
     if (vl) { setVolleyballLeagues(vl.map(r => r.name)); setVolleyballFavoriteLeagues(vl.filter(r => r.is_favorite).map(r => r.name)) }
     if (el) { setEsportsLeagues(el.map(r => r.name)); setEsportsFavoriteLeagues(el.filter(r => r.is_favorite).map(r => r.name)) }
-    if (st) setSoccerTeams(st)
-    if (bt) setBaseballTeams(bt)
-    if (kt) setBasketballTeams(kt)
-    if (vt) setVolleyballTeams(vt)
-    if (et) setEsportsTeams(et)
+    // 리그 관리에서 지운 리그의 팀은 팀 이름 추천에서 뺀다 (사용자 요청) — 리그 목록에 남아 있는 리그의 팀만
+    const alive = <T extends { league: string }>(ts: T[], ls: { name: string }[] | null) => ls ? ts.filter(t => ls.some(l => l.name === t.league)) : ts
+    if (st) setSoccerTeams(alive(st, sl))
+    if (bt) setBaseballTeams(alive(bt, bl))
+    if (kt) setBasketballTeams(alive(kt, kl))
+    if (vt) setVolleyballTeams(alive(vt, vl))
+    if (et) setEsportsTeams(alive(et, el))
   }
   // 리그 즐겨찾기 토글 — 드롭다운 열었을 때 맨 위 우선순위로 노출하기 위한 용도
   async function toggleSoccerLeagueFavorite(name: string) {
@@ -2831,6 +3287,7 @@ export default function Dashboard() {
   }
   async function deleteSoccerLeague(name: string) {
     await supabase.from('soccer_leagues').delete().eq('name', name) // 팀도 cascade로 함께 삭제됨
+    await supabase.from('soccer_teams').delete().eq('league', name)
     await supabase.from('bets').update({ league: '' }).eq('league', name).eq('sport', 'soccer')
     setSoccerLeagues(p => p.filter(l => l !== name))
     setSoccerTeams(p => p.filter(t => t.league !== name))
@@ -2846,6 +3303,7 @@ export default function Dashboard() {
   }
   async function deleteBaseballLeague(name: string) {
     await supabase.from('baseball_leagues').delete().eq('name', name)
+    await supabase.from('baseball_teams').delete().eq('league', name)
     await supabase.from('bets').update({ league: '' }).eq('league', name).eq('sport', 'baseball')
     setBaseballLeagues(p => p.filter(l => l !== name))
     setBaseballTeams(p => p.filter(t => t.league !== name))
@@ -2861,6 +3319,7 @@ export default function Dashboard() {
   }
   async function deleteBasketballLeague(name: string) {
     await supabase.from('basketball_leagues').delete().eq('name', name)
+    await supabase.from('basketball_teams').delete().eq('league', name)
     await supabase.from('bets').update({ league: '' }).eq('league', name).eq('sport', 'basketball')
     setBasketballLeagues(p => p.filter(l => l !== name))
     setBasketballTeams(p => p.filter(t => t.league !== name))
@@ -2876,6 +3335,7 @@ export default function Dashboard() {
   }
   async function deleteEsportsLeague(name: string) {
     await supabase.from('esports_leagues').delete().eq('name', name)
+    await supabase.from('esports_teams').delete().eq('league', name)
     await supabase.from('bets').update({ league: '' }).eq('league', name).eq('sport', 'esports')
     setEsportsLeagues(p => p.filter(l => l !== name))
     setEsportsTeams(p => p.filter(t => t.league !== name))
@@ -2891,6 +3351,7 @@ export default function Dashboard() {
   }
   async function deleteVolleyballLeague(name: string) {
     await supabase.from('volleyball_leagues').delete().eq('name', name)
+    await supabase.from('volleyball_teams').delete().eq('league', name)
     await supabase.from('bets').update({ league: '' }).eq('league', name).eq('sport', 'volleyball')
     setVolleyballLeagues(p => p.filter(l => l !== name))
     setVolleyballTeams(p => p.filter(t => t.league !== name))
@@ -2966,33 +3427,33 @@ export default function Dashboard() {
     await supabase.from('volleyball_teams').delete().eq('league', league).eq('name', name)
     setVolleyballTeams(p => p.filter(t => !(t.league === league && t.name === name)))
   }
-  const totalRolling     = (s: Site) => (s.last_deposit ?? 0) + (s.point_deposit ?? 0)
+  const totalRolling     = (s: Site) => rollingTargetOf(s)
   const depositRemaining = (s: Site) => Math.max(0, totalRolling(s) - (s.deposit_bet_done ?? 0))
-  const depositPct       = (s: Site) => totalRolling(s) > 0 ? Math.round((s.deposit_bet_done ?? 0) / totalRolling(s) * 100) : 0
+  const depositPct       = (s: Site) => rollingProgress(s.deposit_bet_done ?? 0, totalRolling(s))
   const toKrw = (amount: number, currency: 'krw' | 'usd') => currency === 'usd' ? amount * usdKrwRate : amount
   // 전체 사이트 합산 (달러는 원화로 환산) — 지금 롤링이 얼마나 필요한지 한눈에 보기 위함 (개별 사이트 카드와 동일한 구성: 입금/포인트/남은롤링/진행률)
-  const aggDep = sites.reduce((sum, s) => sum + toKrw(s.last_deposit ?? 0, s.currency), 0)
-  const aggPt  = sites.reduce((sum, s) => sum + toKrw(s.point_deposit ?? 0, s.currency), 0)
-  const aggRollingTarget = aggDep + aggPt
+  const aggRollingTarget = sites.reduce((sum, s) => sum + toKrw(rollingTargetOf(s), s.currency), 0)
   const aggRollingDone   = sites.reduce((sum, s) => sum + toKrw(s.deposit_bet_done ?? 0, s.currency), 0)
   const aggRem = Math.max(0, aggRollingTarget - aggRollingDone)
-  const aggPct = aggRollingTarget > 0 ? Math.round(aggRollingDone / aggRollingTarget * 100) : 0
+  const aggPct = rollingProgress(aggRollingDone, aggRollingTarget)
   const betsBySite       = (id: string) => bets.filter(b => b.site_id === id)
   const pendingBySite    = (id: string) => betsBySite(id).filter(b => b.result === 'pending')
   const settledBySite    = (id: string) => betsBySite(id).filter(b => b.result !== 'pending')
   // 화면 표시 전용 — 결과 처리 후 1시간 동안은 "완료된 목록"으로 바로 넘기지 않고 진행중 쪽에 그대로 보여줌
   // (잔액/수익 계산 등 실제 데이터 처리는 위 pendingBySite/settledBySite를 그대로 쓰고, 이건 오직 목록 표시 위치만 다르게 함)
   const isRecentlyResolved = (b: Bet) => b.result !== 'pending' && !!b.result_at && (nowTick - new Date(b.result_at).getTime()) < RESULT_HOLD_MS
-  const displayPendingBySite = (id: string) => betsBySite(id).filter(b => b.result === 'pending' || isRecentlyResolved(b))
-  const displaySettledBySite = (id: string) => betsBySite(id).filter(b => b.result !== 'pending' && !isRecentlyResolved(b))
+  // 카지노 베팅은 입력 즉시 결과처리되므로 진행중/완료 목록이 아니라 게임 롤링처럼 별도 목록으로 보여준다
+  const displayPendingBySite = (id: string) => betsBySite(id).filter(b => b.sport !== 'casino' && (b.result === 'pending' || isRecentlyResolved(b)))
+  const displaySettledBySite = (id: string) => betsBySite(id).filter(b => b.sport !== 'casino' && b.result !== 'pending' && !isRecentlyResolved(b))
+  const casinoBySite = (id: string) => betsBySite(id).filter(b => b.sport === 'casino')
   const gameRollingsBySite = (id: string) => gameRollings.filter(g => g.site_id === id)
   const colCount = Math.max(1, sites.length)
 
   function sitePnL(site: Site) {
     // 마감된(비활성) 사이트는 사이트명 옆 진행중 수익/손실 표시를 하지 않음
     if (!site.active) return null
-    const hasPending = pendingBySite(site.id).length > 0
-    const visibleSum = settledBySite(site.id).reduce((acc, b) => acc + b.profit, 0)
+    const hasPending = pendingBySite(site.id).some(b => !b.is_mock)
+    const visibleSum = settledBySite(site.id).filter(b => !b.is_mock).reduce((acc, b) => acc + b.profit, 0)
     const carry = site.carry_pnl ?? 0
     const total = carry + visibleSum
     // 아직 아무 이력도 없는 새 사이트 → 표시 안 함
@@ -3000,12 +3461,15 @@ export default function Dashboard() {
     return total
   }
 
+  // 룰북 메모장 — 사이트관리처럼 모달 창으로
+  function openRulebook() { setShowRulebook(true) }
+
   /* ── 사이트 관리 ── */
-  async function addSite(name: string, currency: 'krw' | 'usd') {
+  async function addSite(name: string, currency: 'krw' | 'usd', rollingPct = 100) {
     const { data } = await supabase.from('sites').insert({
       name, balance: 0, active: false, sort_order: sites.length,
       rolling_target: 0, rolling_done: 0, last_deposit: 0, deposit_bet_done: 0,
-      point_deposit: 0, total_withdrawal: 0, currency,
+      point_deposit: 0, total_withdrawal: 0, currency, rolling_pct: rollingPct,
     }).select().single()
     if (data) { await logAction({ action_type: 'insert', table_name: 'sites', record_id: data.id, after_data: data, description: `사이트 추가: ${data.name}` }); setSites(p => [...p, data]) }
   }
@@ -3018,6 +3482,13 @@ export default function Dashboard() {
   async function toggleCurrency(site: Site) {
     const { data } = await supabase.from('sites').update({ currency: site.currency === 'krw' ? 'usd' : 'krw' }).eq('id', site.id).select().single()
     if (data) setSites(p => p.map(s => s.id === site.id ? data : s))
+  }
+  async function updateRollingPct(site: Site, val: number) {
+    const { data } = await supabase.from('sites').update({ rolling_pct: val }).eq('id', site.id).select().single()
+    if (data) {
+      await logAction({ action_type: 'update', table_name: 'sites', record_id: site.id, before_data: { rolling_pct: site.rolling_pct } as never, after_data: { rolling_pct: val } as never, description: `${site.name} 롤링 목표 ${site.rolling_pct ?? 100}% → ${val}%` })
+      setSites(p => p.map(s => s.id === site.id ? data : s))
+    }
   }
   async function updateDefaultStake(site: Site, val: number) {
     const { data } = await supabase.from('sites').update({ default_stake: val }).eq('id', site.id).select().single()
@@ -3037,9 +3508,10 @@ export default function Dashboard() {
     if (!depositSite) return
     const before = { ...depositSite }; const isusd = depositSite.currency === 'usd'
     const newTotalDeposit = (depositSite.last_deposit ?? 0) + amount
-    const newTotalRolling = newTotalDeposit + (depositSite.point_deposit ?? 0)
+    // 이전 목표를 넘겨 롤링한 초과분은 이월하지 않음 — 이번 입금분(× 롤링 목표 %)만큼은 새로 롤링 필요
+    const prevTarget = rollingTargetOf(depositSite)
     const currentDone = depositSite.deposit_bet_done ?? 0
-    const newDone = currentDone > (newTotalRolling - amount) ? newTotalRolling - amount : currentDone
+    const newDone = Math.min(currentDone, prevTarget)
     const { data } = await supabase.from('sites').update({
       balance: depositSite.balance + amount, active: true,
       last_deposit: newTotalDeposit,
@@ -3059,9 +3531,9 @@ export default function Dashboard() {
     const before = { ...depositSite }
     // 입금과 동일한 로직: 포인트가 추가되면 그만큼 남은 롤링이 다시 생겨야 함 (롤링완료 상태였어도 추가된 포인트만큼은 롤링 필요)
     const newTotalPoint = (depositSite.point_deposit ?? 0) + amount
-    const newTotalRolling = (depositSite.last_deposit ?? 0) + newTotalPoint
+    const prevTarget = rollingTargetOf(depositSite)
     const currentDone = depositSite.deposit_bet_done ?? 0
-    const newDone = currentDone > (newTotalRolling - amount) ? newTotalRolling - amount : currentDone
+    const newDone = Math.min(currentDone, prevTarget)
     const { data } = await supabase.from('sites').update({
       balance: depositSite.balance + amount, active: true,
       point_deposit: newTotalPoint,
@@ -3077,8 +3549,8 @@ export default function Dashboard() {
     // 완료된 목록(이미 결과 처리된 베팅)은 마감 시점에 숨김 처리 — 다음 마감 때 완료 목록이 비워지는 효과
     // 진행중(pending) 베팅은 절대 건드리지 않음 — 결과 처리 전까지 계속 남아있어야 함
     const siteSettled = settledBySite(withdrawSite.id)
-    const settledProfitSum = siteSettled.reduce((acc, b) => acc + b.profit, 0)
-    const stillPending = pendingBySite(withdrawSite.id).length > 0
+    const settledProfitSum = siteSettled.filter(b => !b.is_mock).reduce((acc, b) => acc + b.profit, 0)
+    const stillPending = pendingBySite(withdrawSite.id).some(b => !b.is_mock)
     // 진행중 베팅이 남아있으면 수익률을 이월(초기화하지 않음), 없으면 완전히 초기화
     const newCarryPnl = stillPending ? (withdrawSite.carry_pnl ?? 0) + settledProfitSum : 0
 
@@ -3131,10 +3603,16 @@ export default function Dashboard() {
   }
 
   /* ── 베팅 제출 ── */
-  async function submitBet(site: Site, sport: string, content: string, odds: number, stake: number, isLive = false, league = ''): Promise<boolean> {
+  async function submitBet(site: Site, sport: string, content: string, odds: number, stake: number, isLive = false, league = '', isMock = false): Promise<boolean> {
     const { market, pick } = autoMarket(content)
-    const { data: betData } = await supabase.from('bets').insert({ bet_date: today, sport: sport as Sport, league, match: content, market, pick, odds, stake, result: 'pending' as BetResult, profit: 0, memo: '', site_id: site.id, parlay_group: null, parlay_leg: 1, is_live: isLive }).select().single()
+    const { data: betData } = await supabase.from('bets').insert({ bet_date: today, sport: sport as Sport, league, match: content, market, pick, odds, stake, result: 'pending' as BetResult, profit: 0, memo: '', site_id: site.id, parlay_group: null, parlay_leg: 1, is_live: isLive, is_mock: isMock }).select().single()
     if (!betData) return false
+    // 모의베팅: 잔액·롤링은 건드리지 않는다
+    if (isMock) {
+      await logAction({ action_type: 'insert', table_name: 'bets', record_id: betData.id, after_data: betData as never, description: `[${site.name}] 모의 ${content} / ${stake.toLocaleString()}` })
+      setBets(p => [...p, betData])
+      return true
+    }
     const { data: siteData } = await supabase.from('sites').update({ balance: site.balance - stake, rolling_done: site.rolling_done + stake, deposit_bet_done: (site.deposit_bet_done ?? 0) + stake }).eq('id', site.id).select().single()
     if (siteData) {
       await logAction({ action_type: 'insert', table_name: 'bets', record_id: betData.id, after_data: betData as never, description: `[${site.name}] ${content} / ${stake.toLocaleString()}` })
@@ -3163,6 +3641,23 @@ export default function Dashboard() {
       return true
     }
     return false
+  }
+
+  /* ── 카지노 기록 삭제 (카지노 입력은 없앴지만 남아있는 기록은 지울 수 있게) ── */
+  async function deleteCasinoBet(bet: Bet) {
+    const site = sites.find(s => s.id === bet.site_id)
+    if (!confirm(`카지노 ${bet.match} 기록을 삭제하고 잔액/롤링을 되돌릴까요?`)) return
+    await supabase.from('bets').delete().eq('id', bet.id)
+    setBets(p => p.filter(b => b.id !== bet.id))
+    if (site) {
+      const { data } = await supabase.from('sites').update({
+        balance: site.balance - bet.profit,
+        rolling_done: Math.max(0, site.rolling_done - bet.stake),
+        deposit_bet_done: Math.max(0, (site.deposit_bet_done ?? 0) - bet.stake),
+      }).eq('id', site.id).select().single()
+      if (data) setSites(p => p.map(s => s.id === data.id ? data : s))
+    }
+    await logAction({ action_type: 'delete', table_name: 'bets', record_id: bet.id, before_data: bet as never, description: `카지노 ${bet.match} 삭제 (베팅 ${bet.stake.toLocaleString()} / 손익 ${bet.profit.toLocaleString()})` })
   }
 
   /* ── 게임 롤링 추가 (베팅 없이 롤링 금액만 차감 + 목록에 기록) ── */
@@ -3299,7 +3794,9 @@ export default function Dashboard() {
 
   /* ── 결과 처리 (단폴, 완료→pending 복원 포함) ── */
   async function applyResult(bet: Bet, result: BetResult | 'cancel' | 'revert') {
-    const site = sites.find(s => s.id === bet.site_id)
+    const betSite = sites.find(s => s.id === bet.site_id)
+    // 모의베팅은 결과처리/취소/되돌리기 모두 베팅 기록만 바꾸고 사이트 잔액·롤링엔 반영하지 않는다
+    const site = bet.is_mock ? undefined : betSite
 
     // 처리 취소: 완료된 베팅을 다시 pending으로 복원
     if (result === 'revert') {
@@ -3342,7 +3839,7 @@ export default function Dashboard() {
       return
     }
 
-    const isusd = site?.currency === 'usd'
+    const isusd = !bet.is_mock && betSite?.currency === 'usd'
     const rawProfit = bet.stake * (bet.odds - 1)
     const profit = result === 'win'
       ? (isusd ? Math.round(rawProfit * 100) / 100 : Math.round(rawProfit))
@@ -3374,13 +3871,14 @@ export default function Dashboard() {
       return
     }
     const profit = -(bet.stake - cashoutAmount)
-    const isusd = site.currency === 'usd'
+    const isusd = !bet.is_mock && site.currency === 'usd'
     const rateAtSettlement = isusd ? await getUsdKrwRate() : null
     const memo = bet.memo ? `${bet.memo} · 캐시아웃 ${cashoutAmount.toLocaleString()}` : `캐시아웃 ${cashoutAmount.toLocaleString()}`
     const { data } = await supabase.from('bets').update({ result: 'loss', profit, usd_krw_rate: rateAtSettlement, memo, cashout_amount: cashoutAmount, result_at: new Date().toISOString() }).eq('id', bet.id).select().single()
     if (data) {
       await logAction({ action_type: 'update', table_name: 'bets', record_id: data.id, before_data: bet as never, after_data: data as never, description: `캐시아웃: ${bet.match} → ${cashoutAmount.toLocaleString()}` })
       setBets(p => p.map(b => b.id === data.id ? data : b))
+      if (bet.is_mock) return
       const { data: sd } = await supabase.from('sites').update({
         balance: site.balance + cashoutAmount,
         rolling_done: Math.max(0, site.rolling_done - cashoutAmount),
@@ -3438,7 +3936,7 @@ export default function Dashboard() {
       await logAction({ action_type: 'update', table_name: 'bets', record_id: data.id, before_data: before as never, after_data: data as never, description: `베팅 수정: ${data.match}` })
       setBets(p => p.map(b => b.id === data.id ? data : b))
       // 금액(stake)이 변경된 만큼 사이트의 잔액/롤링에도 차액을 반영 (남은 롤링이 즉시 갱신되도록)
-      const delta = stake - bet.stake
+      const delta = bet.is_mock ? 0 : stake - bet.stake
       if (delta !== 0) {
         const site = sites.find(s => s.id === bet.site_id)
         if (site) {
@@ -3508,121 +4006,201 @@ export default function Dashboard() {
     setInlineEditBetId(null)
   }
 
-  return (
-    <div className="page">
-      {/* 데스크탑: 사이트 현황(좌, 카드 세로 쌓기) / 베팅 현황(우)을 한 줄에 두고 1 : 베팅 사이트 수 비율로 가로폭을 나눠
-          모든 카드가 같은 폭이 되게 한다 — 베팅 사이트를 추가하면 전체 카드 폭이 똑같이 줄어든다 */}
-      <div className="dashboard-main" style={{ '--mining-n': 1, '--bet-n': colCount } as React.CSSProperties}>
+  // 사이트 한 곳의 베팅 목록(베팅추가·게임 롤링·카지노·진행 중·완료) — 좌우·상하 모드 사이트 카드와 베팅 모드 '진행 중 베팅' 한 줄에서 같이 쓴다.
+  // withAdd = 맨 위 베팅추가 버튼 (베팅 모드에선 빼고 베팅 모드 패널의 베팅추가로)
+  /* 자동 판정이 맞춘 경기 한 줄 — "뉴욕 vs 포틀랜드 · 09:30" / "경기중 60 : 59" / "102 : 98 종료" (사용자 요청 2026-11-22) */
+  const gameInfoLine = (b: Bet) => {
+    const g = b.auto_game
+    if (!g?.home || !g?.away) return null
+    const st = g.status ?? ''
+    const started = !!g.start && Date.parse(g.start) <= Date.now()
+    const final = g.final || st === '종료' || /^final/i.test(st)
+    const stopped = /연기|중단|취소|postpon|cancel|suspend|abandon/i.test(st)
+    const sc = g.hs != null && g.as != null && g.hs !== '' && g.as !== '' ? `${g.hs} : ${g.as}` : null
+    const tail = stopped ? <span style={{ color: 'var(--orange)', fontWeight: 700 }}>{st}{sc ? ` (${sc})` : ''}</span>
+      : final ? <span style={{ color: 'var(--text-secondary)', fontWeight: 700 }}>{sc ?? ''} 종료</span>
+      : started ? <span style={{ color: 'var(--gold)', fontWeight: 700 }}>● {sc ?? '경기중'}{st && !/^\d+\/\d+/.test(st) ? ` ${st}` : ''}</span>
+      : <span>{g.start ? dayjs(g.start).format('M/D HH:mm') : ''}</span>
+    return <span style={{ fontWeight: 500 }}>{g.home} vs {g.away} · {tail}</span>
+  }
 
-        {/* ── 사이트 현황 (좌측) */}
-        <div className="dashboard-side">
-          <MiningWidget />
-          <DailyPnLWidget usdKrwRate={usdKrwRate} refreshKey={(() => { const st = bets.filter(b => b.result !== 'pending'); return `${st.length}:${st.reduce((a, b) => a + b.profit, 0)}` })()} />
-        </div>
-
-        {/* ── 베팅 현황 (전체) */}
-        <div className="dashboard-bets">
-          {sites.length === 0 ? (
-            <div className="card" style={{ padding: '10px 14px' }}>
-              <div className="flex-between mb-10">
-                <span className="card-title" style={{ margin: 0 }}>베팅 현황</span>
-                <button onClick={() => setShowSiteMgr(true)} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-secondary)', cursor: 'pointer', padding: '3px 8px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-body)' }}>
-                  <Settings size={11} /> 사이트관리
-                </button>
-              </div>
-              <div className="empty"><div className="empty-icon">🎯</div>사이트를 추가하세요</div>
+  /* ── 베팅 모드의 베팅 현황 (2026-11-22 사용자 요청 — 사이트마다 칸을 나누지 말고 하나로):
+     맨 위 = 사이트별 한 줄 요약(입금·남은 롤링·수익), 그 아래 = 모든 사이트의 진행중 베팅을 한 줄씩 (최근 것 위) */
+  const renderCombinedStatus = () => {
+    const rows = sites.map(site => ({ site, pending: displayPendingBySite(site.id) }))
+    const all = rows.flatMap(r => r.pending.map(b => ({ b, site: r.site })))
+      .sort((x, y) => y.b.created_at.localeCompare(x.b.created_at))
+    const seenGroups = new Set<string>()
+    const num: CSSProperties = { fontFamily: 'var(--font-num)', fontWeight: 700, whiteSpace: 'nowrap' }
+    const iconBtn = (title: string, color: string, onClick: () => void, icon: React.ReactNode) => (
+      <button className="bet-action-btn" title={title} onClick={e => { e.stopPropagation(); onClick() }} style={{ width: 20, height: 20, color, borderColor: 'var(--border)' }}>{icon}</button>
+    )
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {/* 사이트 요약 — 사이트 하나에 한 줄 */}
+        <div className="card" style={{ padding: '6px 10px' }}>
+          {/* 모바일(700px 이하)은 사이트마다 카드 두 줄 — index.css .ss-* (2026-11-24 사용자 요청), PC는 한 줄 표 그대로 (display: contents) */}
+          <div className="ss-grid" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1.6fr) minmax(0, 1fr) auto', columnGap: 10, rowGap: 4, alignItems: 'center', fontSize: 12 }}>
+            <div className="ss-head" style={{ display: 'contents' }}>
+            <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 700 }}>사이트</span>
+            <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 700, textAlign: 'right' }}>입금</span>
+            <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 700 }}>남은 롤링</span>
+            <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 700, textAlign: 'right' }}>수익</span>
+            <span />
             </div>
-          ) : (
-            <div className="card" style={{ padding: '10px 14px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, gap: 10, flexWrap: 'wrap' }}>
-                <span className="card-title" style={{ margin: 0 }}>베팅 현황</span>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  {aggRollingTarget > 0 && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <span style={{ fontSize: 12, fontWeight: 800, fontFamily: 'var(--font-num)', color: aggRem > 0 ? 'var(--gold)' : 'var(--green)' }}>{Math.round(aggRem).toLocaleString()}원</span>
-                      <div className="deposit-progress-bar" style={{ width: 150, margin: 0 }}><div className="deposit-progress-fill" style={{ width: `${Math.min(100, aggPct)}%` }} /></div>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: aggPct >= 100 ? 'var(--green)' : 'var(--orange)' }}>{aggPct}%</span>
-                    </div>
-                  )}
-                  <button onClick={() => setShowSiteMgr(true)} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-secondary)', cursor: 'pointer', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-body)' }}>
-                    <Settings size={12} /> 사이트관리
-                  </button>
-                </div>
+            {rows.map(({ site, pending }) => {
+              const isusd = site.currency === 'usd'; const pfx = isusd ? '$' : ''; const sfx = isusd ? '' : '원'
+              const dep = site.last_deposit ?? 0; const pct = depositPct(site); const rem = depositRemaining(site); const pnl = sitePnL(site)
+              const n = pending.filter(b => b.result === 'pending').length
+              return <div key={site.id} className={`ss-row${site.active ? ' ss-active' : ''}`} style={{ display: 'contents' }}>
+                <span className="ss-name" style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0 }}>
+                  {site.active && <span className="site-active-dot" />}
+                  <span style={{ fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: site.active ? 'var(--text-primary)' : 'var(--text-secondary)' }}>{site.name}</span>
+                  {isusd && <span style={{ fontSize: 9, color: 'var(--blue)', fontWeight: 700 }}>$</span>}
+                  {n > 0 && <span style={{ fontSize: 10, color: 'var(--blue)', fontWeight: 700 }}>· {n}건</span>}
+                </span>
+                <span className="ss-dep" style={{ ...num, textAlign: 'right', color: dep > 0 ? 'var(--text-primary)' : 'var(--text-muted)' }}><span className="ss-lbl">입금 </span>{dep > 0 ? `${pfx}${dep.toLocaleString()}${sfx}` : '–'}</span>
+                <span className="ss-roll" style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                  <span className="ss-lbl">남은 롤링</span>
+                  <span style={{ ...num, color: rem > 0 ? 'var(--gold)' : 'var(--green)' }}>{pfx}{rem.toLocaleString()}{sfx}</span>
+                  <span className="deposit-progress-bar" style={{ flex: 1, margin: 0, minWidth: 30 }}><span className="deposit-progress-fill" style={{ display: 'block', width: `${Math.min(100, pct)}%` }} /></span>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: pct >= 100 ? 'var(--green)' : 'var(--orange)' }}>{pct.toFixed(0)}%</span>
+                </span>
+                <span style={{ ...num, textAlign: 'right' }} className={`ss-pnl${pnl == null ? '' : pnl >= 0 ? ' profit-pos' : ' profit-neg'}`}>
+                  {pnl == null ? '–' : `${pnl >= 0 ? '+' : ''}${Math.round(isusd ? pnl * usdKrwRate : pnl).toLocaleString()}원`}
+                </span>
+                <span className="ss-btn" style={{ display: 'flex', gap: 4 }}>
+                  <button className={`site-icon-btn site-icon-deposit ${dep > 0 ? 'active' : ''}`} title="입금" style={{ width: 24, height: 24 }} onClick={() => setDepositSite(site)}><ArrowDownToLine size={13} /></button>
+                  <button className="site-icon-btn site-icon-withdraw" title="출금" style={{ width: 24, height: 24 }} onClick={() => setWithdrawSite(site)}><LogOut size={13} /></button>
+                </span>
               </div>
-              <div className="site-cards-wrap" style={{ '--site-cols': colCount } as React.CSSProperties}>
-              {sites.map(site => {
-                const dep = site.last_deposit ?? 0; const pt = site.point_deposit ?? 0
+            })}
+          </div>
+        </div>
+        {/* 진행중 베팅 — 한 줄씩 */}
+        <div className="card combo-pending" style={{ padding: '6px 10px' }}>
+          <div className="combo-pending-title" style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-secondary)', marginBottom: 4 }}>진행중 베팅 {all.filter(x => x.b.result === 'pending').length}건</div>
+          {all.length === 0 && <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '6px 0' }}>진행중인 베팅이 없습니다</div>}
+          {all.map(({ b, site }) => {
+            if (b.parlay_group) { if (seenGroups.has(b.parlay_group)) return null; seenGroups.add(b.parlay_group) }
+            const legs = b.parlay_group ? all.filter(x => x.b.parlay_group === b.parlay_group).map(x => x.b).sort((p, q) => p.parlay_leg - q.parlay_leg) : [b]
+            const isusd = site.currency === 'usd'; const pfx = isusd ? '$' : ''; const sfx = isusd ? '' : '원'
+            const held = b.result !== 'pending'
+            const ar = b.auto_result
+            const arColor = ar === 'win' ? 'var(--green)' : ar === 'loss' ? 'var(--red)' : 'var(--blue)'
+            const odds = b.parlay_group ? legs.reduce((m, l) => m * l.odds, 1) : b.odds
+            return (
+              <Fragment key={b.parlay_group ?? b.id}>
+              <div className={`combo-row${held ? ` combo-held${heldEntryClass(b.result)}` : ''}`}
+                style={{ display: 'grid', gridTemplateColumns: '56px 18px minmax(0, 1fr) auto auto auto', columnGap: 8, alignItems: 'center', padding: '5px 2px', borderTop: '1px solid var(--border-light)', fontSize: 12, position: 'relative' }}>
+                <span className="cr-site" style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={site.name}>{site.name}</span>
+                <span className="cr-sport" style={{ fontSize: 14, lineHeight: 1, textAlign: 'center' }}>{sportGlyph(b.sport) ?? SPORT_SHORT[b.sport] ?? '📋'}</span>
+                <span className="cr-match" style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }} title={[b.league, ...legs.map(l => l.match)].filter(Boolean).join(' · ')}>
+                  {(b.league || b.auto_game) && <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.league}{b.parlay_group ? ` · 조합 ${legs.length}폴` : ''}{!b.parlay_group && b.auto_game && <> · {gameInfoLine(b)}</>}</span>}
+                  {legs.map(l => (
+                    <span key={l.id} style={{ display: 'flex', minWidth: 0 }}>
+                      <BetMatchLine sport={l.sport} match={l.match} fontSize={12} stacked={false} live={l.is_live} knownOptions={displayOptionsBySport[l.sport] ?? []} numericOptions={displayNumericBySport[l.sport] ?? []} />
+                    </span>
+                  ))}
+                  {!held && !ar && b.auto_note?.includes('직접 확인') && <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--orange)' }}>⚠ {b.auto_note}</span>}
+                </span>
+                <span className="cr-odds" style={{ ...num, color: 'var(--gold)' }}>@{odds.toFixed(2)}</span>
+                <span className="cr-stake" style={{ ...num, color: isBigStake(b.stake, isusd) ? 'var(--orange)' : 'var(--text-secondary)' }}>{pfx}{b.stake.toLocaleString()}{sfx}</span>
+                <span className="cr-act" style={{ display: 'flex', alignItems: 'center', gap: 3, justifyContent: 'flex-end' }}>
+                  {held ? <>
+                    <span style={{ ...num, fontSize: 11, color: b.result === 'win' ? 'var(--green)' : b.result === 'loss' ? 'var(--red)' : 'var(--blue)' }}>
+                      {b.result === 'win' ? `+${pfx}${b.profit.toLocaleString()}${sfx}` : b.result === 'loss' ? `-${pfx}${b.stake.toLocaleString()}${sfx}` : 'PUSH'}
+                    </span>
+                    {iconBtn('되돌리기', 'var(--text-secondary)', () => applyResult(b, 'revert'), <RotateCcw size={11} />)}
+                  </> : <>
+                    {ar && !b.parlay_group && (
+                      <button className="btn btn-xs" title={`자동 판정${b.auto_score ? ` (${b.auto_score.replace('-', ' : ')} 종료)` : ''} — 누르면 최종 처리`}
+                        style={{ padding: '1px 6px', fontSize: 11, fontWeight: 700, color: arColor, border: `1px solid ${arColor}`, background: 'transparent', marginRight: 2 }}
+                        onClick={() => applyResult(b, ar)}>{ar === 'win' ? '적중' : ar === 'loss' ? '실패' : '적특'} 확인</button>
+                    )}
+                    <button className="bet-action-btn" title="수동처리" onClick={e => { e.stopPropagation(); setManualBetId(manualBetId === b.id ? null : b.id) }}
+                      style={{ width: 22, height: 22, color: manualBetId === b.id ? 'var(--gold)' : 'var(--text-secondary)', borderColor: manualBetId === b.id ? 'var(--gold-border)' : 'var(--border)' }}><Ellipsis size={13} /></button>
+                    {manualBetId === b.id && (
+                      <span onClick={e => e.stopPropagation()} style={{ position: 'absolute', right: 0, top: 'calc(100% - 2px)', zIndex: 20, display: 'flex', gap: 4, padding: 5, background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 6, boxShadow: '0 4px 12px rgba(0,0,0,0.4)' }}>
+                        {([
+                          ['적중', 'var(--green)', <CheckCircle size={12} />, () => applyResult(b, 'win')],
+                          ['실패', 'var(--red)', <XCircle size={12} />, () => applyResult(b, 'loss')],
+                          ['적특', 'var(--blue)', <MinusCircle size={12} />, () => { if (confirm('적특으로 처리하시겠습니까?')) applyResult(b, 'push') }],
+                          ...(!b.parlay_group ? [['캐시아웃', 'var(--purple)', <DollarSign size={12} />, () => applyCashout(b)]] : []),
+                          ['베팅취소', 'var(--text-muted)', <Ban size={12} />, () => applyResult(b, 'cancel')],
+                        ] as [string, string, React.ReactNode, () => void][]).map(([label, color, icon, fn]) => (
+                          <button key={label} className="btn btn-xs" onClick={() => { setManualBetId(null); fn() }}
+                            style={{ display: 'flex', alignItems: 'center', gap: 3, padding: '2px 7px', fontSize: 11, fontWeight: 700, color, border: `1px solid ${color}`, background: 'transparent', whiteSpace: 'nowrap' }}>{icon}{label}</button>
+                        ))}
+                      </span>
+                    )}
+                  </>}
+                </span>
+              </div>
+              </Fragment>
+            )
+          })}
+        </div>
+        {/* 완료된 목록 — 사이트 칸 모드와 같이 다음 마감 처리 때 사라짐, 누르면 펼침 */}
+        {(() => {
+          const done = sites.flatMap(site => displaySettledBySite(site.id).map(b => ({ b, site })))
+            .sort((x, y) => (y.b.result_at ?? y.b.created_at).localeCompare(x.b.result_at ?? x.b.created_at))
+          if (!done.length) return null
+          const open = !!expandedSettled['__all']
+          const seen = new Set<string>()
+          return (
+            <div className="card" style={{ padding: '6px 10px' }}>
+              <div onClick={() => setExpandedSettled(p => ({ ...p, __all: !p.__all }))}
+                style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', fontSize: 11, fontWeight: 800, color: 'var(--text-muted)', userSelect: 'none' }}>
+                {open ? <ChevronUp size={12} /> : <ChevronDown size={12} />} 완료된 목록 {done.length}건
+                <span style={{ marginLeft: 'auto', fontFamily: 'var(--font-num)', fontWeight: 700 }}>
+                  적중 {done.filter(x => x.b.result === 'win').length} · 실패 {done.filter(x => x.b.result === 'loss').length}
+                </span>
+              </div>
+              {open && done.map(({ b, site }) => {
+                if (b.parlay_group) { if (seen.has(b.parlay_group)) return null; seen.add(b.parlay_group) }
+                const legs = b.parlay_group ? done.filter(x => x.b.parlay_group === b.parlay_group).map(x => x.b).sort((p, q) => p.parlay_leg - q.parlay_leg) : [b]
                 const isusd = site.currency === 'usd'; const pfx = isusd ? '$' : ''; const sfx = isusd ? '' : '원'
-                const pct = depositPct(site); const rem = depositRemaining(site)
-                const pnl = sitePnL(site)
-                const pending = displayPendingBySite(site.id)
-                const settled = displaySettledBySite(site.id)
+                const rc = b.result === 'win' ? 'var(--green)' : b.result === 'loss' ? 'var(--red)' : 'var(--blue)'
                 return (
-                  <div key={site.id} className="card" style={{ padding: 0, overflow: 'hidden', border: site.active ? '1px solid var(--green-border)' : '1px solid var(--border)' }}>
-                    {/* 사이트 헤더 */}
-                    <div style={{ background: site.active ? 'var(--green-bg)' : 'var(--bg-elevated)', padding: '10px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <span style={{ fontWeight: 700, fontSize: 15 }}>{site.name}</span>
-                        {isusd && <span style={{ fontSize: 9, background: 'var(--blue-bg)', color: 'var(--blue)', border: '1px solid var(--blue-border)', borderRadius: 3, padding: '1px 4px', fontWeight: 700 }}>$</span>}
-                        {site.active && <span className="site-active-dot" />}
-                        {pnl !== null && (
-                          <span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-num)', display: 'flex', alignItems: 'baseline', gap: 4 }} className={pnl >= 0 ? 'profit-pos' : 'profit-neg'}>
-                            {/* 사이트별 현재 수익은 통화와 무관하게 항상 원화로만 표시 (달러 금액은 숨김) */}
-                            {pnl >= 0 ? '+' : ''}{Math.round(isusd ? pnl * usdKrwRate : pnl).toLocaleString()}원
-                          </span>
-                        )}
-                      </div>
-                      <div style={{ display: 'flex', gap: 6 }}>
-                        <button className={`site-icon-btn site-icon-deposit ${dep > 0 ? 'active' : ''}`} onClick={e => { e.stopPropagation(); setDepositSite(site) }}><ArrowDownToLine size={15} /></button>
-                        <button className="site-icon-btn site-icon-withdraw" onClick={e => { e.stopPropagation(); setWithdrawSite(site) }}><LogOut size={15} /></button>
-                      </div>
-                    </div>
-                    {/* 롤링 정보 */}
-                    <div style={{ position: 'relative', padding: '8px 14px', borderBottom: '1px solid var(--border-light)', display: 'flex', flexDirection: 'column', gap: 3 }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>입금</span>
-                          <span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-num)', color: '#E2E8F0' }}>{pfx}{dep.toLocaleString()}{sfx}</span>
-                        </div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>포인트</span>
-                          <span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-num)', color: pt > 0 ? 'var(--purple)' : 'var(--text-muted)' }}>{pt > 0 ? `+${pt.toLocaleString()}P` : '–'}</span>
-                        </div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>남은 롤링</span>
-                          <span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-num)', color: rem > 0 ? 'var(--gold)' : 'var(--green)' }}>{pfx}{rem.toLocaleString()}{sfx}</span>
-                        </div>
-                        <div className="deposit-progress-bar"><div className="deposit-progress-fill" style={{ width: `${Math.min(100,pct)}%` }} /></div>
-                        <div style={{ fontSize: 11, color: pct >= 100 ? 'var(--green)' : 'var(--orange)', fontWeight: 700, textAlign: 'right' }}>{pct}%</div>
-                        {/* 롤링 100% 완료 도장 — 입금/포인트/남은롤링 표시 영역 가운데에 반투명 오버레이 */}
-                        {pct >= 100 && (
-                          <div style={{
-                            position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            pointerEvents: 'none',
-                          }}>
-                            <div style={{
-                              opacity: 0.4,
-                              transform: 'rotate(-14deg)',
-                              border: '3px solid var(--green)',
-                              color: 'var(--green)',
-                              borderRadius: 8,
-                              padding: '2px 14px',
-                              fontSize: 15,
-                              fontWeight: 900,
-                              letterSpacing: '2px',
-                              fontFamily: 'var(--font-num)',
-                              textShadow: '0 0 4px var(--green)',
-                              background: 'rgba(0,0,0,0.05)',
-                            }}>
-                              롤링완료
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    {/* 베팅 목록 */}
+                  <div key={b.parlay_group ?? b.id} className="combo-row" style={{ display: 'grid', gridTemplateColumns: '56px 18px minmax(0, 1fr) auto auto auto', columnGap: 8, alignItems: 'center', padding: '4px 2px', borderTop: '1px solid var(--border-light)', fontSize: 12, opacity: 0.8 }}>
+                    <span className="cr-site" style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={site.name}>{site.name}</span>
+                    <span className="cr-sport" style={{ fontSize: 14, lineHeight: 1, textAlign: 'center' }}>{sportGlyph(b.sport) ?? SPORT_SHORT[b.sport] ?? '📋'}</span>
+                    <span className="cr-match" style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
+                      {(b.league || b.auto_game) && <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.league}{b.parlay_group ? ` · 조합 ${legs.length}폴` : ''}{!b.parlay_group && b.auto_game && <> · {gameInfoLine(b)}</>}</span>}
+                      {legs.map(l => (
+                        <span key={l.id} style={{ display: 'flex', minWidth: 0 }}>
+                          <BetMatchLine sport={l.sport} match={l.match} fontSize={12} stacked={false} live={l.is_live} teamColor={rc} knownOptions={displayOptionsBySport[l.sport] ?? []} numericOptions={displayNumericBySport[l.sport] ?? []} />
+                        </span>
+                      ))}
+                    </span>
+                    <span className="cr-odds" style={{ fontFamily: 'var(--font-num)', fontWeight: 700, color: 'var(--text-muted)' }}>@{(b.parlay_group ? legs.reduce((m, l) => m * l.odds, 1) : b.odds).toFixed(2)}</span>
+                    <span className="cr-stake" style={{ fontFamily: 'var(--font-num)', fontWeight: 700, color: 'var(--text-muted)' }}>{pfx}{b.stake.toLocaleString()}{sfx}</span>
+                    <span className="cr-act" style={{ display: 'flex', alignItems: 'center', gap: 3, justifyContent: 'flex-end' }}>
+                      <span style={{ fontFamily: 'var(--font-num)', fontWeight: 700, fontSize: 11, color: rc }}>
+                        {b.cashout_amount != null ? `캐시아웃 ${pfx}${b.cashout_amount.toLocaleString()}${sfx}` : b.result === 'win' ? `+${pfx}${b.profit.toLocaleString()}${sfx}` : b.result === 'loss' ? `-${pfx}${b.stake.toLocaleString()}${sfx}` : 'PUSH'}
+                      </span>
+                      <button className="bet-action-btn" title="되돌리기" onClick={() => b.parlay_group ? applyParlayRevert(legs) : applyResult(b, 'revert')}
+                        style={{ width: 20, height: 20, color: 'var(--text-secondary)', borderColor: 'var(--border)' }}><RotateCcw size={11} /></button>
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
+          )
+        })()}
+      </div>
+    )
+  }
+
+  const renderBetList = (site: Site, withAdd: boolean) => {
+    const isusd = site.currency === 'usd'; const pfx = isusd ? '$' : ''; const sfx = isusd ? '' : '원'
+    const pending = displayPendingBySite(site.id)
+    const settled = displaySettledBySite(site.id)
+    return (
                     <div style={{ padding: '6px 8px' }}>
                       {/* 베팅 추가 — 사이트 활성(입금) 상태일 때만, 항상 맨 위 */}
-                      {site.active && (
+                      {withAdd && site.active && (
                         <div style={{ marginBottom: pending.length > 0 ? 8 : 4 }}>
                           {openFormSiteId !== site.id ? (
                             <div style={{ display: 'flex', justifyContent: 'center' }}>
@@ -3631,7 +4209,7 @@ export default function Dashboard() {
                           ) : openFormType === 'game' ? (
                             <GameRollingForm site={site} onClose={() => setOpenFormSiteId(null)} onSubmit={amt => submitGameRolling(site, amt)} />
                           ) : (
-                            <SingleBetForm site={site} defaultSport={betsBySite(site.id).slice(-1)[0]?.sport ?? 'soccer'} onClose={() => setOpenFormSiteId(null)} onBet={(sp,ct,od,amt,lv,lg) => submitBet(site,sp,ct,od,amt,lv,lg)} onMultiBet={(sp,cs,od,amt,lgs) => submitMultiBet(site,sp,cs,od,amt,lgs)} baseballOverrides={baseballOverrides} soccerOverrides={soccerOverrides} basketballOverrides={basketballOverrides} volleyballOverrides={volleyballOverrides} teamCandidates={teamCandidates} allBetsHistory={allBetsHistory} leagueCandidates={leagueCandidates} soccerLeagues={soccerLeagues} baseballLeagues={baseballLeagues} basketballLeagues={basketballLeagues} volleyballLeagues={volleyballLeagues} esportsLeagues={esportsLeagues} soccerFavoriteLeagues={soccerFavoriteLeagues} baseballFavoriteLeagues={baseballFavoriteLeagues} basketballFavoriteLeagues={basketballFavoriteLeagues} volleyballFavoriteLeagues={volleyballFavoriteLeagues} esportsFavoriteLeagues={esportsFavoriteLeagues} onToggleSoccerLeagueFavorite={toggleSoccerLeagueFavorite} onToggleBaseballLeagueFavorite={toggleBaseballLeagueFavorite} onToggleBasketballLeagueFavorite={toggleBasketballLeagueFavorite} onToggleVolleyballLeagueFavorite={toggleVolleyballLeagueFavorite} onToggleEsportsLeagueFavorite={toggleEsportsLeagueFavorite} soccerTeams={soccerTeams} baseballTeams={baseballTeams} basketballTeams={basketballTeams} volleyballTeams={volleyballTeams} esportsTeams={esportsTeams} onAddSoccerLeague={addSoccerLeague} onAddBaseballLeague={addBaseballLeague} onAddBasketballLeague={addBasketballLeague} onAddVolleyballLeague={addVolleyballLeague} onAddEsportsLeague={addEsportsLeague} onRenameSoccerLeague={renameSoccerLeague} onDeleteSoccerLeague={deleteSoccerLeague} onRenameBaseballLeague={renameBaseballLeague} onDeleteBaseballLeague={deleteBaseballLeague} onRenameBasketballLeague={renameBasketballLeague} onDeleteBasketballLeague={deleteBasketballLeague} onRenameVolleyballLeague={renameVolleyballLeague} onDeleteVolleyballLeague={deleteVolleyballLeague} onRenameEsportsLeague={renameEsportsLeague} onDeleteEsportsLeague={deleteEsportsLeague} onAddSoccerTeam={addSoccerTeam} onAddBaseballTeam={addBaseballTeam} onAddBasketballTeam={addBasketballTeam} onAddVolleyballTeam={addVolleyballTeam} onAddEsportsTeam={addEsportsTeam} onRenameSoccerTeam={renameSoccerTeam} onDeleteSoccerTeam={deleteSoccerTeam} onRenameBaseballTeam={renameBaseballTeam} onDeleteBaseballTeam={deleteBaseballTeam} onRenameBasketballTeam={renameBasketballTeam} onDeleteBasketballTeam={deleteBasketballTeam} onRenameVolleyballTeam={renameVolleyballTeam} onDeleteVolleyballTeam={deleteVolleyballTeam} onRenameEsportsTeam={renameEsportsTeam} onDeleteEsportsTeam={deleteEsportsTeam} quickPicks={quickPickContents} betOptionsBySport={betOptionsBySport} numericBetOptionsBySport={numericBetOptionsBySport} onAddBetOption={addBetOption} onDeleteBetOption={deleteBetOption} onEditBetOption={editBetOption} onReorderBetOption={reorderBetOption} onToggleNumericBetOption={toggleNumericBetOption} />
+                            <SingleBetForm site={site} defaultSport={betsBySite(site.id).slice(-1)[0]?.sport ?? 'soccer'} onClose={() => setOpenFormSiteId(null)} onBet={(sp,ct,od,amt,lv,lg,mk) => submitBet(site,sp,ct,od,amt,lv,lg,mk)} onMultiBet={(sp,cs,od,amt,lgs) => submitMultiBet(site,sp,cs,od,amt,lgs)} betOptionStakesBySport={betOptionStakesBySport} onSetBetOptionStake={setBetOptionStake} baseballOverrides={baseballOverrides} soccerOverrides={soccerOverrides} basketballOverrides={basketballOverrides} volleyballOverrides={volleyballOverrides} teamCandidates={teamCandidates} allBetsHistory={allBetsHistory} leagueCandidates={leagueCandidates} soccerLeagues={soccerLeagues} baseballLeagues={baseballLeagues} basketballLeagues={basketballLeagues} volleyballLeagues={volleyballLeagues} esportsLeagues={esportsLeagues} soccerFavoriteLeagues={soccerFavoriteLeagues} baseballFavoriteLeagues={baseballFavoriteLeagues} basketballFavoriteLeagues={basketballFavoriteLeagues} volleyballFavoriteLeagues={volleyballFavoriteLeagues} esportsFavoriteLeagues={esportsFavoriteLeagues} onToggleSoccerLeagueFavorite={toggleSoccerLeagueFavorite} onToggleBaseballLeagueFavorite={toggleBaseballLeagueFavorite} onToggleBasketballLeagueFavorite={toggleBasketballLeagueFavorite} onToggleVolleyballLeagueFavorite={toggleVolleyballLeagueFavorite} onToggleEsportsLeagueFavorite={toggleEsportsLeagueFavorite} soccerTeams={soccerTeams} baseballTeams={baseballTeams} basketballTeams={basketballTeams} volleyballTeams={volleyballTeams} esportsTeams={esportsTeams} onAddSoccerLeague={addSoccerLeague} onAddBaseballLeague={addBaseballLeague} onAddBasketballLeague={addBasketballLeague} onAddVolleyballLeague={addVolleyballLeague} onAddEsportsLeague={addEsportsLeague} onRenameSoccerLeague={renameSoccerLeague} onDeleteSoccerLeague={deleteSoccerLeague} onRenameBaseballLeague={renameBaseballLeague} onDeleteBaseballLeague={deleteBaseballLeague} onRenameBasketballLeague={renameBasketballLeague} onDeleteBasketballLeague={deleteBasketballLeague} onRenameVolleyballLeague={renameVolleyballLeague} onDeleteVolleyballLeague={deleteVolleyballLeague} onRenameEsportsLeague={renameEsportsLeague} onDeleteEsportsLeague={deleteEsportsLeague} onAddSoccerTeam={addSoccerTeam} onAddBaseballTeam={addBaseballTeam} onAddBasketballTeam={addBasketballTeam} onAddVolleyballTeam={addVolleyballTeam} onAddEsportsTeam={addEsportsTeam} onRenameSoccerTeam={renameSoccerTeam} onDeleteSoccerTeam={deleteSoccerTeam} onRenameBaseballTeam={renameBaseballTeam} onDeleteBaseballTeam={deleteBaseballTeam} onRenameBasketballTeam={renameBasketballTeam} onDeleteBasketballTeam={deleteBasketballTeam} onRenameVolleyballTeam={renameVolleyballTeam} onDeleteVolleyballTeam={deleteVolleyballTeam} onRenameEsportsTeam={renameEsportsTeam} onDeleteEsportsTeam={deleteEsportsTeam} quickPicks={quickPickContents} betOptionsBySport={betOptionsBySport} numericBetOptionsBySport={numericBetOptionsBySport} onAddBetOption={addBetOption} onDeleteBetOption={deleteBetOption} onEditBetOption={editBetOption} onReorderBetOption={reorderBetOption} onToggleNumericBetOption={toggleNumericBetOption} />
                           )}
                         </div>
                       )}
@@ -3646,6 +4224,25 @@ export default function Dashboard() {
                                   +{isusd ? '$' : ''}{gr.amount.toLocaleString()}{isusd ? '' : '원'}
                                 </span>
                                 <button onClick={() => deleteGameRolling(gr)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', padding: 2 }}><Trash2 size={12} /></button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {/* 카지노 기록 — 게임별 총 베팅금액 / 손수익 */}
+                      {casinoBySite(site.id).length > 0 && (
+                        <div style={{ marginBottom: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                          {[...casinoBySite(site.id)].reverse().map(cb => (
+                            <div key={cb.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, padding: '7px 10px', background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', fontSize: 12 }}>
+                              <span style={{ color: 'var(--text-secondary)', fontWeight: 700, whiteSpace: 'nowrap' }}>🎰 {cb.match}</span>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                                <span style={{ fontFamily: 'var(--font-num)', color: 'var(--text-muted)', fontSize: 11, whiteSpace: 'nowrap' }}>
+                                  {pfx}{cb.stake.toLocaleString()}{sfx}
+                                </span>
+                                <span style={{ fontFamily: 'var(--font-num)', fontWeight: 700, whiteSpace: 'nowrap', color: cb.profit > 0 ? 'var(--green)' : cb.profit < 0 ? 'var(--red)' : 'var(--text-muted)' }}>
+                                  {cb.profit > 0 ? '+' : cb.profit < 0 ? '-' : ''}{pfx}{Math.abs(cb.profit).toLocaleString()}{sfx}
+                                </span>
+                                <button onClick={() => deleteCasinoBet(cb)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', padding: 2 }}><Trash2 size={12} /></button>
                               </div>
                             </div>
                           ))}
@@ -3687,7 +4284,7 @@ export default function Dashboard() {
                                               fontSize: legChecked ? 13 : 12, color: legChecked ? 'var(--green)' : 'var(--text-muted)',
                                               fontWeight: legChecked ? 800 : 400, width: 18, textAlign: 'center', flexShrink: 0,
                                             }}>{legChecked ? '✓' : (LEG_MARKS[idx] ?? idx+1)}</span>
-                                            <BetMatchLine sport={gb.sport} match={gb.match} stacked={false} knownOptions={betOptionsBySport[gb.sport] ?? []} numericOptions={numericBetOptionsBySport[gb.sport] ?? []} />
+                                            <BetMatchLine sport={gb.sport} match={gb.match} stacked={false} knownOptions={displayOptionsBySport[gb.sport] ?? []} numericOptions={displayNumericBySport[gb.sport] ?? []} />
                                             {hoverBetId === bet.parlay_group && !isHeld && (
                                               <div style={{ display: 'flex', gap: 3, flexShrink: 0, position: 'absolute', right: 0, top: '50%', transform: 'translateY(-50%)', background: 'var(--bg-hover)', paddingLeft: 10, boxShadow: '-10px 0 8px -2px var(--bg-hover)' }}>
                                                 {legChecked ? (
@@ -3780,7 +4377,7 @@ export default function Dashboard() {
                                   onRenameBasketballTeam={renameBasketballTeam} onDeleteBasketballTeam={deleteBasketballTeam}
                                   onRenameVolleyballTeam={renameVolleyballTeam} onDeleteVolleyballTeam={deleteVolleyballTeam}
                                   onRenameEsportsTeam={renameEsportsTeam} onDeleteEsportsTeam={deleteEsportsTeam}
-                                  betOptionsBySport={betOptionsBySport} numericBetOptionsBySport={numericBetOptionsBySport} onAddBetOption={addBetOption} onDeleteBetOption={deleteBetOption} onEditBetOption={editBetOption} onReorderBetOption={reorderBetOption} onToggleNumericBetOption={toggleNumericBetOption}
+                                  betOptionsBySport={displayOptionsBySport} numericBetOptionsBySport={displayNumericBySport} onAddBetOption={addBetOption} onDeleteBetOption={deleteBetOption} onEditBetOption={editBetOption} onReorderBetOption={reorderBetOption} onToggleNumericBetOption={toggleNumericBetOption}
                                 />
                               ) : (
                                 <>
@@ -3789,11 +4386,24 @@ export default function Dashboard() {
                                     {bet.league && <div style={{ paddingLeft: 26, fontSize: 10, color: 'var(--text-muted)', fontWeight: 700 }}>{bet.league}</div>}
                                     <div style={{ display: 'flex', gap: 5, alignItems: 'flex-start' }}>
                                       <span style={{ fontSize: 18, lineHeight: 1, flexShrink: 0, width: 22, textAlign: 'center', marginTop: 1 }}>{sportGlyph(bet.sport) ?? SPORT_SHORT[bet.sport] ?? '📋'}</span>
-                                      <BetMatchLine sport={bet.sport} match={bet.match} live={bet.is_live} knownOptions={betOptionsBySport[bet.sport] ?? []} numericOptions={numericBetOptionsBySport[bet.sport] ?? []} />
+                                      <BetMatchLine sport={bet.sport} match={bet.match} live={bet.is_live} knownOptions={displayOptionsBySport[bet.sport] ?? []} numericOptions={displayNumericBySport[bet.sport] ?? []} />
                                     </div>
-                                    <div style={{ paddingLeft: 26, marginTop: 2 }}>
-                                      <BetOddsStakeLine odds={bet.odds} stake={bet.stake} prefix={pfx} suffix={sfx} big={isBigStake(bet.stake, isusd)} />
+                                    <div style={{ paddingLeft: 26, marginTop: 4 }}>
+                                      <BetOddsStakeLine odds={bet.odds} stake={bet.stake} prefix={pfx} suffix={sfx} big={isBigStake(bet.stake, isusd)} mock={bet.is_mock} />
                                     </div>
+                                    {bet.result === 'pending' && bet.auto_result && (() => {
+                                      const ar = bet.auto_result
+                                      const c = ar === 'win' ? 'var(--green)' : ar === 'loss' ? 'var(--red)' : 'var(--blue)'
+                                      return (
+                                        <div style={{ paddingLeft: 26, marginTop: 4, display: 'flex', alignItems: 'center', gap: 6, fontSize: 11 }}>
+                                          <span style={{ color: c, fontWeight: 700 }}>자동: {ar === 'win' ? '적중' : ar === 'loss' ? '실패' : '적특'}</span>
+                                          {bet.auto_score && <span style={{ color: 'var(--text-muted)' }}>({bet.auto_score.replace('-', ' : ')} 종료)</span>}
+                                          <button className="btn btn-xs" title="자동 판정대로 최종 처리"
+                                            style={{ marginLeft: 'auto', padding: '1px 8px', fontSize: 11, fontWeight: 700, color: c, border: `1px solid ${c}`, background: 'transparent' }}
+                                            onClick={e => { e.stopPropagation(); applyResult(bet, ar) }}>확인</button>
+                                        </div>
+                                      )
+                                    })()}
                                   </div>
                                   {/* 결과 처리 버튼 — hover 시 우측 상단에 2x3 그리드로 살짝 겹쳐서 표시 (내용 레이아웃엔 영향 없음).
                                       이미 결과 처리되어 1시간 보류 중인 경우엔 재처리 버튼 대신 되돌리기만 제공 */}
@@ -3875,8 +4485,8 @@ export default function Dashboard() {
                                         {gb.league && <div style={{ paddingLeft: 23, fontSize: 9, color: 'var(--text-muted)', fontWeight: 700 }}>{gb.league}</div>}
                                         <div style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
                                           <span style={{ fontSize: 10, color: 'var(--text-muted)', width: 18, textAlign: 'center', flexShrink: 0 }}>{LEG_MARKS[idx] ?? idx+1}</span>
-                                          <BetTeamName sport={gb.sport} match={gb.match} fontSize={12} teamColor={isWin ? 'var(--green)' : isLoss ? 'var(--red)' : 'var(--text-secondary)'} knownOptions={betOptionsBySport[gb.sport] ?? []} numericOptions={numericBetOptionsBySport[gb.sport] ?? []} />
-                                          <BetBadgeRow sport={gb.sport} match={gb.match} knownOptions={betOptionsBySport[gb.sport] ?? []} numericOptions={numericBetOptionsBySport[gb.sport] ?? []} />
+                                          <BetTeamName sport={gb.sport} match={gb.match} fontSize={12} teamColor={isWin ? 'var(--green)' : isLoss ? 'var(--red)' : 'var(--text-secondary)'} knownOptions={displayOptionsBySport[gb.sport] ?? []} numericOptions={displayNumericBySport[gb.sport] ?? []} />
+                                          <BetBadgeRow sport={gb.sport} match={gb.match} knownOptions={displayOptionsBySport[gb.sport] ?? []} numericOptions={displayNumericBySport[gb.sport] ?? []} />
                                         </div>
                                       </div>
                                     ))}
@@ -3900,17 +4510,19 @@ export default function Dashboard() {
                                   {bet.league && <div style={{ paddingLeft: 24, fontSize: 9, color: 'var(--text-muted)', fontWeight: 700 }}>{bet.league}</div>}
                                   <div style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
                                     <span style={{ fontSize: 16, lineHeight: 1, flexShrink: 0, width: 20, textAlign: 'center' }}>{sportGlyph(bet.sport) ?? SPORT_SHORT[bet.sport] ?? '📋'}</span>
-                                    <BetTeamName sport={bet.sport} match={bet.match} fontSize={12} teamColor={bet.result === 'win' ? 'var(--green)' : bet.result === 'loss' ? 'var(--red)' : 'var(--text-secondary)'} knownOptions={betOptionsBySport[bet.sport] ?? []} numericOptions={numericBetOptionsBySport[bet.sport] ?? []} />
+                                    <BetTeamName sport={bet.sport} match={bet.match} fontSize={12} teamColor={bet.result === 'win' ? 'var(--green)' : bet.result === 'loss' ? 'var(--red)' : 'var(--text-secondary)'} knownOptions={displayOptionsBySport[bet.sport] ?? []} numericOptions={displayNumericBySport[bet.sport] ?? []} />
                                     <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', flexShrink: 0 }}>{bet.odds.toFixed(2)}</span>
                                   </div>
                                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingLeft: 24, marginTop: 2 }}>
-                                    <BetBadgeRow sport={bet.sport} match={bet.match} live={bet.is_live} knownOptions={betOptionsBySport[bet.sport] ?? []} numericOptions={numericBetOptionsBySport[bet.sport] ?? []} />
+                                    <BetBadgeRow sport={bet.sport} match={bet.match} live={bet.is_live} knownOptions={displayOptionsBySport[bet.sport] ?? []} numericOptions={displayNumericBySport[bet.sport] ?? []} />
                                     {hoverBetId === 's_' + bet.id ? (
                                       <button className="btn btn-ghost btn-xs" style={{ fontSize: 10 }} onClick={() => applyResult(bet, 'revert')}><RotateCcw size={9} /> 되돌리기</button>
                                     ) : (
                                       <span style={{ fontSize: 10, fontWeight: 700, flexShrink: 0, color: bet.result === 'win' ? 'var(--green)' : bet.result === 'loss' ? 'var(--red)' : 'var(--blue)' }}>
-                                        {bet.result === 'win' ? `+${pfx}${bet.profit.toLocaleString()}${sfx}` : bet.result === 'loss' ? `-${pfx}${bet.stake.toLocaleString()}${sfx}` : 'PUSH'}
-                                        {isBigStake(bet.stake, isusd) && <Flame size={11} style={{ marginLeft: 4, verticalAlign: 'text-bottom', color: 'var(--gold)', fill: 'var(--gold)', filter: 'drop-shadow(0 0 2px var(--gold))' }} />}
+                                        {bet.is_mock
+                                          ? <span style={{ color: 'var(--purple)' }}>모의 {bet.result === 'win' ? '적중' : bet.result === 'loss' ? '실패' : '적특'}</span>
+                                          : bet.result === 'win' ? `+${pfx}${bet.profit.toLocaleString()}${sfx}` : bet.result === 'loss' ? `-${pfx}${bet.stake.toLocaleString()}${sfx}` : 'PUSH'}
+                                        {!bet.is_mock && isBigStake(bet.stake, isusd) && <Flame size={11} style={{ marginLeft: 4, verticalAlign: 'text-bottom', color: 'var(--gold)', fill: 'var(--gold)', filter: 'drop-shadow(0 0 2px var(--gold))' }} />}
                                       </span>
                                     )}
                                   </div>
@@ -3921,10 +4533,180 @@ export default function Dashboard() {
                         )
                       })()}
                     </div>
+    )
+  }
+
+  return (
+    <div className="page">
+      {/* 데스크탑: 사이트 현황(좌, 카드 세로 쌓기) / 베팅 현황(우)을 한 줄에 두고 1 : 베팅 사이트 수 비율로 가로폭을 나눠
+          모든 카드가 같은 폭이 되게 한다 — 베팅 사이트를 추가하면 전체 카드 폭이 똑같이 줄어든다 */}
+      {/* 레이아웃 모드 — 좌우(기본): 사이트 현황·베팅분석(버튼으로 전환) 좌 / 베팅 현황 우,
+          상하: 사이트 현황 위 / 아래 줄에 베팅분석 좌 · 베팅 현황 우 */}
+      <div className={`dashboard-main${stacked ? ' stacked' : ''}${betMode ? ' betmode' : ''}`} style={{ '--mining-n': !stacked && sidePanel === 'analysis' ? 1.2 : 1, '--bet-n': colCount } as React.CSSProperties}>
+
+        {/* ── 베팅 모드 (좌측) — 종목 → 리그 → 경기 → 베팅옵션. 사이트 현황 대신 이 자리를 쓰고 베팅 현황은 우측으로 */}
+        {/* ── 베팅 모드 좌측: 사이트 현황 + 일별 손익을 한 칸에 세로로 (2026-11-24 사용자 요청 — 사이트 현황 | 베팅 패널 | 베팅 현황) */}
+        {betMode && (
+          <div className="dashboard-betmode-side">
+            <MiningWidget compact />
+            <DailyPnLWidget usdKrwRate={usdKrwRate} refreshKey={(() => { const st = bets.filter(b => b.result !== 'pending'); return `${st.length}:${st.reduce((a, b) => a + b.profit, 0)}` })()} />
+          </div>
+        )}
+        {betMode && (
+          <div className="dashboard-betmode">
+            <BetModePanel pendingBets={bets.filter(b => b.result === 'pending')} lastSiteId={bets.reduce<Bet | null>((a, b) => b.site_id && b.sport !== 'casino' && (!a || b.created_at > a.created_at) ? b : a, null)?.site_id ?? null} target={betTarget ?? null} onTargetDone={onBetTargetDone} sites={sites} betOptionsBySport={betOptionsBySport} numericBetOptionsBySport={numericBetOptionsBySport}
+              teamsBySport={{ soccer: soccerTeams, baseball: baseballTeams, basketball: basketballTeams, volleyball: volleyballTeams }}
+              onBet={(site, sp, ct, od, amt, lv, lg) => submitBet(site, sp, ct, od, amt, lv, lg)}
+              renderAddForm={(site, onClose) => (
+                <SingleBetForm site={site} defaultSport={betsBySite(site.id).slice(-1)[0]?.sport ?? 'soccer'} onClose={onClose} onBet={(sp,ct,od,amt,lv,lg,mk) => submitBet(site,sp,ct,od,amt,lv,lg,mk)} onMultiBet={(sp,cs,od,amt,lgs) => submitMultiBet(site,sp,cs,od,amt,lgs)} betOptionStakesBySport={betOptionStakesBySport} onSetBetOptionStake={setBetOptionStake} baseballOverrides={baseballOverrides} soccerOverrides={soccerOverrides} basketballOverrides={basketballOverrides} volleyballOverrides={volleyballOverrides} teamCandidates={teamCandidates} allBetsHistory={allBetsHistory} leagueCandidates={leagueCandidates} soccerLeagues={soccerLeagues} baseballLeagues={baseballLeagues} basketballLeagues={basketballLeagues} volleyballLeagues={volleyballLeagues} esportsLeagues={esportsLeagues} soccerFavoriteLeagues={soccerFavoriteLeagues} baseballFavoriteLeagues={baseballFavoriteLeagues} basketballFavoriteLeagues={basketballFavoriteLeagues} volleyballFavoriteLeagues={volleyballFavoriteLeagues} esportsFavoriteLeagues={esportsFavoriteLeagues} onToggleSoccerLeagueFavorite={toggleSoccerLeagueFavorite} onToggleBaseballLeagueFavorite={toggleBaseballLeagueFavorite} onToggleBasketballLeagueFavorite={toggleBasketballLeagueFavorite} onToggleVolleyballLeagueFavorite={toggleVolleyballLeagueFavorite} onToggleEsportsLeagueFavorite={toggleEsportsLeagueFavorite} soccerTeams={soccerTeams} baseballTeams={baseballTeams} basketballTeams={basketballTeams} volleyballTeams={volleyballTeams} esportsTeams={esportsTeams} onAddSoccerLeague={addSoccerLeague} onAddBaseballLeague={addBaseballLeague} onAddBasketballLeague={addBasketballLeague} onAddVolleyballLeague={addVolleyballLeague} onAddEsportsLeague={addEsportsLeague} onRenameSoccerLeague={renameSoccerLeague} onDeleteSoccerLeague={deleteSoccerLeague} onRenameBaseballLeague={renameBaseballLeague} onDeleteBaseballLeague={deleteBaseballLeague} onRenameBasketballLeague={renameBasketballLeague} onDeleteBasketballLeague={deleteBasketballLeague} onRenameVolleyballLeague={renameVolleyballLeague} onDeleteVolleyballLeague={deleteVolleyballLeague} onRenameEsportsLeague={renameEsportsLeague} onDeleteEsportsLeague={deleteEsportsLeague} onAddSoccerTeam={addSoccerTeam} onAddBaseballTeam={addBaseballTeam} onAddBasketballTeam={addBasketballTeam} onAddVolleyballTeam={addVolleyballTeam} onAddEsportsTeam={addEsportsTeam} onRenameSoccerTeam={renameSoccerTeam} onDeleteSoccerTeam={deleteSoccerTeam} onRenameBaseballTeam={renameBaseballTeam} onDeleteBaseballTeam={deleteBaseballTeam} onRenameBasketballTeam={renameBasketballTeam} onDeleteBasketballTeam={deleteBasketballTeam} onRenameVolleyballTeam={renameVolleyballTeam} onDeleteVolleyballTeam={deleteVolleyballTeam} onRenameEsportsTeam={renameEsportsTeam} onDeleteEsportsTeam={deleteEsportsTeam} quickPicks={quickPickContents} betOptionsBySport={betOptionsBySport} numericBetOptionsBySport={numericBetOptionsBySport} onAddBetOption={addBetOption} onDeleteBetOption={deleteBetOption} onEditBetOption={editBetOption} onReorderBetOption={reorderBetOption} onToggleNumericBetOption={toggleNumericBetOption} />
+              )} />
+          </div>
+        )}
+
+        {/* ── 사이트 현황 (좌측 / 상하 모드에선 위) */}
+        {!betMode && <div className={`dashboard-side${!stacked && sidePanel === 'analysis' ? ' analysis-open' : ''}`}>
+          {stacked ? (
+            <div style={{ minWidth: 0 }}><MiningWidget compact /></div>
+          ) : (
+            /* 사이트 현황 / 베팅분석 — 제목 자리 버튼으로 골라서 같은 자리에 보여준다 (베팅분석은 카드 1.2장 폭) */
+            <div style={{ minWidth: 0 }}>
+              <div style={{ display: sidePanel === 'site' ? undefined : 'none' }}><MiningWidget tabs={ANALYSIS_IN_DASHBOARD ? sidePanelTabs : undefined} /></div>
+              {ANALYSIS_IN_DASHBOARD && analysisOpened && (
+                <div style={{ display: sidePanel === 'analysis' ? undefined : 'none' }}>
+                  <Suspense fallback={analysisFallback(sidePanelTabs)}>
+                    <BetAnalysisPanel tabs={sidePanelTabs} active={sidePanel === 'analysis'} />
+                  </Suspense>
+                </div>
+              )}
+            </div>
+          )}
+          <div className="dashboard-pnl-slot">
+          <DailyPnLWidget compact={stacked} usdKrwRate={usdKrwRate} refreshKey={(() => { const st = bets.filter(b => b.result !== 'pending'); return `${st.length}:${st.reduce((a, b) => a + b.profit, 0)}` })()} />
+          </div>
+        </div>}
+
+        {/* ── 베팅분석 (상하 모드에서만 — 아래 줄 좌측) */}
+        {ANALYSIS_IN_DASHBOARD && stacked && (
+          <div className="dashboard-analysis">
+            <Suspense fallback={analysisFallback(analysisTitle)}>
+              <BetAnalysisPanel tabs={analysisTitle} />
+            </Suspense>
+          </div>
+        )}
+
+        {/* ── 베팅 현황 (전체) */}
+        <div className="dashboard-bets">
+          {sites.length === 0 ? (
+            <div className="card" style={{ padding: '10px 14px' }}>
+              <div className="flex-between mb-10">
+                <span className="card-title" style={{ margin: 0 }}>베팅 현황</span>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <button onClick={openRulebook} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--gold)', cursor: 'pointer', padding: '3px 8px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-body)' }}>
+                  <BookOpen size={11} /> 룰북
+                </button>
+                <button onClick={() => setShowSiteMgr(true)} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-secondary)', cursor: 'pointer', padding: '3px 8px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-body)' }}>
+                  <Settings size={11} /> 사이트관리
+                </button>
+                </div>
+              </div>
+              <div className="empty"><div className="empty-icon">🎯</div>사이트를 추가하세요</div>
+            </div>
+          ) : (
+            <div className="card" style={{ padding: '10px 14px' }}>
+              {/* 제목줄: 베팅 현황 · (오른쪽) 보기 방식 전환 | 룰북·사이트관리 아이콘 / 아래 줄: 전체 남은 롤링 */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: aggRollingTarget > 0 ? 6 : 12 }}>
+                <span className="card-title" style={{ margin: 0 }}>베팅 현황</span>
+                <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <button onClick={openRulebook} title="룰북" style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--gold)', cursor: 'pointer', padding: '4px 7px', display: 'flex', alignItems: 'center' }}>
+                    <BookOpen size={13} />
+                  </button>
+                  <button onClick={() => setShowSiteMgr(true)} title="사이트관리" style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-secondary)', cursor: 'pointer', padding: '4px 7px', display: 'flex', alignItems: 'center' }}>
+                    <Settings size={13} />
+                  </button>
+                </div>
+              </div>
+              {aggRollingTarget > 0 && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                  <span style={{ fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>남은 롤링</span>
+                  <span style={{ fontSize: 12, fontWeight: 800, fontFamily: 'var(--font-num)', color: aggRem > 0 ? 'var(--gold)' : 'var(--green)', whiteSpace: 'nowrap' }}>{Math.round(aggRem).toLocaleString()}원</span>
+                  <div className="deposit-progress-bar" style={{ flex: 1, margin: 0 }}><div className="deposit-progress-fill" style={{ width: `${Math.min(100, aggPct)}%` }} /></div>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: aggPct >= 100 ? 'var(--green)' : 'var(--orange)' }}>{aggPct.toFixed(1)}%</span>
+                </div>
+              )}
+{betMode ? renderCombinedStatus() : <div className="site-cards-wrap" style={{ '--site-cols': colCount } as React.CSSProperties}>
+              {sites.map(site => {
+                const dep = site.last_deposit ?? 0; const pt = site.point_deposit ?? 0
+                const isusd = site.currency === 'usd'; const pfx = isusd ? '$' : ''; const sfx = isusd ? '' : '원'
+                const pct = depositPct(site); const rem = depositRemaining(site)
+                const pnl = sitePnL(site)
+                return (
+                  <div key={site.id} className="card" style={{ padding: 0, overflow: 'hidden', border: site.active ? '1px solid var(--green-border)' : '1px solid var(--border)' }}>
+                    {/* 사이트 헤더 */}
+                    <div style={{ background: site.active ? 'var(--green-bg)' : 'var(--bg-elevated)', padding: '10px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span style={{ fontWeight: 700, fontSize: 15 }}>{site.name}</span>
+                        {isusd && <span style={{ fontSize: 9, background: 'var(--blue-bg)', color: 'var(--blue)', border: '1px solid var(--blue-border)', borderRadius: 3, padding: '1px 4px', fontWeight: 700 }}>$</span>}
+                        {site.active && <span className="site-active-dot" />}
+                        {pnl !== null && (
+                          <span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-num)', display: 'flex', alignItems: 'baseline', gap: 4 }} className={pnl >= 0 ? 'profit-pos' : 'profit-neg'}>
+                            {/* 사이트별 현재 수익은 통화와 무관하게 항상 원화로만 표시 (달러 금액은 숨김) */}
+                            {pnl >= 0 ? '+' : ''}{Math.round(isusd ? pnl * usdKrwRate : pnl).toLocaleString()}원
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <button className={`site-icon-btn site-icon-deposit ${dep > 0 ? 'active' : ''}`} onClick={e => { e.stopPropagation(); setDepositSite(site) }}><ArrowDownToLine size={15} /></button>
+                        <button className="site-icon-btn site-icon-withdraw" onClick={e => { e.stopPropagation(); setWithdrawSite(site) }}><LogOut size={15} /></button>
+                      </div>
+                    </div>
+                    {/* 롤링 정보 */}
+                    <div style={{ position: 'relative', padding: '8px 14px', borderBottom: '1px solid var(--border-light)', display: 'flex', flexDirection: 'column', gap: 3 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>입금</span>
+                          <span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-num)', color: '#E2E8F0' }}>{pfx}{dep.toLocaleString()}{sfx}</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>포인트</span>
+                          <span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-num)', color: pt > 0 ? 'var(--purple)' : 'var(--text-muted)' }}>{pt > 0 ? `+${pt.toLocaleString()}P` : '–'}</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>남은 롤링{(site.rolling_pct ?? 100) !== 100 && <span style={{ marginLeft: 4, fontSize: 9, fontWeight: 700, color: 'var(--gold)' }}>({site.rolling_pct}%)</span>}</span>
+                          <span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-num)', color: rem > 0 ? 'var(--gold)' : 'var(--green)' }}>{pfx}{rem.toLocaleString()}{sfx}</span>
+                        </div>
+                        <div className="deposit-progress-bar"><div className="deposit-progress-fill" style={{ width: `${Math.min(100,pct)}%` }} /></div>
+                        <div style={{ fontSize: 11, color: pct >= 100 ? 'var(--green)' : 'var(--orange)', fontWeight: 700, textAlign: 'right' }}>{pct.toFixed(1)}%</div>
+                        {/* 롤링 100% 완료 도장 — 입금/포인트/남은롤링 표시 영역 가운데에 반투명 오버레이 */}
+                        {pct >= 100 && (
+                          <div style={{
+                            position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            pointerEvents: 'none',
+                          }}>
+                            <div style={{
+                              opacity: 0.4,
+                              transform: 'rotate(-14deg)',
+                              border: '3px solid var(--green)',
+                              color: 'var(--green)',
+                              borderRadius: 8,
+                              padding: '2px 14px',
+                              fontSize: 15,
+                              fontWeight: 900,
+                              letterSpacing: '2px',
+                              fontFamily: 'var(--font-num)',
+                              textShadow: '0 0 4px var(--green)',
+                              background: 'rgba(0,0,0,0.05)',
+                            }}>
+                              롤링완료
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    {/* 베팅 목록 */}
+                    {renderBetList(site, !betMode)}   {/* 베팅 모드에선 사이트별 베팅추가 빼고 베팅 모드 패널의 베팅추가로 */}
                   </div>
                 )
               })}
-              </div>
+              </div>}
             </div>
           )}
         </div>
@@ -3933,8 +4715,9 @@ export default function Dashboard() {
 
       {/* 모달 */}
       {showSiteMgr && (
-        <SiteMgrModal sites={sites} onClose={() => setShowSiteMgr(false)} onAdd={addSite} onDelete={deleteSite} onToggleCurrency={toggleCurrency} onReorder={reorderSites} onUpdateDefaultStake={updateDefaultStake} />
+        <SiteMgrModal sites={sites} onClose={() => setShowSiteMgr(false)} onAdd={addSite} onDelete={deleteSite} onToggleCurrency={toggleCurrency} onReorder={reorderSites} onUpdateDefaultStake={updateDefaultStake} onUpdateRollingPct={updateRollingPct} />
       )}
+      {showRulebook && <RulebookNotes onClose={() => setShowRulebook(false)} />}
       {depositSite && <DepositModal site={depositSite} onClose={() => setDepositSite(null)} onDeposit={doDeposit} onPoint={doPoint} />}
       {withdrawSite && <WithdrawModal site={withdrawSite} onClose={() => setWithdrawSite(null)} onWithdraw={doWithdraw} />}
 

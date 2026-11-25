@@ -2,3 +2,5 @@ node_modules
 dist
 .env
 .env.local
+.cache_nba_archive.json
+__pycache__/

@@ -402,6 +402,13 @@ tr:hover td { background: var(--bg-hover); }
 .site-bet-entry.held-push { background: var(--bg-elevated) !important; box-shadow: inset 0 0 0 1px var(--border); }
 .site-bet-entry.held-entry:not(:hover) > *:not(.result-stamp) { opacity: 0.4; filter: grayscale(0.7); }
 
+/* 베팅 모드 합친 목록의 처리 확인한 줄: 왼쪽 색 막대 + 옅은 색 배경, 내용은 흐리게(손익·되돌리기 칸은 또렷) */
+.combo-held { border-radius: 6px; border-top-color: transparent !important; margin-top: 2px; padding-left: 8px !important; }
+.combo-held.held-win  { background: rgba(0,232,122,0.08); box-shadow: inset 3px 0 0 var(--green); }
+.combo-held.held-loss { background: rgba(255,77,109,0.08); box-shadow: inset 3px 0 0 var(--red); }
+.combo-held.held-push { background: var(--bg-elevated); box-shadow: inset 3px 0 0 var(--blue); }
+.combo-held:not(:hover) > *:not(:last-child) { opacity: 0.45; filter: grayscale(0.6); }
+
 /* ── 진행 바 ── */
 .deposit-progress-bar { height: 7px; background: var(--bg-elevated); border-radius: 2px; overflow: hidden; margin-top: 4px; width: 100%; }
 .deposit-progress-fill { height: 100%; background: linear-gradient(90deg, var(--orange), #FFAD42); border-radius: 2px; transition: width 0.4s ease; }
@@ -545,6 +552,20 @@ tr:hover td { background: var(--bg-hover); }
 .dashboard-main { display: flex; flex-direction: column; gap: 10px; width: 100%; }
 .dashboard-side { display: flex; flex-direction: column; gap: 10px; width: 100%; }
 .dashboard-bets { width: 100%; }
+.dashboard-analysis { width: 100%; min-width: 0; }
+/* 베팅분석 입력칸 — 좌측 정렬 [이름][칸] [이름][칸], 입력칸은 모두 같은 가로·세로. 기준점 줄은 나머지 칸을 비워서 다음 줄로 */
+/* 베팅분석 배당 입력 — 모든 종목 한 줄 3칸 자리 (이름 + 입력칸) × 3, 좌측 정렬 */
+.bet-inputs { display: grid; grid-template-columns: repeat(3, max-content 92px); justify-content: start; align-items: center; gap: 5px 6px; margin-bottom: 12px; }
+.bet-inputs__label { white-space: nowrap; }
+.bet-inputs > label > input.bet-odds-input, .bet-inputs input.bet-odds-input { width: 92px; height: 28px; box-sizing: border-box; padding: 0 6px; }
+/* 판정 결과 표 — 칸 여백을 줄여 베팅~베팅 강도가 가로 스크롤 없이 한 번에 */
+.bet-judge-table th, .bet-judge-table td { padding-left: 6px; padding-right: 6px; }
+.bet-judge-table td { padding-top: 6px; padding-bottom: 6px; }
+@media (max-width: 600px) {
+  .bet-inputs { grid-template-columns: max-content 92px; }
+  .bet-inputs__rest { display: none; }
+  .bet-inputs .bet-inputs__label { padding-left: 0 !important; }
+}
 
 /* ── 사이트 현황(채굴) 카드 그리드 ── */
 .mining-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 8px; }
@@ -555,9 +576,27 @@ tr:hover td { background: var(--bg-hover); }
 @media (min-width: 901px) {
   .dashboard-main { flex-direction: row; align-items: flex-start; gap: 10px; }
   .dashboard-side { flex: var(--mining-n, 1) 1 0; min-width: 0; width: auto; }
+  .dashboard-side.analysis-open { min-width: 450px; }
   .dashboard-bets { flex: var(--bet-n, 1) 1 0; min-width: 0; width: auto; }
   .mining-cards { grid-template-columns: minmax(0, 1fr); }
   .site-cards-wrap { grid-template-columns: repeat(var(--site-cols, 1), minmax(0, 1fr)); }
+}
+
+/* ── 대시보드 "상하" 모드: 사이트 현황(채굴·일별손익)을 위 한 줄에, 베팅 현황을 그 아래 전체 폭으로 ── */
+@media (min-width: 901px) {
+  /* 아래 줄은 베팅분석(카드 1.2장 폭) 좌 / 베팅 현황 우 — 사이트 현황 줄은 한 줄 전체를 차지해서 자동으로 줄바꿈된다 */
+  .dashboard-main.stacked { flex-direction: row; flex-wrap: wrap; align-items: flex-start; }
+  .dashboard-main.stacked .dashboard-analysis { flex: 1.2 1 0; width: auto; }
+  /* 베팅분석 판정 표(베팅~베팅 강도)가 가로 스크롤 없이 다 보이는 최소 폭 */
+  .dashboard-main.stacked .dashboard-analysis { min-width: 450px; }
+  .dashboard-main.stacked .dashboard-side { flex: none; width: 100%; flex-direction: row; align-items: stretch; }
+  /* 일별 손익은 사이트 현황 높이에 맞춘다 — 슬롯은 행 높이만 따라가고(내용이 높이를 늘리지 않게) 카드를 그 안에 꽉 채움 */
+  .dashboard-main.stacked .dashboard-pnl-slot { position: relative; }
+  .dashboard-main.stacked .dashboard-pnl-slot > .card { position: absolute; inset: 0; overflow-y: auto; display: flex; flex-direction: column; }
+  .dashboard-main.stacked .dashboard-side > :first-child { flex: 2 1 0; min-width: 0; }
+  .dashboard-main.stacked .dashboard-side > :last-child { flex: 1 1 0; min-width: 340px; }
+  .dashboard-main.stacked .dashboard-bets { flex: var(--bet-n, 1) 1 0; min-width: 0; width: auto; }
+  .dashboard-main.stacked .mining-cards { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
 }
 
 @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
@@ -565,4 +604,74 @@ tr:hover td { background: var(--bg-hover); }
 /* ── 채굴 페이지 ── */
 @media (max-width: 640px) {
   .mining-content { padding: 12px !important; }
+}
+
+/* ── 대시보드 "베팅" 모드: 베팅 모드 패널(종목·리그 → 경기 → 베팅슬립) 좌 6.5 / 베팅 현황(하나로 합친 목록) 우 3.5 (2026-11-22 사용자 요청) ── */
+.dashboard-betmode { width: 100%; min-width: 0; }
+.dashboard-betmode-side { display: flex; flex-direction: column; gap: 10px; min-width: 0; width: 100%; }
+@media (min-width: 901px) {
+  .dashboard-main.betmode .dashboard-betmode { flex: 6.5 1 0; min-width: 560px; width: auto; }
+  .dashboard-main.betmode .dashboard-bets { flex: 3.5 1 0; min-width: 380px; width: auto; }
+  /* 베팅 모드 3칸: 사이트 현황·일별 손익(좁게) | 베팅 패널 | 베팅 현황 (2026-11-24 사용자 요청) */
+  .dashboard-main.betmode .dashboard-betmode-side { flex: 0 0 285px; width: 285px; }
+  .dashboard-main.betmode .dashboard-betmode-side .mining-cards { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* 베팅 모드 패널 칸 — PC: 종목·리그 | 경기 일정 | 베팅슬립 (0.65 : 0.9 : 1.2) */
+.betmode-grid { display: grid; grid-template-columns: minmax(0, 0.65fr) minmax(0, 0.9fr) minmax(0, 1.2fr); gap: 10px; align-items: start; }
+/* 모바일 (2026-11-24 사용자 요청 — 세 칸이면 팀 이름이 잘린다): 종목·리그 → 아래 경기 일정 → 아래 베팅슬립. PC는 그대로 */
+@media (max-width: 700px) {
+  .betmode-grid { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+  .betmode-grid .betmode-col { max-height: none !important; overflow: visible !important; }
+  .betmode-grid .bm-col-league .bm-sport { display: grid !important; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .betmode-grid .bm-col-league .bm-sport > :first-child { grid-column: 1 / -1; }
+  .betmode-grid .bm-col-league .bm-sport > button:not(:first-child) { margin-left: 0 !important; }
+}
+
+.ss-lbl { display: none; }
+/* ── 베팅 모드 모바일 (2026-11-24 사용자 요청 — 모바일에서 진행중 베팅이 잘 안 보였다. PC는 그대로) ──
+   ① 순서: 베팅 현황(진행중 베팅)을 맨 위로 → 베팅 패널 → 사이트 현황·일별 손익
+   ② 진행중·완료 한 줄을 두 줄로: [종목 · 사이트 · 배당 · 금액 · 처리] / [리그·팀·옵션 전체 폭], 글자 조금 크게, 줄마다 카드 */
+@media (max-width: 700px) {
+  .dashboard-main.betmode .dashboard-bets { order: 1; }
+  .dashboard-main.betmode .dashboard-betmode { order: 2; }
+  .dashboard-main.betmode .dashboard-betmode-side { order: 3; }
+  .combo-pending-title { font-size: 13px !important; color: var(--text-primary) !important; margin-bottom: 6px !important; }
+  .combo-row {
+    grid-template-columns: 20px minmax(0, 1fr) auto auto auto !important;
+    grid-template-areas: "sport site odds stake act" "match match match match match";
+    row-gap: 4px; column-gap: 8px !important;
+    padding: 8px 8px !important; margin-top: 6px;
+    border: 1px solid var(--border) !important; border-radius: var(--radius-sm);
+    background: var(--bg-elevated);
+  }
+  .combo-row .cr-sport { grid-area: sport; font-size: 16px !important; }
+  .combo-row .cr-site { grid-area: site; font-size: 12px !important; color: var(--text-primary) !important; }
+  .combo-row .cr-odds { grid-area: odds; font-size: 13px; }
+  .combo-row .cr-stake { grid-area: stake; font-size: 13px; }
+  .combo-row .cr-act { grid-area: act; }
+  .combo-row .cr-match { grid-area: match; padding-top: 4px; border-top: 1px dashed var(--border-light); }
+  .combo-row .cr-match > span:first-child { font-size: 11px !important; }
+  .combo-pending .combo-row .bet-action-btn { width: 28px !important; height: 28px !important; }
+}
+
+/* 베팅 현황 사이트 요약 — 모바일은 사이트마다 카드 두 줄 (2026-11-24 사용자 요청):
+   [● 이름 · n건 · 수익 · 입금/출금] / [입금 금액 · 남은 롤링 금액 ━━━ %] */
+@media (max-width: 700px) {
+  .ss-grid { display: flex !important; flex-direction: column; align-items: stretch !important; gap: 6px; }
+  .ss-head { display: none !important; }
+  .ss-row {
+    display: grid !important; grid-template-columns: auto minmax(0, 1fr) auto auto;
+    grid-template-areas: "name name pnl btn" "dep roll roll roll";
+    column-gap: 10px; row-gap: 6px; align-items: center;
+    padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-elevated);
+  }
+  .ss-row.ss-active { border-color: var(--green-border); }
+  .ss-name { grid-area: name; font-size: 13px; }
+  .ss-pnl { grid-area: pnl; font-size: 13px; }
+  .ss-btn { grid-area: btn; }
+  .ss-btn .site-icon-btn { width: 30px !important; height: 30px !important; }
+  .ss-dep { grid-area: dep; text-align: left !important; font-size: 12px; }
+  .ss-roll { grid-area: roll; font-size: 12px; }
+  .ss-lbl { display: inline; font-size: 10px; color: var(--text-muted); font-weight: 700; white-space: nowrap; font-family: var(--font-body); }
 }

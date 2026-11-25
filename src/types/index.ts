@@ -1,4 +1,4 @@
-export type Sport = 'soccer' | 'baseball' | 'basketball' | 'volleyball' | 'hockey' | 'esports' | 'other'
+export type Sport = 'soccer' | 'baseball' | 'basketball' | 'volleyball' | 'hockey' | 'esports' | 'other' | 'casino'
 export type Market = 'moneyline' | 'handicap' | 'over' | 'under' | 'correct_score' | 'other'
 export type BetResult = 'win' | 'loss' | 'push' | 'pending'
 export type CashflowType = 'income' | 'expense'
@@ -15,6 +15,7 @@ export interface Site {
   default_stake: number             // 기본 베팅 금액 (0이면 통화별 폴백)
   carry_pnl: number                 // 마감 시 진행중 베팅이 남아있으면 이월되는 누적 수익률 (진행중 베팅 없이 마감되면 0으로 초기화)
   settlement_hidden: boolean        // 결산 "사이트별 손익"에서 숨김 여부 — 대시보드의 active(진행중 베팅 여부)와는 완전히 별개
+  rolling_pct: number               // 롤링 목표 % (기본 100) — 입금+포인트의 이 비율만큼 롤링해야 완료 (300이면 30만 입금 시 90만)
 }
 export interface Bet {
   id: string; created_at: string; bet_date: string; sport: Sport
@@ -30,6 +31,12 @@ export interface Bet {
   result_at: string | null      // 결과(적중/실패/PUSH/캐시아웃) 처리된 시각 — 처리 후 1시간 동안은 완료된 목록으로 넘기지 않고 진행중에 유지
   stats_excluded: boolean       // 통계에서 제외(통계 페이지 "최근 합류" 목록에서 삭제) — 베팅 자체는 남아 잔액/결산엔 그대로 반영
   bet_option: string | null     // 통계에서 베팅옵션별 성적을 낼 때 문구 패턴매칭 대신 수동으로 지정한 옵션 라벨 ("기타" 재지정용)
+  is_mock: boolean              // 모의베팅 — 만원 기준, 잔액·롤링 미반영, 통계 "모의" 탭에서만 집계
+  auto_result?: 'win' | 'loss' | 'push' | null  // 자동 판정 (DB auto_grade_bets — 종료 경기 점수로), 최종 처리는 [확인]
+  auto_score?: string | null    // 자동 판정에 쓴 최종 점수 '홈-원정' (배구는 세트)
+  auto_note?: string | null     // 판정 못 한 이유 (경기 못 찾음 등)
+  auto_game_id?: string | null // 자동 판정이 맞춘 game_schedules 경기 id (베팅 모드 일정 '베팅함' 표시)
+  auto_game?: { home?: string; away?: string; start?: string; status?: string | null; hs?: string | number | null; as?: string | number | null; final?: boolean } | null  // 자동 판정이 맞춘 경기 (진행중 베팅 리그 옆 표시)
 }
 export interface Todo {
   id: string; created_at: string; todo_date: string; content: string
@@ -66,4 +73,6 @@ export interface SoccerOddsLog {
   result_outcome: 'home_win' | 'draw' | 'away_win' | null
   result_updated_at: string | null
 }
-export type Tab = 'dashboard' | 'stats' | 'settlement' | 'analysis' | 'simul' | 'rulebook'
+// 카지노(sport='casino')는 더 이상 입력하지 않음 — 예전 기록만 대시보드에 남아 삭제 가능, 통계에서는 제외
+
+export type Tab = 'dashboard' | 'stats' | 'settlement' | 'schedule' | 'simul' | 'rulebook'
