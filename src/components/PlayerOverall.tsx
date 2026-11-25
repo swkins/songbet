@@ -467,7 +467,7 @@ export default function PlayerOverall({ league, gameDate, home, away, left, odds
             {sim.parts.market != null && (sim.parts.wMarket ?? 0) > 0
               ? <>마진 = 시장 {signed(sim.parts.market)} × {sim.parts.wMarket} + 우리 모델 {signed(sim.parts.model)} × {Math.round((1 - (sim.parts.wMarket ?? 0.8)) * 10) / 10}</>
               : <>마진 = 우리 모델 {signed(sim.parts.model)}</>}
-            {' '}· 우리 모델 = 팀 레이팅 차 {signed(sim.parts.rating ?? 0)} + 홈 {signed(sim.parts.hca)} + 결장·개인 피로 {signed(sim.parts.injury)}{sim.parts.cond ? <> + 컨디션 차 {signed(sim.parts.cond)}</> : null}
+            {' '}· 우리 모델 = 팀 레이팅 차 {signed(sim.parts.rating ?? 0)} + 홈 {signed(sim.parts.hca)} + {sim.parts.lineup != null ? '출전 선수 보정(오늘 뛸 선수 실력 − 지금까지 평균)' : '결장·개인 피로'} {signed(sim.parts.injury)}{sim.parts.cond ? <> + 컨디션 차 {signed(sim.parts.cond)}</> : null}
             {sim.parts.news ? <> + 뉴스 보정 {signed(sim.parts.news)}{data.news?.adj_note ? ` (${data.news.adj_note})` : ''}</> : null}
             {' '}· 팀 레이팅 = 이번 시즌 경기만으로 상대 보정해 고침 (지난 시즌 값 안 씀) · 선수 출전 칸을 누르면 결장/출전으로 바꿔 다시 계산
           </div>) : (

@@ -37,7 +37,8 @@ export interface PlayerOv {
 }
 const kindRank = (k: string | null | undefined) => k === '외국인' ? 0 : k === '아시아쿼터' ? 1 : 2
 export interface TeamOv { team: string | null; players: PlayerOv[]; full: number | null; exp: number | null; stats: TeamStats | null; gone?: string[] }
-export interface TeamStats { n: number; pf: number; pa: number; sw?: number; sl?: number; vr?: number; rt?: TeamRating }   // vr = 배구 상대 보정 레이팅 (volleyRatings)
+export interface TeamStats { n: number; pf: number; pa: number; sw?: number; sl?: number; vr?: number; rt?: TeamRating
+  lineup?: { hist: number; avg: Record<string, number> } }   // 출전 선수 보정 (WKBL): 지금까지 경기 평균 실력 합, 선수별 평균 게임스코어   // vr = 배구 상대 보정 레이팅 (volleyRatings)
 /** NBA 팀 레이팅 (nbaRatings) — r = 득실(상대 보정), o = 공격(+ = 많이 넣음), d = 수비(+ = 많이 내줌), avgT = 리그 평균 총점 */
 export interface TeamRating { r: number; o: number; d: number; n: number; avgT: number }   // 농구 pf·pa = 경기당 득점·실점 / 배구 = 경기당 딴·잃은 세트, sw·sl = 시즌 세트 합
 export interface GameNews { summary: string | null; items: { title: string; url?: string }[] | null; margin_adj: number | null; adj_note: string | null; checked_at: string }
@@ -117,13 +118,57 @@ async function loadLeague(code: string): Promise<LeagueData> {
   }
   teams.forEach(t => { t.sw = t.pf; t.sl = t.pa; t.pf /= t.n; t.pa /= t.n })
   if (vbRaw.length) volleyRatings(vbRaw).forEach((v, team) => { const t = teams.get(team); if (t) t.vr = v.r })   // 배구 상대 보정 레이팅
+  // 출전 선수 보정 (WKBL, 2026-11-25 — KB스타즈가 박지수 없이 치른 초반 경기로 레이팅이 낮게 잡혀 우리은행 승으로 나왔다):
+  //  경기마다 '그날 뛴 선수 상위 8명의 그때까지 평균 게임스코어 합'(실력 합)을 내고, 레이팅은 '실력 합이 평소보다 얼마나 높았나 × lineupK'를
+  //  반영한 예측과의 오차로 고친다 → 주전이 빠져서 진 경기는 덜 깎인다. 예측 때는 오늘 출전 예상 선수(출전 확률)로 실력 합을 다시 낸다.
+  //  2025-26 백테스트(scripts/kbl_lineup_backtest.py): WKBL 뒤 절반 MAE 10.27 → 10.17·적중 65.0 → 72.5%, 2026-27 MAE 10.13 → 9.60. KBL은 개선 없음(0).
+  let lineupAdj: Map<string, number> | undefined
+  const lk = PARAMS.leagues[code]?.lineupK
+  if (lk) {
+    const { data: pg } = await supabase.from('v_player_games').select('game_date,team,player_id,gmsc,minutes').eq('league', code).eq('season', cur).limit(5000)
+    const P = new Map<string, number[]>(), HIST = new Map<string, number[]>(), S = new Map<string, number>()
+    const byDay = new Map<string, Map<string, string[]>>()
+    for (const r of (pg ?? []) as { game_date: string; team: string; player_id: string; gmsc: number | null; minutes: number | null }[]) {
+      if (!(Number(r.minutes) > 0)) continue
+      const day = byDay.get(r.game_date) ?? new Map<string, string[]>(); byDay.set(r.game_date, day)
+      day.set(r.team, [...(day.get(r.team) ?? []), r.player_id])
+    }
+    const gm = new Map<string, number>()
+    for (const r of (pg ?? []) as { game_date: string; team: string; player_id: string; gmsc: number | null; minutes: number | null }[]) if (Number(r.minutes) > 0) gm.set(`${r.game_date}|${r.team}|${r.player_id}`, Number(r.gmsc ?? 0))
+    const avg = (p: string) => { const v = P.get(p); return v && v.length >= 2 ? v.reduce((x, y) => x + y, 0) / v.length : null }
+    const talent = (ids: string[]) => ids.map(avg).filter((v): v is number => v != null).sort((x, y) => y - x).slice(0, 8).reduce((x, y) => x + y, 0)
+    lineupAdj = new Map()
+    const delta = new Map<string, number>()
+    for (const day of [...byDay.keys()].sort()) {
+      const teamsDay = byDay.get(day)!
+      teamsDay.forEach((ids, team) => {
+        const s = talent(ids), h = HIST.get(team)
+        delta.set(`${day}|${team}`, h && h.length ? s - h.reduce((x, y) => x + y, 0) / h.length : 0)
+        S.set(`${day}|${team}`, s)
+      })
+      teamsDay.forEach((ids, team) => {
+        HIST.set(team, [...(HIST.get(team) ?? []), S.get(`${day}|${team}`)!])
+        ids.forEach(p => P.set(p, [...(P.get(p) ?? []), gm.get(`${day}|${team}|${p}`) ?? 0]))
+      })
+    }
+    for (const r of (tg.data ?? []) as TeamGameRow[]) if (r.is_home) lineupAdj.set(`${r.game_date}|${r.team}`, lk * ((delta.get(`${r.game_date}|${r.team}`) ?? 0) - (delta.get(`${r.game_date}|${r.opp}`) ?? 0)))
+    HIST.forEach((h, team) => {
+      const t = teams.get(team); if (!t) return
+      const av: Record<string, number> = {}
+      P.forEach((_, p) => { const v = avg(p); if (v != null) av[p] = v })
+      t.lineup = { hist: h.reduce((x, y) => x + y, 0) / h.length, avg: av }
+    })
+  }
   if (PARAMS.leagues[code]?.rk != null) {   // NBA·KBL·WKBL 팀 레이팅
-    const rt = nbaRatings((tg.data ?? []) as TeamGameRow[], PARAMS.leagues[code], code === 'NBA')
+    const rt = nbaRatings((tg.data ?? []) as TeamGameRow[], PARAMS.leagues[code], code === 'NBA', lineupAdj)
     rt.forEach((v, team) => { const t = teams.get(team); if (t) t.rt = v })
   }
   const fix = <T extends SeasonRow>(r: T): T => ({ ...r, min: num(r.min), gmsc: num(r.gmsc) })
   const curRows = ((a.data ?? []) as SeasonRow[]).map(fix)
-  const prevRows = ((b.data ?? []) as BaseRow[]).map(fix)
+  // 배구는 지난 시즌 체급을 안 섞는다 (2026-11-25 사용자 요청 — 기존 용병은 작년 기록 덕에 높고 새 용병은 평균에서 출발해 불리했다):
+  //  이번 시즌 균형 점수만 (v_vb_tier가 세트 적으면 포지션 평균 쪽으로 당김). player_base의 배구 2025-26 줄은 남아 있지만 안 읽는다.
+  //  → 국내 농구(KBL·WKBL)도 같이 (사용자 요청 2026-11-25 "이번 시즌만 체급", NBA는 건드리지 않음 — 지난 시즌·조사 체급 manual_base 그대로).
+  const prevRows: BaseRow[] = code === 'NBA' ? ((b.data ?? []) as BaseRow[]).map(fix) : []
   const vb = code.startsWith('VLEAGUE')
   const poolCur = curRows.filter(r => r.gmsc != null && r.gp >= 3 && (vb || (r.min ?? 0) >= 12)).map(r => r.gmsc!).sort((x, y) => y - x)
   const poolPrev = prevRows.filter(r => r.gmsc != null && r.gp >= (vb ? 5 : 15) && (vb || (r.min ?? 0) >= 12)).map(r => r.gmsc!).sort((x, y) => y - x)
@@ -279,22 +324,36 @@ export async function loadGameOverall(league: string, gameDate: string, home: Sc
       const kind = d.kinds.get(r.player_id) ?? null
       // 이 리그 지난 시즌 기록이 없는 선수(새 용병·신인): 같은 구분 평균에서 출발해 경기마다 실제 쪽으로 (사용자 요청 2026-11-21)
       //  KBL 2025-26 측정: 새 용병은 평균 6경기분을 섞을 때(1경기 오차 4.7 → 3.0), 국내 신인은 3경기분일 때 가장 정확 — 배구도 일단 같은 값
+      // 이번 시즌 기록만 (2026-11-25 사용자 요청 — 지난 시즌을 섞으면 기존 용병은 높고 새 용병은 평균 출발이라 불리했다).
+      //  새·기존 선수 구분 없이 같은 기준. 농구는 경기 수가 적으면 같은 구분(외국인·아시아쿼터·국내)의 이번 시즌 평균 쪽으로 당긴다
+      //  (외국인·아시아쿼터 6경기분·국내 3경기분 — KBL 2025-26 측정값), 배구는 v_vb_tier가 세트 수로 포지션 평균 쪽으로 이미 당김.
+      //  NBA는 예전 그대로 (사용자 요청 — 국내만): 지난 시즌 섞기 + 새 선수는 같은 구분 평균에서 출발.
       let newcomer: PlayerOv['newcomer'] = null
-      if (lastScore == null && !stubIds.has(r.player_id)) {
-        const ps = vb ? d.pos.get(r.player_id)?.position : null
+      let w = 1
+      let shrinkNote: string | null = null
+      let base: number | null = curScore == null ? null : Math.round(curScore)
+      if (code === 'NBA') {
+        if (lastScore == null && !stubIds.has(r.player_id)) {
+          const k = kind ?? '국내'
+          const pr = d.prior.get(k) ?? d.prior.get(`prev|${k}`) ?? (kind === '외국인' ? 80 : kind ? 68 : 55)
+          const kk = kind ? 6 : 3, ne = curScore == null ? 0 : n
+          newcomer = { kind, n: ne, prior: pr, w: Math.round(ne / (ne + kk) * 100) / 100 }
+        }
+        w = lastScore == null ? 1 : curScore == null ? 0 : n / (n + 15)
+        base = newcomer ? (newcomer.n ? Math.round(((curScore ?? 0) * newcomer.n + newcomer.prior * (kind ? 6 : 3)) / (newcomer.n + (kind ? 6 : 3))) : newcomer.prior)
+          : curScore == null && lastScore == null ? null : Math.round((curScore ?? 0) * w + (lastScore ?? 0) * (1 - w))
+      } else if (curScore != null && !vb) {
         const k = kind ?? '국내'
-        const pr = (ps && kind ? d.prior.get(`${k}|${ps}`) : undefined) ?? d.prior.get(k) ?? d.prior.get(`prev|${k}`) ?? (kind === '외국인' ? 80 : kind ? 68 : 55)
-        const kk = kind ? 6 : 3, ne = curScore == null ? 0 : n
-        newcomer = { kind, n: ne, prior: pr, w: Math.round(ne / (ne + kk) * 100) / 100 }
+        const pr = d.prior.get(k) ?? (kind === '외국인' ? 80 : kind ? 68 : 55)
+        const kk = kind ? 6 : 3
+        base = Math.round((curScore * n + pr * kk) / (n + kk))
+        if (n / (n + kk) < 0.67) shrinkNote = `경기 수가 적어 ${kind ?? '국내 선수'} 평균 ${pr} 쪽으로 (실제 기록 비중 ${Math.round(n / (n + kk) * 100)}%)`
       }
-      const w = lastScore == null ? 1 : curScore == null ? 0 : n / (n + 15)
-      const base = newcomer ? (newcomer.n ? Math.round(((curScore ?? 0) * newcomer.n + newcomer.prior * (kind ? 6 : 3)) / (newcomer.n + (kind ? 6 : 3))) : newcomer.prior)
-        : curScore == null && lastScore == null ? null : Math.round((curScore ?? 0) * w + (lastScore ?? 0) * (1 - w))
       const rc = d.recent.get(r.player_id)
       const form = rc && rc.n >= 2 && rc.gmsc5 != null ? Math.round(score(rc.gmsc5, d.poolForm ?? d.poolCur)) : null
       const overall = base == null ? null : form == null ? base : Math.round(base * 0.7 + form * 0.3)
       const baseNote = stubIds.has(r.player_id) ? '이번 시즌 출전 기록 없음 — 팀 전력에는 안 넣음 (팀 기록에 이미 이 선수 없는 경기력이 반영)' : [n ? `이번 시즌 ${n}경기` : null, pb ? (pb.manual_base != null ? `조사 체급 ${pb.manual_base}${pb.note ? ` (${pb.note})` : ''}` : `지난 시즌 ${pb.gp}경기`) : null,
-        lastScore != null && curScore != null ? `이번 시즌 비중 ${Math.round(w * 100)}%` : null,
+        lastScore != null && curScore != null ? `이번 시즌 비중 ${Math.round(w * 100)}%` : null, shrinkNote,
         newcomer ? `${newcomer.kind ? `새 ${newcomer.kind}` : '이 리그 새 선수'} — ${newcomer.kind ? `${newcomer.kind} 평균` : '같은 리그 선수 평균'} ${newcomer.prior}에서 출발, 실제 기록 비중 ${Math.round(newcomer.w * 100)}%` : null].filter(Boolean).join(' · ')
 
       // 출전 확률
@@ -423,10 +482,11 @@ export interface LeagueParams { sd: number; sdT: number; hca: number; k: number;
   // NBA 팀 레이팅 모델 (2026-11-21, scripts/nba_score_model.py로 2011-16에서 고르고 2017-21·2025-26으로 확인):
   // rk·rkt = 경기마다 오차 반영 속도(득실·총점), carry = 지난 시즌 끝 값 이어받기, early = 시즌 초(팀 10경기 전) 반영 가속,
   // wMarket = 최종 마진·총점에서 시장 기준점 비중 (나머지 = 우리 모델) — 기준점이 없으면 모델만
-  rk?: number; rkt?: number; carry?: number; early?: number; wMarket?: number }
+  rk?: number; rkt?: number; carry?: number; early?: number; wMarket?: number
+  lineupK?: number }   // 출전 선수 보정 계수 (실력 합 1 = 게임스코어 1 → 마진 lineupK점) — WKBL 0.4, 있으면 결장 반영(injury) 대신 쓴다
 interface TeamGameRow { team: string; opp: string; game_date: string; is_home: boolean; team_score: number | null; opp_score: number | null }
 /** NBA 팀 레이팅: 지난 시즌 끝 값(NBA_PRIOR) × carry에서 시작해 이번 시즌 경기 순서대로 오차 × rk만큼 고친다 (최근 경기일수록 비중 큼) */
-export function nbaRatings(rows: TeamGameRow[], c: LeagueParams, usePrior = true): Map<string, TeamRating> {
+export function nbaRatings(rows: TeamGameRow[], c: LeagueParams, usePrior = true, adj?: Map<string, number>): Map<string, TeamRating> {
   const carry = c.carry ?? 0, k = c.rk ?? 0.05, kt = c.rkt ?? 0.05, early = c.early ?? 4, hca = c.hca
   const R = new Map<string, number>(), O = new Map<string, number>(), D = new Map<string, number>(), N = new Map<string, number>()
   if (usePrior) for (const [t, [r, o, d]] of Object.entries(NBA_PRIOR)) { R.set(t, r * carry); O.set(t, o * carry); D.set(t, d * carry) }
@@ -438,7 +498,7 @@ export function nbaRatings(rows: TeamGameRow[], c: LeagueParams, usePrior = true
     const h = x.team, a = x.opp, hs = Number(x.team_score), as = Number(x.opp_score)
     const nMin = Math.min(g(N, h), g(N, a))
     const kk = k * (1 + early * Math.max(0, 10 - nMin) / 10)
-    const e = (hs - as) - (hca + g(R, h) - g(R, a))
+    const e = (hs - as) - (hca + g(R, h) - g(R, a) + (adj?.get(`${x.game_date}|${h}`) ?? 0))
     R.set(h, g(R, h) + kk * e / 2); R.set(a, g(R, a) - kk * e / 2)
     const eh = hs - (avg / 2 + g(O, h) + g(D, a) + hca / 2), ea = as - (avg / 2 + g(O, a) + g(D, h) - hca / 2)
     O.set(h, g(O, h) + kt * eh); D.set(a, g(D, a) + kt * eh); O.set(a, g(O, a) + kt * ea); D.set(h, g(D, h) + kt * ea)
@@ -455,7 +515,7 @@ export const DEFAULT_PARAMS: ModelParams = {
     NBA: { sd: 13.5, sdT: 18, hca: 2.5, k: 1.0, avg: 113, wScore: 0.5, wOv: 0, condK: COND_K.NBA, rk: 0.05, rkt: 0.05, carry: 0, early: 4, wMarket: 0 },   // wMarket 0 = 시장 기준점을 예상 스코어에 안 섞음 (사용자 요청 2026-11-23 — 우리 모델만)   // carry 0 = 지난 시즌 팀 레이팅 안 씀 (사용자 요청 2026-11-21 — 선수가 다 바뀜)
     // KBL·WKBL도 NBA처럼 팀 레이팅 + 결장·컨디션·뉴스 (사용자 요청 2026-11-24, 오버롤 차·시장 안 씀) — 2025-26 순차 백테스트 MAE KBL 9.43→9.30 · WKBL 9.46→9.41 (rk 0.05, early 0)
     KBL: { sd: 11, sdT: 14, hca: 2, k: 0.8, avg: 80, wScore: 0.5, wOv: 0, condK: COND_K.KBL, rk: 0.05, rkt: 0.05, carry: 0, early: 0, wMarket: 0 },
-    WKBL: { sd: 10, sdT: 12, hca: 0.5, k: 0.7, avg: 65, wScore: 0.5, wOv: 0, condK: COND_K.WKBL, rk: 0.05, rkt: 0.05, carry: 0, early: 0, wMarket: 0 },
+    WKBL: { sd: 10, sdT: 12, hca: 0.5, k: 0.7, avg: 65, wScore: 0.5, wOv: 0, condK: COND_K.WKBL, rk: 0.05, rkt: 0.05, carry: 0, early: 0, wMarket: 0, lineupK: 0.4 },
     // 배구: hca = 홈 이점(logit), k = 팀 오버롤 1점당 logit, wScore = 시장 배당 비중, wOv = 오버롤 모델 비중 (volleyPredict.ts)
     // 배구 wScore = 상대 보정 팀 레이팅 비중, wOv = 오버롤 비중 (2026-11-25 레이팅으로 바꾸며 hca 0.15→0.2·wScore 0.5→1, KOVO 5시즌 백테스트)
     VLEAGUE_M: { sd: 0, sdT: 0, hca: 0.2, k: 0.08, avg: 0, wScore: 1, wOv: 0.5, condK: 0 },
@@ -479,7 +539,7 @@ export async function loadModelParams(force = false): Promise<ModelParams> {
   return PARAMS
 }
 export interface SimResult { home: number; away: number; total: number; margin: number; homeWin: number; p10: number; p90: number
-  parts: { scoreMargin: number; ovMargin: number; injury: number; hca: number; news: number; cond: number
+  parts: { scoreMargin: number; ovMargin: number; injury: number; hca: number; news: number; cond: number; lineup?: number
     // NBA 레이팅 모델: rating = 팀 레이팅 차, model = 우리 모델 마진, market = 시장 마진(−홈 기준점), modelTotal·marketTotal
     rating?: number; model?: number; market?: number | null; modelTotal?: number; marketTotal?: number | null; wMarket?: number }
   // 가중치 빼기 전 값 — 예측 저장 후 검토에서 가중치를 바꿔 다시 계산해 보는 데 쓴다
@@ -497,7 +557,18 @@ export function simulate(code: string, home: TeamOv, away: TeamOv, overrides: Re
   const scoreMargin = hPts - aPts
   const ovDiff = H.full - A.full, injDiff = (H.exp - H.full) - (A.exp - A.full)
   const ovMargin = c.k * ovDiff
-  const injury = c.k * injDiff
+  let injury = c.k * injDiff
+  // 출전 선수 보정 (WKBL): 오늘 출전 예상 선수(출전 확률 곱) 상위 8명 실력 합 − 지금까지 경기 평균 → 결장 반영 대신
+  const lineupDelta = (t: TeamOv) => {
+    const lu = t.stats?.lineup; if (!lu) return null
+    const vals = t.players.filter(p => lu.avg[p.id] != null).map(p => lu.avg[p.id] * (overrides[p.id] ?? p.avail.prob) / 100).sort((x, y) => y - x).slice(0, 8)
+    return vals.reduce((x, y) => x + y, 0) - lu.hist
+  }
+  let lineup: number | undefined
+  if (c.lineupK) {
+    const dh = lineupDelta(home), da = lineupDelta(away)
+    if (dh != null && da != null) { lineup = Math.round(c.lineupK * (dh - da) * 10) / 10; injury = lineup }
+  }
   // 컨디션: 1%p 차이 × condK (NBA 0.17점)
   const condDiff = cond ? cond.home.pct - cond.away.pct : 0
   const condAdj = c.condK * condDiff
@@ -530,7 +601,7 @@ export function simulate(code: string, home: TeamOv, away: TeamOv, overrides: Re
   const dR = Math.round(mu), hR = Math.round((sumH + sumA) / n / 2 + dR / 2)
   return { home: hR, away: hR - dR, total: Math.round(T), margin: r1(mu), homeWin: r1(win / n * 100),
     p10: r1(ms[Math.floor(n * 0.1)]), p90: r1(ms[Math.floor(n * 0.9)]),
-    parts: { scoreMargin: r1(scoreMargin), ovMargin: r1(ovMargin), injury: r1(injury), hca: c.hca, news: newsAdj, cond: r1(condAdj), ...extra },
+    parts: { scoreMargin: r1(scoreMargin), ovMargin: r1(ovMargin), injury: r1(injury), hca: c.hca, news: newsAdj, cond: r1(condAdj), ...(lineup != null ? { lineup } : {}), ...extra },
     raw: { scoreMargin: r1(scoreMargin), ovDiff: r1(ovDiff), injDiff: r1(injDiff), condDiff, hca: c.hca, news: newsAdj, T: r1(T), ...rawX } }
 }
 
