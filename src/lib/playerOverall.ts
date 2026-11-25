@@ -643,7 +643,8 @@ export function simulate(code: string, home: TeamOv, away: TeamOv, overrides: Re
   }
   // 컨디션: 1%p 차이 × condK (NBA 0.17점)
   const condDiff = cond ? cond.home.pct - cond.away.pct : 0
-  const condAdj = c.condK * condDiff
+  // NBA: 팀 피로 점수(fatigue.ts NBA_FATIGUE)를 그대로 — 홈 피로 − 원정 피로 (2026-11-26)
+  const condAdj = cond && cond.home.margin != null && cond.away.margin != null ? cond.home.margin - cond.away.margin : c.condK * condDiff
   let mu = c.wScore * scoreMargin + c.wOv * ovMargin + injury + c.hca + newsAdj + condAdj
   let T = hPts + aPts
   // NBA (2026-11-21 사용자 요청 — 점수차가 너무 작아 플핸만 나왔다): 팀 레이팅 모델 + 시장 기준점 (wMarket 0.8) — scripts/nba_score_model.py

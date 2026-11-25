@@ -38,12 +38,69 @@ export interface Condition {
   items: { text: string; pts: number }[]   // 감점 이유
   b2b: boolean
   restDays: number | null           // 직전 경기 뒤 쉰 날 (0 = 백투백)
+  margin?: number                   // NBA: 피로 점수 합 (예상 마진에 그대로 더함, 0 이하) — items.pts도 점수
+}
+
+// ─── NBA 팀 피로 = 점수 (2026-11-26 사용자 요청 — 백투백·장거리 이동·연장·일정 밀집·원정 연전을 정밀하게, 데이터보다 크게) ─────
+// 근거: scripts/nba_fatigue_backtest.py (2011-22, 11,119경기, 우리 팀 레이팅 대비 실제 효과): 백투백 −1.1(앞 시즌)~−2.1(뒤 시즌) ·
+//  백투백+전날 연장 추가 −1.1~−1.8 · 백투백 전날 이동 1,000km당 −0.35 · 2일 안 연장 −0.5 · 고지대 원정 −1.1~−1.3 · 6일 4경기 −0.7~0 ·
+//  원정 연전·시차·누적 이동은 거의 0 (원정 연전이 힘든 건 그 안의 백투백·밀집 때문). 시장은 이미 거의 다 반영(남는 건 연장 −0.7·밀집 −0.3).
+//  사용자 요청 "반영할 수 있는 최대한, 너무 과하지 않게" → 아래 값으로 배율을 바꿔 가며 같은 데이터 MAE: 피로 없음 10.411 · ×0.5 10.375 ·
+//  **지금 값(×0.75) 10.384** · ×1.0 10.414(없는 것과 같음) · ×1.25 10.464 — 예측이 나빠지지 않는 가장 큰 쪽 (2011-16·2018-22도 같은 순서).
+//  원정 연전도 넣음(사용자 판단, 데이터상 효과 작음). 3일+ 휴식 등 플러스는 시즌마다 부호가 바뀌어 안 넣음. 예측 보고서로 확인하며 조정.
+export const NBA_FATIGUE = {
+  b2b: -1.9,              // 백투백
+  b2bKm: -0.5,            // 백투백 전날 밤 이동 1,000km당
+  rest1Km: -0.2,          // 하루 쉬고 이동 1,000km당 (장거리 비행)
+  ot: [-1.5, -0.75, -0.4], // 연장 1번당: 전날 · 2일 전 · 3일 전
+  dense: [[7, 5, -1.1], [6, 4, -0.75], [4, 3, -0.5]] as [number, number, number][],   // 일정 밀집 (오늘 포함, 가장 큰 것 하나)
+  road: [[5, -1.1], [4, -0.75], [3, -0.4]] as [number, number][],                      // 원정 n연전째 (오늘 원정 포함)
+  altitude: -0.9,         // 덴버·유타 원정
+  floor: -6,              // 합계 최저
+}
+const ALTITUDE = new Set(['Denver Nuggets', 'Utah Jazz'])
+function nbaFatigue(team: string, isHome: boolean, host: string, gameDate: string, games: PastGame[]): Condition {
+  const F = NBA_FATIGUE
+  const items: { text: string; pts: number }[] = []
+  const add = (text: string, pts: number) => { if (pts < -0.05) items.push({ text, pts: Math.round(pts * 10) / 10 }) }
+  const loc = (g: PastGame) => NBA_ARENA[(g.is_home ? team : g.opp) ?? ''] ?? null
+  const here = NBA_ARENA[host] ?? null
+  const last = games[0]
+  const restDays = last ? dayDiff(last.game_date, gameDate) - 1 : null
+  const b2b = restDays === 0
+  const tag = (h: boolean | null) => (h ? '홈' : '원정')
+  if (b2b) add(`백투백 (${tag(last!.is_home)} → ${tag(isHome)})`, F.b2b)
+  if (last && here && (b2b || restDays === 1)) {
+    const from = loc(last)
+    if (from) {
+      const d = km(from, here), tz = from[2] - here[2]
+      if (d >= 300) add(`${b2b ? '전날 밤' : '하루 쉬고'} 이동 ${Math.round(d).toLocaleString()}km${tz ? ` · 시차 ${Math.abs(tz)}시간` : ''}`, (b2b ? F.b2bKm : F.rest1Km) * d / 1000)
+    }
+  }
+  for (const g of games) {
+    const ago = dayDiff(g.game_date, gameDate), ot = otCount('NBA', g.team_min)
+    if (ago > 3 || !ot) continue
+    add(`${ago === 1 ? '전날' : `${ago}일 전`} ${ot > 1 ? `${ot}차 ` : ''}연장`, ot * F.ot[ago - 1])
+  }
+  const within = (n: number) => 1 + games.filter(g => dayDiff(g.game_date, gameDate) < n).length
+  const hit = F.dense.find(([days, cnt]) => within(days) >= cnt)
+  if (hit) add(`${hit[0]}일 ${within(hit[0])}경기`, hit[2])
+  if (!isHome) {
+    let k = 1; while (k - 1 < games.length && games[k - 1].is_home === false) k++
+    const r = F.road.find(([n]) => k >= n)
+    if (r) add(`원정 ${k}연전째`, r[1])
+    if (ALTITUDE.has(host)) add('고지대 원정', F.altitude)
+  }
+  const margin = Math.max(F.floor, Math.round(items.reduce((a, x) => a + x.pts, 0) * 10) / 10)
+  // pct는 예전 화면 색·모의베팅(컨디션 차)용으로만: 1점 = 5%
+  return { pct: Math.max(40, Math.round(100 + margin * 5)), items, b2b, restDays, margin }
 }
 
 /** team = 기록상 팀 이름, isHome = 오늘 홈인지, host = 오늘 경기장 팀(홈팀) 이름, past = 이번 시즌 그 팀 경기(오늘 전) */
 export function teamCondition(league: string, team: string, isHome: boolean, host: string, gameDate: string, past: PastGame[]): Condition {
   const nba = league === 'NBA'
   const games = past.filter(g => g.game_date < gameDate).sort((a, b) => b.game_date.localeCompare(a.game_date))
+  if (nba) return nbaFatigue(team, isHome, host, gameDate, games)
   const items: { text: string; pts: number }[] = []
   const add = (text: string, pts: number) => { if (pts < 0) items.push({ text, pts: Math.round(pts * 10) / 10 }) }
   const loc = (g: PastGame) => NBA_ARENA[(g.is_home ? team : g.opp) ?? ''] ?? null

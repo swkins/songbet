@@ -254,7 +254,7 @@ function CondBadge({ c }: { c: Condition }) {
   return (
     <span title={c.items.length ? c.items.map(i => `${i.text} ${i.pts}`).join('\n') : '2일 이상 휴식 · 감점 없음'}
       style={{ fontSize: 10, fontWeight: 800, padding: '0 6px', borderRadius: 8, border: `1px solid ${col}`, color: col, fontFamily: 'var(--font-num)', cursor: 'help' }}>
-      컨디션 {c.pct}%
+      {c.margin != null ? (c.margin ? `피로 ${c.margin}점` : '피로 없음') : `컨디션 ${c.pct}%`}
     </span>
   )
 }
@@ -268,7 +268,7 @@ function ConditionBox({ home, away, hName, aName }: { home: Condition; away: Con
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
           <span style={{ fontWeight: 700, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</span>
           <span style={{ marginLeft: 'auto', fontSize: 10, color: col, fontWeight: 700 }}>{conditionLabel(c.pct)}</span>
-          <span style={{ fontWeight: 800, color: col, fontFamily: 'var(--font-num)', minWidth: 38, textAlign: 'right' }}>{c.pct}%</span>
+          <span style={{ fontWeight: 800, color: col, fontFamily: 'var(--font-num)', minWidth: 38, textAlign: 'right' }}>{c.margin != null ? `${c.margin}점` : `${c.pct}%`}</span>
         </div>
         <div style={{ height: 6, background: 'var(--bg-card)', borderRadius: 3, overflow: 'hidden', margin: '3px 0' }}>
           <div style={{ width: `${c.pct}%`, height: '100%', background: col }} />
@@ -284,7 +284,7 @@ function ConditionBox({ home, away, hName, aName }: { home: Condition; away: Con
     <div style={box}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 6 }}>
         <span style={{ fontSize: 12, fontWeight: 800 }}>팀 컨디션</span>
-        <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>100% = 2일+ 휴식 · 백투백·연장·이동·일정 밀도·원정 연전 감점</span>
+        <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{home.margin != null ? '피로 점수 = 예상 마진에서 빼는 점수 · 백투백 −1.9 · 전날 연장 −1.5 · 백투백 이동 1,000km당 −0.5 · 일정 밀집 · 원정 연전 · 고지대' : '100% = 2일+ 휴식 · 백투백·연장·이동·일정 밀도·원정 연전 감점'}</span>
       </div>
       {row(`홈 · ${hName}`, home)}
       {row(`원정 · ${aName}`, away)}
