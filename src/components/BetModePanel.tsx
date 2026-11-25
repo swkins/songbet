@@ -344,6 +344,9 @@ function BetSlip({ game, sites, lastSiteId, options, numeric, registered, onBet,
 
   const isNumeric = numeric.includes(opt)
   const optLabel = isNumeric ? (numVal.trim() ? applyNumericTemplate(opt, numVal.trim()) : '') : opt
+  // 축구 2.5 오버·언더는 경기 전체 옵션 (사용자 요청 2026-11-25, 배구 3.5 세트 오버처럼) — 고르면 대상이 '경기 전체'가 되고
+  //  저장 문구는 "A vs B 2.5 오버". 야구 팀득점 오버처럼 팀에 거는 오버가 있어서 축구만.
+  const isGameOpt = (o: string) => game.sport === 'soccer' && /오버|언더/.test(o)
   const team = pick === 'home' ? home : pick === 'away' ? away : `${home} vs ${away}`
   const side = pick === 'home' ? '홈' : pick === 'away' ? '원정' : ''
   const content = [team, side, optLabel].filter(Boolean).join(' ')
@@ -373,8 +376,8 @@ function BetSlip({ game, sites, lastSiteId, options, numeric, registered, onBet,
 
       <div style={label}>대상</div>
       <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-        <button type="button" style={chip(pick === 'home')} onClick={() => { setPick('home'); if (!opt) setOpt('승리'); if (!numeric.includes(opt || '승리')) focusOdds() }}>{hShort} · 홈</button>
-        <button type="button" style={chip(pick === 'away')} onClick={() => { setPick('away'); if (!opt) setOpt('승리'); if (!numeric.includes(opt || '승리')) focusOdds() }}>{aShort} · 원정</button>
+        <button type="button" style={chip(pick === 'home')} onClick={() => { setPick('home'); const o = !opt || isGameOpt(opt) ? '승리' : opt; setOpt(o); if (!numeric.includes(o)) focusOdds() }}>{hShort} · 홈</button>
+        <button type="button" style={chip(pick === 'away')} onClick={() => { setPick('away'); const o = !opt || isGameOpt(opt) ? '승리' : opt; setOpt(o); if (!numeric.includes(o)) focusOdds() }}>{aShort} · 원정</button>
         <button type="button" style={chip(pick === 'game')} onClick={() => { setPick('game'); if (opt === '승리') setOpt('') }}>경기 전체</button>
       </div>
 
@@ -382,7 +385,7 @@ function BetSlip({ game, sites, lastSiteId, options, numeric, registered, onBet,
       <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
         {/* 경기 전체(A vs B)는 승리가 없으니 오버·언더 같은 옵션만 */}
         {[...(pick === 'game' ? [] : ['승리']), ...options.filter(o => o !== '승리')].map(o => (
-          <button key={o} type="button" style={chip(opt === o)} onClick={() => { setOpt(o); setNumVal(''); if (!numeric.includes(o)) focusOdds() }}>{o}</button>
+          <button key={o} type="button" style={chip(opt === o)} onClick={() => { setOpt(o); setNumVal(''); if (isGameOpt(o)) setPick('game'); if (!numeric.includes(o)) focusOdds() }}>{o}</button>
         ))}
         {isNumeric && (
           <input className="form-input" autoFocus placeholder="숫자" value={numVal} onChange={e => setNumVal(e.target.value.replace(/[^0-9.+-]/g, ''))}
