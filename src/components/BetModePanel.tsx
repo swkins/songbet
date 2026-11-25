@@ -289,6 +289,25 @@ export default function BetModePanel({ pendingBets = [], lastSiteId = null, targ
   )
 }
 
+/** 베팅슬립에서 고른 사이트의 남은 롤링 · 진행률 (2026-11-25 사용자 요청 — 입금액은 빼고 간단히). 계산은 대시보드 롤링과 같음:
+ *  목표 = (입금 + 포인트) × 롤링 % · 남은 = 목표 − 롤링한 금액, 진행률은 목표 전 최대 99.9%(내림)·넘기면 100%↑ */
+function SiteRolling({ site }: { site: Site }) {
+  const target = ((site.last_deposit ?? 0) + (site.point_deposit ?? 0)) * (site.rolling_pct ?? 100) / 100
+  if (target <= 0) return <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 5 }}>입금 없음 — 롤링 목표 없음</div>
+  const done = site.deposit_bet_done ?? 0
+  const rem = Math.max(0, target - done)
+  const pct = done >= target ? Math.max(100, Math.floor(done / target * 1000) / 10) : Math.min(99.9, Math.floor(done / target * 1000) / 10)
+  const usd = site.currency === 'usd'
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6, fontSize: 11 }}>
+      <span style={{ color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>남은 롤링</span>
+      <span style={{ fontFamily: 'var(--font-num)', fontWeight: 800, color: rem > 0 ? 'var(--gold)' : 'var(--green)', whiteSpace: 'nowrap' }}>{usd ? '$' : ''}{Math.round(rem).toLocaleString()}{usd ? '' : '원'}</span>
+      <span className="deposit-progress-bar" style={{ flex: 1, margin: 0, minWidth: 40 }}><span className="deposit-progress-fill" style={{ display: 'block', width: `${Math.min(100, pct)}%` }} /></span>
+      <span style={{ fontFamily: 'var(--font-num)', fontWeight: 700, color: pct >= 100 ? 'var(--green)' : 'var(--orange)', whiteSpace: 'nowrap' }}>{pct.toFixed(1)}%</span>
+    </div>
+  )
+}
+
 function BetSlip({ game, sites, lastSiteId, options, numeric, registered, onBet, preset }: {
   game: Game; sites: Site[]; lastSiteId?: string | null; options: string[]; numeric: string[]; preset?: BetPreset
   registered: { league: string; name: string }[]
@@ -380,6 +399,7 @@ function BetSlip({ game, sites, lastSiteId, options, numeric, registered, onBet,
           </button>
         ))}
       </div>
+      {site && <SiteRolling site={site} />}
 
       <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
         <div style={{ flex: 1 }}>
@@ -615,6 +635,7 @@ function BasketSlip({ game, sites, lastSiteId, registered, onBet }: {
           </button>
         ))}
       </div>
+      {site && <SiteRolling site={site} />}
 
       <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
         <div style={{ flex: 1 }}>
