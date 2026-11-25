@@ -277,8 +277,8 @@ export default function BetModePanel({ pendingBets = [], lastSiteId = null, targ
             {showAnalysis && game && <GameAnalysisModal g={game} onClose={() => setShowAnalysis(false)} />}
             {addSite && renderAddForm ? renderAddForm(addSite, () => setAddSiteId(null))
               : !game ? <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: 6 }}>경기를 고르면 여기서 베팅합니다</div>
-              : game.sport === 'basketball' || game.sport === 'volleyball'
-                ? <BasketSlip key={game.id} game={game} sites={sites} lastSiteId={lastSiteId} registered={teamsBySport[game.sport] ?? []} onBet={onBet} />
+              : game.sport === 'basketball' || game.sport === 'volleyball' || game.sport === 'soccer'
+                ? <BasketSlip key={game.id + (preset?.gameId === game.id ? '-p' : '')} preset={preset?.gameId === game.id ? preset.p : undefined} game={game} sites={sites} lastSiteId={lastSiteId} registered={teamsBySport[game.sport] ?? []} onBet={onBet} />
                 : <BetSlip key={game.id + (preset?.gameId === game.id ? '-p' : '')} preset={preset?.gameId === game.id ? preset.p : undefined} game={game} sites={sites} lastSiteId={lastSiteId}
                   options={betOptionsBySport[game.sport] ?? []} numeric={numericBetOptionsBySport[game.sport] ?? []}
                   registered={teamsBySport[game.sport] ?? []} onBet={onBet} />}
@@ -344,9 +344,6 @@ function BetSlip({ game, sites, lastSiteId, options, numeric, registered, onBet,
 
   const isNumeric = numeric.includes(opt)
   const optLabel = isNumeric ? (numVal.trim() ? applyNumericTemplate(opt, numVal.trim()) : '') : opt
-  // 축구 2.5 오버·언더는 경기 전체 옵션 (사용자 요청 2026-11-25, 배구 3.5 세트 오버처럼) — 고르면 대상이 '경기 전체'가 되고
-  //  저장 문구는 "A vs B 2.5 오버". 야구 팀득점 오버처럼 팀에 거는 오버가 있어서 축구만.
-  const isGameOpt = (o: string) => game.sport === 'soccer' && /오버|언더/.test(o)
   const team = pick === 'home' ? home : pick === 'away' ? away : `${home} vs ${away}`
   const side = pick === 'home' ? '홈' : pick === 'away' ? '원정' : ''
   const content = [team, side, optLabel].filter(Boolean).join(' ')
@@ -376,8 +373,8 @@ function BetSlip({ game, sites, lastSiteId, options, numeric, registered, onBet,
 
       <div style={label}>대상</div>
       <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-        <button type="button" style={chip(pick === 'home')} onClick={() => { setPick('home'); const o = !opt || isGameOpt(opt) ? '승리' : opt; setOpt(o); if (!numeric.includes(o)) focusOdds() }}>{hShort} · 홈</button>
-        <button type="button" style={chip(pick === 'away')} onClick={() => { setPick('away'); const o = !opt || isGameOpt(opt) ? '승리' : opt; setOpt(o); if (!numeric.includes(o)) focusOdds() }}>{aShort} · 원정</button>
+        <button type="button" style={chip(pick === 'home')} onClick={() => { setPick('home'); if (!opt) setOpt('승리'); if (!numeric.includes(opt || '승리')) focusOdds() }}>{hShort} · 홈</button>
+        <button type="button" style={chip(pick === 'away')} onClick={() => { setPick('away'); if (!opt) setOpt('승리'); if (!numeric.includes(opt || '승리')) focusOdds() }}>{aShort} · 원정</button>
         <button type="button" style={chip(pick === 'game')} onClick={() => { setPick('game'); if (opt === '승리') setOpt('') }}>경기 전체</button>
       </div>
 
@@ -385,7 +382,7 @@ function BetSlip({ game, sites, lastSiteId, options, numeric, registered, onBet,
       <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
         {/* 경기 전체(A vs B)는 승리가 없으니 오버·언더 같은 옵션만 */}
         {[...(pick === 'game' ? [] : ['승리']), ...options.filter(o => o !== '승리')].map(o => (
-          <button key={o} type="button" style={chip(opt === o)} onClick={() => { setOpt(o); setNumVal(''); if (isGameOpt(o)) setPick('game'); if (!numeric.includes(o)) focusOdds() }}>{o}</button>
+          <button key={o} type="button" style={chip(opt === o)} onClick={() => { setOpt(o); setNumVal(''); if (!numeric.includes(o)) focusOdds() }}>{o}</button>
         ))}
         {isNumeric && (
           <input className="form-input" autoFocus placeholder="숫자" value={numVal} onChange={e => setNumVal(e.target.value.replace(/[^0-9.+-]/g, ''))}
@@ -471,17 +468,30 @@ function handicapLines(margin: number): number[] {
 const VOLLEY_LINES = [1.5, 2.5]
 const VOLLEY_TOTALS = Array.from({ length: 13 }, (_, i) => 174.5 + i)
 
-type BPick = { kind: 'win'; side: 'home' | 'away' } | { kind: 'hcap'; side: 'home' | 'away'; line: number }
-  | { kind: 'sets'; ou: 'over' | 'under' } | { kind: 'total'; line: number; ou: 'over' | 'under' }
+// 축구 (사용자 요청 2026-11-25, 배구 슬립처럼): 맨 위 일반승, 핸디는 좌 = 홈 · 우 = 원정 각각 -2.5·-1.5·+0.5·+1.5·+2.5, 아래 공통 2.5 오버
+//  저장 문구는 기존 축구 기록과 같게: "팀 홈 승리"·"팀 원정 -1.5 H"·"팀 홈 0.5 H"·"A vs B 2.5 오버" (auto_grade_bets가 그대로 채점)
+const SOCCER_LINES = [-2.5, -1.5, 0.5, 1.5, 2.5]
 
-function BasketSlip({ game, sites, lastSiteId, registered, onBet }: {
-  game: Game; sites: Site[]; lastSiteId?: string | null; registered: { league: string; name: string }[]
+type BPick = { kind: 'win'; side: 'home' | 'away' } | { kind: 'hcap'; side: 'home' | 'away'; line: number }
+  | { kind: 'sets'; ou: 'over' | 'under' } | { kind: 'total'; line: number; ou: 'over' | 'under' } | { kind: 'ou25' }
+
+// 축구 규칙북 '베팅 →' 프리셋 ('승리' · '0.5 H' · '-1.5 H' …) → 슬립 선택
+function presetPick(p?: BetPreset): BPick | null {
+  if (!p) return null
+  if (p.opt === '승리') return { kind: 'win', side: p.side }
+  const m = p.opt.match(/^(-?\d+(?:\.\d+)?) *H$/)
+  return m ? { kind: 'hcap', side: p.side, line: Number(m[1]) } : null
+}
+
+function BasketSlip({ game, sites, lastSiteId, registered, onBet, preset }: {
+  game: Game; sites: Site[]; lastSiteId?: string | null; registered: { league: string; name: string }[]; preset?: BetPreset
   onBet: (site: Site, sport: string, content: string, odds: number, stake: number, isLive: boolean, league: string) => Promise<boolean>
 }) {
   const home = resolveTeamName(game.home, game.league, registered)
   const away = resolveTeamName(game.away, game.league, registered)
   const live = gameState(game) === 'live'
   const volley = game.sport === 'volleyball'
+  const soccer = game.sport === 'soccer'
   const orderedSites = [...sites].sort((a, b) => Number(b.active) - Number(a.active) || a.sort_order - b.sort_order)
 
   // 최신 승패 배당 + (없으면) 저장된 예측 마진
@@ -489,13 +499,14 @@ function BasketSlip({ game, sites, lastSiteId, registered, onBet }: {
   const [predMargin, setPredMargin] = useState<number | null>(null)
   const [spread, setSpread] = useState<number | null>(null)   // NBA 실제 핸디 기준점 (odds_lines, 홈 기준)
   useEffect(() => {
+    if (soccer) return   // 축구는 기준점 유추 없이 고정 라인
     supabase.from('odds_lines').select('line').eq('game_id', game.id).eq('market', 'spread').order('fetched_at', { ascending: false }).limit(1)
       .then(({ data }) => { const l = data?.[0]?.line; if (l != null) setSpread(Number(l)) })
     supabase.from('odds_snapshots').select('home_odds,away_odds').eq('game_id', game.id).order('fetched_at', { ascending: false }).limit(1)
       .then(({ data }) => { const r = data?.[0]; if (r?.home_odds && r?.away_odds) setMl({ home: Number(r.home_odds), away: Number(r.away_odds) }) })
     supabase.from('predictions').select('margin').eq('game_id', game.id).limit(1)
       .then(({ data }) => { const m = data?.[0]?.margin; if (m != null) setPredMargin(Number(m)) })
-  }, [game.id])
+  }, [game.id, soccer])
 
   // 정배 쪽과 기준점 유추
   const est = useMemo(() => {
@@ -514,10 +525,10 @@ function BasketSlip({ game, sites, lastSiteId, registered, onBet }: {
     if (predMargin != null) return { favHome: predMargin >= 0, margin: Math.abs(predMargin), src: '예상 스코어' }
     return null
   }, [ml, predMargin, spread, game.league, volley])
-  const lines = volley ? VOLLEY_LINES : handicapLines(est?.margin ?? 4.5)
+  const lines = soccer ? SOCCER_LINES : volley ? VOLLEY_LINES : handicapLines(est?.margin ?? 4.5)
   const favSide: 'home' | 'away' = est ? (est.favHome ? 'home' : 'away') : 'home'
 
-  const [pick, setPick] = useState<BPick | null>(null)
+  const [pick, setPick] = useState<BPick | null>(() => presetPick(preset))
   const [siteId, setSiteId] = useState<string>((lastSiteId && sites.some(x => x.id === lastSiteId) ? lastSiteId : orderedSites[0]?.id) ?? '')
   const site = sites.find(s => s.id === siteId) ?? null
   const isusd = site?.currency === 'usd'
@@ -541,8 +552,10 @@ function BasketSlip({ game, sites, lastSiteId, registered, onBet }: {
   const vs = `${home} vs ${away}`
   const content = !pick ? '' : pick.kind === 'win'
     ? `${teamOf(pick.side)} ${sideKo(pick.side)} 승리`
+    : pick.kind === 'ou25' ? `${vs} 2.5 오버`
     : pick.kind === 'hcap'
-      ? volley
+      ? soccer ? `${teamOf(pick.side)} ${sideKo(pick.side)} ${pick.line} H`
+      : volley
         ? `${teamOf(pick.side)} ${sideKo(pick.side)} ${pick.side === favSide ? '-' : ''}${pick.line} H`
         : `${teamOf(pick.side)} ${sideKo(pick.side)} ${pick.line} ${pick.side === favSide ? '마핸' : '플핸'}`
       : pick.kind === 'sets'
@@ -578,10 +591,12 @@ function BasketSlip({ game, sites, lastSiteId, registered, onBet }: {
   const hCol = (side: 'home' | 'away', sign: '-' | '+') => (
     <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
       <span style={{ fontSize: 11, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-        {shortOf(side)} <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>{sideKo(side)} · {sign === '-' ? '마핸' : '플핸'}</span>
+        {shortOf(side)} <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>{sideKo(side)}{soccer ? '' : ` · ${sign === '-' ? '마핸' : '플핸'}`}</span>
       </span>
       {lines.map(l => (
-        <button key={l} type="button" style={{ ...chip(isH(side, l)), padding: '6px 0', fontFamily: 'var(--font-num)', textAlign: 'center' }} onClick={() => choose({ kind: 'hcap', side, line: l })}>{sign}{l}</button>
+        <button key={l} type="button" style={{ ...chip(isH(side, l)), padding: '6px 0', fontFamily: 'var(--font-num)', textAlign: 'center' }} onClick={() => choose({ kind: 'hcap', side, line: l })}>
+          {soccer ? (l > 0 ? `+${l} 플핸` : `${l} 마핸`) : `${sign}${l}`}
+        </button>
       ))}
     </div>
   )
@@ -593,7 +608,7 @@ function BasketSlip({ game, sites, lastSiteId, registered, onBet }: {
       <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{game.league} · {when(game.start)}{game.venue ? ` · ${game.venue}` : ''}{live ? ' · ● 경기중' : ''}</div>
       <div style={{ fontSize: 15, fontWeight: 700, margin: '4px 0 2px' }}>{shortOf('home')} <span style={{ color: 'var(--text-muted)', fontWeight: 400, fontSize: 12 }}>vs</span> {shortOf('away')}</div>
 
-      <div style={label}>승리팀</div>
+      <div style={label}>{soccer ? '일반승' : '승리팀'}</div>
       <div style={{ display: 'flex', gap: 6 }}>
         {(['home', 'away'] as const).map(side => (
           <button key={side} type="button" style={big(isWin(side))} onClick={() => choose({ kind: 'win', side })}>
@@ -603,7 +618,7 @@ function BasketSlip({ game, sites, lastSiteId, registered, onBet }: {
       </div>
 
       <div style={label}>
-        핸디캡 <span style={{ fontWeight: 400 }}>{volley ? (est?.src ? `(${est.src} 기준 정배 = ${shortOf(favSide)})` : '(배당 없음 — 홈을 정배로)')
+        핸디캡 <span style={{ fontWeight: 400 }}>{soccer ? '(좌 = 홈 · 우 = 원정)' : volley ? (est?.src ? `(${est.src} 기준 정배 = ${shortOf(favSide)})` : '(배당 없음 — 홈을 정배로)')
           : est ? `(${est.src} 기준 기준점 약 ${est.margin}점 → ${lines[0]}~${lines[lines.length - 1]})` : '(배당 없음 — 기본 기준점)'}</span>
       </div>
       {/* 좌 = 홈, 우 = 원정 (사용자 요청 2026-11-21 — 정배/역배 순이 아니라 홈/원정 순, 마핸·플핸은 각 칸 제목에) */}
@@ -611,6 +626,11 @@ function BasketSlip({ game, sites, lastSiteId, registered, onBet }: {
         {hCol('home', favSide === 'home' ? '-' : '+')}
         {hCol('away', favSide === 'away' ? '-' : '+')}
       </div>
+
+      {soccer && <>
+        <div style={label}>언오버</div>
+        <button type="button" style={{ ...chip(pick?.kind === 'ou25'), width: '100%', padding: '7px 0' }} onClick={() => choose({ kind: 'ou25' })}>2.5 오버</button>
+      </>}
 
       {volley && <>
         <div style={label}>세트 수</div>
