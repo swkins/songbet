@@ -217,7 +217,7 @@ function VolleyBox({ v, hName, aName, changed, onReset, odds }: { v: VolleyResul
           {odds && <MoneylineBox p={v.homeWin / 100} odds={odds} market={v.marketHome} hName={hName} aName={aName} />}
           <SetCountOdds v={v} />
           <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4, lineHeight: 1.6 }}>
-            {v.coachRisk ? '⚠ 감독 교체 직후 팀 — 확신 30% 줄임 · ' : ''}홈 승률 {v.homeWin}% = 팀 레이팅(상대 보정){v.teamHome != null ? ` ${v.teamHome}%` : ' (기록 없음)'} · 포지션별 오버롤 {v.modelHome}% (팀 오버롤 차 {v.diff > 0 ? '+' : ''}{v.diff}){v.marketHome != null ? ` · 시장 ${v.marketHome}% (비교만)` : ''} → 세트 분포는 과거 V리그 5시즌 곡선 · 점수는 랠리 모델 2만 번(홈 랠리 {Math.round(sim.rally * 1000) / 10}%, 실제 득점으로 검증 전) · 선수 출전 칸을 누르면 다시 계산
+            홈 승률 {v.homeWin}% = 팀 레이팅(상대 보정){v.teamHome != null ? ` ${v.teamHome}%` : ' (기록 없음)'} · 포지션별 오버롤 {v.modelHome}% (팀 오버롤 차 {v.diff > 0 ? '+' : ''}{v.diff}){v.marketHome != null ? ` · 시장 ${v.marketHome}% (비교만)` : ''} → 세트 분포는 과거 V리그 5시즌 곡선 · 점수는 랠리 모델 2만 번(홈 랠리 {Math.round(sim.rally * 1000) / 10}%, 실제 득점으로 검증 전) · 선수 출전 칸을 누르면 다시 계산
           </div>
         </div>
       )}

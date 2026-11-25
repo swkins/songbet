@@ -23,7 +23,7 @@ select league, game_date, team, player_name, play_prob, status, reason, checked_
 select league, team, player_name, from_date, until_date, reason from player_long_out where league in (<리그 코드들>) and (until_date is null or until_date >= (now() at time zone 'Asia/Seoul')::date);
 ```
 
-4. 웹 검색 (WebSearch, mode "extended" — standard는 지난 기사만 나와서 쓰지 않는다): **경기가 있는 리그마다 빠짐없이 한 번씩** (KBL·WKBL·V리그 남자·V리그 여자 — 배구도 꼭), 그 리그 오늘·내일 경기를 한 검색어에 묶는다. 예) `"<홈1> <원정1> <홈2> <원정2> <M월 D일> 경기 결장 부상 복귀"`. 핵심 선수 상태가 안 나왔을 때만 그 팀으로 한 번 더 (전체 검색은 리그 수 + 2번 이하). 웹페이지는 직접 열 수 없으니 검색 결과 요약으로 판단한다. 최근 7일 기사만 쓰고, 날짜가 오래된 기사(지난 시즌 등)는 버린다. 장기 결장 표에 이미 있는 선수는 다시 찾지 않는다. 외국인·아시아쿼터 선수의 부상·복귀·데뷔·교체 기사는 특히 놓치지 않는다.
+4. 웹 검색 (WebSearch, mode "extended" — standard는 지난 기사만 나와서 쓰지 않는다): **경기가 있는 리그마다 빠짐없이 한 번씩** (KBL·WKBL·V리그 남자·V리그 여자 — 배구도 꼭), 그 리그 오늘·내일 경기를 한 검색어에 묶는다. 예) `"<홈1> <원정1> <홈2> <원정2> <M월 D일> 경기 결장 부상 복귀 감독"`. 핵심 선수 상태가 안 나왔을 때만 그 팀으로 한 번 더 (전체 검색은 리그 수 + 2번 이하). 웹페이지는 직접 열 수 없으니 검색 결과 요약으로 판단한다. 최근 7일 기사만 쓰고, 날짜가 오래된 기사(지난 시즌 등)는 버린다. 장기 결장 표에 이미 있는 선수는 다시 찾지 않는다. 외국인·아시아쿼터 선수의 부상·복귀·데뷔·교체 기사는 특히 놓치지 않는다.
 
 5. 선수마다 출전 확률(0~100)을 최종 판단한다.
    - 기본값: 결장 확정(공식 발표·수술·장기 이탈) 0 / 결장 유력 15 / 불투명·당일 결정 50 / 출전 유력 90 / 이상 없음 100. 기사 표현으로 조정 (예: "훈련 정상 소화" ↑, "무리시키지 않겠다" ↓, 명단에만 오르고 감독이 "아직 투입 어렵다" → 15).
@@ -35,6 +35,7 @@ select league, team, player_name, from_date, until_date, reason from player_long
 
 6. **경기 뉴스 요약 (모든 대상 경기, 기사가 적어도 꼭)** — 분석 화면 '뉴스' 칸에 나온다 (사용자 요청):
    - summary = 한국어 2~3문장: 두 팀 순위·연승/연패 흐름, 결장·복귀·외국인 선수 소식, 감독 코멘트 중 베팅에 중요한 것. 기사가 없으면 "새 기사 없음 — 최근 흐름: ..."처럼 3번 기록으로 짧게.
+   - **감독 관련 기사** (2026-11-25 사용자 요청 — 예측에는 넣지 않고 보여 주기만): 4번 검색 결과에 감독 경질·사퇴·대행 체제·새 감독 부임·감독 징계·감독 발언(전술 변화·선수 기용 예고)이 있으면 summary 끝에 `감독: <한 문장>`으로 붙이고 그 기사를 items에 넣는다. 감독 기사만 따로 더 검색하지는 않는다 (검색어에 `감독`을 넣어 한 번에 찾는다 — 예) `"... 경기 결장 부상 복귀 감독"`). 없으면 쓰지 않는다.
    - items = 근거 기사 최대 3개 `[{"title": "..", "url": ".."}]` (검색 결과에 나온 것만, 없으면 `[]`).
    - margin_adj = null (출전 확률로 이미 예측에 반영되니 점수 보정은 넣지 않는다), adj_note = null.
    - league = 리그 코드(KBL·WKBL·VLEAGUE_M·VLEAGUE_W), game_date = 경기 날짜, home·away = 2번 일정 이름 그대로.
@@ -49,10 +50,6 @@ on conflict (league, game_date, team, player_name) do update set player_id = exc
 insert into player_long_out (league, team, player_name, player_id, from_date, until_date, play_prob, status, reason, source_title, source_url)
 values (...) on conflict (league, team, player_name) do update set until_date = excluded.until_date, play_prob = excluded.play_prob, status = excluded.status,
   reason = excluded.reason, source_title = excluded.source_title, source_url = excluded.source_url, updated_at = now();
--- 시즌 중 감독 경질·사퇴·교체 기사가 있을 때만 (change_date = 새 감독·대행이 처음 지휘하는 경기 날짜, 개막 전부터 대행인 팀은 넣지 않음)
--- → 예측이 그 팀 첫 5경기는 확신을 줄인다 (2026-11-25 사용자 요청 — 감독이 갑자기 바뀐 팀은 위험)
-insert into coach_changes (league, team, change_date, coach, interim, prev_coach, reason, source_url)
-values (...) on conflict (league, team, change_date) do update set coach = excluded.coach, interim = excluded.interim, reason = excluded.reason, source_url = excluded.source_url, updated_at = now();
 insert into game_news (league, game_date, home, away, summary, items, margin_adj, adj_note, checked_at)
 values (...), (...)
 on conflict (league, game_date, home, away) do update set summary = excluded.summary, items = excluded.items, checked_at = now();

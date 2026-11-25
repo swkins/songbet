@@ -58,7 +58,6 @@ export interface VolleyResult {
   modelHome: number          // 오버롤 모델만의 홈 승률 %
   marketHome: number | null  // 시장(마진 뺀) 홈 승률 % — 비교용
   teamHome?: number | null   // 팀 레이팅만의 홈 승률 % (홈 이점 포함)
-  coachRisk?: boolean        // 감독 교체 직후 팀이 있어 확신을 줄였음
 }
 
 // ─── 상대 보정 팀 레이팅 (2026-11-25 사용자 요청 — 약한 팀에 진 것·강한 팀을 이긴 것을 다르게) ─────
@@ -79,11 +78,9 @@ export function volleyRatings(games: { game_date: string; home: string; away: st
   return R
 }
 
-// 감독 교체 위험 (2026-11-25 사용자 요청 — 감독이 갑자기 바뀐 팀은 방향을 모르는 위험): 새 감독 첫 5경기는 확신 30% 줄임.
-// KOVO 2021-22~2025-26 교체 6번 백테스트(scripts/vleague_coach_backtest.py): 교체 뒤 5경기(28경기) LL 0.7505 → 30% 0.7172 (50%는 0.7041이지만 표본이 작아 보수적으로).
-// 교체 뒤 결과를 레이팅에 더 크게 반영(분위기)은 ×1.5~3 모두 나빠져서 안 넣음.
-export const COACH_RISK = { games: 5, shrink: 0.3 }
-export interface VolleyTeam { sw?: number; sl?: number; vr?: number; coachGames?: number | null }
+// 감독 요소는 예측에 안 넣는다 (2026-11-25 사용자 결정 — 뉴스에서 감독 관련 기사만 찾아 보여 줌).
+//  참고로 교체 직후 5경기 확신 30% 줄이기는 KOVO 교체 6번 28경기 LL 0.7505 → 0.7172였다 (scripts/vleague_coach_backtest.py).
+export interface VolleyTeam { sw?: number; sl?: number; vr?: number }
 
 /** 팀 세트 득실 → logit 경기 승률 (두 팀 세트 기록이 있을 때) — 예전 방식, 레이팅이 없을 때만 */
 export function teamSetLogit(home?: { sw?: number; sl?: number } | null, away?: { sw?: number; sl?: number } | null): number | null {
@@ -99,10 +96,7 @@ export function predictVolley(code: string, diff: number, p: { hca: number; k: n
   const lm = p.hca + p.k * diff                                  // 오버롤만 (비교 표시용)
   const l = p.hca + p.wOv * p.k * diff + p.wScore * (lt ?? 0)    // 우리 모델
   const pm = odds && odds.home > 1 && odds.away > 1 ? (1 / odds.home) / (1 / odds.home + 1 / odds.away) : null   // 시장 (비교용, 섞지 않음)
-  // 감독 교체 직후 (coach_changes, 새 감독 5경기 전): 잘할지 못할지 모르는 위험 → 홈 승률을 50% 쪽으로 COACH_RISK.shrink만큼 당김
-  const coachRisk = [team?.home, team?.away].some(t => t?.coachGames != null && t.coachGames < COACH_RISK.games)
-  const ph = coachRisk ? 0.5 + (sig(l) - 0.5) * (1 - COACH_RISK.shrink) : sig(l)
-  const dist = setDistribution(code, ph); if (!dist) return null
+  const dist = setDistribution(code, sig(l)); if (!dist) return null
   const r1 = (v: number) => Math.round(v * 1000) / 10
   const homeWin = dist['3-0'] + dist['3-1'] + dist['3-2']
   // 예상 세트 스코어 = 이길 쪽 + 세트 수 중앙값 (2026-11-24 사용자 지적 두 번):
@@ -118,7 +112,7 @@ export function predictVolley(code: string, diff: number, p: { hca: number; k: n
   const expDiff = SET_SCORES.reduce((a, k) => a + DIFF[k] * dist[k], 0)
   const expSets = 3 * (dist['3-0'] + dist['0-3']) + 4 * (dist['3-1'] + dist['1-3']) + 5 * (dist['3-2'] + dist['2-3'])
   return { homeWin: r1(homeWin), dist, best, expDiff: Math.round(expDiff * 100) / 100, expSets: Math.round(expSets * 100) / 100,
-    over35: r1(1 - dist['3-0'] - dist['0-3']), full: r1(dist['3-2'] + dist['2-3']), modelHome: r1(sig(lm)), marketHome: pm == null ? null : r1(pm), teamHome: lt == null ? null : r1(sig(lt + p.hca)), coachRisk }
+    over35: r1(1 - dist['3-0'] - dist['0-3']), full: r1(dist['3-2'] + dist['2-3']), modelHome: r1(sig(lm)), marketHome: pm == null ? null : r1(pm), teamHome: lt == null ? null : r1(sig(lt + p.hca)) }
 }
 
 // ─── 2만 번 시뮬레이션 (사용자 요청 — 가장 많이 나온 세트 스코어 + 예상 총득점) ─────

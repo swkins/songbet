@@ -37,7 +37,7 @@ export interface PlayerOv {
 }
 const kindRank = (k: string | null | undefined) => k === '외국인' ? 0 : k === '아시아쿼터' ? 1 : 2
 export interface TeamOv { team: string | null; players: PlayerOv[]; full: number | null; exp: number | null; stats: TeamStats | null; gone?: string[] }
-export interface TeamStats { n: number; pf: number; pa: number; sw?: number; sl?: number; vr?: number; coachGames?: number | null; rt?: TeamRating }   // vr = 배구 상대 보정 레이팅 (volleyRatings)
+export interface TeamStats { n: number; pf: number; pa: number; sw?: number; sl?: number; vr?: number; rt?: TeamRating }   // vr = 배구 상대 보정 레이팅 (volleyRatings)
 /** NBA 팀 레이팅 (nbaRatings) — r = 득실(상대 보정), o = 공격(+ = 많이 넣음), d = 수비(+ = 많이 내줌), avgT = 리그 평균 총점 */
 export interface TeamRating { r: number; o: number; d: number; n: number; avgT: number }   // 농구 pf·pa = 경기당 득점·실점 / 배구 = 경기당 딴·잃은 세트, sw·sl = 시즌 세트 합
 export interface GameNews { summary: string | null; items: { title: string; url?: string }[] | null; margin_adj: number | null; adj_note: string | null; checked_at: string }
@@ -116,19 +116,7 @@ async function loadLeague(code: string): Promise<LeagueData> {
     t.n++; t.pf += r.team_score; t.pa += r.opp_score; teams.set(r.team, t)
   }
   teams.forEach(t => { t.sw = t.pf; t.sl = t.pa; t.pf /= t.n; t.pa /= t.n })
-  if (vbRaw.length) {
-    volleyRatings(vbRaw).forEach((v, team) => { const t = teams.get(team); if (t) t.vr = v.r })   // 배구 상대 보정 레이팅
-    // 감독 교체 (coach_changes): 가장 최근 교체 뒤 그 팀이 치른 경기 수 → 5경기 전이면 예측 확신을 줄인다 (volleyPredict COACH_RISK)
-    const { data: cc } = await supabase.from('coach_changes').select('team,change_date').eq('league', code).order('change_date', { ascending: false }).limit(100)
-    const last = new Map<string, string>()
-    for (const r of (cc ?? []) as { team: string; change_date: string }[]) if (!last.has(r.team)) last.set(r.team, r.change_date)
-    last.forEach((d, team) => {
-      const t = teams.get(team); if (!t) return
-      const first = vbRaw.reduce((m, g) => (m == null || g.game_date < m ? g.game_date : m), null as string | null)
-      if (first && d < first) return   // 지난 시즌 교체는 무시
-      t.coachGames = vbRaw.filter(g => (g.home === team || g.away === team) && g.game_date >= d && g.home_sets != null && g.home_sets + g.away_sets > 0).length
-    })
-  }
+  if (vbRaw.length) volleyRatings(vbRaw).forEach((v, team) => { const t = teams.get(team); if (t) t.vr = v.r })   // 배구 상대 보정 레이팅
   if (PARAMS.leagues[code]?.rk != null) {   // NBA·KBL·WKBL 팀 레이팅
     const rt = nbaRatings((tg.data ?? []) as TeamGameRow[], PARAMS.leagues[code], code === 'NBA')
     rt.forEach((v, team) => { const t = teams.get(team); if (t) t.rt = v })
