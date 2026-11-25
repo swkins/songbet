@@ -323,7 +323,13 @@ export async function loadGameOverall(league: string, gameDate: string, home: Sc
       const isCur = rosterIds.has(r.player_id)
       const c = isCur ? r : null
       const pb = prevById.get(r.player_id) ?? prevByName.get(norm(r.player_name)) ?? null
-      const curScore = c?.gmsc != null && c.gp > 0 ? score(c.gmsc, d.poolCur) : null
+      // 배구 체급 눈금 (2026-11-25 사용자 요청 — 구간 백분위로는 주전들이 70~90에 몰려 다 비슷해 보였다):
+      //  리그 1위(3경기+ 선수 중 균형 점수 최고) = 100, 아래쪽 5% 선수 = 40, 그 사이는 균형 점수 차이에 비례 (30~100)
+      const vbScale = (z: number) => {
+        const hi = d.poolCur[0], lo = d.poolCur[Math.min(d.poolCur.length - 1, Math.floor(d.poolCur.length * 0.95))]
+        return hi == null || lo == null || hi <= lo ? 60 : Math.max(30, Math.min(100, 40 + 60 * (z - lo) / (hi - lo)))
+      }
+      const curScore = c?.gmsc != null && c.gp > 0 ? (vb ? vbScale(c.gmsc) : score(c.gmsc, d.poolCur)) : null
       const lastScore = pb?.manual_base != null ? pb.manual_base : pb?.gmsc != null && pb.gp > 0 ? score(pb.gmsc, d.poolPrev) : null
       const n = c?.gp ?? 0
       const kind = d.kinds.get(r.player_id) ?? null
