@@ -1,6 +1,6 @@
 // NBA EPM (Estimated Plus-Minus, dunksandthrees.com) → nba_epm (받은 날짜 as_of별 한 벌, 같은 날은 덮어씀)
 // 2026-11-26 사용자 요청: NBA 체급을 우리 게임스코어 체급 대신 EPM으로. 페이지 HTML 안 스크립트에 전 선수(약 540명) 값이 들어 있다
-// (__data.json은 403). 한 번 요청 = 약 1.4MB. pg_cron collect-epm: 매일 21:07 KST 하루 한 번 (21:30 예측 저장 직전, 사용자 요청 — 자주 접근하지 않게).
+// (__data.json은 403). 한 번 요청 = 약 1.4MB. pg_cron collect-epm: 매일 19:43 KST 하루 한 번 (사용자 21시 베팅 전, 자주 접근하지 않게).
 //  off = 공격 EPM, def = 수비 EPM, tot = EPM (100번 공격당 팀 득실 기여, 0 = 리그 평균), mp48 = 48분당 예상 출전 분.
 import { createClient } from 'npm:@supabase/supabase-js@2.45.0'
 

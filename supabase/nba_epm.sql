@@ -1,7 +1,7 @@
 -- NBA EPM (dunksandthrees.com) — 2026-11-26 사용자 요청: NBA 체급·결장 영향을 EPM으로.
 -- 함수 collect-epm이 페이지 한 번에 전 선수 값을 받아 as_of(사이트 데이터 날짜)별로 저장 — 날짜별로 쌓아 두면 나중에 백테스트 가능.
 -- 업데이트: 사이트는 미국 밤 경기 후 하루 한 번 갱신 (as_of = 미국 날짜). 사용자는 NBA를 전날 22시 KST에 걸고 예측 저장은 21:30
---  → 매일 21:07 KST 한 번 (2026-11-26 사용자 요청 — 하루 한 번, 페이지 1개 요청). 크기 하루 약 540줄(약 60KB).
+--  → 매일 19:43 KST 한 번 (2026-11-26 사용자 요청 — 하루 한 번, 페이지 1개 요청; 사용자가 21시에 베팅한다고 보고 그 전에 넉넉히). 크기 하루 약 540줄(약 60KB).
 --  처음엔 19:13·21:07 두 번이었다: collect-epm-2는 꺼 둠(active false).
 create table if not exists public.nba_epm (
   as_of date not null,
@@ -30,4 +30,4 @@ begin
     body := '{}'::jsonb, timeout_milliseconds := 60000);
 end $$;
 revoke all on function public.run_collect_epm() from public, anon, authenticated;
-select cron.schedule('collect-epm', '7 12 * * *', 'select public.run_collect_epm()');     -- 21:07 KST, 하루 한 번
+select cron.schedule('collect-epm', '43 10 * * *', 'select public.run_collect_epm()');     -- 19:43 KST, 하루 한 번
