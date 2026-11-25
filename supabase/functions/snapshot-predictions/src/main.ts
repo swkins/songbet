@@ -44,7 +44,7 @@ async function snapshot(leagues: string[], from: number, to: number, save: boole
         row = { ...base, pred_home: sim.home, pred_away: sim.away, margin: sim.margin, home_win: sim.homeWin, total: sim.total, p10: sim.p10, p90: sim.p90,
           parts: sim.parts, raw: sim.raw,
           cond: d.cond ? { home: { pct: d.cond.home.pct, items: d.cond.home.items }, away: { pct: d.cond.away.pct, items: d.cond.away.items } } : null }
-        out.push({ game: `${base.away} @ ${base.home}`, pred: `${sim.home}-${sim.away}`, margin: sim.margin })
+        out.push({ game: `${base.away} @ ${base.home}`, pred: `${sim.home}-${sim.away}`, margin: sim.margin, injury: sim.parts.injury })
       }
       if (save) {
         const { error } = await supabase.from('predictions').upsert(row); if (error) throw new Error(error.message)

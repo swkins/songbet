@@ -34,7 +34,16 @@ export interface PlayerOv {
   pos?: string | null       // 배구 포지션 (KOVO 명단: S 세터 · OH 아웃사이드 히터 · OP 아포짓 · MB 미들 블로커 · L 리베로)
   kind?: string | null      // '외국인' · '아시아쿼터' (KBL·WKBL = player_kinds, 배구 = KOVO 명단) — 없으면 국내
   newcomer?: { kind: string | null; n: number; prior: number; w: number } | null   // 이 리그 지난 시즌 기록이 없는 선수: 출발점(같은 구분 평균)과 실제 기록 비중
+  epm?: EpmRow | null       // NBA: dunksandthrees EPM (체급·결장 영향에 씀)
+  recentShare?: number      // NBA: 팀 최근 10경기 중 뛴 비율 (팀 레이팅에 이미 들어 있는 정도 — 결장 영향 = 오늘 출전 확률 − 이 값)
 }
+/** NBA EPM — tot = 100번 공격당 팀 득실 기여(0 = 리그 평균), off·def 나눔, mp48 = 48분당 예상 출전 분 */
+export interface EpmRow { tot: number; off: number | null; def: number | null; mp48: number | null; asOf: string; team: string | null }
+// NBA 결장 영향 (2026-11-26 사용자 요청 — EPM으로): 팀 득실 ≈ Σ EPM × 출전 분/48 이라, 빠진 선수 자리는 대체 선수(EPM −2.0)가 메운다고 보고
+//  (EPM − 대체) × 예상 분/48 × (오늘 출전 확률 − 최근 10경기 출전 비율). 개인 피로는 감점 1당 EPM −0.1. 둘 다 검증 전 값.
+export const EPM_REPL = -2.0
+export const EPM_FATIGUE = 0.1
+const normEn = (s: string) => s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^a-z]/g, '')
 const kindRank = (k: string | null | undefined) => k === '외국인' ? 0 : k === '아시아쿼터' ? 1 : 2
 export interface TeamOv { team: string | null; players: PlayerOv[]; full: number | null; exp: number | null; stats: TeamStats | null; gone?: string[] }
 export interface TeamStats { n: number; pf: number; pa: number; sw?: number; sl?: number; vr?: number; rt?: TeamRating
@@ -83,7 +92,8 @@ interface BaseRow extends SeasonRow { manual_base: number | null; note: string |
 interface RecentRow { player_id: string; n: number; gmsc5: number | null; min5: number | null }
 interface StatusRow { team: string; player_name: string; player_id: string | null; play_prob: number | null; status: string | null; confirmed: boolean | null; reason: string | null; source_title: string | null; source_url: string | null; checked_at: string }
 interface InjRow { player_id: string; player_name: string; team: string; status: string | null; short_comment: string | null; return_date: string | null; fetched_at: string }
-interface LeagueData { cur: SeasonRow[]; prev: BaseRow[]; recent: Map<string, RecentRow>; poolCur: number[]; poolPrev: number[]; poolForm?: number[]; names: Record<string, string>; teams: Map<string, TeamStats>; pos: Map<string, { position: string | null; kind: string | null }>; kinds: Map<string, string>; prior: Map<string, number>; at: number }
+interface LeagueData { cur: SeasonRow[]; prev: BaseRow[]; recent: Map<string, RecentRow>; poolCur: number[]; poolPrev: number[]; poolForm?: number[]; names: Record<string, string>; teams: Map<string, TeamStats>; pos: Map<string, { position: string | null; kind: string | null }>; kinds: Map<string, string>; prior: Map<string, number>; at: number
+  epm?: { byName: Map<string, EpmRow>; pool: number[] } }
 
 const cache = new Map<string, LeagueData>()
 const num = (v: unknown) => (v == null ? null : Number(v))
@@ -189,7 +199,21 @@ async function loadLeague(code: string): Promise<LeagueData> {
   groups.forEach((v, k) => { if (v.length >= 3) prior.set(k, Math.round(v.reduce((a, b) => a + b, 0) / v.length)) })
   // 배구 최근폼: 시즌 체급은 균형 점수(v_vb_tier, 2026-11-25)라 단위가 달라서, 최근 5경기 기여도는 다른 선수들의 최근 5경기 기여도 안에서 백분위
   const poolForm = vb ? [...recent.values()].filter(r => r.n >= 2 && r.gmsc5 != null).map(r => r.gmsc5!).sort((x, y) => y - x) : undefined
-  const d = { cur: curRows, prev: prevRows, recent, poolCur, poolPrev, poolForm, names, teams, pos, kinds, prior, at: Date.now() }
+  // NBA EPM: 가장 최근 날짜 한 벌 (collect-epm, 매일 19·21시 KST). 체급 눈금 = 로테이션 선수(48분당 15분+) 안 백분위
+  let epm: LeagueData['epm']
+  if (code === 'NBA') {
+    const { data: last } = await supabase.from('nba_epm').select('as_of').order('as_of', { ascending: false }).limit(1)
+    const asOf = (last?.[0] as { as_of: string } | undefined)?.as_of
+    if (asOf) {
+      const { data: er } = await supabase.from('nba_epm').select('player_name,team,off,def,tot,mp48').eq('as_of', asOf).limit(2000)
+      const byName = new Map<string, EpmRow>()
+      for (const r of (er ?? []) as { player_name: string; team: string | null; off: number | null; def: number | null; tot: number; mp48: number | null }[])
+        byName.set(normEn(r.player_name), { tot: Number(r.tot), off: num(r.off), def: num(r.def), mp48: num(r.mp48), asOf, team: r.team })
+      const pool = [...byName.values()].filter(r => (r.mp48 ?? 0) >= 15).map(r => r.tot).sort((x, y) => y - x)
+      if (pool.length) epm = { byName, pool }
+    }
+  }
+  const d = { cur: curRows, prev: prevRows, recent, poolCur, poolPrev, poolForm, names, teams, pos, kinds, prior, epm, at: Date.now() }
   cache.set(code, d)
   return d
 }
@@ -362,8 +386,17 @@ export async function loadGameOverall(league: string, gameDate: string, home: Sc
       }
       const rc = d.recent.get(r.player_id)
       const form = rc && rc.n >= 2 && rc.gmsc5 != null ? Math.round(score(rc.gmsc5, d.poolForm ?? d.poolCur)) : null
-      const overall = base == null ? null : form == null ? base : Math.round(base * 0.7 + form * 0.3)
-      const baseNote = stubIds.has(r.player_id) ? '이번 시즌 출전 기록 없음 — 팀 전력에는 안 넣음 (팀 기록에 이미 이 선수 없는 경기력이 반영)' : [n ? `이번 시즌 ${n}경기` : null, pb ? (pb.manual_base != null ? `조사 체급 ${pb.manual_base}${pb.note ? ` (${pb.note})` : ''}` : `지난 시즌 ${pb.gp}경기`) : null,
+      let overall = base == null ? null : form == null ? base : Math.round(base * 0.7 + form * 0.3)
+      // NBA = EPM (2026-11-26 사용자 요청): 체급 = EPM 리그 백분위(로테이션 선수 안, 같은 100점 눈금), 오버롤 = 체급 (EPM이 최근 경기도 반영 — 폼은 참고만).
+      //  EPM에 이름이 없는 선수(새로 온 선수 등)만 예전 게임스코어 체급
+      const ep = code === 'NBA' && d.epm ? d.epm.byName.get(normEn(r.player_name)) ?? null : null
+      let epmNote: string | null = null
+      if (ep && !stubIds.has(r.player_id)) {
+        base = Math.round(score(ep.tot, d.epm!.pool)); overall = base; newcomer = null
+        const sg = (x: number | null) => x == null ? '–' : `${x >= 0 ? '+' : ''}${x.toFixed(1)}`
+        epmNote = `EPM ${sg(ep.tot)} (공격 ${sg(ep.off)} · 수비 ${sg(ep.def)}) · 48분당 ${Math.round(ep.mp48 ?? 0)}분 · ${dayjs(ep.asOf).format('M/D')} 기준`
+      } else if (code === 'NBA' && d.epm && !stubIds.has(r.player_id)) epmNote = 'EPM 명단에 없음 — 우리 게임스코어 체급'
+      const baseNote = epmNote ? epmNote : stubIds.has(r.player_id) ? '이번 시즌 출전 기록 없음 — 팀 전력에는 안 넣음 (팀 기록에 이미 이 선수 없는 경기력이 반영)' : [n ? `이번 시즌 ${n}경기` : null, pb ? (pb.manual_base != null ? `조사 체급 ${pb.manual_base}${pb.note ? ` (${pb.note})` : ''}` : `지난 시즌 ${pb.gp}경기`) : null,
         lastScore != null && curScore != null ? `이번 시즌 비중 ${Math.round(w * 100)}%` : null, shrinkNote,
         newcomer ? `${newcomer.kind ? `새 ${newcomer.kind}` : '이 리그 새 선수'} — ${newcomer.kind ? `${newcomer.kind} 평균` : '같은 리그 선수 평균'} ${newcomer.prior}에서 출발, 실제 기록 비중 ${Math.round(newcomer.w * 100)}%` : null].filter(Boolean).join(' · ')
 
@@ -406,7 +439,10 @@ export async function loadGameOverall(league: string, gameDate: string, home: Sc
       const pm = played.get(r.player_id)
       const fatigue = !vb && pm && pm.size ? playerFatigue(code, c?.min ?? null, gameDate, pastRows.filter(x => x.team === team), pm) : null
       const pp = vb ? d.pos.get(r.player_id) : undefined
-      return { id: r.player_id, name: d.names[r.player_name] ?? r.player_name, nameEn: r.player_name, gp: n, share, min: c?.min ?? pb?.min ?? null, base, form, overall, baseNote, avail, fatigue, pos: pp?.position ?? null, kind, newcomer }
+      const last10 = tGames.slice(0, 10)
+      const recentShare = last10.length ? last10.filter(id => pm?.has(id)).length / last10.length : share
+      return { id: r.player_id, name: d.names[r.player_name] ?? r.player_name, nameEn: r.player_name, gp: n, share, min: c?.min ?? pb?.min ?? null, base, form, overall, baseNote, avail, fatigue, pos: pp?.position ?? null, kind, newcomer,
+        ...(code === 'NBA' ? { epm: ep, recentShare } : {}) }
     }).sort((x, y) => kindRank(x.kind) - kindRank(y.kind) || (y.base ?? -1) - (x.base ?? -1) || (y.overall ?? -1) - (x.overall ?? -1))
     // 외국인 맨 위 → 아시아쿼터 → 국내 (사용자 요청 2026-11-24 — 결장이어도 같은 자리), 그 안에서는 체급 순 — 핵심 선수가 빠졌는지 바로 보이게
 
@@ -575,6 +611,13 @@ export function simulate(code: string, home: TeamOv, away: TeamOv, overrides: Re
     const vals = t.players.filter(p => lu.avg[p.id] != null).map(p => lu.avg[p.id] * (overrides[p.id] ?? p.avail.prob) / 100).sort((x, y) => y - x).slice(0, 8)
     return vals.reduce((x, y) => x + y, 0) - lu.hist
   }
+  // NBA 결장·개인 피로 = EPM (위 EPM_REPL 설명): 팀마다 Σ (EPM − 대체) × 예상 분/48 × (오늘 출전 확률 − 최근 출전 비율) − 출전 확률 × 피로 감점 × 0.1 × 분/48
+  const epmLoss = (t: TeamOv) => t.players.reduce((a, p) => {
+    if (!p.epm) return a
+    const q = (overrides[p.id] ?? p.avail.prob) / 100, w = (p.epm.mp48 ?? 0) / 48
+    return a + (p.epm.tot - EPM_REPL) * w * (q - (p.recentShare ?? q)) - q * EPM_FATIGUE * (p.fatigue?.pen ?? 0) * w
+  }, 0)
+  if (code === 'NBA' && [...home.players, ...away.players].some(p => p.epm)) injury = epmLoss(home) - epmLoss(away)
   let lineup: number | undefined
   if (c.lineupK) {
     const dh = lineupDelta(home), da = lineupDelta(away)

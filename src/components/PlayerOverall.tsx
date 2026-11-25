@@ -365,7 +365,8 @@ function TeamTable({ title, t, ovr, onCycle, cond }: { title: string; t: TeamOv;
                   )}
                 </td>
                 <td style={{ ...td, textAlign: 'right', whiteSpace: 'nowrap' }}><Stamina p={p} cond={cond} /></td>
-                <td style={{ ...td, textAlign: 'right', color: 'var(--text-secondary)', fontFamily: 'var(--font-num)' }} title={p.baseNote}>{p.base ?? '–'}<Delta now={p.base} prev={p.prev?.base} date={p.prev?.date} /></td>
+                <td style={{ ...td, textAlign: 'right', color: 'var(--text-secondary)', fontFamily: 'var(--font-num)' }} title={p.baseNote}>{p.base ?? '–'}<Delta now={p.base} prev={p.prev?.base} date={p.prev?.date} />
+                  {p.epm && <div style={{ fontSize: 9, color: p.epm.tot >= 0 ? 'var(--green)' : 'var(--red)', lineHeight: 1.1 }}>EPM {p.epm.tot >= 0 ? '+' : ''}{p.epm.tot.toFixed(1)}</div>}</td>
                 <td style={{ ...td, textAlign: 'right', fontFamily: 'var(--font-num)', color: p.form == null || p.base == null ? 'var(--text-muted)' : p.form > p.base + 2 ? 'var(--green)' : p.form < p.base - 2 ? 'var(--red)' : 'var(--text-secondary)' }}>{p.form ?? '–'}<Delta now={p.form} prev={p.prev?.form} date={p.prev?.date} /></td>
                 <td style={{ ...td, textAlign: 'right', whiteSpace: 'nowrap' }}>
                   <Ov v={p.overall} /><Delta now={p.overall} prev={p.prev?.overall} date={p.prev?.date} />
@@ -500,7 +501,7 @@ export default function PlayerOverall({ league, gameDate, home, away, left, odds
             <TeamTable title={`원정 · ${aName}`} t={data.away} ovr={ovr} onCycle={cycle} cond={data.cond?.away} />
           </div>
           <div style={{ fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.7 }}>
-            오버롤 = 체급 × 0.7 + 최근 5경기 폼 × 0.3 ({data.code === 'NBA' ? '체급 = 이번 시즌 + 지난 시즌, 경기가 쌓일수록 이번 시즌 비중↑' : data.code.startsWith('VLEAGUE') ? '체급 = 이번 시즌 포지션별 능력 균형 점수' : '체급 = 이번 시즌 기록만, 경기 수가 적으면 같은 구분 평균 쪽으로'}) ·{' '}
+            {data.code === 'NBA' ? <>체급 = 오버롤 = EPM(dunksandthrees, 매일 갱신 — 100번 공격당 팀 득실 기여, 공격·수비 포함)의 리그 순위를 100점으로 · 폼은 참고 · EPM에 없는 선수만 게임스코어 체급 · 결장 영향 = (EPM − 대체 −2) × 출전 분/48 ·{' '}</> : <>오버롤 = 체급 × 0.7 + 최근 5경기 폼 × 0.3 ({data.code.startsWith('VLEAGUE') ? '체급 = 이번 시즌 포지션별 능력 균형 점수' : '체급 = 이번 시즌 기록만, 경기 수가 적으면 같은 구분 평균 쪽으로'}) ·{' '}</>}
             {TIERS.map(t => <span key={t.name} style={{ color: t.color, marginRight: 6 }}>● {t.min >= 0 ? `${t.min}+` : '~59'}</span>)}
             <br />출전: <span style={{ color: availColor(95) }}>● 90%↑</span> <span style={{ color: availColor(80) }}>● 70~89</span> <span style={{ color: availColor(50) }}>● 40~69</span> <span style={{ color: availColor(20) }}>● 1~39</span> <span style={{ background: '#FF3B3B', color: '#fff', borderRadius: 4, padding: '0 4px', fontWeight: 700 }}>0%</span> 결장
             {' '}· 확정/추정 = Claude가 뉴스·ESPN 명단을 읽고 판단 · ↩ 복귀·⏱ 출전 제한 = 경기 기록 · 체력 = 팀 컨디션 − 개인 출전시간 부담(직전 경기·7일 누적), 75% 미만 ⚠ 누적 경고 · 🔄 대승·대패 로테이션 · 팀 오버롤 = 출전시간 × 이번 시즌 출전 비중 가중, 결장 반영 = 결장 확률만큼 대체 선수(50)로
