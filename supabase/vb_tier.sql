@@ -50,8 +50,10 @@ with k as (
 select lg as league, season, player_code as player_id, player_name, team_name as team, game_count as gp, snapshot_date as last_date, pos,
   -- 뛴 세트가 적으면 포지션 평균(0) 쪽으로: × 세트 / (세트 + 30) (백테스트와 같은 값)
   -- 범실은 0.5배 무게 (코치 뺀 재검증: 범실 빼기 0.6638 · 0.5배 0.6628 · 1배 0.6642 · 2배 0.6730 — 주포일수록 범실이 늘어서 세게 깎으면 틀린다)
+  -- 세트가 적으면 −0.6 쪽으로 당긴다: × 세트/(세트+30) + (−0.6) × 30/(세트+30) (2026-11-25 — 평균(0) 쪽으로 당기니 거의 안 뛴 후보가
+  --  평균보다 조금 낮은 주전보다 높게 나와 팀 주전 슬롯을 차지했다. 백테스트의 출발점 55점 = 백분위 약 27% ≈ z −0.6과 같게 맞춤)
   round(sum(coalesce(greatest(-3, least(3, dir * (val - mu) / nullif(sd, 0))), 0) * case when key = 'err' then 0.5 else 1 end)
-        / sum(case when key = 'err' then 0.5 else 1 end) * max(sets) / (max(sets) + 30), 3) as tier
+        / sum(case when key = 'err' then 0.5 else 1 end) * max(sets) / (max(sets) + 30) - 0.6 * 30 / (max(sets) + 30), 3) as tier
 from z group by lg, season, player_code, player_name, team_name, game_count, snapshot_date, pos;
 
 create or replace view public.v_player_season with (security_invoker = on) as

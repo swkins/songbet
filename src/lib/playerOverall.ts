@@ -286,12 +286,17 @@ export async function loadGameOverall(league: string, gameDate: string, home: Sc
     const prevById = new Map(d.prev.map(r => [r.player_id, r]))
     const prevByName = new Map(d.prev.map(r => [norm(r.player_name), r]))
     // 명단: 이번 시즌 출전시간(배구는 기여도) 상위 10명 + 출전 확률이 있는 선수
-    const byUse = [...roster].sort((x, y) => vb ? (y.gmsc ?? 0) * y.gp - (x.gmsc ?? 0) * x.gp : (y.min ?? 0) * y.gp - (x.min ?? 0) * x.gp)
+    // 배구는 출전 경기 수 순 (2026-11-25 — 체급이 '평균 = 0' 균형 점수로 바뀐 뒤 '체급 × 경기 수'로 고르니 꾸준히 뛴 평균 이하 선수(이시우·신호진)가
+    //  거의 안 뛴 후보(0 근처)에게 밀려 목록에서 빠졌다), 같으면 체급 순
+    const byUse = [...roster].sort((x, y) => vb ? (y.gp - x.gp) || ((y.gmsc ?? 0) - (x.gmsc ?? 0)) : (y.min ?? 0) * y.gp - (x.min ?? 0) * x.gp)
     // 배구: 포지션마다 주전·백업 후보가 빠지지 않게 (세터·리베로는 기여도 합이 작아 상위 10명에서 잘 빠진다) — 포지션별 몇 명씩 먼저, 나머지는 기여도 순으로 12명
     const top = vb ? (() => {
       const want: Record<string, number> = { S: 2, OP: 2, OH: 3, MB: 3, L: 2 }
       const pick: SeasonRow[] = []
       for (const [ps, k] of Object.entries(want)) pick.push(...byUse.filter(r => d.pos.get(r.player_id)?.position === ps).slice(0, k))
+      // 팀 경기의 절반 이상 뛴 선수는 전부 (2026-11-25 사용자 지적 — 12명 제한으로 정성규·방강호·장추안·신연경처럼 매 경기 나오는 선수가 빠져 팀 전력이 틀렸다)
+      const half = Math.max(1, Math.ceil((stats?.n ?? 0) / 2))
+      for (const r of byUse) if (r.gp >= half && !pick.includes(r)) pick.push(r)
       for (const r of byUse) { if (pick.length >= 12) break; if (!pick.includes(r)) pick.push(r) }
       return pick
     })() : byUse.slice(0, 10)
