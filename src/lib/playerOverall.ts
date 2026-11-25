@@ -41,9 +41,9 @@ export interface PlayerOv {
 /** NBA EPM — tot = 100번 공격당 팀 득실 기여(0 = 리그 평균), off·def 나눔, mp48 = 48분당 예상 출전 분 */
 export interface EpmRow { tot: number; off: number | null; def: number | null; mp48: number | null; asOf: string; team: string | null }
 // NBA 결장 영향 (2026-11-26 사용자 요청 — EPM으로): 팀 득실 ≈ Σ EPM × 출전 분/48 이라, 빠진 선수 자리는 대체 선수(EPM −2.0)가 메운다고 보고
-//  (EPM − 대체) × 예상 분/48 × (오늘 출전 확률 − 최근 10경기 출전 비율). 개인 피로는 감점 1당 EPM −0.1. 둘 다 검증 전 값.
+//  (EPM − 대체) × 예상 분/48 × (오늘 출전 확률 − 최근 10경기 출전 비율). 대체 −2.0은 검증 전 값.
+//  개인 피로(출전시간 부담)는 NBA에서 뺐다 (2026-11-26 사용자 요청 — 팀 컨디션만: 백투백·이동·일정 밀도·연장).
 export const EPM_REPL = -2.0
-export const EPM_FATIGUE = 0.1
 const normEn = (s: string) => s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^a-z]/g, '')
 const kindRank = (k: string | null | undefined) => k === '외국인' ? 0 : k === '아시아쿼터' ? 1 : 2
 export interface TeamOv { team: string | null; players: PlayerOv[]; full: number | null; exp: number | null; stats: TeamStats | null; gone?: string[] }
@@ -629,11 +629,11 @@ export function simulate(code: string, home: TeamOv, away: TeamOv, overrides: Re
     const vals = t.players.filter(p => lu.avg[p.id] != null).map(p => lu.avg[p.id] * (overrides[p.id] ?? p.avail.prob) / 100).sort((x, y) => y - x).slice(0, 8)
     return vals.reduce((x, y) => x + y, 0) - lu.hist
   }
-  // NBA 결장·개인 피로 = EPM (위 EPM_REPL 설명): 팀마다 Σ (EPM − 대체) × 예상 분/48 × (오늘 출전 확률 − 최근 출전 비율) − 출전 확률 × 피로 감점 × 0.1 × 분/48
+  // NBA 결장 = EPM (위 EPM_REPL 설명): 팀마다 Σ (EPM − 대체) × 예상 분/48 × (오늘 출전 확률 − 최근 출전 비율) — 개인 피로는 안 넣음(팀 컨디션만)
   const epmLoss = (t: TeamOv) => t.players.reduce((a, p) => {
     if (!p.epm) return a
     const q = (overrides[p.id] ?? p.avail.prob) / 100, w = (p.epm.mp48 ?? 0) / 48
-    return a + (p.epm.tot - EPM_REPL) * w * (q - (p.recentShare ?? q)) - q * EPM_FATIGUE * (p.fatigue?.pen ?? 0) * w
+    return a + (p.epm.tot - EPM_REPL) * w * (q - (p.recentShare ?? q))
   }, 0)
   if (code === 'NBA' && [...home.players, ...away.players].some(p => p.epm)) injury = epmLoss(home) - epmLoss(away)
   let lineup: number | undefined

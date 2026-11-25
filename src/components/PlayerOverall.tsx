@@ -334,7 +334,7 @@ function TeamTable({ title, t, ovr, onCycle, cond, nba }: { title: string; t: Te
       {!t.team ? <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>이 팀 선수 기록을 아직 못 찾았어요</div> : (
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead><tr>
-            <th style={th}>출전</th><th style={th}>선수</th><th style={{ ...th, textAlign: 'right' }} title="팀 컨디션 − 개인 출전시간 부담">체력</th>
+            <th style={th}>출전</th><th style={th}>선수</th>{!nba && <th style={{ ...th, textAlign: 'right' }} title="팀 컨디션 − 개인 출전시간 부담">체력</th>}
             {!nba && <><th style={{ ...th, textAlign: 'right' }}>체급</th><th style={{ ...th, textAlign: 'right' }}>폼</th></>}<th style={{ ...th, textAlign: 'right' }} title={nba ? 'EPM 리그 순위를 100점으로 · ▲▼ = 최근 7일 변화' : undefined}>오버롤</th>
           </tr></thead>
           <tbody>{t.players.map(p => {
@@ -365,7 +365,7 @@ function TeamTable({ title, t, ovr, onCycle, cond, nba }: { title: string; t: Te
                     {a.limited && <span style={{ fontSize: 10, fontWeight: 700, color: '#FACC15' }}>⏱ 출전 제한 가능</span>}
                   </div>
                   {a.ret && <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{a.ret}</div>}
-                  {p.fatigue?.note && <div style={{ fontSize: 10, color: 'var(--blue)' }}>🔄 {p.fatigue.note}</div>}
+                  {!nba && p.fatigue?.note && <div style={{ fontSize: 10, color: 'var(--blue)' }}>🔄 {p.fatigue.note}</div>}
                   {a.reason && <div style={{ fontSize: 10, color: 'var(--text-secondary)', marginTop: 1 }}>{a.reason}</div>}
                   {a.source && (a.source.title || a.source.url) && (
                     <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>
@@ -374,7 +374,7 @@ function TeamTable({ title, t, ovr, onCycle, cond, nba }: { title: string; t: Te
                     </div>
                   )}
                 </td>
-                <td style={{ ...td, textAlign: 'right', whiteSpace: 'nowrap' }}><Stamina p={p} cond={cond} /></td>
+                {!nba && <td style={{ ...td, textAlign: 'right', whiteSpace: 'nowrap' }}><Stamina p={p} cond={cond} /></td>}
                 {!nba && <>
                 <td style={{ ...td, textAlign: 'right', color: 'var(--text-secondary)', fontFamily: 'var(--font-num)' }} title={p.baseNote}>{p.base ?? '–'}<Delta now={p.base} prev={p.prev?.base} date={p.prev?.date} /></td>
                 <td style={{ ...td, textAlign: 'right', fontFamily: 'var(--font-num)', color: p.form == null || p.base == null ? 'var(--text-muted)' : p.form > p.base + 2 ? 'var(--green)' : p.form < p.base - 2 ? 'var(--red)' : 'var(--text-secondary)' }}>{p.form ?? '–'}<Delta now={p.form} prev={p.prev?.form} date={p.prev?.date} /></td>
@@ -516,7 +516,7 @@ export default function PlayerOverall({ league, gameDate, home, away, left, odds
             {data.code === 'NBA' ? <>오버롤 = EPM(dunksandthrees, 매일 갱신 — 100번 공격당 팀 득실 기여, 공격·수비 포함)의 리그 순위를 100점으로 · ▲▼ = 최근 7일 변화 · EPM에 없는 선수만 게임스코어 체급 · 결장 영향 = (EPM − 대체 −2) × 출전 분/48 ·{' '}</> : <>오버롤 = 체급 × 0.7 + 최근 5경기 폼 × 0.3 ({data.code.startsWith('VLEAGUE') ? '체급 = 이번 시즌 포지션별 능력 균형 점수' : '체급 = 이번 시즌 기록만, 경기 수가 적으면 같은 구분 평균 쪽으로'}) ·{' '}</>}
             {TIERS.map(t => <span key={t.name} style={{ color: t.color, marginRight: 6 }}>● {t.min >= 0 ? `${t.min}+` : '~59'}</span>)}
             <br />출전: <span style={{ color: availColor(95) }}>● 90%↑</span> <span style={{ color: availColor(80) }}>● 70~89</span> <span style={{ color: availColor(50) }}>● 40~69</span> <span style={{ color: availColor(20) }}>● 1~39</span> <span style={{ background: '#FF3B3B', color: '#fff', borderRadius: 4, padding: '0 4px', fontWeight: 700 }}>0%</span> 결장
-            {' '}· 확정/추정 = Claude가 뉴스·ESPN 명단을 읽고 판단 · ↩ 복귀·⏱ 출전 제한 = 경기 기록 · 체력 = 팀 컨디션 − 개인 출전시간 부담(직전 경기·7일 누적), 75% 미만 ⚠ 누적 경고 · 🔄 대승·대패 로테이션 · 팀 오버롤 = 출전시간 × 이번 시즌 출전 비중 가중, 결장 반영 = 결장 확률만큼 대체 선수(50)로
+            {' '}· 확정/추정 = Claude가 뉴스·ESPN 명단을 읽고 판단 · ↩ 복귀·⏱ 출전 제한 = 경기 기록 · {data.code === 'NBA' ? '피로 = 팀 컨디션만(백투백·이동·일정 밀도·연장, 팀 이름 옆) · ' : '체력 = 팀 컨디션 − 개인 출전시간 부담(직전 경기·7일 누적), 75% 미만 ⚠ 누적 경고 · 🔄 대승·대패 로테이션 · '}팀 오버롤 = 출전시간 × 이번 시즌 출전 비중 가중, 결장 반영 = 결장 확률만큼 대체 선수(50)로
           </div>
         </div>
       </div>
