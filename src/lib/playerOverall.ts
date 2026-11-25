@@ -82,7 +82,7 @@ interface BaseRow extends SeasonRow { manual_base: number | null; note: string |
 interface RecentRow { player_id: string; n: number; gmsc5: number | null; min5: number | null }
 interface StatusRow { team: string; player_name: string; player_id: string | null; play_prob: number | null; status: string | null; confirmed: boolean | null; reason: string | null; source_title: string | null; source_url: string | null; checked_at: string }
 interface InjRow { player_id: string; player_name: string; team: string; status: string | null; short_comment: string | null; return_date: string | null; fetched_at: string }
-interface LeagueData { cur: SeasonRow[]; prev: BaseRow[]; recent: Map<string, RecentRow>; poolCur: number[]; poolPrev: number[]; names: Record<string, string>; teams: Map<string, TeamStats>; pos: Map<string, { position: string | null; kind: string | null }>; kinds: Map<string, string>; prior: Map<string, number>; at: number }
+interface LeagueData { cur: SeasonRow[]; prev: BaseRow[]; recent: Map<string, RecentRow>; poolCur: number[]; poolPrev: number[]; poolForm?: number[]; names: Record<string, string>; teams: Map<string, TeamStats>; pos: Map<string, { position: string | null; kind: string | null }>; kinds: Map<string, string>; prior: Map<string, number>; at: number }
 
 const cache = new Map<string, LeagueData>()
 const num = (v: unknown) => (v == null ? null : Number(v))
@@ -154,7 +154,9 @@ async function loadLeague(code: string): Promise<LeagueData> {
     const { k } = keyOf(r.player_id); const x = `prev|${k}`; groups.set(x, [...(groups.get(x) ?? []), score(r.gmsc, poolPrev)])
   }
   groups.forEach((v, k) => { if (v.length >= 3) prior.set(k, Math.round(v.reduce((a, b) => a + b, 0) / v.length)) })
-  const d = { cur: curRows, prev: prevRows, recent, poolCur, poolPrev, names, teams, pos, kinds, prior, at: Date.now() }
+  // 배구 최근폼: 시즌 체급은 균형 점수(v_vb_tier, 2026-11-25)라 단위가 달라서, 최근 5경기 기여도는 다른 선수들의 최근 5경기 기여도 안에서 백분위
+  const poolForm = vb ? [...recent.values()].filter(r => r.n >= 2 && r.gmsc5 != null).map(r => r.gmsc5!).sort((x, y) => y - x) : undefined
+  const d = { cur: curRows, prev: prevRows, recent, poolCur, poolPrev, poolForm, names, teams, pos, kinds, prior, at: Date.now() }
   cache.set(code, d)
   return d
 }
@@ -301,7 +303,7 @@ export async function loadGameOverall(league: string, gameDate: string, home: Sc
       const base = newcomer ? (newcomer.n ? Math.round(((curScore ?? 0) * newcomer.n + newcomer.prior * (kind ? 6 : 3)) / (newcomer.n + (kind ? 6 : 3))) : newcomer.prior)
         : curScore == null && lastScore == null ? null : Math.round((curScore ?? 0) * w + (lastScore ?? 0) * (1 - w))
       const rc = d.recent.get(r.player_id)
-      const form = rc && rc.n >= 2 && rc.gmsc5 != null ? Math.round(score(rc.gmsc5, d.poolCur)) : null
+      const form = rc && rc.n >= 2 && rc.gmsc5 != null ? Math.round(score(rc.gmsc5, d.poolForm ?? d.poolCur)) : null
       const overall = base == null ? null : form == null ? base : Math.round(base * 0.7 + form * 0.3)
       const baseNote = stubIds.has(r.player_id) ? '이번 시즌 출전 기록 없음 — 팀 전력에는 안 넣음 (팀 기록에 이미 이 선수 없는 경기력이 반영)' : [n ? `이번 시즌 ${n}경기` : null, pb ? (pb.manual_base != null ? `조사 체급 ${pb.manual_base}${pb.note ? ` (${pb.note})` : ''}` : `지난 시즌 ${pb.gp}경기`) : null,
         lastScore != null && curScore != null ? `이번 시즌 비중 ${Math.round(w * 100)}%` : null,
