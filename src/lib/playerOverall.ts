@@ -2,7 +2,7 @@ import dayjs from 'dayjs'
 import { supabase } from './supabase'
 import { koName, type ScheduleTeam, type ScheduleGame } from './gameSchedule'
 import { NBA_NAMES_KO } from '../data/nbaNamesKo'
-import { predictVolley, type VolleyResult } from './volleyPredict'
+import { predictVolley, volleyRatings, type VolleyResult } from './volleyPredict'
 import { NBA_PRIOR, NBA_PRIOR_AVG_TOTAL } from '../data/nbaRatingPrior'
 import { teamCondition, playerFatigue, COND_K, type Condition, type PastGame, type PlayerFatigue } from './fatigue'
 
@@ -37,7 +37,7 @@ export interface PlayerOv {
 }
 const kindRank = (k: string | null | undefined) => k === '외국인' ? 0 : k === '아시아쿼터' ? 1 : 2
 export interface TeamOv { team: string | null; players: PlayerOv[]; full: number | null; exp: number | null; stats: TeamStats | null; gone?: string[] }
-export interface TeamStats { n: number; pf: number; pa: number; sw?: number; sl?: number; rt?: TeamRating }
+export interface TeamStats { n: number; pf: number; pa: number; sw?: number; sl?: number; vr?: number; coachGames?: number | null; rt?: TeamRating }   // vr = 배구 상대 보정 레이팅 (volleyRatings)
 /** NBA 팀 레이팅 (nbaRatings) — r = 득실(상대 보정), o = 공격(+ = 많이 넣음), d = 수비(+ = 많이 내줌), avgT = 리그 평균 총점 */
 export interface TeamRating { r: number; o: number; d: number; n: number; avgT: number }   // 농구 pf·pa = 경기당 득점·실점 / 배구 = 경기당 딴·잃은 세트, sw·sl = 시즌 세트 합
 export interface GameNews { summary: string | null; items: { title: string; url?: string }[] | null; margin_adj: number | null; adj_note: string | null; checked_at: string }
@@ -91,13 +91,14 @@ async function loadLeague(code: string): Promise<LeagueData> {
   const hit = cache.get(code)
   if (hit && Date.now() - hit.at < 10 * 60000) return hit
   const cur = seasonOf(dayjs().format('YYYY-MM-DD'))
+  let vbRaw: { game_date: string; home: string; away: string; home_sets: number; away_sets: number }[] = []
   const [a, b, c, nm, tg, kp, pk] = await Promise.all([
     supabase.from('v_player_season').select('player_id,player_name,team,gp,min,gmsc,last_date').eq('league', code).eq('season', cur).limit(2000),
     supabase.from('player_base').select('player_id,player_name,team,gp,min,gmsc,manual_base,note').eq('league', code).eq('season', prevSeasonOf(cur)).limit(2000),
     supabase.from('v_player_recent').select('player_id,n,gmsc5,min5').eq('league', code).limit(2000),
     supabase.from('player_names').select('name_en,name_ko').eq('league', code),
     // 배구: 경기 결과(세트 스코어) = vb_games (KOVO 시즌 일정, 매일 2번) → 팀별 세트 득실
-    code.startsWith('VLEAGUE') ? supabase.from('vb_games').select('home,away,home_sets,away_sets').eq('league', code).eq('season', cur).limit(1000).then(r => ({ ...r, data: ((r.data ?? []) as { home: string; away: string; home_sets: number; away_sets: number }[]).flatMap(g => [{ team: g.home, team_score: g.home_sets, opp_score: g.away_sets }, { team: g.away, team_score: g.away_sets, opp_score: g.home_sets }]) }))
+    code.startsWith('VLEAGUE') ? supabase.from('vb_games').select('game_date,home,away,home_sets,away_sets').eq('league', code).eq('season', cur).limit(1000).then(r => { const raw = (r.data ?? []) as { game_date: string; home: string; away: string; home_sets: number; away_sets: number }[]; vbRaw = raw; return { ...r, data: raw.flatMap(g => [{ team: g.home, team_score: g.home_sets, opp_score: g.away_sets }, { team: g.away, team_score: g.away_sets, opp_score: g.home_sets }]) } })
       : supabase.from('v_team_games').select('team,opp,game_date,is_home,team_score,opp_score').eq('league', code).eq('season', cur).limit(3000),
     // 배구 포지션 (kovo_players — 매일 04시 KOVO 명단으로 갱신)
     code.startsWith('VLEAGUE') ? supabase.from('kovo_players').select('player_code,position,kind').eq('gender', code === 'VLEAGUE_M' ? 'MALE' : 'FEMALE').limit(1000) : Promise.resolve({ data: [] }),
@@ -115,6 +116,19 @@ async function loadLeague(code: string): Promise<LeagueData> {
     t.n++; t.pf += r.team_score; t.pa += r.opp_score; teams.set(r.team, t)
   }
   teams.forEach(t => { t.sw = t.pf; t.sl = t.pa; t.pf /= t.n; t.pa /= t.n })
+  if (vbRaw.length) {
+    volleyRatings(vbRaw).forEach((v, team) => { const t = teams.get(team); if (t) t.vr = v.r })   // 배구 상대 보정 레이팅
+    // 감독 교체 (coach_changes): 가장 최근 교체 뒤 그 팀이 치른 경기 수 → 5경기 전이면 예측 확신을 줄인다 (volleyPredict COACH_RISK)
+    const { data: cc } = await supabase.from('coach_changes').select('team,change_date').eq('league', code).order('change_date', { ascending: false }).limit(100)
+    const last = new Map<string, string>()
+    for (const r of (cc ?? []) as { team: string; change_date: string }[]) if (!last.has(r.team)) last.set(r.team, r.change_date)
+    last.forEach((d, team) => {
+      const t = teams.get(team); if (!t) return
+      const first = vbRaw.reduce((m, g) => (m == null || g.game_date < m ? g.game_date : m), null as string | null)
+      if (first && d < first) return   // 지난 시즌 교체는 무시
+      t.coachGames = vbRaw.filter(g => (g.home === team || g.away === team) && g.game_date >= d && g.home_sets != null && g.home_sets + g.away_sets > 0).length
+    })
+  }
   if (PARAMS.leagues[code]?.rk != null) {   // NBA·KBL·WKBL 팀 레이팅
     const rt = nbaRatings((tg.data ?? []) as TeamGameRow[], PARAMS.leagues[code], code === 'NBA')
     rt.forEach((v, team) => { const t = teams.get(team); if (t) t.rt = v })
@@ -453,8 +467,9 @@ export const DEFAULT_PARAMS: ModelParams = {
     KBL: { sd: 11, sdT: 14, hca: 2, k: 0.8, avg: 80, wScore: 0.5, wOv: 0, condK: COND_K.KBL, rk: 0.05, rkt: 0.05, carry: 0, early: 0, wMarket: 0 },
     WKBL: { sd: 10, sdT: 12, hca: 0.5, k: 0.7, avg: 65, wScore: 0.5, wOv: 0, condK: COND_K.WKBL, rk: 0.05, rkt: 0.05, carry: 0, early: 0, wMarket: 0 },
     // 배구: hca = 홈 이점(logit), k = 팀 오버롤 1점당 logit, wScore = 시장 배당 비중, wOv = 오버롤 모델 비중 (volleyPredict.ts)
-    VLEAGUE_M: { sd: 0, sdT: 0, hca: 0.15, k: 0.08, avg: 0, wScore: 0.5, wOv: 0.5, condK: 0 },   // 배구 wScore = 팀 세트 득실 비중, wOv = 오버롤 비중
-    VLEAGUE_W: { sd: 0, sdT: 0, hca: 0.15, k: 0.08, avg: 0, wScore: 0.5, wOv: 0.5, condK: 0 },
+    // 배구 wScore = 상대 보정 팀 레이팅 비중, wOv = 오버롤 비중 (2026-11-25 레이팅으로 바꾸며 hca 0.15→0.2·wScore 0.5→1, KOVO 5시즌 백테스트)
+    VLEAGUE_M: { sd: 0, sdT: 0, hca: 0.2, k: 0.08, avg: 0, wScore: 1, wOv: 0.5, condK: 0 },
+    VLEAGUE_W: { sd: 0, sdT: 0, hca: 0.2, k: 0.08, avg: 0, wScore: 1, wOv: 0.5, condK: 0 },
   },
   fatigueK: 0.35,
 }

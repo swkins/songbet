@@ -49,6 +49,10 @@ on conflict (league, game_date, team, player_name) do update set player_id = exc
 insert into player_long_out (league, team, player_name, player_id, from_date, until_date, play_prob, status, reason, source_title, source_url)
 values (...) on conflict (league, team, player_name) do update set until_date = excluded.until_date, play_prob = excluded.play_prob, status = excluded.status,
   reason = excluded.reason, source_title = excluded.source_title, source_url = excluded.source_url, updated_at = now();
+-- 시즌 중 감독 경질·사퇴·교체 기사가 있을 때만 (change_date = 새 감독·대행이 처음 지휘하는 경기 날짜, 개막 전부터 대행인 팀은 넣지 않음)
+-- → 예측이 그 팀 첫 5경기는 확신을 줄인다 (2026-11-25 사용자 요청 — 감독이 갑자기 바뀐 팀은 위험)
+insert into coach_changes (league, team, change_date, coach, interim, prev_coach, reason, source_url)
+values (...) on conflict (league, team, change_date) do update set coach = excluded.coach, interim = excluded.interim, reason = excluded.reason, source_url = excluded.source_url, updated_at = now();
 insert into game_news (league, game_date, home, away, summary, items, margin_adj, adj_note, checked_at)
 values (...), (...)
 on conflict (league, game_date, home, away) do update set summary = excluded.summary, items = excluded.items, checked_at = now();
