@@ -24,7 +24,7 @@ const ovOf = (r: number | null, pool: number[]) => {
   let n = 0; for (const x of pool) if (x > r) n++
   return Math.round(pctToScore(n / pool.length))
 }
-const LINEUP: Record<string, string> = { predicted: '예상 선발', confirmed: '확정 선발', lastStarting11: '지난 경기 선발' }
+const LINEUP: Record<string, string> = { predicted: '예상 선발', confirmed: '확정 선발', lastStarting11: '지난 경기 선발', unavailable: '선발 — 아직 안 나옴' }
 const TYPE: Record<string, string> = { injury: '부상', suspension: '징계', international: '대표팀', other: '기타' }
 
 export default function SoccerLineup({ gameId, home, away }: { gameId: string; home: { name?: string }; away: { name?: string } }) {
