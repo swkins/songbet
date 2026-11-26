@@ -8,6 +8,8 @@ import { loadRules, saveRule, loadLines, judge, BET_LABEL, type SoccerRule, type
 // 승무패 = ESPN·DraftKings 최신(odds_snapshots), 핸디 = Action Network 평균(soccer_lines) 또는 포아송 추정.
 // 룰은 Supabase soccer_rules — 아래 '룰 고치기'에서 바꾼다.
 const LEAGUES = ['프리미어리그', '라리가', '세리에A', '분데스리가', '리그1']
+// 룰마다 '전 리그'(all_leagues)면 일정 받는 모든 축구 리그, 아니면 5대 리그만 (2026-11-26 사용자 요청 — R7 2.5 오버는 다른 리그도)
+const rulesFor = (rs: SoccerRule[], league: string) => rs.filter(r => r.all_leagues || LEAGUES.includes(league))
 export interface RulebookBet { sport: string; league: string; gameId: string; preset: { side: 'home' | 'away'; opt: string; odds: number | null } }
 
 export default function SoccerRulebook({ onGoBet }: { onGoBet?: (t: RulebookBet) => void }) {
@@ -23,7 +25,8 @@ export default function SoccerRulebook({ onGoBet }: { onGoBet?: (t: RulebookBet)
       const [rs, rows] = await Promise.all([loadRules(), loadSchedules('soccer')])
       setRules(rs)
       const now = Date.now()
-      const games = rows.filter(r => LEAGUES.includes(r.league)).flatMap(r => r.games.map(g => ({ ...g, league: r.league })))
+      const anyAll = rs.some(r => r.enabled && r.all_leagues)
+      const games = rows.filter(r => LEAGUES.includes(r.league) || anyAll).flatMap(r => r.games.map(g => ({ ...g, league: r.league })))
         .filter(g => gameState(g, now) === 'pre').sort((a, b) => a.start.localeCompare(b.start))
       const ids = games.map(g => g.id)
       const [{ data: snaps }, lines] = await Promise.all([
@@ -37,7 +40,7 @@ export default function SoccerRulebook({ onGoBet }: { onGoBet?: (t: RulebookBet)
         const s = last.get(g.id)
         if (!s?.home_odds || !s?.away_odds || !s?.draw_odds) { none.push({ league: g.league, start: g.start, home: g.home.name ?? '?', away: g.away.name ?? '?' }); continue }
         out.push(judge({ id: g.id, league: g.league, start: g.start, home: g.home.name ?? '?', away: g.away.name ?? '?', sport: 'soccer' },
-          { h: Number(s.home_odds), d: Number(s.draw_odds), a: Number(s.away_odds) }, rs, lines))
+          { h: Number(s.home_odds), d: Number(s.draw_odds), a: Number(s.away_odds) }, rulesFor(rs, g.league), lines))
       }
       setList(out); setNoOdds(none)
     })()
@@ -53,7 +56,7 @@ export default function SoccerRulebook({ onGoBet }: { onGoBet?: (t: RulebookBet)
     <div className="card" style={{ padding: '12px 14px' }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
         <span style={{ fontSize: 15, fontWeight: 800 }}>📋 룰북 베팅 찾기</span>
-        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>5대 리그 · 오늘·내일 경기 전 · 승무패 ESPN(DraftKings) · 핸디 Action Network 평균 (없으면 추정)</span>
+        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>5대 리그 (전 리그 룰은 모든 리그) · 오늘·내일 경기 전 · 승무패 ESPN(DraftKings) · 핸디 Action Network 평균 (없으면 추정)</span>
         <button type="button" className="btn" onClick={() => setReload(x => x + 1)} style={{ marginLeft: 'auto', fontSize: 11, padding: '3px 10px' }}>새로고침</button>
         <button type="button" className="btn" onClick={() => setEdit(e => !e)} style={{ fontSize: 11, padding: '3px 10px' }}>{edit ? '룰 닫기' : '⚙ 룰 고치기'}</button>
       </div>
@@ -135,8 +138,8 @@ function RuleEditor({ rules, onSaved }: { rules: SoccerRule[]; onSaved: () => vo
   )
   async function saveAll() {
     for (const r of rows) {
-      const { id, sort, name, enabled, fav_min, fav_max, dog_min, dog_max, draw_min, draw_max, bet, min_odds } = r
-      await saveRule({ id: id > 0 ? id : undefined, sort, name, enabled, fav_min, fav_max, dog_min, dog_max, draw_min, draw_max, bet, min_odds })
+      const { id, sort, name, enabled, fav_min, fav_max, dog_min, dog_max, draw_min, draw_max, bet, min_odds, all_leagues } = r
+      await saveRule({ id: id > 0 ? id : undefined, sort, name, enabled, fav_min, fav_max, dog_min, dog_max, draw_min, draw_max, bet, min_odds, all_leagues: !!all_leagues })
     }
     setMsg('저장했어요'); onSaved()
   }
@@ -144,7 +147,7 @@ function RuleEditor({ rules, onSaved }: { rules: SoccerRule[]; onSaved: () => vo
   return (
     <div style={{ border: '1px dashed var(--border)', borderRadius: 'var(--radius-sm)', padding: 8, marginBottom: 10, overflowX: 'auto' }}>
       <table style={{ borderCollapse: 'collapse' }}>
-        <thead><tr><th style={th}>사용</th><th style={th}>이름</th><th style={th}>정배 ≥</th><th style={th}>정배 ≤</th><th style={th}>역배 ≥</th><th style={th}>역배 ≤</th><th style={th}>무 ≥</th><th style={th}>무 ≤</th><th style={th}>베팅</th><th style={th}>그 배당 ≥</th></tr></thead>
+        <thead><tr><th style={th}>사용</th><th style={th}>이름</th><th style={th}>정배 ≥</th><th style={th}>정배 ≤</th><th style={th}>역배 ≥</th><th style={th}>역배 ≤</th><th style={th}>무 ≥</th><th style={th}>무 ≤</th><th style={th}>베팅</th><th style={th}>그 배당 ≥</th><th style={th}>전 리그</th></tr></thead>
         <tbody>{rows.map((r, i) => (
           <tr key={r.id}>
             <td style={{ textAlign: 'center' }}><input type="checkbox" checked={r.enabled} onChange={e => set(i, 'enabled', e.target.checked)} /></td>
@@ -152,6 +155,7 @@ function RuleEditor({ rules, onSaved }: { rules: SoccerRule[]; onSaved: () => vo
             <td>{numIn(i, 'fav_min')}</td><td>{numIn(i, 'fav_max')}</td><td>{numIn(i, 'dog_min')}</td><td>{numIn(i, 'dog_max')}</td><td>{numIn(i, 'draw_min')}</td><td>{numIn(i, 'draw_max')}</td>
             <td><select className="form-input" value={r.bet} onChange={e => set(i, 'bet', e.target.value)} style={{ fontSize: 11, padding: '3px 4px' }}>{BETS.map(b => <option key={b} value={b}>{BET_LABEL[b]}</option>)}</select></td>
             <td>{numIn(i, 'min_odds')}</td>
+            <td style={{ textAlign: 'center' }} title="체크 = 일정 받는 모든 축구 리그, 해제 = 5대 리그만"><input type="checkbox" checked={!!r.all_leagues} onChange={e => set(i, 'all_leagues', e.target.checked)} /></td>
           </tr>
         ))}</tbody>
       </table>

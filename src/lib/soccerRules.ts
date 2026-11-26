@@ -9,6 +9,7 @@ export interface SoccerRule {
   id: number; sort: number; name: string; enabled: boolean
   fav_min: number | null; fav_max: number | null; dog_min: number | null; dog_max: number | null; draw_min: number | null; draw_max: number | null
   bet: BetKind; min_odds: number | null; note: string | null
+  all_leagues?: boolean   // true = 일정 받는 모든 축구 리그, false = 5대 리그만 (2026-11-26 — R7 2.5 오버는 전 리그)
 }
 export const BET_LABEL: Record<BetKind, string> = { fav_win: '정배 승', fav_minus15: '정배 -1.5', fav_plus05: '정배 +0.5', dog_plus15: '역배 +1.5', dog_plus25: '역배 +2.5', over25: '2.5 오버' }
 
