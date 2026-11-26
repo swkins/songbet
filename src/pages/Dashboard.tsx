@@ -4108,6 +4108,12 @@ export default function Dashboard({ betTarget, onBetTargetDone, layoutMode = 'si
 
   /* ── 베팅 모드의 베팅 현황 (2026-11-22 사용자 요청 — 사이트마다 칸을 나누지 말고 하나로):
      맨 위 = 사이트별 한 줄 요약(입금·남은 롤링·수익), 그 아래 = 모든 사이트의 진행중 베팅을 한 줄씩 (최근 것 위) */
+  // 자동 판정 일괄 확인 버튼 — 베팅 모드는 '진행중 베팅 n건' 옆, 좌우·상하 모드는 베팅 현황 제목줄 (2026-11-26 사용자 요청)
+  const renderAutoAllBtn = () => { const n = autoReadyBets().length; return n > 0 && (
+    <button onClick={applyAutoAll} disabled={bulkBusy} title="자동 판정이 나온 진행중 베팅을 한 번에 처리 (하나씩 [확인] 누르는 것과 같음)"
+      style={{ background: 'var(--green-bg)', border: '1px solid var(--green-border)', borderRadius: 4, color: 'var(--green)', cursor: bulkBusy ? 'wait' : 'pointer', padding: '2px 8px', display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 800, fontFamily: 'var(--font-body)' }}>
+      <CheckCircle size={12} /> {bulkBusy ? '처리 중…' : `자동 판정 일괄 확인 ${n}건`}
+    </button>) }
   const renderCombinedStatus = () => {
     const rows = sites.map(site => ({ site, pending: displayPendingBySite(site.id) }))
     const all = rows.flatMap(r => r.pending.map(b => ({ b, site: r.site })))
@@ -4161,7 +4167,7 @@ export default function Dashboard({ betTarget, onBetTargetDone, layoutMode = 'si
         </div>
         {/* 진행중 베팅 — 한 줄씩 */}
         <div className="card combo-pending" style={{ padding: '6px 10px' }}>
-          <div className="combo-pending-title" style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-secondary)', marginBottom: 4 }}>진행중 베팅 {all.filter(x => x.b.result === 'pending').length}건</div>
+          <div className="combo-pending-title" style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-secondary)', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 8 }}>진행중 베팅 {all.filter(x => x.b.result === 'pending').length}건 {renderAutoAllBtn()}</div>
           {all.length === 0 && <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '6px 0' }}>진행중인 베팅이 없습니다</div>}
           {all.map(({ b, site }) => {
             if (b.parlay_group) { if (seenGroups.has(b.parlay_group)) return null; seenGroups.add(b.parlay_group) }
@@ -4708,11 +4714,7 @@ export default function Dashboard({ betTarget, onBetTargetDone, layoutMode = 'si
               {/* 제목줄: 베팅 현황 · (오른쪽) 보기 방식 전환 | 룰북·사이트관리 아이콘 / 아래 줄: 전체 남은 롤링 */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: aggRollingTarget > 0 ? 6 : 12 }}>
                 <span className="card-title" style={{ margin: 0 }}>베팅 현황</span>
-                {(() => { const n = autoReadyBets().length; return n > 0 && (
-                  <button onClick={applyAutoAll} disabled={bulkBusy} title="자동 판정이 나온 진행중 베팅을 한 번에 처리 (하나씩 [확인] 누르는 것과 같음)"
-                    style={{ background: 'var(--green-bg)', border: '1px solid var(--green-border)', borderRadius: 4, color: 'var(--green)', cursor: bulkBusy ? 'wait' : 'pointer', padding: '3px 9px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 800, fontFamily: 'var(--font-body)' }}>
-                    <CheckCircle size={12} /> {bulkBusy ? '처리 중…' : `자동 판정 일괄 확인 ${n}건`}
-                  </button>) })()}
+                {!betMode && renderAutoAllBtn()}
                 <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
                   <button onClick={openRulebook} title="룰북" style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--gold)', cursor: 'pointer', padding: '4px 7px', display: 'flex', alignItems: 'center' }}>
                     <BookOpen size={13} />
