@@ -3029,6 +3029,7 @@ export default function Dashboard({ betTarget, onBetTargetDone, layoutMode = 'si
   const [openFormType, setOpenFormType] = useState<'sports' | 'game'>('sports')
   const [hoverBetId, setHoverBetId]     = useState<string | null>(null)
   const [moveBet, setMoveBet]           = useState<Bet | null>(null)     // 사이트 변경 창을 연 베팅
+  const [bulkBusy, setBulkBusy]         = useState(false)                // 자동 판정 일괄 확인 중
   const [manualBetId, setManualBetId]   = useState<string | null>(null)   // 베팅 모드 합친 목록 — '수동처리' 펼친 베팅
   useEffect(() => {
     if (!manualBetId) return
@@ -3883,13 +3884,25 @@ export default function Dashboard({ betTarget, onBetTargetDone, layoutMode = 'si
     const { data } = await supabase.from('bets').update({ result, profit, usd_krw_rate: rateAtSettlement, cashout_amount: null, result_at: new Date().toISOString() }).eq('id', bet.id).select().single()
     if (data) {
       await logAction({ action_type: 'update', table_name: 'bets', record_id: data.id, before_data: bet as never, after_data: data as never, description: `결과: ${bet.match} → ${result}` })
-      const updatedBets = bets.map(b => b.id === data.id ? data : b)
-      setBets(updatedBets)
+      setBets(p => p.map(b => b.id === data.id ? data : b))
       if (site && result === 'win') {
-        const { data: sd } = await supabase.from('sites').update({ balance: site.balance + bet.stake + profit }).eq('id', site.id).select().single()
+        // 잔액은 DB에서 새로 읽어 더한다 (일괄 처리처럼 연달아 처리해도 화면 값이 늦어 틀리지 않게)
+        const { data: cur } = await supabase.from('sites').select('balance').eq('id', site.id).single()
+        const { data: sd } = await supabase.from('sites').update({ balance: Number(cur?.balance ?? site.balance) + bet.stake + profit }).eq('id', site.id).select().single()
         if (sd) setSites(p => p.map(s => s.id === sd.id ? sd : s))
       }
     }
+  }
+
+  /* ── 자동 판정 일괄 확인 (2026-11-26 사용자 요청): 자동 판정이 나온 진행중 단폴을 한 번에 '확인' 처리 — 하나씩 [확인] 누르는 것과 같음 ── */
+  const autoReadyBets = () => sites.flatMap(s => displayPendingBySite(s.id)).filter(b => b.result === 'pending' && !b.parlay_group && !!b.auto_result)
+  async function applyAutoAll() {
+    const list = autoReadyBets()
+    if (!list.length || bulkBusy) return
+    const cnt = (r: string) => list.filter(b => b.auto_result === r).length
+    if (!confirm(`자동 판정 ${list.length}건을 한 번에 처리할까요?\n적중 ${cnt('win')} · 실패 ${cnt('loss')}${cnt('push') ? ` · 적특 ${cnt('push')}` : ''}`)) return
+    setBulkBusy(true)
+    try { for (const b of list) await applyResult(b, b.auto_result as BetResult) } finally { setBulkBusy(false) }
   }
 
   /* ── 캐시아웃 (단폴): 베팅금액 중 일부만 회수 — 나머지는 손실로 처리하고,
@@ -4695,6 +4708,11 @@ export default function Dashboard({ betTarget, onBetTargetDone, layoutMode = 'si
               {/* 제목줄: 베팅 현황 · (오른쪽) 보기 방식 전환 | 룰북·사이트관리 아이콘 / 아래 줄: 전체 남은 롤링 */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: aggRollingTarget > 0 ? 6 : 12 }}>
                 <span className="card-title" style={{ margin: 0 }}>베팅 현황</span>
+                {(() => { const n = autoReadyBets().length; return n > 0 && (
+                  <button onClick={applyAutoAll} disabled={bulkBusy} title="자동 판정이 나온 진행중 베팅을 한 번에 처리 (하나씩 [확인] 누르는 것과 같음)"
+                    style={{ background: 'var(--green-bg)', border: '1px solid var(--green-border)', borderRadius: 4, color: 'var(--green)', cursor: bulkBusy ? 'wait' : 'pointer', padding: '3px 9px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 800, fontFamily: 'var(--font-body)' }}>
+                    <CheckCircle size={12} /> {bulkBusy ? '처리 중…' : `자동 판정 일괄 확인 ${n}건`}
+                  </button>) })()}
                 <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
                   <button onClick={openRulebook} title="룰북" style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--gold)', cursor: 'pointer', padding: '4px 7px', display: 'flex', alignItems: 'center' }}>
                     <BookOpen size={13} />
