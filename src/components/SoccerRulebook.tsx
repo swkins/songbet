@@ -85,7 +85,7 @@ export default function SoccerRulebook({ onGoBet }: { onGoBet?: (t: RulebookBet)
                           <div key={p.rule.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0', opacity: p.okOdds ? 1 : 0.5 }}>
                             <span style={{ width: 34, fontWeight: 800, color: 'var(--gold)' }}>{p.rule.name}</span>
                             <span style={{ flex: 1, fontWeight: 700 }}>{p.label}<span style={{ fontSize: 10, color: 'var(--text-muted)', marginLeft: 6 }}>{BET_LABEL[p.kind]}</span></span>
-                            <span style={{ ...num, width: 92, textAlign: 'right' }} title={p.estimated ? '해외 핸디 배당이 없어 승무패로 추정 (마진 5%)' : `Action Network ${p.books}곳 평균`}>
+                            <span style={{ ...num, width: 92, textAlign: 'right' }} title={p.estimated ? `해외 ${p.kind === 'over25' ? '2.5 오버' : '핸디'} 배당이 없어 승무패로 추정 (마진 5%)` : `해외 북 ${p.books}곳 평균`}>
                               <b>{p.odds?.toFixed(2) ?? '–'}</b><span style={{ fontSize: 9, color: 'var(--text-muted)', marginLeft: 3 }}>{p.line == null ? '' : p.estimated ? '추정' : `${p.books}곳`}</span>
                             </span>
                             <span style={{ ...num, width: 44, textAlign: 'right', color: 'var(--text-secondary)' }}>{p.prob != null ? `${Math.round(p.prob * 100)}%` : ''}</span>
@@ -123,7 +123,7 @@ export default function SoccerRulebook({ onGoBet }: { onGoBet?: (t: RulebookBet)
   )
 }
 
-const BETS: BetKind[] = ['fav_win', 'fav_minus15', 'fav_plus05', 'dog_plus15', 'dog_plus25']
+const BETS: BetKind[] = ['fav_win', 'fav_minus15', 'fav_plus05', 'dog_plus15', 'dog_plus25', 'over25']
 function RuleEditor({ rules, onSaved }: { rules: SoccerRule[]; onSaved: () => void }) {
   const [rows, setRows] = useState<SoccerRule[]>(rules)
   const [msg, setMsg] = useState<string | null>(null)

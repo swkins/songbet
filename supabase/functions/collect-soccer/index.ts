@@ -111,6 +111,12 @@ Deno.serve(async (req) => {
   //  자정이 지나면 어제 줄을 더는 갱신하지 않았기 때문). 어제 줄은 통째로 덮지 않고 이미 저장된 경기만 새 값으로 바꾼다 (UTC 3일로는 어제 오전 경기가 빠져서).
   const yesterday = kstDate(Date.now() - 86400000)
   const byDate: Record<string, Game[]> = { [yesterday]: [], [today]: [], [tomorrow]: [] }
+  // 2.5 오버·언더 등 총골 배당 (2026-11-26 사용자 요청 — 룰북 '무 4.0↑ & 2.5 오버 1.60↑') → soccer_lines side 'over'·'under'
+  const totRows: { game_id: string; league: string; side: string; line: number; odds: number; books: number; source: string; fetched_at: string }[] = []
+  const addTot = (game_id: string, side: string, line: unknown, o: number | null, books: number, source: string) => {
+    const l = Number(line); if (!o || !Number.isFinite(l) || l <= 0) return
+    totRows.push({ game_id, league, side, line: l, odds: Math.round(o * 100) / 100, books, source, fetched_at: new Date().toISOString() })
+  }
   const odds: { game: Game; date: string; h: number | null; d: number | null; a: number | null; oh: number | null; od: number | null; oa: number | null; src: string }[] = []
 
   if (CODE[league]) {
@@ -145,6 +151,11 @@ Deno.serve(async (req) => {
       if (state === 'pre' && ml) odds.push({ game: g, date, src: 'espn-draftkings',
         h: dec(ml.home?.close?.odds), d: dec(ml.draw?.close?.odds), a: dec(ml.away?.close?.odds),
         oh: dec(ml.home?.open?.odds), od: dec(ml.draw?.open?.odds), oa: dec(ml.away?.open?.odds) })
+      const o0 = c?.odds?.[0]
+      if (state === 'pre' && o0?.overUnder != null) {
+        addTot(g.id, 'over', o0.overUnder, dec(o0.total?.over?.close?.odds ?? o0.overOdds), 1, 'espn-draftkings')
+        addTot(g.id, 'under', o0.overUnder, dec(o0.total?.under?.close?.odds ?? o0.underOdds), 1, 'espn-draftkings')
+      }
     }
   } else if (KLEAGUE[league]) {
     // K리그 공식 API — 오늘·내일이 걸친 달(한두 번)
@@ -235,6 +246,8 @@ Deno.serve(async (req) => {
           if (ml && pr('home') && pr('away')) { odds.push({ game: hit.g, date: hit.date, src: 'pinnacle', h: pr('home'), d: pr('draw'), a: pr('away'), oh: null, od: null, oa: null }); pinMatched++ }
           for (const sp of ms.filter(x => x.type === 'spread'))
             for (const p of sp.prices ?? []) if (p.points != null) lineRows.push({ game_id: hit.g.id, league, side: p.designation, line: Number(p.points), odds: pinDec(p.price), books: 1, source: 'pinnacle', fetched_at: new Date().toISOString() })
+          for (const tt of ms.filter(x => x.type === 'total'))
+            for (const p of tt.prices ?? []) if (p.points != null && (p.designation === 'over' || p.designation === 'under')) addTot(hit.g.id, p.designation, p.points, pinDec(p.price), 1, 'pinnacle')
         }
         const uniq = [...new Map(lineRows.map(r => [`${r.game_id}|${r.side}|${r.line}`, r])).values()]
         if (uniq.length) { const { error } = await db.from('soccer_lines').upsert(uniq); if (!error) pinLines = uniq.length }
@@ -310,6 +323,7 @@ Deno.serve(async (req) => {
         if (!g) continue
         anMatched++
         const acc = new Map<string, { side: string; line: number; sum: number; n: number }>()
+        const tacc = new Map<string, { side: string; line: number; sum: number; n: number }>()
         for (const [book, m] of Object.entries<any>(ag.markets ?? {})) {
           if (book === '30') continue   // 30 = 오픈 배당
           for (const sp of m?.event?.spread ?? []) {
@@ -317,12 +331,24 @@ Deno.serve(async (req) => {
             const k = `${sp.side}|${sp.value}`; const a = acc.get(k) ?? { side: sp.side, line: Number(sp.value), sum: 0, n: 0 }
             a.sum += o; a.n++; acc.set(k, a)
           }
+          for (const tt of m?.event?.total ?? []) {
+            const o = dec(tt.odds); if (!o || tt.value == null || (tt.side !== 'over' && tt.side !== 'under')) continue
+            const k = `${tt.side}|${tt.value}`; const a = tacc.get(k) ?? { side: tt.side, line: Number(tt.value), sum: 0, n: 0 }
+            a.sum += o; a.n++; tacc.set(k, a)
+          }
         }
         const up = [...acc.values()].map(a => ({ game_id: g.id, league, side: a.side, line: a.line, odds: Math.round(a.sum / a.n * 100) / 100, books: a.n, source: 'actionnetwork', fetched_at: new Date().toISOString() }))
         if (up.length) { const { error } = await db.from('soccer_lines').upsert(up); if (!error) lines += up.length }
+        for (const a of tacc.values()) addTot(g.id, a.side, a.line, a.sum / a.n, a.n, 'actionnetwork')
       }
     }
   } catch { /* 핸디는 없어도 일정·승무패는 저장됨 */ }
 
-  return log('ok', { pinMatched, pinLines, anMatched, lines, games: rows.reduce((s, r) => s + r.games.length, 0), counts: Object.fromEntries(rows.map(r => [r.game_date, r.games.length])), odds: odds.length, changed, unmatched: [...unknown] })
+  // 총골 저장: 같은 경기·쪽·기준점은 북 수가 많은 출처 (Action Network 평균 > DraftKings·피나클 한 곳)
+  let totals = 0
+  const totBest = new Map<string, typeof totRows[number]>()
+  for (const r of totRows) { const k = `${r.game_id}|${r.side}|${r.line}`; const p = totBest.get(k); if (!p || r.books >= p.books) totBest.set(k, r) }
+  if (totBest.size) { const { error } = await db.from('soccer_lines').upsert([...totBest.values()]); if (!error) totals = totBest.size }
+
+  return log('ok', { pinMatched, pinLines, anMatched, lines, totals, games: rows.reduce((s, r) => s + r.games.length, 0), counts: Object.fromEntries(rows.map(r => [r.game_date, r.games.length])), odds: odds.length, changed, unmatched: [...unknown] })
 })

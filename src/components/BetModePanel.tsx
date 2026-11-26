@@ -479,6 +479,7 @@ type BPick = { kind: 'win'; side: 'home' | 'away' } | { kind: 'hcap'; side: 'hom
 function presetPick(p?: BetPreset): BPick | null {
   if (!p) return null
   if (p.opt === '승리') return { kind: 'win', side: p.side }
+  if (p.opt === '2.5 오버') return { kind: 'ou25' }
   const m = p.opt.match(/^(-?\d+(?:\.\d+)?) *H$/)
   return m ? { kind: 'hcap', side: p.side, line: Number(m[1]) } : null
 }
