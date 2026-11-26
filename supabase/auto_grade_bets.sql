@@ -79,6 +79,15 @@ begin
         continue;
       end if;
       ta := m[1]; side := m[2]; opt := trim(m[3]);
+      -- '팀 홈 2.5 오버'처럼 홈/원정을 고른 오버·언더도 경기 총합으로 (2026-11-26 — '옵션 모름'으로 막혔다)
+      m := regexp_match(opt, '^([0-9]+(?:\.[0-9]+)?) *(세트 )?(오버|언더)$');
+      if m is not null then
+        line := m[1]::numeric; sets := m[2] is not null; ou := m[3];
+        if r.sport = 'volleyball' and not sets then
+          update public.bets set auto_note = '배구 총득점은 자동 판정 안 함' where id = r.id and auto_note is distinct from '배구 총득점은 자동 판정 안 함';
+          continue;
+        end if;
+      end if;
     end if;
 
     -- 경기 고르기: 이름 점수가 가장 높은 경기, 같으면 베팅 시각(-4시간) 이후 가장 먼저 시작하는 경기
@@ -140,7 +149,7 @@ begin
 
     -- 판정 (라이브도 최종 점수 전체로)
     v := null;
-    if side is null then
+    if ou is not null then
       v := case ou when '오버' then (hs + as_) - line else line - (hs + as_) end;
     else
       v := case side when '홈' then hs - as_ else as_ - hs end;  -- 내 팀 기준 점수차
