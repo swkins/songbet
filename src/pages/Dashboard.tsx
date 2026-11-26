@@ -4103,7 +4103,18 @@ export default function Dashboard({ betTarget, onBetTargetDone, layoutMode = 'si
       : final ? <span style={{ color: 'var(--text-secondary)', fontWeight: 700 }}>{sc ?? ''} 종료</span>
       : started ? <span style={{ color: 'var(--gold)', fontWeight: 700 }}>● {sc ?? '경기중'}{st && !/^\d+\/\d+/.test(st) ? ` ${st}` : ''}</span>
       : <span>{g.start ? dayjs(g.start).format('M/D HH:mm') : ''}</span>
-    return <span style={{ fontWeight: 500 }}>{g.home} vs {g.away} · {tail}</span>
+    return { teams: `${g.home} vs ${g.away}`, tail }
+  }
+  // 리그·경기 한 줄: 팀 이름이 길면 이름만 '…'로 줄이고 스코어·상태(tail)는 늘 보이게 (2026-11-26 사용자 요청 — 긴 팀 이름에 스코어가 잘렸다)
+  const infoLine = (b: Bet, legsN: number) => {
+    const gi = !b.parlay_group ? gameInfoLine(b) : null
+    const head = `${b.league}${b.parlay_group ? ` · 조합 ${legsN}폴` : ''}${gi ? ` · ${gi.teams}` : ''}`
+    return (
+      <span style={{ display: 'flex', alignItems: 'baseline', gap: 4, minWidth: 0, fontSize: 10, color: 'var(--text-muted)', fontWeight: 700 }} title={head}>
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{b.league}{b.parlay_group ? ` · 조합 ${legsN}폴` : ''}{gi && <span style={{ fontWeight: 500 }}> · {gi.teams}</span>}</span>
+        {gi && <span style={{ flexShrink: 0, whiteSpace: 'nowrap', fontWeight: 500 }}>· {gi.tail}</span>}
+      </span>
+    )
   }
 
   /* ── 베팅 모드의 베팅 현황 (2026-11-22 사용자 요청 — 사이트마다 칸을 나누지 말고 하나로):
@@ -4184,7 +4195,7 @@ export default function Dashboard({ betTarget, onBetTargetDone, layoutMode = 'si
                 <span className="cr-site" style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={site.name}>{site.name}</span>
                 <span className="cr-sport" style={{ fontSize: 14, lineHeight: 1, textAlign: 'center' }}>{sportGlyph(b.sport) ?? SPORT_SHORT[b.sport] ?? '📋'}</span>
                 <span className="cr-match" style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }} title={[b.league, ...legs.map(l => l.match)].filter(Boolean).join(' · ')}>
-                  {(b.league || b.auto_game) && <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.league}{b.parlay_group ? ` · 조합 ${legs.length}폴` : ''}{!b.parlay_group && b.auto_game && <> · {gameInfoLine(b)}</>}</span>}
+                  {(b.league || b.auto_game) && infoLine(b, legs.length)}
                   {legs.map(l => (
                     <span key={l.id} style={{ display: 'flex', minWidth: 0 }}>
                       <BetMatchLine sport={l.sport} match={l.match} fontSize={12} stacked={false} live={l.is_live} knownOptions={displayOptionsBySport[l.sport] ?? []} numericOptions={displayNumericBySport[l.sport] ?? []} />
@@ -4256,7 +4267,7 @@ export default function Dashboard({ betTarget, onBetTargetDone, layoutMode = 'si
                     <span className="cr-site" style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={site.name}>{site.name}</span>
                     <span className="cr-sport" style={{ fontSize: 14, lineHeight: 1, textAlign: 'center' }}>{sportGlyph(b.sport) ?? SPORT_SHORT[b.sport] ?? '📋'}</span>
                     <span className="cr-match" style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
-                      {(b.league || b.auto_game) && <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.league}{b.parlay_group ? ` · 조합 ${legs.length}폴` : ''}{!b.parlay_group && b.auto_game && <> · {gameInfoLine(b)}</>}</span>}
+                      {(b.league || b.auto_game) && infoLine(b, legs.length)}
                       {legs.map(l => (
                         <span key={l.id} style={{ display: 'flex', minWidth: 0 }}>
                           <BetMatchLine sport={l.sport} match={l.match} fontSize={12} stacked={false} live={l.is_live} teamColor={rc} knownOptions={displayOptionsBySport[l.sport] ?? []} numericOptions={displayNumericBySport[l.sport] ?? []} />
