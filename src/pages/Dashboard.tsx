@@ -24,7 +24,7 @@ import {
   RotateCcw, Settings, Flame, BookOpen,
   CheckCircle, XCircle, Ban, MinusCircle, Gift, GripVertical, DollarSign,
   TrendingUp, TrendingDown, ArrowDownToLine, LogOut, Pencil,
-  ClipboardPaste, ChevronUp, ChevronDown, Star, Ellipsis,
+  ClipboardPaste, ChevronUp, ChevronDown, Star, Ellipsis, ArrowLeftRight,
 } from 'lucide-react'
 
 // 리그 관리 시스템(팀 자동완성·리그 자동인식·리그 관리 모달) — 데이터/로직은 유지하되 화면에는 표출하지 않음
@@ -948,6 +948,40 @@ function WithdrawModal({ site, onClose, onWithdraw }: {
             수익: <span className={netProfit >= 0 ? 'profit-pos' : 'profit-neg'}>{netProfit >= 0 ? '+' : ''}{isusd ? '$' : ''}{netProfit.toLocaleString()}{isusd ? '' : '원'}</span>
           </div>
         )}
+      </div>
+    </div>
+  )
+}
+
+/* ── 진행중 베팅 사이트 변경 (2026-11-26 사용자 요청) — 같은 통화 사이트로만 ── */
+function MoveSiteModal({ bet, sites, onClose, onMove }: { bet: Bet; sites: Site[]; onClose: () => void; onMove: (toId: string) => void }) {
+  const from = sites.find(s => s.id === bet.site_id)
+  const cands = sites.filter(s => s.id !== bet.site_id && s.currency === (from?.currency ?? 'krw'))
+  const isusd = from?.currency === 'usd'
+  useEffect(() => {
+    const k = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k)
+  }, [onClose])
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" style={{ maxWidth: 340 }} onClick={e => e.stopPropagation()}>
+        <div className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+          <ArrowLeftRight size={16} color="var(--gold)" />
+          사이트 변경
+          <button onClick={onClose} style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex', padding: 2, borderRadius: 4 }}><X size={15} /></button>
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 10, lineHeight: 1.5 }}>
+          <div style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{bet.match}</div>
+          <div>지금 사이트 <b>{from?.name ?? '–'}</b> · 금액 {isusd ? '$' : ''}{bet.stake.toLocaleString()}{isusd ? '' : '원'}</div>
+          <div style={{ fontSize: 11, marginTop: 4 }}>{from?.name ?? '원래 사이트'}: 잔액 +금액 · 남은 롤링 +금액 / 새 사이트: 잔액 −금액 · 남은 롤링 −금액</div>
+        </div>
+        {cands.length === 0 && <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>옮길 수 있는 사이트가 없습니다 (같은 통화 사이트만)</div>}
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+          {cands.map(s => (
+            <button key={s.id} className="btn btn-ghost" onClick={() => onMove(s.id)}
+              style={{ fontSize: 12, fontWeight: 700, padding: '6px 12px', color: s.active ? 'var(--text-primary)' : 'var(--text-secondary)' }}>{s.name}</button>
+          ))}
+        </div>
       </div>
     </div>
   )
@@ -2994,6 +3028,7 @@ export default function Dashboard({ betTarget, onBetTargetDone, layoutMode = 'si
   const [openFormSiteId, setOpenFormSiteId] = useState<string | null>(null)
   const [openFormType, setOpenFormType] = useState<'sports' | 'game'>('sports')
   const [hoverBetId, setHoverBetId]     = useState<string | null>(null)
+  const [moveBet, setMoveBet]           = useState<Bet | null>(null)     // 사이트 변경 창을 연 베팅
   const [manualBetId, setManualBetId]   = useState<string | null>(null)   // 베팅 모드 합친 목록 — '수동처리' 펼친 베팅
   useEffect(() => {
     if (!manualBetId) return
@@ -3952,6 +3987,40 @@ export default function Dashboard({ betTarget, onBetTargetDone, layoutMode = 'si
     setInlineEditBetId(null)
   }
 
+  /* ── 진행중 베팅 사이트 변경 (2026-11-26 사용자 요청): 원래 사이트는 베팅 취소처럼(잔액 +금액, 롤링 −금액),
+     새 사이트는 베팅처럼(잔액 −금액, 롤링 +금액). 다폴은 금액을 한 번만. 모의베팅은 사이트 칸만 바꿈.
+     두 사이트 값은 DB에서 새로 읽어 계산 (화면 값이 늦어도 틀리지 않게) ── */
+  async function moveBetSite(bet: Bet, toId: string) {
+    const groupBets = bet.parlay_group ? bets.filter(b => b.parlay_group === bet.parlay_group) : [bet]
+    if (groupBets.some(b => b.result !== 'pending')) { alert('진행중(결과 처리 전) 베팅만 사이트를 바꿀 수 있습니다.'); return }
+    const fromId = bet.site_id
+    if (!fromId || fromId === toId) return
+    const { data: fresh } = await supabase.from('sites').select('*').in('id', [fromId, toId])
+    const from = fresh?.find(s => s.id === fromId) as Site | undefined
+    const to = fresh?.find(s => s.id === toId) as Site | undefined
+    if (!from || !to) { alert('사이트 정보를 못 불러왔습니다.'); return }
+    if (from.currency !== to.currency) { alert('통화가 다른 사이트로는 옮길 수 없습니다.'); return }
+    const { data: moved } = await supabase.from('bets').update({ site_id: toId }).in('id', groupBets.map(b => b.id)).select()
+    if (!moved || moved.length < groupBets.length) { alert('베팅을 옮기지 못했습니다.'); return }
+    setBets(p => p.map(b => moved.find(m => m.id === b.id) ?? b))
+    setMoveBet(null)
+    const stake = bet.stake
+    if (!bet.is_mock) {
+      const { data: f } = await supabase.from('sites').update({
+        balance: from.balance + stake,
+        rolling_done: Math.max(0, from.rolling_done - stake),
+        deposit_bet_done: Math.max(0, (from.deposit_bet_done ?? 0) - stake),
+      }).eq('id', from.id).select().single()
+      const { data: t } = await supabase.from('sites').update({
+        balance: to.balance - stake,
+        rolling_done: to.rolling_done + stake,
+        deposit_bet_done: (to.deposit_bet_done ?? 0) + stake,
+      }).eq('id', to.id).select().single()
+      setSites(p => p.map(s => s.id === f?.id ? f : s.id === t?.id ? t : s))
+    }
+    await logAction({ action_type: 'update', table_name: 'bets', record_id: bet.id, before_data: bet as never, after_data: moved[0] as never, description: `사이트 변경: ${bet.match} / ${from.name} → ${to.name} (${stake.toLocaleString()})` })
+  }
+
   /* ── 다폴 수정 (2~4다리, 다리 수가 늘거나 줄어도 처리) ── */
   async function saveInlineParlay(groupBets: Bet[], contents: string[], odds: number, stake: number, leagues: string[]) {
     if (contents.length < 2 || contents.some(c => !c) || odds <= 0 || stake <= 0) return
@@ -4127,6 +4196,7 @@ export default function Dashboard({ betTarget, onBetTargetDone, layoutMode = 'si
                           ['실패', 'var(--red)', <XCircle size={12} />, () => applyResult(b, 'loss')],
                           ['적특', 'var(--blue)', <MinusCircle size={12} />, () => { if (confirm('적특으로 처리하시겠습니까?')) applyResult(b, 'push') }],
                           ...(!b.parlay_group ? [['캐시아웃', 'var(--purple)', <DollarSign size={12} />, () => applyCashout(b)]] : []),
+                          ['사이트 변경', 'var(--gold)', <ArrowLeftRight size={12} />, () => setMoveBet(b)],
                           ['베팅취소', 'var(--text-muted)', <Ban size={12} />, () => applyResult(b, 'cancel')],
                         ] as [string, string, React.ReactNode, () => void][]).map(([label, color, icon, fn]) => (
                           <button key={label} className="btn btn-xs" onClick={() => { setManualBetId(null); fn() }}
@@ -4327,6 +4397,10 @@ export default function Dashboard({ betTarget, onBetTargetDone, layoutMode = 'si
                                               onClick={() => { setInlineEditBetId(bet.parlay_group); setHoverBetId(null) }}>
                                               <Pencil size={11} />
                                             </button>
+                                            <button className="bet-action-btn" title="사이트 변경" style={{ color: 'var(--gold)', width: 20, height: 20 }}
+                                              onClick={() => { setMoveBet(groupBets[0]); setHoverBetId(null) }}>
+                                              <ArrowLeftRight size={11} />
+                                            </button>
                                             <button className="bet-action-btn bet-action-cancel" title="베팅취소" style={{ width: 20, height: 20 }}
                                               onClick={() => applyParlayResult(groupBets, 'cancel')}>
                                               <Ban size={11} />
@@ -4424,6 +4498,11 @@ export default function Dashboard({ betTarget, onBetTargetDone, layoutMode = 'si
                                           onClick={() => { setInlineEditBetId(bet.id); setHoverBetId(null) }}
                                           style={{ color: 'var(--gold)', width: 20, height: 20 }}>
                                           <Pencil size={13} />
+                                        </button>
+                                        <button className="bet-action-btn" title="사이트 변경"
+                                          onClick={() => { setMoveBet(bet); setHoverBetId(null) }}
+                                          style={{ color: 'var(--gold)', width: 20, height: 20 }}>
+                                          <ArrowLeftRight size={13} />
                                         </button>
                                         <button className="bet-action-btn bet-action-cancel" title="베팅취소"
                                           onClick={() => applyResult(bet, 'cancel')}
@@ -4720,6 +4799,7 @@ export default function Dashboard({ betTarget, onBetTargetDone, layoutMode = 'si
       {showRulebook && <RulebookNotes onClose={() => setShowRulebook(false)} />}
       {depositSite && <DepositModal site={depositSite} onClose={() => setDepositSite(null)} onDeposit={doDeposit} onPoint={doPoint} />}
       {withdrawSite && <WithdrawModal site={withdrawSite} onClose={() => setWithdrawSite(null)} onWithdraw={doWithdraw} />}
+      {moveBet && <MoveSiteModal bet={moveBet} sites={sites} onClose={() => setMoveBet(null)} onMove={toId => moveBetSite(moveBet, toId)} />}
 
 
     </div>
