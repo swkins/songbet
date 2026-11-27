@@ -6,6 +6,7 @@ import { koName } from '../lib/gameSchedule'
 
 // 축구 결장 선수 · 예상 선발 · 선수 오버롤 (FotMob — collect-fotmob, SQL supabase/soccer_fotmob.sql, 2026-11-26 사용자 요청)
 // 오버롤 = FotMob 이번 시즌 평균 평점을 같은 리그(FotMob 주 리그) 선수들 안 순위로 100점 (NBA·농구와 같은 눈금·색).
+// 선수 이름 = soccer_player_names 한글(5대 리그, 2026-11-27 사용자 요청 — 없으면 FotMob 영어 그대로, 마우스 = 영어 이름)
 // 수집: 그날 09~24시 킥오프 경기는 03~08:45, 다음 날 00~09시(새벽) 경기는 15~20:45에 하나씩 천천히.
 interface Side { name: string; formation: string | null; starters: { id: number; name: string }[]; unavailable: { id: number; name: string; type: string | null; ret: string | null }[] }
 interface FmMatch { game_id: string; lineup_type: string | null; home: Side | null; away: Side | null; home_team_id: number; away_team_id: number; fetched_at: string }
@@ -31,6 +32,7 @@ export default function SoccerLineup({ gameId, home, away }: { gameId: string; h
   const [m, setM] = useState<FmMatch | null | undefined>(undefined)
   const [players, setPlayers] = useState<FmPlayer[]>([])
   const [pools, setPools] = useState<Record<number, Pool>>({})
+  const [ko, setKo] = useState<Record<number, string>>({})
   useEffect(() => {
     let off = false
     setM(undefined)
@@ -47,6 +49,12 @@ export default function SoccerLineup({ gameId, home, away }: { gameId: string; h
       ])
       if (off) return
       setPlayers((pl ?? []) as FmPlayer[])
+      const pids = [...new Set([...(pl ?? []).map((x: { player_id: number }) => x.player_id),
+        ...[fm.home, fm.away].flatMap(sd => [...(sd?.starters ?? []), ...(sd?.unavailable ?? [])].map(x => x.id))])]
+      if (pids.length) {
+        const { data: kn } = await supabase.from('soccer_player_names').select('player_id,name_ko').in('player_id', pids)
+        if (!off) setKo(Object.fromEntries((kn ?? []).map((x: { player_id: number; name_ko: string }) => [x.player_id, x.name_ko])))
+      }
       // 리그 눈금: 두 팀 각자의 주 리그 선수 평점 전체
       const out: Record<number, Pool> = {}
       for (const t of (tm ?? []) as { team_id: number; league_id: number | null; league_name: string | null }[]) {
@@ -77,7 +85,7 @@ export default function SoccerLineup({ gameId, home, away }: { gameId: string; h
       return (
         <tr key={id} style={{ background: out ? 'rgba(255,59,59,0.08)' : undefined }}>
           <td style={{ padding: '3px 4px', fontSize: 10, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{p?.pos?.split(',')[0] ?? ''}</td>
-          <td style={{ padding: '3px 4px', fontSize: 12, fontWeight: 600 }}>{name}{extra}</td>
+          <td style={{ padding: '3px 4px', fontSize: 12, fontWeight: 600 }} title={ko[id] ? name : undefined}>{ko[id] ?? name}{extra}</td>
           <td style={{ padding: '3px 4px', textAlign: 'right', whiteSpace: 'nowrap' }} title={p?.rating != null ? `FotMob 시즌 평점 ${p.rating}` : '평점 없음 (출전 적음)'}>
             <span style={{ fontWeight: 800, fontFamily: 'var(--font-num)', color: tier?.color ?? 'var(--text-muted)' }}>{ov ?? '–'}</span>
           </td>
