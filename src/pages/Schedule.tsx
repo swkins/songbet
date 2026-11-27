@@ -19,14 +19,8 @@ import { loadSchedules, gameState, koName, sortLeagues, type ScheduleGame, type 
 
 // 종목 순서 (사용자 요청): 전체 · 축구 · 야구 · 농구 · 배구 · LOL
 const SPORT_LIST: { id: string; label: string; leagues: string[] }[] = [
-  // 리그 순서: 축구 5대 리그·농구 NBA 맨 위, 나머지 가나다순 (sortLeagues, 사용자 요청). 축구 = collect-soccer가 받는 리그 (A매치는 국제 친선·네이션스 리그만)
-  { id: 'soccer', label: '⚽ 축구', leagues: sortLeagues('soccer', ['프리미어리그', '라리가', '세리에A', '분데스리가', '리그1',
-    '챔피언스리그', '유로파리그', '아시아 챔피언스리그',
-    'K리그1', 'K리그2', 'J리그1', 'J리그2',
-    '챔피언쉽', '잉글랜드 리그1', '라리가2', '세리에B', '분데스리가2', '리그2',
-    '에레디비시', '프리메이라리가', '쥬필러리그', '터키', '그리스', '덴마크', '오스트리아', '스코틀랜드', '스웨덴',
-    '미국', '멕시코', '브라질', '아르헨티나', '중국', '호주',
-    '네이션스 리그', '국제 친선 경기']) },   // 대표팀 A매치만 (클럽 친선은 뺌)
+  // 축구 = 5대 리그만 (2026-11-27 사용자 요청 — 나머지 리그·UEFA·AFC·A매치는 collect-soccer 타이머를 끄고 화면에서 뺌)
+  { id: 'soccer', label: '⚽ 축구', leagues: ['프리미어리그', '라리가', '세리에A', '분데스리가', '리그1'] },
   { id: 'baseball', label: '⚾ 야구', leagues: [] },
   { id: 'basketball', label: '🏀 농구', leagues: sortLeagues('basketball', ['KBL', 'WKBL', 'NBA']) },
   { id: 'volleyball', label: '🏐 배구', leagues: ['V리그 남자', 'V리그 여자'] },
