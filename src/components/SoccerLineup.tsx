@@ -48,7 +48,16 @@ export default function SoccerLineup({ gameId, home, away }: { gameId: string; h
         supabase.from('fm_teams').select('team_id,league_id,league_name').in('team_id', ids),
       ])
       if (off) return
-      setPlayers((pl ?? []) as FmPlayer[])
+      // 분데스리가·리그1은 팀 페이지 평점이 비어 있어 리그 평점 파일(fm_league_ratings)로 채움 (2026-11-28)
+      const plist = (pl ?? []) as FmPlayer[]
+      const missing = plist.filter(p => p.rating == null).map(p => p.player_id)
+      if (missing.length) {
+        const { data: lr } = await supabase.from('fm_league_ratings').select('player_id,rating').in('player_id', missing)
+        const lm = new Map((lr ?? []).map((x: { player_id: number; rating: number }) => [x.player_id, Number(x.rating)]))
+        for (const p of plist) if (p.rating == null && lm.has(p.player_id)) p.rating = lm.get(p.player_id)!
+      }
+      if (off) return
+      setPlayers(plist)
       const pids = [...new Set([...(pl ?? []).map((x: { player_id: number }) => x.player_id),
         ...[fm.home, fm.away].flatMap(sd => [...(sd?.starters ?? []), ...(sd?.unavailable ?? [])].map(x => x.id))])]
       if (pids.length) {
@@ -61,7 +70,8 @@ export default function SoccerLineup({ gameId, home, away }: { gameId: string; h
         if (!t.league_id) continue
         const { data: lt } = await supabase.from('fm_teams').select('team_id').eq('league_id', t.league_id)
         const tids = (lt ?? []).map((x: { team_id: number }) => x.team_id)
-        const { data: lr } = await supabase.from('fm_players').select('rating').in('team_id', tids).not('rating', 'is', null).limit(3000)
+        let { data: lr } = await supabase.from('fm_players').select('rating').in('team_id', tids).not('rating', 'is', null).limit(3000)
+        if ((lr ?? []).length < 50) ({ data: lr } = await supabase.from('fm_league_ratings').select('rating').eq('league_id', t.league_id).limit(3000))
         const { data: lg } = await supabase.from('fm_leagues').select('team_count').eq('league_id', t.league_id).maybeSingle()
         out[t.team_id] = { ratings: (lr ?? []).map((x: { rating: number }) => Number(x.rating)), teams: tids.length, total: lg?.team_count ?? null, league: t.league_name }
       }

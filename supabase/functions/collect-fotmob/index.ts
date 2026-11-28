@@ -7,6 +7,9 @@
 //          dawn = 다음 날 00:00~08:59 KST 킥오프(새벽 경기), 15:02에 시작해 20:45까지 (베팅 전날 21시~)
 //  'step'  — 시각이 된 대기 항목 하나만 처리 (pg_cron fm-step 1분마다 → 많아야 1분에 1번). 403·429면 1시간 멈춤.
 //  'seed'  {leagues:[FotMob 리그 번호]} — 처음 채우기: 리그 페이지 → 그 리그 전 팀을 5~8분 간격으로 넣음.
+//  'ratings' {leagues:[…]} — 리그 선수 평점 (2026-11-28: 분데스리가·리그1은 팀 페이지 squad의 rating이 전부 null로 옴 →
+//          리그 페이지의 stats.players 'FotMob rating' 파일(data.fotmob.com/stats/<리그>/season/<id>/rating.json, gzip)을 받아 fm_league_ratings에).
+//          항목 하나 = 요청 2번(리그 페이지 + 평점 파일), 리그끼리 3~5분 간격. pg_cron fm-ratings 하루 한 번.
 import { createClient } from 'npm:@supabase/supabase-js@2.45.0'
 
 const UA = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36' }
@@ -115,6 +118,10 @@ Deno.serve(async req => {
       const now = Date.now(); const lids: number[] = body.leagues ?? [47, 87, 55, 54, 53]
       const ins = lids.map((l, i) => ({ kind: 'seed_league', ref: String(l), league: null, prio: 5, due_at: new Date(now + 60000 + i * 6 * 60000).toISOString() }))
       await db.from('fm_queue').insert(ins); out.queued = ins.length
+    } else if (body.action === 'ratings') {
+      const now = Date.now(); const lids: number[] = body.leagues ?? [47, 87, 55, 54, 53]
+      const ins = lids.map((l, i) => ({ kind: 'league_ratings', ref: String(l), league: null, prio: 5, due_at: new Date(now + 60000 + i * (3 + Math.random() * 2) * 60000).toISOString() }))
+      await db.from('fm_queue').insert(ins); out.queued = ins.length
     } else if (body.action === 'step') {
       const { data: it } = await db.from('fm_queue').select('*').eq('status', 'pending').lte('due_at', new Date().toISOString()).order('due_at').limit(1)
       const q = it?.[0]; if (!q) return Response.json({ ...out, idle: true })
@@ -124,6 +131,21 @@ Deno.serve(async req => {
       if (q.kind === 'match' && q.game_id) {
         const { data: fm } = await db.from('fm_matches').select('start_at').eq('game_id', q.game_id).maybeSingle()
         if (fm?.start_at && Date.parse(fm.start_at) < Date.now()) { await finish('skipped', '이미 시작'); return Response.json(out) }
+      }
+      if (q.kind === 'league_ratings') {
+        const lg = await getJson(`${FM}/leagues?id=${q.ref}&ccode3=KOR`)
+        if (!lg.data) { if (lg.status === 403 || lg.status === 429) { await pause(`league ${lg.status}`); await finish('blocked', lg.status) } else await finish('failed', lg.status); out.status = lg.status; return Response.json(out) }
+        const st = ((lg.data.stats?.players ?? []) as any[]).find(x => x.name === 'rating' || /rating\.json$/.test(x.fetchAllUrl ?? ''))
+        if (!st?.fetchAllUrl) { await finish('failed', 'rating url 없음'); return Response.json(out) }
+        await new Promise(r => setTimeout(r, 2000 + Math.random() * 2000))
+        const rr = await getJson(st.fetchAllUrl)
+        if (!rr.data) { await finish('failed', `rating ${rr.status}`); out.status = rr.status; return Response.json(out) }
+        const list: any[] = rr.data.TopLists?.[0]?.StatList ?? []
+        const rows = list.map(x => ({ player_id: Number(x.ParticiantId ?? x.ParticipantId), league_id: Number(q.ref), team_id: Number(x.TeamId) || null,
+          name: x.ParticipantName ?? null, rating: Number(x.StatValue), minutes: Number(x.MinutesPlayed) || null, matches: Number(x.MatchesPlayed) || null, fetched_at: new Date().toISOString() }))
+          .filter(x => x.player_id && Number.isFinite(x.rating))
+        if (rows.length) { const { error } = await db.from('fm_league_ratings').upsert(rows); if (error) { await finish('failed', error.message); return Response.json(out) } }
+        out.ratings = rows.length; await finish('done', `${rows.length}명`); return Response.json(out)
       }
       const url = q.kind === 'match' ? `${FM}/matchDetails?matchId=${q.ref}` : q.kind === 'team' ? `${FM}/teams?id=${q.ref}&ccode3=KOR` : `${FM}/leagues?id=${q.ref}&ccode3=KOR`
       const r = await getJson(url)

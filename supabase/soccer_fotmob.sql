@@ -65,3 +65,14 @@ revoke all on function public.run_fotmob_step() from public, anon, authenticated
 select cron.schedule('fm-plan-day', '2 18 * * *', $$select public.run_fotmob('{"action":"plan","window":"day"}'::jsonb)$$);    -- 03:02 KST
 select cron.schedule('fm-plan-dawn', '2 6 * * *', $$select public.run_fotmob('{"action":"plan","window":"dawn"}'::jsonb)$$);   -- 15:02 KST
 select cron.schedule('fm-step', '* * * * *', 'select public.run_fotmob_step()');
+
+-- 2026-11-28: 분데스리가·리그1은 FotMob 팀 페이지 squad의 rating이 전부 null (FotMob 쪽에서 안 줌 — 다른 세 리그는 있음)
+-- → 리그 페이지 stats.players의 'FotMob rating' 파일(data.fotmob.com/stats/<리그>/season/<id>/rating.json)을 collect-fotmob 'ratings'로 받아 여기에.
+--   화면(SoccerLineup)은 fm_players.rating이 없으면 이 값, 리그 눈금도 fm_players 평점이 50개 미만이면 이 표로.
+create table if not exists public.fm_league_ratings (
+  player_id bigint primary key, league_id int not null, team_id int, name text,
+  rating numeric not null, minutes int, matches int, fetched_at timestamptz not null default now()
+);
+create index if not exists fm_league_ratings_lg on public.fm_league_ratings (league_id);
+alter table public.fm_league_ratings enable row level security;
+-- 하루 한 번 5대 리그 (리그마다 요청 2번, 3~5분 간격): select cron.schedule('fm-ratings', '37 17 * * *', $$select public.run_fotmob('{"action":"ratings"}'::jsonb)$$);
