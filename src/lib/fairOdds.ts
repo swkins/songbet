@@ -139,3 +139,41 @@ export function impliedScore(f: PinFair | undefined): ImpliedScore | null {
   const top = grid.flatMap((r, h) => r.map((p, a) => ({ h, a, p }))).sort((x, y) => y.p - x.p).slice(0, 5)
   return { lh: best.lh, la: best.la, grid, top }
 }
+
+// ─── 우리 축구 모델 (2026-11-28 사용자 요청 — 배당은 안 넣고 비교만) ───
+// 팀 공격·수비 레이팅(soc_m_team) + 리그 평균·홈 이점(soc_m_league) → 기대 득점 λ → 포아송 + 딕슨-콜스(rho) 스코어 확률.
+// 레이팅은 DB 함수 soc_m_run이 football-data 5대 리그 2020-21~ 경기(골 50% + 유효슈팅×0.319 50%)로 경기마다 고침 (supabase/soccer_model.sql).
+// 2021-23으로 고르고 2023-27로 확인: log loss 모델 0.9796 · 피나클 마감 0.9623 — 모델이 시장보다 덜 정확, 섞으면 나빠짐(시장에 없는 정보 없음).
+export interface ModelScore extends ImpliedScore { ph: number; pd: number; pa: number; o25: number }
+const FD_LEAGUE: Record<string, string> = { '프리미어리그': 'E0', '라리가': 'SP1', '세리에A': 'I1', '분데스리가': 'D1', '리그1': 'F1' }
+export async function loadModelScore(league: string, homeFull?: string | null, awayFull?: string | null): Promise<ModelScore | null> {
+  const code = FD_LEAGUE[league]; if (!code || !homeFull || !awayFull) return null
+  const [{ data: lg }, { data: ts }, { data: cs }] = await Promise.all([
+    supabase.from('soc_m_league').select('mu,hfa,params').eq('league', code).maybeSingle(),
+    supabase.from('soc_m_team').select('espn_name,att,def,last_season').eq('league', code).in('espn_name', [homeFull, awayFull]),
+    supabase.from('soc_m_team').select('last_season').eq('league', code).order('last_season', { ascending: false }).limit(1),
+  ])
+  if (!lg) return null
+  const cur = (cs ?? [])[0]?.last_season as string | undefined
+  const newp = Number(lg.params?.newp ?? -0.3), rho = Number(lg.params?.rho ?? -0.1)
+  // 이번 시즌에 없던 팀(승격·다시 올라온 팀)은 승격팀 출발점 — 지난 시즌에 있던 팀은 그대로 이어받음(carry 1)
+  const prevOf = (x?: string) => x && /^\d{4}$/.test(x) ? `${String(Number(x.slice(0, 2)) - 1).padStart(2, '0')}${String(Number(x.slice(2)) - 1).padStart(2, '0')}` : ''
+  const team = (n: string) => {
+    const t = ((ts ?? []) as { espn_name: string; att: number; def: number; last_season: string }[]).find(x => x.espn_name === n)
+    return t && (t.last_season === cur || t.last_season === prevOf(cur)) ? { att: Number(t.att), def: Number(t.def) } : { att: newp, def: newp }
+  }
+  const h = team(homeFull), a = team(awayFull)
+  const lh = Math.exp(Number(lg.mu) + Number(lg.hfa) + h.att - a.def), la = Math.exp(Number(lg.mu) + a.att - h.def)
+  const grid = scoreGrid(lh, la)
+  let tot = 0
+  grid.forEach((r, i) => r.forEach((_, j) => {
+    let p = grid[i][j]
+    if (i === 0 && j === 0) p *= 1 - lh * la * rho; else if (i === 0 && j === 1) p *= 1 + lh * rho
+    else if (i === 1 && j === 0) p *= 1 + la * rho; else if (i === 1 && j === 1) p *= 1 - rho
+    grid[i][j] = p; tot += p
+  }))
+  let ph = 0, pd = 0, pa = 0, o25 = 0
+  grid.forEach((r, i) => r.forEach((p0, j) => { const p = p0 / tot; grid[i][j] = p; if (i > j) ph += p; else if (i === j) pd += p; else pa += p; if (i + j >= 3) o25 += p }))
+  const top = grid.flatMap((r, hh) => r.map((p, aa) => ({ h: hh, a: aa, p }))).sort((x, y) => y.p - x.p).slice(0, 5)
+  return { lh, la, grid, top, ph, pd, pa, o25 }
+}
