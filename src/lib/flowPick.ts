@@ -1,7 +1,6 @@
 // 배당 흐름 추천 (2026-11-28 사용자 요청 — NBA·축구는 배당 흐름만으로 추천, 국내 리그는 뉴스·오버롤로 직접 분석)
 // 모델·결장·뉴스는 안 씀. 시장(피나클·미국 북)이 이미 다 반영한다고 보고, 돈이 어디로 움직였는지만 본다.
 import type { OddsLine } from './odds'
-import { devig, type PinFair } from './fairOdds'
 
 export type Stars = 0 | 1 | 2 | 3
 
@@ -52,69 +51,4 @@ export function nbaFlow(lines: OddsLine[] | undefined): NbaFlow | null {
   else if (m <= 3) { stars = 0; verdict = '패스'; why = '정배 쪽 2.5~3점 이동 — 과거 두 기간 모두 49~51% (이미 다 반영)' }
   else { stars = 0; verdict = '패스 (엇갈림)'; why = '정배 쪽 3.5점+ 과하게 이동 — 2011-22는 반대(역배) 55.8%, 2025-26은 따라가기 57.5%(40경기)로 정반대' }
   return { ...base, side, toward, stars, verdict, why, sideLineOpen, sideLineNow }
-}
-
-// ─── 축구 피나클 승무패 흐름 → 옵션 추천 ─────────────────
-// 근거 (5대 리그 2021-26 백테스트): 피나클 오픈도 정확하고(log loss 오픈 0.9712 · 마감 0.9683), 움직임은 오픈을 거의 정확히 고친다.
-// → 지금 피나클 공정 확률 = 가장 좋은 추정. 피나클 배당 자체엔 우위 없음, 사이트 배당이 공정 배당 이상일 때만 플러스.
-// 돈이 들어온 옵션(오픈보다 확률이 오른 쪽)은 사이트가 늦게 따라오는 경우가 많아 그쪽을 먼저 본다.
-// 1.30 미만 · 무승부 · 역배 승(→ +0.5·+1.5로)·적특 있는 정수 핸디는 추천 안 함 (사용자 규칙).
-export interface SoccerOpt {
-  label: string; side: 'home' | 'away' | 'game'; opt: string   // opt = 베팅 문구 옵션 ('승리' · '0.5 H' · '2.5 오버')
-  p: number; pOpen: number | null; fair: number
-  stars: Stars; flow: string
-}
-export interface SoccerFlow {
-  moneySide: 'home' | 'away' | null; moneyName: string | null; dp: number   // 돈 쪽과 오픈 대비 확률 변화 (%p 단위 소수, 0.03 = 3%p)
-  streak: number                                                            // 마지막에 같은 방향으로 연속 움직인 횟수
-  changes: number
-  opts: SoccerOpt[]
-}
-
-const pairOpen = (a?: number, b?: number) => (a && b && Number.isFinite(a) && Number.isFinite(b) ? devig([a, b])[0] : null)
-
-export function soccerFlow(f: PinFair | undefined | null, H: string, A: string): SoccerFlow | null {
-  if (!f?.ml) return null
-  const hs = f.history
-  const o = hs[0], n = hs[hs.length - 1]
-  const dh = o && n ? n.ph - o.ph : 0, da = o && n ? n.pa - o.pa : 0
-  const moneySide = Math.max(dh, da) < 0.01 ? null : dh >= da ? 'home' : 'away'
-  // 연속: 끝에서부터 돈 쪽 확률이 계속 오른 횟수
-  let streak = 0
-  if (moneySide) for (let i = hs.length - 1; i > 0; i--) {
-    const d = moneySide === 'home' ? hs[i].ph - hs[i - 1].ph : hs[i].pa - hs[i - 1].pa
-    if (d > 0.001) streak++; else if (d < -0.001) break
-  }
-  const fav: 'home' | 'away' = f.ml.home.p >= f.ml.away.p ? 'home' : 'away'
-  const dog = fav === 'home' ? 'away' : 'home'
-  const nm = (s: 'home' | 'away') => (s === 'home' ? H : A)
-  const opts: SoccerOpt[] = []
-  const add = (label: string, side: SoccerOpt['side'], opt: string, p: number, pOpen: number | null) => {
-    const fair = 1 / p
-    if (fair < 1.3) return                                   // 공정 배당부터 1.30 미만이면 사이트는 더 낮다
-    const d = pOpen == null ? 0 : p - pOpen
-    const stars: Stars = d >= 0.02 ? 2 : d >= 0.01 ? 1 : 0
-    const flow = pOpen == null ? '흐름 기록 없음' : `${(pOpen * 100).toFixed(1)}% → ${(p * 100).toFixed(1)}% (${d >= 0 ? '+' : ''}${(d * 100).toFixed(1)}%p)`
-    opts.push({ label, side, opt, p, pOpen, fair, stars, flow })
-  }
-  // 정배 승
-  add(`${nm(fav)} 승리`, fav, '승리', f.ml[fav].p, o ? (fav === 'home' ? o.ph : o.pa) : null)
-  // 역배 +0.5 (= 정배가 못 이김)
-  add(`${nm(dog)} +0.5`, dog, '0.5 H', 1 - f.ml[fav].p, o ? 1 - (fav === 'home' ? o.ph : o.pa) : null)
-  // ±1.5 · ±2.5 (피나클 핸디가 있을 때)
-  for (const L of [1.5, 2.5]) {
-    const homeLine = fav === 'home' ? -L : L                     // 홈 기준 핸디 키
-    const sp = f.spread[String(homeLine)]
-    if (!sp) continue
-    const favP = fav === 'home' ? sp.home : sp.away, dogP = fav === 'home' ? sp.away : sp.home
-    add(`${nm(fav)} -${L}`, fav, `-${L} H`, favP.p, pairOpen(favP.open, dogP.open))
-    add(`${nm(dog)} +${L}`, dog, `${L} H`, dogP.p, pairOpen(dogP.open, favP.open))
-  }
-  const t = f.total['2.5']
-  if (t) {
-    add('2.5 오버', 'game', '2.5 오버', t.over.p, pairOpen(t.over.open, t.under.open))
-    add('2.5 언더', 'game', '2.5 언더', t.under.p, pairOpen(t.under.open, t.over.open))
-  }
-  opts.sort((a, b) => b.stars - a.stars || b.p - a.p)
-  return { moneySide, moneyName: moneySide ? nm(moneySide) : null, dp: moneySide === 'home' ? dh : moneySide === 'away' ? da : 0, streak, changes: Math.max(0, hs.length - 1), opts }
 }

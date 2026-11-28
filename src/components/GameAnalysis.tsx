@@ -1,7 +1,7 @@
 import dayjs from 'dayjs'
 import PlayerOverall from './PlayerOverall'
 import PinFairBox from './PinFairBox'
-import { NbaFlowBox } from './FlowPickBox'
+import { NbaFlowBox, SoccerFlowSignal } from './FlowPickBox'
 import { MockBetsForGame } from './MockBetStats'
 import OddsHistory, { LineHistory } from './OddsHistory'
 import OverallAnalysisView, { type OverallAnalysis } from './OverallAnalysisView'
@@ -51,6 +51,7 @@ export default function GameAnalysis({ g, analysis, odds, lines, onGoBet }: { g:
       {/* NBA·축구 = 배당 흐름만 (2026-11-28 사용자 요청 — 뉴스·예상 스코어·선수 오버롤은 지움). 국내 리그는 PlayerOverall 그대로 */}
       {flowOnly ? <>
         {g.league === 'NBA' && <NbaFlowBox lines={lines} hName={koName(g.home.name)} aName={koName(g.away.name)} />}
+        {g.sport === 'soccer' && <SoccerFlowSignal gameId={g.id} league={g.league} odds={odds} H={koName(g.home.name)} A={koName(g.away.name)} />}
         {g.sport === 'soccer' && <PinFairBox gameId={g.id} home={g.home} away={g.away} />}
         {odds?.length || lines?.length ? (
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 10, alignItems: 'flex-start' }}>

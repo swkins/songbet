@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import dayjs from 'dayjs'
 import { loadPinFair, minOddsFor, type PinFair, type PinPrice } from '../lib/fairOdds'
 import { koName } from '../lib/gameSchedule'
-import { SoccerFlowBox } from './FlowPickBox'
 
 // 축구 분석 칸: 피나클 공정 배당 (2026-11-28 사용자 요청 — 롤링 위주, 손실이 적은 베팅 고르기)
 // 옵션마다 적중 확률(피나클 마진 뺀 값)·공정 배당·"손실 3% 이내" 최소 배당. 사이트 배당이 그 이상이면 롤링하기 괜찮은 가격.
@@ -19,7 +18,7 @@ export default function PinFairBox({ gameId, home, away }: { gameId: string; hom
   if (f === undefined) return null
   const box: React.CSSProperties = { border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '10px 12px', background: 'var(--bg-elevated)', marginTop: 10 }
   if (!f) return <div style={box}>
-    <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>피나클 공정 배당 — 아직 수집 전 (5대 리그만)</div>
+    <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>피나클 배당 — 이 경기는 아직 연결 전</div>
   </div>
 
   const H = koName(home.name), A = koName(away.name)
@@ -42,7 +41,6 @@ export default function PinFairBox({ gameId, home, away }: { gameId: string; hom
   }
   return (
     <div style={box}>
-      <SoccerFlowBox f={f} H={H} A={A} />
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
         <span style={{ fontSize: 13, fontWeight: 800 }}>피나클 공정 배당</span>
         <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{dayjs(f.fetched_at).format('M/D HH:mm')} 기준 · 승무패 마진 {(f.margin * 100).toFixed(1)}%</span>

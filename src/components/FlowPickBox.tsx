@@ -1,6 +1,8 @@
-import { nbaFlow, soccerFlow, type Stars } from '../lib/flowPick'
-import { minOddsFor, type PinFair } from '../lib/fairOdds'
-import { fmtLine, type OddsLine } from '../lib/odds'
+import { useEffect, useState } from 'react'
+import { nbaFlow, type Stars } from '../lib/flowPick'
+import { loadPinFair, devig, type PinFair } from '../lib/fairOdds'
+import { soccerSignal, LEAGUE_FLOW, type FlowPoint } from '../lib/flowSignal'
+import { fmtLine, type OddsLine, type OddsSnap } from '../lib/odds'
 
 // 배당 흐름 추천 칸 (2026-11-28 사용자 요청 — NBA·축구는 배당 흐름만으로 추천). 계산·근거는 src/lib/flowPick.ts
 const box: React.CSSProperties = { border: '1px solid var(--gold-border)', borderRadius: 'var(--radius-sm)', padding: '10px 12px', background: 'var(--bg-elevated)', marginTop: 10 }
@@ -46,43 +48,53 @@ export function NbaFlowBox({ lines, hName, aName }: { lines?: OddsLine[]; hName:
   )
 }
 
-export function SoccerFlowBox({ f, H, A }: { f: PinFair; H: string; A: string }) {
-  const r = soccerFlow(f, H, A)
-  if (!r) return null
-  const td: React.CSSProperties = { padding: '4px 6px', fontSize: 12, textAlign: 'right', fontFamily: 'var(--font-num)', whiteSpace: 'nowrap' }
-  const th: React.CSSProperties = { ...td, fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }
+// 축구: 배당이 떨어지는 쪽만 가리키고 세기를 판단 (2026-11-28 사용자 요청 — 베팅 옵션은 사용자가 고름). 계산·근거 src/lib/flowSignal.ts
+export function SoccerFlowSignal({ gameId, league, odds, H, A }: { gameId: string; league: string; odds?: OddsSnap[]; H: string; A: string }) {
+  const [pin, setPin] = useState<PinFair | null | undefined>(undefined)
+  useEffect(() => {
+    let off = false; setPin(undefined)
+    loadPinFair([gameId]).then(m => { if (!off) setPin(m[gameId] ?? null) }).catch(() => { if (!off) setPin(null) })
+    return () => { off = true }
+  }, [gameId])
+  if (pin === undefined) return null
+  // 피나클 변동 기록이 먼저, 없으면 DraftKings(odds_snapshots)
+  let src = '피나클'
+  let hist: FlowPoint[] = (pin?.history ?? []).map(r => ({ t: r.t, ph: r.ph, pa: r.pa, h: r.h, a: r.a }))
+  if (hist.length < 1 && odds?.length) {
+    src = 'DraftKings'
+    const pt = (t: string, h?: number | null, d?: number | null, a?: number | null): FlowPoint | null => {
+      if (!h || !d || !a) return null
+      const [ph, , pa] = devig([h, d, a]); return { t, ph, pa, h, a }
+    }
+    const f = odds[0]
+    const open = pt(f.fetched_at, f.open_home, f.open_draw, f.open_away)
+    hist = [open, ...odds.map(r => pt(r.fetched_at, r.home_odds, r.draw_odds, r.away_odds))].filter((x): x is FlowPoint => !!x)
+  }
+  const r = soccerSignal(hist)
+  const lg = LEAGUE_FLOW[league]
+  const color = !r ? 'var(--text-muted)' : r.level === 'strong' ? 'var(--green)' : r.level === 'signal' ? 'var(--gold)' : r.level === 'trap' ? 'var(--red)' : 'var(--text-muted)'
+  const name = r?.side ? (r.side === 'home' ? H : A) : null
   return (
-    <div style={{ ...box, marginTop: 0, marginBottom: 10 }}>
-      <Title sub="피나클 배당 흐름만 봄 (모델·결장·뉴스 안 씀)" />
-      <div style={{ fontSize: 12, marginBottom: 6 }}>
-        {r.moneyName
-          ? <>돈이 <b>{r.moneyName}</b> 쪽으로 — 오픈 대비 <b style={{ color: 'var(--green)' }}>+{(r.dp * 100).toFixed(1)}%p</b>{r.streak >= 2 ? <> · 최근 <b>{r.streak}번 연속</b> 같은 방향</> : null}</>
-          : <span style={{ color: 'var(--text-muted)' }}>뚜렷한 흐름 없음 (오픈 대비 1%p 미만{r.changes ? ` · ${r.changes}번 바뀜` : ''})</span>}
-      </div>
-      <div style={{ overflowX: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead><tr>
-            <th style={{ ...th, textAlign: 'left' }}></th>
-            <th style={{ ...th, textAlign: 'left' }}>옵션</th>
-            <th style={th} title="피나클 오픈 → 지금 (마진 뺀 확률)">흐름</th>
-            <th style={th} title="사이트 배당이 이 이상이면 기대수익 플러스">공정 배당</th>
-            <th style={th} title="사이트 배당이 이 이상이면 기대 손실 3% 이내 (롤링용)">손실 3% 이내</th>
-          </tr></thead>
-          <tbody>
-            {r.opts.map(o => (
-              <tr key={o.label} style={{ borderTop: '1px solid var(--border)' }}>
-                <td style={{ ...td, textAlign: 'left' }}><StarTag s={o.stars} /></td>
-                <td style={{ ...td, textAlign: 'left', fontFamily: 'var(--font-body)', fontWeight: o.stars ? 700 : 400 }}>{o.label}</td>
-                <td style={{ ...td, fontSize: 11, color: o.pOpen != null && o.p - o.pOpen >= 0.01 ? 'var(--green)' : o.pOpen != null && o.p - o.pOpen <= -0.01 ? 'var(--red)' : 'var(--text-muted)' }}>{o.flow}</td>
-                <td style={{ ...td, fontWeight: 700 }}>{o.fair.toFixed(2)}</td>
-                <td style={{ ...td, color: 'var(--gold)' }}>{minOddsFor(o.p, 0.03).toFixed(2)}↑</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+    <div style={{ ...box, marginTop: 10 }}>
+      <Title sub={`${src} 승무패 · 오픈 → 지금 (마진 뺀 확률)${lg ? ` · 이 리그 흐름: ${lg.grade} (${lg.note})` : ' · 이 리그 흐름: 검증 전'}`} />
+      {!r ? <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>배당 기록이 아직 없습니다.</div> : <>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 15, fontWeight: 800, color }}>{r.title}</span>
+          {name && <span style={{ fontSize: 14, fontWeight: 700 }}>
+            돈 쪽: {name} <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>({r.fav ? '정배' : '역배'})</span>
+            {r.oddsOpen && r.oddsNow ? <span style={{ fontSize: 12, fontFamily: 'var(--font-num)', marginLeft: 6 }}>{r.oddsOpen.toFixed(2)} → <b>{r.oddsNow.toFixed(2)}</b></span> : null}
+            <span style={{ fontSize: 12, fontFamily: 'var(--font-num)', color, marginLeft: 6 }}>+{(r.dp * 100).toFixed(1)}%p</span>
+          </span>}
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 4 }}>{r.why}</div>
+        {r.side && <div style={{ fontSize: 11, marginTop: 4, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          <span>바뀐 횟수 {r.changes}번{r.streak >= 2 ? ` · 최근 ${r.streak}번 연속 같은 방향` : ''}</span>
+          <span style={{ color: 'var(--text-muted)' }}>반대쪽 {(r.other * 100 >= 0 ? '+' : '') + (r.other * 100).toFixed(1)}%p</span>
+          {r.retrace && <span style={{ color: 'var(--red)', fontWeight: 700 }}>⚠ 정점에서 되돌아오는 중 — 흐름이 약해지고 있음</span>}
+        </div>}
+      </>}
       <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 6 }}>
-        ★★ = 오픈보다 2%p+ 돈이 들어온 옵션, ★ = 1~2%p, 롤링 = 흐름 없음·반대. 피나클이 이미 움직였으니 우위는 <b>사이트 배당이 공정 배당 이상</b>일 때만 (백테스트: 마감 배당을 따라가면 ±0, 오픈 때 돈 쪽이면 +15.9%) — 사이트가 늦게 따라오는 돈 쪽을 먼저 확인. 1.30 미만·무승부·역배 승은 안 넣음.
+        기준(2021-26 백테스트, 10시간 전 추정): 정배 2%p 미만 노이즈 · 2~5%p 신호(본전 근처) · 5%p+ 강한 신호(+5~16%) / 역배 3.5%p 미만 함정(−10~−12%) · 3.5%p+ 확실한 신호(+6~8%). 실제 사이트 배당이 낮으면 그만큼 빼고 보세요.
       </div>
     </div>
   )

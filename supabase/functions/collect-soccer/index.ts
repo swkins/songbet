@@ -18,7 +18,7 @@
 //   그 경기들의 DraftKings 배당을 odds_snapshots에(같은 경기 id 'soc-ESPN id'라 오늘·내일 일정에 들어와도 기록이 이어짐), 피나클 pin_matchups 연결도.
 //   일정 표(game_schedules)는 화면이 쓰는 어제·오늘·내일 그대로 — 먼 경기는 일정 표에 안 넣는다.
 // + 핸디 배당: Action Network 북메이커 주력 핸디 평균 → soccer_lines (룰북 베팅 찾기용, 5대 리그·MLS)
-// 배당(DraftKings·피나클·BetExplorer·Action Network)은 5대 리그만 — 나머지 리그는 일정·결과만 (2026-11-28 사용자 요청, ODDS_ON)
+// 배당(DraftKings·피나클·BetExplorer·Action Network)은 PIN5 표의 19개 리그만 — 나머지 리그는 일정·결과만 (2026-11-28 사용자 요청, ODDS_ON)
 // 저장: game_schedules(sport soccer, league = 리그 관리 이름, full = 원래 이름) · odds_snapshots(home·draw·away, 바뀌었을 때만) · odds_fetch_log(매번)
 import { createClient } from 'npm:@supabase/supabase-js@2.45.0'
 
@@ -45,8 +45,15 @@ const PIN: Record<string, [number, RegExp]> = { 'K리그1': [207551, /^Korea Rep
 const PIN_KEY = 'CmX2KcMrXuFmNg6YFbmTxE0y9CIrOi0R'
 const PIN_URL = 'https://guest.api.arcadia.pinnacle.com/0.1'
 // 피나클 5대 리그 id (못 찾으면 이름으로 다시 찾음)
+// 2026-11-28 사용자 요청: 남긴 19개 리그 모두 (배당 흐름 분석용). J리그1은 지금 목록에 없어 이름으로 찾음(id 0)
 const PIN5: Record<string, [number, RegExp]> = { '프리미어리그': [1980, /^England - Premier League$/], '라리가': [2196, /^Spain - La Liga$/],
-  '세리에A': [2436, /^Italy - Serie A$/], '분데스리가': [1842, /^Germany - Bundesliga$/], '리그1': [2036, /^France - Ligue 1$/] }
+  '세리에A': [2436, /^Italy - Serie A$/], '분데스리가': [1842, /^Germany - Bundesliga$/], '리그1': [2036, /^France - Ligue 1$/],
+  '챔피언스리그': [2627, /^UEFA - Champions League$/], '유로파리그': [2630, /^UEFA - Europa League$/], '네이션스 리그': [302451, /^UEFA - Nations League$/],
+  '프리메이라리가': [2386, /^Portugal - Primeira Liga$/], '에레디비시': [1928, /^Netherlands - Eredivisie$/], '쥬필러리그': [1817, /^Belgium - Pro League$/],
+  '터키': [2592, /^Turkey - Super League$/], '챔피언쉽': [1977, /^England - Championship$/],
+  'K리그1': [207551, /^Korea Republic - K League 1$/], 'K리그2': [207552, /^Korea Republic - K League 2$/],
+  'J리그1': [0, /^Japan - J1 League$/], 'J리그2': [2159, /^Japan - J2 League$/],
+  '미국': [2663, /^USA - Major League Soccer$/], '브라질': [1834, /^Brazil - Serie A$/] }
 const PIN5_SPREAD = new Set([0.5, 1.5, 2.5]), PIN5_TOTAL = new Set([1.5, 2.5, 3.5])
 const pinDec = (p: number) => Math.round((p > 0 ? 1 + p / 100 : 1 + 100 / -p) * 1000) / 1000
 const BX: Record<string, string> = { 'K리그1': 'south-korea/k-league-1', 'K리그2': 'south-korea/k-league-2', 'J리그2': 'japan/j2-league' }
@@ -105,7 +112,7 @@ Deno.serve(async (req) => {
   const db = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
   const log = async (status: string, note: Record<string, unknown>) => { await db.from('odds_fetch_log').insert({ league, status, note }); return new Response(JSON.stringify({ league, status, ...note }), { headers: { 'Content-Type': 'application/json' } }) }
   if (!CODE[league] && !KLEAGUE[league] && league !== 'J리그2') return log('error', { message: 'unknown league' })
-  // 배당은 5대 리그만 (2026-11-28 사용자 요청 — 다른 리그는 일정·결과만, 자동 결과 판정용)
+  // 배당은 PIN5 표의 19개 리그만 (2026-11-28 사용자 요청 — 나머지는 일정·결과만)
   const ODDS_ON = !!PIN5[league]
 
   // 팀 이름 표
@@ -354,7 +361,9 @@ Deno.serve(async (req) => {
         let best: Game | null = null, bs = 0
         for (const g of ours) {
           if (Math.abs(Date.parse(g.start) - t) > 30 * 60000) continue
-          const sc = (tok(g.home.full ?? g.home.name).some(w => th.includes(w)) ? 1 : 0) + (tok(g.away.full ?? g.away.name).some(w => ta.includes(w)) ? 1 : 0)
+          // K리그·J리그2는 일정 이름이 한글·일본어라 영어 단어로 못 맞춤 → soccer_team_names 'pn:'·'bx:' 이름표로도 비교
+          const sc = (tok(g.home.full ?? g.home.name).some(w => th.includes(w)) || byPrefix(ph.name) === g.home.name ? 1 : 0)
+            + (tok(g.away.full ?? g.away.name).some(w => ta.includes(w)) || byPrefix(pa.name) === g.away.name ? 1 : 0)
           if (sc > bs) { bs = sc; best = g }
         }
         const row = { matchup_id: m.id, league, start_at: new Date(t).toISOString(), home: ph.name, away: pa.name, last_seen: now }
