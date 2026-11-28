@@ -57,18 +57,20 @@ export function SoccerFlowSignal({ gameId, league, odds, H, A }: { gameId: strin
     return () => { off = true }
   }, [gameId])
   if (pin === undefined) return null
-  // 피나클 변동 기록이 먼저, 없으면 DraftKings(odds_snapshots)
-  let src = '피나클'
+  // 시작점이 진짜 오픈인 쪽을 먼저 (2026-11-28 — 피나클 기록은 수집을 켠 뒤부터라 오픈이 아님, DraftKings는 ESPN이 오픈 배당을 같이 줌).
+  // 백테스트도 북 평균 배당 기준이라 DraftKings 쪽이 더 가깝다. DraftKings 오픈이 없으면 피나클 기록.
+  const pt = (t: string, h?: number | null, d?: number | null, a?: number | null): FlowPoint | null => {
+    if (!h || !d || !a) return null
+    const [ph, , pa] = devig([Number(h), Number(d), Number(a)]); return { t, ph, pa, h: Number(h), a: Number(a) }
+  }
+  const dk = (odds ?? []).filter(r => r.source === 'espn-draftkings')
+  const dkOpen = dk.find(r => r.open_home && r.open_draw && r.open_away)
+  let src = '피나클 (수집 시작 이후)'
   let hist: FlowPoint[] = (pin?.history ?? []).map(r => ({ t: r.t, ph: r.ph, pa: r.pa, h: r.h, a: r.a }))
-  if (hist.length < 1 && odds?.length) {
-    src = 'DraftKings'
-    const pt = (t: string, h?: number | null, d?: number | null, a?: number | null): FlowPoint | null => {
-      if (!h || !d || !a) return null
-      const [ph, , pa] = devig([h, d, a]); return { t, ph, pa, h, a }
-    }
-    const f = odds[0]
-    const open = pt(f.fetched_at, f.open_home, f.open_draw, f.open_away)
-    hist = [open, ...odds.map(r => pt(r.fetched_at, r.home_odds, r.draw_odds, r.away_odds))].filter((x): x is FlowPoint => !!x)
+  if (dkOpen || (hist.length < 2 && dk.length)) {
+    src = dkOpen ? 'DraftKings (오픈부터)' : 'DraftKings'
+    hist = [dkOpen ? pt(dkOpen.fetched_at, dkOpen.open_home, dkOpen.open_draw, dkOpen.open_away) : null,
+      ...dk.map(r => pt(r.fetched_at, r.home_odds, r.draw_odds, r.away_odds))].filter((x): x is FlowPoint => !!x)
   }
   const r = soccerSignal(hist)
   const lg = LEAGUE_FLOW[league]
