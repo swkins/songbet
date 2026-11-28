@@ -92,3 +92,14 @@ select league, player_id, count(*)::int as n, round(sum(gmsc * (6 - rn)) / sum(6
 from (select g.*, row_number() over (partition by league, player_id order by game_date desc) rn
       from public.v_player_games g where season = public.season_of((now() at time zone 'Asia/Seoul')::date)) x
 where rn <= 5 group by league, player_id;
+
+-- 2026-11-28: collect-stats가 팀 이름을 KOVO '가까운 경기 일정'에서만 가져와서 그 일정에 없는 팀(대한항공·GS칼텍스)은 team_name이 비어 들어왔다
+--  → 팀 전력에서 그 팀 선수가 통째로 빠짐. 들어올 때 같은 팀 코드의 예전 이름으로 채운다.
+create or replace function public.kovo_fill_team_name() returns trigger language plpgsql as $$
+begin
+  if new.team_name is null then
+    select team_name into new.team_name from public.kovo_player_snapshots where team_code = new.team_code and team_name is not null order by snapshot_date desc limit 1;
+  end if;
+  return new;
+end $$;
+create trigger kovo_fill_team_name before insert or update on public.kovo_player_snapshots for each row execute function public.kovo_fill_team_name();
