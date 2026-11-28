@@ -31,7 +31,8 @@ export default function GameAnalysisModal({ g, onClose }: { g: AnalysisGame; onC
     }).catch(() => setOdds([]))
   }, [g.id, g.date]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const none = odds != null && !OV_LEAGUE[g.league] && !odds.length && !lines.length && !analysis
+  // 축구는 DraftKings 배당이 없어도 FotMob 결장·선발·피나클 공정 배당이 있어 늘 연다 (2026-11-28 — 함부르크–바이에른이 '분석 자료가 없습니다'로 나왔다)
+  const none = odds != null && g.sport !== 'soccer' && !OV_LEAGUE[g.league] && !odds.length && !lines.length && !analysis
   return (
     <div className="modal-overlay" onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}>
       <div className="modal" style={{ maxWidth: 1280, width: '96vw', maxHeight: '94vh' }}>
