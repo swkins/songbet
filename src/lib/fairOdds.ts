@@ -107,3 +107,29 @@ export function fairFor(f: PinFair | undefined, side: 'home' | 'away' | 'game', 
 export const evOf = (p: number, odds: number) => p * odds - 1
 /** 기대 손실이 lossPct(예 0.03 = 3%) 이내가 되는 최소 배당 */
 export const minOddsFor = (p: number, lossPct: number) => (1 - lossPct) / p
+
+// ─── 배당 기준 예상 스코어 (2026-11-28 사용자 요청) ───
+// 피나클 공정 확률(홈 승·무·원정 승 + 2.5 오버)에 가장 잘 맞는 두 팀 기대 득점(포아송 λ)을 찾아 스코어 확률을 낸다.
+// 우리 모델이 아니라 시장 값 — 화면에도 '피나클 배당 기준'으로 표시.
+export interface ImpliedScore { lh: number; la: number; grid: number[][]; top: { h: number; a: number; p: number }[] }
+const pois = (l: number, n: number) => { const out: number[] = []; let p = Math.exp(-l); for (let k = 0; k <= n; k++) { out.push(p); p *= l / (k + 1) } return out }
+function scoreGrid(lh: number, la: number, n = 10): number[][] {
+  const ph = pois(lh, n), pa = pois(la, n)
+  return ph.map(x => pa.map(y => x * y))
+}
+export function impliedScore(f: PinFair | undefined): ImpliedScore | null {
+  if (!f?.ml) return null
+  const tgt = { h: f.ml.home.p, d: f.ml.draw.p, a: f.ml.away.p, o: f.total['2.5']?.over.p }
+  const loss = (lh: number, la: number) => {
+    const g = scoreGrid(lh, la)
+    let h = 0, d = 0, a = 0, o = 0
+    g.forEach((r, i) => r.forEach((p, j) => { if (i > j) h += p; else if (i === j) d += p; else a += p; if (i + j >= 3) o += p }))
+    return (h - tgt.h) ** 2 + (d - tgt.d) ** 2 + (a - tgt.a) ** 2 + (tgt.o != null ? (o - tgt.o) ** 2 : 0)
+  }
+  let best = { lh: 1.3, la: 1.1, v: Infinity }
+  for (let lh = 0.2; lh <= 4.5; lh += 0.05) for (let la = 0.2; la <= 4.5; la += 0.05) { const v = loss(lh, la); if (v < best.v) best = { lh, la, v } }
+  for (let lh = best.lh - 0.05; lh <= best.lh + 0.05; lh += 0.005) for (let la = best.la - 0.05; la <= best.la + 0.05; la += 0.005) { const v = loss(lh, la); if (v < best.v) best = { lh, la, v } }
+  const grid = scoreGrid(best.lh, best.la)
+  const top = grid.flatMap((r, h) => r.map((p, a) => ({ h, a, p }))).sort((x, y) => y.p - x.p).slice(0, 5)
+  return { lh: best.lh, la: best.la, grid, top }
+}

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import dayjs from 'dayjs'
-import { loadPinFair, minOddsFor, type PinFair, type PinPrice } from '../lib/fairOdds'
+import { loadPinFair, minOddsFor, impliedScore, type PinFair, type PinPrice } from '../lib/fairOdds'
 import { koName } from '../lib/gameSchedule'
 
 // 축구 분석 칸: 피나클 공정 배당 (2026-11-28 사용자 요청 — 롤링 위주, 손실이 적은 베팅 고르기)
@@ -37,8 +37,30 @@ export default function PinFairBox({ gameId, home, away }: { gameId: string; hom
     const down = pr.odds < pr.open
     return <span style={{ fontSize: 10, marginLeft: 4, color: down ? 'var(--red)' : 'var(--green)' }}>{down ? '▼' : '▲'}{pr.open.toFixed(2)}</span>
   }
+  const sc = impliedScore(f)
+  const tile: React.CSSProperties = { flex: '1 1 90px', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '6px 8px', textAlign: 'center' }
   return (
     <div style={box}>
+      {sc && <>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
+          <span style={{ fontSize: 13, fontWeight: 800 }}>예상 스코어</span>
+          <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>피나클 배당 기준 (승무패·2.5 오버에 맞춘 기대 득점) — 우리 모델 아님</span>
+        </div>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
+          <div style={tile}>
+            <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>기대 득점</div>
+            <div style={{ fontSize: 18, fontWeight: 800, fontFamily: 'var(--font-num)' }}>{sc.lh.toFixed(2)} : {sc.la.toFixed(2)}</div>
+            <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{H} : {A}</div>
+          </div>
+          {sc.top.map((t, i) => (
+            <div key={`${t.h}-${t.a}`} style={{ ...tile, borderColor: i === 0 ? 'var(--gold-border)' : 'var(--border)' }}>
+              <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{i === 0 ? '가장 유력' : `${i + 1}순위`}</div>
+              <div style={{ fontSize: 18, fontWeight: 800, fontFamily: 'var(--font-num)', color: i === 0 ? 'var(--gold)' : undefined }}>{t.h} : {t.a}</div>
+              <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{(t.p * 100).toFixed(1)}%</div>
+            </div>
+          ))}
+        </div>
+      </>}
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
         <span style={{ fontSize: 13, fontWeight: 800 }}>피나클 공정 배당</span>
         <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{dayjs(f.fetched_at).format('M/D HH:mm')} 기준 · 승무패 마진 {(f.margin * 100).toFixed(1)}%</span>
