@@ -18,6 +18,7 @@
 //   그 경기들의 DraftKings 배당을 odds_snapshots에(같은 경기 id 'soc-ESPN id'라 오늘·내일 일정에 들어와도 기록이 이어짐), 피나클 pin_matchups 연결도.
 //   일정 표(game_schedules)는 화면이 쓰는 어제·오늘·내일 그대로 — 먼 경기는 일정 표에 안 넣는다.
 // + 핸디 배당: Action Network 북메이커 주력 핸디 평균 → soccer_lines (룰북 베팅 찾기용, 5대 리그·MLS)
+// 배당(DraftKings·피나클·BetExplorer·Action Network)은 5대 리그만 — 나머지 리그는 일정·결과만 (2026-11-28 사용자 요청, ODDS_ON)
 // 저장: game_schedules(sport soccer, league = 리그 관리 이름, full = 원래 이름) · odds_snapshots(home·draw·away, 바뀌었을 때만) · odds_fetch_log(매번)
 import { createClient } from 'npm:@supabase/supabase-js@2.45.0'
 
@@ -104,6 +105,8 @@ Deno.serve(async (req) => {
   const db = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
   const log = async (status: string, note: Record<string, unknown>) => { await db.from('odds_fetch_log').insert({ league, status, note }); return new Response(JSON.stringify({ league, status, ...note }), { headers: { 'Content-Type': 'application/json' } }) }
   if (!CODE[league] && !KLEAGUE[league] && league !== 'J리그2') return log('error', { message: 'unknown league' })
+  // 배당은 5대 리그만 (2026-11-28 사용자 요청 — 다른 리그는 일정·결과만, 자동 결과 판정용)
+  const ODDS_ON = !!PIN5[league]
 
   // 팀 이름 표
   const { data: nm } = await db.from('soccer_team_names').select('league, src, ko')
@@ -136,7 +139,7 @@ Deno.serve(async (req) => {
     // 먼 날(+2~+5일)은 3시간에 한 번만 (요청 수를 덜 늘리게)
     const { data: lastFar } = await db.from('odds_fetch_log').select('fetched_at').eq('league', league).eq('status', 'ok').eq('note->>far', 'true')
       .gte('fetched_at', new Date(Date.now() - 3 * 3600000).toISOString()).limit(1)
-    farFetched = !(lastFar ?? []).length
+    farFetched = ODDS_ON && !(lastFar ?? []).length
     const utcDays = [-1, 0, 1, ...(farFetched ? [2, 3, 4, 5] : [])].map(d => new Date(Date.now() + d * 86400000).toISOString().slice(0, 10).replaceAll('-', ''))
     const events: any[] = []
     try {
@@ -166,11 +169,11 @@ Deno.serve(async (req) => {
         status: state === 'post' ? postStatus(c?.status?.type ?? e.status?.type) : state === 'in' ? (c?.status?.type?.shortDetail ?? '경기 중') : null }
       if (far) farGames.push({ g, date }); else byDate[date].push(g)
       const ml = c?.odds?.[0]?.moneyline
-      if (state === 'pre' && ml) odds.push({ game: g, date, src: 'espn-draftkings',
+      if (ODDS_ON && state === 'pre' && ml) odds.push({ game: g, date, src: 'espn-draftkings',
         h: dec(ml.home?.close?.odds), d: dec(ml.draw?.close?.odds), a: dec(ml.away?.close?.odds),
         oh: dec(ml.home?.open?.odds), od: dec(ml.draw?.open?.odds), oa: dec(ml.away?.open?.odds) })
       const o0 = c?.odds?.[0]
-      if (state === 'pre' && o0?.overUnder != null) {
+      if (ODDS_ON && state === 'pre' && o0?.overUnder != null) {
         addTot(g.id, 'over', o0.overUnder, dec(o0.total?.over?.close?.odds ?? o0.overOdds), 1, 'espn-draftkings')
         addTot(g.id, 'under', o0.overUnder, dec(o0.total?.under?.close?.odds ?? o0.underOdds), 1, 'espn-draftkings')
       }
@@ -234,7 +237,7 @@ Deno.serve(async (req) => {
   }
   const preGames = () => Object.entries(byDate).filter(([date]) => date !== yesterday).flatMap(([date, gs]) => gs.filter(g => !g.status).map(g => ({ g, date })))
   let pinMatched = 0, pinLines = 0
-  if (PIN[league]) {
+  if (PIN[league] && ODDS_ON) {
     try {
       const H = { 'User-Agent': UA['User-Agent'], Accept: 'application/json', 'x-api-key': PIN_KEY, Referer: 'https://www.pinnacle.com/', Origin: 'https://www.pinnacle.com' }
       let [id] = PIN[league]
@@ -274,7 +277,7 @@ Deno.serve(async (req) => {
   }
 
   // 백업: 피나클에서 한 경기도 못 맞췄을 때만 BetExplorer fixtures (1·X·2)
-  if (BX[league] && pinMatched === 0 && preGames().length) {
+  if (ODDS_ON && BX[league] && pinMatched === 0 && preGames().length) {
     try {
       await sleep(1500 + Math.random() * 2500)
       const res = await fetch(`https://www.betexplorer.com/football/${BX[league]}/fixtures/`, { headers: { ...UA, Accept: 'text/html', 'Accept-Language': 'en' } })
@@ -390,7 +393,7 @@ Deno.serve(async (req) => {
 
   // 핸디 배당: Action Network (미국 동부 날짜, 한 번에 그날 전 리그) — 북메이커별 주력 핸디(±0.5·±1.5·±2.5)를 기준점별 평균 → soccer_lines
   let lines = 0, anMatched = 0
-  if (AN_LEAGUE[league]) try {
+  if (ODDS_ON && AN_LEAGUE[league]) try {
     const pre = rows.filter(r => r.game_date !== yesterday).flatMap(r => r.games).filter(g => !g.status)
     const usDates = [...new Set(pre.map(g => new Date(Date.parse(g.start) - 5 * 3600000).toISOString().slice(0, 10).replaceAll('-', '')))]
     const tok = (s: string) => (s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length >= 4 && !['club', 'city'].includes(w))

@@ -4,7 +4,6 @@ import { loadSchedules, gameState, resolveTeamName, koName, leagueLabel, sortLea
 import { applyNumericTemplate } from '../lib/betOptions'
 import type { Site, Bet } from '../types'
 import { supabase } from '../lib/supabase'
-import GameAnalysisModal from './GameAnalysisModal'
 import { loadOdds, oddsTrend, type OddsSnap } from '../lib/odds'
 import { Arrow, trendColor } from './OddsHistory'
 import { loadPinFair, fairFor, evOf, type PinFair } from '../lib/fairOdds'
@@ -58,7 +57,6 @@ export default function BetModePanel({ pendingBets = [], lastSiteId = null, targ
   const [gameId, setGameId] = useState<string | null>(null)
   const [addOpen, setAddOpen] = useState(false)          // 베팅추가: 사이트 고르는 중
   const [addSiteId, setAddSiteId] = useState<string | null>(null)
-  const [showAnalysis, setShowAnalysis] = useState(false)   // 고른 경기를 한 번 더 누르면 분석 — 분석 탭 자료를 가운데 큰 창으로
   const addSite = sites.find(s => s.id === addSiteId) ?? null
   const orderedSites = [...sites].sort((a, b) => Number(b.active) - Number(a.active) || a.sort_order - b.sort_order)
 
@@ -230,8 +228,8 @@ export default function BetModePanel({ pendingBets = [], lastSiteId = null, targ
                     <div key={g.id}>
                       {header}
                       <div style={{ position: 'relative' }}>
-                      <button type="button" title={[sel ? '한 번 더 누르면 분석' : '', ...(myBets ?? []).map(b => `베팅: ${b.match} @${b.odds} · ${b.stake.toLocaleString()}`)].filter(Boolean).join('\n') || undefined}
-                        onClick={() => { if (sel) { setShowAnalysis(true); return } setGameId(g.id); setAddSiteId(null) }}
+                      <button type="button" title={[...(myBets ?? []).map(b => `베팅: ${b.match} @${b.odds} · ${b.stake.toLocaleString()}`)].filter(Boolean).join('\n') || undefined}
+                        onClick={() => { setGameId(g.id); setAddSiteId(null) }}
                         style={{ ...item(sel), width: '100%', display: 'flex', flexDirection: 'column', gap: 2,
                           position: 'relative', overflow: 'hidden', ...(myBets && !sel ? { borderColor: 'var(--orange)', background: 'var(--orange-bg)' } : {}) }}>
                         <span style={{ fontSize: 10, fontWeight: 700, color: live ? 'var(--gold)' : 'var(--text-muted)', fontFamily: 'var(--font-num)', display: 'flex', alignItems: 'center', gap: 0, paddingRight: 10 }}>
@@ -275,7 +273,6 @@ export default function BetModePanel({ pendingBets = [], lastSiteId = null, targ
             <div style={{ ...head, display: 'flex', alignItems: 'center', gap: 6 }}>
               <span>{addSite ? `베팅추가 · ${addSite.name}` : '베팅슬립'}</span>
             </div>
-            {showAnalysis && game && <GameAnalysisModal g={game} onClose={() => setShowAnalysis(false)} />}
             {addSite && renderAddForm ? renderAddForm(addSite, () => setAddSiteId(null))
               : !game ? <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: 6 }}>경기를 고르면 여기서 베팅합니다</div>
               : game.sport === 'basketball' || game.sport === 'volleyball' || game.sport === 'soccer'
