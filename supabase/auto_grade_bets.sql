@@ -2,7 +2,7 @@
 -- 결과가 안 나온 단폴 베팅(축구·농구·배구)을 일정(game_schedules)의 종료 경기와 맞춰 적중/실패를 auto_result에 넣는다.
 -- 최종 처리(result·손익·잔액)는 사용자가 베팅 현황에서 [확인]을 눌러야 된다 (앱의 applyResult).
 -- 맞추는 법: 같은 종목·리그, 날짜 ±1일, 같은 쪽(홈/원정) 팀 이름 (띄어쓰기 무시 일치 > 포함 > 단어 겹침, NBA는 영→한 표).
--- 라이브도 최종 점수 전체로 판정 (사용자: 0:1에서 +0.5는 1:1 이상이어야 적중). 배구 총득점 오버/언더는 안 함.
+-- 라이브도 최종 점수 전체로 판정 (사용자: 0:1에서 +0.5는 1:1 이상이어야 적중). 배구 총득점 오버/언더는 KOVO 세트별 점수(vb_set_scores, supabase/vb_set_scores.sql)로 (2026-11-28~).
 -- WKBL 일정에는 점수가 없어 다음 날 새벽 들어오는 v_team_games 점수를 쓴다.
 
 alter table public.bets add column if not exists auto_result text;      -- win | loss | push
@@ -58,20 +58,17 @@ language plpgsql security definer set search_path to 'public' as $$
 declare
   r record; m text[]; side text; opt text; ta text; tb text; line numeric; ou text; sets boolean;
   best_score int; best_game jsonb; best_date date; hs numeric; as_ numeric; st text;
-  v numeric; res text; n int := 0; dur interval; gj jsonb;
+  v numeric; res text; n int := 0; dur interval; gj jsonb; pts boolean; ph int; pa int;
 begin
   for r in select id, sport, league, match, bet_date, created_at from public.bets
            where result = 'pending' and parlay_group is null and coalesce(is_hidden, false) = false
              and sport in ('soccer', 'basketball', 'volleyball') and bet_date >= current_date - 10
   loop
-    side := null; opt := null; ta := null; tb := null; line := null; ou := null; sets := false;
+    side := null; opt := null; ta := null; tb := null; line := null; ou := null; sets := false; pts := false;
     m := regexp_match(r.match, '^(.+) vs (.+?) ([0-9]+(?:\.[0-9]+)?) (세트 )?(오버|언더)$');
     if m is not null then
       ta := m[1]; tb := m[2]; line := m[3]::numeric; sets := m[4] is not null; ou := m[5];
-      if r.sport = 'volleyball' and not sets then
-        update public.bets set auto_note = '배구 총득점은 자동 판정 안 함' where id = r.id and auto_note is distinct from '배구 총득점은 자동 판정 안 함';
-        continue;
-      end if;
+      pts := r.sport = 'volleyball' and not sets;   -- 배구 총득점 = KOVO 세트별 점수 합 (vb_set_scores)
     else
       m := regexp_match(r.match, '^(.+) (홈|원정) (.+)$');
       if m is null then
@@ -83,10 +80,7 @@ begin
       m := regexp_match(opt, '^([0-9]+(?:\.[0-9]+)?) *(세트 )?(오버|언더)$');
       if m is not null then
         line := m[1]::numeric; sets := m[2] is not null; ou := m[3];
-        if r.sport = 'volleyball' and not sets then
-          update public.bets set auto_note = '배구 총득점은 자동 판정 안 함' where id = r.id and auto_note is distinct from '배구 총득점은 자동 판정 안 함';
-          continue;
-        end if;
+        pts := r.sport = 'volleyball' and not sets;
       end if;
     end if;
 
@@ -143,13 +137,25 @@ begin
       continue;
     end if;
 
+    -- 배구 총득점 오버/언더: KOVO 세트별 점수 합 (2026-11-28 사용자 요청 — 그 전엔 '자동 판정 안 함')
+    if pts then
+      select v2.home_pts, v2.away_pts into ph, pa from public.vb_set_scores v2 where v2.game_id = best_game->>'id';
+      if ph is null or pa is null then
+        update public.bets set auto_result = null, auto_score = null, auto_game_id = best_game->>'id', auto_note = '세트별 점수 기다림'
+         where id = r.id and (auto_note is distinct from '세트별 점수 기다림' or auto_result is not null);
+        continue;
+      end if;
+    end if;
+
     -- 최종 점수가 나왔으면 화면 표시에도 (WKBL은 일정에 점수가 없다)
     gj := gj || jsonb_build_object('hs', hs::int, 'as', as_::int, 'final', true);
     update public.bets set auto_game = gj where id = r.id and auto_game is distinct from gj;
 
     -- 판정 (라이브도 최종 점수 전체로)
     v := null;
-    if ou is not null then
+    if ou is not null and pts then
+      v := case ou when '오버' then (ph + pa) - line else line - (ph + pa) end;
+    elsif ou is not null then
       v := case ou when '오버' then (hs + as_) - line else line - (hs + as_) end;
     else
       v := case side when '홈' then hs - as_ else as_ - hs end;  -- 내 팀 기준 점수차
@@ -163,8 +169,10 @@ begin
       end if;
     end if;
     res := case when v > 0 then 'win' when v < 0 then 'loss' else 'push' end;
-    update public.bets set auto_result = res, auto_score = hs::int || '-' || as_::int, auto_game_id = best_game->>'id', auto_at = now(), auto_note = null
-     where id = r.id and (auto_result is distinct from res or auto_score is distinct from hs::int || '-' || as_::int);
+    -- 배구 총득점은 '총 182점 (3-1)'처럼 (점수 칸은 세트 그대로)
+    update public.bets set auto_result = res, auto_score = case when pts then '총 ' || (ph + pa) || '점 (' || hs::int || '-' || as_::int || ')' else hs::int || '-' || as_::int end,
+      auto_game_id = best_game->>'id', auto_at = now(), auto_note = null
+     where id = r.id and (auto_result is distinct from res or auto_score is distinct from case when pts then '총 ' || (ph + pa) || '점 (' || hs::int || '-' || as_::int || ')' else hs::int || '-' || as_::int end);
     if found then n := n + 1; end if;
   end loop;
   return n;
