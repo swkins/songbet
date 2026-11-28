@@ -4,6 +4,8 @@
 //  - NBA: Action Network scoreboard (미국 날짜, 한 번에 전 경기, 9개 북 평균, book 30 = 오픈, 홈 티켓 %)
 //  - 국내: BetExplorer 리그 페이지 1번 (평균배당, 왼쪽 팀 = 홈). 몇 초 간격 여러 번이면 429 → 국내 리그끼리 3분 이상 띄움(SQL 쪽).
 //    429면 다른 지역(x-region)으로 자기 자신을 한 번 더 부른다. 부르는 시각은 경기 시간 기준(supabase/cron_collect_slots.sql).
+//  - KBL·WKBL (2026-11-28 사용자 요청 — BetExplorer 429 대신): KBL = 365Scores(collect-365, Bet365)가 먼저(최근 3시간 안에 다 받았으면 건너뜀),
+//    그다음 Oddsportal 리그 페이지 1번(페이지 안 initialOddsMap = 북 평균 avgOdds·북 수 cntActive, cols 1|2 = 홈·원정 순서) → 못 받으면 BetExplorer(백업).
 //  오늘·내일 끝나지 않은 경기가 없으면 요청하지 않는다.
 //  + NBA 핸디·언오버 기준점(2026-11-21 사용자 요청) → odds_lines: 북마다 주력 라인(대안 라인 제외)을 모아 가장 많은 라인(같으면 양쪽 배당이 더 비슷한 쪽),
 //    그 라인 북 평균 배당, book 30 = 오픈. 바뀌었을 때만 한 줄 (= 기준점 변경 히스토리). 예측·채점은 DB 트리거(supabase/nba_lines.sql).
@@ -12,6 +14,10 @@ import { createClient } from 'npm:@supabase/supabase-js@2.45.0'
 const UA = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36' }
 const KST = 9 * 3600000
 const kstDate = (ms: number) => new Date(ms + KST).toISOString().slice(0, 10)
+const OP: Record<string, string> = {
+  KBL: 'https://www.oddsportal.com/basketball/south-korea/kbl/',
+  WKBL: 'https://www.oddsportal.com/basketball/south-korea/wkbl-women/',
+}
 const BE: Record<string, string> = {
   KBL: 'https://www.betexplorer.com/basketball/south-korea/kbl/',
   WKBL: 'https://www.betexplorer.com/basketball/south-korea/wkbl-women/',
@@ -33,7 +39,7 @@ const lastWord = (s: string) => (s ?? '').trim().split(/\s+/).pop()?.toLowerCase
 
 interface Game { id: string; start: string; home: string; away: string; date: string }
 interface Line { game: Game; market: 'spread' | 'total'; line: number; h: number; a: number; open: number | null; oh: number | null; oa: number | null; books: number }
-interface Odds { game: Game; home: number; away: number; openH?: number | null; openA?: number | null; tix?: number | null; books?: number; name: string }
+interface Odds { game: Game; home: number; away: number; openH?: number | null; openA?: number | null; tix?: number | null; books?: number; name: string; src?: string }
 
 Deno.serve(async (req) => {
   let body: any = {}
@@ -50,7 +56,7 @@ Deno.serve(async (req) => {
     .filter(g => Date.parse(g.start) + 3 * 3600000 > Date.now())
   if (!games.length) return log('skipped', { message: '오늘·내일 남은 경기 없음' })
   // V리그: 365Scores(collect-365, Bet365)가 먼저 — 최근 3시간 안에 남은 경기 배당을 다 받았으면 BetExplorer는 안 부른다 (2026-11-22 사용자 요청, BetExplorer = 백업)
-  if (league.startsWith('V리그')) {
+  if (league.startsWith('V리그') || league === 'KBL') {
     const { data: l3 } = await db.from('odds_fetch_log').select('note').eq('league', league).eq('status', 'ok').gte('fetched_at', new Date(Date.now() - 3 * 3600000).toISOString()).order('fetched_at', { ascending: false }).limit(20)
     const last365 = (l3 ?? []).find((x: any) => x.note?.src === '365')
     if (last365 && Number(last365.note?.odds ?? 0) >= games.length) return log('skipped', { message: '365Scores 배당 있음 — BetExplorer 안 부름' })
@@ -102,7 +108,33 @@ Deno.serve(async (req) => {
           }
         }
       }
-    } else {
+    }
+    // Oddsportal (KBL·WKBL) — 한 번에 그 리그 다음 경기들 + 북 평균 배당
+    let opNote: string | null = null
+    if (OP[league]) {
+      try {
+        const r = await fetch(OP[league], { headers: { ...UA, 'Accept-Language': 'en' } })
+        if (!r.ok) opNote = `oddsportal ${r.status}`
+        else {
+          let t = await r.text()
+          for (let i = 0; i < 5 && t.includes('\\"'); i++) t = t.replace(/\\"/g, '"').replace(/\\\\/g, '\\')
+          const kw = (s: string) => ALIAS[league].find(([re]) => re.test(s ?? ''))?.[1]
+          const seen = new Set<string>()
+          for (const m of t.matchAll(/"home-name":"([^"]+)","away-name":"([^"]+)"[\s\S]{0,2500}?"encodeEventId":"([A-Za-z0-9]+)","colClassName":"datet t(\d+)/g)) {
+            const [, hn, an, eid, ts] = m
+            if (seen.has(eid)) continue; seen.add(eid)
+            const om = t.match(new RegExp(`"${eid}":\\{"event":\\d+,"odds":\\[\\{"active":(?:true|false),"maxOdds":[0-9.]+,"avgOdds":([0-9.]+)[\\s\\S]*?"cntActive":(\\d+)[\\s\\S]*?\\{"active":(?:true|false),"maxOdds":[0-9.]+,"avgOdds":([0-9.]+)`))
+            if (!om) continue
+            const kh = kw(hn), ka = kw(an), start = Number(ts) * 1000
+            const g = games.find(x => Math.abs(Date.parse(x.start) - start) <= 40 * 60000 && kh && ka && x.home?.includes(kh) && x.away?.includes(ka))
+            if (!g) { unmatched.push(`op:${hn} - ${an}`); continue }
+            found.push({ game: g, home: +om[1], away: +om[3], books: +om[2], name: `${hn} - ${an}`, src: 'oddsportal' })
+          }
+          if (!found.length) opNote = 'oddsportal 0경기'
+        }
+      } catch (e) { opNote = `oddsportal ${String(e).slice(0, 60)}` }
+    }
+    if (league !== 'NBA' && !found.length) {
       const res = await fetch(BE[league], { headers: { ...UA, 'Accept-Language': 'en' } })
       if (res.status === 429 || body.test429 === 1) {
         // 429면 다른 지역(다른 IP)에서 한 번만 더 (2026-11-22 — Supabase 서버 IP를 여럿이 같이 써서 간격과 상관없이 막힘)
@@ -134,15 +166,18 @@ Deno.serve(async (req) => {
         found.push({ game: g, home: odds[0], away: odds[1], name })
       }
     }
+    if (opNote) unmatched.push(opNote)
   } catch (e) { return log('error', { message: String(e) }) }
 
   // 바뀐 것만 저장
   let changed = 0
   for (const o of found) {
-    const { data: prev } = await db.from('odds_snapshots').select('home_odds, away_odds').eq('game_id', o.game.id).order('fetched_at', { ascending: false }).limit(1)
+    const src = o.src ?? (league === 'NBA' ? 'actionnetwork' : 'betexplorer')
+    // 같은 출처 마지막 값과 비교 (출처가 섞여도 오르내림이 생기지 않게)
+    const { data: prev } = await db.from('odds_snapshots').select('home_odds, away_odds').eq('game_id', o.game.id).eq('source', src).order('fetched_at', { ascending: false }).limit(1)
     const p = prev?.[0]
     if (p && Number(p.home_odds) === o.home && Number(p.away_odds) === o.away) continue
-    const { error } = await db.from('odds_snapshots').insert({ league, game_date: o.game.date, game_id: o.game.id, source: league === 'NBA' ? 'actionnetwork' : 'betexplorer',
+    const { error } = await db.from('odds_snapshots').insert({ league, game_date: o.game.date, game_id: o.game.id, source: src,
       home_odds: o.home, away_odds: o.away, open_home: o.openH ?? null, open_away: o.openA ?? null, home_tickets: o.tix ?? null, books: o.books ?? null, match_name: o.name })
     if (!error) changed++
   }

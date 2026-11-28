@@ -12,6 +12,8 @@ export interface PinFair {
   ml?: { home: PinPrice; draw: PinPrice; away: PinPrice }
   spread: Record<string, { home: PinPrice; away: PinPrice }>   // 키 = 홈 기준 핸디 ('-0.5', '1.5' …)
   total: Record<string, { over: PinPrice; under: PinPrice }>   // 키 = 기준점 ('2.5' …)
+  /** 승무패 배당 흐름 (오래된 것 → 최신, 바뀐 때만) — 피나클 배당과 마진 뺀 확률 (2026-11-28 사용자 요청) */
+  history: { t: string; h: number; d: number; a: number; ph: number; pd: number; pa: number }[]
 }
 
 /** 파워 방식 마진 제거: Σ (1/o)^k = 1 이 되는 k를 찾아 p = (1/o)^k */
@@ -35,7 +37,11 @@ function build(rows: PinRow[]): PinFair | null {
   // rows: 오래된 것 → 최신 순
   const first = new Map<string, PinRow>(), last = new Map<string, PinRow>()
   for (const r of rows) { const k = `${r.market}|${key(r.line)}`; if (!first.has(k)) first.set(k, r); last.set(k, r) }
-  const out: PinFair = { fetched_at: rows[rows.length - 1].fetched_at, margin: 0, spread: {}, total: {} }
+  const out: PinFair = { fetched_at: rows[rows.length - 1].fetched_at, margin: 0, spread: {}, total: {}, history: [] }
+  for (const r of rows) if (r.market === 'ml' && r.p2) {
+    const [ph, pd, pa] = devig([Number(r.p1), Number(r.p2), Number(r.p3)])
+    out.history.push({ t: r.fetched_at, h: Number(r.p1), d: Number(r.p2), a: Number(r.p3), ph, pd, pa })
+  }
   for (const [k, r] of last) {
     const o = first.get(k)!
     if (r.market === 'ml' && r.p2) {

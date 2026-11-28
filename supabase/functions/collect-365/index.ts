@@ -1,4 +1,4 @@
-// 365Scores 배구 일정·결과·배당 (2026-11-22 사용자 요청 — BetExplorer보다 365Scores를 먼저)
+// 365Scores 배구·KBL 일정·결과·배당 (2026-11-22 사용자 요청 — BetExplorer보다 365Scores를 먼저; 2026-11-28 KBL 추가 — 배당만, 일정은 KBL 공식 그대로)
 //  - V리그 남·여: 일정·결과는 KOVO 그대로(경기 id·선수 기록·예측이 이어지게), 배당만 365Scores(Bet365 승패, 오픈 포함) → KOVO 경기에 시작 시각(±40분)으로 맞춤.
 //    collect-odds(BetExplorer)는 최근 3시간 안에 365Scores가 남은 경기 배당을 다 받았으면 건너뛴다 (백업).
 //  - (해외 배구 일정·결과·배당은 2026-11-22 사용자 요청으로 뺐다 — own: true 리그는 일정·결과도 365Scores → game_schedules id '365-경기id')
@@ -17,9 +17,15 @@ const SRC = '365-bet365'
 // own = 일정·결과도 365Scores로 (false = V리그: 배당만)
 // 2026-11-22 사용자 요청으로 해외 배구(이탈리아·폴란드·터키·브라질·체코·벨기에)는 뺐다 — 다시 넣으려면 own: true 줄을 더하면 된다
 //  (id: 이탈리아 남 5723·여 5729, 폴란드 남 5772·여 8093, 터키 남 5766·여 7897, 브라질 남 5710·여 5711, 체코 남 5757, 벨기에 여 8301)
-const LEAGUES: { league: string; comp: number; own: boolean }[] = [
-  { league: 'V리그 남자', comp: 8344, own: false }, { league: 'V리그 여자', comp: 8343, own: false },
+const LEAGUES: { league: string; comp: number; own: boolean; sport: string }[] = [
+  { league: 'V리그 남자', comp: 8344, own: false, sport: 'volleyball' }, { league: 'V리그 여자', comp: 8343, own: false, sport: 'volleyball' },
+  { league: 'KBL', comp: 401, own: false, sport: 'basketball' },
 ]
+// 같은 시각 경기가 여럿일 때(KBL 주말 등) 팀 이름으로 고른다: 365 영어 이름 → 일정 한글 이름에 들어 있는 글자 (collect-odds ALIAS와 같음)
+const ALIAS: Record<string, [RegExp, string][]> = {
+  KBL: [[/thunders|samsung/i, '삼성'], [/sakers|\blg\b|changwon/i, 'LG'], [/knights|\bsk\b/i, 'SK'], [/mobis|phoebus|ulsan/i, '현대모비스'], [/sono|goyang/i, '소노'], [/wonju|promy|\bdb\b/i, 'DB'],
+        [/kcc|egis|busan/i, 'KCC'], [/kogas|pegasus|daegu/i, '가스공사'], [/suwon|\bkt\b|sonicboom/i, 'KT'], [/jungkwanjang|anyang|red boosters|kgc/i, '정관장']],
+}
 
 const statusOf = (g: any): string | null => {
   const t = String(g.statusText ?? '')
@@ -38,7 +44,7 @@ Deno.serve(async (req) => {
   try { body = await req.json() } catch { /* 빈 body */ }
   const only: string | undefined = body.league
   const db = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
-  const { data: nm } = await db.from('sports_team_names').select('league, src, ko').eq('sport', 'volleyball')
+  const { data: nm } = await db.from('sports_team_names').select('league, src, ko').in('sport', ['volleyball', 'basketball'])
   const names = new Map((nm ?? []).map((r: any) => [`${r.league}|${r.src}`, r.ko]))
   const today = kstDate(Date.now())
   const window = new Set([-1, 0, 1, 2].map(d => kstDate(Date.now() + d * 86400000)))
@@ -83,11 +89,16 @@ Deno.serve(async (req) => {
     } else {
       // V리그: KOVO 경기에 시작 시각으로 맞춰 배당만
       const { data: srows } = await db.from('game_schedules').select('game_date, games').eq('league', L.league).gte('game_date', today)
-      const kovo = (srows ?? []).flatMap((r: any) => (r.games ?? []).map((g: any) => ({ id: g.id, start: g.start, date: r.game_date, home: g.home?.name, away: g.away?.name })))
+      const kovo = (srows ?? []).flatMap((r: any) => (r.games ?? []).map((g: any) => ({ id: g.id, start: g.start, date: r.game_date, home: `${g.home?.name ?? ''} ${g.home?.full ?? ''}`, away: `${g.away?.name ?? ''} ${g.away?.full ?? ''}` })))
       for (const g of games) {
         if (g.statusGroup !== 2 || !(g.odds?.options?.length >= 2)) continue
         const t = Date.parse(g.startTime)
-        const cand = kovo.filter(k => Math.abs(Date.parse(k.start) - t) <= 40 * 60000)
+        let cand = kovo.filter(k => Math.abs(Date.parse(k.start) - t) <= 40 * 60000)
+        if (cand.length > 1 && ALIAS[L.league]) {
+          const kw = (n: string) => ALIAS[L.league].find(([re]) => re.test(n ?? ''))?.[1]
+          const kh = kw(g.homeCompetitor?.name), ka = kw(g.awayCompetitor?.name)
+          cand = cand.filter(k => (!kh || String(k.home ?? '').includes(kh)) && (!ka || String(k.away ?? '').includes(ka)))
+        }
         if (cand.length !== 1) continue
         const o1 = g.odds.options.find((o: any) => o.num === 1), o2 = g.odds.options.find((o: any) => o.num === 2)
         if (!o1?.rate?.decimal || !o2?.rate?.decimal) continue

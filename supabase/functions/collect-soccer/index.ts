@@ -14,6 +14,9 @@
 // + 피나클 5대 리그 (2026-11-28 사용자 요청 — 롤링용 공정 배당): 리그 전체 경기(보통 1주일치)의 승무패·핸디(±0.5·±1.5·±2.5)·총골(1.5·2.5·3.5)을
 //   pin_matchups(경기, 우리 일정 game_id 연결)·pin_odds(바뀐 때만 = 변동 기록, 첫 줄 오픈·킥오프 전 마지막 줄 마감)에 저장 — SQL supabase/pin_odds.sql.
 //   일정·승무패 메인(odds_snapshots)은 그대로 ESPN·DraftKings.
+// + 5일 앞 경기 (2026-11-28 사용자 요청 — 축구는 배당이 일찍 열리니 미리 쌓아 두기): 3시간에 한 번 ESPN UTC +2~+5일도 받아
+//   그 경기들의 DraftKings 배당을 odds_snapshots에(같은 경기 id 'soc-ESPN id'라 오늘·내일 일정에 들어와도 기록이 이어짐), 피나클 pin_matchups 연결도.
+//   일정 표(game_schedules)는 화면이 쓰는 어제·오늘·내일 그대로 — 먼 경기는 일정 표에 안 넣는다.
 // + 핸디 배당: Action Network 북메이커 주력 핸디 평균 → soccer_lines (룰북 베팅 찾기용, 5대 리그·MLS)
 // 저장: game_schedules(sport soccer, league = 리그 관리 이름, full = 원래 이름) · odds_snapshots(home·draw·away, 바뀌었을 때만) · odds_fetch_log(매번)
 import { createClient } from 'npm:@supabase/supabase-js@2.45.0'
@@ -126,9 +129,15 @@ Deno.serve(async (req) => {
   }
   const odds: { game: Game; date: string; h: number | null; d: number | null; a: number | null; oh: number | null; od: number | null; oa: number | null; src: string }[] = []
 
+  const farGames: { g: Game; date: string }[] = []
+  let farFetched = false
   if (CODE[league]) {
     const code = CODE[league]
-    const utcDays = [-1, 0, 1].map(d => new Date(Date.now() + d * 86400000).toISOString().slice(0, 10).replaceAll('-', ''))
+    // 먼 날(+2~+5일)은 3시간에 한 번만 (요청 수를 덜 늘리게)
+    const { data: lastFar } = await db.from('odds_fetch_log').select('fetched_at').eq('league', league).eq('status', 'ok').eq('note->>far', 'true')
+      .gte('fetched_at', new Date(Date.now() - 3 * 3600000).toISOString()).limit(1)
+    farFetched = !(lastFar ?? []).length
+    const utcDays = [-1, 0, 1, ...(farFetched ? [2, 3, 4, 5] : [])].map(d => new Date(Date.now() + d * 86400000).toISOString().slice(0, 10).replaceAll('-', ''))
     const events: any[] = []
     try {
       for (const [i, d] of utcDays.entries()) {
@@ -142,7 +151,9 @@ Deno.serve(async (req) => {
     const seen = new Set<string>()
     for (const e of events) {
       const date = kstDate(Date.parse(e.date))
-      if (!byDate[date] || seen.has(String(e.id))) continue
+      if (seen.has(String(e.id))) continue
+      const far = !byDate[date] && Date.parse(e.date) > Date.now()
+      if (!byDate[date] && !far) continue
       seen.add(String(e.id))
       const c = e.competitions?.[0]
       const state: string = c?.status?.type?.state ?? e.status?.type?.state ?? 'pre'   // pre · in · post
@@ -153,7 +164,7 @@ Deno.serve(async (req) => {
       }
       const g: Game = { id: `soc-${e.id}`, start: new Date(Date.parse(e.date)).toISOString(), home: side('home'), away: side('away'), venue: c?.venue?.fullName ?? null,
         status: state === 'post' ? postStatus(c?.status?.type ?? e.status?.type) : state === 'in' ? (c?.status?.type?.shortDetail ?? '경기 중') : null }
-      byDate[date].push(g)
+      if (far) farGames.push({ g, date }); else byDate[date].push(g)
       const ml = c?.odds?.[0]?.moneyline
       if (state === 'pre' && ml) odds.push({ game: g, date, src: 'espn-draftkings',
         h: dec(ml.home?.close?.odds), d: dec(ml.draw?.close?.odds), a: dec(ml.away?.close?.odds),
@@ -331,7 +342,7 @@ Deno.serve(async (req) => {
       if (!kres.ok) pin5.marketsHttp = kres.status
       const now = new Date().toISOString()
       const tok = (s: string) => (s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length >= 4 && !['club', 'city', 'united'].includes(w))
-      const ours = rows.flatMap(r => r.games)
+      const ours = [...rows.flatMap(r => r.games), ...farGames.map(x => x.g)]
       const linked: any[] = [], unlinked: any[] = [], cand: any[] = []
       for (const m of mus) {
         if (m.parentId || (m.type ?? 'matchup') !== 'matchup' || m.participants?.length !== 2) continue
@@ -424,5 +435,5 @@ Deno.serve(async (req) => {
   for (const r of totRows) { const k = `${r.game_id}|${r.side}|${r.line}`; const p = totBest.get(k); if (!p || r.books >= p.books) totBest.set(k, r) }
   if (totBest.size) { const { error } = await db.from('soccer_lines').upsert([...totBest.values()]); if (!error) totals = totBest.size }
 
-  return log('ok', { pin5, pinMatched, pinLines, anMatched, lines, totals, games: rows.reduce((s, r) => s + r.games.length, 0), counts: Object.fromEntries(rows.map(r => [r.game_date, r.games.length])), odds: odds.length, changed, unmatched: [...unknown] })
+  return log('ok', { far: farFetched, farGames: farGames.length, pin5, pinMatched, pinLines, anMatched, lines, totals, games: rows.reduce((s, r) => s + r.games.length, 0), counts: Object.fromEntries(rows.map(r => [r.game_date, r.games.length])), odds: odds.length, changed, unmatched: [...unknown] })
 })

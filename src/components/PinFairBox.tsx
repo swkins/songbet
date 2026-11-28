@@ -87,9 +87,69 @@ export default function PinFairBox({ gameId, home, away }: { gameId: string; hom
           </tbody>
         </table>
       </div>
+      <OddsFlow f={f} H={H} A={A} />
       <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 6 }}>
         적중 확률 = 피나클 배당에서 마진을 뺀 값. 사이트 배당이 '손실 {LOSS * 100}% 이내' 이상이면 롤링하기 괜찮은 가격, 공정 배당 이상이면 기대수익 플러스.
       </div>
+    </div>
+  )
+}
+
+// 배당 흐름 (2026-11-28 사용자 요청): 피나클 승무패가 바뀐 기록 — 맨 위 = 지금, 오픈 대비 확률 변화, 한 번에 2%p 이상 움직인 줄은 강조
+const BIG = 0.02
+function OddsFlow({ f, H, A }: { f: PinFair; H: string; A: string }) {
+  const hs = f.history
+  if (!hs.length) return null
+  const o = hs[0], n = hs[hs.length - 1]
+  const pp = (x: number) => `${x >= 0 ? '+' : ''}${(x * 100).toFixed(1)}%p`
+  const dh = n.ph - o.ph, da = n.pa - o.pa
+  const fav = n.ph >= n.pa ? 'home' : 'away'
+  const toward = Math.abs(dh) < 0.005 && Math.abs(da) < 0.005 ? null : (dh > da ? H : A)
+  const col = (x: number) => (Math.abs(x) < 0.005 ? 'var(--text-muted)' : x > 0 ? 'var(--green)' : 'var(--red)')
+  const td: React.CSSProperties = { padding: '3px 6px', fontSize: 11, textAlign: 'right', fontFamily: 'var(--font-num)', whiteSpace: 'nowrap' }
+  const rows = [...hs].reverse().slice(0, 12)
+  return (
+    <div style={{ marginTop: 10 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap', marginBottom: 4 }}>
+        <span style={{ fontSize: 12, fontWeight: 800 }}>배당 흐름</span>
+        <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+          {dayjs(o.t).format('M/D HH:mm')} 처음 받음 · 바뀐 횟수 {hs.length - 1}번
+        </span>
+      </div>
+      <div style={{ fontSize: 11, marginBottom: 4 }}>
+        오픈 → 지금: {H} <b style={{ color: col(dh) }}>{(o.ph * 100).toFixed(1)}% → {(n.ph * 100).toFixed(1)}% ({pp(dh)})</b>
+        {' · '}{A} <b style={{ color: col(da) }}>{(o.pa * 100).toFixed(1)}% → {(n.pa * 100).toFixed(1)}% ({pp(da)})</b>
+        {toward && <span style={{ color: 'var(--text-secondary)' }}> — 돈이 <b>{toward}</b> 쪽({(toward === H) === (fav === 'home') ? '정배' : '역배'})으로</span>}
+      </div>
+      {hs.length > 1 && (
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead><tr>
+              <th style={{ ...td, textAlign: 'left', fontSize: 10, color: 'var(--text-muted)' }}>시각</th>
+              <th style={{ ...td, fontSize: 10, color: 'var(--text-muted)' }}>{H}</th>
+              <th style={{ ...td, fontSize: 10, color: 'var(--text-muted)' }}>무</th>
+              <th style={{ ...td, fontSize: 10, color: 'var(--text-muted)' }}>{A}</th>
+              <th style={{ ...td, fontSize: 10, color: 'var(--text-muted)' }}>홈 확률 변화</th>
+            </tr></thead>
+            <tbody>
+              {rows.map((r, i) => {
+                const prev = rows[i + 1]
+                const ch = prev ? r.ph - prev.ph : 0
+                const big = prev && (Math.abs(ch) >= BIG || Math.abs(r.pa - prev.pa) >= BIG)
+                return (
+                  <tr key={r.t} style={{ borderTop: '1px solid var(--border)', background: big ? 'var(--gold-bg)' : undefined }}>
+                    <td style={{ ...td, textAlign: 'left', fontFamily: 'var(--font-body)' }}>{i === 0 ? '지금 · ' : ''}{dayjs(r.t).format('M/D HH:mm')}</td>
+                    <td style={td}>{r.h.toFixed(2)}</td>
+                    <td style={td}>{r.d.toFixed(2)}</td>
+                    <td style={td}>{r.a.toFixed(2)}</td>
+                    <td style={{ ...td, color: col(ch) }}>{prev ? pp(ch) : '오픈'}{big ? ' ⚡' : ''}</td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   )
 }
