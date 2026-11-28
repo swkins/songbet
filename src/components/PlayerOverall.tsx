@@ -546,7 +546,7 @@ function LinePickBox({ sim, lines, sd, sdT, hName, aName }: { sim: { margin: num
           </div>
           <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>예상 마진 {sim.margin > 0 ? '+' : ''}{sim.margin} vs 기준점 → 기준점보다 {Math.abs(a.edge)}점 {a.edge >= 0 ? '홈 쪽' : '원정 쪽'}</div>
           {(() => { const od = a.side === 'home' ? sp.home_odds : sp.away_odds, oo = a.side === 'home' ? sp.away_odds : sp.home_odds; const r = recOf(a.prob / 100, od, oo); if (!r || !od) return null
-            return <div style={{ fontSize: 11, marginTop: 2 }} title={`추천 확률 = 시장 ${r.market}% + ${REC_RULE.shrink} × (모델 ${a.prob}% − 시장)`}>배당 {od.toFixed(2)} · 추천 확률 {r.prob}% · 기대수익 <b style={{ color: r.ev >= 0 ? 'var(--green)' : 'var(--red)' }}>{r.ev > 0 ? '+' : ''}{r.ev}%</b>{r.rec && <RecTag />}</div> })()}
+            return <div style={{ fontSize: 11, marginTop: 2 }} title={`추천 확률 = 시장 ${r.market}% + ${REC_RULE.shrink} × (모델 ${a.prob}% − 시장)`}>배당 {od.toFixed(2)} · 추천 확률 {r.prob}% · 기대수익 <b style={{ color: r.ev >= 0 ? 'var(--green)' : 'var(--red)' }}>{r.ev > 0 ? '+' : ''}{r.ev}%</b> <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>· 모델 참고 (추천은 위 '배당 흐름 추천')</span></div> })()}
         </div>
       )}
       {tt && o && (

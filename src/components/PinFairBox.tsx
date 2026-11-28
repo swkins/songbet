@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import dayjs from 'dayjs'
 import { loadPinFair, minOddsFor, impliedScore, loadModelScore, type PinFair, type PinPrice, type ModelScore } from '../lib/fairOdds'
 import { koName } from '../lib/gameSchedule'
+import { SoccerFlowBox } from './FlowPickBox'
 
 // 축구 분석 칸: 피나클 공정 배당 (2026-11-28 사용자 요청 — 롤링 위주, 손실이 적은 베팅 고르기)
 // 옵션마다 적중 확률(피나클 마진 뺀 값)·공정 배당·"손실 3% 이내" 최소 배당. 사이트 배당이 그 이상이면 롤링하기 괜찮은 가격.
@@ -50,6 +51,7 @@ export default function PinFairBox({ gameId, league, home, away }: { gameId: str
   const tile: React.CSSProperties = { flex: '1 1 90px', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '6px 8px', textAlign: 'center' }
   return (
     <div style={box}>
+      <SoccerFlowBox f={f} H={H} A={A} />
       {ms && <ModelBlock ms={ms} H={H} A={A} f={f} />}
       {sc && <>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>

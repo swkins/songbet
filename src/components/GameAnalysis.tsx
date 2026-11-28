@@ -2,6 +2,7 @@ import dayjs from 'dayjs'
 import PlayerOverall from './PlayerOverall'
 import SoccerLineup from './SoccerLineup'
 import PinFairBox from './PinFairBox'
+import { NbaFlowBox } from './FlowPickBox'
 import { MockBetsForGame } from './MockBetStats'
 import OddsHistory, { LineHistory } from './OddsHistory'
 import OverallAnalysisView, { type OverallAnalysis } from './OverallAnalysisView'
@@ -47,6 +48,8 @@ export default function GameAnalysis({ g, analysis, odds, lines, onGoBet }: { g:
         </div>
         {side(g.away, '원정')}
       </div>
+      {/* NBA: 배당 흐름 추천 (2026-11-28 사용자 요청 — NBA·축구는 배당 흐름만으로 추천, 축구는 PinFairBox 맨 위) */}
+      {g.league === 'NBA' && <NbaFlowBox lines={lines} hName={koName(g.home.name)} aName={koName(g.away.name)} />}
       {/* 좌: 배당 변동 + 예상 스코어 / 우: 선수 오버롤·출전 확률 / 아래: 뉴스 */}
       <PlayerOverall league={g.league} gameDate={g.date} home={g.home} away={g.away}
         left={odds?.length || lines?.length ? <>
