@@ -188,6 +188,8 @@ export default function ModelReport({ onClose }: { onClose: () => void }) {
 
           {/* NBA 모의베팅 — 방법별 (supabase/nba_mock_bets.sql) */}
           <MockBetStats />
+          {/* KBL 기준점 모의베팅 (2026-11-28 사용자 요청 — supabase/kbl_mock_bets.sql) */}
+          <MockBetStats league="KBL" />
 
           {/* Claude 검토 */}
           <div style={box}>

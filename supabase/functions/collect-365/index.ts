@@ -1,4 +1,4 @@
-// 365Scores 배구·KBL 일정·결과·배당 (2026-11-22 사용자 요청 — BetExplorer보다 365Scores를 먼저; 2026-11-28 KBL 추가 — 배당만, 일정은 KBL 공식 그대로)
+// 365Scores 배구·KBL 일정·결과·배당 (2026-11-22 사용자 요청 — BetExplorer보다 365Scores를 먼저; 2026-11-28 KBL 추가 — 배당만, 일정은 KBL 공식 그대로; KBL은 핸디·언오버 기준점도 odds_lines에)
 //  - V리그 남·여: 일정·결과는 KOVO 그대로(경기 id·선수 기록·예측이 이어지게), 배당만 365Scores(Bet365 승패, 오픈 포함) → KOVO 경기에 시작 시각(±40분)으로 맞춤.
 //    collect-odds(BetExplorer)는 최근 3시간 안에 365Scores가 남은 경기 배당을 다 받았으면 건너뛴다 (백업).
 //  - (해외 배구 일정·결과·배당은 2026-11-22 사용자 요청으로 뺐다 — own: true 리그는 일정·결과도 365Scores → game_schedules id '365-경기id')
@@ -64,6 +64,7 @@ Deno.serve(async (req) => {
     const nameOf = (n: string) => names.get(`${L.league}|${n}`) ?? n.replace(/\s*\(W\)\s*$/, '')
     const odds: { id: string; date: string; h: number; a: number; oh: number | null; oa: number | null; name: string }[] = []
     let matched = 0
+    const linked = new Map<number, { id: string; date: string }>()   // 365 경기 id → 우리 경기 (KBL 핸디·언오버용)
     if (L.own) {
       // 리그 관리 팀 목록에 새 팀 추가 (베팅추가 팀 이름 추천·자동 판정 이름 맞추기용)
       const teamRows = [...new Set(games.flatMap(g => [g.homeCompetitor?.name, g.awayCompetitor?.name]).filter(Boolean).map((n: string) => nameOf(n)))].map(name => ({ league: L.league, name }))
@@ -91,7 +92,7 @@ Deno.serve(async (req) => {
       const { data: srows } = await db.from('game_schedules').select('game_date, games').eq('league', L.league).gte('game_date', today)
       const kovo = (srows ?? []).flatMap((r: any) => (r.games ?? []).map((g: any) => ({ id: g.id, start: g.start, date: r.game_date, home: `${g.home?.name ?? ''} ${g.home?.full ?? ''}`, away: `${g.away?.name ?? ''} ${g.away?.full ?? ''}` })))
       for (const g of games) {
-        if (g.statusGroup !== 2 || !(g.odds?.options?.length >= 2)) continue
+        if (g.statusGroup !== 2) continue
         const t = Date.parse(g.startTime)
         let cand = kovo.filter(k => Math.abs(Date.parse(k.start) - t) <= 40 * 60000)
         if (cand.length > 1 && ALIAS[L.league]) {
@@ -100,6 +101,8 @@ Deno.serve(async (req) => {
           cand = cand.filter(k => (!kh || String(k.home ?? '').includes(kh)) && (!ka || String(k.away ?? '').includes(ka)))
         }
         if (cand.length !== 1) continue
+        linked.set(g.id, { id: cand[0].id, date: cand[0].date })
+        if (!(g.odds?.options?.length >= 2)) continue
         const o1 = g.odds.options.find((o: any) => o.num === 1), o2 = g.odds.options.find((o: any) => o.num === 2)
         if (!o1?.rate?.decimal || !o2?.rate?.decimal) continue
         matched++
@@ -115,7 +118,43 @@ Deno.serve(async (req) => {
       const { error } = await db.from('odds_snapshots').insert({ league: L.league, game_date: o.date, game_id: o.id, source: SRC, home_odds: o.h, away_odds: o.a, open_home: o.oh, open_away: o.oa, books: 1, match_name: o.name })
       if (!error) changed++
     }
-    await log('ok', { games: games.length, odds: odds.length, changed, ...(L.own ? {} : { matched }) })
+    // KBL 핸디·언오버 기준점 (2026-11-28 사용자 요청 — 기준점 모의베팅용): /web/bets/lines/ = Bet365 메인 + 대안 라인(±0.5·1점).
+    //  기준점 = 양쪽 배당이 가장 비슷한 라인 (NBA와 같은 규칙, 같으면 .5 라인). Spread 'Home' 옵션 lead = 홈 기준 핸디(+1.5 = 홈 플핸) → odds_lines.line 그대로.
+    //  Total: home_odds = 오버, away_odds = 언더. open_line = 우리가 처음 받은 기준점 (365는 라인별 첫 배당만 줌 — 진짜 오픈 라인은 없음). 바뀐 때만 한 줄.
+    let lineChanged = 0, lineGames = 0
+    if (L.league === 'KBL' && linked.size) {
+      try {
+        await sleep(800 + Math.random() * 1200)
+        const r = await fetch(`https://webws.365scores.com/web/bets/lines/?appTypeId=5&langId=1&timezoneName=Asia/Seoul&userCountryId=1&games=${[...linked.keys()].join(',')}`, { headers: UA })
+        const lines: any[] = r.ok ? ((await r.json())?.lines ?? []) : []
+        const pick = (gid: number, type: number) => {
+          const cands = lines.filter(l => l.gameId === gid && l.lineTypeId === type && l.bookmakerId === 14).map(l => {
+            const o = (n: string) => l.options?.find((x: any) => x.name === n)
+            if (type === 35) { const h = o('Home'), a = o('Away'); if (!h?.rate?.decimal || !a?.rate?.decimal || h.lead == null) return null
+              return { line: Number(h.lead), h: h.rate.decimal, a: a.rate.decimal, oh: h.originalRate?.decimal ?? null, oa: a.originalRate?.decimal ?? null } }
+            const ov = o('Over'), un = o('Under'), v = Number(l.internalOptionValue)
+            if (!ov?.rate?.decimal || !un?.rate?.decimal || !Number.isFinite(v)) return null
+            return { line: v, h: ov.rate.decimal, a: un.rate.decimal, oh: ov.originalRate?.decimal ?? null, oa: un.originalRate?.decimal ?? null }
+          }).filter(Boolean) as { line: number; h: number; a: number; oh: number | null; oa: number | null }[]
+          return cands.sort((x, y) => Math.abs(x.h - x.a) - Math.abs(y.h - y.a) || (Math.abs(y.line % 1) - Math.abs(x.line % 1)))[0] ?? null
+        }
+        for (const [gid, ours] of linked) {
+          let any = false
+          for (const [type, market] of [[35, 'spread'], [34, 'total']] as const) {
+            const m = pick(gid, type); if (!m) continue
+            any = true
+            const { data: prev } = await db.from('odds_lines').select('line, home_odds, away_odds, open_line').eq('game_id', ours.id).eq('market', market).eq('source', SRC).order('fetched_at', { ascending: false }).limit(1)
+            const p = prev?.[0]
+            if (p && Number(p.line) === m.line && Number(p.home_odds) === m.h && Number(p.away_odds) === m.a) continue
+            const { error } = await db.from('odds_lines').insert({ league: L.league, game_date: ours.date, game_id: ours.id, market, line: m.line, home_odds: m.h, away_odds: m.a,
+              open_line: p ? Number(p.open_line ?? p.line) : m.line, open_home: m.oh, open_away: m.oa, books: 1, source: SRC })
+            if (!error) lineChanged++
+          }
+          if (any) lineGames++
+        }
+      } catch (e) { results[`${L.league} lines`] = String(e).slice(0, 120) }
+    }
+    await log('ok', { games: games.length, odds: odds.length, changed, ...(L.own ? {} : { matched, linked: linked.size }), ...(L.league === 'KBL' ? { lineGames, lineChanged } : {}) })
   }
   return new Response(JSON.stringify(results), { headers: { 'Content-Type': 'application/json' } })
 })

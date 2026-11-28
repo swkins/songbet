@@ -69,6 +69,8 @@ export default function GameAnalysis({ g, analysis, odds, lines, onGoBet }: { g:
           </> : null}
           lines={lines?.length ? { spread: lastLine(lines, 'spread'), total: lastLine(lines, 'total') } : null}
           odds={(() => { const l = odds?.[odds.length - 1]; return l?.home_odds && l?.away_odds ? { home: Number(l.home_odds), away: Number(l.away_odds) } : null })()} />
+        {/* KBL 기준점 모의베팅 (2026-11-28 사용자 요청 — 365Scores Bet365 기준점) */}
+        {g.league === 'KBL' && <div style={{ marginTop: 10 }}><MockBetsForGame gameId={g.id} league="KBL" /></div>}
       </>}
       {analysis && !flowOnly ? <OverallAnalysisView a={analysis} /> : null}
     </div>
