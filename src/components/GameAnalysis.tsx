@@ -1,6 +1,7 @@
 import dayjs from 'dayjs'
 import PlayerOverall from './PlayerOverall'
 import SoccerLineup from './SoccerLineup'
+import PinFairBox from './PinFairBox'
 import { MockBetsForGame } from './MockBetStats'
 import OddsHistory, { LineHistory } from './OddsHistory'
 import OverallAnalysisView, { type OverallAnalysis } from './OverallAnalysisView'
@@ -57,6 +58,8 @@ export default function GameAnalysis({ g, analysis, odds, lines, onGoBet }: { g:
         lines={lines?.length ? { spread: lastLine(lines, 'spread'), total: lastLine(lines, 'total') } : null}
         odds={(() => { const l = odds?.[odds.length - 1]; return l?.home_odds && l?.away_odds ? { home: Number(l.home_odds), away: Number(l.away_odds) } : null })()} />
       {/* 축구: 결장 선수·예상 선발·오버롤 (FotMob) */}
+      {/* 축구: 피나클 공정 배당 (롤링 손실 비교) */}
+      {g.sport === 'soccer' && <PinFairBox gameId={g.id} home={g.home} away={g.away} />}
       {g.sport === 'soccer' && <SoccerLineup gameId={g.id} home={g.home} away={g.away} />}
       {analysis ? <OverallAnalysisView a={analysis} />
         : null}

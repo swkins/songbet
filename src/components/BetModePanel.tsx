@@ -7,6 +7,7 @@ import { supabase } from '../lib/supabase'
 import GameAnalysisModal from './GameAnalysisModal'
 import { loadOdds, oddsTrend, type OddsSnap } from '../lib/odds'
 import { Arrow, trendColor } from './OddsHistory'
+import { loadPinFair, fairFor, evOf, type PinFair } from '../lib/fairOdds'
 
 // ─── 대시보드 '베팅' 모드 (초안) ──────────────────────────────────
 // 가져온 경기 일정(game_schedules)을 보고 바로 베팅한다.
@@ -350,6 +351,14 @@ function BetSlip({ game, sites, lastSiteId, options, numeric, registered, onBet,
   const odds = parseOdds(oddsRaw)
   const stake = Number(amount.replace(/,/g, '')) || 0
   const ready = !!site && odds > 0 && stake > 0 && !!optLabel && !busy
+  // 축구 5대 리그: 피나클 공정 확률로 이 배당의 기대 손익 (2026-11-28 사용자 요청 — 롤링 손실 비교)
+  const [pin, setPin] = useState<PinFair | null>(null)
+  useEffect(() => {
+    let off = false; setPin(null)
+    if (game.sport === 'soccer') loadPinFair([game.id]).then(m => { if (!off) setPin(m[game.id] ?? null) }).catch(() => {})
+    return () => { off = true }
+  }, [game.id, game.sport])
+  const fairP = pin && optLabel ? fairFor(pin, pick, optLabel) : null
 
   async function submit() {
     if (!ready || !site) return
@@ -420,6 +429,17 @@ function BetSlip({ game, sites, lastSiteId, options, numeric, registered, onBet,
           </div>
         </div>
       </div>
+
+      {fairP && (() => {
+        const ev = odds > 0 ? evOf(fairP.p, odds) : null
+        const col = ev == null ? 'var(--text-secondary)' : ev >= 0 ? 'var(--green)' : ev >= -0.03 ? 'var(--gold)' : 'var(--red)'
+        return (
+          <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-secondary)' }} title="피나클 배당에서 마진을 뺀 확률 기준">
+            피나클 공정 {(fairP.p * 100).toFixed(1)}% · 공정 배당 <b>{fairP.fair.toFixed(2)}</b>
+            {ev != null && <> · 이 배당 기대 <b style={{ color: col }}>{ev >= 0 ? '+' : ''}{(ev * 100).toFixed(1)}%</b></>}
+          </div>
+        )
+      })()}
 
       <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--text-secondary)', marginTop: 8, cursor: 'pointer' }}>
         <input type="checkbox" checked={isLive} onChange={e => setIsLive(e.target.checked)} /> 라이브

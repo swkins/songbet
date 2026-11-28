@@ -11,6 +11,9 @@
 //    피나클에서 한 경기도 못 맞추면 백업으로 BetExplorer fixtures (data-odd 1·X·2, 연달아 부르면 429).
 // 팀 이름 = 리그 관리 등록 한글 이름: DB soccer_team_names(league, src, ko) — league 칸이 그 리그면 그 리그 것, 없으면 아무 리그(친선경기용), 그다음 아래 KO 표.
 //   src = ESPN 영어 이름 · 'kl:K21'(K리그 팀 코드) · 'jl:sapporo'(J리그 코드) · 'bx:Daejeon'(BetExplorer 이름 앞부분 — 가장 긴 것). 못 찾으면 영어 이름 그대로 + 로그 unmatched.
+// + 피나클 5대 리그 (2026-11-28 사용자 요청 — 롤링용 공정 배당): 리그 전체 경기(보통 1주일치)의 승무패·핸디(±0.5·±1.5·±2.5)·총골(1.5·2.5·3.5)을
+//   pin_matchups(경기, 우리 일정 game_id 연결)·pin_odds(바뀐 때만 = 변동 기록, 첫 줄 오픈·킥오프 전 마지막 줄 마감)에 저장 — SQL supabase/pin_odds.sql.
+//   일정·승무패 메인(odds_snapshots)은 그대로 ESPN·DraftKings.
 // + 핸디 배당: Action Network 북메이커 주력 핸디 평균 → soccer_lines (룰북 베팅 찾기용, 5대 리그·MLS)
 // 저장: game_schedules(sport soccer, league = 리그 관리 이름, full = 원래 이름) · odds_snapshots(home·draw·away, 바뀌었을 때만) · odds_fetch_log(매번)
 import { createClient } from 'npm:@supabase/supabase-js@2.45.0'
@@ -37,6 +40,10 @@ const KLEAGUE: Record<string, string> = { 'K리그1': '1', 'K리그2': '2' }
 const PIN: Record<string, [number, RegExp]> = { 'K리그1': [207551, /^Korea Republic - K League 1$/], 'K리그2': [207552, /^Korea Republic - K League 2$/], 'J리그2': [2159, /^Japan - J2 League$/] }
 const PIN_KEY = 'CmX2KcMrXuFmNg6YFbmTxE0y9CIrOi0R'
 const PIN_URL = 'https://guest.api.arcadia.pinnacle.com/0.1'
+// 피나클 5대 리그 id (못 찾으면 이름으로 다시 찾음)
+const PIN5: Record<string, [number, RegExp]> = { '프리미어리그': [1980, /^England - Premier League$/], '라리가': [2196, /^Spain - La Liga$/],
+  '세리에A': [2436, /^Italy - Serie A$/], '분데스리가': [1842, /^Germany - Bundesliga$/], '리그1': [2036, /^France - Ligue 1$/] }
+const PIN5_SPREAD = new Set([0.5, 1.5, 2.5]), PIN5_TOTAL = new Set([1.5, 2.5, 3.5])
 const pinDec = (p: number) => Math.round((p > 0 ? 1 + p / 100 : 1 + 100 / -p) * 1000) / 1000
 const BX: Record<string, string> = { 'K리그1': 'south-korea/k-league-1', 'K리그2': 'south-korea/k-league-2', 'J리그2': 'japan/j2-league' }
 // ESPN 영어 이름 → 리그 관리에 등록된 한글 이름 (2026-27 시즌, 등록 이름 그대로 — 오타 포함)
@@ -303,6 +310,73 @@ Deno.serve(async (req) => {
       open_home: o.oh, open_away: o.oa, open_draw: o.od, books: 1, match_name: `${o.game.home.full} - ${o.game.away.full}` })
     if (!error) changed++
   }
+  // 피나클 5대 리그 → pin_matchups·pin_odds
+  const pin5: Record<string, unknown> = {}
+  if (PIN5[league]) try {
+    const H = { 'User-Agent': UA['User-Agent'], Accept: 'application/json', 'x-api-key': PIN_KEY, Referer: 'https://www.pinnacle.com/', Origin: 'https://www.pinnacle.com' }
+    let [id] = PIN5[league]
+    await sleep(1000 + Math.random() * 1500)
+    let mres = await fetch(`${PIN_URL}/leagues/${id}/matchups`, { headers: H })
+    if (!mres.ok) {
+      const ls = await (await fetch(`${PIN_URL}/sports/29/leagues?all=false`, { headers: H })).json()
+      const L = (ls as any[]).find(x => PIN5[league][1].test(x.name))
+      if (L) { id = L.id; mres = await fetch(`${PIN_URL}/leagues/${id}/matchups`, { headers: H }) }
+    }
+    if (!mres.ok) pin5.http = mres.status
+    else {
+      const mus: any[] = await mres.json()
+      await sleep(800 + Math.random() * 1200)
+      const kres = await fetch(`${PIN_URL}/leagues/${id}/markets/straight`, { headers: H })
+      const mks: any[] = kres.ok ? await kres.json() : []
+      if (!kres.ok) pin5.marketsHttp = kres.status
+      const now = new Date().toISOString()
+      const tok = (s: string) => (s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length >= 4 && !['club', 'city', 'united'].includes(w))
+      const ours = rows.flatMap(r => r.games)
+      const linked: any[] = [], unlinked: any[] = [], cand: any[] = []
+      for (const m of mus) {
+        if (m.parentId || (m.type ?? 'matchup') !== 'matchup' || m.participants?.length !== 2) continue
+        const ph = m.participants.find((p: any) => p.alignment === 'home'), pa = m.participants.find((p: any) => p.alignment === 'away'); if (!ph || !pa) continue
+        const t = Date.parse(m.startTime), th = tok(ph.name), ta = tok(pa.name)
+        let best: Game | null = null, bs = 0
+        for (const g of ours) {
+          if (Math.abs(Date.parse(g.start) - t) > 30 * 60000) continue
+          const sc = (tok(g.home.full ?? g.home.name).some(w => th.includes(w)) ? 1 : 0) + (tok(g.away.full ?? g.away.name).some(w => ta.includes(w)) ? 1 : 0)
+          if (sc > bs) { bs = sc; best = g }
+        }
+        const row = { matchup_id: m.id, league, start_at: new Date(t).toISOString(), home: ph.name, away: pa.name, last_seen: now }
+        if (best) linked.push({ ...row, game_id: best.id }); else unlinked.push(row)
+        for (const x of mks) {
+          if (x.matchupId !== m.id || x.period !== 0) continue
+          const pr = (d: string) => { const q = x.prices?.find((y: any) => y.designation === d); return q ? pinDec(q.price) : null }
+          const pt = (d: string) => { const q = x.prices?.find((y: any) => y.designation === d); return q?.points != null ? Number(q.points) : null }
+          if (x.type === 'moneyline') cand.push({ matchup_id: m.id, market: 'ml', line: null, alt: false, p1: pr('home'), p2: pr('draw'), p3: pr('away') })
+          else if (x.type === 'spread') { const l = pt('home'); if (l != null && PIN5_SPREAD.has(Math.abs(l))) cand.push({ matchup_id: m.id, market: 'spread', line: l, alt: !!x.isAlternate, p1: pr('home'), p2: null, p3: pr('away') }) }
+          else if (x.type === 'total') { const l = pt('over'); if (l != null && PIN5_TOTAL.has(l)) cand.push({ matchup_id: m.id, market: 'total', line: l, alt: !!x.isAlternate, p1: pr('over'), p2: null, p3: pr('under') }) }
+        }
+      }
+      if (linked.length) await db.from('pin_matchups').upsert(linked, { defaultToNull: false })
+      if (unlinked.length) await db.from('pin_matchups').upsert(unlinked, { defaultToNull: false })
+      // 바뀐 것만 (시장·기준점마다 마지막 줄과 비교)
+      const ids = [...new Set(cand.map(c => c.matchup_id))]
+      const last = new Map<string, any>()
+      if (ids.length) {
+        const { data: prev } = await db.from('pin_odds').select('matchup_id,market,line,alt,p1,p2,p3').in('matchup_id', ids).order('fetched_at', { ascending: false }).limit(10000)
+        for (const r of prev ?? []) { const k = `${r.matchup_id}|${r.market}|${r.line == null ? '' : Number(r.line)}`; if (!last.has(k)) last.set(k, r) }
+      }
+      const same = (a: any, b: number | null) => (a == null ? null : Number(a)) === b
+      // 같은 시장·기준점이 두 번 오면 주력 라인(alt false) 하나만
+      const uniq = new Map<string, any>()
+      for (const c of cand) { const k = `${c.matchup_id}|${c.market}|${c.line == null ? '' : c.line}`; const u = uniq.get(k); if (!u || (u.alt && !c.alt)) uniq.set(k, c) }
+      const ins = [...uniq.values()].filter(c => c.p1 && c.p3).filter(c => {
+        const p = last.get(`${c.matchup_id}|${c.market}|${c.line == null ? '' : c.line}`)
+        return !p || !same(p.p1, c.p1) || !same(p.p2, c.p2) || !same(p.p3, c.p3) || p.alt !== c.alt
+      }).map(c => ({ ...c, fetched_at: now }))
+      if (ins.length) { const { error } = await db.from('pin_odds').insert(ins); if (error) pin5.error = error.message }
+      Object.assign(pin5, { matchups: linked.length + unlinked.length, linked: linked.length, markets: cand.length, inserted: ins.length,
+        unlinkedToday: unlinked.filter(u => ours.length && Date.parse(u.start_at) < Date.now() + 2 * 86400000).map(u => `${u.home} - ${u.away}`) })
+    }
+  } catch (e) { pin5.error = String(e).slice(0, 120) }
+
   // 핸디 배당: Action Network (미국 동부 날짜, 한 번에 그날 전 리그) — 북메이커별 주력 핸디(±0.5·±1.5·±2.5)를 기준점별 평균 → soccer_lines
   let lines = 0, anMatched = 0
   if (AN_LEAGUE[league]) try {
@@ -350,5 +424,5 @@ Deno.serve(async (req) => {
   for (const r of totRows) { const k = `${r.game_id}|${r.side}|${r.line}`; const p = totBest.get(k); if (!p || r.books >= p.books) totBest.set(k, r) }
   if (totBest.size) { const { error } = await db.from('soccer_lines').upsert([...totBest.values()]); if (!error) totals = totBest.size }
 
-  return log('ok', { pinMatched, pinLines, anMatched, lines, totals, games: rows.reduce((s, r) => s + r.games.length, 0), counts: Object.fromEntries(rows.map(r => [r.game_date, r.games.length])), odds: odds.length, changed, unmatched: [...unknown] })
+  return log('ok', { pin5, pinMatched, pinLines, anMatched, lines, totals, games: rows.reduce((s, r) => s + r.games.length, 0), counts: Object.fromEntries(rows.map(r => [r.game_date, r.games.length])), odds: odds.length, changed, unmatched: [...unknown] })
 })

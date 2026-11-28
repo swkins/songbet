@@ -170,3 +170,49 @@ insert into soccer_leagues (name) select x from unnest(array['아시아 챔피�
 insert into public.odds_jobs (league, job) values ('아시아 챔피언스리그','collect-soccer-acl'),('아시아 챔피언스리그2','collect-soccer-acl2') on conflict (league) do nothing;
 select cron.schedule(j, '0 0 1 1 *', format('select public.run_collect_soccer(%L)', l)) from (values ('collect-soccer-acl','아시아 챔피언스리그'),('collect-soccer-acl2','아시아 챔피언스리그2')) v(j,l);
 -- 그다음 alter_job으로 첫 실행을 50분 뒤로. K리그 팀 ESPN 영어 이름(Jeonbuk Hyundai Motors 등)·중동·동남아 팀 50개는 soccer_team_names league '' 로 넣음
+
+-- 2026-11-28: 꺼 둔 타이머(active false)도 계속 돌던 문제 — run_collect_soccer가 끝에 cron.alter_job으로 다음 시각을 다시 잡는데,
+-- 그래도 꺼진 작업이 실행됐다. 함수 맨 앞에서 자기 작업이 꺼져 있으면 바로 끝내고, 꺼진 작업은 일정도 '0 0 31 2 *'(오지 않는 날)로.
+-- (5대 리그만 남김 — 2026-11-27 사용자 요청. 다시 켜려면 cron.alter_job(jobid, schedule := '0 0 * * *', active := true) 뒤 한 번 돌면 랜덤 시각으로 바뀜)
+create or replace function public.run_collect_soccer(p_league text)
+ returns void language plpgsql security definer set search_path to 'public', 'cron', 'net'
+as $function$
+declare
+  j public.odds_jobs; mins int; nxt timestamptz; u timestamp; busy boolean; blocked boolean; has_games boolean;
+  bx_set text[] := array['KBL','WKBL','V리그 남자','V리그 여자'];
+  top5 boolean := p_league in ('프리미어리그','라리가','세리에A','분데스리가','리그1');
+  is_bx boolean := p_league = any(bx_set);
+begin
+  select * into j from public.odds_jobs where league = p_league;
+  if not coalesce((select active from cron.job where jobname = j.job), false) then return; end if;
+  perform pg_sleep(5 + random() * 20);
+  if is_bx then
+    busy := exists (select 1 from public.odds_jobs where league = any(bx_set) and league <> p_league and last_request_at > now() - interval '3 minutes');
+  else
+    busy := exists (select 1 from public.odds_jobs where job like 'collect-soccer-%' and not (league = any(bx_set)) and league <> p_league and last_request_at > now() - interval '1 minute');
+  end if;
+  busy := busy or exists (select 1 from cron.job_run_details d join cron.job c on c.jobid = d.jobid
+                  where c.jobname = 'update-schedule-random' and d.start_time > now() - interval '2 minutes');
+  if busy then
+    mins := case when is_bx then 3 + floor(random() * 8)::int else 1 + floor(random() * 4)::int end;
+    update public.odds_jobs set deferred = deferred + 1 where league = p_league;
+  else
+    perform net.http_post(
+      url := 'https://rgxjwfsmevfwmivsziyq.supabase.co/functions/v1/collect-soccer',
+      headers := '{"Content-Type":"application/json","Authorization":"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJneGp3ZnNtZXZmd21pdnN6aXlxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEzODIzOTUsImV4cCI6MjA5Njk1ODM5NX0.8eD0N5CLCBoDSrlg0nz3Q2JmOYthHepJlTptHCMYetw"}'::jsonb,
+      body := jsonb_build_object('league', p_league), timeout_milliseconds := 60000);
+    blocked := exists (select 1 from (select status from public.odds_fetch_log where league = p_league order by fetched_at desc limit 1) l where l.status = 'blocked');
+    has_games := exists (select 1 from public.game_schedules where league = p_league
+                         and game_date between (now() at time zone 'Asia/Seoul')::date and (now() at time zone 'Asia/Seoul')::date + 1
+                         and jsonb_array_length(games) > 0);
+    mins := case when blocked then 90 + floor(random() * 31)::int
+                 when not has_games then case when top5 then 150 + floor(random() * 91)::int else 180 + floor(random() * 121)::int end
+                 when top5 then 40 + floor(random() * 61)::int
+                 else 60 + floor(random() * 61)::int end;
+    update public.odds_jobs set last_request_at = now(), deferred = 0 where league = p_league;
+  end if;
+  nxt := now() + make_interval(mins => mins); u := nxt at time zone 'UTC';
+  update public.odds_jobs set next_at = nxt where league = p_league;
+  perform cron.alter_job((select jobid from cron.job where jobname = j.job), schedule := extract(minute from u)::int || ' ' || extract(hour from u)::int || ' * * *');
+end $function$;
+select cron.alter_job(jobid, schedule := '0 0 31 2 *', active := false) from cron.job where jobname like 'collect-soccer-%' and not active;
