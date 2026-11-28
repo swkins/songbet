@@ -8,7 +8,8 @@ import { supabase } from '../lib/supabase'
 // 일정은 예약 작업과 같게 (한국 시간). 바꾸면 여기도 같이.
 interface TaskDef { name: string; desc: string; hh: number; mm: number; days: number[]; kind: 'news' | 'review'; task?: string }
 const TASKS: TaskDef[] = [
-  { name: '출전확률-NBA', desc: '매일 20:41 · 다음 날 NBA 출전 확률 + 뉴스', hh: 20, mm: 41, days: [0, 1, 2, 3, 4, 5, 6], kind: 'news', task: 'NBA' },
+  // 출전확률-NBA는 2026-11-28 사용자 요청으로 끔 (NBA는 배당 흐름만)
+//  { name: '출전확률-NBA', desc: '매일 20:41 · 다음 날 NBA 출전 확률 + 뉴스', hh: 20, mm: 41, days: [0, 1, 2, 3, 4, 5, 6], kind: 'news', task: 'NBA' },
   { name: '출전확률-국내-평일', desc: '월~금 13:17 · 오늘·내일 KBL·WKBL·V리그', hh: 13, mm: 17, days: [1, 2, 3, 4, 5], kind: 'news', task: '국내' },
   { name: '출전확률-국내-주말', desc: '토·일 8:23 · 오늘·내일 KBL·WKBL·V리그', hh: 8, mm: 23, days: [0, 6], kind: 'news', task: '국내' },
   { name: '예측검토-매일', desc: '매일 08:52 · 전날 예측 채점·가중치 제안', hh: 8, mm: 52, days: [0, 1, 2, 3, 4, 5, 6], kind: 'review' },

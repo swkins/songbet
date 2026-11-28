@@ -1,6 +1,5 @@
 import dayjs from 'dayjs'
 import PlayerOverall from './PlayerOverall'
-import SoccerLineup from './SoccerLineup'
 import PinFairBox from './PinFairBox'
 import { NbaFlowBox } from './FlowPickBox'
 import { MockBetsForGame } from './MockBetStats'
@@ -18,6 +17,7 @@ const mdDay = (d: string) => `${dayjs(d).format('M/D')} (${KO_DAY[dayjs(d).day()
 // 오른쪽 분석 칸 — 경기 정보 · 승패 배당 변동 · 선수 오버롤·출전 확률(PlayerOverall) · 오버롤 분석(있으면)
 export default function GameAnalysis({ g, analysis, odds, lines, onGoBet }: { g: AnalysisGame; analysis: OverallAnalysis | null; odds?: OddsSnap[]; lines?: OddsLine[]; onGoBet?: (t: { sport: string; league: string; gameId: string }) => void }) {
   const st = gameState(g)
+  const flowOnly = g.league === 'NBA' || g.sport === 'soccer'
   const showScore = st !== 'pre' && g.home.score != null && g.away.score != null
   const side = (t: Team, label: string) => (
     <div style={{ flex: 1, textAlign: 'center', minWidth: 0 }}>
@@ -48,24 +48,28 @@ export default function GameAnalysis({ g, analysis, odds, lines, onGoBet }: { g:
         </div>
         {side(g.away, '원정')}
       </div>
-      {/* NBA: 배당 흐름 추천 (2026-11-28 사용자 요청 — NBA·축구는 배당 흐름만으로 추천, 축구는 PinFairBox 맨 위) */}
-      {g.league === 'NBA' && <NbaFlowBox lines={lines} hName={koName(g.home.name)} aName={koName(g.away.name)} />}
-      {/* 좌: 배당 변동 + 예상 스코어 / 우: 선수 오버롤·출전 확률 / 아래: 뉴스 */}
-      <PlayerOverall league={g.league} gameDate={g.date} home={g.home} away={g.away}
-        left={odds?.length || lines?.length ? <>
-          {odds?.length ? <OddsHistory compact list={odds} homeName={koName(g.home.name)} awayName={koName(g.away.name)} /> : null}
-          {lines?.length ? <LineHistory list={lines} homeName={koName(g.home.name)} awayName={koName(g.away.name)} /> : null}
-        </> : null}
-        // NBA: 이 경기 모의베팅 (방법별 픽) — 예상 스코어 바로 아래 (사용자 요청)
-        afterScore={g.league === 'NBA' ? <MockBetsForGame gameId={g.id} /> : null}
-        lines={lines?.length ? { spread: lastLine(lines, 'spread'), total: lastLine(lines, 'total') } : null}
-        odds={(() => { const l = odds?.[odds.length - 1]; return l?.home_odds && l?.away_odds ? { home: Number(l.home_odds), away: Number(l.away_odds) } : null })()} />
-      {/* 축구: 결장 선수·예상 선발·오버롤 (FotMob) */}
-      {/* 축구: 피나클 공정 배당 (롤링 손실 비교) */}
-      {g.sport === 'soccer' && <PinFairBox gameId={g.id} league={g.league} home={g.home} away={g.away} />}
-      {g.sport === 'soccer' && <SoccerLineup gameId={g.id} home={g.home} away={g.away} />}
-      {analysis ? <OverallAnalysisView a={analysis} />
-        : null}
+      {/* NBA·축구 = 배당 흐름만 (2026-11-28 사용자 요청 — 뉴스·예상 스코어·선수 오버롤은 지움). 국내 리그는 PlayerOverall 그대로 */}
+      {flowOnly ? <>
+        {g.league === 'NBA' && <NbaFlowBox lines={lines} hName={koName(g.home.name)} aName={koName(g.away.name)} />}
+        {g.sport === 'soccer' && <PinFairBox gameId={g.id} home={g.home} away={g.away} />}
+        {odds?.length || lines?.length ? (
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 10, alignItems: 'flex-start' }}>
+            {odds?.length ? <div style={{ flex: '1 1 320px', minWidth: 0 }}><OddsHistory compact list={odds} homeName={koName(g.home.name)} awayName={koName(g.away.name)} /></div> : null}
+            {lines?.length ? <div style={{ flex: '1 1 320px', minWidth: 0 }}><LineHistory list={lines} homeName={koName(g.home.name)} awayName={koName(g.away.name)} /></div> : null}
+          </div>
+        ) : null}
+        {g.league === 'NBA' && <MockBetsForGame gameId={g.id} />}
+      </> : <>
+        {/* 좌: 배당 변동 + 예상 스코어 / 우: 선수 오버롤·출전 확률 / 아래: 뉴스 */}
+        <PlayerOverall league={g.league} gameDate={g.date} home={g.home} away={g.away}
+          left={odds?.length || lines?.length ? <>
+            {odds?.length ? <OddsHistory compact list={odds} homeName={koName(g.home.name)} awayName={koName(g.away.name)} /> : null}
+            {lines?.length ? <LineHistory list={lines} homeName={koName(g.home.name)} awayName={koName(g.away.name)} /> : null}
+          </> : null}
+          lines={lines?.length ? { spread: lastLine(lines, 'spread'), total: lastLine(lines, 'total') } : null}
+          odds={(() => { const l = odds?.[odds.length - 1]; return l?.home_odds && l?.away_odds ? { home: Number(l.home_odds), away: Number(l.away_odds) } : null })()} />
+      </>}
+      {analysis && !flowOnly ? <OverallAnalysisView a={analysis} /> : null}
     </div>
   )
 }

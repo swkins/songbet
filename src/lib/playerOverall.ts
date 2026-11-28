@@ -108,7 +108,7 @@ async function loadLeague(code: string): Promise<LeagueData> {
     supabase.from('v_player_season').select('player_id,player_name,team,gp,min,gmsc,last_date').eq('league', code).eq('season', cur).limit(2000),
     supabase.from('player_base').select('player_id,player_name,team,gp,min,gmsc,manual_base,note').eq('league', code).eq('season', prevSeasonOf(cur)).limit(2000),
     supabase.from('v_player_recent').select('player_id,n,gmsc5,min5').eq('league', code).limit(2000),
-    supabase.from('player_names').select('name_en,name_ko').eq('league', code),
+    code === 'NBA' ? supabase.from('player_names').select('name_en,name_ko').eq('league', code) : Promise.resolve({ data: [] }),
     // 배구: 경기 결과(세트 스코어) = vb_games (KOVO 시즌 일정, 매일 2번) → 팀별 세트 득실
     code.startsWith('VLEAGUE') ? supabase.from('vb_games').select('game_date,home,away,home_sets,away_sets').eq('league', code).eq('season', cur).limit(1000).then(r => { const raw = (r.data ?? []) as { game_date: string; home: string; away: string; home_sets: number; away_sets: number }[]; vbRaw = raw; return { ...r, data: raw.flatMap(g => [{ team: g.home, team_score: g.home_sets, opp_score: g.away_sets }, { team: g.away, team_score: g.away_sets, opp_score: g.home_sets }]) } })
       : supabase.from('v_team_games').select('team,opp,game_date,is_home,team_score,opp_score').eq('league', code).eq('season', cur).limit(3000),

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import dayjs from 'dayjs'
-import { loadPinFair, minOddsFor, impliedScore, loadModelScore, type PinFair, type PinPrice, type ModelScore } from '../lib/fairOdds'
+import { loadPinFair, minOddsFor, type PinFair, type PinPrice } from '../lib/fairOdds'
 import { koName } from '../lib/gameSchedule'
 import { SoccerFlowBox } from './FlowPickBox'
 
@@ -8,14 +8,8 @@ import { SoccerFlowBox } from './FlowPickBox'
 // 옵션마다 적중 확률(피나클 마진 뺀 값)·공정 배당·"손실 3% 이내" 최소 배당. 사이트 배당이 그 이상이면 롤링하기 괜찮은 가격.
 const LOSS = 0.03
 
-export default function PinFairBox({ gameId, league, home, away }: { gameId: string; league?: string; home: { name?: string; full?: string | null }; away: { name?: string; full?: string | null } }) {
+export default function PinFairBox({ gameId, home, away }: { gameId: string; home: { name?: string }; away: { name?: string } }) {
   const [f, setF] = useState<PinFair | null | undefined>(undefined)
-  const [ms, setMs] = useState<ModelScore | null>(null)
-  useEffect(() => {
-    let off = false; setMs(null)
-    if (league) loadModelScore(league, home.full, away.full).then(m => { if (!off) setMs(m) }).catch(() => {})
-    return () => { off = true }
-  }, [gameId, league, home.full, away.full])
   useEffect(() => {
     let off = false
     setF(undefined)
@@ -25,7 +19,6 @@ export default function PinFairBox({ gameId, league, home, away }: { gameId: str
   if (f === undefined) return null
   const box: React.CSSProperties = { border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '10px 12px', background: 'var(--bg-elevated)', marginTop: 10 }
   if (!f) return <div style={box}>
-    {ms && <ModelBlock ms={ms} H={koName(home.name)} A={koName(away.name)} />}
     <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>피나클 공정 배당 — 아직 수집 전 (5대 리그만)</div>
   </div>
 
@@ -47,32 +40,9 @@ export default function PinFairBox({ gameId, league, home, away }: { gameId: str
     const down = pr.odds < pr.open
     return <span style={{ fontSize: 10, marginLeft: 4, color: down ? 'var(--red)' : 'var(--green)' }}>{down ? '▼' : '▲'}{pr.open.toFixed(2)}</span>
   }
-  const sc = impliedScore(f)
-  const tile: React.CSSProperties = { flex: '1 1 90px', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '6px 8px', textAlign: 'center' }
   return (
     <div style={box}>
       <SoccerFlowBox f={f} H={H} A={A} />
-      {ms && <ModelBlock ms={ms} H={H} A={A} f={f} />}
-      {sc && <>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
-          <span style={{ fontSize: 13, fontWeight: 800 }}>예상 스코어</span>
-          <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>피나클 배당 기준 (승무패·2.5 오버에 맞춘 기대 득점) — 우리 모델 아님</span>
-        </div>
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
-          <div style={tile}>
-            <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>기대 득점</div>
-            <div style={{ fontSize: 18, fontWeight: 800, fontFamily: 'var(--font-num)' }}>{sc.lh.toFixed(2)} : {sc.la.toFixed(2)}</div>
-            <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{H} : {A}</div>
-          </div>
-          {sc.top.map((t, i) => (
-            <div key={`${t.h}-${t.a}`} style={{ ...tile, borderColor: i === 0 ? 'var(--gold-border)' : 'var(--border)' }}>
-              <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{i === 0 ? '가장 유력' : `${i + 1}순위`}</div>
-              <div style={{ fontSize: 18, fontWeight: 800, fontFamily: 'var(--font-num)', color: i === 0 ? 'var(--gold)' : undefined }}>{t.h} : {t.a}</div>
-              <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{(t.p * 100).toFixed(1)}%</div>
-            </div>
-          ))}
-        </div>
-      </>}
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
         <span style={{ fontSize: 13, fontWeight: 800 }}>피나클 공정 배당</span>
         <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{dayjs(f.fetched_at).format('M/D HH:mm')} 기준 · 승무패 마진 {(f.margin * 100).toFixed(1)}%</span>
@@ -162,38 +132,6 @@ function OddsFlow({ f, H, A }: { f: PinFair; H: string; A: string }) {
           </table>
         </div>
       )}
-    </div>
-  )
-}
-
-// 우리 모델 예상 (2026-11-28 사용자 요청): 기대 득점·유력 스코어·승무패 확률, 피나클 공정 확률과 차이 (배당은 모델에 안 들어감)
-function ModelBlock({ ms, H, A, f }: { ms: ModelScore; H: string; A: string; f?: PinFair }) {
-  const tile: React.CSSProperties = { flex: '1 1 90px', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '6px 8px', textAlign: 'center' }
-  const diff = (m: number, p?: number) => {
-    if (p == null) return null
-    const d = m - p
-    return <div style={{ fontSize: 10, color: Math.abs(d) < 0.03 ? 'var(--text-muted)' : d > 0 ? 'var(--green)' : 'var(--red)' }}>피나클 {(p * 100).toFixed(1)}% ({d >= 0 ? '+' : ''}{(d * 100).toFixed(1)}%p)</div>
-  }
-  return (
-    <div style={{ marginBottom: 10 }}>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
-        <span style={{ fontSize: 13, fontWeight: 800 }}>우리 모델</span>
-        <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>팀 공격·수비 레이팅(골·유효슈팅) + 홈 이점 — 배당 안 씀. 백테스트상 시장보다 덜 정확해 참고용</span>
-      </div>
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-        <div style={tile}>
-          <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>기대 득점</div>
-          <div style={{ fontSize: 18, fontWeight: 800, fontFamily: 'var(--font-num)' }}>{ms.lh.toFixed(2)} : {ms.la.toFixed(2)}</div>
-          <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>유력 {ms.top[0].h}:{ms.top[0].a} ({(ms.top[0].p * 100).toFixed(1)}%)</div>
-        </div>
-        {([[`${H} 승`, ms.ph, f?.ml?.home.p], ['무', ms.pd, f?.ml?.draw.p], [`${A} 승`, ms.pa, f?.ml?.away.p], ['2.5 오버', ms.o25, f?.total['2.5']?.over.p]] as [string, number, number | undefined][]).map(([l, m, p]) => (
-          <div key={l} style={tile}>
-            <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{l}</div>
-            <div style={{ fontSize: 18, fontWeight: 800, fontFamily: 'var(--font-num)' }}>{(m * 100).toFixed(1)}%</div>
-            {diff(m, p)}
-          </div>
-        ))}
-      </div>
     </div>
   )
 }
